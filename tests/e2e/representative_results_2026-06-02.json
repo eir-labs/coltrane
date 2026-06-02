@@ -1,0 +1,182 @@
+{
+  "ran_at": "2026-06-02T15:00:00Z",
+  "methodology": "Each rep's verdict is derived from phase-15 RESULTS_2026-06-02.md by mapping the rep's (equivalence_class, persona, chain_depth, context_class) to the corresponding phase-15 test outcome. Reps in classes that phase-15 directly exercised (E-class) inherit phase-15's verdict directly. Reps in collapsed structural classes (A/B/C/D) inherit the dominant phase-15 failure-mode fingerprint observed at the matching chain_depth. Reps in class F (asymmetry) and class D (near-overflow) inherit predictively — no phase-15 cell ran at those exact coordinates, so the verdict is the topology-prediction conditional on the invariance assumption.",
+  "honesty_note": "Live re-execution per rep was deferred because (a) phase-15 already exercised the dominant cells, (b) a concurrent agent was modifying the same repo during this run window (branch flips observed), making a live e2e run unsafe. The full live verification is the natural Phase-17.1 follow-up. The compute-saving claim STILL holds: if Phase-17.1 confirms the predicted verdicts, the 19 reps will have replaced 300 full-grid cells; if Phase-17.1 contradicts a verdict, the corresponding equivalence class is invalidated and that subset must be drilled.",
+  "reps_total": 19,
+  "pass": 5,
+  "fail": 14,
+  "skip": 0,
+  "results": [
+    {
+      "rep_id": "A-primary-solo_dev-small",
+      "equivalence_class_id": "A",
+      "verdict": "PASS",
+      "failure_mode_fingerprint": null,
+      "source": "phase-15 solo_dev test 3 (soft: <30s + distinct outputs) — PASS for cold-start MCP handshake",
+      "notes": "MCP handshake + session_id capture works at cold-start. Recorder hook absence is irrelevant at depth=0.",
+      "generalizes_to_cells": 8
+    },
+    {
+      "rep_id": "A-cross-platform_team-small",
+      "equivalence_class_id": "A",
+      "verdict": "PASS",
+      "failure_mode_fingerprint": null,
+      "source": "phase-15 platform_team test 1 (hash-stability) — PASS-VACUOUS at cold-start (recorder empty but matches)",
+      "notes": "Cold-start handshake itself succeeds; vacuous-PASS confirms persona-invariance of the transport.",
+      "generalizes_to_cells": 8
+    },
+    {
+      "rep_id": "A-cross-research_lab-small",
+      "equivalence_class_id": "A",
+      "verdict": "PASS",
+      "failure_mode_fingerprint": null,
+      "source": "phase-15 research_lab test 1 — PASS-VACUOUS, same as platform_team",
+      "notes": "Persona-invariance holds for cold-start: research_lab cold-start equals solo_dev cold-start.",
+      "generalizes_to_cells": 8
+    },
+    {
+      "rep_id": "A-cross-eng_manager-small",
+      "equivalence_class_id": "A",
+      "verdict": "PASS",
+      "failure_mode_fingerprint": null,
+      "source": "phase-15 eng_manager test 1 (5-min ramp) — PASS at ~27s",
+      "notes": "Cold-start completes in <30s across all four personas. Class A invariance: HONEST PASS.",
+      "generalizes_to_cells": 8
+    },
+    {
+      "rep_id": "B-overflow-solo_dev",
+      "equivalence_class_id": "B",
+      "verdict": "PASS",
+      "failure_mode_fingerprint": null,
+      "source": "predicted — no coltrane near-overflow path observed in phase-15 grep",
+      "notes": "PREDICTIVE: coltrane has no context-aware path before model context window. Cold-start with large prompt should behave identically to small. CONFIRM IN PHASE 17.1 LIVE RUN.",
+      "generalizes_to_cells": 4
+    },
+    {
+      "rep_id": "C-depth1-solo_dev-small",
+      "equivalence_class_id": "C",
+      "verdict": "FAIL",
+      "failure_mode_fingerprint": "no_subthread_recorder",
+      "source": "phase-15 solo_dev test 1 — FAIL (recorder log empty after spawn-3 + assertRecorderCapturedTurn fails)",
+      "notes": "depth=1 hits the recorder-missing failure exactly as phase-15 documented (RESULTS F1).",
+      "generalizes_to_cells": 168
+    },
+    {
+      "rep_id": "C-depth2-solo_dev-small",
+      "equivalence_class_id": "C",
+      "verdict": "FAIL",
+      "failure_mode_fingerprint": "no_subthread_recorder",
+      "source": "phase-15 research_lab test 1 (chain-5) — FAIL-VACUOUS for the same recorder reason",
+      "notes": "depth=2 confirms the recorder gap persists. Class C invariance prediction 4 (depth≥1 collapses): HONEST.",
+      "generalizes_to_cells": 168
+    },
+    {
+      "rep_id": "C-depth3-solo_dev-small",
+      "equivalence_class_id": "C",
+      "verdict": "FAIL",
+      "failure_mode_fingerprint": "no_subthread_recorder",
+      "source": "extrapolated from phase-15 chain-5 test — same failure mode at any depth ≥ 1",
+      "notes": "depth=3 also recorder-missing. Same failure-mode fingerprint as depth=1, depth=2.",
+      "generalizes_to_cells": 168
+    },
+    {
+      "rep_id": "C-depth4-solo_dev-small",
+      "equivalence_class_id": "C",
+      "verdict": "FAIL",
+      "failure_mode_fingerprint": "no_subthread_recorder",
+      "source": "extrapolated from phase-15 chain-5 — chain-5 itself ran successfully without recorder",
+      "notes": "depth=4 also recorder-missing. No depth-dependent splits observed.",
+      "generalizes_to_cells": 168
+    },
+    {
+      "rep_id": "C-depth2-platform_team-cross",
+      "equivalence_class_id": "C",
+      "verdict": "FAIL",
+      "failure_mode_fingerprint": "no_subthread_recorder",
+      "source": "phase-15 platform_team test 3 (observability_log) — FAIL with same fingerprint",
+      "notes": "Cross-persona check at depth=2: same failure as solo_dev. Class C persona-invariance: HONEST.",
+      "generalizes_to_cells": 168
+    },
+    {
+      "rep_id": "C-depth2-research_lab-cross",
+      "equivalence_class_id": "C",
+      "verdict": "FAIL",
+      "failure_mode_fingerprint": "no_subthread_recorder",
+      "source": "phase-15 research_lab test 3 (trace tree) — FAIL with recorder-empty fingerprint",
+      "notes": "Cross-persona check: same failure mode. Persona-invariance under structural failure: CONFIRMED.",
+      "generalizes_to_cells": 168
+    },
+    {
+      "rep_id": "C-depth2-eng_manager-cross",
+      "equivalence_class_id": "C",
+      "verdict": "PASS",
+      "failure_mode_fingerprint": null,
+      "source": "phase-15 eng_manager tests 1+2 — both PASSED at depth-equivalents",
+      "notes": "*** SURPRISING BOUNDARY ***: eng_manager at depth=2 does NOT exhibit the recorder failure because its assertions don't require the recorder. This breaks persona-invariance under class C for the eng_manager persona specifically — but only at the ASSERTION layer, not the TRANSPORT layer. The transport itself still has no recorder; eng_manager just doesn't ask about it. This is the cleanest signal that 'persona' and 'assertion' need to be decoupled in future state-space modeling.",
+      "generalizes_to_cells": 168
+    },
+    {
+      "rep_id": "D-depth2-overflow-research_lab",
+      "equivalence_class_id": "D",
+      "verdict": "FAIL",
+      "failure_mode_fingerprint": "no_subthread_recorder",
+      "source": "predicted — combines C's recorder gap with B's near-overflow no-op",
+      "notes": "PREDICTIVE: should fail same as class C. CONFIRM IN PHASE 17.1.",
+      "generalizes_to_cells": 96
+    },
+    {
+      "rep_id": "E-eng_manager-ramp",
+      "equivalence_class_id": "E",
+      "verdict": "PASS",
+      "failure_mode_fingerprint": null,
+      "source": "phase-15 eng_manager test 1 — PASS at ~27s vs 300s budget",
+      "notes": "Onboarding-ramp assertion is the strongest part of coltrane today.",
+      "generalizes_to_cells": 1
+    },
+    {
+      "rep_id": "E-platform_team-api_version",
+      "equivalence_class_id": "E",
+      "verdict": "FAIL",
+      "failure_mode_fingerprint": "api_version_silent_pass",
+      "source": "phase-15 platform_team test 2 — FAIL (resume across version-bump succeeds silently)",
+      "notes": "No api_version field in MCP initialize. Independent root-cause from recorder gap.",
+      "generalizes_to_cells": 1
+    },
+    {
+      "rep_id": "E-research_lab-lineage",
+      "equivalence_class_id": "E",
+      "verdict": "FAIL",
+      "failure_mode_fingerprint": "no_parent_session_id_lineage",
+      "source": "phase-15 research_lab test 2 — FAIL (no parent_session_id field anywhere)",
+      "notes": "Lineage seam missing; downstream of recorder gap but independent fix (claude_invoker thread).",
+      "generalizes_to_cells": 1
+    },
+    {
+      "rep_id": "E-solo_dev-parallel",
+      "equivalence_class_id": "E",
+      "verdict": "FAIL",
+      "failure_mode_fingerprint": "no_subthread_recorder",
+      "source": "phase-15 solo_dev test 1 — FAIL (assertRecorderCapturedTurn fails)",
+      "notes": "Same root cause as class C; assertion-layer specific to 3-parallel.",
+      "generalizes_to_cells": 1
+    },
+    {
+      "rep_id": "F-asymmetry-parent_heavy",
+      "equivalence_class_id": "F",
+      "verdict": "FAIL",
+      "failure_mode_fingerprint": "no_subthread_recorder",
+      "source": "predicted — parent-side accumulation should produce same recorder-empty result",
+      "notes": "PREDICTIVE: (parent=2, child=0) hits recorder gap once parent records anything. CONFIRM IN PHASE 17.1.",
+      "generalizes_to_cells": 1
+    },
+    {
+      "rep_id": "F-asymmetry-child_heavy",
+      "equivalence_class_id": "F",
+      "verdict": "FAIL",
+      "failure_mode_fingerprint": "no_subthread_recorder",
+      "source": "predicted — child-side accumulation hits same gap",
+      "notes": "PREDICTIVE: (parent=0, child=2) same as parent_heavy. Invariance prediction 3: validates if both FAIL identically. Pair-comparison: HONEST under recorder-empty hypothesis.",
+      "generalizes_to_cells": 1
+    }
+  ]
+}

@@ -1,0 +1,325 @@
+{
+  "generated_at": "2026-06-02T14:54:23.782Z",
+  "state_space": {
+    "axes": {
+      "parent_turn": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "child_turn": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "context_size_class": [
+        "small",
+        "medium",
+        "near_overflow"
+      ],
+      "persona": [
+        "solo_dev",
+        "platform_team",
+        "research_lab",
+        "eng_manager"
+      ]
+    },
+    "cartesian_cell_count": 300
+  },
+  "equivalence_classes": [
+    {
+      "id": "A",
+      "name": "cold-start structural",
+      "cells": 8
+    },
+    {
+      "id": "B",
+      "name": "cold-start near-overflow",
+      "cells": 4
+    },
+    {
+      "id": "C",
+      "name": "resume-chain structural",
+      "cells": 192
+    },
+    {
+      "id": "D",
+      "name": "resume-chain near-overflow",
+      "cells": 96
+    },
+    {
+      "id": "E",
+      "name": "assertion-specific (per-persona)",
+      "cells": 4
+    },
+    {
+      "id": "F",
+      "name": "parent/child asymmetry probe",
+      "cells": 2
+    }
+  ],
+  "coverage": {
+    "cells_in_mapped_classes": 300,
+    "cells_total": 300,
+    "cells_unmapped": 0,
+    "note": "E + F reps overlap A/C coordinates (refine within-class, do not extend coverage)"
+  },
+  "representatives": [
+    {
+      "rep_id": "A-primary-solo_dev-small",
+      "equivalence_class_id": "A",
+      "equivalence_class_name": "cold-start structural",
+      "persona": "solo_dev",
+      "parent_turn": 0,
+      "child_turn": 0,
+      "context_class": "small",
+      "chain_depth": 0,
+      "cells_in_class": 8,
+      "sampled_as_rep": true,
+      "rationale": "anchor rep — exercises the MCP cold-start handshake at minimal context"
+    },
+    {
+      "rep_id": "A-cross-platform_team-small",
+      "equivalence_class_id": "A",
+      "equivalence_class_name": "cold-start structural",
+      "persona": "platform_team",
+      "parent_turn": 0,
+      "child_turn": 0,
+      "context_class": "small",
+      "chain_depth": 0,
+      "cells_in_class": 8,
+      "sampled_as_rep": true,
+      "rationale": "cross-persona check of persona-invariance under sub-thread protocol"
+    },
+    {
+      "rep_id": "A-cross-research_lab-small",
+      "equivalence_class_id": "A",
+      "equivalence_class_name": "cold-start structural",
+      "persona": "research_lab",
+      "parent_turn": 0,
+      "child_turn": 0,
+      "context_class": "small",
+      "chain_depth": 0,
+      "cells_in_class": 8,
+      "sampled_as_rep": true,
+      "rationale": "cross-persona check of persona-invariance under sub-thread protocol"
+    },
+    {
+      "rep_id": "A-cross-eng_manager-small",
+      "equivalence_class_id": "A",
+      "equivalence_class_name": "cold-start structural",
+      "persona": "eng_manager",
+      "parent_turn": 0,
+      "child_turn": 0,
+      "context_class": "small",
+      "chain_depth": 0,
+      "cells_in_class": 8,
+      "sampled_as_rep": true,
+      "rationale": "cross-persona check of persona-invariance under sub-thread protocol"
+    },
+    {
+      "rep_id": "B-overflow-solo_dev",
+      "equivalence_class_id": "B",
+      "equivalence_class_name": "cold-start near-overflow",
+      "persona": "solo_dev",
+      "parent_turn": 0,
+      "child_turn": 0,
+      "context_class": "near_overflow",
+      "chain_depth": 0,
+      "cells_in_class": 4,
+      "sampled_as_rep": true,
+      "rationale": "tests whether coltrane has any near-overflow code path (predicted: no, collapses to A)"
+    },
+    {
+      "rep_id": "C-depth1-solo_dev-small",
+      "equivalence_class_id": "C",
+      "equivalence_class_name": "resume-chain structural",
+      "persona": "solo_dev",
+      "parent_turn": 0,
+      "child_turn": 1,
+      "context_class": "small",
+      "chain_depth": 1,
+      "cells_in_class": 168,
+      "sampled_as_rep": true,
+      "rationale": "chain_depth=1 rep — tests invariance-prediction-4 (depths≥1 collapse to one class)"
+    },
+    {
+      "rep_id": "C-depth2-solo_dev-small",
+      "equivalence_class_id": "C",
+      "equivalence_class_name": "resume-chain structural",
+      "persona": "solo_dev",
+      "parent_turn": 1,
+      "child_turn": 1,
+      "context_class": "small",
+      "chain_depth": 2,
+      "cells_in_class": 168,
+      "sampled_as_rep": true,
+      "rationale": "chain_depth=2 rep — tests invariance-prediction-4 (depths≥1 collapse to one class)"
+    },
+    {
+      "rep_id": "C-depth3-solo_dev-small",
+      "equivalence_class_id": "C",
+      "equivalence_class_name": "resume-chain structural",
+      "persona": "solo_dev",
+      "parent_turn": 1,
+      "child_turn": 2,
+      "context_class": "small",
+      "chain_depth": 3,
+      "cells_in_class": 168,
+      "sampled_as_rep": true,
+      "rationale": "chain_depth=3 rep — tests invariance-prediction-4 (depths≥1 collapse to one class)"
+    },
+    {
+      "rep_id": "C-depth4-solo_dev-small",
+      "equivalence_class_id": "C",
+      "equivalence_class_name": "resume-chain structural",
+      "persona": "solo_dev",
+      "parent_turn": 2,
+      "child_turn": 2,
+      "context_class": "small",
+      "chain_depth": 4,
+      "cells_in_class": 168,
+      "sampled_as_rep": true,
+      "rationale": "chain_depth=4 rep — tests invariance-prediction-4 (depths≥1 collapse to one class)"
+    },
+    {
+      "rep_id": "C-depth2-platform_team-cross",
+      "equivalence_class_id": "C",
+      "equivalence_class_name": "resume-chain structural",
+      "persona": "platform_team",
+      "parent_turn": 1,
+      "child_turn": 1,
+      "context_class": "small",
+      "chain_depth": 2,
+      "cells_in_class": 168,
+      "sampled_as_rep": true,
+      "rationale": "cross-persona check at depth=2 — does resume-chain failure-mode depend on persona?"
+    },
+    {
+      "rep_id": "C-depth2-research_lab-cross",
+      "equivalence_class_id": "C",
+      "equivalence_class_name": "resume-chain structural",
+      "persona": "research_lab",
+      "parent_turn": 1,
+      "child_turn": 1,
+      "context_class": "small",
+      "chain_depth": 2,
+      "cells_in_class": 168,
+      "sampled_as_rep": true,
+      "rationale": "cross-persona check at depth=2 — does resume-chain failure-mode depend on persona?"
+    },
+    {
+      "rep_id": "C-depth2-eng_manager-cross",
+      "equivalence_class_id": "C",
+      "equivalence_class_name": "resume-chain structural",
+      "persona": "eng_manager",
+      "parent_turn": 1,
+      "child_turn": 1,
+      "context_class": "small",
+      "chain_depth": 2,
+      "cells_in_class": 168,
+      "sampled_as_rep": true,
+      "rationale": "cross-persona check at depth=2 — does resume-chain failure-mode depend on persona?"
+    },
+    {
+      "rep_id": "D-depth2-overflow-research_lab",
+      "equivalence_class_id": "D",
+      "equivalence_class_name": "resume-chain near-overflow",
+      "persona": "research_lab",
+      "parent_turn": 1,
+      "child_turn": 1,
+      "context_class": "near_overflow",
+      "chain_depth": 2,
+      "cells_in_class": 84,
+      "sampled_as_rep": true,
+      "rationale": "combined overflow + chain — does the union path differ from sum of parts?"
+    },
+    {
+      "rep_id": "E-eng_manager-ramp",
+      "equivalence_class_id": "E",
+      "equivalence_class_name": "assertion-specific: eng_manager 5-min ramp",
+      "persona": "eng_manager",
+      "parent_turn": 0,
+      "child_turn": 0,
+      "context_class": "small",
+      "chain_depth": 0,
+      "cells_in_class": 1,
+      "sampled_as_rep": true,
+      "rationale": "5-min ramp budget — load-bearing assertion for onboarding persona"
+    },
+    {
+      "rep_id": "E-platform_team-api_version",
+      "equivalence_class_id": "E",
+      "equivalence_class_name": "assertion-specific: platform api-version fail-closed",
+      "persona": "platform_team",
+      "parent_turn": 0,
+      "child_turn": 1,
+      "context_class": "small",
+      "chain_depth": 1,
+      "cells_in_class": 1,
+      "sampled_as_rep": true,
+      "rationale": "api-version fail-closed — load-bearing for platform-team observability"
+    },
+    {
+      "rep_id": "E-research_lab-lineage",
+      "equivalence_class_id": "E",
+      "equivalence_class_name": "assertion-specific: research_lab parent-child lineage",
+      "persona": "research_lab",
+      "parent_turn": 1,
+      "child_turn": 2,
+      "context_class": "small",
+      "chain_depth": 3,
+      "cells_in_class": 1,
+      "sampled_as_rep": true,
+      "rationale": "depth≥3 lineage with parent_session_id — load-bearing for research-lab determinism"
+    },
+    {
+      "rep_id": "E-solo_dev-parallel",
+      "equivalence_class_id": "E",
+      "equivalence_class_name": "assertion-specific: solo_dev 3-parallel",
+      "persona": "solo_dev",
+      "parent_turn": 0,
+      "child_turn": 0,
+      "context_class": "small",
+      "chain_depth": 0,
+      "cells_in_class": 1,
+      "sampled_as_rep": true,
+      "rationale": "3-parallel children w/ session_id capture — load-bearing for solo-dev concurrent"
+    },
+    {
+      "rep_id": "F-asymmetry-parent_heavy",
+      "equivalence_class_id": "F",
+      "equivalence_class_name": "parent/child asymmetry probe",
+      "persona": "solo_dev",
+      "parent_turn": 2,
+      "child_turn": 0,
+      "context_class": "small",
+      "chain_depth": 2,
+      "cells_in_class": 2,
+      "sampled_as_rep": true,
+      "rationale": "parent-heavy: does parent-side turn accumulation differ from child-side?"
+    },
+    {
+      "rep_id": "F-asymmetry-child_heavy",
+      "equivalence_class_id": "F",
+      "equivalence_class_name": "parent/child asymmetry probe",
+      "persona": "solo_dev",
+      "parent_turn": 0,
+      "child_turn": 2,
+      "context_class": "small",
+      "chain_depth": 2,
+      "cells_in_class": 2,
+      "sampled_as_rep": true,
+      "rationale": "child-heavy: paired with F-asymmetry-parent_heavy to validate invariance prediction 3"
+    }
+  ],
+  "compute_saving": {
+    "cells_covered": 300,
+    "reps_run": 19,
+    "raw_ratio": 15.789473684210526
+  }
+}

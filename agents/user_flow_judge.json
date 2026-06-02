@@ -1,0 +1,13 @@
+{
+  "slug": "user_flow_judge",
+  "primitives": [
+    "INTERPRET"
+  ],
+  "input_types": [
+    "user-flow-transcript"
+  ],
+  "output_types": [
+    "user-flow-verdict"
+  ],
+  "domain": "self_judge"
+}

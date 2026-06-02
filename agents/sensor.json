@@ -1,0 +1,10 @@
+{
+  "slug": "sensor",
+  "primitives": [
+    "SENSE"
+  ],
+  "output_types": [
+    "raw-note"
+  ],
+  "domain": "demo"
+}

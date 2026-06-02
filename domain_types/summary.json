@@ -1,0 +1,18 @@
+{
+  "slug": "summary",
+  "version": 1,
+  "extends": "Interpretation",
+  "domain": "demo",
+  "status": "active",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "gist": {
+        "type": "string"
+      }
+    }
+  },
+  "required_fields": [
+    "gist"
+  ]
+}

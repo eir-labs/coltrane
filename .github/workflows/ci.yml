@@ -1,0 +1,22 @@
+# CI — the green gate, public. Runs the same `npm run verify` (tsc --noEmit + vitest)
+# the band runs locally, on every push + PR. A contributor's PR proves green before merge.
+# Note: this covers the deterministic suite (481 tests). The live-Claude spawn is a
+# separate manual gate (needs the CLI + ANTHROPIC_API_KEY) — not run here by design.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+      - run: npm ci
+      - run: npm run verify

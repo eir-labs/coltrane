@@ -1,0 +1,18 @@
+{
+  "internal_update": {
+    "sections": ["summary", "what_we_built", "where_it_is", "next", "open_decisions"],
+    "density_targets": { "summary": 400, "what_we_built": 700, "where_it_is": 400, "next": 500, "open_decisions": 500 }
+  },
+  "deal_brief": {
+    "sections": ["short_version", "what_we_heard", "what_phase1_builds", "roadmap", "commercial_terms", "next_steps"],
+    "density_targets": { "short_version": 300, "what_we_heard": 600, "what_phase1_builds": 800, "roadmap": 600, "commercial_terms": 500, "next_steps": 300 }
+  },
+  "grant_update": {
+    "sections": ["summary", "progress", "milestones", "risks", "next"],
+    "density_targets": { "summary": 400, "progress": 800, "milestones": 500, "risks": 500, "next": 400 }
+  },
+  "default": {
+    "sections": ["summary", "body", "next"],
+    "density_targets": { "summary": 400, "body": 800, "next": 400 }
+  }
+}

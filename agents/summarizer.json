@@ -1,0 +1,13 @@
+{
+  "slug": "summarizer",
+  "primitives": [
+    "INTERPRET"
+  ],
+  "input_types": [
+    "raw-note"
+  ],
+  "output_types": [
+    "summary"
+  ],
+  "domain": "demo"
+}

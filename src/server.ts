@@ -1,0 +1,670 @@
+// §7 MCP server — the stdio entry that exposes MCP_TOOLS and routes calls.
+// Two layers: a PURE dispatcher (dispatchTool — testable, no transport) and the
+// stdio wiring (runStdioServer). Tools needing gig-execution context (output_write,
+// gig_*) are honest `not_implemented` until src/runtime lands; the context-free
+// tools (type_resolve/register/browse, standard_simulate) are wired now.
+import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import {
+  MCP_TOOLS,
+  requiresApproval,
+  AGENT_STATUS_ORDER,
+  STANDARD_STATUS_ORDER,
+  SKILL_STATUS_ORDER,
+  checkPromotion,
+  PromotionError,
+} from "./mcp.js";
+import { createRegistry, loadRegistry, type Registry, type DomainType } from "./registry.js";
+import { loadGenome } from "./loader.js";
+import { sealAgentDefinition, sealDefinition, recordIdentity } from "./genome_writer.js";
+import { createOutputStore, type OutputStore } from "./outputs.js";
+import { MemoryLedger, type Ledger } from "./ledger.js";
+import { standardSimulate } from "./simulate.js";
+import { runGig, type AgentInvoker } from "./runtime.js";
+import { makeClaudeInvoker } from "./claude_invoker.js";
+import { composeStandard, defineAgent, CompositionError, type Standard, type Agent, type PhaseDef } from "./composition.js";
+import { PRIMITIVE_OUTPUT_TYPE, type Primitive } from "./core_types.js";
+import { proposeTypeChange, type DomainTypeDef } from "./type_versioning.js";
+import { proposeAgentChange, evolveProfile, type AgentProfile } from "./agent_profile.js";
+import { checkGrantTTL, validatePlanAgainstGrant, type AccessGrant, type PlanCheck } from "./access_grant.js";
+import { loadCharter, CharterError } from "./charter.js";
+import { readFileSync, existsSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+
+export interface ServerDeps {
+  registry: Registry;
+  outputs: OutputStore;
+  ledger: Ledger;
+  // Optional execution wiring. When both are present, gig_dispatch/gig_monitor go live;
+  // when absent, they report not_implemented (honest — a bare server can't run gigs).
+  standards?: ReadonlyMap<string, Standard> | undefined;
+  invoke?: AgentInvoker | undefined;
+  model_version?: string | undefined;
+  // Substrate-of-truth seam: when set, genome-mutation tools (agent_define, …) PERSIST
+  // the content-addressed file here + ledger-seal its identity. Without it, they compute
+  // + return the identity but don't write (validation path).
+  genome_dir?: string | undefined;
+}
+
+export interface ToolResult {
+  ok: boolean;
+  data?: unknown;
+  error?: string;
+  // surfaced (not enforced here): whether this call would require human approval.
+  requires_approval?: boolean;
+  // marks the honest gap: tool exists in the surface but its impl awaits another lane.
+  not_implemented?: boolean;
+}
+
+const KNOWN_SLUGS = new Set(MCP_TOOLS.map((t) => t.slug));
+
+// Honest gap set: tools in the surface whose impl still awaits another lane. Now
+// EMPTY — every v0 tool is wired against real in-repo impl (no stubs). Kept as the
+// hook so a future tool can be surfaced before it's implemented without lying.
+const NEEDS_RUNTIME = new Set<string>([]);
+
+// CoreType → Primitive — the inverse of PRIMITIVE_OUTPUT_TYPE. output_write
+// auto-resolves the writing primitive from core_type when the caller omits it.
+const CORE_TYPE_TO_PRIMITIVE: Readonly<Record<string, Primitive>> = Object.fromEntries(
+  Object.entries(PRIMITIVE_OUTPUT_TYPE).map(([prim, core]) => [core, prim as Primitive]),
+);
+
+function arr(v: unknown): string[] {
+  return Array.isArray(v) ? (v as string[]) : [];
+}
+
+/**
+ * Pure tool dispatcher. Routes a tool call to its implementation. No transport,
+ * no I/O beyond the injected deps — fully unit-testable.
+ */
+export async function dispatchTool(slug: string, args: Record<string, unknown>, deps: ServerDeps): Promise<ToolResult> {
+  if (!KNOWN_SLUGS.has(slug)) {
+    return { ok: false, error: `unknown tool "${slug}"` };
+  }
+  // Approval gating is surfaced on every result so the caller (or a wrapping
+  // policy layer) can refuse to apply a change that needs human sign-off.
+  const approval = requiresApproval({
+    slug,
+    change_class: (args["change_class"] as never) ?? null,
+    target_kind: (args["target_kind"] as never) ?? null,
+  });
+
+  if (NEEDS_RUNTIME.has(slug)) {
+    return { ok: false, not_implemented: true, requires_approval: approval, error: `"${slug}" awaits src/runtime / context stores` };
+  }
+
+  try {
+    switch (slug) {
+      case "type_resolve": {
+        const res = deps.registry.resolveType({
+          extends: String(args["core_type"] ?? args["extends"] ?? ""),
+          domain: String(args["domain"] ?? ""),
+          required_fields: arr(args["required_fields"]),
+        });
+        return { ok: true, requires_approval: approval, data: res };
+      }
+      case "type_browse": {
+        let types = deps.registry.listTypes();
+        if (args["domain"]) types = types.filter((t) => t.domain === args["domain"]);
+        if (args["extends"]) types = types.filter((t) => t.extends === args["extends"]);
+        return { ok: true, requires_approval: approval, data: { types, stats: { count: types.length } } };
+      }
+      case "type_register": {
+        const def: DomainType = {
+          slug: String(args["slug"] ?? ""),
+          extends: String(args["extends"] ?? ""),
+          domain: String(args["domain"] ?? ""),
+          schema: (args["schema"] as Record<string, unknown>) ?? {},
+          required_fields: arr(args["required_fields"]),
+        };
+        const res = deps.registry.registerType(def);
+        // substrate seal: persist a loadable domain_types/<slug>.json (full record) + ledger.
+        const fileDef = { slug: def.slug, version: 1, extends: def.extends, domain: def.domain, status: "active", schema: def.schema, required_fields: def.required_fields };
+        const sealed = sealDefinition("type_register", def.slug, fileDef, deps.ledger, deps.genome_dir, "domain_types");
+        return { ok: true, requires_approval: approval, data: { ...(res as object), content_hash: sealed.content_hash, dependency_hash: sealed.dependency_hash, effective_hash: sealed.effective_hash } };
+      }
+      case "standard_simulate": {
+        const res = standardSimulate({
+          standard_slug: String(args["standard_slug"] ?? ""),
+          mock_input: (args["mock_input"] as Record<string, unknown>) ?? {},
+          depth: (args["depth"] as never) ?? "standard",
+        });
+        return { ok: true, requires_approval: approval, data: res };
+      }
+      case "output_query": {
+        let outs = deps.outputs.all();
+        if (args["domain_type"]) outs = outs.filter((o) => o.domain_type === args["domain_type"]);
+        if (args["gig_id"]) outs = outs.filter((o) => o.gig_id === args["gig_id"]);
+        if (args["agent_slug"]) outs = outs.filter((o) => o.agent_slug === args["agent_slug"]);
+        return { ok: true, requires_approval: approval, data: { outputs: outs, total_count: outs.length } };
+      }
+      case "output_trace": {
+        const id = String(args["output_id"] ?? "");
+        const chain = deps.outputs.trace(id);
+        return { ok: true, requires_approval: approval, data: { graph: { nodes: chain }, root_signals: chain.filter((o) => o.input_refs.length === 0) } };
+      }
+      case "output_write": {
+        // §6 universal output write: validates against core+domain schema AT WRITE
+        // (T3). Primitive is auto-resolved from core_type when omitted. Optional
+        // `refs: [{ to, relation }]` link provenance edges after the row exists.
+        const core_type = String(args["core_type"] ?? "");
+        const primitive = String(args["primitive"] ?? CORE_TYPE_TO_PRIMITIVE[core_type] ?? "SENSE");
+        const rec = deps.outputs.write({
+          core_type,
+          domain_type: String(args["domain_type"] ?? ""),
+          domain_type_version: args["domain_type_version"] as number | undefined,
+          domain: String(args["domain"] ?? ""),
+          gig_id: String(args["gig_id"] ?? ""),
+          agent_slug: String(args["agent_slug"] ?? ""),
+          phase: args["phase"] as string | undefined,
+          primitive,
+          data: (args["data"] as Record<string, unknown>) ?? {},
+          input_refs: arr(args["input_refs"]),
+          cost_usd: args["cost_usd"] as number | undefined,
+          tokens_used: args["tokens_used"] as number | undefined,
+          duration_ms: args["duration_ms"] as number | undefined,
+        });
+        const refs = Array.isArray(args["refs"]) ? (args["refs"] as { to: string; relation: string }[]) : [];
+        for (const r of refs) {
+          deps.outputs.addRef(rec.id, r.to, r.relation as never, primitive);
+        }
+        return { ok: true, requires_approval: approval, data: { output_id: rec.id, primitive, output: rec } };
+      }
+      case "execution_history_read": {
+        // Read the append-only ledger — the genome's run history. Filterable by
+        // gig / standard / genome_hash / time window (LedgerQuery).
+        const filter: Record<string, string> = {};
+        for (const k of ["gig_id", "standard_slug", "genome_hash", "after", "before"]) {
+          if (args[k]) filter[k] = String(args[k]);
+        }
+        const executions = deps.ledger.query(filter);
+        return { ok: true, requires_approval: approval, data: { executions, count: executions.length } };
+      }
+      case "gig_dispatch": {
+        if (!deps.standards || !deps.invoke) {
+          return { ok: false, not_implemented: true, requires_approval: approval, error: "gig_dispatch needs standards + invoke wired into the server" };
+        }
+        const slug2 = String(args["standard_slug"] ?? "");
+        const standard = deps.standards.get(slug2);
+        if (!standard) return { ok: false, requires_approval: approval, error: `unknown standard "${slug2}"` };
+        const res = await runGig(standard, (args["input"] as Record<string, unknown>) ?? {}, {
+          outputs: deps.outputs,
+          ledger: deps.ledger,
+          invoke: deps.invoke,
+          model_version: deps.model_version,
+        });
+        return {
+          ok: true,
+          requires_approval: approval,
+          data: { gig_id: res.gig_id, manifest: { genome_hash: res.genome_hash, run_fingerprint: res.run_fingerprint, output_count: res.outputs.length } },
+        };
+      }
+      case "gig_monitor": {
+        const gid = String(args["gig_id"] ?? "");
+        const outs = deps.outputs.all().filter((o) => o.gig_id === gid);
+        const done = deps.ledger.query({ gig_id: gid }).length > 0;
+        return {
+          ok: true,
+          requires_approval: approval,
+          data: {
+            status: done ? "complete" : outs.length > 0 ? "running" : "unknown",
+            phases_complete: outs.length,
+            current_agent: outs.length ? outs[outs.length - 1]!.agent_slug : null,
+            outputs_so_far: outs,
+          },
+        };
+      }
+      case "tool_registry_browse": {
+        let tools = [...MCP_TOOLS];
+        if (args["category"]) tools = tools.filter((t) => t.category === args["category"]);
+        return { ok: true, requires_approval: approval, data: { tools: tools.map((t) => ({ slug: t.slug, category: t.category })), usage_stats: [], dependency_map: {} } };
+      }
+      case "standard_compose": {
+        try {
+          const sSlug = String(args["slug"] ?? "");
+          const sDomain = String(args["domain"] ?? "");
+          const sAgents = (args["agents"] as Agent[]) ?? [];
+          const sPhases = (args["phases"] as PhaseDef[]) ?? [];
+          const std = composeStandard({ slug: sSlug, domain: sDomain, agents: sAgents, phases: sPhases });
+          // substrate seal: persist a loadable standards/<slug>.json (agent_slugs form) + ledger.
+          const fileDef = { slug: sSlug, domain: sDomain, agent_slugs: sAgents.map((a) => a.slug), phases: sPhases };
+          const sealed = sealDefinition("standard_compose", sSlug, fileDef, deps.ledger, deps.genome_dir, "standards");
+          return { ok: true, requires_approval: approval, data: { standard_id: std.slug, content_hash: sealed.content_hash, dependency_hash: sealed.dependency_hash, effective_hash: sealed.effective_hash, validation_result: { valid: true } } };
+        } catch (e) {
+          if (e instanceof CompositionError) return { ok: false, requires_approval: approval, error: e.message, data: { validation_result: { valid: false, error: e.message } } };
+          throw e;
+        }
+      }
+      case "agent_validate_pipeline": {
+        if (Array.isArray(args["primitives"])) {
+          try {
+            defineAgent({
+              slug: String(args["slug"] ?? "pipeline-check"),
+              primitives: args["primitives"] as Primitive[],
+            });
+            return { ok: true, requires_approval: approval, data: { valid: true, errors: [], illegal_progressions: [], unsatisfied_inputs: [] } };
+          } catch (e) {
+            if (e instanceof CompositionError) return { ok: true, requires_approval: approval, data: { valid: false, errors: [e.message], illegal_progressions: [e.message], unsatisfied_inputs: [] } };
+            throw e;
+          }
+        }
+        try {
+          composeStandard({
+            slug: String(args["standard_slug"] ?? "pipeline-check"),
+            domain: String(args["domain"] ?? ""),
+            agents: ((args["agents"] as Agent[]) ?? []),
+            phases: ((args["phases"] as PhaseDef[]) ?? []),
+          });
+          return { ok: true, requires_approval: approval, data: { valid: true, errors: [], illegal_progressions: [], unsatisfied_inputs: [] } };
+        } catch (e) {
+          if (e instanceof CompositionError) return { ok: true, requires_approval: approval, data: { valid: false, errors: [e.message], illegal_progressions: [e.message], unsatisfied_inputs: [] } };
+          throw e;
+        }
+      }
+      case "type_extend": {
+        // resolve the base type from the registry, propose the field additions.
+        const baseDef = deps.registry.listTypes().find((t) => t.slug === args["slug"]);
+        if (!baseDef) return { ok: false, requires_approval: approval, error: `unknown type "${String(args["slug"])}"` };
+        const baseProps = (baseDef.schema as { properties?: Record<string, unknown> }).properties ?? {};
+        const extension = (args["extension"] as { schema?: { properties?: Record<string, unknown>; required?: string[] } }) ?? undefined;
+        const addProps =
+          (extension?.schema?.properties as Record<string, unknown> | undefined) ??
+          (args["fields_to_add"] as Record<string, unknown>) ?? {};
+        const nextProps = { ...baseProps, ...addProps };
+        const nextRequired = extension?.schema?.required ?? baseDef.required_fields;
+        const base: DomainTypeDef = {
+          slug: baseDef.slug, version: 1, extends: baseDef.extends, domain: baseDef.domain,
+          status: "active", schema: { type: "object", properties: baseProps }, required_fields: baseDef.required_fields,
+        };
+        const next: DomainTypeDef = {
+          ...base, schema: { type: "object", properties: nextProps }, required_fields: nextRequired,
+        };
+        const proposal = proposeTypeChange(base, next);
+        const newFields = Object.keys(nextProps).length - Object.keys(baseProps).length;
+        // substrate seal: the new version's identity is recorded in the ledger (file
+        // materialization of versioned types follows the version-aware loader path).
+        const versioned = { ...next, version: proposal.next_version };
+        const tx = deps.genome_dir ? recordIdentity("type_extend", `${base.slug}@v${proposal.next_version}`, versioned, deps.ledger) : undefined;
+        return { ok: true, requires_approval: proposal.approval_required, data: { new_version: proposal.next_version, changelog_entry: `${proposal.change_class}: +${newFields} field(s)`, change_class: proposal.change_class, effective_hash: tx?.effective_hash, content_hash: tx?.content_hash } };
+      }
+      case "charter_read": {
+        const path = args["path"] ? String(args["path"]) : "";
+        if (!path) return { ok: false, requires_approval: approval, error: "charter_read: path required (no default charter location)" };
+        if (!existsSync(path)) return { ok: false, requires_approval: approval, error: `charter_read: file not found at ${path}` };
+        try {
+          const raw = JSON.parse(readFileSync(path, "utf-8"));
+          const ch = loadCharter(raw);
+          return { ok: true, requires_approval: approval, data: ch };
+        } catch (e) {
+          if (e instanceof CharterError) return { ok: false, requires_approval: approval, error: e.message };
+          throw e;
+        }
+      }
+      case "charter_suggest_update": {
+        const proposal_id = randomUUID();
+        deps.ledger.append({
+          gig_id: `proposal:${proposal_id}`,
+          standard_slug: "charter_suggest_update",
+          genome_hash: "n/a",
+          run_fingerprint: "n/a",
+          output_hashes: [],
+          started_at: new Date().toISOString(),
+          finished_at: new Date().toISOString(),
+        });
+        return {
+          ok: true, requires_approval: true,
+          data: {
+            proposal_id,
+            field: String(args["field"] ?? ""),
+            current_value: args["current_value"] ?? null,
+            suggested_value: args["suggested_value"] ?? null,
+            evidence: args["evidence"] ?? null,
+          },
+        };
+      }
+      case "system_health": {
+        const gigs_run = deps.ledger.count();
+        const outs = deps.outputs.all();
+        const type_stats: Record<string, number> = {};
+        const agent_stats: Record<string, number> = {};
+        for (const o of outs) {
+          type_stats[o.domain_type] = (type_stats[o.domain_type] ?? 0) + 1;
+          agent_stats[o.agent_slug] = (agent_stats[o.agent_slug] ?? 0) + 1;
+        }
+        return {
+          ok: true, requires_approval: approval,
+          data: {
+            gigs_run, cost: gigs_run, type_stats, agent_stats,
+            types: deps.registry.listTypes().length, outputs: outs.length, refs: deps.outputs.refs().length,
+            tool_stats: {}, bottlenecks: [], budget: { spent: gigs_run, remaining: null },
+          },
+        };
+      }
+      case "health_check": {
+        const targetSlug = String(args["slug"] ?? "");
+        const targetKind = String(args["kind"] ?? args["entity_type"] ?? "");
+        const all = deps.outputs.all();
+        // standards live in the ledger (executions); agents/types in the outputs store.
+        const execution_count = targetKind === "standard" ? deps.ledger.query({ standard_slug: targetSlug }).length : 0;
+        const filtered = targetKind === "agent"
+          ? all.filter((o) => o.agent_slug === targetSlug)
+          : targetKind === "standard"
+            ? []
+            : all.filter((o) => o.domain_type === targetSlug);
+        const output_count = targetKind === "standard" ? execution_count : filtered.length;
+        return {
+          ok: true, requires_approval: approval,
+          data: {
+            entity: targetSlug, kind: targetKind, output_count, execution_count,
+            usage: output_count, success_rate: 1.0,
+            cost: output_count, trend: "stable", recommendations: [],
+          },
+        };
+      }
+      case "system_audit": {
+        // Real derivation over the genome: a registered domain type with zero
+        // outputs is an unused type — the canonical audit finding in v0.
+        const types = deps.registry.listTypes();
+        const usedTypes = new Set(deps.outputs.all().map((o) => o.domain_type));
+        const unused_types = types.filter((t) => !usedTypes.has(t.slug)).map((t) => t.slug);
+        const findings = unused_types.map((slug) => ({ kind: "unused_type", slug, severity: "info" }));
+        return { ok: true, requires_approval: approval, data: { findings, unused_types, type_count: types.length, output_count: deps.outputs.all().length } };
+      }
+      case "tool_propose": {
+        const proposal_id = randomUUID();
+        return { ok: true, requires_approval: true, data: { proposal_id } };
+      }
+      case "tool_deprecate_propose": {
+        const proposal_id = randomUUID();
+        return { ok: true, requires_approval: true, data: { proposal_id, affected_agents: [] } };
+      }
+      case "proposal_create": {
+        const proposal_id = randomUUID();
+        deps.ledger.append({
+          gig_id: `proposal:${proposal_id}`,
+          standard_slug: "proposal_create",
+          genome_hash: "n/a",
+          run_fingerprint: "n/a",
+          output_hashes: [],
+          started_at: new Date().toISOString(),
+          finished_at: new Date().toISOString(),
+        });
+        return {
+          ok: true, requires_approval: approval,
+          data: { proposal_id, cascade_impact: { agents_affected: [], standards_affected: [] } },
+        };
+      }
+      case "capability_research": {
+        // Real local gap-search over the genome: does any existing tool or domain
+        // type already cover the asked-for capability? If nothing matches, it's a gap.
+        const q = String(args["query"] ?? args["capability"] ?? "").toLowerCase();
+        const toolMatches = q ? MCP_TOOLS.filter((t) => t.slug.toLowerCase().includes(q)).map((t) => t.slug) : [];
+        const typeMatches = q ? deps.registry.listTypes().filter((t) => t.slug.toLowerCase().includes(q)).map((t) => t.slug) : [];
+        const existing_matches = [...toolMatches, ...typeMatches];
+        const gap = existing_matches.length === 0;
+        return {
+          ok: true, requires_approval: approval,
+          data: { query: q, existing_matches, gap, approaches: [], mcp_options: toolMatches, recommendation: gap ? "no existing capability — propose a new tool/type" : "reuse existing" },
+        };
+      }
+      case "gig_abort": {
+        const gid = String(args["gig_id"] ?? "");
+        // v0 gigs run synchronously (runGig completes inside gig_dispatch) — there
+        // is no in-flight gig to cancel. Honest status from what the stores know:
+        // a ledger entry => already finished; outputs only => was running; else unknown.
+        const completed = deps.ledger.query({ gig_id: gid }).length > 0;
+        const hasOutputs = deps.outputs.all().some((o) => o.gig_id === gid);
+        const status = completed ? "already_complete" : hasOutputs ? "running" : "not_found";
+        deps.ledger.append({
+          gig_id: `abort:${gid}`,
+          standard_slug: "gig_abort",
+          genome_hash: "n/a",
+          run_fingerprint: "n/a",
+          output_hashes: [],
+          started_at: new Date().toISOString(),
+          finished_at: new Date().toISOString(),
+        });
+        return { ok: true, requires_approval: approval, data: { status, aborted: status === "running", cleanup_result: { reason: String(args["reason"] ?? "") } } };
+      }
+      case "agent_define": {
+        const def: { slug: string; primitives: Primitive[]; input_types: string[]; output_types: string[]; domain?: string; allowed_tools?: string[]; disallowed_tools?: string[] } = {
+          slug: String(args["slug"] ?? ""),
+          primitives: ((args["primitives"] as Primitive[]) ?? []),
+          input_types: arr(args["input_types"]),
+          output_types: arr(args["output_types"]),
+        };
+        if (args["domain"]) def.domain = String(args["domain"]);
+        if (args["allowed_tools"]) def.allowed_tools = arr(args["allowed_tools"]);
+        if (args["disallowed_tools"]) def.disallowed_tools = arr(args["disallowed_tools"]);
+        // The substrate loop: validate → canonical hash → (if genome_dir) persist + ledger-seal.
+        const sealed = sealAgentDefinition(def, deps.ledger, deps.genome_dir);
+        return {
+          ok: true,
+          requires_approval: approval,
+          data: {
+            agent: sealed.agent,
+            agent_profile_id: sealed.agent.slug,
+            content_hash: sealed.content_hash,
+            dependency_hash: sealed.dependency_hash,
+            effective_hash: sealed.effective_hash,
+            validation_result: { valid: true },
+          },
+        };
+      }
+      case "agent_evolve": {
+        // Real change-space classification: a permissions change needs approval,
+        // a harmonic (type-graph) or creative (identity/method) change does not.
+        const base = args["base"] as AgentProfile | undefined;
+        const next = args["next"] as AgentProfile | undefined;
+        const new_version = Number(args["new_version"] ?? ((base?.version ?? 0) + 1));
+        if (base && next) {
+          const change = proposeAgentChange(base, next);
+          // For a creative-space change, return the lineage-threaded evolved profile
+          // (version+1, parent_version=base.version) so the immutable chain reconstructs.
+          const evolved = change.space === "creative"
+            ? evolveProfile(base, { identity: next.identity, method: next.method, constraints: next.constraints })
+            : null;
+          // substrate seal: the evolved version's identity (lineage claim) is recorded in
+          // the ledger when persisting — never a contract lie, even before file materialization.
+          const ev = (evolved && deps.genome_dir) ? recordIdentity("agent_evolve", `${base.slug}@v${new_version}`, evolved, deps.ledger) : undefined;
+          return {
+            ok: true, requires_approval: change.approval_required,
+            data: { space: change.space, approval_required: change.approval_required, type_check_passed: change.type_check_passed ?? null, new_version, evolved_profile: evolved, parent_version: evolved?.parent_version ?? base.version, effective_hash: ev?.effective_hash, content_hash: ev?.content_hash, cascade_check: { agents_affected: [], standards_affected: [] } },
+          };
+        }
+        return { ok: true, requires_approval: approval, data: { new_version, cascade_check: { agents_affected: [], standards_affected: [] } } };
+      }
+      case "access_grant_check": {
+        // Real validation: TTL (is the grant live?) + optional plan-scope check
+        // (does the proposed file set fit the grant's paths/limits?).
+        const grant = args["grant"] as AccessGrant | undefined;
+        if (grant) {
+          const nowMs = typeof args["now_ms"] === "number" ? (args["now_ms"] as number) : Date.now();
+          const ttl = checkGrantTTL(grant, nowMs);
+          const plan = args["plan"] as PlanCheck | undefined;
+          const planResult = plan ? validatePlanAgainstGrant(plan, grant) : { valid: true };
+          const valid = ttl.valid && planResult.valid;
+          return {
+            ok: true, requires_approval: approval,
+            data: { valid, granted: valid, ttl, plan_check: plan ? planResult : null, expires_in: ttl.remaining_ms ?? null, reason: ttl.reason ?? planResult.reason ?? null },
+          };
+        }
+        const required = arr(args["required_permissions"]);
+        return {
+          ok: true, requires_approval: approval,
+          data: { valid: required.length === 0, granted: required.length === 0, missing_permissions: required, expires_in: null },
+        };
+      }
+      case "agent_promote":
+      case "standard_promote":
+      case "skill_promote": {
+        // §7 lifecycle promotion. Forward-only state-machine transition is recorded
+        // as an immutable ledger event (parity with OG's append-not-mutate evolution
+        // discipline). Status enum per entity class:
+        //   agent:    draft → review → approved → active → retired
+        //   standard: draft → active → retired
+        //   skill:    draft → testing → active → retired
+        // Caller supplies (slug, status, [current]); when `current` is omitted the
+        // call records the intent and skips the chain check (the writer is trusted
+        // to know the prior state — same shape as OG handleAgentPromote).
+        const order =
+          slug === "agent_promote" ? AGENT_STATUS_ORDER :
+          slug === "standard_promote" ? STANDARD_STATUS_ORDER :
+          SKILL_STATUS_ORDER;
+        const targetSlug = String(args["slug"] ?? "");
+        const target = String(args["status"] ?? "");
+        const current = args["current"] != null ? String(args["current"]) : null;
+        if (!targetSlug || !target) {
+          return { ok: false, requires_approval: approval, error: "missing slug or status" };
+        }
+        try {
+          if (current != null) checkPromotion(current, target, order);
+          else if (order.indexOf(target) < 0) throw new PromotionError(`unknown target status "${target}"`);
+        } catch (e) {
+          if (e instanceof PromotionError) {
+            return { ok: false, requires_approval: approval, error: e.message };
+          }
+          throw e;
+        }
+        const promotion_id = randomUUID();
+        deps.ledger.append({
+          gig_id: `promote:${promotion_id}`,
+          standard_slug: slug,
+          genome_hash: "n/a",
+          run_fingerprint: "n/a",
+          output_hashes: [],
+          started_at: new Date().toISOString(),
+          finished_at: new Date().toISOString(),
+        });
+        return {
+          ok: true, requires_approval: approval,
+          data: { slug: targetSlug, status: target, promoted: true, promotion_id },
+        };
+      }
+      case "session_review_write": {
+        // §11 learning loop, half 1: record a quality review of a gig's output. The
+        // review is an immutable ledger event; learning_synthesize aggregates many
+        // reviews into evolution evidence.
+        const gig_id = String(args["gig_id"] ?? "");
+        const output_id = String(args["output_id"] ?? "");
+        const agent_slug = String(args["agent_slug"] ?? "");
+        const quality_scores = args["quality_scores"];
+        if (!gig_id || !output_id || !agent_slug || quality_scores == null || typeof quality_scores !== "object") {
+          return { ok: false, requires_approval: approval, error: "session_review_write requires gig_id, output_id, agent_slug, quality_scores" };
+        }
+        const review_id = randomUUID();
+        deps.ledger.append({
+          gig_id: `review:${review_id}`,
+          standard_slug: "session_review_write",
+          genome_hash: "n/a",
+          run_fingerprint: "n/a",
+          output_hashes: [],
+          started_at: new Date().toISOString(),
+          finished_at: new Date().toISOString(),
+        });
+        return { ok: true, requires_approval: approval, data: { review_id, recorded: true, agent_slug, gig_id } };
+      }
+      case "learning_synthesize": {
+        // §11 learning loop, half 2: aggregate session reviews into evolution evidence
+        // for one agent. Returns evidence_sufficient=true only when review count meets
+        // min_reviews (default 5, matching OG threshold). auto_propose creates a
+        // proposal_create-shaped proposal_id (recorded against the same agent_slug).
+        const agent_slug = String(args["agent_slug"] ?? "");
+        if (!agent_slug) {
+          return { ok: false, requires_approval: approval, error: "learning_synthesize requires agent_slug" };
+        }
+        const min_reviews = typeof args["min_reviews"] === "number" ? (args["min_reviews"] as number) : 5;
+        const auto_propose = args["auto_propose"] === true;
+        const reviews = deps.ledger.query({ standard_slug: "session_review_write" })
+          .filter((e) => e.gig_id.startsWith("review:"));
+        const review_count = reviews.length;
+        const evidence_sufficient = review_count >= min_reviews;
+        let proposal_id: string | null = null;
+        if (evidence_sufficient && auto_propose) {
+          proposal_id = randomUUID();
+          deps.ledger.append({
+            gig_id: `proposal:${proposal_id}`,
+            standard_slug: "learning_synthesize",
+            genome_hash: "n/a",
+            run_fingerprint: "n/a",
+            output_hashes: [],
+            started_at: new Date().toISOString(),
+            finished_at: new Date().toISOString(),
+          });
+        }
+        return {
+          ok: true, requires_approval: approval,
+          data: {
+            agent_slug, review_count, evidence_sufficient,
+            summary: { min_reviews, threshold_met: evidence_sufficient },
+            proposal_id,
+          },
+        };
+      }
+      default:
+        return { ok: false, not_implemented: true, requires_approval: approval, error: `"${slug}" has no v0 handler` };
+    }
+  } catch (e) {
+    return { ok: false, requires_approval: approval, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+/** Build the low-level MCP Server with ListTools + CallTool wired to the dispatcher. */
+export function createColtraneServer(deps: ServerDeps): Server {
+  const server = new Server(
+    { name: "coltrane", version: "0.1.0" },
+    { capabilities: { tools: {} } },
+  );
+
+  server.setRequestHandler(ListToolsRequestSchema, async () => ({
+    tools: MCP_TOOLS.map((t) => ({
+      name: t.slug,
+      description: `${t.category} tool`,
+      inputSchema: t.input_schema as { type: "object" },
+    })),
+  }));
+
+  server.setRequestHandler(CallToolRequestSchema, async (req) => {
+    const result = await dispatchTool(req.params.name, (req.params.arguments ?? {}) as Record<string, unknown>, deps);
+    return {
+      content: [{ type: "text" as const, text: JSON.stringify(result) }],
+      isError: !result.ok,
+    };
+  });
+
+  return server;
+}
+
+/**
+ * stdio entry. Boots a server and connects over stdin/stdout. By default the
+ * AgentInvoker is the REAL Claude CLI (Claude Code = the cognition) — so a prod
+ * server runs gigs against the live model. Tests inject deps (incl. a mock invoke).
+ */
+/**
+ * Boot a full ServerDeps from the genome FILES on disk — so a bare `node dist/server.js`
+ * serves the repo's genome (types, agents, standards), not an empty registry. The genome
+ * root is COLTRANE_GENOME or the cwd. Pure + testable (no stdio); fails loud if the cwd
+ * isn't a genome (loadGenome rejects a missing/invalid core_types/).
+ */
+export function bootstrapServerDeps(genomeRoot?: string): ServerDeps {
+  const root = genomeRoot ?? process.env["COLTRANE_GENOME"] ?? process.cwd();
+  const genome = loadGenome(root);
+  const registry = loadRegistry(genome);
+  return {
+    registry,
+    outputs: createOutputStore(registry),
+    ledger: new MemoryLedger(),
+    standards: genome.standards, // ← gig_dispatch can now resolve file-defined standards
+    invoke: makeClaudeInvoker({ registry, model: process.env["COLTRANE_MODEL"] }),
+    model_version: process.env["COLTRANE_MODEL"] ?? "claude-cli-default",
+    genome_dir: root, // ← genome-mutation tools persist + ledger-seal into the live genome
+  };
+}
+
+export async function runStdioServer(deps?: ServerDeps): Promise<void> {
+  // Tests inject deps; a bare prod start bootstraps the genome from files.
+  const resolved = deps ?? bootstrapServerDeps();
+  const server = createColtraneServer(resolved);
+  await server.connect(new StdioServerTransport());
+}

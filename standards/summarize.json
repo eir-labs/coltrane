@@ -1,0 +1,18 @@
+{
+  "slug": "summarize",
+  "domain": "demo",
+  "agent_slugs": [
+    "sensor",
+    "summarizer"
+  ],
+  "phases": [
+    {
+      "name": "sense",
+      "agent": "sensor"
+    },
+    {
+      "name": "interpret",
+      "agent": "summarizer"
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "slug": "raw-note",
+  "version": 1,
+  "extends": "Signal",
+  "domain": "demo",
+  "status": "active",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "text": {
+        "type": "string"
+      }
+    }
+  },
+  "required_fields": [
+    "text"
+  ]
+}

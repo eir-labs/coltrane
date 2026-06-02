@@ -1,0 +1,225 @@
+// §6 — the universal output store + output_refs provenance graph + findings view.
+// Pure-TS (in-memory), ledger.ts style. Validation is NOT reimplemented here:
+// write() wires registry.validate() and rejects bad-schema outputs AT WRITE (T3).
+import { randomUUID } from "node:crypto";
+import type { Registry } from "./registry.js";
+
+// §6 output_refs.relation CHECK constraint, as a closed set.
+export const REF_RELATIONS = [
+  "derived_from",
+  "validates",
+  "challenges",
+  "refines",
+  "triggers",
+  "contains",
+] as const;
+export type RefRelation = (typeof REF_RELATIONS)[number];
+
+// §6 `outputs` row. The universal typed-output store: one table, all output shapes.
+export interface OutputRecord {
+  id: string;
+  core_type: string;
+  domain_type: string;
+  domain_type_version: number;
+  domain: string;
+  gig_id: string;
+  agent_slug: string;
+  phase?: string | undefined;
+  primitive: string;
+  data: Record<string, unknown>; // validated against core + domain schema at write
+  input_refs: string[];
+  created_at: string;
+  cost_usd?: number | undefined;
+  tokens_used?: number | undefined;
+  duration_ms?: number | undefined;
+}
+
+// What a caller supplies to write(). id + created_at are assigned by the store;
+// domain_type_version + input_refs + the cost fields are optional.
+export interface OutputWrite {
+  core_type: string;
+  domain_type: string;
+  domain_type_version?: number | undefined;
+  domain: string;
+  gig_id: string;
+  agent_slug: string;
+  phase?: string | undefined;
+  primitive: string;
+  data: Record<string, unknown>;
+  input_refs?: string[] | undefined;
+  cost_usd?: number | undefined;
+  tokens_used?: number | undefined;
+  duration_ms?: number | undefined;
+}
+
+// §6 `output_refs` row — one typed edge of the provenance graph.
+export interface OutputRef {
+  id: string;
+  from_output_id: string;
+  to_output_id: string;
+  relation: RefRelation;
+  primitive: string;
+  created_at: string;
+}
+
+// §6 backward-compat `findings` VIEW shape (projection over outputs where
+// domain_type='finding' AND domain='eirtests').
+export interface Finding {
+  id: string;
+  gig_id: string;
+  pattern_key?: string | undefined;
+  severity?: string | undefined;
+  title?: string | undefined;
+  evidence?: string | undefined;
+  location?: string | undefined;
+  recommendation?: string | undefined;
+  is_novel?: boolean | undefined;
+  kpi_impacts?: unknown;
+  status?: string | undefined;
+  agent_role: string;
+  dimension?: string | undefined;
+  created_at: string;
+}
+
+export class OutputStoreError extends Error {}
+
+export interface OutputStore {
+  // Validates against core+domain schema via registry; throws on invalid (T3). Returns the stored row.
+  write(o: OutputWrite): OutputRecord;
+  get(id: string): OutputRecord | undefined;
+  all(): readonly OutputRecord[];
+  // Provenance edge. relation must be in REF_RELATIONS; both endpoints must exist.
+  addRef(from_output_id: string, to_output_id: string, relation: RefRelation, primitive: string): OutputRef;
+  refs(): readonly OutputRef[];
+  // E6: walk backward from an artifact to its source signals (input_refs + derived_from/refines edges).
+  trace(id: string): OutputRecord[];
+  // T8: the backward-compat findings view.
+  findings(): Finding[];
+}
+
+export function createOutputStore(registry: Registry): OutputStore {
+  const outputs = new Map<string, OutputRecord>();
+  const edges: OutputRef[] = [];
+
+  function asStr(v: unknown): string | undefined {
+    return typeof v === "string" ? v : undefined;
+  }
+
+  return {
+    write(o) {
+      // T2/T3: reject bad-schema output AT WRITE by wiring the registry validator.
+      const result = registry.validate({
+        core_type: o.core_type,
+        domain_type: o.domain_type,
+        data: o.data,
+      });
+      if (!result.valid) {
+        throw new OutputStoreError(
+          `output rejected: ${o.domain_type} failed schema validation — ${result.errors.join("; ")}`,
+        );
+      }
+      const rec: OutputRecord = {
+        id: randomUUID(),
+        core_type: o.core_type,
+        domain_type: o.domain_type,
+        domain_type_version: o.domain_type_version ?? 1,
+        domain: o.domain,
+        gig_id: o.gig_id,
+        agent_slug: o.agent_slug,
+        phase: o.phase,
+        primitive: o.primitive,
+        data: o.data,
+        input_refs: o.input_refs ?? [],
+        created_at: new Date().toISOString(),
+        cost_usd: o.cost_usd,
+        tokens_used: o.tokens_used,
+        duration_ms: o.duration_ms,
+      };
+      outputs.set(rec.id, rec);
+      return rec;
+    },
+
+    get(id) {
+      return outputs.get(id);
+    },
+
+    all() {
+      return [...outputs.values()];
+    },
+
+    addRef(from_output_id, to_output_id, relation, primitive) {
+      if (!REF_RELATIONS.includes(relation)) {
+        throw new OutputStoreError(`invalid relation "${relation}"`);
+      }
+      if (!outputs.has(from_output_id)) {
+        throw new OutputStoreError(`from_output_id "${from_output_id}" does not exist`);
+      }
+      if (!outputs.has(to_output_id)) {
+        throw new OutputStoreError(`to_output_id "${to_output_id}" does not exist`);
+      }
+      const ref: OutputRef = {
+        id: randomUUID(),
+        from_output_id,
+        to_output_id,
+        relation,
+        primitive,
+        created_at: new Date().toISOString(),
+      };
+      edges.push(ref);
+      return ref;
+    },
+
+    refs() {
+      return [...edges];
+    },
+
+    trace(id) {
+      // Walk backward: a node's parents are its input_refs plus the targets of
+      // its derived_from/refines edges. Returns every reachable ancestor (the
+      // provenance closure), cycle-safe.
+      const seen = new Set<string>();
+      const order: OutputRecord[] = [];
+      const stack = [id];
+      while (stack.length) {
+        const cur = stack.pop() as string;
+        if (seen.has(cur)) continue;
+        seen.add(cur);
+        const rec = outputs.get(cur);
+        if (!rec) continue;
+        if (cur !== id) order.push(rec);
+        for (const p of rec.input_refs) stack.push(p);
+        for (const e of edges) {
+          if (e.from_output_id === cur && (e.relation === "derived_from" || e.relation === "refines")) {
+            stack.push(e.to_output_id);
+          }
+        }
+      }
+      return order;
+    },
+
+    findings() {
+      const rows: Finding[] = [];
+      for (const o of outputs.values()) {
+        if (o.domain_type !== "finding" || o.domain !== "eirtests") continue;
+        const d = o.data;
+        rows.push({
+          id: o.id,
+          gig_id: o.gig_id,
+          pattern_key: asStr(d["pattern_key"]),
+          severity: asStr(d["severity"]),
+          title: asStr(d["title"]),
+          evidence: asStr(d["evidence"]),
+          location: asStr(d["location"]),
+          recommendation: asStr(d["recommendation"]),
+          is_novel: typeof d["is_novel"] === "boolean" ? (d["is_novel"] as boolean) : undefined,
+          kpi_impacts: d["kpi_impacts"],
+          status: asStr(d["status"]),
+          agent_role: o.agent_slug,
+          dimension: asStr(d["dimension"]),
+          created_at: o.created_at,
+        });
+      }
+      return rows;
+    },
+  };
+}

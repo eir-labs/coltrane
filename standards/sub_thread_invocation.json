@@ -1,0 +1,55 @@
+{
+  "slug": "sub_thread_invocation",
+  "domain": "self_judge",
+  "agent_slugs": [
+    "sub_thread_trace_sensor",
+    "sub_thread_soft_judge"
+  ],
+  "phases": [
+    {
+      "name": "sense",
+      "agent": "sub_thread_trace_sensor"
+    },
+    {
+      "name": "interpret",
+      "agent": "sub_thread_soft_judge"
+    }
+  ],
+  "soft_criteria_per_persona": {
+    "backend-eng": [
+      "parent_context_preservation",
+      "child_stays_on_task",
+      "output_coherence_between_turns",
+      "graceful_degradation_when_state_window_fills",
+      "jargon_balance_per_persona"
+    ],
+    "oss-maintainer": [
+      "parent_context_preservation",
+      "child_stays_on_task",
+      "output_coherence_between_turns",
+      "graceful_degradation_when_state_window_fills",
+      "jargon_balance_per_persona"
+    ],
+    "security-eng": [
+      "parent_context_preservation",
+      "child_stays_on_task",
+      "output_coherence_between_turns",
+      "graceful_degradation_when_state_window_fills",
+      "jargon_balance_per_persona"
+    ],
+    "fresh-contributor": [
+      "parent_context_preservation",
+      "child_stays_on_task",
+      "output_coherence_between_turns",
+      "graceful_degradation_when_state_window_fills",
+      "jargon_balance_per_persona"
+    ],
+    "non-engineer-tash-shape": [
+      "parent_context_preservation",
+      "child_stays_on_task",
+      "output_coherence_between_turns",
+      "graceful_degradation_when_state_window_fills",
+      "jargon_balance_per_persona"
+    ]
+  }
+}

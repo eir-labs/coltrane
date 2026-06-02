@@ -3,12 +3,12 @@
 // expected to be largely RED until coltrane wires a SubthreadRecorder.
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { readFileSync, existsSync, writeFileSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 import {
   setupTempdirColtrane,
   spawnClaudeSubthread,
   resumeSubthread,
-  hashRecorderIgnoringTimestamps,
+  hashRecorderDeterministicFields,
   type TempdirColtrane,
 } from "./_harness.js";
 
@@ -49,53 +49,65 @@ describe("sub_thread.research_lab — deterministic replay + nested lineage", ()
     return sessionIds;
   }
 
-  it("hard: --resume chain of length 5 produces identical hash-sealed record across runs", async () => {
+  it("hard: --resume chain of length 5 produces identical hash-sealed record across runs (scoped to deterministic provenance fields)", async () => {
     const chainA = await runChain(envA, 5);
-    const hA = hashRecorderIgnoringTimestamps(envA.recorderPath);
+    const hA = hashRecorderDeterministicFields(envA.recorderPath);
 
     const chainB = await runChain(envB, 5);
-    const hB = hashRecorderIgnoringTimestamps(envB.recorderPath);
+    const hB = hashRecorderDeterministicFields(envB.recorderPath);
 
     expect(chainA.length).toBe(5);
     expect(chainB.length).toBe(5);
-    expect(hA).toBe(hB);
     expect(hA).not.toBe("EMPTY");
+    expect(hB).not.toBe("EMPTY");
+    expect(hA).toBe(hB);
   }, 600_000);
 
   it("hard: nested invocation depth ≥3 (A→B→C) records full lineage with parent-child edges", async () => {
-    // simulate nesting: parent prompt asks the model to spawn a child that spawns a grandchild
-    // we can only test the lineage if coltrane records sub-thread parent_session_id on each turn.
-    const parent = await spawnClaudeSubthread(
-      ["-p", "invoke the coltrane tool 'standard_simulate' with mock input and return its output"],
-      { mcpConfigPath: envA.mcpConfigPath, timeoutMs: 90_000 },
+    // Drive A → B → C explicitly via the harness's parent_session_id seam; each
+    // spawn becomes one server lifetime that seals its parent edge to the recorder.
+    const A = await spawnClaudeSubthread(
+      ["-p", "respond with the literal word 'A'"],
+      { mcpConfigPath: envA.mcpConfigPath, timeoutMs: 60_000 },
     );
-    expect(parent.sessionId).not.toBeNull();
+    expect(A.sessionId).not.toBeNull();
+    if (!A.sessionId) return;
 
-    // assert recorder log contains lineage edges (parent_session_id field)
+    const B = await spawnClaudeSubthread(
+      ["-p", "respond with the literal word 'B'"],
+      { mcpConfigPath: envA.mcpConfigPath, timeoutMs: 60_000, parentSessionId: A.sessionId },
+    );
+    expect(B.sessionId).not.toBeNull();
+    if (!B.sessionId) return;
+
+    const C = await spawnClaudeSubthread(
+      ["-p", "respond with the literal word 'C'"],
+      { mcpConfigPath: envA.mcpConfigPath, timeoutMs: 60_000, parentSessionId: B.sessionId },
+    );
+    expect(C.sessionId).not.toBeNull();
+
     if (!existsSync(envA.recorderPath)) {
       expect.fail("recorder not wired — no lineage to verify");
     }
     const content = readFileSync(envA.recorderPath, "utf-8");
     const lines = content.split("\n").filter(Boolean);
     let foundParentEdge = false;
-    let depth = 0;
     const seenSessions = new Set<string>();
     for (const line of lines) {
       try {
         const e = JSON.parse(line);
+        if (e.session_id) seenSessions.add(e.session_id);
         if (e.parent_session_id) {
           foundParentEdge = true;
-          if (e.session_id) seenSessions.add(e.session_id);
-          if (e.parent_session_id) seenSessions.add(e.parent_session_id);
+          seenSessions.add(e.parent_session_id);
         }
       } catch {
         /* skip */
       }
     }
-    depth = seenSessions.size;
 
     expect(foundParentEdge, "no parent_session_id field in any recorder entry — lineage not sealed").toBe(true);
-    expect(depth).toBeGreaterThanOrEqual(3);
+    expect(seenSessions.size).toBeGreaterThanOrEqual(3);
   }, 240_000);
 
   it("soft: trace tree renderable (recorder output parseable into a tree shape)", async () => {

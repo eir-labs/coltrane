@@ -30,7 +30,11 @@ import { proposeAgentChange, evolveProfile, type AgentProfile } from "./agent_pr
 import { checkGrantTTL, validatePlanAgainstGrant, type AccessGrant, type PlanCheck } from "./access_grant.js";
 import { loadCharter, CharterError } from "./charter.js";
 import { readFileSync, existsSync } from "node:fs";
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHash } from "node:crypto";
+import { join } from "node:path";
+import { SubthreadRecorder, ApiVersionMismatchError } from "./subthread_recorder.js";
+import { canonJson, runFingerprint, CANONICAL_FORM_VERSION } from "./canonical_form.js";
+import type { LoadedGenome } from "./loader.js";
 
 export interface ServerDeps {
   registry: Registry;
@@ -611,7 +615,7 @@ export async function dispatchTool(slug: string, args: Record<string, unknown>, 
 }
 
 /** Build the low-level MCP Server with ListTools + CallTool wired to the dispatcher. */
-export function createColtraneServer(deps: ServerDeps): Server {
+export function createColtraneServer(deps: ServerDeps, recorder?: SubthreadRecorder): Server {
   const server = new Server(
     { name: "coltrane", version: "0.1.0" },
     { capabilities: { tools: {} } },
@@ -627,6 +631,10 @@ export function createColtraneServer(deps: ServerDeps): Server {
 
   server.setRequestHandler(CallToolRequestSchema, async (req) => {
     const result = await dispatchTool(req.params.name, (req.params.arguments ?? {}) as Record<string, unknown>, deps);
+    if (recorder) {
+      recorder.recordToolCall(req.params.name);
+      recorder.recordObservability(`call:${req.params.name}`, { ok: result.ok });
+    }
     return {
       content: [{ type: "text" as const, text: JSON.stringify(result) }],
       isError: !result.ok,
@@ -634,6 +642,23 @@ export function createColtraneServer(deps: ServerDeps): Server {
   });
 
   return server;
+}
+
+/**
+ * Deterministic hash of the loaded genome (types + agents + standards). Identical
+ * source trees produce identical hashes, regardless of which session boots the server.
+ */
+function loadedGenomeHash(genome: LoadedGenome): string {
+  const types = [...genome.domain_types.values()]
+    .map((t) => ({ slug: t.slug, extends: t.extends, domain: t.domain, required_fields: t.required_fields, schema: t.schema }))
+    .sort((a, b) => (a.slug < b.slug ? -1 : 1));
+  const agents = [...genome.agents.values()]
+    .map((a) => ({ slug: a.slug, primitives: a.primitives, input_types: a.input_types, output_types: a.output_types, domain: a.domain }))
+    .sort((a, b) => (a.slug < b.slug ? -1 : 1));
+  const standards = [...genome.standards.values()]
+    .map((s) => ({ slug: s.slug, domain: s.domain, agent_slugs: s.agents.map((x) => x.slug), phases: s.phases }))
+    .sort((a, b) => (a.slug < b.slug ? -1 : 1));
+  return createHash("sha256").update(canonJson({ types, agents, standards })).digest("hex");
 }
 
 /**
@@ -665,6 +690,57 @@ export function bootstrapServerDeps(genomeRoot?: string): ServerDeps {
 export async function runStdioServer(deps?: ServerDeps): Promise<void> {
   // Tests inject deps; a bare prod start bootstraps the genome from files.
   const resolved = deps ?? bootstrapServerDeps();
-  const server = createColtraneServer(resolved);
+  const recorder = openSubthreadRecorderFromEnv(resolved);
+  const server = createColtraneServer(resolved, recorder ?? undefined);
+  if (recorder) {
+    const flush = () => recorder.flush();
+    process.on("SIGTERM", flush);
+    process.on("SIGINT", flush);
+    process.on("beforeExit", flush);
+    process.on("exit", flush);
+  }
   await server.connect(new StdioServerTransport());
+}
+
+/**
+ * Open a sub-thread recorder if the harness/parent supplied env wiring. Reads
+ * COLTRANE_SESSION_ID + COLTRANE_RECORDER_PATH (mandatory pair); optional
+ * COLTRANE_API_VERSION (default "1.0.0"), COLTRANE_PARENT_SESSION_ID,
+ * COLTRANE_MODEL. On api_version mismatch with a prior turn for this session,
+ * writes a typed error entry to the recorder, prints the typed error to stderr
+ * (best-effort observability), and exits non-zero so the seam fails CLOSED.
+ */
+function openSubthreadRecorderFromEnv(deps: ServerDeps): SubthreadRecorder | null {
+  const session_id = process.env["COLTRANE_SESSION_ID"];
+  const path = process.env["COLTRANE_RECORDER_PATH"]
+    ?? (deps.genome_dir ? join(deps.genome_dir, ".coltrane-recorder.jsonl") : undefined);
+  if (!session_id || !path) return null;
+  const api_version = process.env["COLTRANE_API_VERSION"] ?? "1.0.0";
+  const parent_session_id = process.env["COLTRANE_PARENT_SESSION_ID"] ?? null;
+  const model_version = process.env["COLTRANE_MODEL"] ?? deps.model_version ?? "claude-cli-default";
+  const genome = deps.genome_dir ? loadGenome(deps.genome_dir) : null;
+  const genome_hash = genome ? loadedGenomeHash(genome) : "no-genome";
+  const run_fp = runFingerprint({
+    genome_hash,
+    model_version,
+    canonical_form_version: CANONICAL_FORM_VERSION,
+    eval_scores: {},
+    output_hashes: [],
+  });
+  try {
+    return SubthreadRecorder.open({
+      path,
+      session_id,
+      parent_session_id,
+      api_version,
+      genome_hash,
+      run_fingerprint: run_fp,
+    });
+  } catch (e) {
+    if (e instanceof ApiVersionMismatchError) {
+      process.stderr.write(`${e.message}\n`);
+      process.exit(2);
+    }
+    throw e;
+  }
 }

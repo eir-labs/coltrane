@@ -1,0 +1,59 @@
+{
+  "slug": "code-change-protocol",
+  "domain": "code-changes",
+  "agent_slugs": [
+    "domain-explorer",
+    "problem-definer",
+    "solution-developer",
+    "delivery-finalizer"
+  ],
+  "phases": [
+    {
+      "name": "discover",
+      "agent": "domain-explorer"
+    },
+    {
+      "name": "define",
+      "agent": "problem-definer"
+    },
+    {
+      "name": "develop",
+      "agent": "solution-developer"
+    },
+    {
+      "name": "deliver",
+      "agent": "delivery-finalizer"
+    }
+  ],
+  "identity": {
+    "id": "code-change-protocol@1",
+    "name": "Code change protocol",
+    "version": 1,
+    "purpose": "Chain a code change through DISCOVER, DEFINE, DEVELOP, DELIVER under the safe-prereg discipline. The DEFINE phase freezes predict, kill, and apoha fields before any diff is written; the DELIVER phase renders the verdict against those frozen fields and opens the pull request only if the predict held."
+  },
+  "prereg": {
+    "discover": {
+      "state": "drafted",
+      "fields": ["change_surface", "neighbouring_areas", "candidate_framings"]
+    },
+    "define": {
+      "state": "seal_fires",
+      "predict": "The diff produces <named observable change> in <named file or surface> with <named test> turning green.",
+      "kill": "<Named test> stays red, OR <named other test> turns red, OR the diff touches <named out-of-scope area>.",
+      "apoha": [
+        "Not a refactor of unrelated code",
+        "Not a behavioural change to the public API beyond what predict names",
+        "Not a dependency upgrade",
+        "Not a test rewrite that weakens existing assertions"
+      ]
+    },
+    "develop": {
+      "state": "execution_under_seal",
+      "append_only": true
+    },
+    "deliver": {
+      "state": "verdict_written",
+      "promotes_only_if": "predict_held && !kill_triggered && code_review_minimum_bar_score >= 0.7"
+    }
+  }
+}

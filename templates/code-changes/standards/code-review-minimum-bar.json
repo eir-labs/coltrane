@@ -1,0 +1,56 @@
+{
+  "slug": "code-review-minimum-bar",
+  "domain": "code-changes",
+  "agent_slugs": [
+    "code-reviewer"
+  ],
+  "phases": [
+    {
+      "name": "interpret",
+      "agent": "code-reviewer"
+    }
+  ],
+  "identity": {
+    "id": "code-review-minimum-bar@1",
+    "name": "Code review minimum bar",
+    "version": 1,
+    "purpose": "Soft-judge a code diff on six criteria, each scored 0-1. Aggregate >= 0.7 with no zero-criterion passes the bar; otherwise the review is blocking and names the single most urgent fix."
+  },
+  "criteria": [
+    {
+      "slug": "lint_clean",
+      "weight": 0.15,
+      "rubric": "Score 1 if the linter and formatter pass on the touched files with zero errors and zero warnings. Score 0.5 for warnings only. Score 0 for any errors."
+    },
+    {
+      "slug": "types_pass",
+      "weight": 0.2,
+      "rubric": "Score 1 if the project's static type check passes on the touched files. Score 0 for any type error. No partial credit."
+    },
+    {
+      "slug": "tests_added_or_updated",
+      "weight": 0.2,
+      "rubric": "Score 1 if new behaviour has a corresponding new or updated test that asserts the change. Score 0.5 for a test that exercises the path but does not assert the new behaviour. Score 0 if no test covers the new behaviour."
+    },
+    {
+      "slug": "naming_clear",
+      "weight": 0.1,
+      "rubric": "Score 1 if introduced identifiers read clearly in context with no need for an accompanying comment. Score 0.5 if a comment is needed. Score 0 for misleading or contradictory names."
+    },
+    {
+      "slug": "no_secrets",
+      "weight": 0.15,
+      "rubric": "Score 1 if no API keys, tokens, passwords, or credentials appear anywhere in the diff. Score 0 if any secret material is present, regardless of intent."
+    },
+    {
+      "slug": "scope_held",
+      "weight": 0.2,
+      "rubric": "Score 1 if the diff touches only the files named in the predict. Score 0.5 for incidental touches that are clearly mechanical. Score 0 for substantive changes to files outside the predict."
+    }
+  ],
+  "aggregation": {
+    "method": "weighted_mean",
+    "pass_threshold": 0.7,
+    "blocking_on_any_zero": true
+  }
+}

@@ -20,8 +20,8 @@
             "turn_idx": { "type": "number" },
             "parent_session_id": { "type": ["string", "null"] },
             "child_session_id": { "type": ["string", "null"] },
-            "prompt": { "type": "string" },
-            "response": { "type": "string" },
+            "prompt": { "type": ["string", "null"] },
+            "response": { "type": ["string", "null"] },
             "timestamp": { "type": ["string", "null"] },
             "tool_calls": { "type": "array" }
           }

@@ -1,0 +1,79 @@
+# PR coverage report. Tolerant of missing coverage config — if the sibling
+# coverage-mutation work hasn't landed, the job emits a notice and exits 0
+# instead of failing the PR.
+#
+# Dependency: tonight/miles/phase-15d-coverage-mutation (vitest coverage config).
+# Once that lands and vitest.config.ts (or a sibling) defines `coverage:`,
+# this workflow runs `npx vitest run --coverage` and posts the summary.
+
+name: coverage
+
+on:
+  pull_request:
+
+concurrency:
+  group: coverage-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.x"
+          cache: "npm"
+      - run: npm ci
+
+      - name: detect coverage config
+        id: detect
+        run: |
+          # Scan known config files for a vitest `coverage:` block.
+          if grep -RIlq --include="vitest.config.*" "coverage" . ; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: run coverage
+        id: run
+        if: steps.detect.outputs.configured == 'true'
+        run: |
+          # @vitest/coverage-v8 must be present as a devDependency for this
+          # to work — gap-5 is expected to add it.
+          npx vitest run --coverage --reporter=default | tee coverage_output.txt
+          {
+            echo "summary<<EOF"
+            tail -n 40 coverage_output.txt
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: comment coverage on PR
+        if: steps.detect.outputs.configured == 'true' && github.event.pull_request.head.repo.full_name == github.repository
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const summary = `${{ steps.run.outputs.summary }}`;
+            const body = [
+              '### Coverage report',
+              '',
+              '```',
+              summary,
+              '```',
+            ].join('\n');
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body,
+            });
+
+      - name: note (no coverage config yet)
+        if: steps.detect.outputs.configured != 'true'
+        run: |
+          echo "::notice::No vitest coverage config detected. Waiting on gap-5 (phase-15d-coverage-mutation). Workflow exits clean."

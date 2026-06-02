@@ -1,0 +1,10 @@
+{
+  "slug": "user_flow_sensor",
+  "primitives": [
+    "SENSE"
+  ],
+  "output_types": [
+    "user-flow-transcript"
+  ],
+  "domain": "self_judge"
+}

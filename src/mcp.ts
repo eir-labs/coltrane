@@ -57,6 +57,8 @@ export const MCP_TOOLS: readonly MCPToolDef[] = [
   { slug: "skill_promote",                 category: "build", input_schema: obj({ slug: "string", status: "string" }), output_schema: obj({ slug: "string", status: "string", promoted: "boolean" }) },
 
   { slug: "charter_suggest_update", category: "manage_context", input_schema: obj({ company_id: "string", field: "string", current_value: "string", suggested_value: "string", evidence: "object" }), output_schema: obj({ proposal_id: "string" }) },
+
+  { slug: "lever_tensor_compute_cover", category: "build", input_schema: obj({ tasks: "array", k_object_dimension: "number", failure_library: "object" }), output_schema: obj({ K_minimal: "number", cover_complete: "boolean", umbra_remaining: "array", permutation_assignment: "array", transverse_score: "number" }) },
 ];
 
 // Lifecycle promotion order — forward-only. agent/standard share the same chain;

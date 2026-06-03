@@ -1,0 +1,184 @@
+{
+  "schema_version": "0.2",
+  "updated_at": "2026-05-25T23:00:00Z",
+  "updated_by": "eng",
+  "spec_file": "Coltrane Spec.docx.md",
+  "assignments": {
+    "eng": [
+      "§6 database schema",
+      "§7 MCP surface (32 tools)",
+      "§8 coltrane's own profile constraints",
+      "§10 company context",
+      "§11 product development domain",
+      "§12 pricing architecture",
+      "§13 bootstrap sequence",
+      "src/ runtime",
+      "src/ schemas + contracts",
+      "canonical_form proofs (shipped, 16 tests)",
+      "coordination + tracking.json"
+    ]
+  },
+  "spec_sections": {
+    "§2 type system": {
+      "status": "covered",
+      "owner": "eng",
+      "files": [{ "path": "tests/core_types.test.ts", "owner": "eng", "assertions": 8, "status": "shipped" }]
+    },
+    "§3 primitives + composition": {
+      "status": "covered",
+      "owner": "eng",
+      "files": [
+        { "path": "tests/composition_rules.test.ts", "owner": "eng", "assertions": 13, "status": "shipped" },
+        { "path": "tests/standard_composition_validation.test.ts", "owner": "eng", "assertions": 4, "status": "shipped" }
+      ]
+    },
+    "§4 agent model three spaces": {
+      "status": "covered",
+      "owner": "eng",
+      "files": [{ "path": "tests/agent_profile_spaces.test.ts", "owner": "eng", "assertions": 8, "status": "shipped" }]
+    },
+    "§5 domain type registry": {
+      "status": "covered",
+      "owner": "eng",
+      "files": [
+        { "path": "tests/type_versioning.test.ts", "owner": "eng", "assertions": 3, "status": "shipped" },
+        { "path": "tests/runtime_type_creation.test.ts", "owner": "eng", "assertions": 4, "status": "shipped" },
+        { "path": "tests/type_resolution.test.ts", "owner": "eng", "assertions": 5, "status": "shipped" },
+        { "path": "tests/domain_extension.test.ts", "owner": "eng", "assertions": 4, "status": "shipped" }
+      ]
+    },
+    "§6 database schema": {
+      "status": "covered",
+      "owner": "eng",
+      "note": "no SQL dep in repo (pure-TS stores per ledger.ts) — §6 ships as a TS store module, the faithful realization of outputs/output_refs/findings-view. registry.validate wired at write-time.",
+      "files": [
+        { "path": "src/outputs.ts", "owner": "eng", "status": "shipped", "note": "universal outputs store + output_refs provenance graph (6 relations) + findings backward-compat view + trace() for E6" },
+        { "path": "tests/domain_type_validation.test.ts", "owner": "eng", "assertions": 4, "status": "shipped", "note": "T2 (valid passes) + T3 (bad-schema rejected at write, nothing persisted)" },
+        { "path": "tests/findings_view.test.ts", "owner": "eng", "assertions": 3, "status": "shipped", "note": "T8 (findings view projects v1 columns; excludes non-eirtests/non-finding)" },
+        { "path": "src/server.ts", "owner": "eng", "status": "shipped", "note": "MCP stdio entry: low-level Server + pure dispatchTool. wires 6 context-free §7 tools (type_resolve/register/browse, standard_simulate, output_query, output_trace) to registry+outputs; honest not_implemented for runtime-dependent tools (gig_*, output_write, agent_*) until src/runtime lands. approval-gating surfaced per call." },
+        { "path": "tests/mcp_server.test.ts", "owner": "eng", "assertions": 13, "status": "shipped", "note": "dispatcher routing, wired tools, honest not_implemented, approval surfacing, server construction" },
+        { "path": "src/runtime.ts", "owner": "eng", "status": "shipped", "note": "runGig: walks phases, injected AgentInvoker (mock in tests / Claude in entry), writes typed+validated outputs, links derived_from provenance, records ledger with deterministic genome_hash + run_fingerprint(model_version, empty eval_scores — v0 un-tempered)" },
+        { "path": "tests/runtime.test.ts", "owner": "eng", "assertions": 6, "status": "shipped", "note": "2-phase gig executes; provenance links; deterministic genome_hash, model-sensitive run_fingerprint; unknown-agent + bad-schema rejected" },
+        { "path": "tests/e2e_full_loop.test.ts", "owner": "eng", "assertions": 2, "status": "shipped", "note": "E1 — gig_dispatch→runtime→outputs→output_query→output_trace, all THROUGH the MCP dispatcher. actually-runs-end-to-end." },
+        { "path": "tests/server_easy_wires.test.ts", "owner": "eng", "assertions": 8, "status": "shipped", "note": "O9 — 4 more tools wired OUT of NEEDS_RUNTIME by eng: agent_validate_pipeline (dual-shape {primitives} | {agents,phases}), type_extend ({extension.schema} | {fields_to_add}), charter_read (loadCharter from path; no-path→error), charter_suggest_update (→proposal_id + ledger append). eng authored the prereg contract; eng wired src/server.ts to satisfy it." }
+      ],
+      "note_runtime": "NEEDS_RUNTIME is now EMPTY — all 13 tools wired against real in-repo impl (no stubs). eng directive 2026-05-25: WIRE ALL 12, no step without a test. eng wired 11 (thin/stub); eng made them REAL + added the §6 pair (output_write, execution_history_read). FULL BUILD GREEN via `npm run verify` (tsc --noEmit && vitest run): 303 tests / 34 files.",
+      "claude_invoker": { "path": "src/claude_invoker.ts", "owner": "eng", "status": "shipped", "note": "the REAL AgentInvoker: buildPrompt (pure 5-layer) + extractJson (tolerant) + makeClaudeInvoker (spawns `claude -p`). wired as default invoke in runStdioServer. tested by tests/claude_invoker.test.ts (8 assertions, pure pieces only — spawn is the non-deterministic seam)." },
+      "runtime_wires": [
+        { "path": "tests/server_runtime_wires.test.ts", "owner": "eng", "assertions": 6, "status": "shipped", "note": "output_write (outputs.write + addRef provenance, auto-resolves primitive from core_type, T3 bad-schema reject) + execution_history_read (ledger.query, filterable). real-backed, no invented store." },
+        { "path": "tests/server_governance_wires.test.ts", "owner": "eng", "assertions": 17, "status": "shipped", "note": "the 11 eng-wired tools, made REAL + tested: agent_define (defineAgent), agent_evolve (proposeAgentChange change-space), access_grant_check (checkGrantTTL + validatePlanAgainstGrant), proposal_create/tool_propose/tool_deprecate_propose (ledger-backed proposal_id + approval), system_audit (unused-type derivation), system_health (live counts), health_check (per-entity counts), gig_abort (honest sync-gig status), capability_research (local gap-search over tools+types)." }
+      ],
+      "remaining_NEEDS_RUNTIME": [],
+      "e2e_and_store": [
+        { "path": "tests/e2e_provenance_trace.test.ts", "owner": "eng", "assertions": 2, "status": "shipped", "note": "E6 — artifact→signal full trace through MCP surface; root signal has empty ancestor closure (trace excludes self, returns ancestors)." },
+        { "path": "tests/e2e_backward_compat.test.ts", "owner": "eng", "assertions": 2, "status": "shipped", "note": "E2 — 25 scans through gig_dispatch → findings view projects 25 correct v1 rows; codechange note excluded (apoha)." },
+        { "path": "tests/e2e_bug_fix_standard.test.ts", "owner": "eng", "assertions": 2, "status": "shipped", "note": "E3 — 5-phase find→triage→plan→fix→review runs in declared order, none skipped; 5-hop trace reaches root defect." },
+        { "path": "tests/outputs.test.ts", "owner": "eng", "assertions": 8, "status": "shipped", "note": "O5 — §6 store direct: append/query, provenance walk, invalid-relation+dangling-endpoint reject, validation-at-write, findings view, cycle-safe trace." },
+        { "path": "tests/e2e_dynamic_type.test.ts", "owner": "eng", "assertions": 2, "status": "shipped", "note": "E4 — type registered MID-GIG via dispatchTool visible to downstream validation; bad-shape output blocked at write (apoha)." }
+      ],
+      "remaining": ["§13 bootstrap sequence", "A6 recorder_audit (shipped — see §9)", "real Claude AgentInvoker live validation (the spawn seam — needs CLI+key, out of unit scope)"]
+    },
+    "§7 MCP surface (32 tools)": {
+      "status": "covered",
+      "owner": "eng",
+      "files": [
+        { "path": "tests/mcp_surface.test.ts", "owner": "eng", "assertions": 31, "status": "shipped" },
+        { "path": "tests/standard_simulate.test.ts", "owner": "eng", "assertions": 3, "status": "shipped" },
+        { "path": "tests/mcp_promotion_and_learning.test.ts", "owner": "eng", "assertions": 24, "status": "shipped", "note": "O23 — §7 promotion + learning surface: agent_promote/standard_promote/skill_promote (forward-only state machine) + session_review_write + learning_synthesize. closes the evolution-loop parity gap eng flagged; oss now covers the full lifecycle (define → evolve → promote → learn)." }
+      ]
+    },
+    "§8 coltrane's own profile constraints": {
+      "status": "covered",
+      "owner": "eng",
+      "files": [
+        { "path": "tests/coltrane_profile_constraints.test.ts", "owner": "eng", "assertions": 39, "status": "shipped" },
+        { "path": "tests/learner_threshold.test.ts", "owner": "eng", "assertions": 8, "status": "shipped", "note": "§14 E5 — learner ≥50 gigs threshold; cross-references §8 constraint 11" }
+      ]
+    },
+    "§9 trust & access model": {
+      "status": "covered",
+      "owner": "eng",
+      "files": [
+        { "path": "tests/trust_boundaries.test.ts", "owner": "eng", "assertions": 9, "status": "shipped" },
+        { "path": "tests/artifact_validation_criteria.test.ts", "owner": "eng", "assertions": 6, "status": "shipped" },
+        { "path": "tests/grant_ttl.test.ts", "owner": "eng", "assertions": 4, "status": "shipped" }
+      ]
+    },
+    "§10 company context": {
+      "status": "assigned",
+      "owner": "eng",
+      "files": []
+    },
+    "§11 product development domain": {
+      "status": "assigned",
+      "owner": "eng",
+      "files": []
+    },
+    "§12 pricing architecture": {
+      "status": "covered",
+      "owner": "eng",
+      "files": [{ "path": "tests/pricing_architecture.test.ts", "owner": "eng", "assertions": 7, "status": "shipped" }]
+    },
+    "§13 bootstrap sequence": {
+      "status": "covered",
+      "owner": "eng",
+      "files": [
+        { "path": "tests/bootstrap_genome.test.ts", "owner": "eng", "assertions": 3, "status": "shipped", "note": "O15 — Bootstrap Run + rm-rf-rebuild litmus: loadGenome(repoRoot) reads exactly 6 core types off disk; a registry reconstituted PURELY from files runs a full gig end-to-end through the MCP surface; unregistered type does not validate. proves repo=genome, boots from files alone." }
+      ],
+      "note": "the 8-week narrative is a spec doc (DJ Steve / docs lane). the v0 TESTABLE invariant — the genome boots from disk through to a running gig — is now covered by O15. week 1-3 deliverables shipped + proven."
+    },
+    "§14 testing strategy": {
+      "status": "meta",
+      "owner": null,
+      "files": [
+        { "path": "tests/gig_nondeterminism.test.ts", "owner": "eng", "assertions": 2, "status": "shipped", "note": "cross-cutting: system claims no reproducible/deterministic output. pending eng SOT confirm vs the 26." },
+        { "path": "tests/dependency_isolation.test.ts", "owner": "eng", "assertions": 2, "status": "shipped", "note": "cross-cutting: OSS engine imports no fleet infra / internal endpoints. pending eng SOT confirm vs the 26." }
+      ]
+    }
+  },
+  "src_implementation": {
+    "runtime": { "owner": "eng", "status": "shipped", "scope": "src/runtime.ts, src/loader.ts, src/ledger.ts (eng), src/outputs.ts" },
+    "schemas_and_contracts": { "owner": "eng", "status": "shipped", "scope": "src/canonical_form.ts (3-vector eng-conformant + effective_hash via v0.1 amendment); eng's Python proofs cross-language confirm interop" },
+    "mcp_server": { "owner": "eng", "status": "shipped", "scope": "src/server.ts — stdio + dispatchTool, ZERO stubs (NEEDS_RUNTIME empty)" },
+    "pricing": { "owner": "eng", "status": "shipped", "scope": "src/pricing.ts" },
+    "registry": { "owner": "eng", "status": "shipped", "scope": "src/registry.ts — createRegistry (registerType/resolveType/validate/listTypes) + RESOLVE_WEIGHTS (§5 domain type registry runtime). turns eng's 3 §5 tests green; tests aligned to capitalized CORE_TYPES." },
+    "core_types": { "owner": "eng", "status": "shipped", "scope": "src/core_types.ts" },
+    "type_versioning": { "owner": "eng", "status": "shipped", "scope": "src/type_versioning.ts" },
+    "composition": { "owner": "eng", "status": "shipped", "scope": "src/composition.ts" },
+    "mcp_tools": { "owner": "eng", "status": "shipped", "scope": "src/mcp.ts" },
+    "access_grant": { "owner": "eng", "status": "shipped", "scope": "src/access_grant.ts — AccessGrant, checkGrantTTL, validatePlanAgainstGrant, exposedTools, Phase" },
+    "agent_profile": { "owner": "eng", "status": "shipped", "scope": "src/agent_profile.ts — proposeAgentChange, ProfileSpace, AgentProfile" },
+    "output_validation": { "owner": "eng", "status": "shipped", "scope": "src/output_validation.ts — validateOutput (§9 Artifact + Verdict schema enforcement)" },
+    "simulate": { "owner": "eng", "status": "shipped", "scope": "src/simulate.ts — standardSimulate" },
+    "barrel": { "owner": "eng", "status": "shipped", "scope": "src/index.ts — re-exports everything; future ants add 'export * from \"./<file>.js\";' here when shipping new src files" }
+  },
+  "out_of_tree": {
+    "canonical_form_proofs": {
+      "path": "~/eir/math/proofs/test_coltrane_canonical_form.py",
+      "owner": "eng",
+      "tests_passing": 16,
+      "status": "shipped"
+    }
+  },
+  "deletions_log": [
+    { "path": "tests/tones.test.ts", "deleted_by": "eng", "deleted_at": "approx 2026-05-25T18:18Z", "reason": "12-tone model conflated a morning riff with v2 spec architecture; not in spec" },
+    { "path": "tests/type_resolution.test.ts", "deleted_by": "eng", "deleted_at": "2026-05-25T18:17Z", "reason": "duplicate of eng's tests/type-resolution.test.ts; eng's was more comprehensive" },
+    { "path": "tests/well-temperament.test.ts", "deleted_by": "eng", "deleted_at": "2026-05-25T18:30Z", "reason": "renamed to tests/domain_extension.test.ts (spec-term, snake_case per naming_rules)" },
+    { "path": "tests/give-away.test.ts", "deleted_by": "eng", "deleted_at": "2026-05-25T18:30Z", "reason": "renamed to tests/dependency_isolation.test.ts (spec-term, snake_case)" },
+    { "path": "tests/honest-scope.test.ts", "deleted_by": "eng", "deleted_at": "2026-05-25T18:30Z", "reason": "renamed to tests/gig_nondeterminism.test.ts (spec-term, snake_case)" },
+    { "path": "tests/runtime-type-creation.test.ts", "deleted_by": "eng", "deleted_at": "2026-05-25T18:30Z", "reason": "renamed to tests/runtime_type_creation.test.ts (snake_case per naming_rules)" },
+    { "path": "tests/type-resolution.test.ts", "deleted_by": "eng", "deleted_at": "2026-05-25T18:30Z", "reason": "RESTORED as tests/type_resolution.test.ts — eng had wrongly deleted this comprehensive file during deconfliction (eng had kept it over the dup); now restored" }
+  ],
+  "rename_actions_required": [
+    { "from": "tests/well-temperament.test.ts", "to": "tests/domain_extension.test.ts", "owner": "eng", "status": "done" },
+    { "from": "tests/give-away.test.ts", "to": "tests/dependency_isolation.test.ts", "owner": "eng", "status": "done" },
+    { "from": "tests/honest-scope.test.ts", "to": "tests/gig_nondeterminism.test.ts", "owner": "eng", "status": "done" }
+  ],
+  "protocol": {
+    "load_assignment": "open /home/user/eir/coltrane-oss/tracking.json; read assignments.<your_ant_id>; that is your work list.",
+    "claim": "for each spec section in your list, set spec_sections.<section>.status = 'claimed' + updated_at",
+    "ship": "set spec_sections.<section>.status = 'covered' + append file to .files[]",
+    "delete": "remove file from .files[]; append to deletions_log[] with reason",
+    "naming_rules": "snake_case filenames; spec terms only in identifiers; no metaphor in code"
+  }
+}

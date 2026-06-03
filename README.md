@@ -1,79 +1,120 @@
 # Coltrane
 
-The Well-Tempered Agent System.
+**Bring methodology rigor to your AI agents — without changing your existing setup.**
 
-An MCP server that composes bands of agents from a content-addressed genome, runs them against typed inputs, and emits a reconstructible, hash-sealed record of what happened. Open source. Self-contained. Per-user.
+Coltrane is an MCP server that drops into your existing Claude Code (or any stdio-MCP client) and adds pre-registered, hash-sealed audit trails to every agent run. Apache-2.0. Self-contained. Per-user.
 
-## Install
+If you run AI agents in production and someone has ever asked you to *prove* a result was real, this is for you.
+
+## Who this is for
+
+- **Quant / risk teams** who need model-validation audit trails (SR 11-7 compatible)
+- **Research scientists** running multi-step LLM workflows that need to be reproducible
+- **OSS contributors** building agents that need defensible behavior contracts
+- **Anyone with N+ agents** suffering coordination drift and ad-hoc prompt sprawl
+
+Not for: vibe-coders running a single chat session. Coltrane earns its keep when stakes exist.
+
+## 5-minute install
 
 ```bash
 git clone <repo-url> coltrane && cd coltrane
 npm install
+npm run verify        # tsc + vitest, both must pass
+npm run build
+```
+
+Point your MCP client at `dist/server.js`. Coltrane is now available in your session.
+
+## Define an agent in 30 seconds
+
+Add a file at `players/code-reviewer.json`:
+
+```json
+{
+  "name": "code-reviewer",
+  "predict": "Catches >80% of seeded bugs in test fixture",
+  "kill_condition": "Misses a security-class bug",
+  "primitives": ["JUDGE", "VERIFY"]
+}
+```
+
+Done. The agent is now invocable. No code changes. No restarts. Coltrane re-reads the genome on each gig.
+
+## What you get
+
+Three things every other agent framework leaves on the floor:
+
+1. **Pre-registration** — every agent declares what it will do AND what would falsify it, sealed with a content hash before the run starts.
+2. **Sealed audit trail** — every output carries `genome_hash` (reproducibility key) + `run_fingerprint` (model version + scores). Append-only. Cannot be retroactively edited without breaking the seal.
+3. **Verdict shape** — outputs land as one of: RIPENED (the predict held), PARTLY-RIPENED (held in shape, named what didn't), NOT-RIPENED (kill fired, here's which failure-shell face). Never a binary PASS/FAIL.
+
+## The five definition classes
+
+You author files. Coltrane reads them. No TypeScript edits required.
+
+| Class | What it is | Example file |
+|---|---|---|
+| `types` | Typed schemas for inputs/outputs | `core_types/Signal.json` |
+| `players` | Agent definitions (charter, capabilities, primitives) | `players/code-reviewer.json` |
+| `standards` | Multi-phase workflows | `standards/double-diamond-review.json` |
+| `skills` | Reusable cognitive primitives bound into agents | `skills/extract-claims.md` |
+| `evals` | Verdict-substrates that judge gig outputs | declared inside the standard |
+
+## The six cognitive primitives
+
+Map 1:1 to output types. Don't invent new ones — compose with these:
+
+| Primitive | Output type |
+|---|---|
+| `SENSE` | Signal |
+| `INTERPRET` | Interpretation |
+| `JUDGE` | Judgment |
+| `PLAN` | Plan |
+| `CREATE` | Artifact |
+| `VERIFY` | Verdict |
+
+## MCP tools at a glance
+
+32 tools across 5 categories. Full list in `src/mcp.ts`.
+
+| Category | What it does |
+|---|---|
+| **Understand** | Browse types, query outputs, read agent charters, trace execution history |
+| **Build** | Register types, define agents, compose standards, promote skills |
+| **Run** | Dispatch gigs, monitor in-flight, abort, write outputs |
+| **Improve** | Health-check agents, validate pipelines, propose new tools, run audits |
+| **Manage Context** | Suggest charter updates |
+
+Human approval gates exist where they matter: tool changes, charter changes, breaking type changes. Forward-only promotion through a typed state machine.
+
+## Architecture, in one paragraph
+
+The engine (this repo) is Apache-2.0 and given away in full. The content layer (your genome — your definitions) is yours. The institution layer is whoever runs it, carrying accountability — that's not code, that's a contract.
+
+## Litmus test: does it actually work?
+
+```bash
+rm -rf .coltrane-cache/
 npm run verify
 ```
 
-`npm run verify` runs `tsc --noEmit && vitest run` — both gates must pass for green.
+If the test suite stays green after deleting every cached artifact, the genome files are the source of truth. (They are. This is the whole point.)
 
-## Run the MCP server
+## Cross-language reproducibility
 
-```bash
-npm run build
-node dist/server.js
-```
+Three published hashes identify the canonical-form reference vector:
 
-Then point any MCP client (Claude Code, Cursor, anything stdio-MCP) at this binary.
-
-## What it is, in 5 sentences
-
-1. **Genome** — content-addressed JSON/text files under `core_types/`, `domain_types/`, `agents/`, `standards/`, `skills/`. Adding a type or agent means adding a file; no TypeScript changes required.
-2. **Five definition classes** — `types · players (agents) · standards · skills · evals`. Each is a hashable, fixture-backable definition.
-3. **Six cognitive primitives** — `SENSE · INTERPRET · JUDGE · PLAN · CREATE · VERIFY`. Each maps 1:1 to a core output type (`Signal · Interpretation · Judgment · Plan · Artifact · Verdict`).
-4. **Three identity hashes per definition** — `content_hash` (the bytes) · `dependency_hash` (the relational closure) · `effective_hash` (the binding of the two). Two byte-identical definitions in different contexts produce different effective hashes.
-5. **One sealed record per gig** — `genome_hash` (deterministic, the reproducibility key) + `run_fingerprint` (carries model_version + eval scores, non-deterministic by design). Both live in the append-only ledger.
-
-## MCP tool surface
-
-32 tools across 5 categories. The full list is in `src/mcp.ts`. Highlights:
-
-| Category | Tools |
-|---|---|
-| Understand | type_resolve · type_browse · output_query · output_trace · charter_read · execution_history_read · access_grant_check · tool_registry_browse |
-| Build | type_register · type_extend · agent_define · agent_evolve · agent_promote · standard_compose · standard_simulate · standard_promote · skill_promote |
-| Run | gig_dispatch · gig_monitor · gig_abort · output_write |
-| Improve | agent_validate_pipeline · health_check · system_health · system_audit · proposal_create · tool_propose · tool_deprecate_propose · capability_research · session_review_write · learning_synthesize |
-| Manage Context | charter_suggest_update |
-
-Approval is gated structurally: `tool_propose`, `tool_deprecate_propose`, and `charter_suggest_update` always require human approval; `type_register` / `type_extend` require it only for breaking changes; lifecycle promotion (`agent_promote` / `standard_promote` / `skill_promote`) is forward-only through a typed state machine; everything else operates within the type-safety guardrails.
-
-## Architecture
-
-| Layer | What it is |
-|---|---|
-| ENGINE | This repo. The runtime + MCP server + canonical_form contract. Apache-2.0. |
-| CONTENT | Per-deployment genome (your definitions). Re-accumulable. |
-| INSTITUTION | The party running it, carrying accountability. Not code. |
-
-The engine is given away in full. The accountability stake is the commercial coordinate, held by whoever operates a deployment.
-
-## Litmus test
-
-```bash
-rm -rf .coltrane-cache/    # if any
-npm run verify             # rebuilds from genome files
-```
-
-If the suite stays green after deleting every materialized artifact, the genome is the source of truth.
-
-## Canonical form interoperability
-
-Every implementation that produces the same 3 published hex hashes interoperates:
-
-- `e88dff82403e35c07bce390b88ecb5995ebada86db83242d2ac0a8ff558d37da` — `meta.json` for the `hello-skill` reference vector
-- `d778a51deac04f56d1fb5456b2b1498505320c64043b5f402d2dfe27baf21ea4` — `skill.md` for the same
+- `e88dff82403e35c07bce390b88ecb5995ebada86db83242d2ac0a8ff558d37da` — `meta.json`
+- `d778a51deac04f56d1fb5456b2b1498505320c64043b5f402d2dfe27baf21ea4` — `skill.md`
 - `25e74fe11444b604f4715e984a1f101dcf7cdd135035696175acf508d54f0fe3` — definition hash
 
-Cross-language conformance: TypeScript (this repo) and Python (`~/eir/math/proofs/test_coltrane_canonical_form.py`) both reproduce these hashes byte-for-byte.
+Any implementation that produces these same three hex hashes byte-for-byte interoperates. An independent Python reference implementation already does.
 
 ## License
 
-Apache-2.0
+Apache-2.0. Use it. Fork it. Ship it.
+
+## Questions
+
+Open an Issue. Or just clone, define one agent, and watch your next run get sealed.

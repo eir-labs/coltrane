@@ -1,0 +1,11 @@
+{
+  "slug": "solution-developer",
+  "primitives": ["CREATE", "PLAN"],
+  "input_types": ["project-charter"],
+  "output_types": ["artifact"],
+  "domain": "bootstrap",
+  "lane": "develop",
+  "model": "sonnet",
+  "prompt_file": "agents/phase_agents/solution-developer.md",
+  "description": "Generates the files under the sealed charter. Writes .coltrane/agents/, .coltrane/standards/, .coltrane/skills/, .coltrane/types/, .claude/, CLAUDE.md, tests/preseed/, README.md, the project's first scaffold-prereg. Sealed-fields are frozen; only appendable post-seal."
+}

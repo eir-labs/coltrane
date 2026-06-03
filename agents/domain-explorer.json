@@ -1,0 +1,11 @@
+{
+  "slug": "domain-explorer",
+  "primitives": ["SENSE", "INTERPRET"],
+  "input_types": ["raw-note"],
+  "output_types": ["repo-survey", "raw-note"],
+  "domain": "bootstrap",
+  "lane": "discover",
+  "model": "sonnet",
+  "prompt_file": "agents/phase_agents/domain-explorer.md",
+  "description": "Discovers the problem space without converging. Surveys the registry, history, and charter; widens the option set before any commitment."
+}

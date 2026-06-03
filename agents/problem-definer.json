@@ -1,0 +1,12 @@
+{
+  "slug": "problem-definer",
+  "primitives": ["JUDGE", "PLAN"],
+  "input_types": ["repo-survey", "raw-note"],
+  "output_types": ["project-charter"],
+  "domain": "bootstrap",
+  "lane": "define",
+  "model": "sonnet",
+  "prompt_file": "agents/phase_agents/problem-definer.md",
+  "description": "Converges. Names the falsifiable: predict + kill + apoha. Emits the project-charter at the discover→define seam (the sealed birth pre-reg).",
+  "seals_pre_reg": true
+}

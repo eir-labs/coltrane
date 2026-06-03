@@ -11,7 +11,17 @@ git clone <repo-url> coltrane && cd coltrane
 npm install && npm run build
 ```
 
-Point Claude Code at `dist/server.js` in your MCP config. Done.
+Add coltrane to your Claude Code MCP config (one block, in `~/.claude/settings.json` or this repo's `.mcp.json`):
+
+```json
+{
+  "mcpServers": {
+    "coltrane": { "command": "node", "args": ["dist/server.js"] }
+  }
+}
+```
+
+Open Claude Code in this directory. Say "hi." Coltrane's MCP server auto-starts, the project CLAUDE.md loads, and the first-time tuning ritual greets you to learn what kind of work you do. From there, it asks permission to scan a few of your other repos for context, then drafts 3-5 starter player files tuned to what it finds.
 
 ## Define an agent in 30 seconds
 

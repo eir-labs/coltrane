@@ -7,3 +7,9 @@ dist
 .stryker-tmp
 scripts/.private/
 tests/lint_guard/.scratch/
+
+# live-slack runtime artifacts (per-Steve state + secrets)
+.env
+.env.local
+.coltrane/
+

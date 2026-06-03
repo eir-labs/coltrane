@@ -174,7 +174,7 @@ describe("FilePreRegLedger — durable append-only across restarts", () => {
       // File contents are JSON-lines per line.
       const raw = readFileSync(path, "utf-8");
       expect(raw.split("\n").filter(Boolean).length).toBe(1);
-      const parsed = JSON.parse(raw.split("\n")[0]);
+      const parsed = JSON.parse(raw.split("\n")[0] ?? "");
       expect(parsed.pre_reg_id).toBe("f-1");
     } finally {
       rmSync(dir, { recursive: true, force: true });

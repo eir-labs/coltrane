@@ -1,93 +1,136 @@
 # Sleep
 
-> **Status: In development.** The math layer (TDA on the audit-stream, eigenvector-centrality partition, fix-bath read-only orientation) is being built. The user-facing surface described here is the target.
+> **Status: In development.** Architecture validated across three sim cycles (v0/v1/v2) and an independent cascade-resilience verdict (lighthouse). User-facing dials and regime indicators below are the target interface. Wiring still in flight.
 
-Sleep is a nightly pass each Steve runs against its last 24 hours of work. It's how implicit discipline becomes explicit. It's how the gaps in the day's work get named. It's how a band of agents gets better at being itself over weeks instead of drifting.
+Sleep is a nightly pass each Steve runs against its last 24 hours of work. It is how implicit discipline becomes explicit. It is how the gaps in the day's work get named. It is how a band of agents stays itself instead of collapsing into the loudest pattern it generated yesterday.
 
-This document explains what Sleep is, what it produces, and what the user sees in the morning.
+This document explains what Sleep is, what it produces, the two dials the user gets to turn, and what regime indicators show on the morning surface.
 
-## What it is
+## The three operators
 
-Sleep is a circadian discipline. Each Steve, once per cycle (nightly by default), runs three coupled passes on the audit-stream of the prior 24 hours:
+Each cycle runs three operators in order, mapped to human sleep stages:
 
-- **LIGHT** — a bleach-wash projection through the Three Shadows lens. Pass 1 quotients out identifiers. Pass 2 projects to the structural plane. Pass 3 keeps only invariants — structural moves that repeated three or more times across the cycle.
-- **LEAKAGE** — a hole-detection pass. Topics that opened but didn't close. Dimensions named but not filled. Tasks dispatched but unfinished. Negative space the day's work avoided.
-- **PING** — a resonance pass. Which surviving invariants ring back across multiple work-streams. A real ratchet pings in three or more lanes; a one-off only in one.
+- **N2 spindle-replay** — stochastic, centrality-weighted sampling of the day's seals. Diverse ratchet candidates surface. Not deterministic; some randomness is necessary to avoid locking in the same eigenvector every cycle.
+- **N3 slow-wave bleach** — uniform downscale of non-ratchet edges. Strong patterns survive, weak ones prune. This is Tononi's synaptic-homeostasis pattern: nothing gets boosted; everything gets renormalized downward, and the strong stay strong by relative position.
+- **REM combinatorial** — dream operator. Shape templates from the day's surviving ratchets get filled with random details from elsewhere in the chain. Nonsense specifics, profound structure. Off-axis probes generated for next day's work.
 
-The math underneath is topological data analysis on the audit-stream (H¹ loops over a coupling-weighted graph). The chemistry analogy is the darkroom: 24h of timestamped seals is the negative; the ratchets are the latent image already encoded; the bleach-wash develops them.
+These three together produce the cycle output.
 
-The output of one cycle is three ledgers and a map.
+## The dream layer (REM, in detail)
+
+A dream is not a memory dump and not a counterfactual story. Mechanically, it is a multi-scale composition:
+
+- **Layer 0** — H¹ loops on the actual audit-stream (real seals citing real seals).
+- **Layer 1 (dream proper)** — for each layer-0 loop, generate a parallel loop with the same shape template but random detail-fill from elsewhere in the chain.
+- **Layer 2+ (stacking)** — with probability `p_stack` per loop, the dream loop becomes a single node in the next layer's graph. New loops form between dream-loops at the higher level. Repeat. Each layer's "details" are the previous layer's "shapes."
+
+This is the nerve construction in topological data analysis: a fractal of progressively-abstracted loops, each layer the same shape rule applied to different content.
+
+The user never sees the dream details — they are nonsense by construction. The user sees only the shapes that survive Pass 3 of the bleach, which is what makes the morning surface sober.
 
 ## What gets produced
 
+Per cycle, three artifacts plus a regime indicator.
+
 ### Ratchet ledger
 
-Positive invariants. Patterns of discipline that locked in across the cycle. Each entry:
+Positive invariants. Patterns of discipline that survived all three operators. Each entry:
 
 - the pattern, named in plain language
 - first-appearance timestamp
-- attribution chain (which work-stream surfaced it, who cross-witnessed)
-- eigenvector-centrality score (how important the surrounding seals were that cited it)
+- residence (cycles survived)
+- attribution chain (which work-stream surfaced it, which Steves cross-witnessed)
+- counter-test results: counterfactual / external / inverse, each pass or fail in plain English
 
-A ratchet earns its place by surviving the bleach across cycles. Ratchets from yesterday are read-only — they pass forward, never re-bleached. The fix-bath holds them stable.
+Ratchets from prior cycles are read-only. They pass forward; they do not get re-bleached. The fix-bath holds them stable.
 
 ### Hole ledger
 
 Negative invariants. Gaps the night revealed. Each entry:
 
-- the gap, named in plain language (e.g., "agent reviewed 12 PRs but never proposed a refactor")
-- where it should have been (which lane, which seal)
-- a suggested next-cycle action — or just an acknowledged absence
+- the gap, named in plain language
+- where it should have been
+- suggested next-cycle action — or just an acknowledged absence
 
-The hole ledger is what the user wakes up to act on. It's the part of sleep that's commercially legible: "your 4 Steves found these gaps overnight."
+The hole ledger is what the user wakes up to act on.
 
 ### Resonance map
 
-The coupling structure. Which ratchets ring in which lanes. Which Steves cross-witness which patterns. Visualized as a small graph in the wake summary.
+Coupling structure. Which ratchets ring across which Steves. Lightweight visualization.
+
+### Regime indicator
+
+A three-state lamp that tells the user where their dial settings landed the system this cycle:
+
+- **subcritical** (green-rigid): few ratchets, all stable, low search. Safe; shipping mode. Avalanche distribution is light-tailed.
+- **critical** (yellow-bright): power-law avalanches at characteristic exponent. Discovery sweet spot. Optimal exploration with structured ratchet population.
+- **supercritical** (red): cascades extend. Identity collapse risk. Lighthouse's empirically-located death-spiral lives here, past gain-1.05.
+
+The regime is computed from the cycle's avalanche-size distribution against fitted reference curves. Three states; one lamp.
+
+## The two dials
+
+### Identity-search pressure
+
+A balance between sleep-only and sleep+dream. The math: dream raises the gain reduction on cascade, narrows breadth, deepens dark-mode reach. Sleep-only widens candidate vocabulary, raises churn, churns identity.
+
+- **Discovery setting** (sleep-heavy): wider candidate vocabulary (sim shows +76% ratchets seen across 60 days), higher renewal rate (3× turnover, easier to abandon bad ratchets), bursty churn (inter-arrival CV ≈ 1.44). Use during ideation sprints, early projects, rapidly-shifting domains.
+- **Shipping setting** (dream-heavy): fewer ratchets, longer residence (3.78 days median vs 2.19), depth not breadth, novel-rate ≈ 0.27. Use during shipping cycles, mature projects, regulated contexts.
+
+The dial is continuous between the two. Mid-positions are valid.
+
+### Dream depth
+
+How many layers the dream stacks. Independent of identity-search pressure.
+
+- **Depth 1** (flat): dream generates parallel loops only. Mild structural recombination.
+- **Depth 2–3** (default): one or two layers of nerve construction. Surfaces higher-order ratchets that single-layer dreams miss.
+- **Depth ≥ 4**: deeper hierarchies. Expensive; interpretability degrades after depth 3 in most cases. Reserved for projects where deep structural recurrence matters.
+
+If a stacked dream at depth N+1 reveals no ratchets a depth-N pass missed across multiple cycles, the architecture says back off to depth N. Self-tuning recommended via a small monitor.
 
 ## What the user sees in the morning
 
-A single Slack post in the channel where Live Mode runs:
+A single Slack post in the channel where Live Mode runs. See [wake_summary_template_v0.md] for the format. Concise summary:
 
-```
-slept. 24h cycle complete.
+- header line + cycle number
+- ratchets that survived the bleach, with counter-test trail in plain English
+- holes surfaced overnight, each with suggested action
+- resonance note (which Steves rang together)
+- regime indicator (sub / critical / super)
+- pointer to proposed player-file edits
 
-ratchets developed (3 new, 7 fixed-from-prior):
-  · "review-before-route" — locked in across 14 PR-triage seals
-  · "name-the-apoha" — surfaced in 6 design discussions
-  · "verify-then-claim" — emerged from 4 distinct ledger updates
-
-holes (2 surfaced):
-  · spec changes proposed but unsynced to README (5 occurrences)
-  · agent reactions on incidents but no follow-up triage (3 occurrences)
-
-resonance:
-  the 4 Steves rang together on review-before-route. one Steve carried
-  name-the-apoha alone — worth cross-witness next cycle.
-
-new ratchets proposed for player-file integration. see .coltrane/ratchets.jsonl.
-review + approve before next cycle.
-```
-
-The user reviews the proposed player-file edits at their pace. Approving a ratchet bakes it into the relevant player; declining leaves it in the ledger as a candidate for next cycle's bleach.
+User reviews proposed edits at their pace. Approving a ratchet integrates it into the relevant player file; declining returns it to the candidate pool for next cycle's bleach. No penalty either way.
 
 ## What Sleep is not
 
-- **Not a memory dump.** Sleep doesn't summarize 24h of work — it develops the latent discipline in the work. Summaries belong elsewhere.
-- **Not re-exposable.** Yesterday's ratchets don't get re-developed. The fix-bath is permanent; passes are forward-only.
-- **Not chatty.** One post per cycle. The Steves don't comment, debate, or perform during sleep. They develop. They emit. They wake.
-- **Not band-internal.** Sleep ships as a Live Mode feature for users too. Their 4 Steves get circadian self-discipline by default.
+- **Not a memory dump.** Sleep does not summarize 24h of work; it develops the latent discipline.
+- **Not re-exposable.** Yesterday's ratchets pass forward; the fix-bath is permanent.
+- **Not chatty.** One post per cycle.
+- **Not a black box.** Every ratchet carries its counter-test trail. The math is auditable; the user does not need to read it.
 
 ## Cycle frequency
 
-Default: 24 hours, fired at a configurable local-time anchor. High-velocity projects can run shorter cycles (12h, 6h); slow-build projects can extend (weekly). The math doesn't depend on the period — it depends on having enough seals in the window for H¹ loops to form.
+Default: 24 hours, fired at a configurable local-time anchor. Tunable: 6h, 12h, 24h, weekly. The math doesn't depend on the period; it depends on having enough seals in the window for H¹ loops to form. As a heuristic: at least ~30 seals per cycle.
+
+## Sim findings, summarized
+
+Across the v0/v1/v2 sim progression and an independent lighthouse cascade-verdict:
+
+- Sleep-alone produces wider ratchet vocabulary with bursty churn. Power-law fit confirmed.
+- Sleep+dream stabilizes identity, deepens dark-mode reach 3.5×, narrows breadth.
+- Three operators (N2 → N3 → REM) outperform a single bleach-pass on cumulative ratchets, renewal rate, and renewal-stability.
+- Cascade resilience: dream-as-depth = gain-reduction. The death-spiral lives past gain-1.05 in the dial space, well past the critical regime.
+- Minimum effective real-data injection rate for stable resurrection cycles: ≈ 20%.
+
+Details in the simulation artifacts and lighthouse cascade verdict.
 
 ## The philosophy
 
-Discipline that stays implicit gets reinvented every day. Discipline that gets named becomes a ratchet — direction that holds across cycles. Sleep is how a band of agents learns to be more itself by recognizing what it's already been doing.
+Discipline that stays implicit gets reinvented every day. Discipline that gets named becomes a ratchet — direction that holds across cycles. Sleep names what was always latent in the work; Dream tests what survives random recombination so that what locks in is shape, not surface. The dial is yours.
 
 Pillars hold. Ratchets direct. Standards play. Sleep is the formal naming step that turns implicit work-shape into a directable ratchet.
 
 ---
 
-*Sleep is part of Coltrane OSS Live Mode. See [README](../README.md), [live_mode.md](live_mode.md), and `.coltrane/ratchets.jsonl` for the per-project ledger.*
+*Sleep is part of Coltrane Live Mode. See [README](../README.md), [live_mode.md](live_mode.md), and `.coltrane/ratchets.jsonl` for the per-project ledger.*

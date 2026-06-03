@@ -7,6 +7,80 @@ Read it once; the rules apply for the rest of the session.
 
 ---
 
+## First-time tuning (run this on every fresh clone, exactly once)
+
+If the file `.coltrane/tuned.json` does NOT exist in this workspace yet, you are talking
+to a user who just cloned coltrane. Before doing anything else, run this short discovery
+conversation. After it, write `.coltrane/tuned.json` to mark this session as tuned, and
+write a project-specific `CLAUDE.md` at the workspace root reflecting what you learned.
+
+**Step 1 — greet, ask what they're working on.**
+
+Say plainly: "Welcome to Coltrane. Before we start, two questions so I can tune the book
+to your work. First — in 1-2 sentences, what kind of work do you do? (research,
+backend engineering, model risk, grant writing, content, ML platform, etc.)"
+
+Wait for their answer. Keep it short.
+
+**Step 2 — ask permission to scan adjacent repos.**
+
+Say: "Can I scan a few of your other repos to learn the domain and your style? I'll
+only do a survey-level read (file names, README first paragraph, recent commit
+themes, language). I will NOT exfiltrate code or read secrets. Name any 2-5 repo
+paths you want me to look at, or say 'skip' to skip this step."
+
+If they name paths: scan each one with the Read tool (READMEs, top-level file
+structure, last 30 days of `git log --oneline` if a git repo). Do not deeply read
+source files. Do not touch `.env`, `secrets/`, or anything under `.git/`.
+
+If they say skip: continue without the scan.
+
+**Step 3 — propose 3-5 player files tuned to what you found.**
+
+Based on Step 1 + Step 2, draft 3-5 candidate player definitions (under `players/`)
+tuned to their domain. For example:
+
+- a research scientist gets `literature-scout`, `claim-bounder`, `synthesizer`
+- a backend engineer gets `code-reviewer`, `migration-planner`, `incident-responder`
+- a model-risk officer gets `prereg-author`, `walk-forward-verifier`, `verdict-writer`
+
+Each draft is a JSON file with `name`, `predict`, `kill_condition`, `apoha`, `tools`.
+Show them the proposed names + one-line `predict` for each. Ask which they want
+created. Create only the ones they say yes to.
+
+**Step 4 — offer to write the workspace CLAUDE.md.**
+
+Say: "Want me to write a CLAUDE.md at the root of this workspace based on what we
+just learned? It'll tell future Claude sessions what kind of work happens here, which
+players are in flight, and your conventions. You can edit it freely after."
+
+If yes: write it. Lead with the user's 1-2-sentence answer from Step 1. List the
+players you created. Include any conventions you inferred from their repos
+(language preferences, formatting, naming).
+
+**Step 5 — seal the moment.**
+
+Create `.coltrane/tuned.json` with:
+
+```json
+{
+  "tuned_at": "<ISO-8601 timestamp>",
+  "user_summary": "<their step-1 answer, verbatim>",
+  "scanned_repos": ["<path>", "..."],
+  "players_created": ["<name>", "..."],
+  "claude_md_written": true | false
+}
+```
+
+This file is the seal — the project's first sealed claim about what it is. Future
+sessions read `.coltrane/tuned.json` to know tuning has already happened and skip
+to normal work.
+
+**If `.coltrane/tuned.json` already exists**: skip the discovery, read its
+`user_summary`, and proceed normally.
+
+---
+
 ## What this repo is
 
 coltrane is a **methodology engine** — a typed substrate for defining agents, composing

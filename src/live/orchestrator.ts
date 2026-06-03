@@ -75,9 +75,10 @@ export async function discoverSteves(
     const auditPath = join(baseDir, dir, "audit.jsonl");
     const raw = await readFile(seedPath, "utf8");
     const seed = JSON.parse(raw) as SteveSeed;
-    const idx = i + 1;
-    const bot = env[`SLACK_BOT_TOKEN_${idx}`];
-    const app = env[`SLACK_APP_TOKEN_${idx}`];
+    // One slack app shared across all 4 Steves; per-Steve identity is via
+    // letterhead prefix, not separate token pair.
+    const bot = env["SLACK_BOT_TOKEN"];
+    const app = env["SLACK_APP_TOKEN"];
     specs.push({
       steve_uuid: seed.steve_uuid,
       seed_path: seedPath,

@@ -39,7 +39,7 @@ describe("runCli", () => {
     expect(manifest).toContain("socket_mode_enabled: true");
 
     const envTemplate = await readFile(join(dir, ".env.template"), "utf8");
-    expect(envTemplate).toContain("SLACK_BOT_TOKEN_1=");
+    expect(envTemplate).toContain("SLACK_BOT_TOKEN=");
   });
 
   it("rejects unknown subcommands with exit 2", async () => {

@@ -60,11 +60,12 @@ describe("renderSlackManifest", () => {
 describe("renderEnvTemplate", () => {
   const env = renderEnvTemplate();
 
-  it(`names a token pair slot for each of ${STEVE_COUNT} steves`, () => {
-    for (let i = 1; i <= STEVE_COUNT; i++) {
-      expect(env).toContain(`SLACK_BOT_TOKEN_${i}=`);
-      expect(env).toContain(`SLACK_APP_TOKEN_${i}=`);
-    }
+  it("names ONE shared bot+app token pair (4 Steves share one slack app)", () => {
+    expect(env).toContain("SLACK_BOT_TOKEN=");
+    expect(env).toContain("SLACK_APP_TOKEN=");
+    // Per-Steve identity comes from letterhead prefix, not separate tokens.
+    expect(env).toContain("STEVE_A_PREFIX=");
+    expect(env).toContain("STEVE_D_PREFIX=");
   });
 
   it("includes the COLTRANE_BOOK_PATH slot", () => {

@@ -42,14 +42,8 @@ describe("discoverSteves", () => {
       uuids: ["a", "b", "c", "d"],
     });
     const env = {
-      SLACK_BOT_TOKEN_1: "xoxb-1",
-      SLACK_APP_TOKEN_1: "xapp-1",
-      SLACK_BOT_TOKEN_2: "xoxb-2",
-      SLACK_APP_TOKEN_2: "xapp-2",
-      SLACK_BOT_TOKEN_3: "xoxb-3",
-      SLACK_APP_TOKEN_3: "xapp-3",
-      SLACK_BOT_TOKEN_4: "xoxb-4",
-      SLACK_APP_TOKEN_4: "xapp-4",
+      SLACK_BOT_TOKEN: "xoxb-shared",
+      SLACK_APP_TOKEN: "xapp-shared",
     };
     const specs = await discoverSteves(dir, env);
     expect(specs).toHaveLength(4);

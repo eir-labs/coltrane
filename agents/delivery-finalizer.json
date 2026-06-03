@@ -1,8 +1,8 @@
 {
   "slug": "delivery-finalizer",
   "primitives": ["VERIFY", "CREATE"],
-  "input_types": ["artifact"],
-  "output_types": ["verdict"],
+  "input_types": ["Artifact"],
+  "output_types": ["Verdict"],
   "domain": "bootstrap",
   "lane": "deliver",
   "model": "sonnet",

@@ -2,7 +2,7 @@
   "slug": "solution-developer",
   "primitives": ["CREATE", "PLAN"],
   "input_types": ["project-charter"],
-  "output_types": ["artifact"],
+  "output_types": ["Artifact"],
   "domain": "bootstrap",
   "lane": "develop",
   "model": "sonnet",

@@ -9,7 +9,8 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "verify": "tsc --noEmit && vitest run",
-    "e2e": "vitest run --config tests/e2e/vitest.config.ts"
+    "e2e": "vitest run --config tests/e2e/vitest.config.ts",
+    "lint:imports": "git ls-files 'src/**/*.ts' 'src/**/*.tsx' 'src/**/*.js' 'src/**/*.mjs' 'src/**/*.cjs' 'tests/**/*.ts' 'tests/**/*.tsx' 'tests/**/*.js' 'tests/**/*.mjs' 'tests/**/*.cjs' | bash scripts/check_imports.sh"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.26.0",

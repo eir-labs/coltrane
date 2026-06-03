@@ -5,3 +5,5 @@ dist
 /coverage
 /reports
 .stryker-tmp
+scripts/.private/
+tests/lint_guard/.scratch/

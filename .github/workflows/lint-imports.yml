@@ -1,0 +1,65 @@
+# Import hygiene gate. Runs the project allowlist eslint config against the
+# files changed in a pull request. PR-only by design: this gate must not run
+# on push to main, so a regression that lands cannot block all subsequent PRs
+# while it is being reverted.
+#
+# See docs/CONTAINMENT.md for the policy.
+
+name: lint-imports
+
+on:
+  pull_request:
+
+concurrency:
+  group: lint-imports-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  allowlist:
+    name: import allowlist (PR diff + full tree)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # full history so the merge-base diff resolves
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.x"
+          cache: "npm"
+      - run: npm ci
+      # Install eslint at the pinned version into the workflow's npm cache.
+      # We do not add eslint as a project devDependency; the lint config is
+      # standalone (`--no-eslintrc`) and only needs eslint at run time here.
+      - name: install eslint + ts parser (workflow-local)
+        # These are intentionally NOT project devDependencies — they are used
+        # only by this gate and by the opt-in pre-commit hook.
+        run: npm install --no-save eslint@^9 @typescript-eslint/parser@^8
+      - name: scan PR diff
+        run: |
+          set -euo pipefail
+          BASE="${{ github.event.pull_request.base.sha }}"
+          HEAD="${{ github.event.pull_request.head.sha }}"
+          echo "diffing $BASE..$HEAD"
+          git diff --name-only --diff-filter=ACMR "$BASE" "$HEAD" \
+            | bash scripts/check_imports.sh
+      - name: scan full source tree
+        run: |
+          set -euo pipefail
+          # Defense in depth: catch anything that landed via rename or that the
+          # PR-diff scan missed.
+          git ls-files -- \
+            'src/**/*.ts' \
+            'src/**/*.tsx' \
+            'src/**/*.js' \
+            'src/**/*.mjs' \
+            'src/**/*.cjs' \
+            'tests/**/*.ts' \
+            'tests/**/*.tsx' \
+            'tests/**/*.js' \
+            'tests/**/*.mjs' \
+            'tests/**/*.cjs' \
+            | bash scripts/check_imports.sh

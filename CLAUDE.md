@@ -35,28 +35,38 @@ source files. Do not touch `.env`, `secrets/`, or anything under `.git/`.
 
 If they say skip: continue without the scan.
 
-**Step 3 — propose 3-5 player files tuned to what you found.**
+**Step 3 — propose changes to the book. Grow in place, not replace.**
 
-Based on Step 1 + Step 2, draft 3-5 candidate player definitions (under `players/`)
-tuned to their domain. For example:
+First, read every existing file under `players/`, `standards/`, `skills/`, `core_types/`,
+`domain_types/`. Then based on Step 1 + Step 2, propose CHANGES:
 
-- a research scientist gets `literature-scout`, `claim-bounder`, `synthesizer`
-- a backend engineer gets `code-reviewer`, `migration-planner`, `incident-responder`
-- a model-risk officer gets `prereg-author`, `walk-forward-verifier`, `verdict-writer`
+- **edits** to existing players whose shape now fits the user's domain better
+- **new** players for domain-specific work that no existing player covers
+- **new** standards if multi-phase workflows you found in their repos suggest one
 
-Each draft is a JSON file with `name`, `predict`, `kill_condition`, `apoha`, `tools`.
-Show them the proposed names + one-line `predict` for each. Ask which they want
-created. Create only the ones they say yes to.
+For example:
+- a research scientist might get an EDIT to `code-reviewer` (`tools` narrowed,
+  `predict` re-pointed at LaTeX/Jupyter) plus NEW `literature-scout` + `claim-bounder`
+- a backend engineer might get an EDIT to `code-reviewer` (predict re-pointed
+  at their language) plus NEW `migration-planner` + `incident-responder`
 
-**Step 4 — offer to write the workspace CLAUDE.md.**
+For each proposal, show: the file path, whether it's an edit or new, and a one-line
+`predict`. Ask which they want applied. Apply only the ones they say yes to.
 
-Say: "Want me to write a CLAUDE.md at the root of this workspace based on what we
-just learned? It'll tell future Claude sessions what kind of work happens here, which
-players are in flight, and your conventions. You can edit it freely after."
+Never silently overwrite. The book grows; it does not get replaced.
 
-If yes: write it. Lead with the user's 1-2-sentence answer from Step 1. List the
-players you created. Include any conventions you inferred from their repos
-(language preferences, formatting, naming).
+**Step 4 — propose edits to THIS CLAUDE.md.**
+
+Do NOT write a separate workspace CLAUDE.md. Coltrane already ships one (the file
+you are reading now). Instead, propose appendable edits to this file:
+
+- a "What this workspace works on" section reflecting the user's Step 1 answer
+- a "Players added this tuning" list with the players they accepted in Step 3
+- a "Conventions inferred from adjacent repos" section if Step 2 found patterns
+  (language, formatting, naming, branch conventions)
+
+Show the proposed appended block. Ask if they want it added. Append on yes.
+Never replace the existing protocol sections — append below them.
 
 **Step 5 — seal the moment.**
 
@@ -68,7 +78,8 @@ Create `.coltrane/tuned.json` with:
   "user_summary": "<their step-1 answer, verbatim>",
   "scanned_repos": ["<path>", "..."],
   "players_created": ["<name>", "..."],
-  "claude_md_written": true | false
+  "claude_md_appended": true | false,
+  "players_edited": ["<name>", "..."]
 }
 ```
 

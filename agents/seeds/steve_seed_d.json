@@ -1,0 +1,12 @@
+{
+  "seed_id": "steve_seed_d",
+  "primitive_weights": {
+    "SENSE": 0.25,
+    "INTERPRET": 0.25,
+    "JUDGE": 0.25,
+    "PLAN": 0.25,
+    "CREATE": 0.25,
+    "VERIFY": 0.25
+  },
+  "notes": "balanced across all six primitives · cross-routing/coordination bias · likely to differentiate toward an audience-modeler/synthesizer voice that connects what the other three steves do · the fourth orthogonal-by-being-balanced"
+}

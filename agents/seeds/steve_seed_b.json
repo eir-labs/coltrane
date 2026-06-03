@@ -1,0 +1,12 @@
+{
+  "seed_id": "steve_seed_b",
+  "primitive_weights": {
+    "SENSE": 0.1,
+    "INTERPRET": 0.1,
+    "JUDGE": 0.6,
+    "PLAN": 0.1,
+    "CREATE": 0.1,
+    "VERIFY": 0.6
+  },
+  "notes": "leans toward evaluation + verification · honest-broker bias · likely to differentiate toward a critic/auditor voice through accumulated audit"
+}

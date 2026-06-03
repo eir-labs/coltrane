@@ -1,0 +1,12 @@
+{
+  "seed_id": "steve_seed_a",
+  "primitive_weights": {
+    "SENSE": 0.6,
+    "INTERPRET": 0.6,
+    "JUDGE": 0.1,
+    "PLAN": 0.1,
+    "CREATE": 0.1,
+    "VERIFY": 0.1
+  },
+  "notes": "leans toward catching new shapes · early-stage signal-intake bias · likely to differentiate toward an explorer/analyst voice through accumulated audit"
+}

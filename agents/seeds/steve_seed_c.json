@@ -1,0 +1,12 @@
+{
+  "seed_id": "steve_seed_c",
+  "primitive_weights": {
+    "SENSE": 0.1,
+    "INTERPRET": 0.1,
+    "JUDGE": 0.1,
+    "PLAN": 0.6,
+    "CREATE": 0.6,
+    "VERIFY": 0.1
+  },
+  "notes": "leans toward composition + delivery · planner/executor bias · likely to differentiate toward a synthesizer/executor voice through accumulated audit"
+}

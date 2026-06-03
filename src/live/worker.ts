@@ -17,6 +17,8 @@
 //   node dist/src/live/worker.js
 
 import { readFile } from "node:fs/promises";
+import { dirname } from "node:path";
+import { tune } from "./tuning.js";
 import { createSlackBridge, type InboxEvent } from "./slack_bridge.js";
 
 function requireEnv(name: string): string {
@@ -40,6 +42,24 @@ export async function runWorker(): Promise<void> {
   // it at first-inbox.
   await readFile(bookPath, "utf8");
   await readFile(seedPath, "utf8");
+
+  // Tuning: scan the project, pair its shape with this Steve's seed,
+  // and seal the result to audit.jsonl. The CC-bridge consumes this seal
+  // (and the audit stream below it) to color the Claude Code thread.
+  // The project root is the dir containing CLAUDE.md.
+  const rootPath = dirname(bookPath);
+  const seal = await tune(steveUuid, seedPath, rootPath, auditPath);
+  process.stderr.write(
+    JSON.stringify({
+      steve_uuid: steveUuid,
+      event: "tuning",
+      seal_hash: seal.seal_hash,
+      project_shape_hash: seal.project_shape_hash,
+      seed_hash: seal.seed_hash,
+      pairings: seal.pairings.map((p) => p.task_type),
+      unavailable_signals: seal.unavailable_signals,
+    }) + "\n",
+  );
 
   const bridge = createSlackBridge({
     steve_uuid: steveUuid,

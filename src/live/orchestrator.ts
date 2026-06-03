@@ -16,6 +16,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { readFile, readdir, appendFile, mkdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { SteveSeed } from "./scaffold.js";
+import { registerNightlySleep, type NightlyHandle, type NightlySleepOptions } from "./sleep.js";
 
 export interface SteveBootSpec {
   steve_uuid: string;
@@ -41,6 +42,9 @@ export interface OrchestratorOptions {
   log_sink?: (line: string) => Promise<void>;
   /** Max restart attempts per Steve before giving up. */
   max_restarts?: number;
+  /** Override of the nightly-sleep options (tests inject fake timers /
+   * disable scheduling entirely by passing { disable: true }). */
+  nightly_sleep?: NightlySleepOptions & { disable?: boolean };
 }
 
 export interface OrchestratorHandle {
@@ -49,6 +53,7 @@ export interface OrchestratorHandle {
     child: ChildProcess;
     restarts: number;
   }>;
+  nightly_sleep?: NightlyHandle;
   shutdown: () => Promise<void>;
 }
 
@@ -166,8 +171,24 @@ export async function bootOrchestrator(opts: OrchestratorOptions): Promise<Orche
     await log({ event: "child_spawn", steve_uuid: spec.steve_uuid, pid: state.child.pid ?? null });
   }
 
+  // Register the nightly bleach-wash. Skippable for tests via
+  // nightly_sleep: { disable: true }.
+  let nightly: NightlyHandle | undefined;
+  if (!opts.nightly_sleep?.disable) {
+    const { disable: _disable, ...nightlyOpts } = opts.nightly_sleep ?? {};
+    nightly = registerNightlySleep(
+      {
+        root: opts.root,
+        log,
+      },
+      nightlyOpts,
+    );
+    await log({ event: "nightly_sleep_registered", hour_local: nightlyOpts.hour ?? 3 });
+  }
+
   return {
     steves: states,
+    ...(nightly !== undefined ? { nightly_sleep: nightly } : {}),
     async shutdown() {
       for (const s of states) {
         try {
@@ -176,6 +197,7 @@ export async function bootOrchestrator(opts: OrchestratorOptions): Promise<Orche
           // already gone
         }
       }
+      if (nightly) nightly.cancel();
       await log({ event: "shutdown" });
     },
   };

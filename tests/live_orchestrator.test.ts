@@ -90,6 +90,7 @@ describe("bootOrchestrator", () => {
       spawner: spawner as never,
       worker_command: "/bin/true",
       worker_args: [],
+      nightly_sleep: { disable: true },
       log_sink: async (line) => {
         logs.push(line);
       },
@@ -127,6 +128,7 @@ describe("bootOrchestrator", () => {
       worker_command: "/bin/true",
       worker_args: [],
       max_restarts: 2,
+      nightly_sleep: { disable: true },
       log_sink: async (line) => {
         logs.push(line);
       },
@@ -163,6 +165,7 @@ describe("bootOrchestrator", () => {
       spawner: spawner as never,
       worker_command: "/bin/true",
       worker_args: [],
+      nightly_sleep: { disable: true },
       log_sink: async (line) => {
         logs.push(line);
       },
@@ -174,6 +177,51 @@ describe("bootOrchestrator", () => {
     expect(spawnCount).toBe(4); // no restart
 
     await handle.shutdown();
+  });
+});
+
+describe("bootOrchestrator → nightly sleep", () => {
+  it("registers a nightly sleep handle by default and cancels it on shutdown", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "coltrane-orch-night-"));
+    await materializeScaffold({ root: dir, uuids: ["a", "b", "c", "d"] });
+    const bookPath = join(dir, "CLAUDE.md");
+    await writeFile(bookPath, "# book\n", "utf8");
+
+    const spawner = vi.fn(() => makeFakeChild() as never);
+    const logs: string[] = [];
+
+    // capture setTimeout calls; never actually fire (return a fake handle).
+    const setT = vi.fn(
+      (_cb: () => void, _ms: number) =>
+        ({ unref: () => undefined }) as unknown as ReturnType<typeof setTimeout>,
+    ) as unknown as typeof setTimeout;
+    const clearT = vi.fn() as unknown as typeof clearTimeout;
+
+    const handle = await bootOrchestrator({
+      root: dir,
+      book_path: bookPath,
+      env: {},
+      spawner: spawner as never,
+      worker_command: "/bin/true",
+      worker_args: [],
+      nightly_sleep: {
+        set_timeout: setT,
+        clear_timeout: clearT,
+        run_sleep_all: async () => [],
+      },
+      log_sink: async (line) => {
+        logs.push(line);
+      },
+    });
+
+    expect(handle.nightly_sleep).toBeDefined();
+    expect(setT).toHaveBeenCalledTimes(1);
+    expect(
+      logs.some((l) => JSON.parse(l).event === "nightly_sleep_registered"),
+    ).toBe(true);
+
+    await handle.shutdown();
+    expect(clearT).toHaveBeenCalled();
   });
 });
 

@@ -182,17 +182,23 @@ export async function materializeScaffold(opts: ScaffoldOptions): Promise<Scaffo
 /** User-facing instructions printed after a successful scaffold. */
 export function renderSetupInstructions(result: ScaffoldResult): string {
   const lines = [
-    "live-slack scaffold complete.",
+    "4 Steves scaffolded.",
     "",
-    `manifest: ${result.manifest_path}`,
-    `env template: ${result.env_template_path}`,
-    `steve dirs (${result.steve_dirs.length}):`,
-    ...result.steve_dirs.map((d) => `  - ${d}`),
+    `  manifest:    ${result.manifest_path}`,
+    `  env:         ${result.env_template_path}`,
+    `  steve dirs:  .coltrane/steve_<uuid>/  (${result.steve_dirs.length})`,
     "",
-    "next steps:",
-    "  1. Upload coltrane/slack-app-manifest.yaml at https://api.slack.com/apps → Create New App → From a manifest.",
-    "  2. Install to your workspace, then copy the 4 bot tokens + 4 app-level tokens into .env (use .env.template as a starting point).",
-    "  3. Run `coltrane play --live-slack` to boot the 4 Steves.",
+    "next:",
+    "",
+    "  1. Upload the manifest at https://api.slack.com/apps →",
+    '     "Create New App" → "From a manifest."',
+    "  2. Install to your workspace. Copy the 4 bot tokens + 4 app tokens",
+    "     into .env (use .env.template as a starting point).",
+    "  3. `coltrane play --live-slack` — your 4 Steves wake up.",
+    "",
+    "they start unnamed, unlabeled. each reads your CLAUDE.md and",
+    "your project. tasks pair to them by feel. names emerge from the",
+    "work — days, maybe weeks. that's the design.",
   ];
   return lines.join("\n");
 }

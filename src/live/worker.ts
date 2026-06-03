@@ -2,14 +2,15 @@
 //
 // The orchestrator spawns one of these per Steve. The worker reads its
 // uuid + seed + token pair + audit path from env vars, constructs a
-// SlackBridge, and runs an event loop that hands inbox events off to a
-// downstream consumer (the Claude Code thread, when wired).
+// SlackBridge, binds a CC session, and runs the consume-inbox -> CC-resume
+// -> post-back loop until SIGTERM/SIGINT.
 //
-// For tonight's ship, the worker's `on_inbox` is a passthrough that
-// records to audit.jsonl and prints a structured stderr line. The actual
-// CC-thread wiring lands in subhuti's lane (which owns the slack-app
-// creation flow + reaction handling) and groove's lane (which owns the
-// onboarding UX).
+// Wiring diagram:
+//
+//   tune() -> seal tuning onto audit.jsonl
+//   bindNewSession() -> seal cc_session_bound onto audit.jsonl
+//   createSlackBridge({ on_inbox: enqueue-to-memory-queue }) -> start socket
+//   steveWorkerLoop() -> drain queue -> invoker -> bridge.post -> seal
 //
 // Run via:
 //   STEVE_UUID=... STEVE_SEED_PATH=... STEVE_AUDIT_PATH=...
@@ -20,6 +21,13 @@ import { readFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { tune } from "./tuning.js";
 import { createSlackBridge, type InboxEvent } from "./slack_bridge.js";
+import { bindNewSession } from "./cc_session_binding.js";
+import { defaultInvoker } from "./cc_invoker.js";
+import {
+  steveWorkerLoop,
+  createMemoryInboxSource,
+  type InboxEnvelope,
+} from "./worker_loop.js";
 
 function requireEnv(name: string): string {
   const v = process.env[name];
@@ -27,6 +35,22 @@ function requireEnv(name: string): string {
     throw new Error(`missing required env var: ${name}`);
   }
   return v;
+}
+
+/** Convert slack_bridge's InboxEvent into the loop's InboxEnvelope shape.
+ *  Returns null if the event lacks the minimum text/id needed to drive a
+ *  Claude response (e.g. reactions without a textual prompt). */
+export function inboxEventToEnvelope(ev: InboxEvent): InboxEnvelope | null {
+  if (!ev.text || !ev.ts) return null;
+  const env: InboxEnvelope = {
+    event_id: ev.ts,
+    text: ev.text,
+    received_at: ev.received_at,
+  };
+  if (ev.channel !== undefined) env.channel = ev.channel;
+  if (ev.user !== undefined) env.user = ev.user;
+  if (ev.thread_ts !== undefined) env.thread_ts = ev.thread_ts;
+  return env;
 }
 
 export async function runWorker(): Promise<void> {
@@ -44,9 +68,7 @@ export async function runWorker(): Promise<void> {
   await readFile(seedPath, "utf8");
 
   // Tuning: scan the project, pair its shape with this Steve's seed,
-  // and seal the result to audit.jsonl. The CC-bridge consumes this seal
-  // (and the audit stream below it) to color the Claude Code thread.
-  // The project root is the dir containing CLAUDE.md.
+  // and seal the result to audit.jsonl.
   const rootPath = dirname(bookPath);
   const seal = await tune(steveUuid, seedPath, rootPath, auditPath);
   process.stderr.write(
@@ -61,17 +83,36 @@ export async function runWorker(): Promise<void> {
     }) + "\n",
   );
 
+  // Bind a fresh CC session for this worker boot. The binding event is
+  // sealed onto audit.jsonl; ensureSessionId inside the loop reads it back
+  // (and mints a replacement only if it's missing for some reason).
+  const binding = await bindNewSession(steveUuid, auditPath, "worker_boot");
+  process.stderr.write(
+    JSON.stringify({
+      steve_uuid: steveUuid,
+      event: "cc_session_bound",
+      session_id: binding.session_id,
+    }) + "\n",
+  );
+
+  // Inbox queue: slack_bridge writes via on_inbox; worker_loop drains.
+  const inbox = createMemoryInboxSource();
+
   const bridge = createSlackBridge({
     steve_uuid: steveUuid,
     bot_token: botToken,
     app_token: appToken,
     audit_path: auditPath,
     on_inbox: async (ev: InboxEvent) => {
-      // Stub passthrough: subhuti's PR replaces this with the CC-thread
-      // dispatch. For now we just emit a structured stderr line so the
-      // orchestrator log + audit.jsonl correlate.
+      const env = inboxEventToEnvelope(ev);
+      if (env) inbox.enqueue(env);
       process.stderr.write(
-        JSON.stringify({ steve_uuid: steveUuid, inbox: ev.kind, ts: ev.ts }) + "\n",
+        JSON.stringify({
+          steve_uuid: steveUuid,
+          inbox: ev.kind,
+          ts: ev.ts,
+          enqueued: env !== null,
+        }) + "\n",
       );
     },
   });
@@ -81,14 +122,37 @@ export async function runWorker(): Promise<void> {
     JSON.stringify({ steve_uuid: steveUuid, status: "started" }) + "\n",
   );
 
-  // keep alive
-  await new Promise<void>((resolve) => {
-    const onSignal = () => {
-      void bridge.stop().then(resolve);
-    };
-    process.once("SIGTERM", onSignal);
-    process.once("SIGINT", onSignal);
+  // Shutdown bookkeeping: SIGTERM/SIGINT flips a flag the loop polls each
+  // iteration; once the in-flight cycle exits, we stop the bridge + return.
+  let shutdownRequested = false;
+  const onSignal = () => {
+    shutdownRequested = true;
+  };
+  process.once("SIGTERM", onSignal);
+  process.once("SIGINT", onSignal);
+
+  const invoker = defaultInvoker();
+  const stats = await steveWorkerLoop(steveUuid, {
+    steve_uuid: steveUuid,
+    audit_path: auditPath,
+    invoker,
+    inbox,
+    post: {
+      post: (channel, text, thread_ts) => bridge.post(channel, text, thread_ts),
+    },
+    shouldStop: () => shutdownRequested,
+    idle_sleep_ms: 500,
+    session_trigger: "worker_boot",
   });
+
+  await bridge.stop();
+  process.stderr.write(
+    JSON.stringify({
+      steve_uuid: steveUuid,
+      status: "stopped",
+      ...stats,
+    }) + "\n",
+  );
 }
 
 // Run only when invoked directly (not when imported by tests).

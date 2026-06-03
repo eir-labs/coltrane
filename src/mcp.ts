@@ -35,6 +35,11 @@ export const MCP_TOOLS: readonly MCPToolDef[] = [
   { slug: "agent_evolve",                  category: "build", input_schema: obj({ slug: "string", changes: "object", reason: "string", evidence: "object" }), output_schema: obj({ new_version: "number", cascade_check: "object" }) },
   { slug: "standard_compose",              category: "build", input_schema: obj({ slug: "string", domain: "string", phases: "array", depth_overrides: "object", composition_schema: "object", credits_formula: "string" }), output_schema: obj({ standard_id: "string", validation_result: "object" }) },
   { slug: "standard_simulate",             category: "build", input_schema: obj({ standard_slug: "string", mock_input: "object", depth: "string" }), output_schema: obj({ phases: "array", estimated_cost: "number", estimated_duration: "number" }) },
+  // prereg_seal — the discover→define seam mechanism. Takes a draft pre-reg's
+  // {predict, kill, apoha} triplet, validates minimum content, computes
+  // sha256_pre_verdict over the canonical-JSON, writes an append-only ledger
+  // entry, and returns the SEALED state. Engine: src/pre_reg.ts.
+  { slug: "prereg_seal",                   category: "build", input_schema: obj({ pre_reg_id: "string", kind: "string", sealed: "object", sealed_by: "string" }), output_schema: obj({ pre_reg_id: "string", pre_reg_hash: "string", sealed_at: "string", kind: "string", sealed_by: "string" }) },
 
   { slug: "gig_dispatch",                  category: "run", input_schema: obj({ standard_slug: "string", input: "object", depth: "string", company_id: "string" }), output_schema: obj({ gig_id: "string", manifest: "object" }) },
   { slug: "gig_monitor",                   category: "run", input_schema: obj({ gig_id: "string" }), output_schema: obj({ status: "string", phases_complete: "number", current_agent: "string", outputs_so_far: "array" }) },

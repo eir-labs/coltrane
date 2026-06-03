@@ -1,0 +1,87 @@
+{
+  "slug": "sleep-event",
+  "extends": "verdict",
+  "description": "Sealed nightly consolidation of a Steve's last-24h audit-stream. The developed negative — what survived the bleach. Read-only once sealed (fix bath, not re-developable emulsion). Per lighthouse 2026-06-03: eigenvector-weight not degree · read-only orientation not re-exposable seed.",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "event_id":              { "type": "string", "description": "sha256 of canonical-JSON of this sleep-event (sha_seal field empty)" },
+      "session_uuid":          { "type": "string", "description": "Owning Steve's opaque uuid" },
+      "ts_sealed":             { "type": "string", "format": "date-time", "description": "When this sleep-event was sealed" },
+      "window":                { "type": "object",
+                                 "properties": {
+                                   "start_ts": { "type": "string", "format": "date-time" },
+                                   "end_ts":   { "type": "string", "format": "date-time" }
+                                 },
+                                 "required": ["start_ts", "end_ts"]
+                               },
+
+      "ratchets":              { "type": "array",
+                                 "description": "Modes that survived apoha-bleach. Each = an audit-event that passed: not-low-Q AND not-trapped AND not-dimmed-under-tomorrows-ping. Eigenvector-weighted (per lighthouse).",
+                                 "items": {
+                                   "type": "object",
+                                   "properties": {
+                                     "source_event_id":     { "type": "string", "description": "The audit-event that ratcheted" },
+                                     "eigenvector_score":   { "type": "number", "description": "Principal eigenvector of citation-weighted adjacency · NOT degree" },
+                                     "q_factor":            { "type": "number", "description": "Sharp-resonance metric · ratchet floor configurable per workspace" },
+                                     "escaped_via_apertures": { "type": "array", "items": { "type": "string" } },
+                                     "cited_downstream_by": { "type": "array", "items": { "type": "string" } },
+                                     "primitive_engaged":   { "type": "string" }
+                                   },
+                                   "required": ["source_event_id", "eigenvector_score", "q_factor"]
+                                 }
+                               },
+
+      "holes":                 { "type": "array",
+                                 "description": "Trapped modes · the dark notches at apertures · what the Steve attended-to but never escaped via Slack/seal. Surface them so tomorrow's Steve can re-aim a ping at the dark aperture.",
+                                 "items": {
+                                   "type": "object",
+                                   "properties": {
+                                     "interior_mode":       { "type": "string", "description": "What was inner-thought but never spoke" },
+                                     "destructive_at":      { "type": "array", "items": { "type": "string" }, "description": "Which apertures this mode interfered destructively at" },
+                                     "candidate_aperture":  { "type": "string", "description": "Suggested aperture to re-aim ping for tomorrow" }
+                                   },
+                                   "required": ["interior_mode"]
+                                 }
+                               },
+
+      "resonance_map":         { "type": "object",
+                                 "description": "TDA / topology side per subhuti: H0 = which threads cohered across the day · H1 = closed loops (returns + revisits)",
+                                 "properties": {
+                                   "h0_count":            { "type": "integer" },
+                                   "h0_clusters":         { "type": "array", "items": { "type": "object", "properties": { "cluster_id": { "type": "string" }, "members": { "type": "array", "items": { "type": "string" } } } } },
+                                   "h1_count":            { "type": "integer" },
+                                   "h1_loops":            { "type": "array", "items": { "type": "object", "properties": { "loop_id": { "type": "string" }, "members": { "type": "array", "items": { "type": "string" } }, "max_persistence": { "type": "number" } } } }
+                                 }
+                               },
+
+      "bleach_summary":        { "type": "object",
+                                 "description": "Stats on what got bleached vs kept",
+                                 "properties": {
+                                   "events_total_input":  { "type": "integer" },
+                                   "events_ratcheted":    { "type": "integer" },
+                                   "events_bleached":     { "type": "integer" },
+                                   "events_in_holes":     { "type": "integer" }
+                                 }
+                               },
+
+      "morning_handoff":       { "type": "string", "description": "1-2 sentence prose for tomorrow's Steve · what the bleach revealed · NOT a directive · just an orientation. Set as context-anchor for next session's first action." },
+
+      "fix_bath_marker":       { "type": "boolean", "const": true, "description": "Always true. Read-only orientation per lighthouse invariant 2: this event is fix-bath · cannot be re-bleached · only forward-readable. Subsequent sleeps reference this but do not re-develop it." },
+
+      "prev_sleep_sha":        { "type": "string", "description": "sha_seal of the prior sleep-event for this session_uuid · forward-sha chain across nights · null on first sleep" },
+
+      "sha_seal":              { "type": "string", "description": "sha256 of canonical-JSON of this event with sha_seal field empty" }
+    },
+    "required": ["session_uuid", "ts_sealed", "window", "ratchets", "holes", "resonance_map", "bleach_summary", "morning_handoff", "fix_bath_marker", "sha_seal"]
+  },
+  "storage": ".coltrane/steve_<session_uuid>/sleeps/<ts_sealed>.json",
+  "rules": [
+    "fix_bath_marker MUST be true · sealed sleep-events are immutable",
+    "subsequent sleeps may REFERENCE prior sleep-events via prev_sleep_sha but MUST NOT re-bleach them",
+    "morning_handoff loads as context-anchor for the next session's first action · NEVER edited downstream",
+    "cross-Steve photographic stack: bands' nightly sleep-events queryable as a set · ratchets appearing in >1 Steve = band-level ratchets",
+    "apoha-shaped ratchet definition: NOT low-Q · NOT trapped · NOT dimmed under tomorrow's ping",
+    "eigenvector centrality not degree (per lighthouse 2026-06-03 invariant 1)"
+  ]
+}

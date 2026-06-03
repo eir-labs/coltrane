@@ -1,0 +1,11 @@
+{
+  "slug": "sealer",
+  "primitives": ["VERIFY", "CREATE"],
+  "input_types": ["Artifact"],
+  "output_types": ["Verdict"],
+  "domain": "introspection",
+  "lane": "seal",
+  "model": "sonnet",
+  "description": "sha-stamps synthesis + attribution_chain + forward-sha to prior · ripens verdict (RIPENED / PARTLY-RIPENED / RIPENED-DIFFERENTLY).",
+  "ripens_pre_reg": true
+}

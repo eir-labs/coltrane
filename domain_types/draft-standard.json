@@ -1,0 +1,45 @@
+{
+  "slug": "draft-standard",
+  "version": 1,
+  "extends": "Artifact",
+  "domain": "seeding",
+  "status": "active",
+  "description": "Proposed standard (multi-phase workflow) derived from recurrent_workflows in a pattern-extraction. Draft only — user accepts before adoption to active fleet.",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "input_refs":      { "type": "array", "items": { "type": "string" }, "description": "References to pattern-extraction + repo-survey outputs." },
+      "slug":            { "type": "string", "description": "Proposed standard slug." },
+      "domain":          { "type": "string" },
+      "description":     { "type": "string" },
+      "phases":          {
+        "type": "array",
+        "description": "Ordered phases per coltrane standard convention. Each phase names a phase-agent slug + intent.",
+        "items": {
+          "type": "object",
+          "properties": {
+            "name":   { "type": "string" },
+            "agent":  { "type": "string" },
+            "intent": { "type": "string" }
+          },
+          "required": ["name", "agent", "intent"]
+        }
+      },
+      "execution_modes": {
+        "type": "object",
+        "description": "Per project-bootstrap-v0 shape — conductor_mode default, dispatch_mode for power users.",
+        "properties": {
+          "conductor_mode": { "type": "object" },
+          "dispatch_mode":  { "type": "object" }
+        }
+      },
+      "evidence_summary": { "type": "string", "description": "Which recurrent_workflow this standard formalizes + which repos exhibited it." },
+      "user_acceptance":  {
+        "type": "string",
+        "enum": ["pending", "accepted", "rejected", "refined"],
+        "default": "pending"
+      }
+    },
+    "required": ["input_refs", "slug", "domain", "phases", "user_acceptance"]
+  }
+}

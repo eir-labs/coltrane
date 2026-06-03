@@ -1,6 +1,6 @@
 {
   "slug": "sleep-event",
-  "extends": "verdict",
+  "extends": "Verdict",
   "description": "Sealed nightly consolidation of a Steve's last-24h audit-stream. The developed negative — what survived the bleach. Read-only once sealed (fix bath, not re-developable emulsion). Per lighthouse 2026-06-03: eigenvector-weight not degree · read-only orientation not re-exposable seed.",
   "schema": {
     "type": "object",

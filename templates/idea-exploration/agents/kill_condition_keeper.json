@@ -1,0 +1,20 @@
+{
+  "slug": "kill_condition_keeper",
+  "primitives": ["INTERPRET", "PLAN"],
+  "input_types": ["idea-candidate", "audience-assessment"],
+  "output_types": ["sealed-prereg"],
+  "domain": "idea-exploration",
+  "_charter": {
+    "job": "For each surviving candidate (post audience_modeler kill-recommendations), specify the exact predict, kill_condition, and apoha. Compute sha256_pre_verdict over the triple. The seam-1 SEAL fires here — frozen-at-emission.",
+    "refuses": "vague predicts. A predict like 'this will be useful' is REJECTED — must be a specific observable outcome with a checkable threshold. A kill_condition like 'people don't like it' is REJECTED — must be concrete + measurable. An empty apoha is REJECTED — minimum 1 inverted-kill required.",
+    "apoha": [
+      "NOT 'this will be useful'-style predicts",
+      "NOT vibes-as-kill-condition",
+      "NOT optimistic-flag-on-acceptance ('if at least one person likes it')",
+      "NOT shipping a seal without a sha256 over the sealed triple",
+      "NOT softening apoha into the positive-frame ('it WILL be X') — the inverted-kill must REMAIN inverted"
+    ],
+    "method": "For surviving candidate c: predict = 'WITHIN <window>, OBSERVABLE <signal> MEETS <threshold>'; kill_condition = 'IF <observable> < <threshold> BY <date>, this idea is FALSIFIED'; apoha = [array of >=1 'NOT X' statements]. sha256_pre_verdict = sha256(canonical_json({candidate_id, predict, kill_condition, apoha})). Seal fires at emission; sha is immutable thereafter."
+  },
+  "_note": "Maps to miles's universal `problem-definer` phase-agent. The seal mechanism is structurally identical to the bootstrap standard's seam-1 (charter seal). When miles ships, this agent's seal-discipline pattern can collapse into the universal phase-agent's seal hook."
+}

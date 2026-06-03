@@ -1,0 +1,21 @@
+{
+  "slug": "unsown-seed",
+  "version": 1,
+  "extends": "Artifact",
+  "domain": "idea-exploration",
+  "status": "active",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "candidate_id": { "type": "string" },
+      "sha256_pre_verdict": { "type": "string" },
+      "framing": { "type": "string" },
+      "predict": { "type": "string" },
+      "kill_condition": { "type": "string" },
+      "apoha": { "type": "array", "items": { "type": "string" } },
+      "archived_at": { "type": "string" },
+      "reason_not_developed": { "type": "string" }
+    }
+  },
+  "required_fields": ["candidate_id", "sha256_pre_verdict", "framing"]
+}

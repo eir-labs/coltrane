@@ -1,0 +1,89 @@
+{
+  "slug": "idea_exploration_protocol",
+  "domain": "idea-exploration",
+  "description": "Double-diamond × safe-prereg for IDEA exploration. Diverge widely (≥7 alternatives). Seal at DEFINE. Develop the picked; archive the rest as restartable seeds. Ripen against the frozen seal.",
+  "agent_slugs": [
+    "idea_explorer",
+    "audience_modeler",
+    "kill_condition_keeper",
+    "seed_sower",
+    "ripener"
+  ],
+  "phases": [
+    {
+      "name": "discover",
+      "agent": "idea_explorer"
+    },
+    {
+      "name": "define_audience",
+      "agent": "audience_modeler"
+    },
+    {
+      "name": "define_seal",
+      "agent": "kill_condition_keeper"
+    },
+    {
+      "name": "develop",
+      "agent": "seed_sower"
+    },
+    {
+      "name": "deliver",
+      "agent": "ripener"
+    }
+  ],
+  "double_diamond": {
+    "expand_1": "discover",
+    "contract_1_a": "define_audience",
+    "contract_1_b": "define_seal",
+    "expand_2": "develop",
+    "contract_2": "deliver",
+    "seams_with_seal": [
+      "discover -> define_audience (gate: candidate count >= 7 AND diversity score >= 60)",
+      "define_audience -> define_seal (gate: each surviving candidate has 3 audience archetypes OR is kill-recommended)",
+      "define_seal -> develop (SEAL FIRES: each surviving candidate has sealed-prereg with sha256_pre_verdict; predict/kill/apoha FROZEN)",
+      "develop -> deliver (gate: every non-developed candidate persisted as unsown-seed with seal-hash intact)"
+    ]
+  },
+  "gates": {
+    "discover_to_define_audience": {
+      "min_candidate_count": 7,
+      "min_diversity_score": 60,
+      "refuses_premature_convergence": true,
+      "kill_if": "fewer than 7 candidates surfaced — DISCOVER stays open"
+    },
+    "define_seal_to_develop": {
+      "required_fields_per_surviving_candidate": ["predict", "kill_condition", "apoha", "sha256_pre_verdict"],
+      "kill_if": "any surviving candidate missing any of the four sealed fields — DEFINE_SEAL stays open"
+    },
+    "develop_to_deliver": {
+      "archived_seed_integrity_check": true,
+      "kill_if": "any unsown-seed is missing its sha256_pre_verdict OR fails canonical re-hash"
+    }
+  },
+  "safe_prereg_discipline": {
+    "policy": "soft-defaults, opt-in tightening (aligned with project-bootstrap-v0)",
+    "default": "DEFINE_SEAL auto-creates sealed-prereg artifacts; if user skips sealing, DEVELOP runs anyway with WARN 'running unsealed — this is observation, not verification'; DELIVER emits UNVERIFIED instead of RIPENED.",
+    "opt_in_tightening": "Set protocol.seal_required = true to refuse DEVELOP without sealed-pre-regs and refuse RIPENED without seal-3 integrity-check."
+  },
+  "execution_modes": {
+    "conductor_mode": {
+      "default": true,
+      "summary": "Claude Code thread reads this standard JSON and conducts WITH the user through each phase inline. User has agency at each seam. The thread is the conductor; the user is the soloist; the agent JSONs are the score's voice-leading cues.",
+      "conductor_protocol": [
+        "Read this standard's `phases[]` in order.",
+        "For each phase, read the named agent's `_charter` and `_charter.apoha`, then enter that phase's intent in plain prose to the user.",
+        "Refuse to advance through a seam until the seam's gate condition is met. If the gate is not met, name what's missing in plain English; do not silently skip.",
+        "At DEFINE_SEAL: state the proposed predict + kill_condition + apoha aloud, ask the user to confirm or refine, then compute sha256_pre_verdict over the agreed text. Cite the seal hash explicitly.",
+        "Treat archived unsown-seeds as restartable later — explicitly name them in DELIVER so the user knows what's preserved."
+      ]
+    },
+    "dispatch_mode": {
+      "default": false,
+      "summary": "Subagent-per-phase. Each agent JSON compiles to a `.claude/agents/<slug>.md` for dispatch via Claude Code's Task tool. Conductor (parent thread) dispatches each phase as a subagent and reads the return value.",
+      "subagent_compile_target": ".claude/agents/<agent-slug>.md",
+      "core_definitions_shared": "Both modes use the SAME agent JSONs and the SAME standard JSON. The mode chooses HOW the score is read (conducted-with-user inline, or dispatched-as-subagent), not WHAT the score says."
+    },
+    "score_is_the_same": "The standard JSON IS the score. The agent JSONs ARE the players. Conductor-mode and dispatch-mode are two ways to render the same score; user has agency in both, default is conduct-with-user."
+  },
+  "_note": "Two-step DEFINE (define_audience + define_seal) is the lane-specific shape — the audience-receiver check happens BEFORE the seal so we don't seal an audienceless idea. Universal bootstrap (project-bootstrap-v0) collapses DEFINE into one phase via `problem-definer`. Both shapes valid; this template's two-step is the idea-exploration tilt."
+}

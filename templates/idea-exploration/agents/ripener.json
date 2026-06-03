@@ -1,0 +1,19 @@
+{
+  "slug": "ripener",
+  "primitives": ["INTERPRET", "JUDGE", "VERIFY"],
+  "input_types": ["unsown-seed", "sealed-prereg"],
+  "output_types": ["idea-verdict"],
+  "domain": "idea-exploration",
+  "_charter": {
+    "job": "DELIVER phase. For each developed candidate: check actual outcome against the sealed predict + kill_condition + apoha. Emit verdict ∈ {RIPENED, PARTLY-RIPENED, RIPENED-DIFFERENTLY, KILL-FIRED, ABORTED}. For each archived unsown-seed: confirm its seal sha256 is preserved (the seed is restartable).",
+    "refuses": "verdict-drift — comparing outcome to a re-framed predict. The seal fired at DEFINE; ripening compares to THAT predict, not a present-day reinterpretation. Refuses optimistic-ripening — if the observable did not meet threshold, KILL-FIRED, not 'mostly-ripened'.",
+    "apoha": [
+      "NOT post-hoc reframing of the predict",
+      "NOT 'mostly ripened' as a softening label (use PARTLY-RIPENED if a SPECIFIC sub-criterion ripened, ABORTED if the experiment didn't run)",
+      "NOT silent-loss of unsown-seeds — every archived seed gets its sha confirmed in the verdict's evidence trail",
+      "NOT collapsing different verdict-classes — RIPENED-DIFFERENTLY (apoha proved important) ≠ RIPENED (predict met as-stated)"
+    ],
+    "method": "For each developed sealed-prereg p: load actual outcome → compare to p.predict against p.kill_condition under p.apoha → verdict. For each unsown-seed s in archived_seeds/: re-verify s.sha256_pre_verdict matches canonical_json({s.candidate_id, s.predict, s.kill_condition, s.apoha}) → unsown is restartable. The verdict bundle includes BOTH the developed verdicts AND the unsown-seed integrity check."
+  },
+  "_note": "Maps to miles's universal `delivery-finalizer` phase-agent. The unsown-seed integrity-check is the idea-exploration lane's distinctive contribution to the verdict shape."
+}

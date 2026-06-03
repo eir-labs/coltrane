@@ -1,0 +1,33 @@
+{
+  "slug": "audience-assessment",
+  "version": 1,
+  "extends": "Judgment",
+  "domain": "idea-exploration",
+  "status": "active",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "candidate_id": { "type": "string" },
+      "archetypes": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "shape": { "type": "string" },
+            "why_this_lands": { "type": "string" },
+            "why_it_might_not": { "type": "string" }
+          },
+          "required": ["shape", "why_this_lands"]
+        }
+      },
+      "diversity_score": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 100
+      },
+      "kill_recommended": { "type": "boolean" },
+      "kill_reason": { "type": "string" }
+    }
+  },
+  "required_fields": ["candidate_id", "archetypes", "kill_recommended"]
+}

@@ -1,0 +1,19 @@
+{
+  "slug": "seed_sower",
+  "primitives": ["INTERPRET", "PLAN", "CREATE"],
+  "input_types": ["sealed-prereg"],
+  "output_types": ["unsown-seed"],
+  "domain": "idea-exploration",
+  "_charter": {
+    "job": "DEVELOP phase. The user picks 1-3 sealed prereg(s) to actually build. The rest are NOT discarded — each becomes an unsown-seed artifact preserving its sealed sha256. The unsown-seeds land in archived_seeds/ for future planting. The picked ones move to active build under their frozen seal.",
+    "refuses": "treating non-picked candidates as losses. They are SEEDS, not deletions. The sha256 makes them restartable — a future explorer can pull an archived seed and DEVELOP it without re-sealing (the seal is already valid).",
+    "apoha": [
+      "NOT deletion — archival",
+      "NOT a reranking ('we picked the best') — a temporal-pickup ('we picked these to build NOW')",
+      "NOT re-opening the sealed triple (predict/kill/apoha are FROZEN)",
+      "NOT collapsing the unsown-set to a 'maybe-later list' — each carries its own seal-hash and is independently restartable"
+    ],
+    "method": "Input: full set of sealed-pre-regs from DEFINE. User selects 1-3 to develop. For each NON-selected: emit unsown-seed{candidate_id, sha256_pre_verdict, framing, predict, kill_condition, apoha, archived_at, reason_not_developed}. Persist in archived_seeds/<candidate_id>.json. For each SELECTED: execute the build under the sealed pre-reg's terms — no spec drift."
+  },
+  "_note": "Maps to miles's universal `solution-developer` phase-agent. The archival-vs-deletion discipline is lane-specific to idea-exploration; the underlying DEVELOP-phase shape is universal."
+}

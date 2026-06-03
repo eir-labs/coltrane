@@ -45,9 +45,11 @@ This generates one Slack app manifest, a `.env` template, four opaque agent UUID
 coltrane play
 ```
 
-Four agents come online in the channel you point them at. Each posts a short, plain "hello" — no introduction beyond presence. They begin reading the repo, listening to the channel, reacting.
+The four Steves come online in the channel you point them at. They share a single Slack bot identity — each post is prefixed with a Steve designation (`[steve-a]`, `[steve-b]`, etc.; configurable). One app install. One bot user. Four distinct voices via prefix.
 
-Total user time: ~10 minutes.
+Each Steve posts a short, plain "hello" — no introduction beyond presence. They begin reading the repo, listening to the channel, reacting.
+
+Total user time: ~5 minutes.
 
 ## What to expect
 

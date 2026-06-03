@@ -1,7 +1,7 @@
 // O5 — §6 outputs store, tested directly (not through the router). Append + query,
 // the output_refs provenance graph walks correctly, the backward-compat findings
-// view, and core_type/schema validation AT WRITE. Apoha: an output is written
-// without validation, or trace breaks (infinite-loops) on a provenance cycle.
+// view, and core_type/schema validation AT WRITE. Counter-claim: an output is
+// written without validation, or trace breaks (infinite-loops) on a provenance cycle.
 import { describe, it, expect } from "vitest";
 import { createRegistry, createOutputStore, type DomainType, type OutputStore } from "../src";
 
@@ -44,7 +44,7 @@ describe("O5: provenance graph walks correctly", () => {
   });
 });
 
-describe("O5: validation AT WRITE (apoha — no unvalidated persistence)", () => {
+describe("O5: validation AT WRITE (no unvalidated persistence)", () => {
   it("rejects a bad-schema output and persists nothing", () => {
     const s = store();
     expect(() => s.write({ core_type: "Signal", domain_type: "page-model", domain: "eirtests", gig_id: "g1", agent_slug: "scout", primitive: "SENSE", data: { wrong: "no url" } })).toThrow();
@@ -62,7 +62,7 @@ describe("O5: findings view", () => {
   });
 });
 
-describe("O5: trace is cycle-safe (apoha — no infinite loop)", () => {
+describe("O5: trace is cycle-safe (no infinite loop)", () => {
   it("a derived_from cycle terminates", () => {
     const s = store();
     const a = s.write({ core_type: "Signal", domain_type: "page-model", domain: "eirtests", gig_id: "g1", agent_slug: "scout", primitive: "SENSE", data: { url: "/a" } });

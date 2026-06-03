@@ -1,7 +1,8 @@
 // O18 — gig_song: the engine→song bridge. A gig's ordered agents (each composed of
 // primitives) encode to a chord progression and render to a JSONG tick-log. The
-// apoha: the primitive→tone map is a PARAMETER (overridable), and the output stays
-// STRUCTURE (progression + resolution + per-step chords), never a scalar verdict.
+// counter-claim: the primitive→tone map is a PARAMETER (overridable), and the
+// output stays STRUCTURE (progression + resolution + per-step chords), never a
+// scalar verdict.
 import { describe, it, expect } from "vitest";
 import { gigToSong, stepToChord, songToJsong, DEFAULT_TONE_MAP, type SongStep } from "../src/gig_song.js";
 import { readAll } from "../src/jsong.js";

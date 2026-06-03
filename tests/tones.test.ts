@@ -1,7 +1,7 @@
 // O17 — song-substrate core: the 12 tones, additive chords, arity, interval
-// consonance, resolution. The apoha throughout: nothing collapses to a scalar
-// verdict — resolve() returns the full tension profile + structure, one channel's
-// read meant to be triangulated, never a "truth" on its own.
+// consonance, resolution. The counter-claim throughout: nothing collapses to a
+// scalar verdict — resolve() returns the full tension profile + structure, one
+// channel's read meant to be triangulated, never a "truth" on its own.
 import { describe, it, expect } from "vitest";
 import {
   TONES, N_TONES, toneName, intervalClass, intervalConsonance,

@@ -24,7 +24,7 @@ function makeDeps(): ServerDeps {
 }
 
 describe("promotion state machines — pure", () => {
-  // KARMA: forward-only transitions accepted.
+  // Forward-only transitions accepted.
   it("agent: draft → review → approved → active → retired all pass", () => {
     for (let i = 0; i < AGENT_STATUS_ORDER.length - 1; i++) {
       const from = AGENT_STATUS_ORDER[i]!;
@@ -42,7 +42,7 @@ describe("promotion state machines — pure", () => {
     expect(() => checkPromotion("testing", "active", SKILL_STATUS_ORDER)).not.toThrow();
   });
 
-  // APOHA: backward / unknown transitions rejected.
+  // Backward / unknown transitions rejected.
   it("rejects backward transition (active → draft)", () => {
     expect(() => checkPromotion("active", "draft", AGENT_STATUS_ORDER)).toThrow(PromotionError);
   });

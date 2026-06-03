@@ -1,0 +1,89 @@
+{
+  "slug": "project-charter",
+  "version": 1,
+  "extends": "Plan",
+  "domain": "bootstrap",
+  "status": "active",
+  "description": "The birth pre-reg for a coltrane-flavored project. Emitted by problem-definer at the discover→define seam of project-bootstrap-v0. Sealed before DEVELOP begins (or marked unverified if user skips seal). The charter governs which preseed template is unrolled, which behavioral primitives are project-default, and which standards the project ships with.",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "id": { "type": "string" },
+      "name": { "type": "string" },
+      "use_case": {
+        "type": "string",
+        "enum": ["code-changes", "research-briefs", "operations", "idea-exploration", "mixed", "bare"]
+      },
+      "template": { "type": "string" },
+
+      "predict": {
+        "type": "string",
+        "description": "What this project predicts about itself. Falsifiable. Sealed."
+      },
+      "kill": {
+        "type": "string",
+        "description": "What would falsify the project's premise. Sealed."
+      },
+      "apoha": {
+        "type": "string",
+        "description": "What this project is explicitly NOT. Scope-bound. Sealed."
+      },
+
+      "preseed_agents": {
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "Slugs of agents to ship in the scaffolded .coltrane/agents/. Includes the 4 universal phase-agents at minimum; template adds domain-specific ones."
+      },
+      "preseed_standards": {
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "Slugs of standards to ship in .coltrane/standards/. Includes the 4 domain-protocol standards by default."
+      },
+      "preseed_skills": {
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "Slugs of skills to ship in .coltrane/skills/. Includes coltrane-governance + apoha-discipline + rubric-loading + domain-specific skills."
+      },
+      "default_model_tier": {
+        "type": "string",
+        "enum": ["economy", "standard", "premium"],
+        "default": "standard"
+      },
+      "default_code_tool_access": {
+        "type": "string",
+        "enum": ["none", "read", "write", "full"],
+        "default": "read"
+      },
+
+      "seal_required": {
+        "type": "boolean",
+        "default": false,
+        "description": "If true, DEVELOP refuses to run without a sealed charter (R1-style hard-gate). Default false = safe-prereg soft policy."
+      },
+
+      "sealed_at": {
+        "type": ["string", "null"],
+        "format": "date-time"
+      },
+      "sealed_by": {
+        "type": ["string", "null"]
+      },
+      "pre_reg_hash": {
+        "type": ["string", "null"],
+        "pattern": "^[a-f0-9]{64}$",
+        "description": "SHA-256 of canonical-JSON of {predict, kill, apoha}, computed at seal moment."
+      },
+
+      "verdict": {
+        "type": ["string", "null"],
+        "enum": [null, "RIPENED", "PARTLY-RIPENED", "RIPENED-DIFFERENTLY", "KILL-FIRED", "ABORTED", "UNVERIFIED"],
+        "description": "Set at DELIVER. UNVERIFIED = user skipped seal; verdict cannot be computed."
+      },
+      "verdict_at": {
+        "type": ["string", "null"],
+        "format": "date-time"
+      }
+    },
+    "required": ["id", "name", "use_case", "predict", "kill", "apoha"]
+  }
+}

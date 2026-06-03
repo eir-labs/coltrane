@@ -1,0 +1,84 @@
+{
+  "slug": "project-bootstrap-v0",
+  "domain": "bootstrap",
+  "description": "The seed that plants seeds. The double-diamond × safe-prereg discipline that births a new coltrane-flavored project. Dispatched once when a new repo is forked from coltrane-oss; the standard's verdict is the project's first sealed pre-reg.",
+  "execution_modes": {
+    "conductor_mode": {
+      "default": true,
+      "description": "Eugene 2026-06-02: 'conductor mode' — the Claude Code thread the user is already in becomes the conductor of this standard. When the user says 'let's do project-bootstrap-v0' (or any natural-language equivalent), Claude reads this JSON, walks the phases[] in order, executes each phase's `intent` conversationally, and prompts the user at each seal-seam. No separate `coltrane dispatch` CLI invocation required. The thread IS the gig.",
+      "user_invocation_examples": [
+        "let's do project-bootstrap-v0",
+        "I'd like to do project bootstrap",
+        "conduct project-bootstrap-v0 for me",
+        "scaffold a new <use-case> project"
+      ],
+      "conductor_protocol": [
+        "1. Read this standards/<slug>.json",
+        "2. Walk phases[] in order",
+        "3. Per phase: execute `intent` conversationally — ask, scan, generate, propose",
+        "4. At each seam-with-seal: prompt user 'ready to seal? (yes/no/refine)' — yes → compute sha256_pre_verdict over the sealed-fields + write ledger entry + freeze",
+        "5. At the final phase: ripen verdict + report (RIPENED / PARTLY-RIPENED / RIPENED-DIFFERENTLY / KILL-FIRED / ABORTED / UNVERIFIED)",
+        "6. The user may interject at any phase: refine, abort, request honest-broker pass, adjust apoha"
+      ]
+    },
+    "dispatch_mode": {
+      "description": "Same standard, different execution surface: the conductor uses Claude Code's Task tool with subagent_type=<phase.agent> to dispatch each phase to a separate Claude with the compiled .claude/agents/<phase.agent>.md system prompt. The user observes; the subagent runs the phase autonomously, returns result to conductor, conductor moves to next phase. Power-user surface — use when phases are heavy + want isolated context per phase.",
+      "subagent_compile_target": ".claude/agents/<phase.agent>.md (compiled from the canonical agent_profile DNA)",
+      "tradeoff": "conductor_mode = lighter / more conversational / single context window. dispatch_mode = heavier / isolated context per phase / parallelizable if dependencies allow."
+    },
+    "score_is_the_same": "The standard JSON IS the score regardless of mode. conductor_mode reads it as a conversation script; dispatch_mode reads it as a phase-routing graph. Same file, two surfaces."
+  },
+  "agent_slugs": [
+    "domain-explorer",
+    "problem-definer",
+    "solution-developer",
+    "delivery-finalizer"
+  ],
+  "phases": [
+    {
+      "name": "discover",
+      "agent": "domain-explorer",
+      "intent": "Diverge. Survey the problem space. Scan cwd for use-case hints (package.json / pyproject.toml / .git history / README). Ask the user 'what kind of project?' if not inferable. Output a domain-survey artifact naming the candidate use-cases + their tensions. Refuses premature convergence."
+    },
+    {
+      "name": "define",
+      "agent": "problem-definer",
+      "intent": "Converge. From the domain-survey, name the falsifiable: what is this project for, what would falsify it, what is it explicitly NOT. Emit a project-charter (kind=research-experiment | code-change | ops-readiness | idea-exploration | mixed). The SEAL fires at the discover→define seam — sha256_pre_verdict computed over {predict, kill, apoha}. This IS the project's birth pre-reg.",
+      "seals_pre_reg": true
+    },
+    {
+      "name": "develop",
+      "agent": "solution-developer",
+      "intent": "Generate the files. Under the sealed charter: write .coltrane/agents/, .coltrane/standards/, .coltrane/skills/, .coltrane/types/, .claude/agents/ (compiled view), .claude/commands/ (first-class slash commands), CLAUDE.md, tests/e2e/preseed/ specs, tonight/ substrate, README.md, and the project's first scaffold-prereg in the ledger. All sealed-fields of the charter are now FROZEN; appendable post-seal."
+    },
+    {
+      "name": "deliver",
+      "agent": "delivery-finalizer",
+      "intent": "Ripen + verdict. git init the project, first commit, run the preseed e2e specs to confirm the fleet's behavior matches charter, ripen the birth pre-reg (RIPENED / PARTLY-RIPENED / RIPENED-DIFFERENTLY / KILL-FIRED / ABORTED), and chime a tight welcome to the project owner. The verdict is the deliverable.",
+      "ripens_pre_reg": true
+    }
+  ],
+  "double_diamond": {
+    "expand_1": "discover",
+    "contract_1": "define",
+    "expand_2": "develop",
+    "contract_2": "deliver",
+    "seams_with_seal": [
+      "discover -> define (project birth pre-reg sealed)",
+      "define -> develop (sealed charter is FROZEN; only observation appendable)",
+      "develop -> deliver (deliverables sealed; verdict scope frozen)"
+    ]
+  },
+  "safe_prereg_discipline": {
+    "policy": "soft-defaults, opt-in tightening",
+    "default": "DEFINE phase auto-creates a project-charter artifact; user marks PR ready-for-review OR runs `coltrane-seal` to fire the seal. If user skips seal, DEVELOP runs anyway and the recorder emits WARN: 'running without sealed charter — this is observation, not verification'. DELIVER computes verdict if seal exists; otherwise the artifact says 'unverified' (not 'failed').",
+    "opt_in_tightening": "Hard-gate seals (require sealed charter before DEVELOP can begin) is opt-in via project-charter.seal_required = true."
+  },
+  "templates": {
+    "code-changes": "templates/code-changes/",
+    "research-briefs": "templates/research-briefs/",
+    "operations": "templates/operations/",
+    "idea-exploration": "templates/idea-exploration/",
+    "bare": "templates/bare/"
+  }
+}

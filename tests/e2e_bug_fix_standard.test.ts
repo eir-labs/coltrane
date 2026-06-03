@@ -1,7 +1,8 @@
 // E3 — a multi-phase bug-fix standard runs end-to-end in order: find → triage →
 // plan → fix → review, one primitive per phase (SENSE·INTERPRET·PLAN·CREATE·VERIFY).
-// Every phase must execute, in declared order, each consuming the prior. Apoha: a
-// phase is skipped (fewer outputs than phases) or the order is broken.
+// Every phase must execute, in declared order, each consuming the prior.
+// Counter-claim: a phase is skipped (fewer outputs than phases) or the order
+// is broken.
 import { describe, it, expect } from "vitest";
 import {
   dispatchTool, createRegistry, createOutputStore, MemoryLedger,

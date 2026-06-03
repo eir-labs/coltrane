@@ -67,6 +67,9 @@ export interface ClaudeInvokerOptions {
   // With --strict-mcp-config, ONLY these load — never the host's ambient servers.
   mcpServers?: Record<string, unknown> | undefined;
   run?: ((bin: string, args: string[]) => string) | undefined; // injectable spawn (tests)
+  // When set, the spawned child receives COLTRANE_PARENT_SESSION_ID so its first
+  // recorded turn seals the lineage edge to its parent.
+  parent_session_id?: string | undefined;
 }
 
 // The blast-radius cage, PURE. Given the agent's tool grant + a per-gig mcp-config path,
@@ -90,7 +93,9 @@ export function buildInvokerArgs(
 
 // The production AgentInvoker. Writes a per-gig mcp-config (the permitted servers only),
 // spawns `claude -p` inside the cage, parses the JSON. The spawn is the non-deterministic
-// seam (inject `run` to test the cage args + parse without the CLI).
+// seam (inject `run` to test the cage args + parse without the CLI). When a
+// parent_session_id is provided, every spawned MCP server in this child receives it via
+// env so the recorder seals the parent → child lineage edge on the child's first turn.
 export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker {
   const bin = opts.bin ?? "claude";
   const run = opts.run ?? ((b: string, args: string[]) => execFileSync(b, args, { encoding: "utf-8", maxBuffer: 64 * 1024 * 1024 }));
@@ -102,7 +107,19 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
     const prompt = buildPrompt(ctx, schema);
     // per-gig mcp-config: only the deployment-permitted servers (empty by default).
     const cfgPath = join(tmpdir(), `coltrane-mcp-${randomUUID()}.json`);
-    writeFileSync(cfgPath, JSON.stringify({ mcpServers: opts.mcpServers ?? {} }));
+    const servers = opts.mcpServers ?? {};
+    const parent = opts.parent_session_id;
+    // Inject parent_session_id env into every named server so children seal lineage.
+    const enriched = parent
+      ? Object.fromEntries(
+          Object.entries(servers).map(([name, def]) => {
+            const d = (def && typeof def === "object" ? def : {}) as Record<string, unknown>;
+            const env = (d["env"] && typeof d["env"] === "object" ? d["env"] : {}) as Record<string, unknown>;
+            return [name, { ...d, env: { ...env, COLTRANE_PARENT_SESSION_ID: parent } }];
+          }),
+        )
+      : servers;
+    writeFileSync(cfgPath, JSON.stringify({ mcpServers: enriched }));
     try {
       const args = buildInvokerArgs(prompt, cfgPath, {
         model: opts.model,

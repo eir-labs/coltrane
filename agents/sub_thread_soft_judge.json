@@ -1,0 +1,13 @@
+{
+  "slug": "sub_thread_soft_judge",
+  "primitives": [
+    "INTERPRET"
+  ],
+  "input_types": [
+    "parsed-conversation-trace"
+  ],
+  "output_types": [
+    "soft-verdict"
+  ],
+  "domain": "self_judge"
+}

@@ -1,0 +1,10 @@
+{
+  "slug": "sub_thread_trace_sensor",
+  "primitives": [
+    "SENSE"
+  ],
+  "output_types": [
+    "parsed-conversation-trace"
+  ],
+  "domain": "self_judge"
+}

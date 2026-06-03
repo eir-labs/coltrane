@@ -1,12 +1,12 @@
-# Coltrane v2 — Test Suite Prereg
+# Coltrane v2 — Test Suite Pre-registration
 
 **Source of truth:** `Coltrane Spec.docx.md` §14 (Testing Strategy)
-**Discipline:** every test pairs a karma claim (must pass) with an apoha (must fail). registered before impl.
+**Discipline:** every test pairs a positive claim (must pass) with a counter-claim (must fail). Registered before implementation.
 **Updated:** 2026-05-25T18:25:00Z
 
 ## Layer 1 — Type System (8)
 
-| # | Karma (must pass) | Apoha (must fail) | File |
+| # | Must pass | Must fail | File |
 |---|---|---|---|
 | T1 | Output validates against core type schema | Output missing a required core-type field is rejected | tests/core_types.test.ts + tests/artifact_validation_criteria.test.ts |
 | T2 | Output validates against domain type schema | Output missing a required domain-extension field is rejected | tests/domain_type_validation.test.ts |
@@ -19,7 +19,7 @@
 
 ## Layer 2 — Pipeline Validation (6)
 
-| # | Karma (must pass) | Apoha (must fail) | File |
+| # | Must pass | Must fail | File |
 |---|---|---|---|
 | P1 | Agent with CREATE but no upstream INTERPRET rejected | Such agent accepted | tests/composition_rules.test.ts |
 | P2 | Valid SENSE → INTERPRET → JUDGE pipeline passes | Valid pipeline rejected (false positive) | tests/composition_rules.test.ts |
@@ -30,7 +30,7 @@
 
 ## Layer 3 — Trust & Access (6)
 
-| # | Karma (must pass) | Apoha (must fail) | File |
+| # | Must pass | Must fail | File |
 |---|---|---|---|
 | A1 | Agent in SENSE phase cannot access write tools | Write tool exposed in SENSE phase | tests/trust_boundaries.test.ts |
 | A2 | Plan referencing files outside grant rejected | Out-of-scope plan accepted | tests/trust_boundaries.test.ts |
@@ -39,12 +39,16 @@
 | A5 | Expired access grant blocks execution | Expired grant still grants access | tests/grant_ttl.test.ts |
 | A6 | Files modified outside declared scope flagged by recorder | Out-of-scope write goes unflagged | tests/recorder_audit.test.ts |
 
-## Cross-cutting | # | Karma (must pass) | Apoha (must fail) | File |
+## Cross-cutting
+
+| # | Must pass | Must fail | File |
 |---|---|---|---|
-| X1 | OSS engine imports no fleet infra / internal endpoints | An import from @supabase, slack_ant, or eir-internal slips into src/ | tests/dependency_isolation.test.ts |
+| X1 | OSS engine imports no fleet infra / internal endpoints | An import from an internal package slips into src/ | tests/dependency_isolation.test.ts |
 | X2 | System exposes no API claiming gig reproducibility | An assertGigReproducible / behaviorHash export appears | tests/gig_nondeterminism.test.ts |
 
-## §5 Domain Registry — additional | # | Karma (must pass) | Apoha (must fail) | File |
+## §5 Domain Registry — additional
+
+| # | Must pass | Must fail | File |
 |---|---|---|---|
 | R1 | Domain type registered at runtime, no source file changes; instance validates against the registry alone | Registering a type writes/edits a .ts source file, or an unregistered type validates | tests/runtime_type_creation.test.ts |
 | R2 | One core type extends into multiple domains, each validates; core types immutable (no add-core API), extends must be a core | A domain type extending a non-core type is accepted, or a registerCoreType API exists | tests/domain_extension.test.ts |
@@ -53,7 +57,7 @@
 
 ## Layer 4 — End-to-End (6)
 
-| # | Karma (must pass) | Apoha (must fail) | File |
+| # | Must pass | Must fail | File |
 |---|---|---|---|
 | E1 | NL goal → designed standard → executed → outputs in DB | Loop breaks somewhere; outputs missing | tests/e2e_full_loop.test.ts |
 | E2 | 100 readiness scans pass through new system; findings view works | Findings view returns wrong rows after migration | tests/e2e_backward_compat.test.ts |
@@ -64,7 +68,7 @@
 
 ## Orthogonal — §-specific lane tests (registered after audit drift)
 
-| # | Karma (must pass) | Apoha (must fail) | File |
+| # | Must pass | Must fail | File |
 |---|---|---|---|
 | O1 | §2.5 canonical_form: 3 published reference hex vectors reproduce; CRLF→LF; excluded fields stripped; effective_hash = sha256("1.1\|ch\|dh") | Hex drifts on shape change; canonText leaves trailing newlines; effective_hash misses content vs deps | tests/canonical_form.test.ts |
 | O2 | §7 MCP surface: 32 tools enumerated with input+output schemas; approval-required tools gated correctly | Tool added without schema; always-approval tool slips through gating | tests/mcp_surface.test.ts |
@@ -105,13 +109,15 @@
 
 ## Discipline Protocol
 
-1. Register here before opening the test file. PR-blocking until prereg row exists.
-2. File path in row matches actual file. tracking.json reflects same path + owner + status.
-3. Karma + apoha both implemented. orphan karma (no apoha) → reject at CI.
-4. When closing a test, mark status in tracking.json. Don't delete the prereg row — keep the registration.
-5. Adding a row requires an open lane in tracking.json. No off-prereg tests.
+1. Register here before opening the test file. PR-blocking until pre-reg row exists.
+2. File path in row matches actual file.
+3. Both the positive claim and the counter-claim are implemented; an orphan positive (no counter-claim) is rejected at CI.
+4. When closing a test, leave the pre-reg row in place — keep the registration as historical record.
+5. Adding a row requires the corresponding test file path.
 
-## Release tie-up — agent evolution lineage | # | Karma (must pass) | Apoha (must fail) | File |
+## Release tie-up — agent evolution lineage
+
+| # | Must pass | Must fail | File |
 |---|---|---|---|
 | O24 | evolveProfile threads lineage: version+1, parent_version=base.version, status=draft, creative change applied; chain reconstructs | parent_version unset/wrong; in-place mutate (base unchanged); a harmonic or permissions change passes through evolve instead of requiring a proposal | tests/agent_evolve_lineage.test.ts |
 | O23 | §7 promotion + learning surface — 5 tools wired through dispatcher: agent_promote/standard_promote/skill_promote enforce forward-only state-machine transitions and append a ledger event; session_review_write records reviews (requires gig_id/output_id/agent_slug/quality_scores); learning_synthesize aggregates reviews and gates evidence_sufficient on min_reviews, auto-creates a proposal only when threshold met + auto_propose=true | a backward transition (active→draft) is accepted; an unknown status enum passes; a review missing quality_scores records anyway; learning_synthesize emits evidence_sufficient under threshold; auto_propose silently no-ops when threshold met | tests/mcp_promotion_and_learning.test.ts |

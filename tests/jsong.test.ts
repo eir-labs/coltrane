@@ -1,8 +1,9 @@
-// O16 — JSONG pure-TS port conformance. The apoha that matters: byte-for-byte
-// agreement with the Python reference impl (sim-in-a-box/sib/jsong.py). The two
-// golden hex vectors below were emitted by the Python `pack_header` / `pack_tick`
-// from fixed inputs; if this TS port produces different bytes, the cross-language
-// format has forked — exactly what JSONG's fixed layout exists to prevent.
+// O16 — JSONG pure-TS port conformance. The counter-claim that matters:
+// byte-for-byte agreement with the Python reference impl (sim-in-a-box/sib/jsong.py).
+// The two golden hex vectors below were emitted by the Python `pack_header` /
+// `pack_tick` from fixed inputs; if this TS port produces different bytes, the
+// cross-language format has forked — exactly what JSONG's fixed layout exists
+// to prevent.
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -97,7 +98,7 @@ describe("JSONG: round-trip + multi-tick file", () => {
   });
 });
 
-describe("JSONG: apoha — malformed input is rejected, never silently accepted", () => {
+describe("JSONG: malformed input is rejected, never silently accepted", () => {
   it("rejects bad magic", () => {
     const b = packHeader(goldenHeader());
     b[0] = 0x00;

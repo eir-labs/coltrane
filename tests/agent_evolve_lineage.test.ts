@@ -13,7 +13,7 @@ const base: AgentProfile = {
 };
 
 describe("evolveProfile lineage (O20)", () => {
-  it("karma: creative change threads version+1 + parent_version + draft; chain reconstructs", () => {
+  it("creative change threads version+1 + parent_version + draft; chain reconstructs", () => {
     const v2 = evolveProfile(base, { identity: "you scan deeply" });
     expect(v2.version).toBe(2);
     expect(v2.parent_version).toBe(1);
@@ -26,7 +26,7 @@ describe("evolveProfile lineage (O20)", () => {
     expect(v3.version).toBe(3); expect(v3.parent_version).toBe(2);        // chains again
   });
 
-  it("apoha: harmonic fields can't ride through evolve — primitives/types carried unchanged", () => {
+  it("harmonic fields can't ride through evolve — primitives/types carried unchanged", () => {
     const harmonic = { primitives: ["SENSE","INTERPRET"], domain: "other" } as unknown as Partial<Pick<AgentProfile,"identity"|"method"|"constraints">>;
     const v2 = evolveProfile(base, harmonic);
     expect(v2.primitives).toEqual(["SENSE"]);  // harmonic ignored, NOT applied
@@ -34,7 +34,7 @@ describe("evolveProfile lineage (O20)", () => {
     expect(v2.parent_version).toBe(1);           // still a valid lineage hop
   });
 
-  it("apoha: permissions never evolve — carried unchanged", () => {
+  it("permissions never evolve — carried unchanged", () => {
     const v2 = evolveProfile(base, { method: "look harder" });
     expect(v2.permissions).toEqual(base.permissions);
   });

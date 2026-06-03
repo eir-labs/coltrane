@@ -210,7 +210,7 @@ describe("dependencyHash — v0.1 spec shape", () => {
   });
 });
 
-describe("effectiveHash — karma × emptiness binding", () => {
+describe("effectiveHash — content × dependency binding", () => {
   it("composes from content_hash + dependency_hash via the v0.1 byte format", () => {
     const ch = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
     const dh = "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210";

@@ -1,7 +1,6 @@
 # Phase 17 — Topology equivalence-classes for sub-thread e2e state-space
 
 **Run date:** 2026-06-02
-**Branch:** `groove/phase17-topology-collapse` (parent: `groove/phase15-e2e-sub-thread`)
 
 This spec applies an equivalence-class collapse to the test-cell state-space of the
 phase-15 e2e sub-thread suite. The core move is standard: instead of running every
@@ -41,9 +40,9 @@ hooks, hash stability, lineage, ramp budget) — not in the transport. Therefore
 any structural failure (e.g. "no sub-thread recorder wired", phase-15 RESULTS F1/F3/F4/F5),
 all four personas in the same (parent_turn, child_turn, context) cell collapse to one class.
 
-**Apoha:** this does NOT hold for assertion-specific tests. eng_manager-F1 (5-min ramp)
-is a timing assertion unique to that persona; it cannot collapse with platform_team-F2
-(api-version fail-closed) even at the same coordinates.
+**Counter-condition:** this does NOT hold for assertion-specific tests. eng_manager-F1
+(5-min ramp) is a timing assertion unique to that persona; it cannot collapse with
+platform_team-F2 (api-version fail-closed) even at the same coordinates.
 
 ### Invariance prediction 2: context_size_class — small/medium collapse
 
@@ -55,8 +54,9 @@ truncation/summarization paths.
 Therefore for the same (parent_turn, child_turn, persona), `small` and `medium` collapse
 into one class. `near_overflow` is a separate class.
 
-**Apoha:** does NOT hold if coltrane has a context-aware path that activates earlier
-than overflow. Phase-15 grep shows no such path exists today → collapse is honest.
+**Counter-condition:** does NOT hold if coltrane has a context-aware path that
+activates earlier than overflow. Phase-15 grep shows no such path exists today
+→ collapse is honest.
 
 ### Invariance prediction 3: chain_depth dominates over (parent_turn, child_turn) split
 
@@ -67,9 +67,10 @@ child-side accumulation.
 Concretely: (parent_turn=2, child_turn=0) and (parent_turn=0, child_turn=2) and
 (parent_turn=1, child_turn=1) should all collapse to `chain_depth=2`.
 
-**Apoha:** does NOT hold if coltrane treats parent/child asymmetrically (e.g. parent's
-ledger is durable but child's is in-memory). Phase-15 RESULTS suggests no recorder is
-wired AT ALL for sub-threads → the asymmetry doesn't yet exist → collapse is honest.
+**Counter-condition:** does NOT hold if coltrane treats parent/child asymmetrically
+(e.g. parent's ledger is durable but child's is in-memory). Phase-15 RESULTS suggests
+no recorder is wired AT ALL for sub-threads → the asymmetry doesn't yet exist
+→ collapse is honest.
 
 ### Invariance prediction 4: depth ≥ 1 is one class (post-cold-start)
 
@@ -78,8 +79,8 @@ wired AT ALL for sub-threads → the asymmetry doesn't yet exist → collapse is
 NO per-depth special-casing in `claude_invoker.ts`, depths 1, 2, 3, 4 collapse to one
 class: "resume-chain-of-any-length-≥1".
 
-**Apoha:** does NOT hold if coltrane installs any depth-aware logic (e.g. compaction
-at depth=3). None observed in phase-15.
+**Counter-condition:** does NOT hold if coltrane installs any depth-aware logic
+(e.g. compaction at depth=3). None observed in phase-15.
 
 ## Equivalence-class derivation
 
@@ -168,7 +169,7 @@ For each representative cell:
 - If the equivalence-collapse demonstrably doesn't fit the cells, reshape and
   report RIPENED-DIFFERENTLY.
 
-## Apoha (what this is NOT)
+## What this is NOT
 
 - NOT re-running every cell of the full 300-cell grid.
 - NOT extending coltrane code; this is a test-scope topology layer.

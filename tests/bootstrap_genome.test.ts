@@ -3,8 +3,8 @@
 // builds a registry with zero hardcoded core types, extends it at runtime, and runs
 // a full gig end-to-end through the MCP surface. Proves "seed the schema → seed the
 // players → the loop runs" boots from files alone.
-// Apoha: the disk genome is missing/!=6 core types, or a gig can't run on the
-// registry that was reconstituted purely from files.
+// Counter-claim: the disk genome is missing/!=6 core types, or a gig can't run
+// on the registry that was reconstituted purely from files.
 import { describe, it, expect } from "vitest";
 import { fileURLToPath } from "node:url";
 import {
@@ -48,7 +48,7 @@ describe("§13 Bootstrap Run — genome boots from disk", () => {
     expect(deps.outputs.all().map((o) => o.domain_type).sort()).toEqual(["finding", "page-model"]);
   });
 
-  it("a genome-loaded type validates instances with zero manual registerType for the core (apoha guard)", () => {
+  it("a genome-loaded type validates instances with zero manual registerType for the core (counter-claim guard)", () => {
     const registry = loadRegistry(loadGenome(REPO_ROOT));
     // an unregistered domain type must NOT validate — the registry only knows what was booted
     const res = registry.validate({ core_type: "Signal", domain_type: "ghost-type", data: { anything: true } });

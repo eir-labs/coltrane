@@ -1,0 +1,59 @@
+{
+  "slug": "user-flow-verdict",
+  "version": 1,
+  "extends": "Interpretation",
+  "domain": "self_judge",
+  "status": "active",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "criteria": {
+        "type": "object",
+        "properties": {
+          "tool_pick_appropriate": {
+            "type": "object",
+            "properties": {
+              "score": { "type": ["number", "null"] },
+              "rationale": { "type": "string" }
+            }
+          },
+          "response_faithful": {
+            "type": "object",
+            "properties": {
+              "score": { "type": ["number", "null"] },
+              "rationale": { "type": "string" }
+            }
+          },
+          "genome_state_valid": {
+            "type": "object",
+            "properties": {
+              "score": { "type": ["number", "null"] },
+              "rationale": { "type": "string" }
+            }
+          },
+          "typed_error_on_malformed": {
+            "type": "object",
+            "properties": {
+              "score": { "type": ["number", "null"] },
+              "rationale": { "type": "string" }
+            }
+          },
+          "multi_turn_continuity": {
+            "type": "object",
+            "properties": {
+              "score": { "type": ["number", "null"] },
+              "rationale": { "type": "string" }
+            }
+          }
+        }
+      },
+      "overall_score": { "type": ["number", "null"] },
+      "overall_pass": { "type": "boolean" },
+      "top_finding": { "type": "string" }
+    }
+  },
+  "required_fields": [
+    "criteria",
+    "overall_pass"
+  ]
+}

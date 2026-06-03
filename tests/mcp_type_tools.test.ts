@@ -40,7 +40,7 @@ describe("type tools through the MCP router", () => {
     expect(types.map((t) => t.slug)).toContain("finding");
   });
 
-  it("type_register rejects a duplicate (reuse enforcement, apoha)", async () => {
+  it("type_register rejects a duplicate (reuse enforcement)", async () => {
     const d = deps();
     await dispatchTool("type_register", finding, d);
     let rejected = false;

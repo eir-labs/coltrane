@@ -1,8 +1,8 @@
 // E6 — full provenance trace from a final artifact back to the original signal,
 // THROUGH the MCP surface. A 3-phase gig builds a real derived_from chain
 // (signal → interpretation → artifact); output_trace must return every ancestor.
-// Apoha: the trace breaks or drops an edge (an ancestor missing), or a root
-// signal falsely reports ancestors it never had.
+// Counter-claim: the trace breaks or drops an edge (an ancestor missing), or
+// a root signal falsely reports ancestors it never had.
 import { describe, it, expect } from "vitest";
 import {
   dispatchTool, createRegistry, createOutputStore, MemoryLedger,
@@ -55,7 +55,7 @@ describe("E6: full provenance trace artifact → signal", () => {
     expect(roots).toContain(sig.id);
   });
 
-  it("a root signal has no ancestors — trace returns the empty closure, no phantom edges (apoha)", async () => {
+  it("a root signal has no ancestors — trace returns the empty closure, no phantom edges", async () => {
     const deps = wired();
     const d = await dispatchTool("gig_dispatch", { standard_slug: "scan-and-fix", input: {} }, deps);
     const { gig_id } = d.data as { gig_id: string };

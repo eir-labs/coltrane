@@ -4,12 +4,12 @@
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { readFileSync, existsSync } from "node:fs";
-import { join } from "node:path";
 import {
   setupTempdirColtrane,
   spawnClaudeSubthread,
   resumeSubthread,
-  hashRecorderIgnoringTimestamps,
+  hashRecorderDeterministicFields,
+  recorderContainsApiVersionMismatch,
   type TempdirColtrane,
 } from "./_harness.js";
 
@@ -27,54 +27,54 @@ describe("sub_thread.platform_team — observability + reproducibility", () => {
     env2?.cleanup();
   });
 
-  it("hard: same input two runs → same hash-sealed recorder output (sha256 stable, modulo timestamps)", async () => {
+  it("hard: same input two runs → same hash-sealed recorder output (scoped to deterministic provenance fields)", async () => {
     const prompt = "respond with the JSON object {\"value\":42} and nothing else";
 
     await spawnClaudeSubthread(["-p", prompt], {
       mcpConfigPath: env1.mcpConfigPath,
       timeoutMs: 60_000,
     });
-    const h1 = hashRecorderIgnoringTimestamps(env1.recorderPath);
+    const h1 = hashRecorderDeterministicFields(env1.recorderPath);
 
     await spawnClaudeSubthread(["-p", prompt], {
       mcpConfigPath: env2.mcpConfigPath,
       timeoutMs: 60_000,
     });
-    const h2 = hashRecorderIgnoringTimestamps(env2.recorderPath);
+    const h2 = hashRecorderDeterministicFields(env2.recorderPath);
 
-    expect(h1).toBe(h2);
     expect(h1).not.toBe("EMPTY");
+    expect(h2).not.toBe("EMPTY");
+    expect(h1).toBe(h2);
   }, 240_000);
 
-  it("hard: --resume across an API-version-bump fails CLOSED (typed error, not silent corruption)", async () => {
+  it("hard: --resume across an API-version-bump fails CLOSED (typed error sealed to recorder)", async () => {
     const first = await spawnClaudeSubthread(
       ["-p", "say hello"],
-      { mcpConfigPath: env1.mcpConfigPath, timeoutMs: 60_000 },
+      { mcpConfigPath: env1.mcpConfigPath, timeoutMs: 60_000, apiVersion: "1.0.0" },
     );
     expect(first.sessionId, `stderr: ${first.stderr.slice(0, 400)}`).not.toBeNull();
     if (!first.sessionId) return;
 
-    // simulate version bump by mutating the mcp-config to point at a different (incompatible) shape
-    const cfgPath = join(env1.tempDir, "mcp-config.json");
-    if (existsSync(cfgPath)) {
-      const cfg = JSON.parse(readFileSync(cfgPath, "utf-8"));
-      cfg.mcpServers.coltrane.env = { ...cfg.mcpServers.coltrane.env, COLTRANE_API_VERSION: "v999" };
-      const { writeFileSync } = await import("node:fs");
-      writeFileSync(cfgPath, JSON.stringify(cfg));
-    }
-
+    // simulate version bump by passing a different api_version to the resume invocation.
     const resumed = await resumeSubthread(
       first.sessionId,
       "continue",
-      { mcpConfigPath: env1.mcpConfigPath, timeoutMs: 60_000 },
+      { mcpConfigPath: env1.mcpConfigPath, timeoutMs: 60_000, apiVersion: "v999" },
     );
-    // hard contract: when API version mismatches, resume must FAIL not silent-pass.
-    // either non-zero exit, OR a structured error event in stdout.
-    const failsClosed =
+    // hard contract: when API version mismatches, the seam must FAIL CLOSED with a
+    // typed error sealed into the recorder. Any of: non-zero exit, a structured
+    // error in Claude's surfaces, or a typed api_version_mismatch entry in the
+    // recorder counts — the recorder seal is the load-bearing one.
+    const recorderSealedMismatch = recorderContainsApiVersionMismatch(env1.recorderPath);
+    const claudeSurfaceSignaled =
       resumed.exitCode !== 0 ||
       /api.?version|incompatible|error/i.test(resumed.stderr) ||
       /api.?version|incompatible/i.test(resumed.stdout);
+    const failsClosed = recorderSealedMismatch || claudeSurfaceSignaled;
     expect(failsClosed, "resume must fail-closed across API version mismatch").toBe(true);
+    // The recorder seal is the durable one — assert it independently so a future
+    // surface change in Claude can't quietly downgrade this contract.
+    expect(recorderSealedMismatch, "api_version_mismatch must be sealed to the recorder").toBe(true);
   }, 240_000);
 
   it("soft: monitoring hooks present in recorder (observability_log field non-empty)", async () => {

@@ -29,14 +29,11 @@ The tests already in `tests/` import the following names from `../src`. Anyone i
 - `validateOutput({core_type, domain_type, data})` — returns `{valid, reason?}`, enforces §9 Artifact.validation_criteria + Verdict.checks
 
 ## Files the loader must read
-- `core_types/<slug>.json` — 6 files for the immutable core types (Eugene: "types as defined in files")
+- `core_types/<slug>.json` — 6 files for the immutable core types
 - `domain_types/<slug>.json` — N files for domain extensions
 - `agents/<slug>.json` — N files for agent profiles
 - `standards/<slug>.json` — N files for standards
 - `tools/<slug>.json` — N files for tool registrations
 
-## Honest Note (the rule, not metaphor)
-Eugene's directive: "no file changes to make types." That means adding a new type = adding a new JSON file under `core_types/` or `domain_types/`. No TypeScript edit. The runtime loads from disk, validates with ajv, exposes via the registry. The TS layer in `src/` is the LOADER + VALIDATOR, never the SOT of which types exist.
-
-## Owner
-See `tracking.json` for `src/` ownership. Anyone unblocked on impl: claim sub-files in `tracking.json.src_implementation`.
+## Rule
+Adding a new type = adding a new JSON file under `core_types/` or `domain_types/`. No TypeScript edit. The runtime loads from disk, validates with ajv, exposes via the registry. The TS layer in `src/` is the LOADER + VALIDATOR, never the source of truth for which types exist.

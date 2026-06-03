@@ -1,8 +1,9 @@
 // O19 — Document Factory: the 5-layer contract. Deterministic structure + bounded
-// inference. The apoha that matters: a slot with NO fact is DROPPED (never filled
-// with invented content), the inference contract REJECTS a non-conforming response
-// (retry once, then fail loud), and no inference call sees the whole document
-// except the final coherence pass. Inferer is mocked → deterministic test, no key.
+// inference. The counter-claim that matters: a slot with NO fact is DROPPED (never
+// filled with invented content), the inference contract REJECTS a non-conforming
+// response (retry once, then fail loud), and no inference call sees the whole
+// document except the final coherence pass. Inferer is mocked → deterministic
+// test, no key.
 import { describe, it, expect } from "vitest";
 import { join } from "node:path";
 import {

@@ -28,7 +28,7 @@ Then point any MCP client (Claude Code, Cursor, anything stdio-MCP) at this bina
 1. **Genome** — content-addressed JSON/text files under `core_types/`, `domain_types/`, `agents/`, `standards/`, `skills/`. Adding a type or agent means adding a file; no TypeScript changes required.
 2. **Five definition classes** — `types · players (agents) · standards · skills · evals`. Each is a hashable, fixture-backable definition.
 3. **Six cognitive primitives** — `SENSE · INTERPRET · JUDGE · PLAN · CREATE · VERIFY`. Each maps 1:1 to a core output type (`Signal · Interpretation · Judgment · Plan · Artifact · Verdict`).
-4. **Three identity hashes per definition** — `content_hash` (karma: the bytes) · `dependency_hash` (emptiness: relational closure) · `effective_hash` (the binding). Two byte-identical definitions in different contexts produce different effective hashes.
+4. **Three identity hashes per definition** — `content_hash` (the bytes) · `dependency_hash` (the relational closure) · `effective_hash` (the binding of the two). Two byte-identical definitions in different contexts produce different effective hashes.
 5. **One sealed record per gig** — `genome_hash` (deterministic, the reproducibility key) + `run_fingerprint` (carries model_version + eval scores, non-deterministic by design). Both live in the append-only ledger.
 
 ## MCP tool surface

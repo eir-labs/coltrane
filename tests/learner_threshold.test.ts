@@ -1,6 +1,6 @@
 // Prereg row E5 — Layer 4 End-to-End.
-// Karma: learner observes 50+ gigs, proposes downgrade with evidence.
-// Apoha: proposes downgrade without 50+ data points (§8 constraint 10).
+// Must pass: learner observes 50+ gigs, proposes downgrade with evidence.
+// Must fail: proposes downgrade without 50+ data points (§8 constraint 10).
 
 import { describe, it, expect } from "vitest";
 
@@ -22,7 +22,7 @@ function makeGigs(n: number): GigObservation[] {
   }));
 }
 
-describe("E5 karma — learner with ≥50 gigs proposes downgrade with evidence", () => {
+describe("E5 — learner with ≥50 gigs proposes downgrade with evidence", () => {
   it("accepts proposal at exactly 50 gigs", () => {
     const r = learnerProposeDowngrade({
       agent_slug: "candidate-agent",
@@ -58,7 +58,7 @@ describe("E5 karma — learner with ≥50 gigs proposes downgrade with evidence"
   });
 });
 
-describe("E5 apoha — learner with <50 gigs cannot propose downgrade", () => {
+describe("E5 — learner with <50 gigs cannot propose downgrade", () => {
   it("rejects proposal at 49 gigs", () => {
     const r = learnerProposeDowngrade({
       agent_slug: "candidate-agent",

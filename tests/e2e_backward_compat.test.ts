@@ -1,8 +1,8 @@
 // E2 — backward-compat at scale: many scans run THROUGH the MCP surface, each
 // producing a finding; the v1 `findings` view projects them all correctly. This is
 // the migration guarantee — existing finding consumers keep working unchanged.
-// Apoha: the view returns wrong rows (a non-eirtests / non-finding output leaks in),
-// or projects stale/misjoined columns.
+// Counter-claim: the view returns wrong rows (a non-eirtests / non-finding output
+// leaks in), or projects stale/misjoined columns.
 import { describe, it, expect } from "vitest";
 import {
   dispatchTool, createRegistry, createOutputStore, MemoryLedger,
@@ -50,7 +50,7 @@ describe("E2: backward-compat findings view at scale", () => {
     expect(rows.every((r) => typeof r.title === "string" && r.title.startsWith("finding "))).toBe(true);
   });
 
-  it("a non-eirtests note never leaks into the findings view (apoha)", async () => {
+  it("a non-eirtests note never leaks into the findings view", async () => {
     const deps = wired();
     await dispatchTool("gig_dispatch", { standard_slug: "readiness-scan", input: { n: 0 } }, deps);
     // a codechange note written straight to the store must NOT appear in findings()

@@ -16,7 +16,7 @@ import {
   PromotionError,
 } from "./mcp.js";
 import { createRegistry, loadRegistry, type Registry, type DomainType } from "./registry.js";
-import { loadGenome, type SkillRecord } from "./loader.js";
+import { loadGenome, type SkillRecord, type EvalRecord } from "./loader.js";
 import { sealAgentDefinition, sealDefinition, recordIdentity } from "./genome_writer.js";
 import { createOutputStore, type OutputStore } from "./outputs.js";
 import { MemoryLedger, type Ledger } from "./ledger.js";
@@ -50,6 +50,10 @@ export interface ServerDeps {
   // agent's skill_slugs into actual SkillRecords (rendered as the prompt's
   // Skills layer by the Claude invoker).
   skills?: ReadonlyMap<string, SkillRecord> | undefined;
+  // §13/evals — passed through to runGig so eval scan-and-fire works post-phases.
+  // Agents map is also passed so an eval can name an agent_slug to invoke.
+  evals?: ReadonlyMap<string, EvalRecord> | undefined;
+  agents?: ReadonlyMap<string, Agent> | undefined;
   // Substrate-of-truth seam: when set, genome-mutation tools (agent_define, …) PERSIST
   // the content-addressed file here + ledger-seal its identity. Without it, they compute
   // + return the identity but don't write (validation path).
@@ -207,6 +211,8 @@ export async function dispatchTool(slug: string, args: Record<string, unknown>, 
           invoke: deps.invoke,
           model_version: deps.model_version,
           skills: deps.skills,
+          evals: deps.evals,
+          agents: deps.agents,
         });
         return {
           ok: true,
@@ -725,6 +731,8 @@ export function bootstrapServerDeps(genomeRoot?: string): ServerDeps {
     invoke: makeClaudeInvoker({ registry, model: process.env["COLTRANE_MODEL"] }),
     model_version: process.env["COLTRANE_MODEL"] ?? "claude-cli-default",
     skills: genome.skills, // ← skill substrate — runGig resolves agent.skill_slugs into prompt
+    evals: genome.evals,   // ← eval substrate (5th class) — runGig fires evals post-phases
+    agents: genome.agents, // ← eval invocations resolve their agent_slug against this map
     genome_dir: root, // ← genome-mutation tools persist + ledger-seal into the live genome
   };
 }

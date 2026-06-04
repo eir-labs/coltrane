@@ -8,8 +8,12 @@ export interface AgentDef {
   output_types?: readonly string[];
   domain?: string;
   // Blast-radius cage: the tool whitelist/blacklist the spawned claude is held to.
-  // Empty/absent = no per-agent tool grant (with --strict-mcp-config, the spawn gets
-  // NO ambient MCP tools — deny-by-default; declare allowed_tools to grant scope).
+  // - allowed_tools: empty/absent = no per-agent tool grant (with --strict-mcp-config,
+  //   the spawn gets NO ambient MCP tools — deny-by-default; declare allowed_tools to
+  //   grant scope). Any tool listed here is REMOVED from the deny baseline below.
+  // - disallowed_tools: ADDITIVE on top of the DEFAULT_DENY_TOOLS baseline (Bash,
+  //   Read/Write/Edit, Task, WebFetch/Search, etc.). defineAgent always merges the
+  //   baseline in, so an agent that declares nothing still gets the sword raised.
   allowed_tools?: readonly string[];
   disallowed_tools?: readonly string[];
 }
@@ -52,6 +56,50 @@ const NEEDS_UPSTREAM_REASONING = new Set<Primitive>(["CREATE"]);
 const NEEDS_TARGET = new Set<Primitive>(["VERIFY"]);
 const REASONING = new Set<Primitive>(["INTERPRET", "PLAN", "SENSE"]);
 
+// The default-deny lower bound: tools every agent's spawn is BLOCKED from using
+// unless the agent explicitly grants them in allowed_tools. Wielded like a sword —
+// host-shell escapes, host-fs escapes, recursion escape, and ambient egress.
+// This is the floor. Per-agent disallowed_tools EXTENDS (additive) this baseline.
+// Per-agent allowed_tools WINS — any tool in allowed_tools is removed from the
+// effective deny list (you can grant Bash explicitly if a standard truly needs it).
+export const DEFAULT_DENY_TOOLS: readonly string[] = Object.freeze([
+  // host-shell escapes
+  "Bash",
+  "Shell",
+  "KillBash",
+  "BashOutput",
+  // host-fs escapes
+  "Read",
+  "Write",
+  "Edit",
+  // recursion escape
+  "Task",
+  // ambient egress
+  "WebFetch",
+  "WebSearch",
+]);
+
+// Compute the effective disallowed_tools for an agent:
+//   baseline = DEFAULT_DENY_TOOLS
+//   explicit = agent's declared disallowed_tools (additive on top of baseline)
+//   allowed  = agent's declared allowed_tools (subtracted — explicit grant wins)
+// Returns a stable, de-duplicated, allow-filtered list.
+export function effectiveDisallowedTools(
+  declared_disallowed: readonly string[] | undefined,
+  declared_allowed: readonly string[] | undefined,
+): string[] {
+  const allowSet = new Set(declared_allowed ?? []);
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const t of [...DEFAULT_DENY_TOOLS, ...(declared_disallowed ?? [])]) {
+    if (allowSet.has(t)) continue; // explicit allow_tools beats the deny baseline
+    if (seen.has(t)) continue;
+    seen.add(t);
+    out.push(t);
+  }
+  return out;
+}
+
 export function defineAgent(def: AgentDef): Agent {
   const prims = def.primitives;
   if (prims.length === 0) {
@@ -77,6 +125,13 @@ export function defineAgent(def: AgentDef): Agent {
     }
   }
 
+  // Default-deny lower bound: every agent's effective disallowed_tools is the
+  // DEFAULT_DENY_TOOLS baseline EXTENDED by any explicit declarations, with any
+  // tool the agent ALSO declared in allowed_tools removed (explicit grant wins).
+  // This means an agent that declares nothing still gets Bash/Read/Write/Task/
+  // WebFetch/etc. blocked at spawn — the sword is always raised.
+  const effective_disallowed = effectiveDisallowedTools(def.disallowed_tools, def.allowed_tools);
+
   return {
     slug: def.slug,
     primitives: prims,
@@ -85,7 +140,7 @@ export function defineAgent(def: AgentDef): Agent {
       def.output_types ?? prims.map((p) => PRIMITIVE_OUTPUT_TYPE[p]).slice(-1),
     domain: def.domain ?? null,
     allowed_tools: def.allowed_tools ?? [],
-    disallowed_tools: def.disallowed_tools ?? [],
+    disallowed_tools: effective_disallowed,
   };
 }
 

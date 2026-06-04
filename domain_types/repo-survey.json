@@ -23,5 +23,6 @@
       "survey_completeness": { "type": "string", "enum": ["complete", "partial", "shallow"], "description": "Honest signal-bound: did we hit the scan limits or get clean reads on every channel?" }
     },
     "required": ["repo_path", "repo_name", "survey_completeness"]
-  }
+  },
+  "required_fields": []
 }

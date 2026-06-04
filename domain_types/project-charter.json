@@ -85,5 +85,6 @@
       }
     },
     "required": ["id", "name", "use_case", "predict", "kill", "apoha"]
-  }
+  },
+  "required_fields": []
 }

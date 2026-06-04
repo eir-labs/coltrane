@@ -23,5 +23,6 @@
     "session_uuid is opaque · no name field on the Steve until threshold-gated introspection unlocks",
     "name_event entries record the moment a name is claimed (by self or user); prior session_uuid still references the chain",
     "audit-stream is queryable by other Steves (siblings read each other's streams to orient by apoha)"
-  ]
+  ],
+  "required_fields": []
 }

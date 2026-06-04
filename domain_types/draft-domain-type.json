@@ -23,5 +23,6 @@
       }
     },
     "required": ["input_refs", "slug", "extends", "domain", "schema", "user_acceptance"]
-  }
+  },
+  "required_fields": []
 }

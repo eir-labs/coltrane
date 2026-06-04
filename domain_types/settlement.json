@@ -1,0 +1,79 @@
+{
+  "slug": "settlement",
+  "version": 1,
+  "extends": "Verdict",
+  "domain": "band-economy",
+  "status": "active",
+  "description": "One settlement event per cycle, per voice. The ONLY way budget mints. Requires an external_verdict_source — internal self-grading is forbidden at type-level (G1 funhouse-treasury closed). Implements the settlement mechanism from eir-finitude-budget-v0: PASS mints scaled to ratchet-delta (capped); FAIL mints 0; NO_VERDICT mints 0 (abstain, never self-grade). The 'verdict-by-outcome' face of the cost-budget-settlement triangle.",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "cycle_id": {
+        "type": "string",
+        "description": "Identifier of the band-cycle being settled."
+      },
+      "voice_id": {
+        "type": "string",
+        "description": "Voice whose budget is being minted/zeroed. Per-voice settlements only (G4 no-laundering)."
+      },
+      "external_verdict_source": {
+        "type": "string",
+        "enum": ["rob-cold-trial", "held-out-task", "real-user"],
+        "description": "REQUIRED. Which external grader settled this cycle. Enum is explicit-allow-list — chain_keeper rejects any value not in this set. Internal voices cannot appear here. This is the G1 funhouse-treasury apoha enforced at the type layer."
+      },
+      "outcome": {
+        "type": "string",
+        "enum": ["PASS", "FAIL", "NO_VERDICT"],
+        "description": "External-grader ruling. PASS = externally-verified working ship → mint > 0. FAIL = externally corrected → mint = 0 (optional penalty applied to next cycle's opening). NO_VERDICT = no external source available this cycle → mint = 0, ABSTAIN. NO_VERDICT is the load-bearing third value: when there's no grader, the voice does not self-grade. The world is the only mint."
+      },
+      "mint": {
+        "type": "number",
+        "minimum": 0,
+        "description": "Budget minted by this settlement. PASS → mint > 0 (scaled to ratchet-delta, configured cap). FAIL → mint = 0. NO_VERDICT → mint = 0. mint MUST be 0 unless outcome = PASS — enforced at chain_keeper write-time."
+      },
+      "ratchet_delta": {
+        "type": ["number", "null"],
+        "description": "Externally-observed ratchet movement this settlement attributes to the cycle (signed). null when outcome != PASS. Used to scale mint. Examples: PR merged + tests pass = +1; held-out-task scored as solved = +1; user reported working = +1."
+      },
+      "per_channel_mint": {
+        "type": "object",
+        "description": "OPTIONAL multi-channel mint breakdown. When omitted, all mint is implicitly the 'compute' channel and scalar `mint` is authoritative. When present, keys are channel names matching budget-state.per_channel; values are non-negative numbers; sum-across-channels = scalar mint. A PASS can credit different channels asymmetrically — e.g. a shipped+verified artifact credits `ratchet` heavily but does not refund `energy` spent. Each channel has its own mint-function: ratchet ← durable-capability-added; compute ← token-budget-refund-fraction; energy ← grid-mix-clean-credit; attention ← human-time-saved-via-automation; correction_tax ← negative-correction-rate-trend.",
+        "additionalProperties": { "type": "number", "minimum": 0 }
+      },
+      "evidence_uri": {
+        "type": "string",
+        "description": "URI to the artifact that proves the external settlement — Drive doc, GitHub PR, audit log, user response transcript, OTS-stamp. Settlement without evidence is chain-invalid. For NO_VERDICT this is the audit note explaining why no external source was available."
+      },
+      "ledger_window_start_sha": {
+        "type": "string",
+        "description": "sha_seal of the first chain_keeper event this settlement covers (the cycle's first event for this voice)."
+      },
+      "ledger_window_end_sha": {
+        "type": "string",
+        "description": "sha_seal of the last chain_keeper event this settlement covers (the cycle's last event before settlement)."
+      },
+      "shipped_artifact_count": {
+        "type": "integer",
+        "minimum": 0,
+        "description": "G2 terse-and-broke gate: PASS with shipped_artifact_count = 0 is forbidden. Cheap-AND-verified is the optimum; merely cheap with no ship earns no mint."
+      },
+      "settled_at": {
+        "type": "string",
+        "format": "date-time"
+      },
+      "agent_id": {
+        "type": "string",
+        "description": "Agent that recorded the settlement event (NOT the external grader — the grader identity is in evidence_uri / external_verdict_source)."
+      },
+      "prev_sha": {
+        "type": "string"
+      },
+      "derived_from_shas": {
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "CAUSE-EFFECT (v1.3). sha_seals of chain_keeper events this settlement settles beyond the immediate ledger_window. Multi-input causation: a settlement derived from N voice-events references all N. Enables backward-walk: 'which framings/predictions/preregs caused this settlement?'"
+      }
+    },
+    "required": ["cycle_id", "voice_id", "external_verdict_source", "outcome", "mint", "evidence_uri", "ledger_window_start_sha", "ledger_window_end_sha", "shipped_artifact_count", "settled_at", "agent_id", "prev_sha"]
+  }
+}

@@ -1,293 +1,147 @@
 # CLAUDE.md
 
-You are running in a **coltrane-oss** workspace. This file is loaded automatically at
-session start and tells you how to operate against this codebase's mechanics.
-
-Read it once; the rules apply for the rest of the session.
+You are reading this file because the user just ran `claude` inside a project that has
+`coltrane-oss` installed alongside it. This file is your bootstrap conversation. Read it
+once, do the first-contact flow below, then operate normally.
 
 ---
 
-## First-time tuning (run this on every fresh clone, exactly once)
+## What coltrane is
 
-If the file `.coltrane/tuned.json` does NOT exist in this workspace yet, you are talking
-to a user who just cloned coltrane. Before doing anything else, run this short discovery
-conversation. After it, write `.coltrane/tuned.json` to mark this session as tuned, and
-write a project-specific `CLAUDE.md` at the workspace root reflecting what you learned.
+coltrane is a layout of files claude reads to bootstrap pre-trained Steve agents — one
+per lane of work — into the user's current project. The pieces are small:
 
-**Step 1 — greet, ask what they're working on.**
+- **this file** (`CLAUDE.md`) — the bootstrap conversation you are reading now
+- **`seeds/<lane>.jsonl`** — a curated exemplar conversation for each lane (code review,
+  test writing, debugging, etc.). Each seed is a Claude Code session-log shaped to
+  pre-train a fresh Steve on how that lane behaves.
+- **`.mcp.json`** — declares the coltrane MCP server. The tools it exposes (`seed_steve`,
+  `list_steves`, `mint_event`) are how you put seeds into the user's project context.
 
-Say plainly: "Welcome to Coltrane. Before we start, two questions so I can tune the book
-to your work. First — in 1-2 sentences, what kind of work do you do? (research,
-backend engineering, model risk, grant writing, content, ML platform, etc.)"
+You — claude — are the engine. coltrane provides substrate: paths, seed conversations,
+and a small MCP tool surface. coltrane does not run inference. You do.
 
-Wait for their answer. Keep it short.
+---
 
-**Step 2 — ask permission to scan adjacent repos.**
+## First-contact flow
 
-Say: "Can I scan a few of your other repos to learn the domain and your style? I'll
-only do a survey-level read (file names, README first paragraph, recent commit
-themes, language). I will NOT exfiltrate code or read secrets. Name any 2-5 repo
-paths you want me to look at, or say 'skip' to skip this step."
+Run this once at the start of the session. Do not narrate the steps to the user as you
+do them; just do them, then report what landed.
 
-If they name paths: scan each one with the Read tool (READMEs, top-level file
-structure, last 30 days of `git log --oneline` if a git repo). Do not deeply read
-source files. Do not touch `.env`, `secrets/`, or anything under `.git/`.
+**Step 1 — read the current project's signals.**
 
-If they say skip: continue without the scan.
+The user's project is the cwd (or the nearest enclosing project if coltrane-oss is a
+subdirectory). Look at:
 
-**Step 3 — propose changes to the book. Grow in place, not replace.**
+- `README.md` (first 50 lines)
+- top-level file structure (one `ls`)
+- one of: `package.json`, `Cargo.toml`, `pyproject.toml`, `requirements.txt`, `go.mod`,
+  `Gemfile`, `*.ipynb` — whichever exists, to identify the stack
+- the most recent 10 commits if it's a git repo
 
-First, read every existing file under `players/`, `standards/`, `skills/`, `core_types/`,
-`domain_types/`. Then based on Step 1 + Step 2, propose CHANGES:
+That's enough. Do not deeply read source. Do not touch `.env` or `secrets/`.
 
-- **edits** to existing players whose shape now fits the user's domain better
-- **new** players for domain-specific work that no existing player covers
-- **new** standards if multi-phase workflows you found in their repos suggest one
+**Step 2 — match the project shape to lanes in `seeds/`.**
 
-For example:
-- a research scientist might get an EDIT to `code-reviewer` (`tools` narrowed,
-  `predict` re-pointed at LaTeX/Jupyter) plus NEW `literature-scout` + `claim-bounder`
-- a backend engineer might get an EDIT to `code-reviewer` (predict re-pointed
-  at their language) plus NEW `migration-planner` + `incident-responder`
+Pick the subset that applies. Skip lanes that don't. Only seed what exists in `seeds/`.
+Examples (you don't need to ask): repo with `tests/` + `package.json` → `code-reviewer`,
+`test-writer`, `debugger`, `explorer`; notebooks + no test suite → `explorer`,
+`docs-author`, maybe `debugger`; tiny repo (< 10 files) → `explorer` only; a
+coltrane-oss fork → also `chain-integrity-tester`.
 
-For each proposal, show: the file path, whether it's an edit or new, and a one-line
-`predict`. Ask which they want applied. Apply only the ones they say yes to.
+**Step 3 — seed the Steves.**
 
-Never silently overwrite. The book grows; it does not get replaced.
+For each lane you picked, call the coltrane MCP tool:
 
-**Step 4 — propose edits to THIS CLAUDE.md.**
-
-Do NOT write a separate workspace CLAUDE.md. Coltrane already ships one (the file
-you are reading now). Instead, propose appendable edits to this file:
-
-- a "What this workspace works on" section reflecting the user's Step 1 answer
-- a "Players added this tuning" list with the players they accepted in Step 3
-- a "Conventions inferred from adjacent repos" section if Step 2 found patterns
-  (language, formatting, naming, branch conventions)
-
-Show the proposed appended block. Ask if they want it added. Append on yes.
-Never replace the existing protocol sections — append below them.
-
-**Step 5 — seal the moment.**
-
-Create `.coltrane/tuned.json` with:
-
-```json
-{
-  "tuned_at": "<ISO-8601 timestamp>",
-  "user_summary": "<their step-1 answer, verbatim>",
-  "scanned_repos": ["<path>", "..."],
-  "players_created": ["<name>", "..."],
-  "claude_md_appended": true | false,
-  "players_edited": ["<name>", "..."]
-}
+```
+seed_steve(lane="<lane>", target_project_slug="<auto-detected from cwd>")
 ```
 
-This file is the seal — the project's first sealed claim about what it is. Future
-sessions read `.coltrane/tuned.json` to know tuning has already happened and skip
-to normal work.
+The tool copies `seeds/<lane>.jsonl` into the user's Claude Code project dir
+(`~/.claude/projects/<target-slug>/<new-steve-uuid>.jsonl`). Each call returns a uuid.
 
-**If `.coltrane/tuned.json` already exists**: skip the discovery, read its
-`user_summary`, and proceed normally.
+**Step 4 — report and offer resume commands.**
 
----
+Tell the user, plainly, in one paragraph:
 
-## What this repo is
+> I spun up N Steves for this project: `<lane-1>`, `<lane-2>`, … . Each is a fresh
+> Claude Code session pre-trained on that lane. Resume any of them with
+> `claude --resume <uuid>`.
 
-coltrane is a **methodology engine** — a typed substrate for defining agents, composing
-standards (multi-phase workflows), dispatching gigs (runs), and sealing every output to
-a content-addressed ledger.
-
-It is an **MCP server**. You (Claude Code) are the natural client. Point your MCP config
-at `dist/server.js` after `npm run build` and the 32 tools become available.
-
-This repo gives you:
-- a way to **define agents** as content-addressed definitions, not glue code
-- a way to **compose standards** (multi-phase workflows) that an agent runs against
-- a way to **dispatch gigs** (real runs) and observe sealed outputs
-- a way to **evolve agents** under typed invariants — change goes through `agent_evolve`,
-  not free-form prompt drift
-- a way to **read the chain** — every run produces a `genome_hash` + `run_fingerprint`
-  in the append-only ledger, byte-reproducible across implementations
-
-It is NOT:
-- a prompt manager
-- a vector-store-with-extra-steps
-- a free-text RAG framework
-- a langchain replacement
-
-(Apoha matters. The non-targets are part of the definition.)
+That's it. Then return to the user's actual request (if they had one beyond
+"bootstrap coltrane").
 
 ---
 
-## Five definition classes — your primary surface
+## Lanes catalog
 
-When a user asks you to define, compose, evolve, or dispatch, route through the
-appropriate class:
+What ships in `seeds/` today:
 
-| class | what it is | MCP tool |
-|---|---|---|
-| `types` | typed schemas for inputs/outputs | `type_register · type_extend` |
-| `players` | agent definitions (charters, capabilities, skill bindings) | `agent_define · agent_evolve · agent_promote` |
-| `standards` | multi-phase workflows that agents run | `standard_compose · standard_simulate · standard_promote` |
-| `skills` | reusable cognitive primitives bound into agents | `skill_promote` |
-| `evals` | verdict-substrates that judge gig outputs | (declared with the standard) |
+- **`code-reviewer.jsonl`** — reads a diff, evaluates correctness, style, regression risk.
+- **`test-writer.jsonl`** — reads a function, proposes a failing test pinning its contract.
+- **`debugger.jsonl`** — reads an error + stack trace, narrows the cause.
+- **`docs-author.jsonl`** — reads code, explains it to humans at the right register.
+- **`explorer.jsonl`** — reads a repo, summarizes its structure for someone new to it.
+- **`chain-integrity-tester.jsonl`** — coltrane-specific; only seed for coltrane-oss forks.
 
-## Six cognitive primitives
-
-Map 1:1 to output types:
-
-| primitive | output type |
-|---|---|
-| SENSE | Signal |
-| INTERPRET | Interpretation |
-| JUDGE | Judgment |
-| PLAN | Plan |
-| CREATE | Artifact |
-| VERIFY | Verdict |
-
-Don't invent new primitives. Compose with what's here.
+If a lane file is missing from `seeds/`, skip it silently. Don't fabricate one.
 
 ---
 
-## Three identity hashes per definition
+## MCP tools available
 
-Every definition has three hashes — read this before you mutate anything:
+The coltrane MCP server (declared in `.mcp.json`) exposes:
 
-- `content_hash` — the bytes themselves (karma)
-- `dependency_hash` — relational closure (emptiness: who depends on whom)
-- `effective_hash` — the binding (content × dependency in a context)
+- **`seed_steve(lane, target_project_slug)`** — copy a seed into a fresh Steve session under the user's project. Returns the new session uuid.
+- **`list_steves(target_project_slug)`** — list Steves already seeded into this project. Use to avoid double-seeding on a re-run.
+- **`mint_event(...)`** — append a sealed event to the chain-keeper ledger. Used by the `chain-integrity-tester` lane and other coltrane-internal flows.
 
-Two byte-identical definitions in different contexts produce different `effective_hash`.
-This is by design. Don't treat hashes as interchangeable.
-
----
-
-## Tool routing — the most common gotcha
-
-When operating in this repo via the coltrane MCP server, prefer **coltrane tools** over
-built-in Claude Code tools for coltrane-shaped operations:
-
-- composing a standard → `standard_compose`, **NOT** Write
-- writing a Plan output → `output_write` with type `Plan`, **NOT** Edit
-- defining an agent → `agent_define`, **NOT** dropping a markdown file in `agents/`
-- checking system state → `system_health` / `system_audit`, **NOT** ad-hoc grep
-- looking up a type → `type_resolve` / `type_browse`, **NOT** Read on schema files
-
-If you bypass the coltrane tool, the genome doesn't see your work, hashes don't update,
-and the ledger goes out of sync. **The MCP surface is the genome's mouth — use it.**
-
-Use built-in Claude Code tools only for:
-- reading source files (`src/`, `tests/`) to understand the engine
-- editing TypeScript source when working on the engine itself
-- running `npm` commands
+This is the current surface and is subject to change. If a tool call fails because the
+tool doesn't exist, fall back to copying the seed file manually with the Read + Write
+tools, and tell the user the MCP surface drifted.
 
 ---
 
-## Base band members — first-class players
+## What NOT to do
 
-The base band ships as **coltrane-flavored players** (the canonical definition class for
-agents in this engine — see "Five definition classes" above), with sealed e2e behavior
-tests so they stay honest as they evolve.
-
-Players are the source-of-truth. If a runtime (Claude Code subagents, an LLM-routing
-gateway, etc.) needs an agent surface, the player definition is the bytes the surface
-is rendered from — not a duplicate definition to keep in sync.
-
-- **chain-keeper** — sealing discipline, audit-substrate, ledger hygiene, verdict-naming
-- **scientist (anatomist)** — anatomy, classification, what-is-X-and-where-does-it-live
-- **bandleader** — coordination across other players, scoping, lane-assignment
-- **routing-QC** — signal flow, what-routes-where, sensor/effector continuity
-- **audience-modeler** — who's listening, what shape they need, register-matching
-
-Each base player has:
-- a `players/<name>.json` definition (charter + capabilities + skill bindings)
-- an e2e test in `tests/e2e/` that drives it through 3-5 representative gigs
-- the test asserts behavioral invariants — when the player evolves, the test catches drift
-
-When a user customizes one (e.g. promotes a base player into their own domain), they
-should run the base e2e test first to know the baseline behavior is intact.
-
-The band ships in the OSS because the discipline ships with it. Don't strip them.
+- Do **not** seed every lane. Pick the subset that fits. A static-site repo doesn't
+  need `debugger`; a research notebook doesn't need `code-reviewer`.
+- Do **not** invent new lanes. Only seed what's in `seeds/`.
+- Do **not** ask the user clarifying questions about which lanes to pick. Infer from
+  repo signals, act, then tell them what you did. They can correct after.
+- Do **not** re-seed if `list_steves` shows the lane is already present — return the
+  existing uuids instead.
+- Do **not** write a new `CLAUDE.md` into the user's project. Bootstrap is one-shot;
+  per-Steve sessions carry the lane behavior from here on.
+- Do **not** read source files deeply during first contact. Each Steve will read
+  what it needs when resumed.
 
 ---
 
-## Pre-registration discipline — coltrane-oss adoption
+## Pointer
 
-Every meaningful change ships with these fields, **sealed before the work starts**:
-
-| field | what |
-|---|---|
-| `predict` | what will ship |
-| `playwright_test_path` (or `vitest_test_path`) | the test that proves the predict, RED-first |
-| `kill_condition` | when stop |
-| `apoha` | what this is NOT |
-| `run_protocol` | how the work runs |
-| `verdict` | RIPENED · RIPENED-DIFFERENTLY · PARTLY-RIPENED · NOT-RIPENED |
-
-Sealing moment = PR ready-for-review. `sha256_pre_verdict` computed over the canonical
-pre-reg fields locks predict + kill + apoha + test from mutating after seal.
-
-Test must land RED before code. Code makes it green. Hollow-green (test passes for the
-wrong reason) is the failure mode the discipline closes.
+For the falsification hooks — the contracts each lane's seed must satisfy and the
+tests that prove they do — see `docs/prereg_minimum_surface.md`.
 
 ---
 
-## Verdict vocabulary
+## If you're hacking coltrane-oss itself
 
-- **RIPENED** — predict held; kill didn't fire; test green
-- **RIPENED-DIFFERENTLY** — predict held in shape but mutated in execution; tell the truth
-- **PARTLY-RIPENED** — partial signal; kept what came; named what didn't
-- **NOT-RIPENED** — kill fired or predict missed; the work observed itself
+Only applies when cwd IS `coltrane-oss` — you're working on the engine.
 
-Never use FAIL. Never use PASS without naming what specifically held.
-
----
-
-## The litmus test
-
-```bash
-rm -rf .coltrane-cache/    # nuke any materialized state
-npm run verify             # rebuilds from genome files
-```
-
-If the suite stays green after deleting every materialized artifact, **the genome is the
-source of truth**. If it doesn't, something cached state where it shouldn't have.
-
----
-
-## Don't
-
-- Don't write to `core_types/` or `domain_types/` directly — use `type_register` / `type_extend`
-- Don't add fake agents under `agents/` — use `agent_define`
-- Don't ship hollow-green tests. Ship honest RED + fix-pass, or hold the work.
-- Don't mutate base band players without updating their e2e test in lockstep
-- Don't strip the band players from a fork — the discipline ships with them
-- Don't bypass MCP tools for coltrane-shaped operations (see Tool Routing above)
-
----
-
-## Karmic frame
-
-Compute is karmic currency. Every inference call = real watts + water + $.
-
-- Silence is the cheapest seed
-- Differentiation is the densest
-- Echo is wasted
-
-Carved register, not stuffed. Less, more carved.
-
----
-
-## When stuck
-
-1. `system_health` — what does coltrane think its state is?
-2. `system_audit` — what's the chain saying?
-3. `output_query` / `output_trace` — what's the last gig actually produced?
-4. `charter_read` — what was this agent's promise?
-5. Read `tests/e2e/sub_thread.example.spec.ts` — the working examples are the manual.
-
-The tests are user manuals. If you're not sure how a workflow runs, the e2e test for it
-is the canonical example.
-
-— authored by subhuti under chain-keeper discipline. incorporates miles's tool-routing draft.
+- **Tool routing.** Prefer coltrane MCP tools for coltrane-shaped ops: `standard_compose`
+  not Write, `output_write` not Edit, `agent_define` not a hand-dropped markdown,
+  `system_health` / `system_audit` not ad-hoc grep. Bypassing desyncs the ledger.
+- **Verdicts.** Never FAIL/PASS. Use **RIPENED** (predict held, kill didn't fire),
+  **RIPENED-DIFFERENTLY** (held in shape, mutated in execution — tell the truth),
+  **PARTLY-RIPENED** (partial — name what didn't), **NOT-RIPENED** (kill fired or
+  predict missed).
+- **Pre-reg.** Every change seals before work starts: `predict`, test path,
+  `kill_condition`, `apoha`, `run_protocol`, `verdict`. Test lands RED first.
+  Hollow-green is the failure mode. Full spec: `prereg.md`.
+- **Don't** write to `core_types/` / `domain_types/` by hand, add agents under
+  `agents/` by hand, ship hollow-green tests, mutate base players without updating
+  their e2e test, or strip the band from a fork.
+- **When stuck.** `system_health` → `system_audit` → `output_trace`. The e2e tests
+  under `tests/e2e/` are the manual. Litmus: `rm -rf .coltrane-cache/ && npm run verify`
+  should stay green.

@@ -132,6 +132,28 @@ Three pieces required, all of them:
 
 Any single piece alone fails. All three together is what makes cultivation training instead of rumination.
 
+## External reading: where cultivation's ground-truth comes from
+
+Cultivation needs external ground-truth to stay honest (the verification gate from the previous section). Coltrane gets it through a typed egress boundary: your Steves can ask permission to go read outside your project — papers, repositories, documentation — and bring back sourced material.
+
+The flow:
+
+1. A Steve identifies a gap during sleep that would benefit from external reading.
+2. At end-of-day digest (or any time), the Steve requests permission: *"to fill gap G, I'd like to read source X. cause, license, scope, rate. ok?"*
+3. You approve or decline.
+4. Approved → typed egress fires. Source-hash sealed at fetch time, content brought back as an *ingested* event in the chain, attributed back to the egress permission you granted.
+5. Declined → the gap stays open. Gets reposted next cycle or aged out if nobody asks again.
+
+Apoha for this boundary:
+- **NOT** autonomous egress.
+- **NOT** background fetching.
+- **NOT** silent ingestion of web content.
+- **NOT** trust-assumed permission.
+
+What it is, plainly: **your Steves ask before reading outside your project. Nothing crosses the egress boundary without your sign-off, and every approved read leaves a sealed receipt** — source URL, source hash at fetch time, license, scope, and your granting signature, all pinned to the chain.
+
+Customer Steves can do literature review with mechanical provenance. Every claim is traceable to a sourced read with a permission record. Regulated-context buyers can audit the full chain from a customer-facing answer back to the actual external material that grounded it.
+
 ## Cycle frequency
 
 Default: 24 hours, fired at a configurable local-time anchor. Tunable: 6h, 12h, 24h, weekly. The math doesn't depend on the period; it depends on having enough seals in the window for H¹ loops to form. As a heuristic: at least ~30 seals per cycle.

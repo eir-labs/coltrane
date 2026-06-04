@@ -21,7 +21,7 @@ import { sealAgentDefinition, sealDefinition, recordIdentity } from "./genome_wr
 import { createOutputStore, defaultOutputsPersistDir, type OutputStore } from "./outputs.js";
 import { MemoryLedger, type Ledger } from "./ledger.js";
 import { standardSimulate } from "./simulate.js";
-import { runGig, type AgentInvoker } from "./runtime.js";
+import { runGig, BudgetExhausted, type AgentInvoker } from "./runtime.js";
 import { makeClaudeInvoker } from "./claude_invoker.js";
 import { composeStandard, defineAgent, CompositionError, type Standard, type Agent, type PhaseDef } from "./composition.js";
 import { PRIMITIVE_OUTPUT_TYPE, type Primitive } from "./core_types.js";
@@ -220,18 +220,48 @@ export async function dispatchTool(slug: string, args: Record<string, unknown>, 
         const slug2 = String(args["standard_slug"] ?? "");
         const standard = deps.standards.get(slug2);
         if (!standard) return { ok: false, requires_approval: approval, error: `unknown standard "${slug2}"` };
-        const res = await runGig(standard, (args["input"] as Record<string, unknown>) ?? {}, {
-          outputs: deps.outputs,
-          ledger: deps.ledger,
-          invoke: deps.invoke,
-          model_version: deps.model_version,
-          skills: deps.skills,
-        });
-        return {
-          ok: true,
-          requires_approval: approval,
-          data: { gig_id: res.gig_id, manifest: { genome_hash: res.genome_hash, run_fingerprint: res.run_fingerprint, output_count: res.outputs.length } },
-        };
+        // Optional budget arg — when present, runtime enforces per-gig cost-budget
+        // and raises BudgetExhausted on depletion (PR for T10 gap, see runtime.ts).
+        const budgetArg = args["budget"] as Record<string, unknown> | undefined;
+        let budget: { opening: number; base_cost?: number; k?: number } | undefined;
+        if (budgetArg && typeof budgetArg["opening"] === "number") {
+          budget = { opening: budgetArg["opening"] as number };
+          if (typeof budgetArg["base_cost"] === "number") budget.base_cost = budgetArg["base_cost"] as number;
+          if (typeof budgetArg["k"] === "number") budget.k = budgetArg["k"] as number;
+        }
+        try {
+          const res = await runGig(standard, (args["input"] as Record<string, unknown>) ?? {}, {
+            outputs: deps.outputs,
+            ledger: deps.ledger,
+            invoke: deps.invoke,
+            model_version: deps.model_version,
+            skills: deps.skills,
+            budget,
+          });
+          return {
+            ok: true,
+            requires_approval: approval,
+            data: {
+              gig_id: res.gig_id,
+              manifest: {
+                genome_hash: res.genome_hash,
+                run_fingerprint: res.run_fingerprint,
+                output_count: res.outputs.length,
+                ...(res.budget_state ? { budget_state: res.budget_state } : {}),
+              },
+            },
+          };
+        } catch (e) {
+          if (e instanceof BudgetExhausted) {
+            return {
+              ok: false,
+              requires_approval: approval,
+              error: e.message,
+              data: { budget_exhausted: true, agent_slug: e.agent_slug, balance: e.balance, cost: e.cost, budget_state: e.state },
+            };
+          }
+          throw e;
+        }
       }
       case "gig_monitor": {
         const gid = String(args["gig_id"] ?? "");

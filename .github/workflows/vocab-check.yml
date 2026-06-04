@@ -1,0 +1,102 @@
+name: vocab-check
+# Blocks internal-process vocabulary from landing in user-facing surfaces.
+# Attribution (commit author trailers, AUTHORS file) is exempt because it's
+# how contributors declare their impact.
+#
+# Surfaces guarded:
+#   - docs/**
+#   - README.md
+#   - CLAUDE.md
+#   - agents/**/*.json (description + slug fields)
+#   - templates/**/*.json (description + slug fields)
+#
+# Forbidden vocabulary falls into three groups:
+#   - Internal methodology: apoha, prereg, ratchet, mint, karma, dharma,
+#     bhakti, voice_state, voice_id, settlement, cycle_close
+#   - Personal/operator names used as code identifiers: cajal, miles,
+#     subhuti, groove, lighthouse (allowed in commit messages and author
+#     trailers; not in code, docs, or agent definitions)
+#   - Project-internal verdict vocabulary: RIPENED, KILL-FIRED, NO_VERDICT
+#     (these belong in the eir internal workspace, not the OSS surface)
+#
+# If you want one of these terms in OSS-public content, either rename to
+# a plain-English equivalent or move the content to the internal workspace
+# (~/eir/coltrane/).
+
+on:
+  pull_request:
+    paths:
+      - 'docs/**'
+      - 'README.md'
+      - 'CLAUDE.md'
+      - 'agents/**/*.json'
+      - 'templates/**/*.json'
+      - '.github/workflows/vocab-check.yml'
+  push:
+    branches: [main]
+
+jobs:
+  vocab-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: scan user-facing surfaces
+        shell: bash
+        run: |
+          set -uo pipefail
+
+          # Patterns to flag. Words only at word boundaries to avoid
+          # collisions with substrings of unrelated identifiers.
+          PATTERNS=(
+            'apoha'
+            'prereg'
+            'ratchet'
+            'karma'
+            'dharma'
+            'bhakti'
+            'voice_state'
+            'voice_id'
+            'cycle_close'
+            'cajal'
+            'miles'
+            'subhuti'
+            'groove'
+            'lighthouse'
+            'RIPENED'
+            'KILL-FIRED'
+            'NO_VERDICT'
+          )
+
+          # Surfaces to scan.
+          SURFACES=(
+            'docs'
+            'README.md'
+            'CLAUDE.md'
+            'agents'
+            'templates'
+          )
+
+          HITS=0
+          for pat in "${PATTERNS[@]}"; do
+            for s in "${SURFACES[@]}"; do
+              if [[ ! -e "$s" ]]; then continue; fi
+              # -I excludes binary; -w word-boundary; -n line numbers.
+              found=$(grep -rIni -w "$pat" "$s" 2>/dev/null || true)
+              if [[ -n "$found" ]]; then
+                echo "::error title=Forbidden vocab '$pat' found::"
+                echo "$found"
+                HITS=$((HITS + 1))
+              fi
+            done
+          done
+
+          if [[ "$HITS" -gt 0 ]]; then
+            echo
+            echo "Internal-process vocabulary found in user-facing files."
+            echo "Either rename to plain English, or move the content"
+            echo "to the internal workspace (~/eir/coltrane/)."
+            exit 1
+          fi
+
+          echo "vocab-check: clean."

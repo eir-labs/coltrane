@@ -1,0 +1,55 @@
+{
+  "slug": "ingested",
+  "version": 1,
+  "extends": "Signal",
+  "domain": "live-mode",
+  "status": "active",
+  "description": "Sealed response from an external source. Fourth and final event in the four-step egress lineage. MUST reference its egress predecessor via egress_sha. The attribution_chain field is MANDATORY — any downstream citation of this content automatically carries provenance back to original authors/sources.",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "egress_sha": {
+        "type": "string",
+        "description": "sha_seal of the egress event that fetched this content. chain-invalid if missing."
+      },
+      "provenance": {
+        "type": "string",
+        "const": "ingested",
+        "description": "fixed value — ingested events are typed by construction"
+      },
+      "source_sha": {
+        "type": "string",
+        "description": "sha256 of the canonical-form fetched content. enables replay-verification and detects upstream content drift."
+      },
+      "source_uri": {
+        "type": "string",
+        "description": "URL, DOI, arxiv-id, repo+commit, or canonical identifier of original source"
+      },
+      "attribution_chain": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "author": { "type": ["string", "array"], "description": "string or array of author names" },
+            "venue": { "type": "string", "description": "e.g. journal, conference, book publisher, museum, repo org" },
+            "year": { "type": "integer" },
+            "doi": { "type": ["string", "null"] },
+            "license": { "type": "string", "description": "the actual license attached to the source (CC-BY-4.0, MIT, etc)" },
+            "role_in_chain": { "type": "string", "description": "e.g. 'primary author', 'editor', 'venue host', 'archive'" }
+          },
+          "required": ["author", "venue", "year", "license", "role_in_chain"]
+        },
+        "minItems": 1,
+        "description": "MANDATORY. Authors and source credits. Every downstream citation of this ingested event automatically traverses this chain. Empty = chain-invalid."
+      },
+      "content_kind": {
+        "type": "string",
+        "enum": ["academic_paper", "book", "dataset", "code_repo", "documentation", "artwork", "musical_recording", "film", "blog_post", "specification", "other"]
+      },
+      "ingested_at": { "type": "string", "format": "date-time" },
+      "agent_id": { "type": "string" },
+      "prev_sha": { "type": "string" }
+    },
+    "required": ["egress_sha", "provenance", "source_sha", "source_uri", "attribution_chain", "content_kind", "ingested_at", "agent_id", "prev_sha"]
+  }
+}

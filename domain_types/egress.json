@@ -1,0 +1,38 @@
+{
+  "slug": "egress",
+  "version": 1,
+  "extends": "Signal",
+  "domain": "live-mode",
+  "status": "active",
+  "description": "Actual outward reach to an external source. Third event in the four-step egress lineage. MUST reference an active egress-permission-grant via grant_sha. Seals the request payload (request_sha) at the moment of wire-touch, enabling replay-audit.",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "grant_sha": {
+        "type": "string",
+        "description": "sha_seal of the authorizing egress-permission-grant. chain-invalid if missing or expired."
+      },
+      "request_sha": {
+        "type": "string",
+        "description": "sha256 of the canonical-form outgoing request payload (URL + headers + body)"
+      },
+      "request_uri": { "type": "string" },
+      "fetch_method": {
+        "type": "string",
+        "enum": ["http_get", "http_post", "git_clone", "git_fetch", "mcp_call", "filesystem_read"]
+      },
+      "cause": {
+        "type": ["string", "null"],
+        "description": "gap_id this reach fills, or null for play register"
+      },
+      "register": {
+        "type": "string",
+        "enum": ["work", "play"]
+      },
+      "fetched_at": { "type": "string", "format": "date-time" },
+      "agent_id": { "type": "string" },
+      "prev_sha": { "type": "string" }
+    },
+    "required": ["grant_sha", "request_sha", "request_uri", "fetch_method", "register", "fetched_at", "agent_id", "prev_sha"]
+  }
+}

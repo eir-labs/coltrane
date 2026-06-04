@@ -1,0 +1,61 @@
+{
+  "slug": "egress-permission-grant",
+  "version": 1,
+  "extends": "Verdict",
+  "domain": "live-mode",
+  "status": "active",
+  "description": "Approver responds to an egress-permission-request with authorization to proceed. Second event in the four-step egress lineage. Must reference its request via request_sha. Subsequent egress events must reference grant_sha.",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "request_sha": {
+        "type": "string",
+        "description": "sha_seal of the egress-permission-request this grants"
+      },
+      "granted_by": {
+        "type": "string",
+        "description": "approver identity (e.g. 'eugene', 'designated-approver-id')"
+      },
+      "license": {
+        "type": "string",
+        "description": "usage license terms (CC-BY, MIT, Open Access, etc)"
+      },
+      "scope": {
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "allowed URIs, domains, MCP tools — egress must match scope"
+      },
+      "rate": {
+        "type": "object",
+        "properties": {
+          "max_calls": { "type": "integer" },
+          "window": { "type": "string", "description": "e.g. '1h', '1d', '1w'" }
+        }
+      },
+      "granted_at": { "type": "string", "format": "date-time" },
+      "expires_at": { "type": "string", "format": "date-time" },
+      "register": {
+        "type": "string",
+        "enum": ["work", "play"]
+      },
+      "cadence": {
+        "type": "string",
+        "enum": ["EOD_batched", "emergency_at_any_time"]
+      },
+      "for_gap_id": { "type": ["string", "null"] },
+      "intended_attribution_chain": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "expected_attribution_form": { "type": "string", "description": "e.g. 'author + venue + DOI', 'repo + commit_sha', 'artist + work + year'" },
+            "must_be_cited_when": { "type": "string", "description": "e.g. 'any cultivation in domain D uses this source', 'any chime references derived insight'" }
+          }
+        },
+        "description": "Approver's binding commitment: when ingested content from this grant is later cited, attribution MUST follow this form. Sealed at grant-time, enforced at chime-emission-time."
+      },
+      "prev_sha": { "type": "string" }
+    },
+    "required": ["request_sha", "granted_by", "license", "scope", "granted_at", "expires_at", "register", "cadence", "intended_attribution_chain", "prev_sha"]
+  }
+}

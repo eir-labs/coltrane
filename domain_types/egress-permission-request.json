@@ -1,0 +1,44 @@
+{
+  "slug": "egress-permission-request",
+  "version": 1,
+  "extends": "Plan",
+  "domain": "live-mode",
+  "status": "active",
+  "description": "Ant proposes an outward reach (paper read, dataset fetch, MCP call). First event in the four-step egress lineage. Must precede any egress event. Requires human-in-the-loop approval via egress-permission-grant.",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "gap_id": {
+        "type": ["string", "null"],
+        "description": "Which gap this would fill. null for play register."
+      },
+      "proposed_source": {
+        "type": "object",
+        "properties": {
+          "uri": { "type": "string", "description": "URL, DOI, repo ref, or MCP tool name" },
+          "expected_content_domain": { "type": "string", "description": "e.g. 'academic paper', 'dataset', 'documentation'" }
+        },
+        "required": ["uri", "expected_content_domain"]
+      },
+      "expected_register": {
+        "type": "string",
+        "enum": ["work", "play"]
+      },
+      "proposed_cadence": {
+        "type": "string",
+        "enum": ["EOD_batched", "emergency_at_any_time"]
+      },
+      "cost_estimate": {
+        "type": "object",
+        "properties": {
+          "compute": { "type": "string" },
+          "time_estimate": { "type": "string" },
+          "license_terms": { "type": "string" }
+        }
+      },
+      "agent_id": { "type": "string" },
+      "prev_sha": { "type": "string" }
+    },
+    "required": ["proposed_source", "expected_register", "proposed_cadence", "agent_id", "prev_sha"]
+  }
+}

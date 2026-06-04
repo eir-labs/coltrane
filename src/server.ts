@@ -16,7 +16,7 @@ import {
   PromotionError,
 } from "./mcp.js";
 import { createRegistry, loadRegistry, type Registry, type DomainType } from "./registry.js";
-import { loadGenome } from "./loader.js";
+import { loadGenome, type EvalRecord } from "./loader.js";
 import { sealAgentDefinition, sealDefinition, recordIdentity } from "./genome_writer.js";
 import { createOutputStore, type OutputStore } from "./outputs.js";
 import { MemoryLedger, type Ledger } from "./ledger.js";
@@ -46,6 +46,10 @@ export interface ServerDeps {
   standards?: ReadonlyMap<string, Standard> | undefined;
   invoke?: AgentInvoker | undefined;
   model_version?: string | undefined;
+  // §13/evals — passed through to runGig so eval scan-and-fire works post-phases.
+  // Agents map is also passed so an eval can name an agent_slug to invoke.
+  evals?: ReadonlyMap<string, EvalRecord> | undefined;
+  agents?: ReadonlyMap<string, Agent> | undefined;
   // Substrate-of-truth seam: when set, genome-mutation tools (agent_define, …) PERSIST
   // the content-addressed file here + ledger-seal its identity. Without it, they compute
   // + return the identity but don't write (validation path).
@@ -202,6 +206,8 @@ export async function dispatchTool(slug: string, args: Record<string, unknown>, 
           ledger: deps.ledger,
           invoke: deps.invoke,
           model_version: deps.model_version,
+          evals: deps.evals,
+          agents: deps.agents,
         });
         return {
           ok: true,
@@ -719,6 +725,8 @@ export function bootstrapServerDeps(genomeRoot?: string): ServerDeps {
     standards: genome.standards, // ← gig_dispatch can now resolve file-defined standards
     invoke: makeClaudeInvoker({ registry, model: process.env["COLTRANE_MODEL"] }),
     model_version: process.env["COLTRANE_MODEL"] ?? "claude-cli-default",
+    evals: genome.evals,   // ← eval substrate (5th class) — runGig fires evals post-phases
+    agents: genome.agents, // ← eval invocations resolve their agent_slug against this map
     genome_dir: root, // ← genome-mutation tools persist + ledger-seal into the live genome
   };
 }

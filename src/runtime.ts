@@ -9,6 +9,7 @@ import { PRIMITIVE_OUTPUT_TYPE } from "./core_types.js";
 import { sha256Hex, canonJson, runFingerprint, CANONICAL_FORM_VERSION } from "./canonical_form.js";
 import type { OutputStore, OutputRecord } from "./outputs.js";
 import type { Ledger } from "./ledger.js";
+import type { EvalRecord } from "./loader.js";
 
 // What an agent invocation sees. The invoker returns the output `data` (validated
 // downstream against the agent's declared output domain type).
@@ -30,6 +31,14 @@ export interface RunDeps {
   ledger: Ledger;
   invoke: AgentInvoker;
   model_version?: string | undefined;
+  // §13/evals — the 5th class. When evals + agents are supplied, runGig scans
+  // evals after the standard's phases complete and fires any whose
+  // `fires_on_standard` matches the running standard's slug. Each firing invokes
+  // the eval's declared `agent_slug` against the gig's final output and writes a
+  // verdict-typed output (soft-verdict) to the store. Absent = no evals fire
+  // (back-compat with callers that don't pass them — unit suites stay green).
+  evals?: ReadonlyMap<string, EvalRecord> | undefined;
+  agents?: ReadonlyMap<string, Agent> | undefined;
 }
 
 export interface GigResult {
@@ -125,6 +134,55 @@ export async function runGig(
     started_at,
     finished_at: new Date().toISOString(),
   });
+
+  // §13/evals — scan + fire. After phases complete, each eval whose
+  // `fires_on_standard` matches this standard's slug invokes its `agent_slug`
+  // against the gig's final output. The agent's returned shape is wrapped into a
+  // soft-verdict (criteria + overall_verdict_shade required; passed/reason/checked
+  // carried as additional properties for the test contract). The eval output is
+  // appended to `produced` so caller's GigResult.outputs includes the verdict —
+  // ledger output_hashes are NOT mutated post-fingerprint (reproducibility key
+  // stays scoped to the phase outputs the genome_hash covers).
+  if (deps.evals && deps.agents && produced.length > 0) {
+    const final = produced[produced.length - 1]!;
+    for (const eval_rec of deps.evals.values()) {
+      if (eval_rec.fires_on_standard !== standard.slug) continue;
+      if (!eval_rec.agent_slug) continue;
+      const evalAgent = deps.agents.get(eval_rec.agent_slug);
+      if (!evalAgent) continue; // declared-but-missing agent: skip (honest no-op vs throw)
+      const evalData = await deps.invoke({
+        agent: evalAgent,
+        phase: `eval:${eval_rec.slug}`,
+        inputs: [final],
+        gig_input: gigInput,
+      });
+      const passed = Boolean(evalData["passed"]);
+      const reason = typeof evalData["reason"] === "string" ? (evalData["reason"] as string) : "";
+      const checkedRaw = Array.isArray(evalData["checked"]) ? (evalData["checked"] as unknown[]) : [];
+      const verdictRec = deps.outputs.write({
+        core_type: "Interpretation", // soft-verdict extends Interpretation (domain_types/soft-verdict.json)
+        domain_type: "soft-verdict",
+        domain: evalAgent.domain ?? standard.domain,
+        gig_id,
+        agent_slug: evalAgent.slug,
+        phase: `eval:${eval_rec.slug}`,
+        primitive: "INTERPRET",
+        data: {
+          // Required by soft-verdict schema.
+          criteria: {},
+          overall_verdict_shade: passed ? "full-soft-RIPENED" : "KILLED",
+          // The eval contract (additionalProperties:true on the soft-verdict schema).
+          passed,
+          reason,
+          checked: checkedRaw,
+          eval_slug: eval_rec.slug,
+        },
+        input_refs: [final.id],
+      });
+      deps.outputs.addRef(verdictRec.id, final.id, "validates", "INTERPRET");
+      produced.push(verdictRec);
+    }
+  }
 
   return { gig_id, standard_slug: standard.slug, genome_hash, run_fingerprint, outputs: produced, status: "complete" };
 }

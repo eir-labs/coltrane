@@ -38,10 +38,22 @@ export interface StandardFileDef {
   agent_slugs: readonly string[];
   phases: readonly PhaseDef[];
 }
-// Skills and evals have no composer yet — load them as slug-keyed records (structurally
+// Skills have no composer yet — load them as slug-keyed records (structurally
 // validated: slug present + unique). Their richer contracts are a later layer.
 export interface SkillRecord { slug: string; [k: string]: unknown }
-export interface EvalRecord { slug: string; [k: string]: unknown }
+
+// EvalRecord — the 5th definition class, now load-bearing. An eval declares which
+// standard's gig completion triggers it (`fires_on_standard`) and which agent runs
+// the eval (`agent_slug` — the eval IS an agent invocation against the gig's final
+// output, producing a verdict-typed output that lands in the universal output store).
+// Both fields optional at load (some evals may be authored before they're wired);
+// the runtime ignores evals missing either field — a fail-quiet stance.
+export interface EvalRecord {
+  slug: string;
+  fires_on_standard?: string;
+  agent_slug?: string;
+  [k: string]: unknown;
+}
 
 export interface LoadedGenome {
   core_types: ReadonlyMap<string, CoreTypeRecord>;

@@ -148,6 +148,18 @@ function readJsonl<T>(file: string): T[] {
   return rows;
 }
 
+// Cheap freshness key for a jsonl file. We combine mtimeMs and size so that
+// same-millisecond appends (common in fast tests) still register as changed.
+// Returns 0 for a missing file, matching readJsonl's "absent == empty" stance.
+function fileFreshness(file: string): number {
+  try {
+    const st = fs.statSync(file);
+    return st.mtimeMs * 1e6 + st.size;
+  } catch {
+    return 0;
+  }
+}
+
 function listJsonl(dir: string): string[] {
   if (!fs.existsSync(dir)) return [];
   const out: string[] = [];
@@ -164,42 +176,51 @@ export function createOutputStore(registry: Registry, options?: OutputStoreOptio
   const outputsDir = persistDir ? path.join(persistDir, "outputs") : undefined;
   const refsDir = persistDir ? path.join(persistDir, "refs") : undefined;
 
-  // Track which gig_ids we've hydrated so a single gig file is read at most once.
-  const hydratedGigs = new Set<string>();
-  let fullyHydrated = false;
+  // Cross-store visibility (#110 fix): two OutputStore instances on the same
+  // persistDir must share a view of disk. The previous sticky `hydratedGigs` +
+  // `fullyHydrated` flags blinded store A to store B's appends. Instead we key
+  // hydration per-file on mtime+size: a file is re-read when its freshness
+  // signature differs from what we last absorbed. Same-mtime calls stay cheap
+  // (one stat per file), so the hot path on a quiescent dir is unchanged.
+  const outputsFileFreshness = new Map<string, number>();
+  const refsFileFreshness = new Map<string, number>();
 
   function asStr(v: unknown): string | undefined {
     return typeof v === "string" ? v : undefined;
   }
 
-  function hydrateGig(gig_id: string): void {
-    if (!outputsDir || hydratedGigs.has(gig_id)) return;
-    hydratedGigs.add(gig_id);
+  function hydrateOutputsFile(gig_id: string): void {
+    if (!outputsDir) return;
     const file = path.join(outputsDir, `${gig_id}.jsonl`);
+    const fresh = fileFreshness(file);
+    if (fresh === 0) return;
+    if (outputsFileFreshness.get(file) === fresh) return;
+    outputsFileFreshness.set(file, fresh);
     for (const rec of readJsonl<OutputRecord>(file)) {
       if (!outputs.has(rec.id)) outputs.set(rec.id, rec);
     }
-    if (refsDir) {
-      const refsFile = path.join(refsDir, `${gig_id}.jsonl`);
-      for (const ref of readJsonl<OutputRef>(refsFile)) {
-        if (!edges.some((e) => e.id === ref.id)) edges.push(ref);
-      }
+  }
+
+  function hydrateRefsFile(gig_id: string): void {
+    if (!refsDir) return;
+    const file = path.join(refsDir, `${gig_id}.jsonl`);
+    const fresh = fileFreshness(file);
+    if (fresh === 0) return;
+    if (refsFileFreshness.get(file) === fresh) return;
+    refsFileFreshness.set(file, fresh);
+    for (const ref of readJsonl<OutputRef>(file)) {
+      if (!edges.some((e) => e.id === ref.id)) edges.push(ref);
     }
   }
 
   function hydrateAll(): void {
-    if (!outputsDir || fullyHydrated) return;
-    fullyHydrated = true;
+    if (!outputsDir) return;
     for (const file of listJsonl(outputsDir)) {
-      const base = path.basename(file, ".jsonl");
-      hydrateGig(base);
+      hydrateOutputsFile(path.basename(file, ".jsonl"));
     }
-    // Also pull in any orphan refs files (defensive — addRef writes by from_gig_id).
     if (refsDir) {
       for (const file of listJsonl(refsDir)) {
-        for (const ref of readJsonl<OutputRef>(file)) {
-          if (!edges.some((e) => e.id === ref.id)) edges.push(ref);
-        }
+        hydrateRefsFile(path.basename(file, ".jsonl"));
       }
     }
   }
@@ -236,9 +257,10 @@ export function createOutputStore(registry: Registry, options?: OutputStoreOptio
       };
       outputs.set(rec.id, rec);
       if (outputsDir) {
-        // Mark this gig hydrated so we don't re-read what we just wrote.
-        hydratedGigs.add(rec.gig_id);
-        appendJsonl(path.join(outputsDir, `${rec.gig_id}.jsonl`), rec);
+        const file = path.join(outputsDir, `${rec.gig_id}.jsonl`);
+        appendJsonl(file, rec);
+        // Refresh our freshness signature so we don't re-read what we just wrote.
+        outputsFileFreshness.set(file, fileFreshness(file));
       }
       return rec;
     },
@@ -278,7 +300,9 @@ export function createOutputStore(registry: Registry, options?: OutputStoreOptio
       };
       edges.push(ref);
       if (refsDir) {
-        appendJsonl(path.join(refsDir, `${fromRec.gig_id}.jsonl`), ref);
+        const file = path.join(refsDir, `${fromRec.gig_id}.jsonl`);
+        appendJsonl(file, ref);
+        refsFileFreshness.set(file, fileFreshness(file));
       }
       return ref;
     },

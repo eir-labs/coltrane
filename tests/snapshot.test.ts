@@ -6,7 +6,7 @@
 import { describe, it, expect } from "vitest";
 import { chainEvent, AuditEvent } from "../src/audit_chain.js";
 import {
-  basicGraphV0,
+  cognitiveShapeV0,
   getMode,
   listModes,
   registerMode,
@@ -50,7 +50,7 @@ function buildWindow(
   return out;
 }
 
-describe("basicGraphV0", () => {
+describe("cognitiveShapeV0", () => {
   it("counts events and tallies kind/surface/primitive distributions", () => {
     const events = buildWindow([
       { kind: "react", surface: "hands" },
@@ -59,7 +59,7 @@ describe("basicGraphV0", () => {
       { kind: "verdict", surface: "head", primitive: "JUDGE" },
     ]);
 
-    const snap = basicGraphV0.snapshot(events);
+    const snap = cognitiveShapeV0.snapshot(events);
     const stats = snap.stats as {
       node_count: number;
       kind_dist: Record<string, number>;
@@ -68,7 +68,7 @@ describe("basicGraphV0", () => {
       ts_span: { start: string; end: string };
     };
 
-    expect(snap.mode).toBe("basic-graph-v0");
+    expect(snap.mode).toBe("cognitive-shape-v0");
     expect(snap.fingerprint).toMatch(/^[0-9a-f]{64}$/);
     expect(stats.node_count).toBe(4);
     expect(stats.kind_dist).toEqual({ react: 1, post: 2, verdict: 1 });
@@ -85,14 +85,14 @@ describe("basicGraphV0", () => {
       { kind: "react" as const, surface: "hands" as const },
       { kind: "tool_call" as const, surface: "head" as const, primitive: "SENSE" as const },
     ];
-    const a = basicGraphV0.snapshot(buildWindow(spec));
-    const b = basicGraphV0.snapshot(buildWindow(spec));
+    const a = cognitiveShapeV0.snapshot(buildWindow(spec));
+    const b = cognitiveShapeV0.snapshot(buildWindow(spec));
     expect(a.fingerprint).toBe(b.fingerprint);
     expect(a.stats).toEqual(b.stats);
   });
 
   it("returns null ts_span on empty window", () => {
-    const snap = basicGraphV0.snapshot([]);
+    const snap = cognitiveShapeV0.snapshot([]);
     const stats = snap.stats as { node_count: number; ts_span: unknown };
     expect(stats.node_count).toBe(0);
     expect(stats.ts_span).toBeNull();
@@ -103,78 +103,78 @@ describe("basicGraphV0", () => {
       { kind: "react" as const, surface: "hands" as const, primitive: "SENSE" as const },
       { kind: "post" as const, surface: "head" as const, primitive: "CREATE" as const },
     ];
-    const a = basicGraphV0.snapshot(buildWindow(spec));
-    const b = basicGraphV0.snapshot(buildWindow(spec));
-    expect(basicGraphV0.distance(a, b)).toBe(0);
+    const a = cognitiveShapeV0.snapshot(buildWindow(spec));
+    const b = cognitiveShapeV0.snapshot(buildWindow(spec));
+    expect(cognitiveShapeV0.distance(a, b)).toBe(0);
   });
 
   it("positive distance scales with the L1 of distribution differences", () => {
     // Window A: 2 react/hands, 0 verdicts.
-    const a = basicGraphV0.snapshot(
+    const a = cognitiveShapeV0.snapshot(
       buildWindow([
         { kind: "react", surface: "hands" },
         { kind: "react", surface: "hands" },
       ]),
     );
     // Window B: 0 react, 2 verdict/head with JUDGE.
-    const b = basicGraphV0.snapshot(
+    const b = cognitiveShapeV0.snapshot(
       buildWindow([
         { kind: "verdict", surface: "head", primitive: "JUDGE" },
         { kind: "verdict", surface: "head", primitive: "JUDGE" },
       ]),
     );
     // L1 split: kind 2+2 = 4, surface 2+2 = 4, primitive 0+2 = 2. Total 10.
-    expect(basicGraphV0.distance(a, b)).toBe(10);
+    expect(cognitiveShapeV0.distance(a, b)).toBe(10);
   });
 
   it("similarity ordering: closer windows get smaller distances", () => {
-    const baseline = basicGraphV0.snapshot(
+    const baseline = cognitiveShapeV0.snapshot(
       buildWindow([
         { kind: "react", surface: "hands" },
         { kind: "react", surface: "hands" },
         { kind: "post", surface: "head", primitive: "CREATE" },
       ]),
     );
-    const near = basicGraphV0.snapshot(
+    const near = cognitiveShapeV0.snapshot(
       buildWindow([
         { kind: "react", surface: "hands" },
         { kind: "post", surface: "hands" },
         { kind: "post", surface: "head", primitive: "CREATE" },
       ]),
     );
-    const far = basicGraphV0.snapshot(
+    const far = cognitiveShapeV0.snapshot(
       buildWindow([
         { kind: "verdict", surface: "head", primitive: "JUDGE" },
         { kind: "verdict", surface: "head", primitive: "JUDGE" },
         { kind: "verdict", surface: "head", primitive: "JUDGE" },
       ]),
     );
-    expect(basicGraphV0.distance(baseline, near)).toBeLessThan(
-      basicGraphV0.distance(baseline, far),
+    expect(cognitiveShapeV0.distance(baseline, near)).toBeLessThan(
+      cognitiveShapeV0.distance(baseline, far),
     );
   });
 
   it("rejects cross-mode distance — defined within a mode only", () => {
-    const a = basicGraphV0.snapshot(buildWindow([{ kind: "react", surface: "hands" }]));
+    const a = cognitiveShapeV0.snapshot(buildWindow([{ kind: "react", surface: "hands" }]));
     const stranger: Snapshot = { mode: "psi-v0", fingerprint: "x", stats: {} };
-    expect(() => basicGraphV0.distance(a, stranger)).toThrow(/basic-graph-v0/);
+    expect(() => cognitiveShapeV0.distance(a, stranger)).toThrow(/cognitive-shape-v0/);
   });
 });
 
 describe("snapshot mode registry", () => {
   it("lists the OSS default mode out of the box", () => {
     const modes = listModes();
-    expect(modes).toContain("basic-graph-v0");
+    expect(modes).toContain("cognitive-shape-v0");
   });
 
   it("getMode returns the registered snapshotter", () => {
-    const m = getMode("basic-graph-v0");
-    expect(m.mode).toBe("basic-graph-v0");
+    const m = getMode("cognitive-shape-v0");
+    expect(m.mode).toBe("cognitive-shape-v0");
   });
 
   it("unknown mode throws with the available list in the message", () => {
     expect(() => getMode("does-not-exist")).toThrow(/does-not-exist/);
-    expect(() => getMode("does-not-exist")).toThrow(/basic-graph-v0/);
+    expect(() => getMode("does-not-exist")).toThrow(/cognitive-shape-v0/);
   });
 
   it("registerMode attaches a new mode and rejects collisions", () => {
@@ -197,17 +197,17 @@ describe("snapshot convenience wrapper", () => {
       { kind: "post", surface: "head", primitive: "CREATE" },
     ]);
     const snap = snapshot(events);
-    expect(snap.mode).toBe("basic-graph-v0");
+    expect(snap.mode).toBe("cognitive-shape-v0");
     expect(snap.fingerprint).toMatch(/^[0-9a-f]{64}$/);
   });
 
-  it("matches an explicit basicGraphV0.snapshot call exactly", () => {
+  it("matches an explicit cognitiveShapeV0.snapshot call exactly", () => {
     const events = buildWindow([
       { kind: "tool_call", surface: "hands", primitive: "PLAN" },
       { kind: "verdict", surface: "head", primitive: "VERIFY" },
     ]);
     const a = snapshot(events);
-    const b = basicGraphV0.snapshot(events);
+    const b = cognitiveShapeV0.snapshot(events);
     expect(a).toEqual(b);
   });
 });

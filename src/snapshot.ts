@@ -17,7 +17,7 @@
  * "have I been in a structurally-similar working state before?" queries
  * across past sessions.
  *
- * The slot is pluggable. OSS ships `basicGraphV0`: counts + categorical
+ * The slot is pluggable. OSS ships `cognitiveShapeV0`: counts + categorical
  * distributions over kind/surface/primitive + ts span, sha256 over the
  * canonical stats, L1 distance over the distributions. Real arithmetic
  * on real chain windows; usable today, a functioning gift.
@@ -36,7 +36,7 @@ import type { AuditEvent } from "./audit_chain.js";
 
 /**
  * One snapshot of one chain window. The `mode` tag distinguishes OSS
- * (basic-graph-v0) from eirmath plug-ins (psi-v0, etc); `fingerprint` is
+ * (cognitive-shape-v0) from eirmath plug-ins (psi-v0, etc); `fingerprint` is
  * the sha256 of the canonical stats — same stats always hash to the same
  * fingerprint, different stats hash to different fingerprints; `stats`
  * carries the breakdown the mode's distance function reads.
@@ -70,14 +70,14 @@ function tally(acc: Record<string, number>, key: string): void {
 }
 
 /**
- * basic-graph-v0 — the OSS reference Snapshotter.
+ * cognitive-shape-v0 — the OSS reference Snapshotter.
  *
  * Captures the "cognitive shape" of a chain window: how many events, what
  * kinds (react/post/tool_call/verdict/name_event/primitive_engage), which
  * surface (head/hands), which primitives engaged, and the wall-clock span.
  *
  * Two windows with similar kind/surface/primitive distributions sit close
- * in basic-graph-v0 distance even if their exact bytes differ. Useful for
+ * in cognitive-shape-v0 distance even if their exact bytes differ. Useful for
  * "have I been in a structurally-similar working state before?" queries.
  *
  * Eirmath snapshotters extend this with substrate-tuned topology:
@@ -85,8 +85,8 @@ function tally(acc: Record<string, number>, key: string): void {
  * the 49-cell canonical form. This impl is intentionally simple — the
  * gift functions, the substrate-tuning is the licensed unlock.
  */
-export const basicGraphV0: Snapshotter = {
-  mode: "basic-graph-v0",
+export const cognitiveShapeV0: Snapshotter = {
+  mode: "cognitive-shape-v0",
 
   snapshot(events) {
     const node_count = events.length;
@@ -129,7 +129,7 @@ export const basicGraphV0: Snapshotter = {
   distance(a, b) {
     if (a.mode !== this.mode || b.mode !== this.mode) {
       throw new Error(
-        `basicGraphV0.distance: requires both snapshots mode=${this.mode}, got ${a.mode} / ${b.mode}`,
+        `cognitiveShapeV0.distance: requires both snapshots mode=${this.mode}, got ${a.mode} / ${b.mode}`,
       );
     }
     const aStats = a.stats as {
@@ -156,11 +156,11 @@ export const basicGraphV0: Snapshotter = {
 
 /**
  * Registry of snapshot modes available at runtime. coltrane-oss seeds
- * basic-graph-v0; eirmath registers additional modes via registerMode
+ * cognitive-shape-v0; eirmath registers additional modes via registerMode
  * once its license check passes. The chain substrate stays identical
  * regardless of which modes are registered.
  */
-const MODES = new Map<string, Snapshotter>([[basicGraphV0.mode, basicGraphV0]]);
+const MODES = new Map<string, Snapshotter>([[cognitiveShapeV0.mode, cognitiveShapeV0]]);
 
 /**
  * Register a Snapshotter — used by eirmath plug-ins at boot to attach
@@ -202,5 +202,5 @@ export function listModes(): readonly string[] {
  * no-arg-needed entry point. Eirmath callers use getMode("psi-v0").snapshot.
  */
 export function snapshot(events: readonly AuditEvent[]): Snapshot {
-  return basicGraphV0.snapshot(events);
+  return cognitiveShapeV0.snapshot(events);
 }

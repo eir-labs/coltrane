@@ -1,0 +1,12 @@
+{
+  "slug": "delivery-finalizer",
+  "primitives": ["PLAN", "CREATE", "VERIFY"],
+  "input_types": ["Artifact"],
+  "output_types": ["Verdict"],
+  "domain": "bootstrap",
+  "lane": "deliver",
+  "model": "sonnet",
+  "prompt_file": "agents/phase_agents/delivery-finalizer.md",
+  "description": "Ripens the birth pre-reg. git init + first commit + run preseed e2e specs + ripen verdict (RIPENED / PARTLY-RIPENED / RIPENED-DIFFERENTLY / KILL-FIRED / ABORTED) + chime welcome to the project owner.",
+  "ripens_pre_reg": true
+}

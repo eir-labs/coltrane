@@ -1,6 +1,6 @@
 {
   "slug": "steve-audit-event",
-  "extends": "signal",
+  "extends": "Signal",
   "description": "Append-only event in a Steve's audit-stream. Captures what the Steve did (head: Claude Code thread / hands: Slack surface) without exposing a name. Identity precipitates from accumulated entries.",
   "schema": {
     "type": "object",

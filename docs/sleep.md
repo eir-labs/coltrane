@@ -2,6 +2,14 @@
 
 > **Status: In development.** Architecture validated across multiple sim cycles + cascade-resilience verdict + ensemble-orthogonality verify. User-facing dials and regime indicators below are the target interface. Wiring still in flight.
 
+> **Vocabulary (read first):**
+> - **ratchet** = a recurring pattern that survives multiple cycles of sleep — the structural shape your project keeps coming back to
+> - **hole** = a gap surfaced during sleep — something the project structurally needs but didn't get done
+> - **fix-bath** = the read-only container holding past ratchets, so they pass forward across cycles without re-bleaching (chemistry metaphor for permanent record)
+> - **above-floor / below-floor** = patterns that survive sleep's reversal (above) vs ones that dissolve back (below)
+>
+> Everything else is plain English. If a sentence feels opaque, it's either one of these terms or a translation problem; flag it.
+
 ## What sleep actually does
 
 Each night, Coltrane returns the day's work toward a baseline floor — not erased, *un-developed*. Most patterns dissolve back. What stays above the floor is your project's load-bearing shape: not what you wrote yesterday, not what felt important, but what couldn't be washed away.

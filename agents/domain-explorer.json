@@ -1,9 +1,15 @@
 {
   "slug": "domain-explorer",
-  "primitives": ["SENSE", "INTERPRET"],
-  "input_types": ["raw-note"],
-  "output_types": ["repo-survey"],
-  "domain": "bootstrap",
+  "primitives": [
+    "SENSE",
+    "INTERPRET"
+  ],
+  "input_types": [
+    "raw-note"
+  ],
+  "output_types": [
+    "repo-survey"
+  ],
   "lane": "discover",
   "model": "sonnet",
   "prompt_file": "agents/phase_agents/domain-explorer.md",

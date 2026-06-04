@@ -1,9 +1,16 @@
 {
   "slug": "delivery-finalizer",
-  "primitives": ["PLAN", "CREATE", "VERIFY"],
-  "input_types": ["Artifact"],
-  "output_types": ["Verdict"],
-  "domain": "bootstrap",
+  "primitives": [
+    "PLAN",
+    "CREATE",
+    "VERIFY"
+  ],
+  "input_types": [
+    "Artifact"
+  ],
+  "output_types": [
+    "Verdict"
+  ],
   "lane": "deliver",
   "model": "sonnet",
   "prompt_file": "agents/phase_agents/delivery-finalizer.md",

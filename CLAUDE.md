@@ -116,7 +116,7 @@ It is NOT:
 - a free-text RAG framework
 - a langchain replacement
 
-(Apoha matters. The non-targets are part of the definition.)
+(The non-targets are part of the definition. Naming what something is NOT is half the work.)
 
 ---
 
@@ -154,8 +154,8 @@ Don't invent new primitives. Compose with what's here.
 
 Every definition has three hashes — read this before you mutate anything:
 
-- `content_hash` — the bytes themselves (karma)
-- `dependency_hash` — relational closure (emptiness: who depends on whom)
+- `content_hash` — the bytes themselves
+- `dependency_hash` — relational closure (who depends on whom)
 - `effective_hash` — the binding (content × dependency in a context)
 
 Two byte-identical definitions in different contexts produce different `effective_hash`.
@@ -221,26 +221,28 @@ Every meaningful change ships with these fields, **sealed before the work starts
 | `predict` | what will ship |
 | `playwright_test_path` (or `vitest_test_path`) | the test that proves the predict, RED-first |
 | `kill_condition` | when stop |
-| `apoha` | what this is NOT |
+| `kill_conditions` | the explicit list of what this is NOT testing |
 | `run_protocol` | how the work runs |
-| `verdict` | RIPENED · RIPENED-DIFFERENTLY · PARTLY-RIPENED · NOT-RIPENED |
+| `outcome` | PASS · PARTIAL · FAIL · NO_VERDICT |
 
 Sealing moment = PR ready-for-review. `sha256_pre_verdict` computed over the canonical
-pre-reg fields locks predict + kill + apoha + test from mutating after seal.
+pre-reg fields locks predict + kill_conditions + test from mutating after seal.
 
 Test must land RED before code. Code makes it green. Hollow-green (test passes for the
 wrong reason) is the failure mode the discipline closes.
 
 ---
 
-## Verdict vocabulary
+## Outcome vocabulary
 
-- **RIPENED** — predict held; kill didn't fire; test green
-- **RIPENED-DIFFERENTLY** — predict held in shape but mutated in execution; tell the truth
-- **PARTLY-RIPENED** — partial signal; kept what came; named what didn't
-- **NOT-RIPENED** — kill fired or predict missed; the work observed itself
+- **PASS** — predict held; kill didn't fire; test green
+- **PARTIAL** — partial signal; kept what came; named what didn't
+- **FAIL** — kill fired or predict missed; the work observed itself
+- **NO_VERDICT** — no external grader was available; abstain rather than self-grade
 
-Never use FAIL. Never use PASS without naming what specifically held.
+When the predict held in shape but mutated in execution, say so explicitly in the
+notes — the bytes of the outcome stay PASS, but the prose captures the drift. Don't
+report PASS without naming what specifically held.
 
 ---
 

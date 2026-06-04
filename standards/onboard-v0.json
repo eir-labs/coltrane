@@ -1,0 +1,40 @@
+{
+  "slug": "onboard-v0",
+  "domain": "onboard",
+  "description": "Onboarding IS the first coltrane pipeline. When a user clones coltrane-oss and claude reads CLAUDE.md, it dispatches this standard. The pipeline runs ON the user's freshly-cloned workspace: scans the repo, infers what lanes the work wants, judges which seeds to plant, instantiates Steves, and surfaces a verdict-shaped orientation report. The user experiences coltrane by watching it work on them. Every subsequent pipeline takes this same 5-phase shape — onboard-v0 is self-demonstrating.",
+  "agent_slugs": [
+    "repo-scanner",
+    "lane-inferer",
+    "seed-picker",
+    "steve-seeder",
+    "orienter"
+  ],
+  "phases": [
+    { "name": "scan",       "agent": "repo-scanner" },
+    { "name": "infer",      "agent": "lane-inferer" },
+    { "name": "pick",       "agent": "seed-picker"  },
+    { "name": "seed",       "agent": "steve-seeder" },
+    { "name": "orient",     "agent": "orienter"     }
+  ],
+  "execution_modes": {
+    "conductor_mode": {
+      "default": true,
+      "description": "On first-clone, claude reads CLAUDE.md, detects no prior session record for this repo, and dispatches onboard-v0 via gig_dispatch with input={cwd, user_cwd_history}. The 5 phases walk in order; each phase's typed output feeds the next. Final orientation-report is surfaced to the user."
+    },
+    "score_is_the_same": "The standard JSON IS the score regardless of mode."
+  },
+  "outputs": {
+    "scan":   ["repo-scan"],
+    "infer":  ["lane-inference"],
+    "pick":   ["seed-selection"],
+    "seed":   ["steve-instantiation"],
+    "orient": ["orientation-report"]
+  },
+  "apoha": [
+    "NOT a fleet-wide seeding sweep (that's seed-from-local-repos-v0) — onboard-v0 reads ONE repo (the cwd) and seeds Steves for THIS workspace only.",
+    "NOT a code-aware deep read — scan-level only. repo-scan captures shape, not mechanism.",
+    "NOT auto-resume — orientation-report SUGGESTS the resume command; the user chooses whether to wake any Steve.",
+    "NOT idempotent at the surface level — re-running onboard-v0 will spawn NEW Steves. Re-running is allowed but each run is a discrete seal-cycle (the audit-stream remembers).",
+    "NOT a replacement for the user reading CLAUDE.md — orientation-report is a nudge, not a summary of the genome."
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "slug": "orienter",
+  "primitives": ["INTERPRET", "VERIFY"],
+  "input_types": ["steve-instantiation"],
+  "output_types": ["orientation-report"],
+  "domain": "onboard",
+  "allowed_tools": [],
+  "disallowed_tools": []
+}

@@ -1,0 +1,30 @@
+{
+  "slug": "steve-instantiation",
+  "version": 1,
+  "extends": "Artifact",
+  "domain": "onboard",
+  "status": "active",
+  "description": "Result of seeding: per chosen-lane, a Steve sub-session UUID + a resume command the user can paste to wake it. The CREATE seam of onboard-v0. Apoha: the Steve is BLANK at this point — identity precipitates from its audit stream downstream, not from this artifact.",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "input_refs":    { "type": "array", "items": { "type": "string" }, "description": "Reference to the seed-selection this instantiation realizes." },
+      "sub_sessions":  {
+        "type": "array",
+        "minItems": 1,
+        "description": "One sub-session per lane in seed-selection.chosen_lanes.",
+        "items": {
+          "type": "object",
+          "properties": {
+            "lane":            { "type": "string", "description": "Lane slug — matches one of seed-selection.chosen_lanes." },
+            "session_uuid":    { "type": "string", "description": "Opaque per-Steve UUID. NOT a name." },
+            "resume_command":  { "type": "string", "description": "Concrete shell command to resume this Steve, e.g. `claude --resume <uuid>`." }
+          },
+          "required": ["lane", "session_uuid", "resume_command"]
+        }
+      }
+    },
+    "required": ["input_refs", "sub_sessions"]
+  },
+  "required_fields": ["input_refs", "sub_sessions"]
+}

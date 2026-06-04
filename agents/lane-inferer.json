@@ -1,0 +1,9 @@
+{
+  "slug": "lane-inferer",
+  "primitives": ["INTERPRET"],
+  "input_types": ["repo-scan"],
+  "output_types": ["lane-inference"],
+  "domain": "onboard",
+  "allowed_tools": [],
+  "disallowed_tools": []
+}

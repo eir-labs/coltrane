@@ -1,0 +1,19 @@
+{
+  "slug": "orientation-report",
+  "version": 1,
+  "extends": "Verdict",
+  "domain": "onboard",
+  "status": "active",
+  "description": "The user-facing summary at the end of the onboard-v0 pipeline. The VERIFY seam: what just happened, what was spawned, what to do next. This is the artifact claude surfaces to the human after the recursive pipeline runs ON them. Naming-discipline: lanes_spawned lists lane slugs only (no Steve names — those precipitate later from audit-streams).",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "input_refs":            { "type": "array", "items": { "type": "string" }, "description": "Reference to the steve-instantiation this report verifies." },
+      "report_md":             { "type": "string", "description": "Markdown body of the user-facing orientation. ≤2000 chars. Says what onboarding did, lists the Steves spawned, suggests the next action." },
+      "lanes_spawned":         { "type": "array", "items": { "type": "string" }, "minItems": 1, "description": "Lane slugs that received a Steve. Mirrors steve-instantiation.sub_sessions[].lane." },
+      "suggested_first_action":{ "type": "string", "description": "One-line nudge: what should the user do next? E.g., `claude --resume <uuid>` to wake the backend Steve, or `read CLAUDE.md` to understand the genome." }
+    },
+    "required": ["input_refs", "report_md", "lanes_spawned", "suggested_first_action"]
+  },
+  "required_fields": ["input_refs", "report_md", "lanes_spawned", "suggested_first_action"]
+}

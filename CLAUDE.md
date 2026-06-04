@@ -7,88 +7,50 @@ Read it once; the rules apply for the rest of the session.
 
 ---
 
-## First-time tuning (run this on every fresh clone, exactly once)
+## First-clone bootstrap — dispatch the onboard-v0 standard
 
-If the file `.coltrane/tuned.json` does NOT exist in this workspace yet, you are talking
-to a user who just cloned coltrane. Before doing anything else, run this short discovery
-conversation. After it, write `.coltrane/tuned.json` to mark this session as tuned, and
-write a project-specific `CLAUDE.md` at the workspace root reflecting what you learned.
+If this is the user's **first session** in this repo (no prior entries under
+`~/.claude/projects/<repo-slug>/` beyond your own), do this BEFORE anything else:
 
-**Step 1 — greet, ask what they're working on.**
+**Step 1 — dispatch the onboard standard.**
 
-Say plainly: "Welcome to Coltrane. Before we start, two questions so I can tune the book
-to your work. First — in 1-2 sentences, what kind of work do you do? (research,
-backend engineering, model risk, grant writing, content, ML platform, etc.)"
-
-Wait for their answer. Keep it short.
-
-**Step 2 — ask permission to scan adjacent repos.**
-
-Say: "Can I scan a few of your other repos to learn the domain and your style? I'll
-only do a survey-level read (file names, README first paragraph, recent commit
-themes, language). I will NOT exfiltrate code or read secrets. Name any 2-5 repo
-paths you want me to look at, or say 'skip' to skip this step."
-
-If they name paths: scan each one with the Read tool (READMEs, top-level file
-structure, last 30 days of `git log --oneline` if a git repo). Do not deeply read
-source files. Do not touch `.env`, `secrets/`, or anything under `.git/`.
-
-If they say skip: continue without the scan.
-
-**Step 3 — propose changes to the book. Grow in place, not replace.**
-
-First, read every existing file under `players/`, `standards/`, `skills/`, `core_types/`,
-`domain_types/`. Then based on Step 1 + Step 2, propose CHANGES:
-
-- **edits** to existing players whose shape now fits the user's domain better
-- **new** players for domain-specific work that no existing player covers
-- **new** standards if multi-phase workflows you found in their repos suggest one
-
-For example:
-- a research scientist might get an EDIT to `code-reviewer` (`tools` narrowed,
-  `predict` re-pointed at LaTeX/Jupyter) plus NEW `literature-scout` + `claim-bounder`
-- a backend engineer might get an EDIT to `code-reviewer` (predict re-pointed
-  at their language) plus NEW `migration-planner` + `incident-responder`
-
-For each proposal, show: the file path, whether it's an edit or new, and a one-line
-`predict`. Ask which they want applied. Apply only the ones they say yes to.
-
-Never silently overwrite. The book grows; it does not get replaced.
-
-**Step 4 — propose edits to THIS CLAUDE.md.**
-
-Do NOT write a separate workspace CLAUDE.md. Coltrane already ships one (the file
-you are reading now). Instead, propose appendable edits to this file:
-
-- a "What this workspace works on" section reflecting the user's Step 1 answer
-- a "Players added this tuning" list with the players they accepted in Step 3
-- a "Conventions inferred from adjacent repos" section if Step 2 found patterns
-  (language, formatting, naming, branch conventions)
-
-Show the proposed appended block. Ask if they want it added. Append on yes.
-Never replace the existing protocol sections — append below them.
-
-**Step 5 — seal the moment.**
-
-Create `.coltrane/tuned.json` with:
+Call `mcp__coltrane__gig_dispatch` with:
 
 ```json
 {
-  "tuned_at": "<ISO-8601 timestamp>",
-  "user_summary": "<their step-1 answer, verbatim>",
-  "scanned_repos": ["<path>", "..."],
-  "players_created": ["<name>", "..."],
-  "claude_md_appended": true | false,
-  "players_edited": ["<name>", "..."]
+  "standard_slug": "onboard-v0",
+  "input": {
+    "cwd": "<absolute path of this workspace>",
+    "user_cwd_history": "~/.claude/projects/"
+  }
 }
 ```
 
-This file is the seal — the project's first sealed claim about what it is. Future
-sessions read `.coltrane/tuned.json` to know tuning has already happened and skip
-to normal work.
+This runs 5 phases: `scan` → `infer` → `pick` → `seed` → `orient`. Each phase
+produces one typed output, validated against the schema in `domain_types/`. The
+final phase produces an `orientation-report` (Verdict) — the user-facing summary.
 
-**If `.coltrane/tuned.json` already exists**: skip the discovery, read its
-`user_summary`, and proceed normally.
+**Step 2 — surface the orientation-report to the user.**
+
+After dispatch completes, query the gig's outputs with `mcp__coltrane__output_query`
+and pull the `orientation-report` row. Surface its `report_md` field to the user
+verbatim. End your turn with the `suggested_first_action` as a single-line nudge.
+
+**That's it. No discovery dialogue. No questions. The pipeline IS the introduction.**
+
+This is the recursive design: onboarding IS the first coltrane pipeline. The user
+experiences coltrane by watching it work on them. Every subsequent pipeline takes
+the same 5-phase shape — onboard-v0 is self-demonstrating.
+
+**Honesty list — what's wired vs paper (as of this CLAUDE.md):**
+
+- ✅ **wired**: the 5 domain types, 5 agents, and `onboard-v0` standard (genome JSON, schema-validated, e2e-tested in `tests/e2e/onboarding_pipeline.spec.ts`)
+- ✅ **wired**: `gig_dispatch` runtime walking the phases, typed-output validation, provenance threading, ledger sealing
+- 🟡 **paper-not-wired**: `mcp__coltrane__seed_steve` is referenced by `steve-seeder.allowed_tools` but the tool resolution is provided by the parent harness (#117), not in this OSS build
+- 🟡 **paper-not-wired**: the deterministic LLM-side prompts for each onboard agent — the runtime expects an `AgentInvoker` injected at the seam; the production wiring lives in the host that ships claude as the invoker
+
+**If the user IS a returning session** (their slug already has prior entries under
+`~/.claude/projects/`), skip onboarding and proceed normally.
 
 ---
 

@@ -1,0 +1,22 @@
+{
+  "slug": "repo-scan",
+  "version": 1,
+  "extends": "Signal",
+  "domain": "onboard",
+  "status": "active",
+  "description": "Survey-level read of the repo claude was launched in. Captures the SHAPE of the codebase (paths, file-type histogram, manifest presence, framework hints) without committing to mechanism. Bounded: no deep file read. This is the SENSE seam of the onboard-v0 standard — the first signal the recursive onboarding pipeline produces ON the user.",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "cwd":                 { "type": "string", "description": "Absolute path of the repo claude was launched in." },
+      "paths":               { "type": "array", "items": { "type": "string" }, "description": "Top-level paths observed (capped, kebab-listed)." },
+      "files_by_ext_count":  { "type": "object", "additionalProperties": { "type": "integer" }, "description": "Histogram of file extensions to file counts. E.g., { 'ts': 42, 'json': 7 }." },
+      "has_package_json":    { "type": "boolean" },
+      "has_cargo_toml":      { "type": "boolean" },
+      "has_claude_md":       { "type": "boolean" },
+      "frameworks_detected": { "type": "array", "items": { "type": "string" }, "description": "Coarse framework/runtime hints: 'node', 'vitest', 'next', 'rust-cargo', 'python-pyproject', etc. Best-effort, no false confidence." }
+    },
+    "required": ["cwd", "paths", "files_by_ext_count", "has_package_json", "has_cargo_toml", "has_claude_md", "frameworks_detected"]
+  },
+  "required_fields": ["cwd", "paths", "files_by_ext_count", "has_package_json", "has_cargo_toml", "has_claude_md", "frameworks_detected"]
+}

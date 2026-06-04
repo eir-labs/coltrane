@@ -1,0 +1,9 @@
+{
+  "slug": "repo-scanner",
+  "primitives": ["SENSE"],
+  "input_types": [],
+  "output_types": ["repo-scan"],
+  "domain": "onboard",
+  "allowed_tools": ["Read", "Glob", "Grep"],
+  "disallowed_tools": []
+}

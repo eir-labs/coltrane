@@ -1,0 +1,29 @@
+{
+  "slug": "lane-inference",
+  "version": 1,
+  "extends": "Interpretation",
+  "domain": "onboard",
+  "status": "active",
+  "description": "What lanes the repo WANTS — the INTERPRET seam of onboard-v0. From a repo-scan signal, name candidate lanes (research, backend, frontend, infra, data, ml, content, etc.) with calibrated confidence + reasoning. Apoha: this is NOT a commitment; downstream seed-picker may take none, one, or many. Honesty bound: confidence is low when signal is thin.",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "input_refs": { "type": "array", "items": { "type": "string" }, "description": "Reference to the repo-scan signal this inference is derived from." },
+      "lanes": {
+        "type": "array",
+        "description": "Candidate lanes with confidence and reasoning. Ordered by confidence desc.",
+        "items": {
+          "type": "object",
+          "properties": {
+            "name":       { "type": "string", "description": "Lane slug (e.g., 'backend', 'research', 'frontend')." },
+            "confidence": { "type": "number", "minimum": 0, "maximum": 1, "description": "How strongly the repo-scan signals this lane." },
+            "reasoning":  { "type": "string", "description": "One-line justification grounded in the repo-scan (file types, manifests, frameworks)." }
+          },
+          "required": ["name", "confidence", "reasoning"]
+        }
+      }
+    },
+    "required": ["input_refs", "lanes"]
+  },
+  "required_fields": ["input_refs", "lanes"]
+}

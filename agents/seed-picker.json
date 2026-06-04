@@ -1,0 +1,9 @@
+{
+  "slug": "seed-picker",
+  "primitives": ["JUDGE"],
+  "input_types": ["lane-inference"],
+  "output_types": ["seed-selection"],
+  "domain": "onboard",
+  "allowed_tools": ["Read", "Glob"],
+  "disallowed_tools": []
+}

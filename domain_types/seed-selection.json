@@ -1,0 +1,18 @@
+{
+  "slug": "seed-selection",
+  "version": 1,
+  "extends": "Judgment",
+  "domain": "onboard",
+  "status": "active",
+  "description": "Which lanes get a Steve. The JUDGE seam of onboard-v0 — converges the lane-inference distribution into a discrete choice. Reads the seeds/ directory (the set of available steve_seed_* primitive-weight configs) to know what's actually possible to spawn. Apoha: this commits — once judged, the next phase spawns Steves accordingly.",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "input_refs":    { "type": "array", "items": { "type": "string" }, "description": "Reference to the lane-inference this selection resolves." },
+      "chosen_lanes":  { "type": "array", "items": { "type": "string" }, "minItems": 1, "description": "Lane slugs selected for Steve spawn. ≥1 required — onboarding always seeds at least one lane." },
+      "rationale":     { "type": "string", "description": "Why these lanes, why not the others. Names the apoha." }
+    },
+    "required": ["input_refs", "chosen_lanes", "rationale"]
+  },
+  "required_fields": ["input_refs", "chosen_lanes", "rationale"]
+}

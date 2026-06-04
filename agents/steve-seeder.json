@@ -1,0 +1,9 @@
+{
+  "slug": "steve-seeder",
+  "primitives": ["PLAN", "CREATE"],
+  "input_types": ["seed-selection"],
+  "output_types": ["steve-instantiation"],
+  "domain": "onboard",
+  "allowed_tools": ["mcp__coltrane__seed_steve"],
+  "disallowed_tools": []
+}

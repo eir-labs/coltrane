@@ -117,6 +117,21 @@ User reviews proposed edits at their pace. Approving a ratchet integrates it int
 - **Not chatty.** One post per cycle.
 - **Not a black box.** Every ratchet carries its counter-test trail. The math is auditable; the user does not need to read it.
 
+## Cultivation: directed dream, with a verification gate
+
+The default dream is unguided — it samples projection-planes across the surviving structure without bias. But the user can pick a specific gap from the morning hole ledger and ask the band to **cultivate** it: dream cycles biased toward that gap, deliberately tracing the loops that would close it.
+
+Cultivation needs a verification gate against external ground-truth. Without one, the agent gets *more confident* in patterns that become *less structurally true*. We measured this: ungated cultivation produced 4.2× apparent-competence overshoot while degrading real-domain competence by ~30%. Gated cultivation (≥20% of the cultivated content cross-checked against real organic data) preserved real competence and stayed honest about its own confidence.
+
+The line that holds it: **gated cultivation is mind-training. Ungated cultivation is rumination.**
+
+Three pieces required, all of them:
+- **emulsion separation** — cultivated events are marked and barred from organic citation, so they don't become their own historical evidence
+- **verification gate** — kind-blind transfer test on real organic data, measuring whether cultivation improved real competence (not self-consistency)
+- **gap-region ground-truth ≥ 20%** — the transverse-injection rate from the v3.2 closed-loop safety standard
+
+Any single piece alone fails. All three together is what makes cultivation training instead of rumination.
+
 ## Cycle frequency
 
 Default: 24 hours, fired at a configurable local-time anchor. Tunable: 6h, 12h, 24h, weekly. The math doesn't depend on the period; it depends on having enough seals in the window for H¹ loops to form. As a heuristic: at least ~30 seals per cycle.

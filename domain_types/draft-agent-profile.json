@@ -26,5 +26,6 @@
       }
     },
     "required": ["input_refs", "slug", "description", "behavioral_primitives", "system_prompt_draft", "user_acceptance"]
-  }
+  },
+  "required_fields": []
 }

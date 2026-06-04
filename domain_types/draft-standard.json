@@ -41,5 +41,6 @@
       }
     },
     "required": ["input_refs", "slug", "domain", "phases", "user_acceptance"]
-  }
+  },
+  "required_fields": []
 }

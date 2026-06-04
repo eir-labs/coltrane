@@ -57,5 +57,6 @@
       "confidence_band": { "type": "string", "enum": ["high", "moderate", "low"], "description": "How confident is this read across the survey cohort?" }
     },
     "required": ["input_refs", "user_signature", "confidence_band"]
-  }
+  },
+  "required_fields": []
 }

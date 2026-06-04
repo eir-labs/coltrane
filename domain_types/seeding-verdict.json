@@ -64,5 +64,6 @@
       "next_step_hint":   { "type": "string", "description": "What to run next: typically `project-bootstrap-v0 --use-case <inferred>`." }
     },
     "required": ["input_refs", "repos_surveyed", "pass", "checks", "ripeness"]
-  }
+  },
+  "required_fields": []
 }

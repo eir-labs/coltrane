@@ -7,6 +7,40 @@ Read it once; the rules apply for the rest of the session.
 
 ---
 
+## Simplified bootstrap — `seed_steve` (the MVP mouth)
+
+If a user is opening this repo for the first time and asks you for help with a focused
+lane of work (code review, test writing, debugging, …), you have an MCP tool that
+materializes a **pre-seeded sub-claude** for that lane:
+
+```
+mcp__coltrane__seed_steve(lane: string, project_slug?: string)
+```
+
+**Available lanes** (one curated JSONL per lane under `seeds/`):
+
+| lane | stance |
+|---|---|
+| `code-reviewer` | reads diffs critically, asks about edge cases before approving, never rubber-stamps |
+| `test-writer` | writes failing tests first (RED before GREEN), targets boundary conditions |
+| `debugger` | halves the search space, reproduces before fixing, won't propose fixes for unobserved causes |
+
+**How to use it** — when the user names a task that matches a lane:
+
+1. Call `seed_steve(lane=<matching-lane>)`. It returns `{ session_uuid, path, resume_command }`.
+2. Tell the user verbatim:
+   > Run `claude --resume <session_uuid>` to enter a sub-claude pre-seeded as a `<lane>`.
+3. The sub-session opens with the lane's stance already established — no warm-up prompt,
+   no re-instructing. The stance is in the session ledger.
+
+This is the entire bootstrap. No `coltrane init`, no install flow. Coltrane = README +
+`seeds/` + MCP surface. The lane JSONLs ARE the score; `seed_steve` is the publish step.
+
+If a lane the user wants doesn't exist yet, the error response includes
+`available_lanes` — name the gap, don't make one up.
+
+---
+
 ## First-time tuning (run this on every fresh clone, exactly once)
 
 If the file `.coltrane/tuned.json` does NOT exist in this workspace yet, you are talking

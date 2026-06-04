@@ -64,6 +64,14 @@ export const MCP_TOOLS: readonly MCPToolDef[] = [
   { slug: "charter_suggest_update", category: "manage_context", input_schema: obj({ company_id: "string", field: "string", current_value: "string", suggested_value: "string", evidence: "object" }), output_schema: obj({ proposal_id: "string" }) },
 
   { slug: "lever_tensor_compute_cover", category: "build", input_schema: obj({ tasks: "array", k_object_dimension: "number", failure_library: "object" }), output_schema: obj({ K_minimal: "number", cover_complete: "boolean", umbra_remaining: "array", permutation_assignment: "array", transverse_score: "number" }) },
+
+  // seed_steve — the simplified-bootstrap mouth. Reads a curated lane JSONL
+  // from seeds/<lane>.jsonl and materializes a real Claude Code session file
+  // under ~/.claude/projects/<slug>/<new-uuid>.jsonl with proper parentUuid
+  // threading + a fresh sessionId. The caller then runs `claude --resume <uuid>`
+  // to step into a sub-claude pre-loaded with the lane's stance. Engine:
+  // src/seed_steve.ts. No `coltrane init`, no install flow — git clone + claude.
+  { slug: "seed_steve", category: "run", input_schema: obj({ lane: "string", project_slug: "string", cwd: "string" }), output_schema: obj({ session_uuid: "string", path: "string", lane: "string", project_slug: "string", turns_written: "number" }) },
 ];
 
 // Lifecycle promotion order — forward-only. agent/standard share the same chain;

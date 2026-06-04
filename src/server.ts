@@ -36,6 +36,7 @@ import { join } from "node:path";
 import { SubthreadRecorder, ApiVersionMismatchError } from "./subthread_recorder.js";
 import { canonJson, runFingerprint, CANONICAL_FORM_VERSION } from "./canonical_form.js";
 import type { LoadedGenome } from "./loader.js";
+import { seedSteve, listLanes, LaneNotFoundError } from "./seed_steve.js";
 
 export interface ServerDeps {
   registry: Registry;
@@ -54,6 +55,12 @@ export interface ServerDeps {
   // at bootstrap; tests inject their own. The ledger is append-only + rejects
   // double-seal of the same pre_reg_id.
   pre_reg_ledger?: PreRegLedger | undefined;
+  // Path to seeds/ directory holding lane JSONLs (code-reviewer, test-writer, debugger, ...).
+  // Defaults to <genome_dir>/seeds, falling back to <cwd>/seeds. seed_steve reads from here.
+  seeds_dir?: string | undefined;
+  // Override for HOME — only used in tests so seed_steve writes under a tempdir
+  // rather than the real ~/.claude/projects. Production leaves this undefined.
+  home_dir?: string | undefined;
 }
 
 export interface ToolResult {
@@ -189,6 +196,48 @@ export async function dispatchTool(slug: string, args: Record<string, unknown>, 
         }
         const executions = deps.ledger.query(filter);
         return { ok: true, requires_approval: approval, data: { executions, count: executions.length } };
+      }
+      case "seed_steve": {
+        // Read curated lane JSONL from seeds/<lane>.jsonl, materialize a real
+        // Claude Code session file under ~/.claude/projects/<slug>/<uuid>.jsonl,
+        // return the new session_uuid so caller can `claude --resume <uuid>`.
+        // The lane file is the score; this handler is the publish step.
+        const lane = String(args["lane"] ?? "");
+        if (!lane) return { ok: false, requires_approval: approval, error: "seed_steve requires a lane (e.g. code-reviewer, test-writer, debugger)" };
+        const cwd = args["cwd"] ? String(args["cwd"]) : process.cwd();
+        const seedsDir = deps.seeds_dir
+          ?? (deps.genome_dir ? join(deps.genome_dir, "seeds") : join(process.cwd(), "seeds"));
+        const projectSlug = args["project_slug"] ? String(args["project_slug"]) : undefined;
+        try {
+          const opts: { lane: string; cwd: string; seedsDir: string; home?: string; projectSlug?: string } = {
+            lane, cwd, seedsDir,
+          };
+          if (deps.home_dir !== undefined) opts.home = deps.home_dir;
+          if (projectSlug !== undefined) opts.projectSlug = projectSlug;
+          const res = seedSteve(opts);
+          return {
+            ok: true,
+            requires_approval: approval,
+            data: {
+              session_uuid: res.session_uuid,
+              path: res.path,
+              lane: res.lane,
+              project_slug: res.project_slug,
+              turns_written: res.turns_written,
+              resume_command: `claude --resume ${res.session_uuid}`,
+            },
+          };
+        } catch (e) {
+          if (e instanceof LaneNotFoundError) {
+            return {
+              ok: false,
+              requires_approval: approval,
+              error: e.message,
+              data: { lane: e.lane, available_lanes: e.available_lanes },
+            };
+          }
+          throw e;
+        }
       }
       case "gig_dispatch": {
         if (!deps.standards || !deps.invoke) {
@@ -720,6 +769,7 @@ export function bootstrapServerDeps(genomeRoot?: string): ServerDeps {
     invoke: makeClaudeInvoker({ registry, model: process.env["COLTRANE_MODEL"] }),
     model_version: process.env["COLTRANE_MODEL"] ?? "claude-cli-default",
     genome_dir: root, // ← genome-mutation tools persist + ledger-seal into the live genome
+    seeds_dir: process.env["COLTRANE_SEEDS_DIR"] ?? join(root, "seeds"),
   };
 }
 

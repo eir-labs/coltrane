@@ -63,6 +63,32 @@ describe("buildPrompt: the 5-layer hierarchy", () => {
     const p = buildPrompt(ctx({ inputs: [] }));
     expect(p).toContain("root agent");
   });
+
+  it("emits the Skills layer when skills are present in the ctx", () => {
+    const p = buildPrompt(
+      ctx({
+        skills: [
+          { slug: "summarize-tight", md: "Compose the gist in one tight clause." },
+          { slug: "no-filler", text: "Use only the supplied facts." },
+        ],
+      }),
+    );
+    expect(p).toContain("# Skills");
+    expect(p).toContain("## summarize-tight");
+    expect(p).toContain("Compose the gist in one tight clause.");
+    expect(p).toContain("## no-filler");
+    expect(p).toContain("Use only the supplied facts.");
+    // Skills lands BEFORE Context (layer 3 of 5).
+    expect(p.indexOf("# Skills")).toBeGreaterThan(p.indexOf("# Identity"));
+    expect(p.indexOf("# Skills")).toBeLessThan(p.indexOf("# Context"));
+  });
+
+  it("omits the Skills layer entirely when no skills are bound", () => {
+    const p = buildPrompt(ctx({ skills: [] }));
+    expect(p).not.toContain("# Skills");
+    // Default ctx (no skills field) also omits the layer.
+    expect(buildPrompt(ctx())).not.toContain("# Skills");
+  });
 });
 
 describe("extractJson: tolerant parse of model output", () => {

@@ -12,6 +12,11 @@ import type { Registry } from "./registry.js";
 
 // The 5-layer prompt hierarchy: Disposition → Identity → Skills → Context → Task.
 // Pure: same context in, same prompt out. Hashable, reviewable, testable.
+// Layer 3 (Skills) is emitted when the AgentInvocationContext carries resolved
+// SkillRecords — the runtime resolves the agent's `skill_slugs` against the
+// genome's skills map and passes the records through. Empty/absent → the Skills
+// section is omitted entirely (no empty header, no noise) so the model only
+// sees skills the agent actually declared.
 export function buildPrompt(ctx: AgentInvocationContext, outputSchema?: Record<string, unknown>): string {
   const a = ctx.agent;
   const layers: string[] = [];
@@ -22,7 +27,21 @@ export function buildPrompt(ctx: AgentInvocationContext, outputSchema?: Record<s
   // 2. Identity — who you are.
   layers.push(`# Identity\nYou are the agent "${a.slug}"${a.domain ? ` in the "${a.domain}" domain` : ""}.`);
 
-  // 3. (Skills layer omitted in v0 — skill content injection is a later piece.)
+  // 3. Skills — content the agent's bound skills contribute to the prompt. Each
+  // skill renders as `## <slug>` + its text payload. We pick the first non-empty
+  // string from the conventional content keys (`md`, then `text`, then `body`);
+  // a slug-only SkillRecord still renders its slug so the model knows it's bound.
+  const skillBlocks = (ctx.skills ?? []).map((s) => {
+    const text =
+      (typeof s["md"] === "string" && (s["md"] as string)) ||
+      (typeof s["text"] === "string" && (s["text"] as string)) ||
+      (typeof s["body"] === "string" && (s["body"] as string)) ||
+      "";
+    return `## ${s.slug}${text ? `\n${text}` : ""}`;
+  });
+  if (skillBlocks.length > 0) {
+    layers.push(`# Skills\n${skillBlocks.join("\n\n")}`);
+  }
 
   // 4. Context — the gig input + the upstream typed outputs you consume.
   const inputsBlock = ctx.inputs.length

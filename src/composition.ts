@@ -12,6 +12,10 @@ export interface AgentDef {
   // NO ambient MCP tools — deny-by-default; declare allowed_tools to grant scope).
   allowed_tools?: readonly string[];
   disallowed_tools?: readonly string[];
+  // Skill bindings — slugs the runtime resolves against the genome's skills map
+  // and injects as the prompt's Skills layer (layer 3 of 5). Absent/empty = no
+  // skills attach; the prompt skips the Skills section entirely.
+  skill_slugs?: readonly string[];
 }
 
 export interface Agent {
@@ -24,6 +28,9 @@ export interface Agent {
   // sets them ([] = no grant). The invoker treats absent/empty as deny-by-default.
   allowed_tools?: readonly string[];
   disallowed_tools?: readonly string[];
+  // Skill bindings (slugs) the runtime resolves into the prompt's Skills layer.
+  // Optional so hand-built Agent literals stay valid; defineAgent always sets ([]).
+  skill_slugs?: readonly string[];
 }
 
 export interface PhaseDef {
@@ -86,6 +93,7 @@ export function defineAgent(def: AgentDef): Agent {
     domain: def.domain ?? null,
     allowed_tools: def.allowed_tools ?? [],
     disallowed_tools: def.disallowed_tools ?? [],
+    skill_slugs: def.skill_slugs ?? [],
   };
 }
 

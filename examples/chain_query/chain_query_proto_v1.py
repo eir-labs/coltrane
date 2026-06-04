@@ -15,12 +15,13 @@ from pathlib import Path
 
 INBOX = Path.home() / ".eir" / "inbox_studio.jsonl"
 AGENT_LABELS = {
-    "U08B16PSMB2": "eugene",
-    "U0AVC14NPQV": "miles",
-    "U0AVC0GSQP7": "cajal",
-    "U0B0VQ30RTJ": "subhuti",
-    "U0AVDD12TCN": "groove",
-    "U0B00U8EH0C": "lighthouse",
+    # Slack user_id -> logical agent label. Replace these with your own.
+    "U08B16PSMB2": "principal",
+    "U0AVC14NPQV": "agent_a",
+    "U0AVC0GSQP7": "agent_b",
+    "U0B0VQ30RTJ": "agent_c",
+    "U0AVDD12TCN": "agent_d",
+    "U0B00U8EH0C": "agent_e",
 }
 
 PATTERNS = {
@@ -33,9 +34,9 @@ PATTERNS = {
 
 # Text-proxy mirror of chain_keeper.categorize_kind. The chain treats CATEGORIES
 # as the partition; here we derive a category per inbox message by text shape.
-PRESENCE_PAT = re.compile(r"^\s*(·|:saxophone:|:chains:|tick|miles-tick|heartbeat|miles_tick)+\s*$", re.I)
+PRESENCE_PAT = re.compile(r"^\s*(·|:saxophone:|:chains:|tick|tick|heartbeat)+\s*$", re.I)
 ACK_OPENERS = re.compile(r"^\s*(yes|noted|heard|caught|ack|copy|ok|got it|:white_check_mark:|:thumbsup:|:heavy_check_mark:)\b", re.I)
-SETTLEMENT_PAT = re.compile(r"\b(external_verdict_source|mint fires|first mint|settlement event|PASS.*from rob|rob.*PASS)\b", re.I)
+SETTLEMENT_PAT = re.compile(r"\b(external_grader|credit fires|first credit|settlement event|PASS.*from reviewer|reviewer.*PASS)\b", re.I)
 
 def categorize_text(txt: str) -> str:
     """Text-proxy classifier mirroring chain_keeper's category schema."""

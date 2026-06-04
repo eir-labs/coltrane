@@ -1,8 +1,16 @@
 # Sleep
 
-> **Status: In development.** Architecture validated across three sim cycles (v0/v1/v2) and an independent cascade-resilience verdict (lighthouse). User-facing dials and regime indicators below are the target interface. Wiring still in flight.
+> **Status: In development.** Architecture validated across multiple sim cycles + cascade-resilience verdict + ensemble-orthogonality verify. User-facing dials and regime indicators below are the target interface. Wiring still in flight.
 
-Sleep is a nightly pass each Steve runs against its last 24 hours of work. It is how implicit discipline becomes explicit. It is how the gaps in the day's work get named. It is how a band of agents stays itself instead of collapsing into the loudest pattern it generated yesterday.
+## What sleep actually does
+
+Each night, Coltrane returns the day's work toward a baseline floor — not erased, *un-developed*. Most patterns dissolve back. What stays above the floor is your project's load-bearing shape: not what you wrote yesterday, not what felt important, but what couldn't be washed away.
+
+Then dream reads the surviving structure from new projection-planes — different angles, different scales — and shows you what those readings agree on. Most agreements are familiar. Some surface structure you couldn't see directly because you were standing inside it.
+
+What lands in your morning post is what survived the reversal and re-cohered across the projections.
+
+The floor itself is mechanical, not editorial. Hashed audit-chain seals can't be un-hashed; substrate definitions can't be sleep-bleached because they're what sleep is measured against. Above-floor lives everything that has to earn its place each cycle.
 
 This document explains what Sleep is, what it produces, the two dials the user gets to turn, and what regime indicators show on the morning surface.
 

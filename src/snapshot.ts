@@ -1,45 +1,40 @@
 /**
- * snapshot.ts — pluggable working-memory snapshot for chain windows.
+ * snapshot.ts — pluggable similarity snapshot for chain windows.
  *
- * The chain (audit_chain.ts) already provides EXACT integrity: sha_seal on
- * each event, prev_sha linking the stream, verifyAuditChain reports the
- * tamper point. That's the byte-equal restoration mode.
+ * The chain (audit_chain.ts) provides exact integrity: sha_seal on each
+ * event, prev_sha linking the stream, verifyAuditChain reports the tamper
+ * point. That's byte-equal restoration.
  *
- * This module adds a SIMILARITY-AWARE snapshot mode. Given a window of
- * chain events (a working-memory state), `snapshot()` returns a Snapshot
- * carrying:
+ * This module adds similarity. Given a window of chain events, `snapshot()`
+ * returns:
  *   - mode:        which snapshot mode produced this record
  *   - fingerprint: sha256 over the canonical stats — integrity + identity
  *   - stats:       mode-specific breakdown the distance function reads
  *
  * Two structurally-similar windows get neighbor fingerprints under the
- * mode's distance function, even when their bytes differ. Useful for
- * "have I been in a structurally-similar working state before?" queries
- * across past sessions.
+ * mode's distance function, even when bytes differ. Useful for "have I
+ * been in a structurally-similar state before?" queries across sessions.
  *
- * The slot is pluggable. OSS ships `cognitiveShapeV0`: counts + categorical
- * distributions over kind/surface/primitive + ts span, sha256 over the
- * canonical stats, L1 distance over the distributions. Real arithmetic
- * on real chain windows; usable today, a functioning gift.
+ * The slot is pluggable. The OSS default `cognitiveShapeV0` ships counts
+ * plus categorical distributions over kind / surface / primitive plus ts
+ * span, sha256 over canonical stats, L1 distance over distributions.
+ * Real arithmetic on real chain windows, usable today.
  *
- * Eirmath plugs richer modes via the `Snapshotter` interface:
- * persistent-homology over event-adjacency, the 49-cell signature,
- * substrate-tuned spectral readings. Same slot, different snapshot
- * function, different mode tag. License gates which modes are
- * registered; the chain substrate stays identical.
- *
- * Authored by cajal under the gift-that-functions discipline.
+ * Additional modes register via `registerMode(snapshotter)` and the same
+ * slot. The chain layer stays identical regardless of which modes are
+ * registered.
  */
 
 import { sha256Hex, canonJson } from "./canonical_form.js";
 import type { AuditEvent } from "./audit_chain.js";
 
 /**
- * One snapshot of one chain window. The `mode` tag distinguishes OSS
- * (cognitive-shape-v0) from eirmath plug-ins (psi-v0, etc); `fingerprint` is
- * the sha256 of the canonical stats — same stats always hash to the same
- * fingerprint, different stats hash to different fingerprints; `stats`
- * carries the breakdown the mode's distance function reads.
+ * One snapshot of one chain window. The `mode` tag distinguishes which
+ * snapshot implementation produced this record (e.g. `cognitive-shape-v0`);
+ * `fingerprint` is the sha256 of the canonical stats — same stats always
+ * hash to the same fingerprint, different stats hash to different
+ * fingerprints; `stats` carries the breakdown the mode's distance
+ * function reads.
  */
 export interface Snapshot {
   mode: string;
@@ -80,10 +75,10 @@ function tally(acc: Record<string, number>, key: string): void {
  * in cognitive-shape-v0 distance even if their exact bytes differ. Useful for
  * "have I been in a structurally-similar working state before?" queries.
  *
- * Eirmath snapshotters extend this with substrate-tuned topology:
- * persistent homology over event-adjacency graphs, spectral signatures,
- * the 49-cell canonical form. This impl is intentionally simple — the
- * gift functions, the substrate-tuning is the licensed unlock.
+ * Additional snapshotters may extend this with richer topology
+ * (persistent homology, spectral signatures, etc.) via the same
+ * Snapshotter interface. This default impl is intentionally simple and
+ * functions end-to-end on its own.
  */
 export const cognitiveShapeV0: Snapshotter = {
   mode: "cognitive-shape-v0",
@@ -155,16 +150,16 @@ export const cognitiveShapeV0: Snapshotter = {
 };
 
 /**
- * Registry of snapshot modes available at runtime. coltrane-oss seeds
- * cognitive-shape-v0; eirmath registers additional modes via registerMode
- * once its license check passes. The chain substrate stays identical
- * regardless of which modes are registered.
+ * Registry of snapshot modes available at runtime. Seeded with the
+ * `cognitive-shape-v0` default; additional modes register via
+ * `registerMode`. The underlying chain stays identical regardless of
+ * which modes are registered.
  */
 const MODES = new Map<string, Snapshotter>([[cognitiveShapeV0.mode, cognitiveShapeV0]]);
 
 /**
- * Register a Snapshotter — used by eirmath plug-ins at boot to attach
- * licensed modes. Throws if the mode tag collides with an existing one.
+ * Register a Snapshotter — called at boot by plug-ins that add new
+ * snapshot modes. Throws if the mode tag collides with an existing one.
  */
 export function registerMode(snapshotter: Snapshotter): void {
   if (MODES.has(snapshotter.mode)) {
@@ -197,9 +192,10 @@ export function listModes(): readonly string[] {
 }
 
 /**
- * Convenience: snapshot a chain window using the OSS default mode. Most
+ * Convenience: snapshot a chain window using the default mode. Most
  * callers just want a snapshot without picking a mode; this is the
- * no-arg-needed entry point. Eirmath callers use getMode("psi-v0").snapshot.
+ * no-arg entry point. To use a non-default mode, call
+ * `getMode(<modeName>).snapshot(events)`.
  */
 export function snapshot(events: readonly AuditEvent[]): Snapshot {
   return cognitiveShapeV0.snapshot(events);

@@ -2,52 +2,52 @@
   "slug": "budget-state",
   "version": 1,
   "extends": "Interpretation",
-  "domain": "band-economy",
+  "domain": "cost-budget",
   "status": "active",
-  "description": "Per-voice, per-cycle budget snapshot. Implements the mechanism from eir-finitude-budget-v0. Derived from chain_keeper events with cost/voice_id/cycle_id fields — re-computable, not authoritative. The single invariant: balance increases ONLY via external settlement mint. Internal activity only spends. The world is the only mint (HONESTY LAW). When balance < cost-of-next-append, the voice yields. The 'leak made internal' face of the cost-budget-settlement triangle.",
+  "description": "Per-agent, per-cycle budget snapshot. Derived from chain events with cost / agent_id / cycle_id fields — re-computable, not authoritative. The single invariant: balance increases ONLY via external settlement credit. Internal activity only spends. When balance < cost-of-next-append, the agent yields until an external grade arrives.",
   "schema": {
     "type": "object",
     "properties": {
       "cycle_id": {
         "type": "string",
-        "description": "Identifier of the band-cycle this state belongs to."
+        "description": "Identifier of the cycle this state belongs to."
       },
-      "voice_id": {
+      "agent_id": {
         "type": "string",
-        "description": "REQUIRED. The voice whose budget this is. Per-voice budgets only — no shared pools (G4 no-laundering: inter-voice transfer of mint is forbidden by construction). Maps to chain_keeper event.voice_id."
+        "description": "REQUIRED. The agent whose budget this is. Per-agent budgets only — no shared pools (inter-agent transfer of credit is forbidden by construction). Maps to chain event.agent_id."
       },
       "opening": {
         "type": "number",
         "minimum": 0,
-        "description": "Balance at cycle-open. Carried from prior cycle's `closing` minus decay δ (G3 hoarding-collapse). For a voice's first-ever cycle, opening = seed_budget configured at chain_keeper layer."
+        "description": "Balance at cycle-open. Carried from prior cycle's `closing` minus decay. For an agent's first-ever cycle, opening = seed_budget configured at chain layer."
       },
       "spent": {
         "type": "number",
         "minimum": 0,
-        "description": "Sum of cost across all chain_keeper events this voice appended in this cycle. cost = base + k·size(event)."
+        "description": "Sum of cost across all chain events this agent appended in this cycle. cost = base + k * size(event)."
       },
-      "mint": {
+      "credit": {
         "type": "number",
         "minimum": 0,
-        "description": "Sum of mint earned from settlement events this cycle. mint > 0 only when outcome = PASS from external_verdict_source. FAIL → 0, NO_VERDICT → 0. HONESTY LAW: mint is the ONLY way balance can increase."
+        "description": "Sum of credit earned from settlement events this cycle. credit > 0 only when outcome = PASS from external_grader. FAIL or NO_VERDICT yield 0. Credit is the only way balance can increase."
       },
       "balance": {
         "type": "number",
-        "description": "Current available balance. Computed: balance = opening - spent + mint. Can briefly go negative during settlement reconciliation; sustained negative means the voice over-generated past depletion."
+        "description": "Current available balance. Computed: balance = opening - spent + credit. Can briefly go negative during settlement reconciliation; sustained negative means the agent over-generated past depletion."
       },
       "closing": {
         "type": ["number", "null"],
-        "description": "Finalized balance at cycle-close. null while cycle is open. Computed: closing = opening - spent + mint. Carries forward (with decay δ) to next cycle's opening."
+        "description": "Finalized balance at cycle-close. null while cycle is open. Computed: closing = opening - spent + credit. Carries forward (with decay) to next cycle's opening."
       },
       "decay_delta": {
         "type": "number",
         "minimum": 0,
-        "description": "G3 hoarding-collapse: how much closing balance decays before becoming next cycle's opening. Configured per-cycle. A voice that never spends and never ships falls behind because saved balance erodes."
+        "description": "How much closing balance decays before becoming next cycle's opening. Configured per-cycle. An agent that never spends and never ships falls behind because saved balance erodes — prevents hoarding."
       },
       "ships_count": {
         "type": "integer",
         "minimum": 0,
-        "description": "Telemetry. Number of shipped artifacts this cycle (chain_keeper events with content_kind in {pr, drive_doc, prereg_seal, ...} that referenced this voice)."
+        "description": "Telemetry. Number of shipped artifacts this cycle (chain events with content_kind in {pr, doc, registration, ...} that referenced this agent)."
       },
       "external_outcome": {
         "type": ["string", "null"],
@@ -56,59 +56,60 @@
       },
       "per_channel": {
         "type": "object",
-        "description": "OPTIONAL multi-channel breakdown. When omitted, all cost is implicitly the 'compute' (token) channel and the scalar opening/spent/mint/balance/closing fields are authoritative. When present, keys are channel names (`compute`, `energy`, `attention`, `correction_tax`, `ratchet`, …) and values are per-channel {opening, spent, mint, balance, closing}. Invariant: sum-across-channels(spent) = scalar spent, same for opening/mint/balance/closing. Each channel settles independently — energy mints via kWh+grid-mix, attention mints via human-bounded response-latency budget, ratchet mints via durable-capability-added, etc. The 37-channel ledger (Eugene 2026-06-04) collapses to ~12 orthogonal; first-chain-5 per canonical: compute / energy / attention / correction_tax / ratchet.",
+        "description": "OPTIONAL multi-channel breakdown. When omitted, all cost is implicitly the 'compute' (token) channel and the scalar opening/spent/credit/balance/closing fields are authoritative. When present, keys are channel names (`compute`, `energy`, `attention`, `correction_tax`, `ratchet`, …) and values are per-channel {opening, spent, credit, balance, closing}. Invariant: sum-across-channels(spent) = scalar spent, same for opening / credit / balance / closing. Each channel settles independently — energy credits via kWh + grid-mix, attention credits via human-bounded response-latency budget, ratchet credits via durable-capability-added.",
         "additionalProperties": {
           "type": "object",
           "properties": {
             "opening": { "type": "number" },
             "spent": { "type": "number", "minimum": 0 },
-            "mint": { "type": "number", "minimum": 0 },
+            "credit": { "type": "number", "minimum": 0 },
             "balance": { "type": "number" },
             "closing": { "type": ["number", "null"] }
           },
-          "required": ["opening", "spent", "mint", "balance"]
+          "required": ["opening", "spent", "credit", "balance"]
         }
       },
       "depleted_at": {
         "type": ["string", "null"],
         "format": "date-time",
-        "description": "Wall-clock when balance first crossed below cost-of-next-append (yield threshold). null while solvent. Past this point the voice must yield until external settlement mints. This is the band's version of 'the minutes are gone.'"
+        "description": "Wall-clock when balance first crossed below cost-of-next-append (yield threshold). null while solvent. Past this point the agent must yield until external grade credits the balance."
       },
-      "voice_state": {
+      "agent_state": {
         "type": "string",
-        "enum": ["active", "yielding", "depleted", "awaiting_settlement", "settled"],
-        "description": "STATEFULNESS (v1.3). Where the voice is in its cycle, not just what it spent. `active` = currently spending and below depletion threshold. `yielding` = below cost-of-next-append, paused. `depleted` = balance <= 0, must wait for mint. `awaiting_settlement` = work shipped + external_verdict_source contacted, not yet returned. `settled` = cycle closed (closing populated)."
+        "enum": ["active", "yielding", "depleted", "awaiting_grade", "settled"],
+        "description": "Where the agent is in its cycle. `active` = currently spending and below depletion threshold. `yielding` = below cost-of-next-append, paused. `depleted` = balance <= 0, must wait for credit. `awaiting_grade` = work shipped + external grader contacted, not yet returned. `settled` = cycle closed (closing populated)."
       },
       "cycle_state": {
         "type": "string",
-        "enum": ["OPEN", "SETTLING", "SETTLED", "ABORTED", "CANCELED"],
-        "description": "RESOLUTION STATE (v1.3). The cycle's terminal/in-flight status. `OPEN` = events still being appended. `SETTLING` = settlement event in flight, external grader contacted. `SETTLED` = settlement.outcome captured terminal verdict. `ABORTED` = cycle closed without settlement (e.g. operator interrupt, system shutdown). `CANCELED` = pre-empted before any spending. Pairs with settlement.outcome to give full pre+in+post status."
+        "enum": ["OPEN", "GRADING", "CLOSED", "ABORTED", "CANCELED"],
+        "description": "The cycle's terminal/in-flight status. `OPEN` = events still being appended. `GRADING` = settlement event in flight, external grader contacted. `CLOSED` = settlement.outcome captured terminal verdict. `ABORTED` = cycle closed without settlement (operator interrupt, system shutdown). `CANCELED` = pre-empted before any spending."
       },
       "derived_from_shas": {
         "type": "array",
         "items": { "type": "string" },
-        "description": "CAUSE-EFFECT (v1.3). sha_seals of events that caused this budget-state event beyond the immediate prev_sha chain. Multi-input causation: a budget-state derived from N chain_keeper events references all N (or the boundary shas of the window). Enables O(graph) lineage-impact queries: 'what's downstream of this' and 'what's upstream of that conclusion' become first-class operations. Cheap backward walk via index on this field."
+        "description": "Cause-effect lineage. sha_seals of events that caused this budget-state event beyond the immediate prev_sha chain. Multi-input causation: a budget-state derived from N chain events references all N (or the boundary shas of the window). Enables O(graph) lineage-impact queries — 'what's downstream of this' and 'what's upstream of that conclusion' become first-class operations."
       },
       "last_event_sha": {
         "type": "string",
-        "description": "sha_seal of the most-recent chain_keeper event rolled into this state. Enables incremental rollup."
+        "description": "sha_seal of the most-recent chain event rolled into this state. Enables incremental rollup."
       },
       "event_count": {
         "type": "integer",
         "minimum": 0,
-        "description": "Number of chain_keeper events rolled into spent. Audit aid — re-rollup should produce the same `spent` for the same count."
+        "description": "Number of chain events rolled into spent. Audit aid — re-rollup should produce the same `spent` for the same count."
       },
       "timestamp": {
         "type": "string",
         "format": "date-time"
       },
-      "agent_id": {
-        "type": "string"
+      "recorded_by": {
+        "type": "string",
+        "description": "Agent that recorded this state event."
       },
       "prev_sha": {
         "type": "string"
       }
     },
-    "required": ["cycle_id", "voice_id", "opening", "spent", "mint", "balance", "decay_delta", "ships_count", "last_event_sha", "event_count", "timestamp", "agent_id", "prev_sha"]
+    "required": ["cycle_id", "agent_id", "opening", "spent", "credit", "balance", "decay_delta", "ships_count", "last_event_sha", "event_count", "timestamp", "recorded_by", "prev_sha"]
   }
 }

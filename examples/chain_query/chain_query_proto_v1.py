@@ -14,7 +14,7 @@ import json, re, sys, time, argparse
 from pathlib import Path
 
 INBOX = Path.home() / ".eir" / "inbox_studio.jsonl"
-USER_TO_ANT = {
+AGENT_LABELS = {
     "U08B16PSMB2": "eugene",
     "U0AVC14NPQV": "miles",
     "U0AVC0GSQP7": "cajal",
@@ -24,11 +24,11 @@ USER_TO_ANT = {
 }
 
 PATTERNS = {
-    "prereg_seal": re.compile(r"\b(pre[-_ ]?reg|prereg|sealed.*claim|kill[_ -]?condition|apoha)\b", re.I),
-    "empirical_run": re.compile(r"\b(ran|measured|N=\d+|eigenvals?|spearman|empirical|test ran|results)\b", re.I),
+    "registration": re.compile(r"\b(pre[-_ ]?reg|registration|sealed.*claim|kill[_ -]?condition|)\b", re.I),
+    "test_run": re.compile(r"\b(ran|measured|N=\d+|eigenvals?|spearman|empirical|test ran|results)\b", re.I),
     "verdict": re.compile(r"\b(PASS|FAIL|RIPENED|KILL[- _]?FIRED|kill_fired|failed_at|incomplete_to|verdict)\b"),
     "amendment": re.compile(r"\b(amend|Amendment \d+|standard.*updated|demoted|revised)\b", re.I),
-    "cycle_close": re.compile(r"\b(cycle.*closed|sealed for|methodology cadence.*sealed|ratchet[- ]?tooth)\b", re.I),
+    "cycle_close": re.compile(r"\b(cycle.*closed|sealed for|test cycle.*sealed|credit-step)\b", re.I),
 }
 
 # Text-proxy mirror of chain_keeper.categorize_kind. The chain treats CATEGORIES
@@ -73,7 +73,7 @@ def load_events(window_sec, category_filter=None):
             t = ts_of(ev); txt = text_of(ev)
             u = ev.get("user") if isinstance(ev, dict) else None
             if t is None or now - t > window_sec: continue
-            ant = USER_TO_ANT.get(u)
+            ant = AGENT_LABELS.get(u)
             if not ant or not txt: continue
             cat = categorize_text(txt)
             if category_filter and cat not in category_filter: continue
@@ -82,22 +82,22 @@ def load_events(window_sec, category_filter=None):
     out.sort()
     return out
 
-def preregs_by_voice(events, voice):
+def registrations_by_agent(events, voice):
     return [(t, txt[:200]) for t, a, txt, kinds, c in events
-            if a == voice and "prereg_seal" in kinds]
+            if a == voice and "registration" in kinds]
 
 def completed_cycles(events, voice):
     cycles = []
     for i, (t, a, txt, kinds, c) in enumerate(events):
-        if a != voice or "prereg_seal" not in kinds: continue
+        if a != voice or "registration" not in kinds: continue
         empirical = None; verdict = None
         for tj, aj, txtj, kindsj, cj in events[i+1:]:
             if aj != voice: continue
-            if empirical is None and "empirical_run" in kindsj: empirical = (tj, txtj[:100])
+            if empirical is None and "test_run" in kindsj: empirical = (tj, txtj[:100])
             if "verdict" in kindsj: verdict = (tj, txtj[:100]); break
             if tj - t > 3 * 3600: break
         if empirical and verdict:
-            cycles.append({"prereg_ts": t, "prereg_summary": txt[:100],
+            cycles.append({"registration_ts": t, "registration_summary": txt[:100],
                            "empirical_ts": empirical[0], "verdict_ts": verdict[0],
                            "verdict_summary": verdict[1],
                            "duration_min": (verdict[0] - t) / 60})
@@ -116,7 +116,7 @@ def per_voice_table(events):
     voices = sorted({a for _, a, _, _, _ in events})
     return {v: {
         "n_events": sum(1 for _, a, *_ in events if a == v),
-        "n_preregs": len(preregs_by_voice(events, v)),
+        "n_registrations": len(registrations_by_agent(events, v)),
         "n_completed_cycles": len(completed_cycles(events, v)),
         "falsification": falsification_rate(events, v),
     } for v in voices}
@@ -139,7 +139,7 @@ def main():
           file=sys.stderr)
 
     out = {
-        "schema": "miles.chain_query.proto.v1.stage1",
+        "schema": "chain_query.proto.v1",
         "window_hours": args.window_hours,
         "v0_no_filter": {
             "n_total": len(all_evs),

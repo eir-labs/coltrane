@@ -1,7 +1,7 @@
 {
   "slug": "problem-definer",
   "primitives": ["JUDGE", "PLAN"],
-  "input_types": ["repo-survey", "raw-note"],
+  "input_types": ["repo-survey"],
   "output_types": ["project-charter"],
   "domain": "bootstrap",
   "lane": "define",

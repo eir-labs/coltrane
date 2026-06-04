@@ -1,6 +1,6 @@
 {
   "slug": "delivery-finalizer",
-  "primitives": ["VERIFY", "CREATE"],
+  "primitives": ["PLAN", "CREATE", "VERIFY"],
   "input_types": ["Artifact"],
   "output_types": ["Verdict"],
   "domain": "bootstrap",

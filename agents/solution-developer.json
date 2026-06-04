@@ -1,6 +1,6 @@
 {
   "slug": "solution-developer",
-  "primitives": ["CREATE", "PLAN"],
+  "primitives": ["PLAN", "CREATE"],
   "input_types": ["project-charter"],
   "output_types": ["Artifact"],
   "domain": "bootstrap",

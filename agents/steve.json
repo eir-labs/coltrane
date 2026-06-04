@@ -1,8 +1,8 @@
 {
   "slug": "steve",
-  "primitives": [],
-  "input_types": ["raw-note", "signal"],
-  "output_types": ["raw-note", "signal", "interpretation", "judgment", "plan", "artifact", "verdict"],
+  "primitives": ["SENSE", "INTERPRET"],
+  "input_types": ["raw-note", "Signal"],
+  "output_types": ["raw-note", "Signal", "Interpretation", "Judgment", "Plan", "Artifact", "Verdict"],
   "domain": "live",
   "identity": "blank — earned downstream from audit-stream, not seeded",
   "method": "autodidact · reads workspace + book on first boot · plays gigs · accumulates audit · differentiates from siblings through orthogonal primitive seed weights",

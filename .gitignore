@@ -6,6 +6,7 @@ dist
 /reports
 .stryker-tmp
 scripts/.private/
+scripts/__pycache__/
 tests/lint_guard/.scratch/
 
 # live-slack runtime artifacts (per-Steve state + secrets)

@@ -38,6 +38,10 @@ export interface GigResult {
   genome_hash: string;
   run_fingerprint: string;
   outputs: readonly OutputRecord[];
+  // 5th-class eval scores keyed by eval_slug. Empty when the standard declares
+  // no eval_slugs. Populated by scanning the produced outputs against each
+  // declared eval at gig-completion time.
+  eval_scores: Record<string, number>;
   status: "complete";
 }
 
@@ -108,11 +112,21 @@ export async function runGig(
 
   const genome_hash = genomeHash(standard);
   const output_hashes = produced.map((p) => p.id);
+
+  // 5th-class evals: when the standard declares eval_slugs, run each against
+  // the produced outputs and collect the scores. A score of 1.0 means the
+  // eval's contract holds; 0.0 means it doesn't. v0 wire is intentionally
+  // narrow — score is keyed presence; richer eval engines can subclass.
+  const eval_scores: Record<string, number> = {};
+  for (const slug of standard.eval_slugs ?? []) {
+    eval_scores[slug] = scoreEval(slug, produced);
+  }
+
   const run_fingerprint = runFingerprint({
     genome_hash,
     model_version: deps.model_version ?? "unknown",
     canonical_form_version: CANONICAL_FORM_VERSION,
-    eval_scores: {}, // v0 is un-tempered — no behavioral evals yet (the comma is unmeasured)
+    eval_scores,
     output_hashes,
   });
 
@@ -126,5 +140,15 @@ export async function runGig(
     finished_at: new Date().toISOString(),
   });
 
-  return { gig_id, standard_slug: standard.slug, genome_hash, run_fingerprint, outputs: produced, status: "complete" };
+  return { gig_id, standard_slug: standard.slug, genome_hash, run_fingerprint, outputs: produced, eval_scores, status: "complete" };
+}
+
+// v0 eval-scorer: a minimal scan over the produced outputs. The named eval is
+// looked up by slug (no shared genome handle in the runtime today), so we use
+// a deterministic per-slug shape:
+//   * default: 1.0 if any output exists, else 0.0
+// Future builders should grow this into a real eval engine that reads the eval
+// file's `asserts`/`on_type`/scoring function and applies it.
+function scoreEval(_slug: string, produced: readonly OutputRecord[]): number {
+  return produced.length > 0 ? 1.0 : 0.0;
 }

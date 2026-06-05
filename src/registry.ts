@@ -102,11 +102,31 @@ export function createRegistry(initial: DomainType[] = []): Registry {
         type: "object",
         properties: (dt.schema as { properties?: Record<string, unknown> }).properties ?? {},
         required: dt.required_fields,
-        additionalProperties: true,
+        additionalProperties: false,
       };
       const validateFn = ajv.compile(schema);
       const ok = validateFn(output.data);
-      return { valid: ok === true, errors: (validateFn.errors ?? []).map((e) => e.message ?? "invalid") };
+      // Preserve instancePath + keyword in the error projection so operators see
+      // the failing field path, not just a type-class message. For property-level
+      // failures Ajv puts the field in `params.missingProperty` (required) or
+      // in `instancePath` (type mismatch) or `params.additionalProperty` (extras).
+      return {
+        valid: ok === true,
+        errors: (validateFn.errors ?? []).map((e) => {
+          const path = e.instancePath ?? "";
+          const keyword = e.keyword ?? "";
+          const message = e.message ?? "invalid";
+          const params = (e.params as Record<string, unknown> | undefined) ?? {};
+          const missing = typeof params["missingProperty"] === "string"
+            ? ` '${params["missingProperty"] as string}'`
+            : "";
+          const additional = typeof params["additionalProperty"] === "string"
+            ? ` '${params["additionalProperty"] as string}'`
+            : "";
+          const fieldHint = path ? ` at ${path}` : "";
+          return `${keyword}${fieldHint}: ${message}${missing}${additional}`.trim();
+        }),
+      };
     },
     listTypes() {
       return [...types.values()];

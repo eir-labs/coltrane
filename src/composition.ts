@@ -36,6 +36,10 @@ export interface StandardDef {
   domain: string;
   agents: readonly Agent[];
   phases: readonly PhaseDef[];
+  // 5th-class evals: judge-shapes evaluated against the gig's produced outputs.
+  // Names declared here are looked up in the loaded genome's evals registry at
+  // runGig time; their scores land in run_fingerprint.eval_scores.
+  eval_slugs?: readonly string[];
 }
 
 export interface Standard {
@@ -43,6 +47,7 @@ export interface Standard {
   domain: string;
   agents: readonly Agent[];
   phases: readonly PhaseDef[];
+  eval_slugs?: readonly string[];
 }
 
 export class CompositionError extends Error {}
@@ -58,7 +63,13 @@ export function defineAgent(def: AgentDef): Agent {
     throw new CompositionError(`agent ${def.slug} has no primitives`);
   }
 
-  for (let i = 0; i < prims.length; i++) {
+  // Per-agent sanity: when multiple primitives are bundled in a single agent
+  // (e.g. [PLAN, CREATE]), an inner CREATE position needs an inner PLAN or
+  // INTERPRET upstream of it. Standalone CREATE/[CREATE] is admitted at this
+  // layer; the cross-phase §3 gate enforces "upstream reasoning" across phases
+  // in composeStandard. This split lets a CREATE-only agent compose into a
+  // standard where the upstream phase supplies the reasoning.
+  for (let i = 1; i < prims.length; i++) {
     const p = prims[i]!;
     if (NEEDS_UPSTREAM_REASONING.has(p)) {
       const upstream = prims.slice(0, i);
@@ -94,6 +105,7 @@ export function composeStandard(def: {
   domain: string;
   agents: readonly Agent[];
   phases: readonly PhaseDef[];
+  eval_slugs?: readonly string[];
 }): Standard {
   const agentBySlug = new Map(def.agents.map((a) => [a.slug, a]));
 
@@ -112,6 +124,11 @@ export function composeStandard(def: {
   }
 
   const upstreamOutputs = new Set<string>();
+  // §3 cross-phase check: when a phase's agent uses CREATE, some upstream
+  // phase (or the agent's own earlier primitives) must supply INTERPRET or
+  // PLAN. VERIFY needs SOME upstream phase target. Tracks the bag of
+  // primitives seen in earlier phases.
+  const upstreamPhasePrimitives = new Set<Primitive>();
   for (let i = 0; i < def.phases.length; i++) {
     const ph = def.phases[i]!;
     const ag = agentBySlug.get(ph.agent)!;
@@ -124,6 +141,28 @@ export function composeStandard(def: {
         }
       }
     }
+    // Cross-phase §3 enforcement on the FIRST primitive of this phase's agent.
+    // If the agent bundles its own [PLAN, CREATE], the per-agent check above
+    // already passed. Here we cover the case where the agent's first primitive
+    // is CREATE — the previous phases must supply INTERPRET or PLAN.
+    const firstPrim = ag.primitives[0];
+    if (firstPrim && NEEDS_UPSTREAM_REASONING.has(firstPrim)) {
+      const agentSelfHasReasoning = ag.primitives.slice(1).some((u) => u === "INTERPRET" || u === "PLAN");
+      const phaseUpstreamHasReasoning = upstreamPhasePrimitives.has("INTERPRET") || upstreamPhasePrimitives.has("PLAN");
+      if (!agentSelfHasReasoning && !phaseUpstreamHasReasoning) {
+        throw new CompositionError(
+          `standard ${def.slug}: phase ${ph.name} (${ag.slug}) starts with CREATE but no upstream phase supplies INTERPRET or PLAN`,
+        );
+      }
+    }
+    if (firstPrim && NEEDS_TARGET.has(firstPrim)) {
+      if (upstreamPhasePrimitives.size === 0 && ag.primitives.length === 1) {
+        throw new CompositionError(
+          `standard ${def.slug}: phase ${ph.name} (${ag.slug}) starts with VERIFY but no upstream phase target`,
+        );
+      }
+    }
+    for (const p of ag.primitives) upstreamPhasePrimitives.add(p);
     for (const ot of ag.output_types) upstreamOutputs.add(ot);
   }
 
@@ -154,5 +193,9 @@ export function composeStandard(def: {
     }
   }
 
-  return { slug: def.slug, domain: def.domain, agents: def.agents, phases: def.phases };
+  const std: Standard = { slug: def.slug, domain: def.domain, agents: def.agents, phases: def.phases };
+  if (def.eval_slugs && def.eval_slugs.length > 0) {
+    std.eval_slugs = def.eval_slugs;
+  }
+  return std;
 }

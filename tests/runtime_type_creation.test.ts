@@ -45,7 +45,7 @@ describe("runtime type creation", () => {
       core_type: "Interpretation",
       domain_type: "finding",
       input_refs: [],
-      data: { frame: "trust", claims: ["c1"], confidence: 0.8, pattern_key: "p", severity: "high", title: "t" },
+      data: { pattern_key: "p", severity: "high", title: "t" },
     });
     expect(ok.valid).toBe(true);
   });

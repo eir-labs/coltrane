@@ -2,16 +2,16 @@ import { describe, it, expect } from "vitest";
 import { defineAgent, composeStandard } from "../src";
 
 describe("agent composition: illegal progressions", () => {
-  it("rejects CREATE without upstream INTERPRET or PLAN", () => {
+  it("rejects in-agent CREATE after SENSE without intermediate INTERPRET or PLAN", () => {
     expect(() =>
       defineAgent({ slug: "a", primitives: ["SENSE", "CREATE"] }),
     ).toThrow();
   });
 
-  it("rejects VERIFY without a target", () => {
+  it("accepts standalone VERIFY (cross-phase target check happens at composeStandard)", () => {
     expect(() =>
       defineAgent({ slug: "a", primitives: ["VERIFY"] }),
-    ).toThrow();
+    ).not.toThrow();
   });
 
   it("accepts CREATE after INTERPRET", () => {
@@ -29,6 +29,40 @@ describe("agent composition: illegal progressions", () => {
   it("accepts VERIFY with an upstream target", () => {
     expect(() =>
       defineAgent({ slug: "a", primitives: ["JUDGE", "VERIFY"] }),
+    ).not.toThrow();
+  });
+});
+
+describe("standard composition: cross-phase §3", () => {
+  it("rejects a standard whose first CREATE phase has no upstream INTERPRET or PLAN", () => {
+    const sensor = defineAgent({ slug: "sensor", primitives: ["SENSE"], output_types: ["raw-note"] });
+    const creator = defineAgent({ slug: "creator", primitives: ["CREATE"], input_types: ["raw-note"], output_types: ["artifact"] });
+    expect(() =>
+      composeStandard({
+        slug: "no-reasoning",
+        domain: "eirtests",
+        agents: [sensor, creator],
+        phases: [
+          { name: "sense", agent: "sensor" },
+          { name: "make", agent: "creator" },
+        ],
+      }),
+    ).toThrow();
+  });
+
+  it("accepts a standard where an upstream phase supplies PLAN before a CREATE phase", () => {
+    const planner = defineAgent({ slug: "planner", primitives: ["PLAN"], output_types: ["plan-doc"] });
+    const creator = defineAgent({ slug: "creator", primitives: ["CREATE"], input_types: ["plan-doc"], output_types: ["artifact"] });
+    expect(() =>
+      composeStandard({
+        slug: "with-plan",
+        domain: "eirtests",
+        agents: [planner, creator],
+        phases: [
+          { name: "plan", agent: "planner" },
+          { name: "make", agent: "creator" },
+        ],
+      }),
     ).not.toThrow();
   });
 });

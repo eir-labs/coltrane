@@ -52,6 +52,11 @@ export const MCP_TOOLS: readonly MCPToolDef[] = [
   { slug: "system_audit",                  category: "improve", input_schema: obj({ scope: "string", check: "string" }), output_schema: obj({ findings: "array" }) },
   { slug: "proposal_create",               category: "improve", input_schema: obj({ change_type: "string", target: "string", changes: "object", reason: "string", evidence: "object" }), output_schema: obj({ proposal_id: "string", cascade_impact: "object" }) },
   { slug: "tool_propose",                  category: "improve", input_schema: obj({ slug: "string", type: "string", spec: "object", reason: "string" }), output_schema: obj({ proposal_id: "string" }) },
+  // tool_register — close the propose→register loop. Adds a slug to the live
+  // tool registry so subsequent agent_define calls can grant scope to it.
+  // Without this, propose-only governance is half-built: there is no path to
+  // legitimately admit a tool, and the rejection gate becomes a permanent block.
+  { slug: "tool_register",                 category: "improve", input_schema: obj({ slug: "string", type: "string", spec: "object", category: "string" }), output_schema: obj({ registered: "boolean", slug: "string" }) },
   { slug: "tool_deprecate_propose",        category: "improve", input_schema: obj({ slug: "string", reason: "string", usage_stats: "object" }), output_schema: obj({ proposal_id: "string", affected_agents: "array" }) },
   { slug: "capability_research",           category: "improve", input_schema: obj({ need: "string", context: "object" }), output_schema: obj({ approaches: "array", mcp_options: "array", recommendation: "object" }) },
   { slug: "session_review_write",          category: "improve", input_schema: obj({ gig_id: "string", output_id: "string", agent_slug: "string", agent_version: "number", quality_score: "number", quality_scores: "object", domain: "string", notes: "string" }), output_schema: obj({ review_id: "string", recorded: "boolean" }) },

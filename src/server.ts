@@ -68,6 +68,11 @@ export interface ToolResult {
 
 const KNOWN_SLUGS = new Set(MCP_TOOLS.map((t) => t.slug));
 
+// Live registry of admissible tool slugs — the cage gate for agent_define's
+// allowed_tools. Seeded with the static MCP_TOOLS surface; tool_register grows
+// it at runtime so the propose→register→define loop can close.
+const REGISTERED_TOOL_SLUGS = new Set<string>(MCP_TOOLS.map((t) => t.slug));
+
 // Honest gap set: tools in the surface whose impl still awaits another lane. Now
 // EMPTY — every v0 tool is wired against real in-repo impl (no stubs). Kept as the
 // hook so a future tool can be surfaced before it's implemented without lying.
@@ -150,25 +155,39 @@ export async function dispatchTool(slug: string, args: Record<string, unknown>, 
       }
       case "output_trace": {
         const id = String(args["output_id"] ?? "");
-        const chain = deps.outputs.trace(id);
+        const maxDepth = typeof args["max_depth"] === "number" ? (args["max_depth"] as number) : undefined;
+        const chain = deps.outputs.trace(id, maxDepth !== undefined ? { max_depth: maxDepth } : undefined);
         return { ok: true, requires_approval: approval, data: { graph: { nodes: chain }, root_signals: chain.filter((o) => o.input_refs.length === 0) } };
       }
       case "output_write": {
         // §6 universal output write: validates against core+domain schema AT WRITE
         // (T3). Primitive is auto-resolved from core_type when omitted. Optional
         // `refs: [{ to, relation }]` link provenance edges after the row exists.
+        //
+        // Boundary discipline: null/undefined at the dispatchTool boundary is
+        // NOT silently coerced to "" or {} before validate sees them. The
+        // validator must see what the caller actually sent — `data: null`
+        // falls through and Ajv rejects with the type-mismatch message, rather
+        // than the boundary swallowing the adversarial intent.
         const core_type = String(args["core_type"] ?? "");
         const primitive = String(args["primitive"] ?? CORE_TYPE_TO_PRIMITIVE[core_type] ?? "SENSE");
+        const domain_type_raw = args["domain_type"];
+        const domain_type = typeof domain_type_raw === "string"
+          ? domain_type_raw
+          : domain_type_raw == null ? "" : String(domain_type_raw);
+        const data_raw = args["data"];
+        // undefined → {} (caller never sent the field); null stays null so Ajv sees it.
+        const data = (data_raw === undefined ? {} : data_raw) as Record<string, unknown>;
         const rec = deps.outputs.write({
           core_type,
-          domain_type: String(args["domain_type"] ?? ""),
+          domain_type,
           domain_type_version: args["domain_type_version"] as number | undefined,
           domain: String(args["domain"] ?? ""),
           gig_id: String(args["gig_id"] ?? ""),
           agent_slug: String(args["agent_slug"] ?? ""),
           phase: args["phase"] as string | undefined,
           primitive,
-          data: (args["data"] as Record<string, unknown>) ?? {},
+          data,
           input_refs: arr(args["input_refs"]),
           cost_usd: args["cost_usd"] as number | undefined,
           tokens_used: args["tokens_used"] as number | undefined,
@@ -477,6 +496,19 @@ export async function dispatchTool(slug: string, args: Record<string, unknown>, 
         if (args["domain"]) def.domain = String(args["domain"]);
         if (args["allowed_tools"]) def.allowed_tools = arr(args["allowed_tools"]);
         if (args["disallowed_tools"]) def.disallowed_tools = arr(args["disallowed_tools"]);
+        // Governance gate: each allowed_tools slug must be registered. tool_propose
+        // alone does NOT register; tool_register lands the slug. Unknown slugs are
+        // rejected so the cage cannot grant scope to a tool the registry doesn't know.
+        if (def.allowed_tools && def.allowed_tools.length > 0) {
+          const unknown = def.allowed_tools.filter((s) => !REGISTERED_TOOL_SLUGS.has(s));
+          if (unknown.length > 0) {
+            return {
+              ok: false,
+              requires_approval: approval,
+              error: `agent_define: unknown/unregistered allowed_tools slug${unknown.length > 1 ? "s" : ""}: ${unknown.join(", ")} — call tool_propose then tool_register first`,
+            };
+          }
+        }
         // The substrate loop: validate → canonical hash → (if genome_dir) persist + ledger-seal.
         const sealed = sealAgentDefinition(def, deps.ledger, deps.genome_dir);
         return {
@@ -490,6 +522,31 @@ export async function dispatchTool(slug: string, args: Record<string, unknown>, 
             effective_hash: sealed.effective_hash,
             validation_result: { valid: true },
           },
+        };
+      }
+      case "tool_register": {
+        // Close the propose→register loop. Adds the slug to REGISTERED_TOOL_SLUGS
+        // so subsequent agent_define calls can grant scope to it. The propose step
+        // creates the proposal_id; this step lands the slug in the live registry.
+        const targetSlug = String(args["slug"] ?? "");
+        if (!targetSlug) {
+          return { ok: false, requires_approval: approval, error: "tool_register requires slug" };
+        }
+        REGISTERED_TOOL_SLUGS.add(targetSlug);
+        const registration_id = randomUUID();
+        deps.ledger.append({
+          gig_id: `tool_register:${registration_id}`,
+          standard_slug: "tool_register",
+          genome_hash: "n/a",
+          run_fingerprint: "n/a",
+          output_hashes: [],
+          started_at: new Date().toISOString(),
+          finished_at: new Date().toISOString(),
+        });
+        return {
+          ok: true,
+          requires_approval: approval,
+          data: { registered: true, slug: targetSlug, registration_id },
         };
       }
       case "agent_evolve": {

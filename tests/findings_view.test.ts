@@ -8,7 +8,20 @@ const findingType: DomainType = {
   slug: "finding",
   extends: "Verdict",
   domain: "eirtests",
-  schema: { properties: { pattern_key: { type: "string" }, severity: { type: "string" }, title: { type: "string" } } },
+  schema: {
+    properties: {
+      pattern_key: { type: "string" },
+      severity: { type: "string" },
+      title: { type: "string" },
+      evidence: { type: "string" },
+      location: { type: "string" },
+      recommendation: { type: "string" },
+      is_novel: { type: "boolean" },
+      dimension: { type: "string" },
+      status: { type: "string" },
+      kpi_impacts: { type: "object" },
+    },
+  },
   required_fields: ["pattern_key", "severity", "title"],
 };
 

@@ -92,7 +92,10 @@ export interface OutputStore {
   addRef(from_output_id: string, to_output_id: string, relation: RefRelation, primitive: string): OutputRef;
   refs(): readonly OutputRef[];
   // E6: walk backward from an artifact to its source signals (input_refs + derived_from/refines edges).
-  trace(id: string): OutputRecord[];
+  // Optional opts: max_depth caps the walk at N hops backward from the seed.
+  // gig_id scoping: the walk only follows edges into the seed's gig_id (cross-gig
+  // ancestors are not surfaced).
+  trace(id: string, opts?: { max_depth?: number }): OutputRecord[];
   // T8: the backward-compat findings view.
   findings(): Finding[];
 }
@@ -173,24 +176,37 @@ export function createOutputStore(registry: Registry): OutputStore {
       return [...edges];
     },
 
-    trace(id) {
+    trace(id, opts) {
       // Walk backward: a node's parents are its input_refs plus the targets of
       // its derived_from/refines edges. Returns every reachable ancestor (the
       // provenance closure), cycle-safe.
+      //
+      // max_depth: hard cap on hop count from the seed. depth=0 → no walk
+      // (returns []); depth=1 → only direct parents; etc.
+      //
+      // gig_id scope: the walk only follows into nodes that share the seed's
+      // gig_id. Cross-gig ancestors are not surfaced.
+      const maxDepth = opts?.max_depth;
+      const seed = outputs.get(id);
+      const seedGigId = seed?.gig_id;
       const seen = new Set<string>();
       const order: OutputRecord[] = [];
-      const stack = [id];
+      const stack: Array<{ id: string; depth: number }> = [{ id, depth: 0 }];
       while (stack.length) {
-        const cur = stack.pop() as string;
+        const { id: cur, depth } = stack.pop()!;
         if (seen.has(cur)) continue;
         seen.add(cur);
         const rec = outputs.get(cur);
         if (!rec) continue;
-        if (cur !== id) order.push(rec);
-        for (const p of rec.input_refs) stack.push(p);
+        if (cur !== id) {
+          if (seedGigId !== undefined && rec.gig_id !== seedGigId) continue;
+          order.push(rec);
+        }
+        if (maxDepth !== undefined && depth >= maxDepth) continue;
+        for (const p of rec.input_refs) stack.push({ id: p, depth: depth + 1 });
         for (const e of edges) {
           if (e.from_output_id === cur && (e.relation === "derived_from" || e.relation === "refines")) {
-            stack.push(e.to_output_id);
+            stack.push({ id: e.to_output_id, depth: depth + 1 });
           }
         }
       }

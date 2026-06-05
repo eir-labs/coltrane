@@ -61,7 +61,19 @@ function readJsonDir<T>(dir: string): LoadedJsonFile<T>[] {
     if (extname(name) !== ".json") continue;
     const path = join(dir, name);
     if (!statSync(path).isFile()) continue;
-    out.push({ path, data: JSON.parse(readFileSync(path, "utf-8")) as T });
+    let raw: string;
+    try {
+      raw = readFileSync(path, "utf-8");
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      throw new GenomeLoadError(`failed to read ${path}: ${msg}`);
+    }
+    try {
+      out.push({ path, data: JSON.parse(raw) as T });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      throw new GenomeLoadError(`malformed JSON at ${path}: ${msg}`);
+    }
   }
   return out;
 }
@@ -74,8 +86,6 @@ const REQUIRED_CORE_SLUGS = new Set([
   "Artifact",
   "Verdict",
 ]);
-
-export class GenomeLoadError extends Error {}
 
 export function loadGenome(root: string): LoadedGenome {
   const coreList = readJsonDir<CoreTypeRecord>(join(root, "core_types"));
@@ -128,6 +138,11 @@ export function loadGenome(root: string): LoadedGenome {
   const agents = new Map<string, Agent>();
   const agent_paths = new Map<string, string>();
   for (const { path, data: def } of readJsonDir<AgentFileDef>(join(root, "agents"))) {
+    // Required-field gate: agents/*.json without a slug were silently dropped;
+    // surface the offending file so operators can fix the right one.
+    if (!def.slug || typeof def.slug !== "string") {
+      throw new GenomeLoadError(`agent file ${path} missing required "slug" field`);
+    }
     if (agents.has(def.slug)) {
       throw new GenomeLoadError(
         `duplicate agent slug "${def.slug}" in ${path} (first seen in ${agent_paths.get(def.slug)})`,

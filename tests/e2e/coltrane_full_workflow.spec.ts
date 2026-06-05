@@ -174,23 +174,37 @@ describe("phase 18 — full coltrane workflow (define → evolve → gig → typ
     expect(downstream.ok).toBe(true);
   });
 
-  it("step 4 — illegal pipeline (CREATE without upstream INTERPRET/PLAN) is REJECTED at definition", async () => {
-    // The §3 progression rule: CREATE needs upstream reasoning. defineAgent throws,
-    // and dispatchTool surfaces that as a typed error from the boundary.
-    const res = await dispatchTool(
+  it("step 4 — illegal pipeline (CREATE without upstream INTERPRET/PLAN) is REJECTED at standard composition (cross-phase §3)", async () => {
+    // The §3 progression rule is now enforced CROSS-PHASE, not per-agent.
+    // A standalone [CREATE] agent is admitted at defineAgent (it could be
+    // satisfied by an upstream phase). The rejection happens when the agent
+    // is composed into a standard with no upstream PLAN/INTERPRET phase.
+    const defineRes = await dispatchTool(
       "agent_define",
       {
         slug: "bad-pipeline",
-        primitives: ["CREATE"], // illegal: no upstream INTERPRET/PLAN
+        primitives: ["CREATE"],
         output_types: ["phase18-summary"],
         domain: "phase18",
       },
       deps,
     );
-    expect(res.ok).toBe(false);
-    expect(String(res.error)).toMatch(/CREATE.*upstream/i);
-    // file MUST NOT be written for the rejected agent
-    expect(existsSync(join(env.tempDir, "agents", "bad-pipeline.json"))).toBe(false);
+    expect(defineRes.ok).toBe(true);
+
+    // Compose into a standard with no upstream reasoning phase. The cross-phase
+    // gate rejects.
+    const composeRes = await dispatchTool(
+      "standard_compose",
+      {
+        slug: "bad-standard",
+        domain: "phase18",
+        agents: [{ slug: "bad-pipeline", primitives: ["CREATE"], input_types: [], output_types: ["phase18-summary"], domain: "phase18" }],
+        phases: [{ name: "make", agent: "bad-pipeline" }],
+      },
+      deps,
+    );
+    expect(composeRes.ok).toBe(false);
+    expect(String(composeRes.error)).toMatch(/CREATE.*upstream|INTERPRET|PLAN/i);
   });
 
   it("step 5 — compose a NEW standard referencing the new agents (standard_compose persists + seals)", async () => {

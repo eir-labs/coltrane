@@ -52,6 +52,8 @@ export interface LoadedGenome {
   evals: ReadonlyMap<string, EvalRecord>;
 }
 
+export class GenomeLoadError extends Error {}
+
 interface LoadedJsonFile<T> { readonly path: string; readonly data: T }
 
 function readJsonDir<T>(dir: string): LoadedJsonFile<T>[] {

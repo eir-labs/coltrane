@@ -50,7 +50,8 @@ export interface LoadedGenome {
   // Mutable: the live server shares this map as deps.standards so MCP write-path
   // tools (standard_compose) can make a definition dispatchable in-session.
   standards: Map<string, Standard>;
-  skills: ReadonlyMap<string, SkillRecord>;
+  // Mutable: shared as deps.skills so skill_define writes through to the live map.
+  skills: Map<string, SkillRecord>;
   evals: ReadonlyMap<string, EvalRecord>;
 }
 

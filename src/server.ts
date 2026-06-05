@@ -52,7 +52,7 @@ export interface ServerDeps {
   // §13/skills — passed through to runGig so each invocation can resolve its
   // agent's skill_slugs into actual SkillRecords (rendered as the prompt's
   // Skills layer by the Claude invoker).
-  skills?: ReadonlyMap<string, SkillRecord> | undefined;
+  skills?: Map<string, SkillRecord> | undefined;
   // Substrate-of-truth seam: when set, genome-mutation tools (agent_define, …) PERSIST
   // the content-addressed file here + ledger-seal its identity. Without it, they compute
   // + return the identity but don't write (validation path).
@@ -695,6 +695,19 @@ export async function dispatchTool(slug: string, args: Record<string, unknown>, 
           ok: true, requires_approval: approval,
           data: { valid: required.length === 0, granted: required.length === 0, missing_permissions: required, expires_in: null },
         };
+      }
+      case "skill_define": {
+        // The missing skill authoring tool. Persist (non-destructively) + ledger-seal
+        // via the blessed write path, then write through to the LIVE skills map so a
+        // gig in the same session resolves it into an agent's Skills layer.
+        const skSlug = typeof args["slug"] === "string" ? (args["slug"] as string).trim() : "";
+        if (!skSlug) return { ok: false, requires_approval: approval, error: "skill_define requires a non-empty slug" };
+        const def: SkillRecord = { slug: skSlug };
+        if (typeof args["domain"] === "string") def["domain"] = args["domain"];
+        if (typeof args["md"] === "string") def["md"] = args["md"];
+        const sealed = sealDefinition("skill_define", skSlug, def, deps.ledger, deps.genome_dir, "skills");
+        deps.skills?.set(skSlug, def);
+        return { ok: true, requires_approval: approval, data: { skill_id: skSlug, content_hash: sealed.content_hash, dependency_hash: sealed.dependency_hash, effective_hash: sealed.effective_hash } };
       }
       case "agent_promote":
       case "standard_promote":

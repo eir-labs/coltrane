@@ -18,7 +18,7 @@ import {
 import { createRegistry, loadRegistry, type Registry, type DomainType } from "./registry.js";
 import { loadGenome, type SkillRecord } from "./loader.js";
 import { sealAgentDefinition, sealDefinition, recordIdentity } from "./genome_writer.js";
-import { createOutputStore, type OutputStore } from "./outputs.js";
+import { createOutputStore, defaultOutputsPersistDir, type OutputStore } from "./outputs.js";
 import { MemoryLedger, type Ledger } from "./ledger.js";
 import { standardSimulate } from "./simulate.js";
 import { runGig, type AgentInvoker } from "./runtime.js";
@@ -776,7 +776,10 @@ export function bootstrapServerDeps(genomeRoot?: string): ServerDeps {
   const registry = loadRegistry(genome);
   return {
     registry,
-    outputs: createOutputStore(registry),
+    // PR #78 follow-up: persist outputs to disk so the audit chain survives an
+    // MCP session close (Rob cold-trial requirement). COLTRANE_OUTPUTS_DIR
+    // overrides the default ~/.eir/coltrane_outputs path (tests + sandboxes).
+    outputs: createOutputStore(registry, { persistDir: defaultOutputsPersistDir() }),
     ledger: new MemoryLedger(),
     standards: genome.standards, // ← gig_dispatch can now resolve file-defined standards
     invoke: makeClaudeInvoker({ registry, model: process.env["COLTRANE_MODEL"] }),

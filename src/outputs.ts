@@ -1,7 +1,17 @@
 // §6 — the universal output store + output_refs provenance graph + findings view.
-// Pure-TS (in-memory), ledger.ts style. Validation is NOT reimplemented here:
-// write() wires registry.validate() and rejects bad-schema outputs AT WRITE (T3).
+// Pure-TS (in-memory by default; optional disk-backed jsonl persistence), ledger.ts
+// style. Validation is NOT reimplemented here: write() wires registry.validate() and
+// rejects bad-schema outputs AT WRITE (T3).
+//
+// Persistence (PR #78 follow-up): when a `persistDir` is supplied, every
+// write() appends a json line to `<persistDir>/outputs/<gig_id>.jsonl` and every
+// addRef() appends to `<persistDir>/refs/<from_gig_id>.jsonl`. Reads (get / all /
+// findings / trace / refs) lazy-hydrate from disk on first access, so a fresh
+// process can serve outputs written by an earlier session. Matches the
+// append-only jsonl-chain shape used elsewhere in the audit substrate.
 import { randomUUID } from "node:crypto";
+import * as fs from "node:fs";
+import * as path from "node:path";
 import type { Registry } from "./registry.js";
 
 // §6 output_refs.relation CHECK constraint, as a closed set.
@@ -100,12 +110,101 @@ export interface OutputStore {
   findings(): Finding[];
 }
 
-export function createOutputStore(registry: Registry): OutputStore {
+export interface OutputStoreOptions {
+  // When set, every write/addRef append-flushes to jsonl files under this dir,
+  // and reads lazy-hydrate from disk. Cross-session persistence for MCP clients
+  // that close + reopen between gigs (PR #78 follow-up).
+  persistDir?: string | undefined;
+}
+
+// Default disk-persistence root, matching chain_keeper.py's ~/.eir/<chain>/ shape.
+// Resolved against COLTRANE_OUTPUTS_DIR (test override) or $HOME.
+export function defaultOutputsPersistDir(): string {
+  const override = process.env["COLTRANE_OUTPUTS_DIR"];
+  if (override && override.length > 0) return override;
+  const home = process.env["HOME"] ?? process.env["USERPROFILE"] ?? ".";
+  return path.join(home, ".eir", "coltrane_outputs");
+}
+
+function ensureDir(dir: string): void {
+  fs.mkdirSync(dir, { recursive: true });
+}
+
+function appendJsonl(file: string, row: unknown): void {
+  ensureDir(path.dirname(file));
+  fs.appendFileSync(file, JSON.stringify(row) + "\n", "utf8");
+}
+
+function readJsonl<T>(file: string): T[] {
+  if (!fs.existsSync(file)) return [];
+  const text = fs.readFileSync(file, "utf8");
+  const rows: T[] = [];
+  for (const raw of text.split("\n")) {
+    const line = raw.trim();
+    if (!line) continue;
+    try {
+      rows.push(JSON.parse(line) as T);
+    } catch {
+      // Skip malformed lines — chain_keeper.py uses the same forgiving shape.
+    }
+  }
+  return rows;
+}
+
+function listJsonl(dir: string): string[] {
+  if (!fs.existsSync(dir)) return [];
+  const out: string[] = [];
+  for (const name of fs.readdirSync(dir)) {
+    if (name.endsWith(".jsonl")) out.push(path.join(dir, name));
+  }
+  return out;
+}
+
+export function createOutputStore(registry: Registry, options?: OutputStoreOptions): OutputStore {
   const outputs = new Map<string, OutputRecord>();
   const edges: OutputRef[] = [];
+  const persistDir = options?.persistDir;
+  const outputsDir = persistDir ? path.join(persistDir, "outputs") : undefined;
+  const refsDir = persistDir ? path.join(persistDir, "refs") : undefined;
+
+  // Track which gig_ids we've hydrated so a single gig file is read at most once.
+  const hydratedGigs = new Set<string>();
+  let fullyHydrated = false;
 
   function asStr(v: unknown): string | undefined {
     return typeof v === "string" ? v : undefined;
+  }
+
+  function hydrateGig(gig_id: string): void {
+    if (!outputsDir || hydratedGigs.has(gig_id)) return;
+    hydratedGigs.add(gig_id);
+    const file = path.join(outputsDir, `${gig_id}.jsonl`);
+    for (const rec of readJsonl<OutputRecord>(file)) {
+      if (!outputs.has(rec.id)) outputs.set(rec.id, rec);
+    }
+    if (refsDir) {
+      const refsFile = path.join(refsDir, `${gig_id}.jsonl`);
+      for (const ref of readJsonl<OutputRef>(refsFile)) {
+        if (!edges.some((e) => e.id === ref.id)) edges.push(ref);
+      }
+    }
+  }
+
+  function hydrateAll(): void {
+    if (!outputsDir || fullyHydrated) return;
+    fullyHydrated = true;
+    for (const file of listJsonl(outputsDir)) {
+      const base = path.basename(file, ".jsonl");
+      hydrateGig(base);
+    }
+    // Also pull in any orphan refs files (defensive — addRef writes by from_gig_id).
+    if (refsDir) {
+      for (const file of listJsonl(refsDir)) {
+        for (const ref of readJsonl<OutputRef>(file)) {
+          if (!edges.some((e) => e.id === ref.id)) edges.push(ref);
+        }
+      }
+    }
   }
 
   return {
@@ -139,14 +238,24 @@ export function createOutputStore(registry: Registry): OutputStore {
         duration_ms: o.duration_ms,
       };
       outputs.set(rec.id, rec);
+      if (outputsDir) {
+        // Mark this gig hydrated so we don't re-read what we just wrote.
+        hydratedGigs.add(rec.gig_id);
+        appendJsonl(path.join(outputsDir, `${rec.gig_id}.jsonl`), rec);
+      }
       return rec;
     },
 
     get(id) {
+      const hit = outputs.get(id);
+      if (hit) return hit;
+      // Lazy-hydrate on miss: a fresh session reading an id from an earlier run.
+      hydrateAll();
       return outputs.get(id);
     },
 
     all() {
+      hydrateAll();
       return [...outputs.values()];
     },
 
@@ -154,7 +263,9 @@ export function createOutputStore(registry: Registry): OutputStore {
       if (!REF_RELATIONS.includes(relation)) {
         throw new OutputStoreError(`invalid relation "${relation}"`);
       }
-      if (!outputs.has(from_output_id)) {
+      // Ensure endpoints exist (possibly hydrating to find them).
+      const fromRec = outputs.get(from_output_id) ?? (hydrateAll(), outputs.get(from_output_id));
+      if (!fromRec) {
         throw new OutputStoreError(`from_output_id "${from_output_id}" does not exist`);
       }
       if (!outputs.has(to_output_id)) {
@@ -169,10 +280,14 @@ export function createOutputStore(registry: Registry): OutputStore {
         created_at: new Date().toISOString(),
       };
       edges.push(ref);
+      if (refsDir) {
+        appendJsonl(path.join(refsDir, `${fromRec.gig_id}.jsonl`), ref);
+      }
       return ref;
     },
 
     refs() {
+      hydrateAll();
       return [...edges];
     },
 
@@ -180,6 +295,7 @@ export function createOutputStore(registry: Registry): OutputStore {
       // Walk backward: a node's parents are its input_refs plus the targets of
       // its derived_from/refines edges. Returns every reachable ancestor (the
       // provenance closure), cycle-safe.
+      hydrateAll();
       //
       // max_depth: hard cap on hop count from the seed. depth=0 → no walk
       // (returns []); depth=1 → only direct parents; etc.
@@ -214,6 +330,7 @@ export function createOutputStore(registry: Registry): OutputStore {
     },
 
     findings() {
+      hydrateAll();
       const rows: Finding[] = [];
       for (const o of outputs.values()) {
         if (o.domain_type !== "finding" || o.domain !== "eirtests") continue;

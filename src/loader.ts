@@ -53,7 +53,7 @@ export interface LoadedGenome {
   standards: Map<string, Standard>;
   // Mutable: shared as deps.skills so skill_define writes through to the live map.
   skills: Map<string, SkillRecord>;
-  evals: ReadonlyMap<string, EvalRecord>;
+  evals: Map<string, EvalRecord>;
 }
 
 export class GenomeLoadError extends Error {}

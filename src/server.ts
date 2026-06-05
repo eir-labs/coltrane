@@ -16,7 +16,7 @@ import {
   PromotionError,
 } from "./mcp.js";
 import { createRegistry, loadRegistry, type Registry, type DomainType } from "./registry.js";
-import { loadGenome, type SkillRecord } from "./loader.js";
+import { loadGenome, type SkillRecord, type EvalRecord } from "./loader.js";
 import { sealAgentDefinition, sealDefinition, recordIdentity } from "./genome_writer.js";
 import { createOutputStore, defaultOutputsPersistDir, type OutputStore } from "./outputs.js";
 import { MemoryLedger, type Ledger } from "./ledger.js";
@@ -53,6 +53,9 @@ export interface ServerDeps {
   // agent's skill_slugs into actual SkillRecords (rendered as the prompt's
   // Skills layer by the Claude invoker).
   skills?: Map<string, SkillRecord> | undefined;
+  // 5th-class eval definitions, slug-keyed. Passed to runGig so a standard's
+  // declared eval_slugs are judged against real contracts (not a presence stub).
+  evals?: Map<string, EvalRecord> | undefined;
   // Substrate-of-truth seam: when set, genome-mutation tools (agent_define, …) PERSIST
   // the content-addressed file here + ledger-seal its identity. Without it, they compute
   // + return the identity but don't write (validation path).
@@ -239,6 +242,7 @@ export async function dispatchTool(slug: string, args: Record<string, unknown>, 
             invoke: deps.invoke,
             model_version: deps.model_version,
             skills: deps.skills,
+            evals: deps.evals,
             budget,
           });
           return {
@@ -899,6 +903,7 @@ export function bootstrapServerDeps(genomeRoot?: string): ServerDeps {
     invoke: makeClaudeInvoker({ registry, model: process.env["COLTRANE_MODEL"] }),
     model_version: process.env["COLTRANE_MODEL"] ?? "claude-cli-default",
     skills: genome.skills, // ← skill substrate — runGig resolves agent.skill_slugs into prompt
+    evals: genome.evals, // ← 5th-class eval substrate — runGig judges declared eval_slugs
     genome_dir: root, // ← genome-mutation tools persist + ledger-seal into the live genome
   };
 }

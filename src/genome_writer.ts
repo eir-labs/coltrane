@@ -4,12 +4,47 @@
 // genome_dir is given) write the content-addressed file AND append a ledger entry keyed
 // standard_slug="agent_define", genome_hash=effective_hash. A hand-edited file with no
 // such ledger entry is an orphan — no identity, outside the substrate.
-import { writeFileSync, mkdirSync } from "node:fs";
+import { writeFileSync, mkdirSync, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { defineAgent, type Agent, type AgentDef } from "./composition.js";
 import { canonJson, sha256Hex, effectiveHash, EMPTY_DEPENDENCY_HASH } from "./canonical_form.js";
 import type { Ledger } from "./ledger.js";
+
+/**
+ * Write a genome file, preserving any prior version's BYTES before a destructive
+ * overwrite. The ledger already keeps the content-hash *identity* of every seal;
+ * this keeps the actual prior *content*, so a re-compose / re-define / evolve over
+ * an existing slug is recoverable, not just provably-changed.
+ *
+ * When <subdir>/<slug>.json already exists with DIFFERENT bytes, the old bytes are
+ * snapshotted to .coltrane/history/<subdir>/<slug>/<oldContentHash>.json (gitignored,
+ * local) before the overwrite. Identical bytes → no snapshot (idempotent no-op).
+ * Returns the prior content hash when an overwrite displaced real content.
+ */
+export function writeGenomeFileVersioned(
+  genome_dir: string,
+  subdir: string,
+  slug: string,
+  jsonText: string,
+): { overwritten: boolean; prior_content_hash?: string } {
+  const dir = join(genome_dir, subdir);
+  mkdirSync(dir, { recursive: true });
+  const path = join(dir, `${slug}.json`);
+  let result: { overwritten: boolean; prior_content_hash?: string } = { overwritten: false };
+  if (existsSync(path)) {
+    const oldBytes = readFileSync(path, "utf-8");
+    if (oldBytes !== jsonText) {
+      const prior = sha256Hex(oldBytes);
+      const histDir = join(genome_dir, ".coltrane", "history", subdir, slug);
+      mkdirSync(histDir, { recursive: true });
+      writeFileSync(join(histDir, `${prior}.json`), oldBytes);
+      result = { overwritten: true, prior_content_hash: prior };
+    }
+  }
+  writeFileSync(path, jsonText);
+  return result;
+}
 
 export interface SealResult {
   agent: Agent;
@@ -34,9 +69,7 @@ export function sealDefinition(
   const dependency_hash = EMPTY_DEPENDENCY_HASH;
   const effective_hash = effectiveHash(content_hash, dependency_hash);
   if (genome_dir) {
-    const dir = join(genome_dir, subdir);
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, `${slug}.json`), JSON.stringify(def, null, 2) + "\n");
+    writeGenomeFileVersioned(genome_dir, subdir, slug, JSON.stringify(def, null, 2) + "\n");
     const now = new Date().toISOString();
     ledger.append({
       gig_id: `${kind}:${slug}:${randomUUID()}`,
@@ -89,9 +122,7 @@ export function sealAgentDefinition(def: AgentDef, ledger: Ledger, genome_dir?: 
   const agent = defineAgent(def); // composition-rule validation (throws on illegal pipeline)
   const { content_hash, dependency_hash, effective_hash } = agentIdentity(def);
   if (genome_dir) {
-    const dir = join(genome_dir, "agents");
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, `${def.slug}.json`), JSON.stringify(def, null, 2) + "\n");
+    writeGenomeFileVersioned(genome_dir, "agents", def.slug, JSON.stringify(def, null, 2) + "\n");
     const now = new Date().toISOString();
     ledger.append({
       gig_id: `define:${def.slug}:${randomUUID()}`,

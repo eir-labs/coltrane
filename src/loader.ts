@@ -47,7 +47,9 @@ export interface LoadedGenome {
   core_types: ReadonlyMap<string, CoreTypeRecord>;
   domain_types: ReadonlyMap<string, DomainTypeRecord>;
   agents: ReadonlyMap<string, Agent>;
-  standards: ReadonlyMap<string, Standard>;
+  // Mutable: the live server shares this map as deps.standards so MCP write-path
+  // tools (standard_compose) can make a definition dispatchable in-session.
+  standards: Map<string, Standard>;
   skills: ReadonlyMap<string, SkillRecord>;
   evals: ReadonlyMap<string, EvalRecord>;
 }

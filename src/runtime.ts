@@ -6,7 +6,7 @@
 import { randomUUID } from "node:crypto";
 import type { Standard, Agent } from "./composition.js";
 import { PRIMITIVE_OUTPUT_TYPE } from "./core_types.js";
-import { sha256Hex, canonJson, runFingerprint, CANONICAL_FORM_VERSION } from "./canonical_form.js";
+import { sha256Hex, canonJson, runFingerprint, outputContentHash, CANONICAL_FORM_VERSION } from "./canonical_form.js";
 import type { OutputStore, OutputRecord } from "./outputs.js";
 import type { Ledger } from "./ledger.js";
 import type { SkillRecord } from "./loader.js";
@@ -279,7 +279,10 @@ export async function runGig(
   }
 
   const genome_hash = genomeHash(standard);
-  const output_hashes = produced.map((p) => p.id);
+  // Content-address each output (not its random UUID) so the fingerprint is
+  // reproducible: an honest replay of the same outputs recomputes the same
+  // hashes, while changed content shifts them. See outputContentHash.
+  const output_hashes = produced.map((p) => outputContentHash(p));
 
   // 5th-class evals: when the standard declares eval_slugs, run each against
   // the produced outputs and collect the scores. A score of 1.0 means the

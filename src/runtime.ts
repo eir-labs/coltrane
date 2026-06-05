@@ -9,14 +9,20 @@ import { PRIMITIVE_OUTPUT_TYPE } from "./core_types.js";
 import { sha256Hex, canonJson, runFingerprint, CANONICAL_FORM_VERSION } from "./canonical_form.js";
 import type { OutputStore, OutputRecord } from "./outputs.js";
 import type { Ledger } from "./ledger.js";
+import type { SkillRecord } from "./loader.js";
 
 // What an agent invocation sees. The invoker returns the output `data` (validated
-// downstream against the agent's declared output domain type).
+// downstream against the agent's declared output domain type). `skills` carries
+// the SkillRecords the runtime resolved from this agent's skill_slugs against the
+// genome's skills map — the Claude invoker uses them to emit the prompt's Skills
+// layer (layer 3 of 5). Optional so hand-built ctx literals + callers that don't
+// supply a skills map stay valid; buildPrompt treats absent/empty as "no layer".
 export interface AgentInvocationContext {
   agent: Agent;
   phase: string;
   inputs: readonly OutputRecord[]; // upstream outputs matching this agent's input_types
   gig_input: Record<string, unknown>;
+  skills?: readonly SkillRecord[];
 }
 
 // The one non-deterministic seam. Inject a deterministic fn in tests; the real
@@ -30,6 +36,12 @@ export interface RunDeps {
   ledger: Ledger;
   invoke: AgentInvoker;
   model_version?: string | undefined;
+  // §13/skills — when supplied, runGig resolves each agent's `skill_slugs`
+  // against this map and passes the resulting SkillRecords through the
+  // AgentInvocationContext so the Claude invoker can emit the Skills layer.
+  // Absent = each invocation sees `skills: []` (back-compat — unit suites that
+  // don't supply skills still run green; the agent simply gets no skill layer).
+  skills?: ReadonlyMap<string, SkillRecord> | undefined;
 }
 
 export interface GigResult {
@@ -50,6 +62,23 @@ export class RuntimeError extends Error {}
 // Deterministic hash over the definitions a gig touches: the standard + its agents,
 // in a canonical (sorted, JCS) form. This is the reproducibility key — same defs,
 // same genome_hash, regardless of model or run.
+// Resolve a list of skill slugs against the genome's skills map. Missing slugs
+// are silently dropped — the diagnostic surface is the resulting empty Skills
+// layer in the prompt (the model receives no skill content). Returns [] when
+// either the slugs list or the map is absent.
+function resolveSkills(
+  slugs: readonly string[] | undefined,
+  map: ReadonlyMap<string, SkillRecord> | undefined,
+): readonly SkillRecord[] {
+  if (!slugs || slugs.length === 0 || !map) return [];
+  const out: SkillRecord[] = [];
+  for (const slug of slugs) {
+    const rec = map.get(slug);
+    if (rec) out.push(rec);
+  }
+  return out;
+}
+
 function genomeHash(standard: Standard): string {
   const agents = [...standard.agents]
     .map((a) => ({
@@ -90,7 +119,12 @@ export async function runGig(
     // gather upstream: prior outputs whose domain_type this agent consumes.
     const inputs = produced.filter((o) => agent.input_types.includes(o.domain_type));
 
-    const data = await deps.invoke({ agent, phase: phase.name, inputs, gig_input: gigInput });
+    // resolve this agent's skill bindings (slugs) against the genome's skills map.
+    // Unknown slugs are skipped — the absence surfaces as a missing Skills layer
+    // in the prompt rather than crashing the gig.
+    const skills = resolveSkills(agent.skill_slugs, deps.skills);
+
+    const data = await deps.invoke({ agent, phase: phase.name, inputs, gig_input: gigInput, skills });
 
     // write the typed output (outputs.write validates data vs the domain schema → throws on bad-schema).
     const rec = deps.outputs.write({

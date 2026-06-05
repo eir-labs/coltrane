@@ -33,7 +33,7 @@ export const MCP_TOOLS: readonly MCPToolDef[] = [
   { slug: "type_extend",                   category: "build", input_schema: obj({ slug: "string", domain: "string", fields_to_add: "object", reason: "string" }), output_schema: obj({ new_version: "number", changelog_entry: "string" }) },
   { slug: "agent_define",                  category: "build", input_schema: obj({ slug: "string", primitives: "array", input_types: "array", output_types: "array", identity: "string", method: "string", constraints: "array", permissions: "object" }), output_schema: obj({ agent_profile_id: "string", validation_result: "object" }) },
   { slug: "agent_evolve",                  category: "build", input_schema: obj({ slug: "string", changes: "object", reason: "string", evidence: "object" }), output_schema: obj({ new_version: "number", cascade_check: "object" }) },
-  { slug: "standard_compose",              category: "build", input_schema: obj({ slug: "string", domain: "string", phases: "array", depth_overrides: "object", composition_schema: "object", credits_formula: "string" }), output_schema: obj({ standard_id: "string", validation_result: "object" }) },
+  { slug: "standard_compose",              category: "build", input_schema: obj({ slug: "string", domain: "string", agents: "array", phases: "array", eval_slugs: "array", depth_overrides: "object", composition_schema: "object", credits_formula: "string" }), output_schema: obj({ standard_id: "string", validation_result: "object" }) },
   { slug: "standard_simulate",             category: "build", input_schema: obj({ standard_slug: "string", mock_input: "object", depth: "string" }), output_schema: obj({ phases: "array", estimated_cost: "number", estimated_duration: "number" }) },
   // prereg_seal — the discover→define seam mechanism. Takes a draft pre-reg's
   // sealed triplet (predict, kill, apoha), validates minimum content, computes
@@ -64,6 +64,7 @@ export const MCP_TOOLS: readonly MCPToolDef[] = [
 
   { slug: "agent_promote",                 category: "build", input_schema: obj({ slug: "string", status: "string" }), output_schema: obj({ slug: "string", status: "string", promoted: "boolean" }) },
   { slug: "standard_promote",              category: "build", input_schema: obj({ slug: "string", status: "string" }), output_schema: obj({ slug: "string", status: "string", promoted: "boolean" }) },
+  { slug: "skill_define",                  category: "build", input_schema: obj({ slug: "string", domain: "string", md: "string" }), output_schema: obj({ skill_id: "string", content_hash: "string" }) },
   { slug: "skill_promote",                 category: "build", input_schema: obj({ slug: "string", status: "string" }), output_schema: obj({ slug: "string", status: "string", promoted: "boolean" }) },
 
   { slug: "charter_suggest_update", category: "manage_context", input_schema: obj({ company_id: "string", field: "string", current_value: "string", suggested_value: "string", evidence: "object" }), output_schema: obj({ proposal_id: "string" }) },

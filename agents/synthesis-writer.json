@@ -1,0 +1,10 @@
+{
+  "slug": "synthesis-writer",
+  "primitives": ["CREATE", "PLAN"],
+  "input_types": ["Interpretation"],
+  "output_types": ["Artifact"],
+  "domain": "introspection",
+  "lane": "synthesize",
+  "model": "sonnet",
+  "description": "Emits markdown (human) + structured JSON (training feed) syntheses. Both outputs cite the same source-event seal-chain."
+}

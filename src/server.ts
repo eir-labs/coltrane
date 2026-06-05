@@ -16,14 +16,14 @@ import {
   PromotionError,
 } from "./mcp.js";
 import { createRegistry, loadRegistry, type Registry, type DomainType } from "./registry.js";
-import { loadGenome, type SkillRecord } from "./loader.js";
+import { loadGenome, type SkillRecord, type EvalRecord } from "./loader.js";
 import { sealAgentDefinition, sealDefinition, recordIdentity } from "./genome_writer.js";
 import { createOutputStore, defaultOutputsPersistDir, type OutputStore } from "./outputs.js";
 import { MemoryLedger, type Ledger } from "./ledger.js";
 import { standardSimulate } from "./simulate.js";
 import { runGig, BudgetExhausted, type AgentInvoker } from "./runtime.js";
 import { makeClaudeInvoker } from "./claude_invoker.js";
-import { composeStandard, defineAgent, CompositionError, type Standard, type Agent, type PhaseDef } from "./composition.js";
+import { composeStandard, defineAgent, CompositionError, type Standard, type Agent, type AgentDef, type PhaseDef } from "./composition.js";
 import { PRIMITIVE_OUTPUT_TYPE, type Primitive } from "./core_types.js";
 import { proposeTypeChange, type DomainTypeDef } from "./type_versioning.js";
 import { proposeAgentChange, evolveProfile, type AgentProfile } from "./agent_profile.js";
@@ -43,13 +43,19 @@ export interface ServerDeps {
   ledger: Ledger;
   // Optional execution wiring. When both are present, gig_dispatch/gig_monitor go live;
   // when absent, they report not_implemented (honest — a bare server can't run gigs).
-  standards?: ReadonlyMap<string, Standard> | undefined;
+  // Mutable so the write-path (standard_compose) updates the LIVE map the
+  // dispatcher reads — a definition made through the MCP surface is dispatchable
+  // in the same session, not stale until re-bootstrap (T14 / manual-refresh gap).
+  standards?: Map<string, Standard> | undefined;
   invoke?: AgentInvoker | undefined;
   model_version?: string | undefined;
   // §13/skills — passed through to runGig so each invocation can resolve its
   // agent's skill_slugs into actual SkillRecords (rendered as the prompt's
   // Skills layer by the Claude invoker).
-  skills?: ReadonlyMap<string, SkillRecord> | undefined;
+  skills?: Map<string, SkillRecord> | undefined;
+  // 5th-class eval definitions, slug-keyed. Passed to runGig so a standard's
+  // declared eval_slugs are judged against real contracts (not a presence stub).
+  evals?: Map<string, EvalRecord> | undefined;
   // Substrate-of-truth seam: when set, genome-mutation tools (agent_define, …) PERSIST
   // the content-addressed file here + ledger-seal its identity. Without it, they compute
   // + return the identity but don't write (validation path).
@@ -236,6 +242,7 @@ export async function dispatchTool(slug: string, args: Record<string, unknown>, 
             invoke: deps.invoke,
             model_version: deps.model_version,
             skills: deps.skills,
+            evals: deps.evals,
             budget,
           });
           return {
@@ -289,9 +296,15 @@ export async function dispatchTool(slug: string, args: Record<string, unknown>, 
           const sDomain = String(args["domain"] ?? "");
           const sAgents = (args["agents"] as Agent[]) ?? [];
           const sPhases = (args["phases"] as PhaseDef[]) ?? [];
-          const std = composeStandard({ slug: sSlug, domain: sDomain, agents: sAgents, phases: sPhases });
+          // 5th class: carry eval_slugs through compose → live map → persisted file
+          // so a declared eval actually reaches the runtime (#123 — it was dropped).
+          const sEvalSlugs = Array.isArray(args["eval_slugs"]) ? (args["eval_slugs"] as string[]) : undefined;
+          const std = composeStandard({ slug: sSlug, domain: sDomain, agents: sAgents, phases: sPhases, ...(sEvalSlugs ? { eval_slugs: sEvalSlugs } : {}) });
+          // Write-through to the LIVE map so gig_dispatch sees it this session.
+          // The composed `std` embeds the full agents, so it's dispatch-ready.
+          deps.standards?.set(sSlug, std);
           // substrate seal: persist a loadable standards/<slug>.json (agent_slugs form) + ledger.
-          const fileDef = { slug: sSlug, domain: sDomain, agent_slugs: sAgents.map((a) => a.slug), phases: sPhases };
+          const fileDef = { slug: sSlug, domain: sDomain, agent_slugs: sAgents.map((a) => a.slug), phases: sPhases, ...(sEvalSlugs ? { eval_slugs: sEvalSlugs } : {}) };
           const sealed = sealDefinition("standard_compose", sSlug, fileDef, deps.ledger, deps.genome_dir, "standards");
           return { ok: true, requires_approval: approval, data: { standard_id: std.slug, content_hash: sealed.content_hash, dependency_hash: sealed.dependency_hash, effective_hash: sealed.effective_hash, validation_result: { valid: true } } };
         } catch (e) {
@@ -605,6 +618,68 @@ export async function dispatchTool(slug: string, args: Record<string, unknown>, 
             data: { space: change.space, approval_required: change.approval_required, type_check_passed: change.type_check_passed ?? null, new_version, evolved_profile: evolved, parent_version: evolved?.parent_version ?? base.version, effective_hash: ev?.effective_hash, content_hash: ev?.content_hash, cascade_check: { agents_affected: [], standards_affected: [] } },
           };
         }
+        // (slug, changes) shape: apply a field-diff to a named genome agent, then
+        // CASCADE — type-check every standard the agent is bound into and fail
+        // CLOSED if any breaks, so a bad evolve can't corrupt a live pipeline.
+        const evolveSlug = typeof args["slug"] === "string" ? (args["slug"] as string) : undefined;
+        const changes = (args["changes"] && typeof args["changes"] === "object")
+          ? (args["changes"] as Partial<AgentDef>) : undefined;
+        if (evolveSlug && changes && deps.genome_dir) {
+          const agentPath = join(deps.genome_dir, "agents", `${evolveSlug}.json`);
+          if (!existsSync(agentPath)) {
+            return { ok: false, requires_approval: approval, error: `agent_evolve: unknown agent "${evolveSlug}" (no agents/${evolveSlug}.json)` };
+          }
+          const currentDef = JSON.parse(readFileSync(agentPath, "utf-8")) as AgentDef;
+          const nextDef = { ...currentDef, ...changes };
+
+          // The agent must still be a legal composition on its own…
+          try {
+            defineAgent(nextDef);
+          } catch (e) {
+            if (e instanceof CompositionError) {
+              return { ok: false, requires_approval: approval, error: `agent_evolve rejected: ${e.message}`, data: { cascade_check: { agents_affected: [], standards_affected: [] } } };
+            }
+            throw e;
+          }
+
+          // …and every standard it's bound into must still type-check.
+          const standards_affected: Array<{ slug: string; type_check_passed: boolean; errors: string[] }> = [];
+          for (const std of deps.standards?.values() ?? []) {
+            if (!std.agents.some((a) => a.slug === evolveSlug)) continue;
+            const rebound = std.agents.map((a) => (a.slug === evolveSlug ? { ...a, ...changes } : a));
+            try {
+              composeStandard({ slug: std.slug, domain: std.domain, agents: rebound, phases: std.phases, ...(std.eval_slugs ? { eval_slugs: std.eval_slugs } : {}) });
+              standards_affected.push({ slug: std.slug, type_check_passed: true, errors: [] });
+            } catch (e) {
+              if (e instanceof CompositionError) standards_affected.push({ slug: std.slug, type_check_passed: false, errors: [e.message] });
+              else throw e;
+            }
+          }
+
+          // Fail closed: if any binding standard broke, persist NOTHING.
+          const broken = standards_affected.filter((s) => !s.type_check_passed);
+          if (broken.length > 0) {
+            return {
+              ok: false, requires_approval: approval,
+              error: `agent_evolve rejected: ${broken.length} standard(s) fail type-check after the change: ${broken.map((b) => b.slug).join(", ")}`,
+              data: { new_version, cascade_check: { agents_affected: [], standards_affected } },
+            };
+          }
+
+          // Persist the evolved agent + ledger-seal, then re-bind the live
+          // standards so genome_hash reflects the change on the next gig.
+          const sealed = sealAgentDefinition(nextDef, deps.ledger, deps.genome_dir);
+          for (const std of deps.standards?.values() ?? []) {
+            const agentsArr = std.agents as Agent[];
+            for (let i = 0; i < agentsArr.length; i++) {
+              if (agentsArr[i]!.slug === evolveSlug) agentsArr[i] = sealed.agent;
+            }
+          }
+          return {
+            ok: true, requires_approval: approval,
+            data: { new_version, evolved: sealed.agent, content_hash: sealed.content_hash, effective_hash: sealed.effective_hash, cascade_check: { agents_affected: [], standards_affected } },
+          };
+        }
         return { ok: true, requires_approval: approval, data: { new_version, cascade_check: { agents_affected: [], standards_affected: [] } } };
       }
       case "access_grant_check": {
@@ -627,6 +702,19 @@ export async function dispatchTool(slug: string, args: Record<string, unknown>, 
           ok: true, requires_approval: approval,
           data: { valid: required.length === 0, granted: required.length === 0, missing_permissions: required, expires_in: null },
         };
+      }
+      case "skill_define": {
+        // The missing skill authoring tool. Persist (non-destructively) + ledger-seal
+        // via the blessed write path, then write through to the LIVE skills map so a
+        // gig in the same session resolves it into an agent's Skills layer.
+        const skSlug = typeof args["slug"] === "string" ? (args["slug"] as string).trim() : "";
+        if (!skSlug) return { ok: false, requires_approval: approval, error: "skill_define requires a non-empty slug" };
+        const def: SkillRecord = { slug: skSlug };
+        if (typeof args["domain"] === "string") def["domain"] = args["domain"];
+        if (typeof args["md"] === "string") def["md"] = args["md"];
+        const sealed = sealDefinition("skill_define", skSlug, def, deps.ledger, deps.genome_dir, "skills");
+        deps.skills?.set(skSlug, def);
+        return { ok: true, requires_approval: approval, data: { skill_id: skSlug, content_hash: sealed.content_hash, dependency_hash: sealed.dependency_hash, effective_hash: sealed.effective_hash } };
       }
       case "agent_promote":
       case "standard_promote":
@@ -795,7 +883,7 @@ function loadedGenomeHash(genome: LoadedGenome): string {
  * server runs gigs against the live model. Tests inject deps (incl. a mock invoke).
  */
 /**
- * Boot a full ServerDeps from the genome FILES on disk — so a bare `node dist/server.js`
+ * Boot a full ServerDeps from the genome FILES on disk — so a bare `node dist/src/server_entry.js`
  * serves the repo's genome (types, agents, standards), not an empty registry. The genome
  * root is COLTRANE_GENOME or the cwd. Pure + testable (no stdio); fails loud if the cwd
  * isn't a genome (loadGenome rejects a missing/invalid core_types/).
@@ -815,6 +903,7 @@ export function bootstrapServerDeps(genomeRoot?: string): ServerDeps {
     invoke: makeClaudeInvoker({ registry, model: process.env["COLTRANE_MODEL"] }),
     model_version: process.env["COLTRANE_MODEL"] ?? "claude-cli-default",
     skills: genome.skills, // ← skill substrate — runGig resolves agent.skill_slugs into prompt
+    evals: genome.evals, // ← 5th-class eval substrate — runGig judges declared eval_slugs
     genome_dir: root, // ← genome-mutation tools persist + ledger-seal into the live genome
   };
 }

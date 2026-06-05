@@ -2,7 +2,7 @@
   "mcpServers": {
     "coltrane": {
       "command": "node",
-      "args": ["dist/server.js"]
+      "args": ["dist/src/server_entry.js"]
     }
   }
 }

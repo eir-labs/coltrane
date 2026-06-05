@@ -37,6 +37,7 @@ export interface StandardFileDef {
   domain: string;
   agent_slugs: readonly string[];
   phases: readonly PhaseDef[];
+  eval_slugs?: readonly string[];
 }
 // Skills and evals have no composer yet — load them as slug-keyed records (structurally
 // validated: slug present + unique). Their richer contracts are a later layer.
@@ -47,9 +48,12 @@ export interface LoadedGenome {
   core_types: ReadonlyMap<string, CoreTypeRecord>;
   domain_types: ReadonlyMap<string, DomainTypeRecord>;
   agents: ReadonlyMap<string, Agent>;
-  standards: ReadonlyMap<string, Standard>;
-  skills: ReadonlyMap<string, SkillRecord>;
-  evals: ReadonlyMap<string, EvalRecord>;
+  // Mutable: the live server shares this map as deps.standards so MCP write-path
+  // tools (standard_compose) can make a definition dispatchable in-session.
+  standards: Map<string, Standard>;
+  // Mutable: shared as deps.skills so skill_define writes through to the live map.
+  skills: Map<string, SkillRecord>;
+  evals: Map<string, EvalRecord>;
 }
 
 export class GenomeLoadError extends Error {}
@@ -179,7 +183,7 @@ export function loadGenome(root: string): LoadedGenome {
       resolved.push(a);
     }
     try {
-      standards.set(def.slug, composeStandard({ slug: def.slug, domain: def.domain, agents: resolved, phases: def.phases }));
+      standards.set(def.slug, composeStandard({ slug: def.slug, domain: def.domain, agents: resolved, phases: def.phases, ...(def.eval_slugs ? { eval_slugs: def.eval_slugs } : {}) }));
       standard_paths.set(def.slug, path);
     } catch (e) {
       if (e instanceof CompositionError) throw new GenomeLoadError(`standard "${def.slug}" in ${path}: ${e.message}`);

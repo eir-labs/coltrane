@@ -112,6 +112,29 @@ describe("runtime: gig execution end-to-end", () => {
     expect(r1.run_fingerprint).not.toBe(r2.run_fingerprint); // different model → different fingerprint
   });
 
+  it("run_fingerprint is reproducible: identical genome + model + deterministic outputs → identical fingerprint", async () => {
+    // Replay-vs-tamper depends on this: an honest replay of the same genome with
+    // the same model and the same outputs MUST reproduce the fingerprint. If it
+    // doesn't, a legitimate replay is indistinguishable from a tamper. Bug: the
+    // runtime folded each output's random UUID into output_hashes, so two
+    // identical runs never matched. This pins content-addressing.
+    const a = setup();
+    const r1 = await runGig(standard, {}, { ...a, invoke: mockInvoke, model_version: "m1" });
+    const b = setup();
+    const r2 = await runGig(standard, {}, { ...b, invoke: mockInvoke, model_version: "m1" });
+    expect(r2.run_fingerprint).toBe(r1.run_fingerprint);
+  });
+
+  it("run_fingerprint shifts when an output's content differs (tamper IS caught)", async () => {
+    const a = setup();
+    const r1 = await runGig(standard, {}, { ...a, invoke: mockInvoke, model_version: "m1" });
+    const tamperInvoke: AgentInvoker = ({ agent, inputs }) =>
+      agent.slug === "site-scout" ? { url: "/TAMPERED" } : { title: `finding from ${inputs.length} input(s)` };
+    const b = setup();
+    const r2 = await runGig(standard, {}, { ...b, invoke: tamperInvoke, model_version: "m1" });
+    expect(r2.run_fingerprint).not.toBe(r1.run_fingerprint); // different content → different fingerprint
+  });
+
   it("rejects a phase referencing an unknown agent", async () => {
     const { outputs, ledger } = setup();
     const broken: Standard = { ...standard, phases: [{ name: "x", agent: "ghost" }] };

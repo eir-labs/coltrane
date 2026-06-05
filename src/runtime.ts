@@ -6,10 +6,10 @@
 import { randomUUID } from "node:crypto";
 import type { Standard, Agent } from "./composition.js";
 import { PRIMITIVE_OUTPUT_TYPE } from "./core_types.js";
-import { sha256Hex, canonJson, runFingerprint, CANONICAL_FORM_VERSION } from "./canonical_form.js";
+import { sha256Hex, canonJson, runFingerprint, outputContentHash, CANONICAL_FORM_VERSION } from "./canonical_form.js";
 import type { OutputStore, OutputRecord } from "./outputs.js";
 import type { Ledger } from "./ledger.js";
-import type { SkillRecord } from "./loader.js";
+import type { SkillRecord, EvalRecord } from "./loader.js";
 
 // What an agent invocation sees. The invoker returns the output `data` (validated
 // downstream against the agent's declared output domain type). `skills` carries
@@ -42,6 +42,10 @@ export interface RunDeps {
   // Absent = each invocation sees `skills: []` (back-compat — unit suites that
   // don't supply skills still run green; the agent simply gets no skill layer).
   skills?: ReadonlyMap<string, SkillRecord> | undefined;
+  // 5th-class eval definitions, slug-keyed. When supplied, scoreEval resolves a
+  // declared eval_slug against this map and judges the produced outputs against
+  // its contract. Absent = an unresolvable eval scores 0.0 (can't attest it held).
+  evals?: ReadonlyMap<string, EvalRecord> | undefined;
   /**
    * Optional cost-budget input. When omitted (default), no budget enforcement
    * runs — preserving v0 back-compat. When present, the runtime tracks
@@ -279,7 +283,10 @@ export async function runGig(
   }
 
   const genome_hash = genomeHash(standard);
-  const output_hashes = produced.map((p) => p.id);
+  // Content-address each output (not its random UUID) so the fingerprint is
+  // reproducible: an honest replay of the same outputs recomputes the same
+  // hashes, while changed content shifts them. See outputContentHash.
+  const output_hashes = produced.map((p) => outputContentHash(p));
 
   // 5th-class evals: when the standard declares eval_slugs, run each against
   // the produced outputs and collect the scores. A score of 1.0 means the
@@ -287,7 +294,7 @@ export async function runGig(
   // narrow — score is keyed presence; richer eval engines can subclass.
   const eval_scores: Record<string, number> = {};
   for (const slug of standard.eval_slugs ?? []) {
-    eval_scores[slug] = scoreEval(slug, produced);
+    eval_scores[slug] = scoreEval(slug, produced, deps.evals);
   }
 
   const run_fingerprint = runFingerprint({
@@ -326,6 +333,37 @@ export async function runGig(
 //   * default: 1.0 if any output exists, else 0.0
 // Future builders should grow this into a real eval engine that reads the eval
 // file's `asserts`/`on_type`/scoring function and applies it.
-function scoreEval(_slug: string, produced: readonly OutputRecord[]): number {
-  return produced.length > 0 ? 1.0 : 0.0;
+/**
+ * Real (deterministic) eval judge. Resolves the eval by slug, then:
+ *   - unresolvable slug → 0.0 (can't attest a contract that isn't defined)
+ *   - `on_type` declared but not produced → 0.0 (the target wasn't made)
+ *   - `non_empty_fields` declared → 1.0 iff every named field is present + non-empty
+ *     in EVERY produced output of `on_type`, else 0.0
+ *   - no structured predicate → presence of a typed target is the (weaker) contract
+ * Deterministic by design: eval_scores feed run_fingerprint, so the judge must not
+ * depend on the model (an LLM-as-judge would make replay non-reproducible).
+ */
+function scoreEval(slug: string, produced: readonly OutputRecord[], evals?: ReadonlyMap<string, EvalRecord>): number {
+  const ev = evals?.get(slug);
+  if (!ev) return 0.0;
+  const onType = typeof ev["on_type"] === "string" ? (ev["on_type"] as string) : undefined;
+  const targets = onType ? produced.filter((o) => o.domain_type === onType) : produced;
+  if (targets.length === 0) return 0.0;
+  const fields = Array.isArray(ev["non_empty_fields"]) ? (ev["non_empty_fields"] as string[]) : [];
+  if (fields.length > 0) {
+    const allHold = targets.every((o) => {
+      const data = o.data as Record<string, unknown> | undefined;
+      return fields.every((f) => isNonEmptyValue(data?.[f]));
+    });
+    return allHold ? 1.0 : 0.0;
+  }
+  return 1.0;
+}
+
+function isNonEmptyValue(v: unknown): boolean {
+  if (v === undefined || v === null) return false;
+  if (typeof v === "string") return v.trim().length > 0;
+  if (Array.isArray(v)) return v.length > 0;
+  if (typeof v === "object") return Object.keys(v as object).length > 0;
+  return true; // numbers, booleans — present counts
 }

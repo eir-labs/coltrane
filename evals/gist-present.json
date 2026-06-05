@@ -2,5 +2,6 @@
   "slug": "gist-present",
   "domain": "demo",
   "on_type": "summary",
+  "non_empty_fields": ["gist"],
   "asserts": "the summary output has a non-empty gist field"
 }

@@ -49,6 +49,39 @@ export function definitionHash(files: readonly FileEntry[]): string {
   return sha256Hex(manifest);
 }
 
+/**
+ * Content-address an output for the run_fingerprint. Folds the *semantic* fields
+ * (type identity + producing agent/phase + data) and deliberately EXCLUDES
+ * run-instance noise — `id`, `gig_id`, `created_at`, `input_refs` are all fresh
+ * UUIDs/timestamps per run. Hashing those made two byte-identical runs produce
+ * different fingerprints, so an honest replay never matched and was
+ * indistinguishable from a tamper. With this, identical content → identical hash
+ * (replay reproduces), different content → different hash (tamper is caught).
+ */
+export function outputContentHash(rec: {
+  core_type: string;
+  domain_type: string;
+  domain_type_version: number;
+  domain: string;
+  primitive: string;
+  phase?: string | undefined;
+  agent_slug: string;
+  data: unknown;
+}): string {
+  return sha256Hex(
+    canonJson({
+      core_type: rec.core_type,
+      domain_type: rec.domain_type,
+      domain_type_version: rec.domain_type_version,
+      domain: rec.domain,
+      primitive: rec.primitive,
+      phase: rec.phase,
+      agent_slug: rec.agent_slug,
+      data: rec.data,
+    }),
+  );
+}
+
 export interface RunFingerprintInput {
   genome_hash: string;
   model_version: string;

@@ -2,8 +2,8 @@
 
 > *Teach Claude to play jazz.*
 >
-> *The power of language models is in their improvisation.*
-> *The power of jazz is in its math.*
+> *The power of language models is in their improvisational ability, sometimes called hallucinations.*
+> *The power of jazz is how the math creates the space for exploring new territory safely.*
 > *Music theory — translated through a good player, a good band, and a good standard that says when to walk and when to leap.*
 >
 > *In honor and reverence for John Coltrane, whose courage to leap, and to leap, and to leap has taught so many to find the bravery to do the same themselves.*

@@ -13,11 +13,11 @@ npm install && npm run build
 
 That's it. Open Claude Code in this directory and say "hi."
 
-The repo ships its own `.mcp.json`, so Coltrane's MCP server auto-starts when Claude opens the directory — no `~/.claude/settings.json` edits, no manual server start. The project CLAUDE.md loads automatically, and the first-time tuning ritual greets you: it learns what kind of work you do, asks permission to scan a few of your other repos for context, then proposes edits to existing player files or new ones tuned to what it finds. The book grows in place; it doesn't get replaced.
+The repo ships its own `.mcp.json`, so Coltrane's MCP server auto-starts when Claude opens the directory — no `~/.claude/settings.json` edits, no manual server start. The project CLAUDE.md loads automatically, and the first-time tuning step greets you: it learns what kind of work you do, asks permission to scan a few of your other repos for context, then proposes edits to existing agent files or new ones tuned to what it finds. The set grows in place; it doesn't get replaced.
 
 ## Define an agent in 30 seconds
 
-Create `players/code-reviewer.json`:
+Create `agents/code-reviewer.json`:
 
 ```json
 {
@@ -28,17 +28,19 @@ Create `players/code-reviewer.json`:
 }
 ```
 
-CC can now invoke this agent. No restarts. No code changes. The file IS the agent.
+Claude Code can now invoke this agent. No restarts. No code changes. The file IS the agent.
 
 ## What you get
 
-**Blast radius bounded.** Every agent declares its tool allowlist in its definition. The agent literally cannot call tools outside that list. No surprise side effects.
+**MCP-tool blast radius bounded.** When coltrane dispatches a gig, it spawns a child `claude -p` with `--strict-mcp-config` and `--allowedTools` scoped to the agent's declared grant — the spawn cannot reach MCP servers or tools outside the cage. The built-in tool surface in your own Claude Code session (Bash/Read/Write) is governed by your CLI session permissions, not by coltrane.
 
-**No self-promotion.** Agents cannot promote themselves or modify their own charter. Promotion (DRAFT → CANDIDATE → PROMOTED) is forward-only and requires human approval.
+**No self-promotion.** Agents cannot promote themselves or modify their own charter. Promotion is forward-only through a declared status chain and requires human approval at the boundary.
 
 **Type safety on changes.** Breaking changes to types gate on review. Forward-compatible additions don't. The type system tells you which is which before you ship.
 
 **Sealed runs.** Every gig produces a `genome_hash` (reproducible) + `run_fingerprint` (model version, scores). Append-only ledger. When something fails, you can replay exactly what happened.
+
+**Stop prompting from scratch every session.** Agents are content-addressed files, not throwaway prompts — open Claude Code, the genome is already loaded (see PR #104).
 
 ## Live Mode (in development)
 

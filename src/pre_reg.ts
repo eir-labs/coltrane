@@ -1,18 +1,16 @@
-// §13 pre-reg seal substrate — the discover→define seam mechanism.
+// Pre-reg seal substrate — the discover→define seam mechanism.
 //
 // A pre-reg lives in one of two states:
 //   - DRAFTED  — predict/kill/apoha mutable, iteration allowed
 //   - SEALED   — sealed fields FROZEN at sealed_at; sha256_pre_verdict immutable
 //
-// The seal moment is the apoha-cut: before this call, refinement is allowed;
-// after, the inscribed shape is committed and any observation appends rather
-// than rewrites. The sha256_pre_verdict is the chain handle (per grid-DC §3.1
-// voice-registry pattern + Heliograph PROGRAM.md R1).
+// At the seal moment, the committed shape is frozen and any later observation
+// appends rather than rewrites. The sha256_pre_verdict is the immutable handle
+// to that frozen shape.
 //
-// This module is the engine for problem-definer.md (lane=define, prereg_state=
-// seal_fires). The MCP tool `prereg_seal` (src/mcp.ts) wraps `sealPreReg` and
-// the dispatcher (src/server.ts) routes calls through the injected
-// `PreRegLedger`.
+// This module is the engine for the problem-definer agent (lane=define). The
+// MCP tool `prereg_seal` (src/mcp.ts) wraps `sealPreReg` and the dispatcher
+// (src/server.ts) routes calls through the injected `PreRegLedger`.
 
 import { canonJson, sha256Hex } from "./canonical_form.js";
 import { appendFileSync, readFileSync, existsSync, mkdirSync } from "node:fs";
@@ -26,8 +24,8 @@ import { dirname } from "node:path";
  *           wrong in a specific way.
  * kill    — the condition that would make us STOP or roll back. Observable
  *           from data we will collect.
- * apoha   — what this pre-reg is explicitly NOT — the scope-bound. Named
- *           before action.
+ * apoha   — what this pre-reg is explicitly NOT — the scope-bound. Names the
+ *           neighbouring shapes the work must not collapse into.
  */
 export interface SealedFields {
   readonly predict: string;
@@ -75,8 +73,8 @@ export class PreRegSealError extends Error {}
 
 /**
  * Compute the sha256_pre_verdict over the canonical-JSON of the sealed triplet.
- * This is the immutable chain handle — equivalent to grid-DC §3.1's pattern.
- * Stable across whitespace, key ordering, and field reordering.
+ * This is the immutable chain handle. Stable across whitespace, key ordering,
+ * and field reordering.
  */
 export function computePreRegHash(sealed: SealedFields): string {
   // Canonical-JSON over only the sealed-field triplet — domain extensions DO
@@ -86,9 +84,9 @@ export function computePreRegHash(sealed: SealedFields): string {
 }
 
 /**
- * Validate a SealedFields triplet's minimum content. Per the band's research-
- * methodology discipline: each field must be non-empty + meaningfully long
- * enough to be falsifiable.
+ * Validate a SealedFields triplet's minimum content. Each field must be
+ * non-empty and at least 10 characters of trimmed text so the commitment is
+ * specific enough to be falsifiable.
  */
 export function validateSealedFields(sealed: SealedFields): void {
   const checks: ReadonlyArray<[keyof SealedFields, string]> = [

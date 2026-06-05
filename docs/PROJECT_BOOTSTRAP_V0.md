@@ -33,7 +33,7 @@ When Claude reads this standard in conductor mode:
 5. **Seam 2 / Seam 3** — implicit (charter freezes at seam 2; verdict scope freezes at seam 3 when deliverables are sealed).
 6. **Deliver** — Claude commits, runs preseed e2e specs, computes verdict, chimes welcome.
 
-The user may interject at any phase: refine, abort, request honest-broker pass, adjust apoha. The conductor accommodates.
+The user may interject at any phase: refine, abort, request an honest-broker pass, or adjust the `apoha` field on the charter. The conductor accommodates.
 
 ## The double-diamond shape
 
@@ -53,7 +53,7 @@ contract  ◄─       │   DELIVER   │ ── SEAM │  DEVELOP    │  ◄�
                                                                             VERDICT
 ```
 
-Two diamonds (D1 = problem space, D2 = solution space). Three seams between four phases. **Each seam carries a sealed pre-reg cut** — the apoha-discipline applied at every transition.
+Two diamonds (D1 = problem space, D2 = solution space). Three seams between four phases. **Each seam carries a sealed pre-reg cut** — the same predict + kill + apoha discipline applied at every transition.
 
 ## The 4 phases
 
@@ -89,10 +89,10 @@ This lines up with the Heliograph Validation Program's R1–R8 standing rules (s
 
 Each template is a `templates/<use-case>/` directory in coltrane-oss containing the files DEVELOP will unroll:
 
-- `templates/code-changes/` — code-change-flavored preseed (miles's lane)
-- `templates/research-briefs/` — research-flavored preseed (subhuti's lane)
-- `templates/operations/` — ops-readiness preseed (subhuti's lane)
-- `templates/idea-exploration/` — diverge-discipline preseed (groove's lane)
+- `templates/code-changes/` — code-change-flavored preseed
+- `templates/research-briefs/` — research-flavored preseed
+- `templates/operations/` — ops-readiness preseed
+- `templates/idea-exploration/` — diverge-discipline preseed
 - `templates/bare/` — minimal: just the 4 phase-agents + 4 domain standards + 3 skills
 
 Every template ships with:
@@ -111,9 +111,9 @@ Every template ships with:
 
 ## See also
 
-- `agents/domain-explorer.json` (miles) — diverge-N-alternatives, refuses-premature-convergence
-- `agents/problem-definer.json` (miles) — analyst+critic, seals the predict+kill+apoha
-- `agents/solution-developer.json` (miles) — executor+synthesizer, generates files
-- `agents/delivery-finalizer.json` (miles) — critic+audience_modeler, ripens the charter
-- `domain_types/project-charter.json` (cajal) — the birth pre-reg type
-- `templates/<use-case>/` — domain-specific scaffolding payloads (miles + subhuti + groove)
+- `agents/domain-explorer.json` — diverge-N-alternatives, refuses-premature-convergence
+- `agents/problem-definer.json` — analyst+critic, seals the predict+kill+apoha
+- `agents/solution-developer.json` — executor+synthesizer, generates files
+- `agents/delivery-finalizer.json` — critic+audience_modeler, ripens the charter
+- `domain_types/project-charter.json` — the birth pre-reg type
+- `templates/<use-case>/` — domain-specific scaffolding payloads

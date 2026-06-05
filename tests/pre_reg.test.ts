@@ -45,7 +45,7 @@ describe("computePreRegHash — chain handle stability", () => {
   });
 });
 
-describe("validateSealedFields — apoha-cut minimum-content", () => {
+describe("validateSealedFields — minimum-content per sealed field", () => {
   it("accepts valid triplets", () => {
     expect(() => validateSealedFields(validSealed)).not.toThrow();
   });

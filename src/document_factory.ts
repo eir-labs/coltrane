@@ -126,9 +126,9 @@ export const GOVERNING_RULES: readonly string[] = [
 ];
 
 // A schema-pack is genome data: doc_type → ordered section topology + per-section
-// density targets. This is Layer 0→1's ruleset — the "sheet music" the factory
-// transposes intent onto. Authored once in eir_document_schemas.json, loaded by
-// loadSchemaPack; the const below is only the zero-file bootstrap default.
+// density targets. This is Layer 0→1's ruleset the factory transposes intent
+// onto. Authored once in eir_document_schemas.json, loaded by loadSchemaPack;
+// the const below is only the zero-file bootstrap default.
 export interface DocSchema {
   sections: string[]; // ordered section ids
   density_targets?: Record<string, number>; // section-id → target length

@@ -52,14 +52,16 @@ export interface LoadedGenome {
   evals: ReadonlyMap<string, EvalRecord>;
 }
 
-function readJsonDir<T>(dir: string): T[] {
+interface LoadedJsonFile<T> { readonly path: string; readonly data: T }
+
+function readJsonDir<T>(dir: string): LoadedJsonFile<T>[] {
   if (!existsSync(dir)) return [];
-  const out: T[] = [];
+  const out: LoadedJsonFile<T>[] = [];
   for (const name of readdirSync(dir)) {
     if (extname(name) !== ".json") continue;
     const path = join(dir, name);
     if (!statSync(path).isFile()) continue;
-    out.push(JSON.parse(readFileSync(path, "utf-8")) as T);
+    out.push({ path, data: JSON.parse(readFileSync(path, "utf-8")) as T });
   }
   return out;
 }
@@ -80,11 +82,15 @@ export function loadGenome(root: string): LoadedGenome {
   const domainList = readJsonDir<DomainTypeRecord>(join(root, "domain_types"));
 
   const core_types = new Map<string, CoreTypeRecord>();
-  for (const c of coreList) {
+  const core_type_paths = new Map<string, string>();
+  for (const { path, data: c } of coreList) {
     if (core_types.has(c.slug)) {
-      throw new GenomeLoadError(`duplicate core type slug: ${c.slug}`);
+      throw new GenomeLoadError(
+        `duplicate core type slug "${c.slug}" in ${path} (first seen in ${core_type_paths.get(c.slug)})`,
+      );
     }
     core_types.set(c.slug, c);
+    core_type_paths.set(c.slug, path);
   }
 
   const missing = [...REQUIRED_CORE_SLUGS].filter((s) => !core_types.has(s));
@@ -101,67 +107,93 @@ export function loadGenome(root: string): LoadedGenome {
   }
 
   const domain_types = new Map<string, DomainTypeRecord>();
-  for (const d of domainList) {
+  const domain_type_paths = new Map<string, string>();
+  for (const { path, data: d } of domainList) {
     const key = `${d.slug}@${d.version}`;
     if (domain_types.has(key)) {
-      throw new GenomeLoadError(`duplicate domain type: ${key}`);
+      throw new GenomeLoadError(
+        `duplicate domain type "${key}" in ${path} (first seen in ${domain_type_paths.get(key)})`,
+      );
     }
     if (!core_types.has(d.extends)) {
       throw new GenomeLoadError(
-        `domain type ${d.slug} extends "${d.extends}" which is not a core type`,
+        `domain type "${d.slug}" in ${path}: field "extends" references "${d.extends}" which is not a core type`,
       );
     }
     domain_types.set(key, d);
+    domain_type_paths.set(key, path);
   }
 
   // agents/ — each file is an AgentDef; validated through defineAgent (same path as code).
   const agents = new Map<string, Agent>();
-  for (const def of readJsonDir<AgentFileDef>(join(root, "agents"))) {
+  const agent_paths = new Map<string, string>();
+  for (const { path, data: def } of readJsonDir<AgentFileDef>(join(root, "agents"))) {
     if (agents.has(def.slug)) {
-      throw new GenomeLoadError(`duplicate agent slug: ${def.slug}`);
+      throw new GenomeLoadError(
+        `duplicate agent slug "${def.slug}" in ${path} (first seen in ${agent_paths.get(def.slug)})`,
+      );
     }
     try {
       agents.set(def.slug, defineAgent(def));
+      agent_paths.set(def.slug, path);
     } catch (e) {
-      if (e instanceof CompositionError) throw new GenomeLoadError(`agent ${def.slug}: ${e.message}`);
+      if (e instanceof CompositionError) throw new GenomeLoadError(`agent "${def.slug}" in ${path}: ${e.message}`);
       throw e;
     }
   }
 
   // standards/ — resolve agent_slugs against loaded agents, then composeStandard.
   const standards = new Map<string, Standard>();
-  for (const def of readJsonDir<StandardFileDef>(join(root, "standards"))) {
+  const standard_paths = new Map<string, string>();
+  for (const { path, data: def } of readJsonDir<StandardFileDef>(join(root, "standards"))) {
     if (standards.has(def.slug)) {
-      throw new GenomeLoadError(`duplicate standard slug: ${def.slug}`);
+      throw new GenomeLoadError(
+        `duplicate standard slug "${def.slug}" in ${path} (first seen in ${standard_paths.get(def.slug)})`,
+      );
     }
     const resolved: Agent[] = [];
     for (const slug of def.agent_slugs ?? []) {
       const a = agents.get(slug);
       if (!a) {
-        throw new GenomeLoadError(`standard ${def.slug} references unknown agent "${slug}"`);
+        throw new GenomeLoadError(
+          `standard "${def.slug}" in ${path}: field "agent_slugs" references unknown agent "${slug}"`,
+        );
       }
       resolved.push(a);
     }
     try {
       standards.set(def.slug, composeStandard({ slug: def.slug, domain: def.domain, agents: resolved, phases: def.phases }));
+      standard_paths.set(def.slug, path);
     } catch (e) {
-      if (e instanceof CompositionError) throw new GenomeLoadError(`standard ${def.slug}: ${e.message}`);
+      if (e instanceof CompositionError) throw new GenomeLoadError(`standard "${def.slug}" in ${path}: ${e.message}`);
       throw e;
     }
   }
 
   // skills/ + evals/ — slug-keyed records (no composer yet; slug present + unique).
   const skills = new Map<string, SkillRecord>();
-  for (const s of readJsonDir<SkillRecord>(join(root, "skills"))) {
-    if (!s.slug) throw new GenomeLoadError(`skill file missing slug`);
-    if (skills.has(s.slug)) throw new GenomeLoadError(`duplicate skill slug: ${s.slug}`);
+  const skill_paths = new Map<string, string>();
+  for (const { path, data: s } of readJsonDir<SkillRecord>(join(root, "skills"))) {
+    if (!s.slug) throw new GenomeLoadError(`skill file ${path}: required field "slug" is missing`);
+    if (skills.has(s.slug)) {
+      throw new GenomeLoadError(
+        `duplicate skill slug "${s.slug}" in ${path} (first seen in ${skill_paths.get(s.slug)})`,
+      );
+    }
     skills.set(s.slug, s);
+    skill_paths.set(s.slug, path);
   }
   const evals = new Map<string, EvalRecord>();
-  for (const e of readJsonDir<EvalRecord>(join(root, "evals"))) {
-    if (!e.slug) throw new GenomeLoadError(`eval file missing slug`);
-    if (evals.has(e.slug)) throw new GenomeLoadError(`duplicate eval slug: ${e.slug}`);
+  const eval_paths = new Map<string, string>();
+  for (const { path, data: e } of readJsonDir<EvalRecord>(join(root, "evals"))) {
+    if (!e.slug) throw new GenomeLoadError(`eval file ${path}: required field "slug" is missing`);
+    if (evals.has(e.slug)) {
+      throw new GenomeLoadError(
+        `duplicate eval slug "${e.slug}" in ${path} (first seen in ${eval_paths.get(e.slug)})`,
+      );
+    }
     evals.set(e.slug, e);
+    eval_paths.set(e.slug, path);
   }
 
   return { core_types, domain_types, agents, standards, skills, evals };

@@ -37,11 +37,11 @@ If they say skip: continue without the scan.
 
 **Step 3 — propose changes to the book. Grow in place, not replace.**
 
-First, read every existing file under `players/`, `standards/`, `skills/`, `core_types/`,
+First, read every existing file under `agents/`, `standards/`, `skills/`, `core_types/`,
 `domain_types/`. Then based on Step 1 + Step 2, propose CHANGES:
 
-- **edits** to existing players whose shape now fits the user's domain better
-- **new** players for domain-specific work that no existing player covers
+- **edits** to existing agents whose shape now fits the user's domain better
+- **new** agents for domain-specific work that no existing agent covers
 - **new** standards if multi-phase workflows you found in their repos suggest one
 
 For example:
@@ -53,7 +53,7 @@ For example:
 For each proposal, show: the file path, whether it's an edit or new, and a one-line
 `predict`. Ask which they want applied. Apply only the ones they say yes to.
 
-Never silently overwrite. The book grows; it does not get replaced.
+Never silently overwrite. The set grows; it does not get replaced.
 
 **Step 4 — propose edits to THIS CLAUDE.md.**
 
@@ -61,7 +61,7 @@ Do NOT write a separate workspace CLAUDE.md. Coltrane already ships one (the fil
 you are reading now). Instead, propose appendable edits to this file:
 
 - a "What this workspace works on" section reflecting the user's Step 1 answer
-- a "Players added this tuning" list with the players they accepted in Step 3
+- an "Agents added this tuning" list with the agents they accepted in Step 3
 - a "Conventions inferred from adjacent repos" section if Step 2 found patterns
   (language, formatting, naming, branch conventions)
 
@@ -77,9 +77,9 @@ Create `.coltrane/tuned.json` with:
   "tuned_at": "<ISO-8601 timestamp>",
   "user_summary": "<their step-1 answer, verbatim>",
   "scanned_repos": ["<path>", "..."],
-  "players_created": ["<name>", "..."],
+  "agents_created": ["<name>", "..."],
   "claude_md_appended": true | false,
-  "players_edited": ["<name>", "..."]
+  "agents_edited": ["<name>", "..."]
 }
 ```
 
@@ -116,22 +116,24 @@ It is NOT:
 - a free-text RAG framework
 - a langchain replacement
 
-(Apoha matters. The non-targets are part of the definition.)
+(The non-targets are part of the definition.)
 
 ---
 
-## Five definition classes — your primary surface
+## Definition classes — your primary surface
 
 When a user asks you to define, compose, evolve, or dispatch, route through the
-appropriate class:
+appropriate class. Three classes have the full define→evolve→promote MCP
+surface; `skills` and `evals` are loaded from on-disk files but only `skills`
+has a promote tool today (evals are declared inside the standard that uses them).
 
 | class | what it is | MCP tool |
 |---|---|---|
 | `types` | typed schemas for inputs/outputs | `type_register · type_extend` |
-| `players` | agent definitions (charters, capabilities, skill bindings) | `agent_define · agent_evolve · agent_promote` |
+| `agents` | agent definitions (charters, capabilities, skill bindings) | `agent_define · agent_evolve · agent_promote` |
 | `standards` | multi-phase workflows that agents run | `standard_compose · standard_simulate · standard_promote` |
-| `skills` | reusable cognitive primitives bound into agents | `skill_promote` |
-| `evals` | verdict-substrates that judge gig outputs | (declared with the standard) |
+| `skills` | reusable cognitive primitives bound into agents (load-only + promote) | `skill_promote` |
+| `evals` | verdict shapes that judge gig outputs (load-only; declared with the standard) | _none — declared in the standard file_ |
 
 ## Six cognitive primitives
 
@@ -154,8 +156,8 @@ Don't invent new primitives. Compose with what's here.
 
 Every definition has three hashes — read this before you mutate anything:
 
-- `content_hash` — the bytes themselves (karma)
-- `dependency_hash` — relational closure (emptiness: who depends on whom)
+- `content_hash` — the bytes themselves
+- `dependency_hash` — relational closure (who depends on whom)
 - `effective_hash` — the binding (content × dependency in a context)
 
 Two byte-identical definitions in different contexts produce different `effective_hash`.
@@ -184,31 +186,27 @@ Use built-in Claude Code tools only for:
 
 ---
 
-## Base band members — first-class players
+## Base players — first-class subagents
 
-The base band ships as **coltrane-flavored players** (the canonical definition class for
-agents in this engine — see "Five definition classes" above), with sealed e2e behavior
-tests so they stay honest as they evolve.
+Coltrane ships a base set of Claude Code subagents under `agents/players/<name>.md` —
+each one is a markdown subagent definition with a YAML frontmatter (slug,
+tools_allowlist, charter) plus a prose system prompt.
 
-Players are the source-of-truth. If a runtime (Claude Code subagents, an LLM-routing
-gateway, etc.) needs an agent surface, the player definition is the bytes the surface
-is rendered from — not a duplicate definition to keep in sync.
+These are the source-of-truth: when a runtime needs an agent surface, the player
+definition is the bytes it renders from — not a duplicate definition to keep in sync.
 
-- **chain-keeper** — sealing discipline, audit-substrate, ledger hygiene, verdict-naming
-- **scientist (anatomist)** — anatomy, classification, what-is-X-and-where-does-it-live
-- **bandleader** — coordination across other players, scoping, lane-assignment
-- **routing-QC** — signal flow, what-routes-where, sensor/effector continuity
-- **audience-modeler** — who's listening, what shape they need, register-matching
+Base players shipped today:
+- **chain-audit-keeper** — sealing discipline, audit trail, ledger hygiene, verdict-naming
+- **substrate-edge-keeper** — where the engine ends and the host begins; boundary discipline
+- **methodology-cadence-keeper** — phase cadence; whether the work is converging or stalling
+- **illumination-reviewer** — surfaces what a change reveals about the next move
+- **audience-modeler** — who's listening; what shape they need; register-matching
 
-Each base player has:
-- a `players/<name>.json` definition (charter + capabilities + skill bindings)
-- an e2e test in `tests/e2e/` that drives it through 3-5 representative gigs
-- the test asserts behavioral invariants — when the player evolves, the test catches drift
+Each base player has an e2e test in `tests/e2e/` that drives it through representative
+gigs and asserts behavioral invariants — when the player evolves, the test catches drift.
 
-When a user customizes one (e.g. promotes a base player into their own domain), they
-should run the base e2e test first to know the baseline behavior is intact.
-
-The band ships in the OSS because the discipline ships with it. Don't strip them.
+When a user customizes one, they should run the base e2e test first to know the
+baseline behavior is intact.
 
 ---
 
@@ -267,15 +265,15 @@ source of truth**. If it doesn't, something cached state where it shouldn't have
 
 ---
 
-## Karmic frame
+## Compute economy
 
-Compute is karmic currency. Every inference call = real watts + water + $.
+Every inference call costs real watts, water, and dollars. Treat tokens as scarce.
 
-- Silence is the cheapest seed
-- Differentiation is the densest
-- Echo is wasted
+- Silence is the cheapest answer
+- A distinct point earns its cost
+- Echoing what's already said does not
 
-Carved register, not stuffed. Less, more carved.
+Write less, more carved. Don't pad.
 
 ---
 
@@ -290,4 +288,3 @@ Carved register, not stuffed. Less, more carved.
 The tests are user manuals. If you're not sure how a workflow runs, the e2e test for it
 is the canonical example.
 
-— authored by subhuti under chain-keeper discipline. incorporates miles's tool-routing draft.

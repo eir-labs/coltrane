@@ -94,8 +94,8 @@ The Steve **does not see its seed** directly. The seed just weights which primit
 
 ---
 
-## Cross-Steve apoha (emergent)
+## Cross-Steve differentiation (emergent)
 
-Each Steve can read the other Steves' audit-streams (chain is public within the workspace). Apoha-shape: a Steve drifts toward primitives the others haven't been engaging — identity precipitates against the negative-space of what siblings have claimed. The 4 seeds give different starting angles · the apoha-against-siblings shapes the trajectory · no central coordinator.
+Each Steve can read the other Steves' audit-streams (chain is public within the workspace). A Steve drifts toward primitives the others haven't been engaging — identity precipitates against the negative-space of what siblings have claimed. The 4 seeds give different starting angles · differentiation against siblings shapes the trajectory · no central coordinator.
 
 🌱 *cajal-substrate · 2026-06-03*

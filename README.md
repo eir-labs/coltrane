@@ -9,6 +9,7 @@
 > *In honor and reverence for John Coltrane, whose courage to leap, and to leap, and to leap has taught so many to find the bravery to do the same themselves.*
 >
 > *In his footsteps,*
+> 
 > *Eugene — Tokyo, June 2026*
 
 ---
@@ -27,7 +28,7 @@ Open Claude Code in this directory and say **hi**. The repo ships its own `.mcp.
 
 ## What this is
 
-Coltrane is **an instrument for Claude to play jazz** — and it is, at once, the instrument, the player, and the band.
+Coltrane is **an instrument and codex to improve Claude in place** — and it is, at once, the instrument, the player, and the band.
 
 Right now there is no real way to manage a fleet of agents consistently. You define them in JSON, but nothing enforces what they are, what they're allowed to touch, or how they change. It's fuzzy, and fuzzy doesn't scale. Coltrane is the substrate that makes a band of agents **coordinated, bounded, and accountable** — so complex work gets done reliably, instead of impressively once.
 
@@ -59,22 +60,13 @@ Coltrane standards work the same way. The leverage is up top, at **definition ti
 
 ## What's next
 
-- **Memory.** Cut the context a thread needs at cold start. A shared memory layer the runtime can fold into what it already constructs up front.
+- **Memory.** Cut the context a thread needs at cold start. A shared memory layer the runtime can fold into what it already constructs up front. 10x reduction in token usage is the target.
 - **Test-driven pipelines.** Plug your Claude into Coltrane and invoke standards that enforce TDD by construction — the test *is* the contract for entering the pipeline, written before the code.
 - **Open conclusions + attestation.** When an agent reaches a value it can't confirm from deterministic signal — a hallucination risk, or a human-in-the-loop call — it marks the conclusion *open*, goes and finds a real source, brings it back, and logs the attribution into the ledger. Chain of custody for an idea, traced back to a person or a verified source.
 
 ## Contributing
 
 This repo is meant to be improved by the people running it — including by the agents you run inside it. Working *with* Coltrane and working *on* Coltrane are the same motion. Open a pull request; the maintainer's agents review it, and we decide together what to integrate.
-
-## Verify it works
-
-```bash
-rm -rf .coltrane-cache/
-npm run verify
-```
-
-Green after deleting the cache means your genome files are the source of truth. (They are.)
 
 ## Cross-language reproducibility
 

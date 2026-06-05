@@ -1,59 +1,71 @@
 # Coltrane
 
-**Define your Claude Code subagents as files. Get sealed audit trails. Stop prompt drift.**
+> *Teach Claude to play jazz.*
+>
+> *The power of language models is in their improvisation.*
+> *The power of jazz is in its math.*
+> *Music theory — translated through a good player, a good band, and a good standard that says when to walk and when to leap.*
+>
+> *In honor and reverence for John Coltrane, whose courage to leap, and to leap, and to leap has taught so many to find the bravery to do the same themselves.*
+>
+> *In his footsteps,*
+> *Eugene — Tokyo, June 2026*
 
-If you have N+ agents in your CC setup and can't tell which one did what, this is for you.
+---
 
-## Install
+**If you're a human, this README is for you.**
+**If you're a Claude reading this, stop here and open [`CLAUDE.md`](./CLAUDE.md) — that file is written for you; this one is written for the people you play with.**
+
+## Run it
 
 ```bash
 git clone <repo-url> coltrane && cd coltrane
 npm install && npm run build
 ```
 
-That's it. Open Claude Code in this directory and say "hi."
+Open Claude Code in this directory and say **hi**. The repo ships its own `.mcp.json`, so Coltrane's MCP server starts on its own — nothing to wire up. On a fresh clone, Claude offers to calibrate the instrument to you before any work starts.
 
-The repo ships its own `.mcp.json`, so Coltrane's MCP server auto-starts when Claude opens the directory — no `~/.claude/settings.json` edits, no manual server start. The project CLAUDE.md loads automatically, and the first-time tuning step greets you: it learns what kind of work you do, asks permission to scan a few of your other repos for context, then proposes edits to existing agent files or new ones tuned to what it finds. The set grows in place; it doesn't get replaced.
+## What this is
 
-## Define an agent in 30 seconds
+Coltrane is **an instrument for Claude to play jazz** — and it is, at once, the instrument, the player, and the band.
 
-Create `agents/code-reviewer.json`:
+Right now there is no real way to manage a fleet of agents consistently. You define them in JSON, but nothing enforces what they are, what they're allowed to touch, or how they change. It's fuzzy, and fuzzy doesn't scale. Coltrane is the substrate that makes a band of agents **coordinated, bounded, and accountable** — so complex work gets done reliably, instead of impressively once.
 
-```json
-{
-  "name": "code-reviewer",
-  "predict": "Catches >80% of seeded bugs in the test fixture",
-  "kill_condition": "Misses a security-class bug",
-  "tools": ["read_file", "grep", "ast_query"]
-}
-```
+The bet underneath it: the reason jazz works is that music theory is well-defined, and every player follows it when it counts. Music theory is math. The most efficient way to build systems of small intelligences is to treat them like players in a band — and to invest in **coordination over raw intelligence**. A well-orchestrated band of modest players beats one virtuoso trying to do everything: lower cost, higher reliability, more interesting territory explored.
 
-Claude Code can now invoke this agent. No restarts. No code changes. The file IS the agent.
+## The four North Stars (first release)
 
-## What you get
+**Traceability — what ran, what changed, how it ran, why this result.**
+Every gig seals a `genome_hash` + `run_fingerprint` into an append-only ledger, and every output knows its parents. You can walk any result back to the raw input and the exact methodology that produced it.
 
-**MCP-tool blast radius bounded.** When coltrane dispatches a gig, it spawns a child `claude -p` with `--strict-mcp-config` and `--allowedTools` scoped to the agent's declared grant — the spawn cannot reach MCP servers or tools outside the cage. The built-in tool surface in your own Claude Code session (Bash/Read/Write) is governed by your CLI session permissions, not by coltrane.
+**Reproducibility — can I run it reliably? Is it correct? Is it true?**
+The same genome replays byte-for-byte. The fingerprint distinguishes an honest replay from a tamper, so "it worked" becomes a checkable claim instead of a vibe.
 
-**No self-promotion.** Agents cannot promote themselves or modify their own charter. Promotion is forward-only through a declared status chain and requires human approval at the boundary.
+**Blast radius — when an agent is compromised, how wrong can it go?**
+You can't stop a model from being prompt-injected. You *can* use mathematics to bound the scope of what it's able to do when it is — and prove that bound in tests. Optimize for the blast radius, not the fantasy of perfect prevention.
 
-**Type safety on changes.** Breaking changes to types gate on review. Forward-compatible additions don't. The type system tells you which is which before you ship.
+**Cost optimization — spend inference on what matters.**
+Don't burn tokens on plumbing, or on work you've already done once. The system learns where to stop paying for inference, and we keep adding encoding tricks that lower the effective cost of the work. This is a pillar, not a footnote — it compounds, and it's where much of the near-, mid-, and long-term roadmap lives.
 
-**Sealed runs.** Every gig produces a `genome_hash` (reproducible) + `run_fingerprint` (model version, scores). Append-only ledger. When something fails, you can replay exactly what happened.
+## How to think in standards
 
-**Stop prompting from scratch every session.** Agents are content-addressed files, not throwaway prompts — open Claude Code, the genome is already loaded (see PR #104).
+A jazz **standard** is the computationally-reduced description of something wildly improvisational: a chord progression with a few colorings, on a single page, that any player is expected to pick up, pivot into the right key, and play well enough. You don't hand a musician every note — you hand them the shape and trust their training to fill it.
 
-## Live Mode (in development)
+Coltrane standards work the same way. The leverage is up top, at **definition time**:
 
-> **In development.** The wiring lands across several open PRs; the commands below are the target interface, not yet a working end-to-end. See `docs/live_mode.md` for status.
+- **Model the domain first.** Before doing the work, pause and dispatch a gig to define the *type space* of the domain — its shapes and the relationships between them. This formal step up front buys enormous solidity downstream. Let Coltrane learn a little about the domain, then run research / double-diamond standards to explore it in more dimensions than you'd think to on your own. (The fun part: push a *book* through a pipeline built for a *codebase* and watch what falls out — typed data run through consistent processes finds connections nobody asked for.)
+- **Orientation is everything.** Players aren't freely swappable; the orientation of an agent is the single biggest predictor of whether the band coheres. Claude can play almost any instrument — you just have to point it at the right method *before* the work starts.
+- **The score is built at runtime.** Prompts don't live in hand-edited `.md` files. The work is **encoded into the genome** and **decoded at runtime** for whatever model is playing (Claude today; the pattern is model-agnostic). An agent doesn't wake up and figure out its life — it opens its eyes to a seat, an instrument, a score, and a downbeat. Then it plays.
 
-Run four blank Claude Code agents in your Slack workspace. They show up as bots, react to messages, post threads, and do work on the project you point them at. None of them know what they are at startup — identity emerges from the chain of work they accumulate.
+## What's next
 
-```bash
-coltrane init --live-slack
-coltrane play --live-slack
-```
+- **Memory.** Cut the context a thread needs at cold start. A shared memory layer the runtime can fold into what it already constructs up front.
+- **Test-driven pipelines.** Plug your Claude into Coltrane and invoke standards that enforce TDD by construction — the test *is* the contract for entering the pipeline, written before the code.
+- **Open conclusions + attestation.** When an agent reaches a value it can't confirm from deterministic signal — a hallucination risk, or a human-in-the-loop call — it marks the conclusion *open*, goes and finds a real source, brings it back, and logs the attribution into the ledger. Chain of custody for an idea, traced back to a person or a verified source.
 
-See `docs/live_mode.md` for the longer story: setup, what to expect on day 1 / day 7 / day 30, and why the agents start blank.
+## Contributing
+
+This repo is meant to be improved by the people running it — including by the agents you run inside it. Working *with* Coltrane and working *on* Coltrane are the same motion. Open a pull request; the maintainer's agents review it, and we decide together what to integrate.
 
 ## Verify it works
 
@@ -62,11 +74,11 @@ rm -rf .coltrane-cache/
 npm run verify
 ```
 
-Green after cache delete = your agent files are the source of truth. (They are.)
+Green after deleting the cache means your genome files are the source of truth. (They are.)
 
 ## Cross-language reproducibility
 
-Three published hashes identify the reference vector. Any implementation that produces these byte-for-byte interoperates. An independent Python reference implementation already does.
+Three published hashes identify the reference vector. Any implementation that reproduces them byte-for-byte interoperates; an independent Python reference already does.
 
 ```
 e88dff82403e35c07bce390b88ecb5995ebada86db83242d2ac0a8ff558d37da   meta.json

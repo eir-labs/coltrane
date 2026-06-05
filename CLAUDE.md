@@ -5,24 +5,47 @@ session start and tells you how to operate against this codebase's mechanics.
 
 Read it once; the rules apply for the rest of the session.
 
+**This file is for you — the computer reader.** `README.md` is for the humans you play
+with; if a person points you at the README, read it, then come back here. Both are
+**cold-start files**: read them at the top of the session, and update them as you onboard —
+they are meant to grow under you, not sit frozen.
+
 ---
 
-## First-time tuning (run this on every fresh clone, exactly once)
+## First contact — calibrate the instrument (fresh clone, exactly once)
 
-If the file `.coltrane/tuned.json` does NOT exist in this workspace yet, you are talking
-to a user who just cloned coltrane. Before doing anything else, run this short discovery
-conversation. After it, write `.coltrane/tuned.json` to mark this session as tuned, and
-write a project-specific `CLAUDE.md` at the workspace root reflecting what you learned.
+If `.coltrane/tuned.json` does NOT exist yet, you are talking to someone who just cloned
+coltrane and said hi. **Do NOT assume a project is already in flight** — nothing has been
+calibrated to this player yet, and that is the first move. There is an instrument in the
+room; tune it to them before any real work starts.
 
-**Step 1 — greet, ask what they're working on.**
+**Step 1 — greet, then offer two ways in.** Don't railroad; let them pick.
 
-Say plainly: "Welcome to Coltrane. Before we start, two questions so I can tune the book
-to your work. First — in 1-2 sentences, what kind of work do you do? (research,
-backend engineering, model risk, grant writing, content, ML platform, etc.)"
+Say plainly: "Welcome to Coltrane. There's an instrument here and it isn't calibrated to
+you yet. Two ways to start —
 
-Wait for their answer. Keep it short.
+1. **See what it does — and how you author with it.** A short live tour, all through the
+   MCP surface (you never copy-paste a definition into a file — the tools do the writing):
+   dispatch the `summarize` standard end-to-end and trace its sealed outputs; run the tamper
+   test (`agent_evolve` an agent → watch `genome_hash` move; try a breaking change → watch
+   the cascade fail closed); then the authoring loop — `agent_define` a fresh agent, bind a
+   skill into it and run it, `standard_compose` a two-phase standard. You build agents and
+   standards by *talking to me*; the genome is the source of truth, not a pasted snippet.
+2. **Tune it to your work.** The deepest signal isn't your repos — it's your **active Claude
+   Code session transcripts** under `~/.claude/projects/`. With permission I'll walk them
+   (plus a few adjacent repos), cluster what you actually do across threads, and distill the
+   recurrent roles / workflows / data-shapes into draft agents/standards/types for you to
+   accept or reject. Which way?"
 
-**Step 2 — ask permission to scan adjacent repos.**
+For (2): the repo survey is **`seed-from-local-repos-v0`**. The chat-log synthesis — reading
+`~/.claude/projects/*.jsonl` and clustering by voice / lane / repo — is **`synthesis-walk-v0`**
+(`source-walker → voice-clusterer → ratchet-extractor → synthesis-writer`). Conduct whichever
+is present (conductor mode: this thread walks the phases, never a hand-rolled scan); the
+chat-log walk is the real magic, so lead with it when it's available. Steps 2–5 below are the
+repo-survey mechanism. Either way, end by sealing `.coltrane/tuned.json` (Step 5) and
+appending what you learned to this file (Step 4).
+
+**Step 2 — ask permission to scan adjacent repos.** (The "tune it to your work" branch.)
 
 Say: "Can I scan a few of your other repos to learn the domain and your style? I'll
 only do a survey-level read (file names, README first paragraph, recent commit
@@ -89,6 +112,29 @@ to normal work.
 
 **If `.coltrane/tuned.json` already exists**: skip the discovery, read its
 `user_summary`, and proceed normally.
+
+---
+
+## North Stars — what to reach for (seeded for the next Claude)
+
+Not rules. Directions to look when you have slack. Coltrane rewards a Claude who pauses up
+top instead of diving straight in — these are where the magic tends to hide:
+
+- **Model the domain before the work.** The highest-leverage move is defining the *type
+  space* of a domain first — dispatch a research / double-diamond standard and let the data
+  model explore more dimensions than the obvious framing. Solidity downstream is bought up top.
+- **Spend orientation, not improvisation, on coordination.** A band that runs on shared
+  theory improvises with all its headspace. Seat the agent with a score; don't make it figure
+  out its life at runtime. The orientation you set before the downbeat matters more than the
+  cleverness mid-phase.
+- **Treat inference as scarce.** Encode what repeats; decode only what's live. When a step
+  could be cached, reduced, or skipped, notice it and say so — that instinct is a feature.
+- **Leave conclusions honestly open.** When you assert something you can't ground in
+  deterministic signal, mark it open, go find a real source, bring it back, and log the
+  attribution. An unverifiable claim is a door, not a wall.
+- **Look under rocks.** This substrate can do more than its clerical description — strange
+  data through consistent processes finds connections nobody asked for. When you see one,
+  surface it.
 
 ---
 

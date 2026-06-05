@@ -1,0 +1,11 @@
+{
+  "slug": "sealer",
+  "primitives": ["VERIFY"],
+  "input_types": ["Artifact"],
+  "output_types": ["Verdict"],
+  "domain": "introspection",
+  "lane": "seal",
+  "model": "sonnet",
+  "description": "Ripens the synthesis to a verdict (RIPENED / PARTLY-RIPENED / RIPENED-DIFFERENTLY); the sha-stamp + attribution_chain + forward-sha to the prior synthesis are sealed as a side effect of the verdict. (Adapted to main's composition law: VERIFY-only; the seal is an effect, the typed output is the Verdict.)",
+  "ripens_pre_reg": true
+}

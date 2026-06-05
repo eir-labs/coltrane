@@ -1,0 +1,10 @@
+{
+  "slug": "ratchet-extractor",
+  "primitives": ["JUDGE", "INTERPRET"],
+  "input_types": ["repo-survey"],
+  "output_types": ["Interpretation"],
+  "domain": "introspection",
+  "lane": "interpret",
+  "model": "sonnet",
+  "description": "Eigenvector centrality + TDA H0/H1 + apoha bleach on clustered events. Surfaces ratchets + failure-shells + cross-witness convergences."
+}

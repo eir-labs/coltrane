@@ -28,7 +28,7 @@
 2. **The rebuild-from-files litmus** (test `tests/bootstrap_genome.test.ts`, prereg row O15) — a registry reconstituted purely from `core_types/`, `agents/`, `standards/` on disk runs a full gig end-to-end through the MCP surface. This is the clearest evidence of "the repo IS the genome."
 3. **`examples/hello_band/run.ts`** — runs offline (deterministic stand-in for Claude spawn), shows the smallest possible 2-agent pipeline (sensor → summarizer). Runnable with `npx tsx examples/hello_band/run.ts`.
 4. **Cross-language hash conformance** (test `tests/canonical_form.test.ts`) — 3 published reference hashes reproduce byte-for-byte in TS; Python proof harness reproduces the same hashes. Single sharpest "this is interop-grade" point.
-5. **MCP server boot** — `npm run build && node dist/server.js`, then connect any MCP client (Claude Code, Cursor). 28 tools wired to real impls, zero `not_implemented` stubs.
+5. **MCP server boot** — `npm run build`, then connect any MCP client (Claude Code, Cursor) via the shipped `.mcp.json` (`node dist/src/server_entry.js`). 36 tools wired to real impls, zero `not_implemented` stubs.
 
 ## Notes / flags for review
 

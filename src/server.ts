@@ -879,7 +879,7 @@ function loadedGenomeHash(genome: LoadedGenome): string {
  * server runs gigs against the live model. Tests inject deps (incl. a mock invoke).
  */
 /**
- * Boot a full ServerDeps from the genome FILES on disk — so a bare `node dist/server.js`
+ * Boot a full ServerDeps from the genome FILES on disk — so a bare `node dist/src/server_entry.js`
  * serves the repo's genome (types, agents, standards), not an empty registry. The genome
  * root is COLTRANE_GENOME or the cwd. Pure + testable (no stdio); fails loud if the cwd
  * isn't a genome (loadGenome rejects a missing/invalid core_types/).

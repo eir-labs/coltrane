@@ -144,8 +144,9 @@ coltrane is a **methodology engine** — a typed substrate for defining agents, 
 standards (multi-phase workflows), dispatching gigs (runs), and sealing every output to
 a content-addressed ledger.
 
-It is an **MCP server**. You (Claude Code) are the natural client. Point your MCP config
-at `dist/server.js` after `npm run build` and the 32 tools become available.
+It is an **MCP server**. You (Claude Code) are the natural client. The repo ships its own
+`.mcp.json` pointing at `dist/src/server_entry.js`, so after `npm run build` the 36 tools
+become available when Claude opens the directory.
 
 This repo gives you:
 - a way to **define agents** as content-addressed definitions, not glue code

@@ -328,3 +328,4 @@ export async function runGig(
 // file's `asserts`/`on_type`/scoring function and applies it.
 function scoreEval(_slug: string, produced: readonly OutputRecord[]): number {
   return produced.length > 0 ? 1.0 : 0.0;
+}

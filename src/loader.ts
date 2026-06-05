@@ -37,6 +37,7 @@ export interface StandardFileDef {
   domain: string;
   agent_slugs: readonly string[];
   phases: readonly PhaseDef[];
+  eval_slugs?: readonly string[];
 }
 // Skills and evals have no composer yet — load them as slug-keyed records (structurally
 // validated: slug present + unique). Their richer contracts are a later layer.
@@ -182,7 +183,7 @@ export function loadGenome(root: string): LoadedGenome {
       resolved.push(a);
     }
     try {
-      standards.set(def.slug, composeStandard({ slug: def.slug, domain: def.domain, agents: resolved, phases: def.phases }));
+      standards.set(def.slug, composeStandard({ slug: def.slug, domain: def.domain, agents: resolved, phases: def.phases, ...(def.eval_slugs ? { eval_slugs: def.eval_slugs } : {}) }));
       standard_paths.set(def.slug, path);
     } catch (e) {
       if (e instanceof CompositionError) throw new GenomeLoadError(`standard "${def.slug}" in ${path}: ${e.message}`);

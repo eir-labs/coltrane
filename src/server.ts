@@ -292,12 +292,15 @@ export async function dispatchTool(slug: string, args: Record<string, unknown>, 
           const sDomain = String(args["domain"] ?? "");
           const sAgents = (args["agents"] as Agent[]) ?? [];
           const sPhases = (args["phases"] as PhaseDef[]) ?? [];
-          const std = composeStandard({ slug: sSlug, domain: sDomain, agents: sAgents, phases: sPhases });
+          // 5th class: carry eval_slugs through compose → live map → persisted file
+          // so a declared eval actually reaches the runtime (#123 — it was dropped).
+          const sEvalSlugs = Array.isArray(args["eval_slugs"]) ? (args["eval_slugs"] as string[]) : undefined;
+          const std = composeStandard({ slug: sSlug, domain: sDomain, agents: sAgents, phases: sPhases, ...(sEvalSlugs ? { eval_slugs: sEvalSlugs } : {}) });
           // Write-through to the LIVE map so gig_dispatch sees it this session.
           // The composed `std` embeds the full agents, so it's dispatch-ready.
           deps.standards?.set(sSlug, std);
           // substrate seal: persist a loadable standards/<slug>.json (agent_slugs form) + ledger.
-          const fileDef = { slug: sSlug, domain: sDomain, agent_slugs: sAgents.map((a) => a.slug), phases: sPhases };
+          const fileDef = { slug: sSlug, domain: sDomain, agent_slugs: sAgents.map((a) => a.slug), phases: sPhases, ...(sEvalSlugs ? { eval_slugs: sEvalSlugs } : {}) };
           const sealed = sealDefinition("standard_compose", sSlug, fileDef, deps.ledger, deps.genome_dir, "standards");
           return { ok: true, requires_approval: approval, data: { standard_id: std.slug, content_hash: sealed.content_hash, dependency_hash: sealed.dependency_hash, effective_hash: sealed.effective_hash, validation_result: { valid: true } } };
         } catch (e) {

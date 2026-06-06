@@ -1,0 +1,18 @@
+{
+  "slug": "invention-spec",
+  "version": 1,
+  "extends": "Signal",
+  "domain": "patent-triage",
+  "status": "active",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "title": { "type": "string" },
+      "description": { "type": "string" },
+      "repo_url": { "type": "string" },
+      "field_of_use": { "type": "string" },
+      "filed_by": { "type": "string" }
+    }
+  },
+  "required_fields": ["description"]
+}

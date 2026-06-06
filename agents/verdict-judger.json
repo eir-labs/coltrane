@@ -1,0 +1,9 @@
+{
+  "slug": "verdict-judger",
+  "primitives": ["INTERPRET", "VERIFY", "CREATE"],
+  "input_types": ["claim-draft", "novelty-verdict", "failure-modes"],
+  "output_types": ["triage-verdict", "provisional-draft"],
+  "lane": "judge",
+  "model": "sonnet",
+  "description": "Produces the final GO / NO-GO / NEEDS-WORK verdict for the patent triage, with named axis-of-failure if NEEDS-WORK. Interprets the refined claim + novelty + failure-modes; verifies against triage criteria; if verdict is GO, creates a provisional-draft artifact. Output: triage-verdict (always) + provisional-draft (optional, GO only)."
+}

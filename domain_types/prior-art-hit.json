@@ -1,0 +1,20 @@
+{
+  "slug": "prior-art-hit",
+  "version": 1,
+  "extends": "Signal",
+  "domain": "patent-triage",
+  "status": "active",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "source": { "type": "string" },
+      "url": { "type": "string" },
+      "title": { "type": "string" },
+      "snippet": { "type": "string" },
+      "publication_date": { "type": "string" },
+      "kind": { "type": "string" },
+      "relevance_score": { "type": "number" }
+    }
+  },
+  "required_fields": ["source", "title"]
+}

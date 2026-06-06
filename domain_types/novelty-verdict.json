@@ -1,0 +1,18 @@
+{
+  "slug": "novelty-verdict",
+  "version": 1,
+  "extends": "Judgment",
+  "domain": "patent-triage",
+  "status": "active",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "invention_id": { "type": "string" },
+      "nearest_prior_art": { "type": "array" },
+      "distance_score": { "type": "number" },
+      "verdict": { "type": "string" },
+      "rationale": { "type": "string" }
+    }
+  },
+  "required_fields": ["verdict", "rationale"]
+}

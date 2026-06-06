@@ -1,0 +1,17 @@
+{
+  "slug": "failure-modes",
+  "version": 1,
+  "extends": "Interpretation",
+  "domain": "patent-triage",
+  "status": "active",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "invention_id": { "type": "string" },
+      "named_failure_modes": { "type": "array" },
+      "boundary_conditions": { "type": "array" },
+      "what_this_is_not": { "type": "array" }
+    }
+  },
+  "required_fields": ["named_failure_modes"]
+}

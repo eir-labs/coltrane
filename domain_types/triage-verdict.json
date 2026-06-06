@@ -1,0 +1,19 @@
+{
+  "slug": "triage-verdict",
+  "version": 1,
+  "extends": "Verdict",
+  "domain": "patent-triage",
+  "status": "active",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "invention_id": { "type": "string" },
+      "recommended": { "type": "string" },
+      "rationale": { "type": "string" },
+      "tests_passed": { "type": "array" },
+      "tests_failed": { "type": "array" },
+      "next_step": { "type": "string" }
+    }
+  },
+  "required_fields": ["recommended", "rationale"]
+}

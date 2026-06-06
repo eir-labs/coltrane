@@ -1,0 +1,36 @@
+{
+  "slug": "patent-triage-v0",
+  "domain": null,
+  "description": "Patentability check / patent triage v0. Carves an invention into its smallest spring (one-sentence independent claim) + named failure modes; searches a prior-art corpus for nearest-neighbor matches and aggregates a novelty-verdict; refines the claim under smallest-spring discipline given the novelty-verdict; judges GO / NO-GO / NEEDS-WORK with optional provisional-draft. Methodology-lane slice — subhuti + groove add their slices in follow-ups.",
+  "agent_slugs": [
+    "carver",
+    "novelty-searcher",
+    "claim-rewriter",
+    "verdict-judger"
+  ],
+  "phases": [
+    {
+      "name": "carve",
+      "agent": "carver",
+      "intent": "Diverge → carve. From the invention-spec, extract the smallest-spring one-sentence carved claim + enumerate ≥3 named failure modes with bounds + enumerate ≥5 apoha-distinctions (what this is NOT relative to prior art). Outputs: claim-draft + failure-modes."
+    },
+    {
+      "name": "search-novelty",
+      "agent": "novelty-searcher",
+      "intent": "Diverge → sense. Search a prior-art corpus (patents + literature) for nearest-neighbor matches to the carved claim; report hits with similarity scores; aggregate into a novelty-verdict (PASS / FAIL / TOO-CLOSE-TO-CALL). Outputs: prior-art-hit (list) + novelty-verdict."
+    },
+    {
+      "name": "refine-claim",
+      "agent": "claim-rewriter",
+      "intent": "Converge → reshape. Rewrite the claim to maximize defensible scope given the novelty-verdict; enforce smallest-spring discipline (one independent claim, ≤3 dependent claims, no `comprising` chains over 3 elements). Output: refined claim-draft."
+    },
+    {
+      "name": "judge",
+      "agent": "verdict-judger",
+      "intent": "Converge → verdict. Produce the final GO / NO-GO / NEEDS-WORK verdict with named axis-of-failure if NEEDS-WORK. If verdict is GO, also produce a provisional-draft artifact. Outputs: triage-verdict (always) + provisional-draft (GO only).",
+      "ripens_pre_reg": true
+    }
+  ],
+  "input_types": ["invention-spec"],
+  "output_types": ["triage-verdict", "provisional-draft"]
+}

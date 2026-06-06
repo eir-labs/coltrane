@@ -96,6 +96,13 @@ export function createRegistry(initial: DomainType[] = []): Registry {
       return score(query);
     },
     validate(output) {
+      // Rob #133 — domain_type is OPTIONAL. Empty / missing means the output
+      // is freeform vs. its core type (Interpretation, Plan, Artifact, …) but
+      // doesn't conform to any registered domain schema. Examples that need
+      // this: a discover-phase domain-model document, an analytical plan that
+      // doesn't fit a typed plan-shape yet. The core_type discipline still
+      // holds; only the domain-schema strictness is bypassed.
+      if (!output.domain_type) return { valid: true, errors: [] };
       const dt = types.get(output.domain_type);
       if (!dt) return { valid: false, errors: [`unknown domain_type "${output.domain_type}"`] };
       const schema = {

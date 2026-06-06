@@ -68,10 +68,14 @@ describe("output_write", () => {
     expect(d.outputs.refs()[0]!.relation).toBe("derived_from");
   });
 
-  it("is no longer not_implemented on a bare {} call (it fails honestly on missing fields, not as a stub)", async () => {
+  // Rob #133 (this branch): domain_type is OPTIONAL. A bare {} call no longer
+  // fails as "unknown domain_type" — it writes a freeform output keyed on
+  // core_type only. The honest-failure surface is preserved when a declared
+  // domain_type's schema is actually violated; see tests/rob_ergonomic_fixes.
+  it("is no longer not_implemented on a bare {} call (it succeeds as a freeform output post-#133)", async () => {
     const r = await dispatchTool("output_write", {}, makeDeps());
     expect(r.not_implemented).toBeFalsy();
-    expect(r.ok).toBe(false); // missing core_type/data — a real validation failure, not a stub
+    expect(r.ok).toBe(true);
   });
 });
 

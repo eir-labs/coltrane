@@ -64,6 +64,10 @@ export interface ServerDeps {
   // at bootstrap; tests inject their own. The ledger is append-only + rejects
   // double-seal of the same pre_reg_id.
   pre_reg_ledger?: PreRegLedger | undefined;
+  // Live agent map from the genome — surfaced so standard_compose can resolve
+  // agent slugs from the loaded genome (Rob #132) instead of forcing the
+  // client to round-trip the full Agent objects.
+  agents?: Map<string, Agent> | undefined;
 }
 
 export interface ToolResult {
@@ -96,6 +100,30 @@ const CORE_TYPE_TO_PRIMITIVE: Readonly<Record<string, Primitive>> = Object.fromE
 
 function arr(v: unknown): string[] {
   return Array.isArray(v) ? (v as string[]) : [];
+}
+
+/**
+ * Normalize the user-passed `schema` for type_register (Rob #131).
+ *
+ * The validator (registry.ts) reads `schema.properties` and treats anything
+ * not in it as `additionalProperties` (silently rejected). The MCP surface
+ * doesn't tell the caller the wrapper is required — Rob hit this writing
+ * `{schema: {title: {type: "string"}}}` and watching every field disappear.
+ *
+ * Heuristic: if `schema` lacks a `.properties` key AND its values look like
+ * JSON-schema field defs (objects with a `type` key), wrap them under
+ * `.properties`. Otherwise leave the shape alone. Safe round-trip: a schema
+ * that already has `.properties` is returned untouched.
+ */
+function normalizeSchemaShape(schema: Record<string, unknown>): Record<string, unknown> {
+  if ("properties" in schema) return schema;
+  const entries = Object.entries(schema);
+  if (entries.length === 0) return schema;
+  const looksLikeFieldDefs = entries.every(([, v]) =>
+    v !== null && typeof v === "object" && !Array.isArray(v) && "type" in (v as object)
+  );
+  if (!looksLikeFieldDefs) return schema;
+  return { type: "object", properties: schema };
 }
 
 /**
@@ -139,7 +167,12 @@ export async function dispatchTool(slug: string, args: Record<string, unknown>, 
           slug: String(args["slug"] ?? ""),
           extends: String(args["extends"] ?? ""),
           domain: String(args["domain"] ?? ""),
-          schema: (args["schema"] as Record<string, unknown>) ?? {},
+          // Rob #131 — normalize schema shape. The validator reads
+          // `schema.properties`; if the caller passes field defs at the top
+          // level (e.g. `{title: {type: "string"}}`) instead of inside a
+          // `.properties` wrapper, every field gets silently rejected as
+          // `additionalProperties`. Detect the unwrapped shape and wrap it.
+          schema: normalizeSchemaShape((args["schema"] as Record<string, unknown>) ?? {}),
           required_fields: arr(args["required_fields"]),
         };
         const res = deps.registry.registerType(def);
@@ -294,14 +327,34 @@ export async function dispatchTool(slug: string, args: Record<string, unknown>, 
         try {
           const sSlug = String(args["slug"] ?? "");
           const sDomain = String(args["domain"] ?? "");
-          const sAgents = (args["agents"] as Agent[]) ?? [];
+          // Rob #132 — resolve agent slugs from the genome. Before: clients had
+          // to round-trip the full Agent JSON (slug + primitives + types + ...)
+          // because composeStandard does a slug-keyed lookup and would NPE on
+          // plain string slugs. Now: when an entry is a string or a slug-only
+          // object, look it up in deps.agents (populated by bootstrap from the
+          // loaded genome). Full Agent objects are passed through unchanged.
+          const sAgentsRaw = (args["agents"] as unknown[]) ?? [];
+          const sAgents: Agent[] = sAgentsRaw.map((a) => {
+            if (typeof a === "string") {
+              const loaded = deps.agents?.get(a);
+              if (!loaded) throw new CompositionError(`agent "${a}" not found in genome`);
+              return loaded;
+            }
+            if (a && typeof a === "object" && "slug" in a && !("primitives" in a)) {
+              const slug = (a as { slug: string }).slug;
+              const loaded = deps.agents?.get(slug);
+              if (loaded) return loaded;
+              throw new CompositionError(`agent "${slug}" not found in genome (slug-only object form)`);
+            }
+            return a as Agent;
+          });
           const sPhases = (args["phases"] as PhaseDef[]) ?? [];
-          // 5th class: carry eval_slugs through compose → live map → persisted file
-          // so a declared eval actually reaches the runtime (#123 — it was dropped).
+          // Carry eval_slugs through compose → live map → persisted file so a
+          // declared eval reaches the runtime (preserved from main).
           const sEvalSlugs = Array.isArray(args["eval_slugs"]) ? (args["eval_slugs"] as string[]) : undefined;
           const std = composeStandard({ slug: sSlug, domain: sDomain, agents: sAgents, phases: sPhases, ...(sEvalSlugs ? { eval_slugs: sEvalSlugs } : {}) });
-          // Write-through to the LIVE map so gig_dispatch sees it this session.
-          // The composed `std` embeds the full agents, so it's dispatch-ready.
+          // Write-through to the LIVE map so gig_dispatch sees the new standard
+          // in the same session (no rebootstrap needed).
           deps.standards?.set(sSlug, std);
           // substrate seal: persist a loadable standards/<slug>.json (agent_slugs form) + ledger.
           const fileDef = { slug: sSlug, domain: sDomain, agent_slugs: sAgents.map((a) => a.slug), phases: sPhases, ...(sEvalSlugs ? { eval_slugs: sEvalSlugs } : {}) };
@@ -905,6 +958,7 @@ export function bootstrapServerDeps(genomeRoot?: string): ServerDeps {
     skills: genome.skills, // ← skill substrate — runGig resolves agent.skill_slugs into prompt
     evals: genome.evals, // ← 5th-class eval substrate — runGig judges declared eval_slugs
     genome_dir: root, // ← genome-mutation tools persist + ledger-seal into the live genome
+    agents: new Map(genome.agents), // ← Rob #132 — standard_compose resolves slugs from this
   };
 }
 

@@ -48,7 +48,11 @@ export const MCP_TOOLS: readonly MCPToolDef[] = [
 
   { slug: "agent_validate_pipeline",       category: "improve", input_schema: obj({ agents: "array", standard_slug: "string" }), output_schema: obj({ valid: "boolean", graph: "object", unsatisfied_inputs: "array", illegal_progressions: "array" }) },
   { slug: "health_check",                  category: "improve", input_schema: obj({ entity_type: "string", slug: "string", window: "string" }), output_schema: obj({ usage: "number", success_rate: "number", cost: "number", trend: "string", recommendations: "array" }) },
-  { slug: "system_health",                 category: "improve", input_schema: obj({ window: "string" }), output_schema: obj({ gigs_run: "number", cost: "number", type_stats: "object", agent_stats: "object", tool_stats: "object", bottlenecks: "array", budget: "object" }) },
+  { slug: "system_health",                 category: "improve", input_schema: obj({ window: "string" }), output_schema: obj({ gigs_run: "number", cost: "number", type_stats: "object", agent_stats: "object", tool_stats: "object", bottlenecks: "array", budget: "object", load_errors: "array" }) },
+  // genome_reload — Rob #130. Re-reads agents/standards/types/skills/evals from
+  // disk and updates the live deps in place (no MCP server restart needed).
+  // Returns the diff vs the prior state, plus any load_errors from the new genome.
+  { slug: "genome_reload",                 category: "improve", input_schema: obj({}), output_schema: obj({ reloaded: "boolean", changes: "object", load_errors: "array" }) },
   { slug: "system_audit",                  category: "improve", input_schema: obj({ scope: "string", check: "string" }), output_schema: obj({ findings: "array" }) },
   { slug: "proposal_create",               category: "improve", input_schema: obj({ change_type: "string", target: "string", changes: "object", reason: "string", evidence: "object" }), output_schema: obj({ proposal_id: "string", cascade_impact: "object" }) },
   { slug: "tool_propose",                  category: "improve", input_schema: obj({ slug: "string", type: "string", spec: "object", reason: "string" }), output_schema: obj({ proposal_id: "string" }) },

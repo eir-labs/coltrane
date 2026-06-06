@@ -16,7 +16,7 @@ import {
   PromotionError,
 } from "./mcp.js";
 import { createRegistry, loadRegistry, type Registry, type DomainType } from "./registry.js";
-import { loadGenome, type SkillRecord, type EvalRecord } from "./loader.js";
+import { loadGenome, type SkillRecord, type EvalRecord, type LoadError } from "./loader.js";
 import { sealAgentDefinition, sealDefinition, recordIdentity } from "./genome_writer.js";
 import { createOutputStore, defaultOutputsPersistDir, type OutputStore } from "./outputs.js";
 import { MemoryLedger, type Ledger } from "./ledger.js";
@@ -64,9 +64,11 @@ export interface ServerDeps {
   // at bootstrap; tests inject their own. The ledger is append-only + rejects
   // double-seal of the same pre_reg_id.
   pre_reg_ledger?: PreRegLedger | undefined;
-  // Live agent map from the genome — surfaced so standard_compose can resolve
-  // agent slugs from the loaded genome (Rob #132) instead of forcing the
-  // client to round-trip the full Agent objects.
+  // Soft-fail load errors from the most recent loadGenome (Rob #129).
+  // Surfaced by system_health + refreshed by genome_reload (Rob #130).
+  load_errors?: LoadError[] | undefined;
+  // Live agent map from the genome — surfaced for standard_compose slug
+  // resolution (Rob #132) AND genome_reload diff/refresh (Rob #130).
   agents?: Map<string, Agent> | undefined;
 }
 
@@ -124,6 +126,43 @@ function normalizeSchemaShape(schema: Record<string, unknown>): Record<string, u
   );
   if (!looksLikeFieldDefs) return schema;
   return { type: "object", properties: schema };
+}
+
+/**
+ * In-place sync helper for genome_reload (Rob #130). Mutates `target` so it
+ * matches `source` after the call: keys in `source` not in `target` are added;
+ * keys in both are replaced; keys in `target` not in `source` are deleted.
+ * Returns the slug diff (added / modified / removed). `before` is a snapshot
+ * captured BEFORE the mutation so modified-vs-unchanged is computable via
+ * JSON-stringify equality.
+ *
+ * If `target` is undefined (deps wasn't bootstrapped with that class) the
+ * function is a no-op and returns empty diffs — honest: nothing to mutate.
+ */
+function syncMap<V extends { slug?: string }>(
+  target: Map<string, V> | undefined,
+  source: ReadonlyMap<string, V>,
+  before: Map<string, V>,
+): { added: string[]; modified: string[]; removed: string[] } {
+  const added: string[] = [];
+  const modified: string[] = [];
+  const removed: string[] = [];
+  if (!target) return { added, modified, removed };
+  // Add or replace
+  for (const [key, val] of source) {
+    const prior = before.get(key);
+    target.set(key, val);
+    if (!prior) added.push(key);
+    else if (JSON.stringify(prior) !== JSON.stringify(val)) modified.push(key);
+  }
+  // Remove keys gone from source
+  for (const key of [...target.keys()]) {
+    if (!source.has(key)) {
+      target.delete(key);
+      removed.push(key);
+    }
+  }
+  return { added, modified, removed };
 }
 
 /**
@@ -498,6 +537,80 @@ export async function dispatchTool(slug: string, args: Record<string, unknown>, 
             gigs_run, cost: gigs_run, type_stats, agent_stats,
             types: deps.registry.listTypes().length, outputs: outs.length, refs: deps.outputs.refs().length,
             tool_stats: {}, bottlenecks: [], budget: { spent: gigs_run, remaining: null },
+            // Rob #129 — surface what was skipped at load so operators see broken files
+            load_errors: deps.load_errors ?? [],
+          },
+        };
+      }
+      case "genome_reload": {
+        // Rob #130 — re-read the genome from disk and update deps in place. No
+        // MCP server restart needed; the user's Claude Code session keeps its
+        // conversational context.
+        if (!deps.genome_dir) {
+          return { ok: false, requires_approval: approval, error: "genome_reload requires deps.genome_dir; this server wasn't bootstrapped from a genome directory" };
+        }
+        const fresh = loadGenome(deps.genome_dir);
+
+        // Diff each definition class against the live deps.
+        const standardsBefore = new Map(deps.standards ?? []);
+        const skillsBefore = new Map(deps.skills ?? []);
+        const evalsBefore = new Map(deps.evals ?? []);
+        const typesBefore = new Map(deps.registry.listTypes().map((t) => [t.slug, t] as const));
+
+        // domain_types — registry.replaceTypes does the mutation + diff.
+        const typeDefs: DomainType[] = [...fresh.domain_types.values()].map((d) => ({
+          slug: d.slug,
+          extends: d.extends,
+          domain: d.domain,
+          schema: d.schema as Record<string, unknown>,
+          required_fields: [...d.required_fields],
+        }));
+        const typeDiff = deps.registry.replaceTypes(typeDefs);
+
+        // standards — mutate in place so callers holding deps.standards see updates.
+        const standardsDiff = syncMap(deps.standards, fresh.standards, standardsBefore);
+        const skillsDiff = syncMap(deps.skills, fresh.skills, skillsBefore);
+        const evalsDiff = syncMap(deps.evals, fresh.evals, evalsBefore);
+
+        // Refresh surfaced load_errors so the next system_health call sees them.
+        deps.load_errors = [...fresh.load_errors];
+
+        // agents — diff against deps.agents (the prior-load snapshot) then
+        // mutate deps.agents in place so the next reload sees the new baseline.
+        const agentsBefore = new Map(deps.agents ?? []);
+        const agentsDiff = syncMap(deps.agents, fresh.agents, agentsBefore);
+
+        // typesBefore is captured for symmetry; not currently surfaced beyond typeDiff.
+        void typesBefore;
+
+        return {
+          ok: true, requires_approval: approval,
+          data: {
+            reloaded: true,
+            changes: {
+              added: {
+                domain_types: typeDiff.added,
+                standards: standardsDiff.added,
+                skills: skillsDiff.added,
+                evals: evalsDiff.added,
+                agents: agentsDiff.added,
+              },
+              modified: {
+                domain_types: typeDiff.modified,
+                standards: standardsDiff.modified,
+                skills: skillsDiff.modified,
+                evals: evalsDiff.modified,
+                agents: agentsDiff.modified,
+              },
+              removed: {
+                domain_types: typeDiff.removed,
+                standards: standardsDiff.removed,
+                skills: skillsDiff.removed,
+                evals: evalsDiff.removed,
+                agents: agentsDiff.removed,
+              },
+            },
+            load_errors: deps.load_errors,
           },
         };
       }
@@ -958,7 +1071,8 @@ export function bootstrapServerDeps(genomeRoot?: string): ServerDeps {
     skills: genome.skills, // ← skill substrate — runGig resolves agent.skill_slugs into prompt
     evals: genome.evals, // ← 5th-class eval substrate — runGig judges declared eval_slugs
     genome_dir: root, // ← genome-mutation tools persist + ledger-seal into the live genome
-    agents: new Map(genome.agents), // ← Rob #132 — standard_compose resolves slugs from this
+    load_errors: [...genome.load_errors], // ← Rob #129 — surfaced via system_health
+    agents: new Map(genome.agents), // ← Rob #130 + #132 — slug-resolve + reload-diff
   };
 }
 

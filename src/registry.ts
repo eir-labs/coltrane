@@ -47,6 +47,11 @@ export interface Registry {
   resolveType(query: ResolveQuery): ResolveResult;
   validate(output: OutputToValidate): RegistryValidationResult;
   listTypes(): DomainType[];
+  // Rebuild the type table from `defs`, in place. Used by genome_reload
+  // (Rob #130) so editing domain_types/ on disk reflects in validation without
+  // restarting the MCP server. Bypasses reuse-enforcement — this is a sync,
+  // not authorship. Returns the slug diff vs the prior table.
+  replaceTypes(defs: readonly DomainType[]): { added: string[]; modified: string[]; removed: string[] };
 }
 
 function isCoreType(slug: string): slug is CoreType {
@@ -94,6 +99,24 @@ export function createRegistry(initial: DomainType[] = []): Registry {
     },
     resolveType(query) {
       return score(query);
+    },
+    replaceTypes(defs) {
+      const before = new Map(types);
+      const added: string[] = [];
+      const modified: string[] = [];
+      const removed: string[] = [];
+      types.clear();
+      for (const def of defs) {
+        if (!isCoreType(def.extends)) continue; // soft-skip; mirrors loader's stance
+        types.set(def.slug, def);
+        const prior = before.get(def.slug);
+        if (!prior) added.push(def.slug);
+        else if (JSON.stringify(prior) !== JSON.stringify(def)) modified.push(def.slug);
+      }
+      for (const slug of before.keys()) {
+        if (!types.has(slug)) removed.push(slug);
+      }
+      return { added, modified, removed };
     },
     validate(output) {
       // Rob #133 — domain_type is OPTIONAL. Empty / missing means the output

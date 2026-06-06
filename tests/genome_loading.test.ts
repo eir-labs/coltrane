@@ -66,18 +66,28 @@ describe("genome file-loading: all five classes load from files", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it("fails loud: a standard referencing an unknown agent", () => {
+  // Rob #129: was hard-throw, now per-definition soft-fail. The genome still
+  // loads; the offending file is recorded in load_errors.
+  it("records a standard referencing an unknown agent as a load_error", () => {
     const dir = scratchGenome();
     writeJson(dir, "standards", "broken.json", { slug: "broken", domain: "demo", agent_slugs: ["ghost"], phases: [{ name: "x", agent: "ghost" }] });
-    expect(() => loadGenome(dir)).toThrow(GenomeLoadError);
+    const g = loadGenome(dir);
+    expect(g.standards.has("broken")).toBe(false);
+    const err = g.load_errors.find((e) => e.kind === "standard" && e.slug === "broken");
+    expect(err).toBeDefined();
+    expect(err!.error).toMatch(/ghost|unknown agent/);
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it("fails loud: duplicate agent slug across files", () => {
+  it("records duplicate agent slug as a load_error on the second file", () => {
     const dir = scratchGenome();
     writeJson(dir, "agents", "a.json", { slug: "dup", primitives: ["SENSE"], domain: "demo" });
     writeJson(dir, "agents", "b.json", { slug: "dup", primitives: ["SENSE"], domain: "demo" });
-    expect(() => loadGenome(dir)).toThrow(GenomeLoadError);
+    const g = loadGenome(dir);
+    // The first one wins; the second is skipped + recorded.
+    expect(g.agents.has("dup")).toBe(true);
+    const err = g.load_errors.find((e) => e.kind === "agent" && e.slug === "dup" && /duplicate/i.test(e.error));
+    expect(err).toBeDefined();
     rmSync(dir, { recursive: true, force: true });
   });
 });

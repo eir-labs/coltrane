@@ -72,7 +72,10 @@ describe("loadGenome: no file changes to add a domain type", () => {
     expect(after.domain_types.has("finding@1")).toBe(true);
   });
 
-  it("rejects a domain type that extends a non-core type", () => {
+  // Rob #129 contract change: a domain type that extends a non-core type no
+  // longer hard-fails the whole load. It's recorded in load_errors and the
+  // rest of the genome continues to load.
+  it("records a domain type extending a non-core type as a load_error (was: hard-throw)", () => {
     seedCore();
     const domainDir = join(tmpRoot, "domain_types");
     mkdirSync(domainDir, { recursive: true });
@@ -88,7 +91,11 @@ describe("loadGenome: no file changes to add a domain type", () => {
         required_fields: [],
       }),
     );
-    expect(() => loadGenome(tmpRoot)).toThrow(GenomeLoadError);
+    const genome = loadGenome(tmpRoot);
+    expect(genome.domain_types.has("ghost@1")).toBe(false);
+    const err = genome.load_errors.find((e) => e.kind === "domain_type" && e.slug === "ghost");
+    expect(err).toBeDefined();
+    expect(err!.error).toMatch(/NotACoreType|not a core type/);
   });
 });
 

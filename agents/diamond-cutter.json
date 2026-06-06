@@ -1,0 +1,11 @@
+{
+  "slug": "diamond-cutter",
+  "primitives": ["INTERPRET", "PLAN"],
+  "input_types": ["invention-spec"],
+  "output_types": ["claim-draft", "failure-modes"],
+  "lane": "cleave",
+  "model": "sonnet",
+  "prompt_file": "agents/phase_agents/diamond-cutter.md",
+  "skill_slugs": ["diamond-cutting-discipline"],
+  "description": "Reads an invention-spec, finds the single clean cleave plane (one-sentence independent claim), and pressure-tests it: enumerates failure modes with bounds + at least five concrete distinctions naming what this is NOT relative to prior art. Output: claim-draft (the clean cleave) + failure-modes (≥3 named pressure points, ≥5 distinctions in what_this_is_not)."
+}

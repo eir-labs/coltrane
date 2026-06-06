@@ -5,5 +5,7 @@
   "output_types": ["prior-art-hit", "novelty-verdict"],
   "lane": "search-novelty",
   "model": "sonnet",
-  "description": "Searches a prior-art corpus (patents + literature) for nearest-neighbor matches to the carved claim. Emits prior-art-hit signals (with similarity scores) + aggregates them into a novelty-verdict. SENSE the corpus, JUDGE the distance."
+  "prompt_file": "agents/phase_agents/novelty-searcher.md",
+  "skill_slugs": ["diamond-cutting-discipline"],
+  "description": "Searches a prior-art corpus (patents + literature) for nearest-neighbor matches to the cleaved claim. Emits prior-art-hit signals (with similarity scores) + aggregates them into a novelty-verdict. SENSE the corpus, JUDGE the distance."
 }

@@ -1,9 +1,0 @@
-{
-  "slug": "carver",
-  "primitives": ["INTERPRET", "PLAN"],
-  "input_types": ["invention-spec"],
-  "output_types": ["claim-draft", "failure-modes"],
-  "lane": "carve",
-  "model": "sonnet",
-  "description": "Reads an invention-spec, carves the smallest spring (one-sentence independent claim) + enumerates failure modes with bounds + apoha-distinctions (what this is NOT relative to prior art). Output: claim-draft (the spring) + failure-modes (≥3 named modes, ≥5 apoha-distinctions in what_this_is_not)."
-}

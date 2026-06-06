@@ -1,0 +1,71 @@
+// Fix Rob's #134 — agent.domain=null|undefined should be compatible with any
+// standard's domain, not rejected.
+//
+// Pre-reg
+// =======
+// predict: composeStandard accepts an agent whose .domain is null OR undefined,
+//          treating it as domain-agnostic. The only reject case is when the
+//          agent declares an EXPLICIT domain that conflicts with the standard's.
+// test:    this file
+// kill:    if the loose-null check fires on a legitimately conflicting domain,
+//          we break the existing strictness gate
+// apoha:   NOT removing the strictness — explicit conflicts still throw. NOT
+//          touching defineAgent's default-to-null normalization.
+// verdict: green expected post-fix
+
+import { describe, it, expect } from "vitest";
+import { defineAgent, composeStandard, CompositionError, type Agent } from "../src/composition.js";
+
+describe("agent.domain null/undefined is domain-agnostic (Rob #134)", () => {
+  it("an agent with domain undefined composes into any standard", () => {
+    // Build an agent OBJECT directly (skipping defineAgent's normalize) — this
+    // is how the MCP path constructs Agents from raw client JSON in #132.
+    const agentNoDomain: Agent = {
+      slug: "scout",
+      primitives: ["SENSE"],
+      input_types: [],
+      output_types: ["raw-note"],
+      domain: undefined as unknown as string | null,
+    };
+    const composed = composeStandard({
+      slug: "demo-standard",
+      domain: "elder-scam-shield",
+      agents: [agentNoDomain],
+      phases: [{ name: "sense", agent: "scout" }],
+    });
+    expect(composed.slug).toBe("demo-standard");
+  });
+
+  it("an agent with domain null composes into any standard (existing behavior preserved)", () => {
+    const agentNullDomain = defineAgent({
+      slug: "scout-from-defineAgent",
+      primitives: ["SENSE"],
+      output_types: ["raw-note"],
+      // no domain → defineAgent normalizes to null
+    });
+    expect(agentNullDomain.domain).toBe(null);
+
+    const composed = composeStandard({
+      slug: "demo-standard-2",
+      domain: "elder-scam-shield",
+      agents: [agentNullDomain],
+      phases: [{ name: "sense", agent: "scout-from-defineAgent" }],
+    });
+    expect(composed.slug).toBe("demo-standard-2");
+  });
+
+  it("an agent with an explicit conflicting domain STILL throws (strictness preserved)", () => {
+    const agentExplicitDomain = defineAgent({
+      slug: "scout-elsewhere",
+      primitives: ["SENSE"],
+      output_types: ["raw-note"],
+      domain: "different-domain",
+    });
+    expect(() => composeStandard({
+      slug: "demo-standard-3",
+      domain: "elder-scam-shield",
+      agents: [agentExplicitDomain],
+      phases: [{ name: "sense", agent: "scout-elsewhere" }],
+    })).toThrow(CompositionError);
+  });
+});

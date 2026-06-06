@@ -124,7 +124,10 @@ export function composeStandard(def: {
       );
     }
     const ag = agentBySlug.get(ph.agent)!;
-    if (ag.domain !== null && ag.domain !== def.domain) {
+    // Rob #134: agents with no explicit domain (null OR undefined) are
+    // domain-agnostic — compatible with any standard. Only reject when the
+    // agent declares an explicit domain that conflicts with the standard's.
+    if (ag.domain != null && ag.domain !== def.domain) {
       throw new CompositionError(
         `standard ${def.slug}: agent ${ag.slug}.domain=${ag.domain} ≠ standard.domain=${def.domain}`,
       );

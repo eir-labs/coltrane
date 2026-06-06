@@ -20,6 +20,7 @@ const genome: LoadedGenome = {
   standards: new Map(),
   skills: new Map(),
   evals: new Map(),
+  load_errors: [],
 };
 
 describe("genome to registry bridge", () => {

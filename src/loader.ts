@@ -44,6 +44,17 @@ export interface StandardFileDef {
 export interface SkillRecord { slug: string; [k: string]: unknown }
 export interface EvalRecord { slug: string; [k: string]: unknown }
 
+// Per-definition load failure record. Surfaced via LoadedGenome.load_errors
+// so one broken file no longer blocks the whole genome (Rob #129). The strict
+// gate around core_types still hard-throws — that's the minimum the system
+// needs to function. Anything past that softens.
+export interface LoadError {
+  readonly kind: "domain_type" | "agent" | "standard" | "skill" | "eval";
+  readonly path: string;
+  readonly slug: string | null;
+  readonly error: string;
+}
+
 export interface LoadedGenome {
   core_types: ReadonlyMap<string, CoreTypeRecord>;
   domain_types: ReadonlyMap<string, DomainTypeRecord>;
@@ -54,15 +65,26 @@ export interface LoadedGenome {
   // Mutable: shared as deps.skills so skill_define writes through to the live map.
   skills: Map<string, SkillRecord>;
   evals: Map<string, EvalRecord>;
+  // Rob #129 — per-definition load failures recorded here instead of throwing.
+  load_errors: LoadError[];
 }
 
 export class GenomeLoadError extends Error {}
 
 interface LoadedJsonFile<T> { readonly path: string; readonly data: T }
+interface ParseFailure { readonly path: string; readonly error: string }
 
-function readJsonDir<T>(dir: string): LoadedJsonFile<T>[] {
-  if (!existsSync(dir)) return [];
-  const out: LoadedJsonFile<T>[] = [];
+/**
+ * Read every *.json file in `dir`. Files that fail to read or parse are
+ * accumulated into `parse_failures` instead of throwing — the caller (per
+ * Rob #129) decides whether the failure is hard (core types) or soft
+ * (definitions). Filesystem-level errors (readFileSync) still throw because
+ * they indicate the directory itself is unreadable.
+ */
+function readJsonDir<T>(dir: string): { files: LoadedJsonFile<T>[]; parse_failures: ParseFailure[] } {
+  if (!existsSync(dir)) return { files: [], parse_failures: [] };
+  const files: LoadedJsonFile<T>[] = [];
+  const parse_failures: ParseFailure[] = [];
   for (const name of readdirSync(dir)) {
     if (extname(name) !== ".json") continue;
     const path = join(dir, name);
@@ -75,13 +97,13 @@ function readJsonDir<T>(dir: string): LoadedJsonFile<T>[] {
       throw new GenomeLoadError(`failed to read ${path}: ${msg}`);
     }
     try {
-      out.push({ path, data: JSON.parse(raw) as T });
+      files.push({ path, data: JSON.parse(raw) as T });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      throw new GenomeLoadError(`malformed JSON at ${path}: ${msg}`);
+      parse_failures.push({ path, error: `malformed JSON at ${path}: ${msg}` });
     }
   }
-  return out;
+  return { files, parse_failures };
 }
 
 const REQUIRED_CORE_SLUGS = new Set([
@@ -94,8 +116,17 @@ const REQUIRED_CORE_SLUGS = new Set([
 ]);
 
 export function loadGenome(root: string): LoadedGenome {
-  const coreList = readJsonDir<CoreTypeRecord>(join(root, "core_types"));
-  const domainList = readJsonDir<DomainTypeRecord>(join(root, "domain_types"));
+  const load_errors: LoadError[] = [];
+
+  // core_types/ stays STRICTLY hard-fail: the system can't function without
+  // the six core slugs, so soft-fail would just delay the inevitable crash
+  // somewhere downstream. Parse failures here throw too — same logic.
+  const coreRead = readJsonDir<CoreTypeRecord>(join(root, "core_types"));
+  const firstCoreFailure = coreRead.parse_failures[0];
+  if (firstCoreFailure) {
+    throw new GenomeLoadError(firstCoreFailure.error);
+  }
+  const coreList = coreRead.files;
 
   const core_types = new Map<string, CoreTypeRecord>();
   const core_type_paths = new Map<string, string>();
@@ -122,100 +153,157 @@ export function loadGenome(root: string): LoadedGenome {
     );
   }
 
+  // domain_types/ — past the core gate, soft-fail. One broken type no longer
+  // kills the genome. Each parse-failure becomes a typed LoadError.
+  const domainRead = readJsonDir<DomainTypeRecord>(join(root, "domain_types"));
+  for (const f of domainRead.parse_failures) {
+    load_errors.push({ kind: "domain_type", path: f.path, slug: null, error: f.error });
+  }
   const domain_types = new Map<string, DomainTypeRecord>();
   const domain_type_paths = new Map<string, string>();
-  for (const { path, data: d } of domainList) {
-    const key = `${d.slug}@${d.version}`;
-    if (domain_types.has(key)) {
-      throw new GenomeLoadError(
-        `duplicate domain type "${key}" in ${path} (first seen in ${domain_type_paths.get(key)})`,
-      );
+  for (const { path, data: d } of domainRead.files) {
+    try {
+      const key = `${d.slug}@${d.version}`;
+      if (domain_types.has(key)) {
+        throw new Error(
+          `duplicate domain type "${key}" in ${path} (first seen in ${domain_type_paths.get(key)})`,
+        );
+      }
+      if (!core_types.has(d.extends)) {
+        throw new Error(
+          `field "extends" references "${d.extends}" which is not a core type`,
+        );
+      }
+      domain_types.set(key, d);
+      domain_type_paths.set(key, path);
+    } catch (e) {
+      load_errors.push({
+        kind: "domain_type",
+        path,
+        slug: typeof d?.slug === "string" ? d.slug : null,
+        error: e instanceof Error ? e.message : String(e),
+      });
     }
-    if (!core_types.has(d.extends)) {
-      throw new GenomeLoadError(
-        `domain type "${d.slug}" in ${path}: field "extends" references "${d.extends}" which is not a core type`,
-      );
-    }
-    domain_types.set(key, d);
-    domain_type_paths.set(key, path);
   }
 
-  // agents/ — each file is an AgentDef; validated through defineAgent (same path as code).
+  // agents/ — each file is an AgentDef; validated through defineAgent. Soft-fail
+  // per file: a broken agent does not block other agents from loading.
+  const agentRead = readJsonDir<AgentFileDef>(join(root, "agents"));
+  for (const f of agentRead.parse_failures) {
+    load_errors.push({ kind: "agent", path: f.path, slug: null, error: f.error });
+  }
   const agents = new Map<string, Agent>();
   const agent_paths = new Map<string, string>();
-  for (const { path, data: def } of readJsonDir<AgentFileDef>(join(root, "agents"))) {
-    // Required-field gate: agents/*.json without a slug were silently dropped;
-    // surface the offending file so operators can fix the right one.
-    if (!def.slug || typeof def.slug !== "string") {
-      throw new GenomeLoadError(`agent file ${path} missing required "slug" field`);
-    }
-    if (agents.has(def.slug)) {
-      throw new GenomeLoadError(
-        `duplicate agent slug "${def.slug}" in ${path} (first seen in ${agent_paths.get(def.slug)})`,
-      );
-    }
+  for (const { path, data: def } of agentRead.files) {
+    const slug = typeof def?.slug === "string" ? def.slug : null;
     try {
+      if (!def.slug || typeof def.slug !== "string") {
+        throw new Error(`missing required "slug" field`);
+      }
+      if (agents.has(def.slug)) {
+        throw new Error(
+          `duplicate agent slug "${def.slug}" (first seen in ${agent_paths.get(def.slug)})`,
+        );
+      }
       agents.set(def.slug, defineAgent(def));
       agent_paths.set(def.slug, path);
     } catch (e) {
-      if (e instanceof CompositionError) throw new GenomeLoadError(`agent "${def.slug}" in ${path}: ${e.message}`);
-      throw e;
+      load_errors.push({
+        kind: "agent",
+        path,
+        slug,
+        error: e instanceof CompositionError || e instanceof Error ? e.message : String(e),
+      });
     }
   }
 
   // standards/ — resolve agent_slugs against loaded agents, then composeStandard.
+  // Soft-fail per file. A standard that references a missing-or-broken agent
+  // gets skipped + recorded; other standards still load.
+  const standardRead = readJsonDir<StandardFileDef>(join(root, "standards"));
+  for (const f of standardRead.parse_failures) {
+    load_errors.push({ kind: "standard", path: f.path, slug: null, error: f.error });
+  }
   const standards = new Map<string, Standard>();
   const standard_paths = new Map<string, string>();
-  for (const { path, data: def } of readJsonDir<StandardFileDef>(join(root, "standards"))) {
-    if (standards.has(def.slug)) {
-      throw new GenomeLoadError(
-        `duplicate standard slug "${def.slug}" in ${path} (first seen in ${standard_paths.get(def.slug)})`,
-      );
-    }
-    const resolved: Agent[] = [];
-    for (const slug of def.agent_slugs ?? []) {
-      const a = agents.get(slug);
-      if (!a) {
-        throw new GenomeLoadError(
-          `standard "${def.slug}" in ${path}: field "agent_slugs" references unknown agent "${slug}"`,
+  for (const { path, data: def } of standardRead.files) {
+    const slug = typeof def?.slug === "string" ? def.slug : null;
+    try {
+      if (!def.slug || typeof def.slug !== "string") {
+        throw new Error(`missing required "slug" field`);
+      }
+      if (standards.has(def.slug)) {
+        throw new Error(
+          `duplicate standard slug "${def.slug}" (first seen in ${standard_paths.get(def.slug)})`,
         );
       }
-      resolved.push(a);
-    }
-    try {
-      standards.set(def.slug, composeStandard({ slug: def.slug, domain: def.domain, agents: resolved, phases: def.phases, ...(def.eval_slugs ? { eval_slugs: def.eval_slugs } : {}) }));
+      const resolved: Agent[] = [];
+      for (const aslug of def.agent_slugs ?? []) {
+        const a = agents.get(aslug);
+        if (!a) {
+          throw new Error(`field "agent_slugs" references unknown agent "${aslug}"`);
+        }
+        resolved.push(a);
+      }
+      // Pass eval_slugs through to composeStandard when present (added in #128).
+      standards.set(def.slug, composeStandard({
+        slug: def.slug,
+        domain: def.domain,
+        agents: resolved,
+        phases: def.phases,
+        ...(def.eval_slugs ? { eval_slugs: def.eval_slugs } : {}),
+      }));
       standard_paths.set(def.slug, path);
     } catch (e) {
-      if (e instanceof CompositionError) throw new GenomeLoadError(`standard "${def.slug}" in ${path}: ${e.message}`);
-      throw e;
+      load_errors.push({
+        kind: "standard",
+        path,
+        slug,
+        error: e instanceof CompositionError || e instanceof Error ? e.message : String(e),
+      });
     }
   }
 
-  // skills/ + evals/ — slug-keyed records (no composer yet; slug present + unique).
+  // skills/ + evals/ — slug-keyed records. Soft-fail per file.
+  const skillRead = readJsonDir<SkillRecord>(join(root, "skills"));
+  for (const f of skillRead.parse_failures) {
+    load_errors.push({ kind: "skill", path: f.path, slug: null, error: f.error });
+  }
   const skills = new Map<string, SkillRecord>();
   const skill_paths = new Map<string, string>();
-  for (const { path, data: s } of readJsonDir<SkillRecord>(join(root, "skills"))) {
-    if (!s.slug) throw new GenomeLoadError(`skill file ${path}: required field "slug" is missing`);
-    if (skills.has(s.slug)) {
-      throw new GenomeLoadError(
-        `duplicate skill slug "${s.slug}" in ${path} (first seen in ${skill_paths.get(s.slug)})`,
-      );
+  for (const { path, data: s } of skillRead.files) {
+    const slug = typeof s?.slug === "string" ? s.slug : null;
+    try {
+      if (!s.slug) throw new Error(`required field "slug" is missing`);
+      if (skills.has(s.slug)) {
+        throw new Error(`duplicate skill slug "${s.slug}" (first seen in ${skill_paths.get(s.slug)})`);
+      }
+      skills.set(s.slug, s);
+      skill_paths.set(s.slug, path);
+    } catch (e) {
+      load_errors.push({ kind: "skill", path, slug, error: e instanceof Error ? e.message : String(e) });
     }
-    skills.set(s.slug, s);
-    skill_paths.set(s.slug, path);
+  }
+
+  const evalRead = readJsonDir<EvalRecord>(join(root, "evals"));
+  for (const f of evalRead.parse_failures) {
+    load_errors.push({ kind: "eval", path: f.path, slug: null, error: f.error });
   }
   const evals = new Map<string, EvalRecord>();
   const eval_paths = new Map<string, string>();
-  for (const { path, data: e } of readJsonDir<EvalRecord>(join(root, "evals"))) {
-    if (!e.slug) throw new GenomeLoadError(`eval file ${path}: required field "slug" is missing`);
-    if (evals.has(e.slug)) {
-      throw new GenomeLoadError(
-        `duplicate eval slug "${e.slug}" in ${path} (first seen in ${eval_paths.get(e.slug)})`,
-      );
+  for (const { path, data: e } of evalRead.files) {
+    const slug = typeof e?.slug === "string" ? e.slug : null;
+    try {
+      if (!e.slug) throw new Error(`required field "slug" is missing`);
+      if (evals.has(e.slug)) {
+        throw new Error(`duplicate eval slug "${e.slug}" (first seen in ${eval_paths.get(e.slug)})`);
+      }
+      evals.set(e.slug, e);
+      eval_paths.set(e.slug, path);
+    } catch (err) {
+      load_errors.push({ kind: "eval", path, slug, error: err instanceof Error ? err.message : String(err) });
     }
-    evals.set(e.slug, e);
-    eval_paths.set(e.slug, path);
   }
 
-  return { core_types, domain_types, agents, standards, skills, evals };
+  return { core_types, domain_types, agents, standards, skills, evals, load_errors };
 }

@@ -1,33 +1,33 @@
 {
   "slug": "patent-triage-v0",
   "domain": null,
-  "description": "Patentability check / patent triage v0. Carves an invention into its smallest spring (one-sentence independent claim) + named failure modes; searches a prior-art corpus for nearest-neighbor matches and aggregates a novelty-verdict; refines the claim under smallest-spring discipline given the novelty-verdict; judges GO / NO-GO / NEEDS-WORK with optional provisional-draft. Methodology-lane slice — subhuti + groove add their slices in follow-ups.",
+  "description": "Patentability check / patent triage v0. Takes an invention description and produces the cleanest single-sentence independent claim plus named failure modes; searches a prior-art corpus for nearest-neighbor matches and aggregates a novelty-verdict; refines the claim under the single-cleave discipline given the novelty-verdict; judges GO / NO-GO / NEEDS-WORK with an optional provisional-draft.",
   "agent_slugs": [
-    "carver",
+    "diamond-cutter",
     "novelty-searcher",
     "claim-rewriter",
     "verdict-judger"
   ],
   "phases": [
     {
-      "name": "carve",
-      "agent": "carver",
-      "intent": "Diverge → carve. From the invention-spec, extract the smallest-spring one-sentence carved claim + enumerate ≥3 named failure modes with bounds + enumerate ≥5 apoha-distinctions (what this is NOT relative to prior art). Outputs: claim-draft + failure-modes."
+      "name": "cleave",
+      "agent": "diamond-cutter",
+      "intent": "Find the clean cleave plane. From the invention-spec, produce one single-sentence independent claim, enumerate ≥3 named failure modes with bounds, and enumerate ≥5 distinctions (what this is NOT relative to prior art). Outputs: claim-draft + failure-modes."
     },
     {
       "name": "search-novelty",
       "agent": "novelty-searcher",
-      "intent": "Diverge → sense. Search a prior-art corpus (patents + literature) for nearest-neighbor matches to the carved claim; report hits with similarity scores; aggregate into a novelty-verdict (PASS / FAIL / TOO-CLOSE-TO-CALL). Outputs: prior-art-hit (list) + novelty-verdict."
+      "intent": "Search a prior-art corpus (patents + literature) for nearest-neighbor matches to the claim; report hits with similarity scores; aggregate into a novelty-verdict (PASS / FAIL / TOO-CLOSE-TO-CALL). Outputs: prior-art-hit (list) + novelty-verdict."
     },
     {
       "name": "refine-claim",
       "agent": "claim-rewriter",
-      "intent": "Converge → reshape. Rewrite the claim to maximize defensible scope given the novelty-verdict; enforce smallest-spring discipline (one independent claim, ≤3 dependent claims, no `comprising` chains over 3 elements). Output: refined claim-draft."
+      "intent": "Rewrite the claim to maximize defensible scope given the novelty-verdict; enforce single-cleave discipline (one independent claim, ≤3 functional elements joined by `comprising`). Output: refined claim-draft."
     },
     {
       "name": "judge",
       "agent": "verdict-judger",
-      "intent": "Converge → verdict. Produce the final GO / NO-GO / NEEDS-WORK verdict with named axis-of-failure if NEEDS-WORK. If verdict is GO, also produce a provisional-draft artifact. Outputs: triage-verdict (always) + provisional-draft (GO only).",
+      "intent": "Produce the final FILEABLE / REFINE-FIRST / NOT-FILEABLE verdict with named axis of refinement when needed. When FILEABLE, also produce a provisional-draft skeleton. Outputs: triage-verdict (always) + provisional-draft (FILEABLE only).",
       "ripens_pre_reg": true
     }
   ],

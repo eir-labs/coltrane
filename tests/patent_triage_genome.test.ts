@@ -2,14 +2,14 @@
 //
 // Pre-reg
 // =======
-// predict: patent-triage-v0 standard + its 4 agents + the 7 domain types
-//          load cleanly into the genome, and composeStandard resolves all
-//          agent references without error.
+// predict: the patent-triage-v0 standard, its 4 agents, and the 7 domain
+//          types load cleanly into the genome, and the composition resolves
+//          all agent references without error.
 // test:    this file
-// kill:    if any of the agents / standard / domain types fails to load,
-//          or composeStandard rejects the composition, the test flags it
-// apoha:   this test does NOT exercise live phase execution (no LLM calls);
-//          phase-execution tests are in a separate file (see patent_triage_phases.test.ts).
+// kill:    if any of the agents / standard / domain types fails to load, or
+//          composition rejects the wiring, the test flags it.
+// note:    this test does NOT exercise live phase execution (no LLM calls);
+//          phase-execution tests are in patent_triage_pipeline.test.ts.
 // verdict: green expected post-merge.
 
 import { describe, it, expect } from "vitest";
@@ -31,7 +31,7 @@ describe("patent-triage-v0 — genome files exist on disk", () => {
   });
 
   it("all 4 agent files exist", () => {
-    for (const slug of ["carver", "novelty-searcher", "claim-rewriter", "verdict-judger"]) {
+    for (const slug of ["diamond-cutter", "novelty-searcher", "claim-rewriter", "verdict-judger"]) {
       const p = join(REPO_ROOT, "agents", `${slug}.json`);
       expect(existsSync(p), `missing agent ${slug}`).toBe(true);
       const a = readJson(p);
@@ -62,14 +62,14 @@ describe("patent-triage-v0 — composition wiring (structural)", () => {
   it("standard names exactly the 4 agents", () => {
     expect(standard).not.toBeNull();
     const slugs = (standard as { agent_slugs: string[] }).agent_slugs;
-    expect(slugs).toEqual(["carver", "novelty-searcher", "claim-rewriter", "verdict-judger"]);
+    expect(slugs).toEqual(["diamond-cutter", "novelty-searcher", "claim-rewriter", "verdict-judger"]);
   });
 
   it("standard has 4 phases in correct order", () => {
     const phases = (standard as { phases: { name: string; agent: string }[] }).phases;
-    expect(phases.map((p) => p.name)).toEqual(["carve", "search-novelty", "refine-claim", "judge"]);
+    expect(phases.map((p) => p.name)).toEqual(["cleave", "search-novelty", "refine-claim", "judge"]);
     expect(phases.map((p) => p.agent)).toEqual([
-      "carver",
+      "diamond-cutter",
       "novelty-searcher",
       "claim-rewriter",
       "verdict-judger",
@@ -82,8 +82,8 @@ describe("patent-triage-v0 — composition wiring (structural)", () => {
     expect(s.output_types).toContain("triage-verdict");
   });
 
-  it("carver consumes invention-spec and produces claim-draft + failure-modes", () => {
-    const a = readJson(join(REPO_ROOT, "agents", "carver.json"));
+  it("diamond-cutter consumes invention-spec and produces claim-draft + failure-modes", () => {
+    const a = readJson(join(REPO_ROOT, "agents", "diamond-cutter.json"));
     expect(a.input_types).toEqual(["invention-spec"]);
     expect(a.output_types).toEqual(expect.arrayContaining(["claim-draft", "failure-modes"]));
   });
@@ -111,20 +111,33 @@ describe("patent-triage-v0 — composition wiring (structural)", () => {
   });
 });
 
-describe("patent-triage-v0 — RED until built", () => {
-  // These tests are RED-honest. They specify the contract that landing the
-  // execution layer would have to satisfy. They will flip GREEN when:
-  //   - the executor for `carver` actually produces a claim-draft with one
-  //     independent claim and ≥3 failure modes when given a valid invention-spec
-  //   - the `novelty-searcher` actually queries a prior-art corpus
-  //   - the `claim-rewriter` enforces smallest-spring discipline on output
-  //   - the `verdict-judger` emits GO / NO-GO / NEEDS-WORK with a named axis
-  //
-  // Until then, all four are intentionally RED.
+describe("patent-triage-v0 — diamond-cutting-discipline skill wiring", () => {
+  it("skills/diamond-cutting-discipline.json exists and parses", () => {
+    const p = join(REPO_ROOT, "skills", "diamond-cutting-discipline.json");
+    expect(existsSync(p)).toBe(true);
+    const s = readJson(p);
+    expect(s.slug).toBe("diamond-cutting-discipline");
+    expect(typeof s.md).toBe("string");
+    expect((s.md as string).length).toBeGreaterThan(500);
+  });
 
-  it.todo("carver phase: invention-spec → claim-draft with ≥3 failure modes + ≥5 apoha distinctions");
+  it("all 4 patent-triage agents declare skill_slugs containing diamond-cutting-discipline", () => {
+    for (const slug of ["diamond-cutter", "novelty-searcher", "claim-rewriter", "verdict-judger"]) {
+      const a = readJson(join(REPO_ROOT, "agents", `${slug}.json`));
+      expect(a.skill_slugs, `agent ${slug} missing skill_slugs`).toBeDefined();
+      expect(a.skill_slugs as string[], `agent ${slug} does not ground in diamond-cutting-discipline`)
+        .toContain("diamond-cutting-discipline");
+    }
+  });
+});
+
+describe("patent-triage-v0 — runtime contract (todo until executor lands)", () => {
+  // These name the contract the runtime + executor must satisfy. They will
+  // turn GREEN when the four agents are invoked against a Claude executor
+  // and produce typed outputs that meet the contract.
+  it.todo("diamond-cutter phase: invention-spec → claim-draft with ≥3 failure modes + ≥5 what-this-is-NOT distinctions");
   it.todo("novelty-searcher phase: claim-draft → ≥1 prior-art-hit OR a novelty-verdict=PASS");
-  it.todo("claim-rewriter phase: enforces ≤1 independent claim + ≤3 dependent claims");
-  it.todo("verdict-judger phase: emits GO / NO-GO / NEEDS-WORK + named axis when NEEDS-WORK");
-  it.todo("end-to-end: invention-spec input → triage-verdict output, ALL 4 phases sealed in chain");
+  it.todo("claim-rewriter phase: enforces ≤1 independent claim + ≤3 functional elements joined by `comprising`");
+  it.todo("verdict-judger phase: emits FILEABLE / REFINE-FIRST / NOT-FILEABLE + named axis when REFINE-FIRST");
+  it.todo("end-to-end: invention-spec input → triage-verdict output, all 4 phases sealed in chain");
 });

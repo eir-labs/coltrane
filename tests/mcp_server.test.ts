@@ -110,7 +110,7 @@ describe("MCP server: construction", () => {
 describe("MCP dispatcher: newly-wired tools (impl existed, now routed)", () => {
   const scout = { slug: "scout", primitives: ["SENSE"], input_types: [], output_types: ["page-model"], domain: "eirtests" };
   const analyst = { slug: "analyst", primitives: ["INTERPRET"], input_types: ["page-model"], output_types: ["finding"], domain: "eirtests" };
-  const goodPhases = [{ name: "p1", agent: "scout" }, { name: "p2", agent: "analyst" }];
+  const goodPhases = [{ name: "p1", chairs: [{ role: "p1", agent_slug: "scout", depends_on: [], input_contract: [], output_contract: ["page-model"], required_skills: [] }] }, { name: "p2", chairs: [{ role: "p2", agent_slug: "analyst", depends_on: [], input_contract: [], output_contract: ["finding"], required_skills: [] }] }];
 
   it("tool_registry_browse lists tools, filterable by category", async () => {
     const all = await dispatchTool("tool_registry_browse", {}, deps());
@@ -128,7 +128,7 @@ describe("MCP dispatcher: newly-wired tools (impl existed, now routed)", () => {
   });
 
   it("standard_compose rejects a phase referencing an undefined agent", async () => {
-    const r = await dispatchTool("standard_compose", { slug: "scan", domain: "eirtests", agents: [scout], phases: [{ name: "p", agent: "ghost" }] }, deps());
+    const r = await dispatchTool("standard_compose", { slug: "scan", domain: "eirtests", agents: [scout], phases: [{ name: "p", chairs: [{ role: "p", agent_slug: "ghost", depends_on: [], input_contract: [], output_contract: ["Interpretation"], required_skills: [] }] }] }, deps());
     expect(r.ok).toBe(false);
     expect((r.data as { validation_result: { valid: boolean } }).validation_result.valid).toBe(false);
   });
@@ -136,7 +136,7 @@ describe("MCP dispatcher: newly-wired tools (impl existed, now routed)", () => {
   it("agent_validate_pipeline returns valid for a sound pipeline, illegal_progressions for a broken one", async () => {
     const ok = await dispatchTool("agent_validate_pipeline", { domain: "eirtests", agents: [scout, analyst], phases: goodPhases }, deps());
     expect((ok.data as { valid: boolean }).valid).toBe(true);
-    const bad = await dispatchTool("agent_validate_pipeline", { domain: "eirtests", agents: [scout], phases: [{ name: "p", agent: "ghost" }] }, deps());
+    const bad = await dispatchTool("agent_validate_pipeline", { domain: "eirtests", agents: [scout], phases: [{ name: "p", chairs: [{ role: "p", agent_slug: "ghost", depends_on: [], input_contract: [], output_contract: ["Interpretation"], required_skills: [] }] }] }, deps());
     expect((bad.data as { valid: boolean }).valid).toBe(false);
     expect((bad.data as { illegal_progressions: string[] }).illegal_progressions.length).toBeGreaterThan(0);
   });

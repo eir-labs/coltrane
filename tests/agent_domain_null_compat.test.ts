@@ -31,7 +31,7 @@ describe("agent.domain null/undefined is domain-agnostic (Rob #134)", () => {
       slug: "demo-standard",
       domain: "elder-scam-shield",
       agents: [agentNoDomain],
-      phases: [{ name: "sense", agent: "scout" }],
+      phases: [{ name: "sense", chairs: [{ role: "sense", agent_slug: "scout", depends_on: [], input_contract: [], output_contract: ["raw-note"], required_skills: [] }] }],
     });
     expect(composed.slug).toBe("demo-standard");
   });
@@ -49,7 +49,7 @@ describe("agent.domain null/undefined is domain-agnostic (Rob #134)", () => {
       slug: "demo-standard-2",
       domain: "elder-scam-shield",
       agents: [agentNullDomain],
-      phases: [{ name: "sense", agent: "scout-from-defineAgent" }],
+      phases: [{ name: "sense", chairs: [{ role: "sense", agent_slug: "scout-from-defineAgent", depends_on: [], input_contract: [], output_contract: ["raw-note"], required_skills: [] }] }],
     });
     expect(composed.slug).toBe("demo-standard-2");
   });
@@ -65,7 +65,7 @@ describe("agent.domain null/undefined is domain-agnostic (Rob #134)", () => {
       slug: "demo-standard-3",
       domain: "elder-scam-shield",
       agents: [agentExplicitDomain],
-      phases: [{ name: "sense", agent: "scout-elsewhere" }],
+      phases: [{ name: "sense", chairs: [{ role: "sense", agent_slug: "scout-elsewhere", depends_on: [], input_contract: [], output_contract: ["raw-note"], required_skills: [] }] }],
     })).toThrow(CompositionError);
   });
 });

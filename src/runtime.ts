@@ -5,7 +5,6 @@
 // that carries model_version + (empty, v0) eval_scores — honestly un-tempered.
 import { randomUUID } from "node:crypto";
 import type { Standard, Agent, Chair } from "./composition.js";
-import { normalizePhase } from "./composition.js";
 import { PRIMITIVE_OUTPUT_TYPE } from "./core_types.js";
 import { sha256Hex, canonJson, runFingerprint, outputContentHash, CANONICAL_FORM_VERSION } from "./canonical_form.js";
 import type { OutputStore, OutputRecord } from "./outputs.js";
@@ -230,7 +229,7 @@ export async function runGig(
       }
     : null;
 
-  // Resolve agent-by-slug once (used for legacy-phase normalization).
+  // Resolve agent-by-slug once.
   const agentBySlug = new Map(standard.agents.map((a) => [a.slug, a]));
 
   // Cross-phase role → output map. A chair in phase N can depends_on a chair
@@ -238,8 +237,7 @@ export async function runGig(
   // downstream chairs can resolve their depends_on regardless of phase.
   const producedByRole = new Map<string, OutputRecord>();
 
-  for (const phaseInput of standard.phases) {
-    const phase = normalizePhase(phaseInput, agentBySlug);
+  for (const phase of standard.phases) {
 
     // Per-phase DAG executor. Chairs whose `depends_on` is fully covered by
     // already-produced roles form the next dispatch-batch and run in parallel

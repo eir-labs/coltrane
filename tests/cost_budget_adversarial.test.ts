@@ -86,8 +86,8 @@ const standard: Standard = {
   domain: "eirtests",
   agents: [scout, analyst],
   phases: [
-    { name: "sense", agent: "site-scout" },
-    { name: "interpret", agent: "site-analyst" },
+    { name: "sense", chairs: [{ role: "sense", agent_slug: "site-scout", depends_on: [], input_contract: [], output_contract: ["page-model"], required_skills: [] }] },
+    { name: "interpret", chairs: [{ role: "interpret", agent_slug: "site-analyst", depends_on: [], input_contract: [], output_contract: ["finding"], required_skills: [] }] },
   ],
 };
 
@@ -362,7 +362,7 @@ describe("PR #99 adversarial review — cost-budget enforcement", () => {
       slug: "broken",
       domain: "eirtests",
       agents: [scout],
-      phases: [{ name: "p", agent: "nonexistent" }],
+      phases: [{ name: "p", chairs: [{ role: "p", agent_slug: "nonexistent", depends_on: [], input_contract: [], output_contract: ["Interpretation"], required_skills: [] }] }],
     };
     const { outputs, ledger } = setup();
     await expect(

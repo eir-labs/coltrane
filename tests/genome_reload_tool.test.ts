@@ -91,7 +91,7 @@ describe("genome_reload MCP tool (Rob #130)", () => {
       slug: "summarize",
       domain: "demo",
       agent_slugs: ["scout", "summarizer"],
-      phases: [{ name: "sense", agent: "scout" }, { name: "interpret", agent: "summarizer" }],
+      phases: [{ name: "sense", chairs: [{ role: "sense", agent_slug: "scout", depends_on: [], input_contract: [], output_contract: ["raw-note"], required_skills: [] }] }, { name: "interpret", chairs: [{ role: "interpret", agent_slug: "summarizer", depends_on: [], input_contract: [], output_contract: ["summary"], required_skills: [] }] }],
     });
 
     const res = await dispatchTool("genome_reload", {}, deps);
@@ -148,7 +148,7 @@ describe("genome_reload MCP tool (Rob #130)", () => {
       slug: "broken",
       domain: "demo",
       agent_slugs: ["ghost"],
-      phases: [{ name: "x", agent: "ghost" }],
+      phases: [{ name: "x", chairs: [{ role: "x", agent_slug: "ghost", depends_on: [], input_contract: [], output_contract: ["Interpretation"], required_skills: [] }] }],
     });
 
     const res = await dispatchTool("genome_reload", {}, deps);
@@ -164,7 +164,7 @@ describe("genome_reload MCP tool (Rob #130)", () => {
       slug: "broken",
       domain: "demo",
       agent_slugs: ["ghost"],
-      phases: [{ name: "x", agent: "ghost" }],
+      phases: [{ name: "x", chairs: [{ role: "x", agent_slug: "ghost", depends_on: [], input_contract: [], output_contract: ["Interpretation"], required_skills: [] }] }],
     });
     await dispatchTool("genome_reload", {}, deps);
     const res = await dispatchTool("system_health", {}, deps);

@@ -71,7 +71,7 @@ describe("loadGenome: soft-fail per definition (Rob #129)", () => {
       slug: "good-standard",
       domain: "demo",
       agent_slugs: ["scout"],
-      phases: [{ name: "sense", agent: "scout" }],
+      phases: [{ name: "sense", chairs: [{ role: "sense", agent_slug: "scout", depends_on: [], input_contract: [], output_contract: ["raw-note"], required_skills: [] }] }],
     });
 
     // One BROKEN standard: references an undefined agent — composeStandard rejects it
@@ -79,7 +79,7 @@ describe("loadGenome: soft-fail per definition (Rob #129)", () => {
       slug: "broken-standard",
       domain: "demo",
       agent_slugs: ["scout"],
-      phases: [{ name: "sense", agent: "ghost-agent" }],
+      phases: [{ name: "sense", chairs: [{ role: "sense", agent_slug: "ghost-agent", depends_on: [], input_contract: [], output_contract: ["Interpretation"], required_skills: [] }] }],
     });
 
     const genome = loadGenome(root);
@@ -127,7 +127,7 @@ describe("loadGenome: soft-fail per definition (Rob #129)", () => {
       slug: "depends-on-broken",
       domain: "demo",
       agent_slugs: ["broken-agent"],
-      phases: [{ name: "sense", agent: "broken-agent" }],
+      phases: [{ name: "sense", chairs: [{ role: "sense", agent_slug: "broken-agent", depends_on: [], input_contract: [], output_contract: ["raw-note"], required_skills: [] }] }],
     });
 
     const genome = loadGenome(root);

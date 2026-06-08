@@ -71,8 +71,8 @@ describe("standard with cycle (adversarial unique-unknown)", () => {
         domain: "demo",
         agents: [a, b],
         phases: [
-          { name: "phaseA", agent: "A" },
-          { name: "phaseB", agent: "B" },
+          { name: "phaseA", chairs: [{ role: "phaseA", agent_slug: "A", depends_on: [], input_contract: [], output_contract: ["a-out"], required_skills: [] }] },
+          { name: "phaseB", chairs: [{ role: "phaseB", agent_slug: "B", depends_on: [], input_contract: [], output_contract: ["b-out"], required_skills: [] }] },
         ],
       }),
     ).toThrowError(CompositionError);
@@ -85,8 +85,8 @@ describe("standard with cycle (adversarial unique-unknown)", () => {
         domain: "demo",
         agents: [a, b],
         phases: [
-          { name: "phaseA", agent: "A" },
-          { name: "phaseB", agent: "B" },
+          { name: "phaseA", chairs: [{ role: "phaseA", agent_slug: "A", depends_on: [], input_contract: [], output_contract: ["a-out"], required_skills: [] }] },
+          { name: "phaseB", chairs: [{ role: "phaseB", agent_slug: "B", depends_on: [], input_contract: [], output_contract: ["b-out"], required_skills: [] }] },
         ],
       });
       // unreachable
@@ -137,9 +137,9 @@ describe("standard with cycle (adversarial unique-unknown)", () => {
         domain: "demo",
         agents: [a, b, c],
         phases: [
-          { name: "phaseA", agent: "A3" },
-          { name: "phaseB", agent: "B3" },
-          { name: "phaseC", agent: "C3" },
+          { name: "phaseA", chairs: [{ role: "phaseA", agent_slug: "A3", depends_on: [], input_contract: [], output_contract: ["a3-out"], required_skills: [] }] },
+          { name: "phaseB", chairs: [{ role: "phaseB", agent_slug: "B3", depends_on: [], input_contract: [], output_contract: ["b3-out"], required_skills: [] }] },
+          { name: "phaseC", chairs: [{ role: "phaseC", agent_slug: "C3", depends_on: [], input_contract: [], output_contract: ["c-out"], required_skills: [] }] },
         ],
       });
     } catch (e) {
@@ -227,7 +227,7 @@ describe("standard with cycle (adversarial unique-unknown)", () => {
         slug: "self-cycle",
         domain: "demo",
         agents: [a],
-        phases: [{ name: "phaseA", agent: "Aself" }],
+        phases: [{ name: "phaseA", chairs: [{ role: "phaseA", agent_slug: "Aself", depends_on: [], input_contract: [], output_contract: ["aself-out"], required_skills: [] }] }],
       });
     } catch (e) {
       composeErr = e as Error;

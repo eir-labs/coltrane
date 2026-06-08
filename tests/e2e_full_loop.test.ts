@@ -37,8 +37,8 @@ const readinessScan: Standard = {
   domain: "eirtests",
   agents: [scout, analyst],
   phases: [
-    { name: "sense", agent: "site-scout" },
-    { name: "interpret", agent: "site-analyst" },
+    { name: "sense", chairs: [{ role: "sense", agent_slug: "site-scout", depends_on: [], input_contract: [], output_contract: ["page-model"], required_skills: [] }] },
+    { name: "interpret", chairs: [{ role: "interpret", agent_slug: "site-analyst", depends_on: [], input_contract: [], output_contract: ["finding"], required_skills: [] }] },
   ],
 };
 

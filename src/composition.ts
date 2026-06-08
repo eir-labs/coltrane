@@ -51,42 +51,25 @@ export interface PhaseDef {
   chairs: readonly Chair[];
 }
 
-// Legacy single-agent phase shape. Accepted at the composeStandard / loader / MCP
-// input boundary and normalized to a single-chair PhaseDef internally. Authored
-// standards (JSON files, test literals) that still use {name, agent} keep working
-// until the migration codemod lands. The stored Standard.phases always carries
-// the new chairs shape — legacy form never reaches the runtime.
-//
-// PhaseDefInput is intentionally a single shape with BOTH fields optional
-// (rather than a tagged union) so TypeScript's excess-property check stays
-// quiet on legacy object literals authored as `{ name, agent }`. The runtime
-// discriminates on whether `chairs` is present (see normalizePhase).
-export interface PhaseDefInput {
-  name: string;
-  agent?: string;
-  chairs?: readonly Chair[];
-}
-
 export interface StandardDef {
   slug: string;
   domain: string;
   agents: readonly Agent[];
-  phases: readonly PhaseDefInput[];
+  phases: readonly PhaseDef[];
   // 5th-class evals: judge-shapes evaluated against the gig's produced outputs.
   // Names declared here are looked up in the loaded genome's evals registry at
   // runGig time; their scores land in run_fingerprint.eval_scores.
   eval_slugs?: readonly string[];
 }
 
-// Standard.phases is canonical PhaseDef (chairs) post-composeStandard. Hand-rolled
-// Standard literals in tests / adversarial scenarios that bypass composeStandard
-// may still author the legacy {name, agent} shape; the field type stays wide as
-// PhaseDefInput to accept both. Runtime normalizes per phase before iterating.
+// Standard.phases is canonical PhaseDef (chairs). Legacy {name, agent} form is
+// rejected at the composeStandard / loader / MCP boundary; it never reaches the
+// runtime.
 export interface Standard {
   slug: string;
   domain: string;
   agents: readonly Agent[];
-  phases: readonly PhaseDefInput[];
+  phases: readonly PhaseDef[];
   eval_slugs?: readonly string[];
 }
 
@@ -141,53 +124,31 @@ export function defineAgent(def: AgentDef): Agent {
   };
 }
 
-// Detect the legacy {name, agent} shape and lift it into a single-chair PhaseDef.
-// The synthesized chair uses the phase name as its role, leaves depends_on +
-// input_contract empty (the legacy primitive-graph / upstreamOutputs pass below
-// handles type-flow for legacy standards), and uses the bound agent's
-// output_types as output_contract so downstream chairs can satisfy their
-// declared input_contracts off a legacy upstream phase. Required_skills empty.
-export function normalizePhase(
-  p: PhaseDefInput,
-  agentBySlug: ReadonlyMap<string, Agent>,
-): PhaseDef {
-  if (p.chairs !== undefined) return { name: p.name, chairs: p.chairs };
-  const legacyAgent = p.agent ?? "";
-  const ag = agentBySlug.get(legacyAgent);
-  // Output_contract falls back to ["Interpretation"] when the agent is
-  // unresolvable, so the "empty output_contract" rule doesn't fire on a
-  // bad-agent-slug phase before the agent-unknown error has a chance to
-  // surface. Same idea: agent-unknown wins over output-empty.
-  const output_contract = (ag?.output_types && ag.output_types.length > 0)
-    ? ag.output_types
-    : ["__legacy_synth__"];
-  return {
-    name: p.name,
-    chairs: [
-      {
-        role: p.name,
-        agent_slug: legacyAgent,
-        depends_on: [],
-        input_contract: [],
-        output_contract,
-        required_skills: [],
-      },
-    ],
-  };
-}
-
 export function composeStandard(def: {
   slug: string;
   domain: string;
   agents: readonly Agent[];
-  phases: readonly PhaseDefInput[];
+  phases: readonly PhaseDef[];
   eval_slugs?: readonly string[];
 }): Standard {
   const agentBySlug = new Map(def.agents.map((a) => [a.slug, a]));
 
-  // Normalize every phase to chairs shape up front. Legacy {name, agent} phases
-  // become single-chair phases; new {name, chairs} phases pass through unchanged.
-  const phases: PhaseDef[] = def.phases.map((p) => normalizePhase(p, agentBySlug));
+  // Reject legacy {name, agent} phase shape at the boundary. Chairs is the only
+  // supported shape; the legacy field never reaches the runtime.
+  for (const p of def.phases) {
+    const legacy = p as unknown as { name: string; agent?: unknown; chairs?: unknown };
+    if (legacy.agent !== undefined) {
+      throw new CompositionError(
+        `standard ${def.slug}: phase ${legacy.name} uses legacy phase.agent — not supported; declare chairs[] instead`,
+      );
+    }
+    if (legacy.chairs === undefined) {
+      throw new CompositionError(
+        `standard ${def.slug}: phase ${legacy.name} missing chairs[] (chairs required on every phase)`,
+      );
+    }
+  }
+  const phases: PhaseDef[] = def.phases.map((p) => ({ name: p.name, chairs: p.chairs }));
 
   // ── Chair-level validation ─────────────────────────────────────────────────
   // (a) every phase has at least one chair

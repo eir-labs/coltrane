@@ -68,8 +68,8 @@ describe("e2e: evals declared on a standard must populate eval_scores (RED — N
       domain: "demo",
       agents: [sensor, summarizer],
       phases: [
-        { name: "sense", agent: "sensor" },
-        { name: "interpret", agent: "summarizer" },
+        { name: "sense", chairs: [{ role: "sense", agent_slug: "sensor", depends_on: [], input_contract: [], output_contract: ["raw-note"], required_skills: [] }] },
+        { name: "interpret", chairs: [{ role: "interpret", agent_slug: "summarizer", depends_on: [], input_contract: [], output_contract: ["summary"], required_skills: [] }] },
       ],
       eval_slugs: ["gist-present"],
     } as unknown as Parameters<typeof composeStandard>[0]);
@@ -109,8 +109,8 @@ describe("e2e: evals declared on a standard must populate eval_scores (RED — N
       domain: "demo",
       agents: [sensor, summarizer],
       phases: [
-        { name: "sense", agent: "sensor" },
-        { name: "interpret", agent: "summarizer" },
+        { name: "sense", chairs: [{ role: "sense", agent_slug: "sensor", depends_on: [], input_contract: [], output_contract: ["raw-note"], required_skills: [] }] },
+        { name: "interpret", chairs: [{ role: "interpret", agent_slug: "summarizer", depends_on: [], input_contract: [], output_contract: ["summary"], required_skills: [] }] },
       ],
       eval_slugs: ["gist-present"],
     } as unknown as Parameters<typeof composeStandard>[0]);
@@ -184,8 +184,8 @@ describe("e2e: evals declared on a standard must populate eval_scores (RED — N
       domain: "demo",
       agents: [sensor, summarizer],
       phases: [
-        { name: "sense", agent: "sensor" },
-        { name: "interpret", agent: "summarizer" },
+        { name: "sense", chairs: [{ role: "sense", agent_slug: "sensor", depends_on: [], input_contract: [], output_contract: ["raw-note"], required_skills: [] }] },
+        { name: "interpret", chairs: [{ role: "interpret", agent_slug: "summarizer", depends_on: [], input_contract: [], output_contract: ["summary"], required_skills: [] }] },
       ],
       eval_slugs: ["gist-present"],
     } as unknown as Parameters<typeof composeStandard>[0]);
@@ -195,8 +195,8 @@ describe("e2e: evals declared on a standard must populate eval_scores (RED — N
       domain: "demo",
       agents: [sensor, summarizer],
       phases: [
-        { name: "sense", agent: "sensor" },
-        { name: "interpret", agent: "summarizer" },
+        { name: "sense", chairs: [{ role: "sense", agent_slug: "sensor", depends_on: [], input_contract: [], output_contract: ["raw-note"], required_skills: [] }] },
+        { name: "interpret", chairs: [{ role: "interpret", agent_slug: "summarizer", depends_on: [], input_contract: [], output_contract: ["summary"], required_skills: [] }] },
       ],
       // NO eval declared.
     });

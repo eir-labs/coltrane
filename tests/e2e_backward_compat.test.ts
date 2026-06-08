@@ -21,7 +21,7 @@ const scout: Agent = { slug: "site-scout", primitives: ["SENSE"], input_types: [
 const verifier: Agent = { slug: "readiness-verifier", primitives: ["VERIFY"], input_types: ["page-model"], output_types: ["finding"], domain: "eirtests" };
 const scan: Standard = {
   slug: "readiness-scan", domain: "eirtests", agents: [scout, verifier],
-  phases: [{ name: "sense", agent: "site-scout" }, { name: "verify", agent: "readiness-verifier" }],
+  phases: [{ name: "sense", chairs: [{ role: "sense", agent_slug: "site-scout", depends_on: [], input_contract: [], output_contract: ["page-model"], required_skills: [] }] }, { name: "verify", chairs: [{ role: "verify", agent_slug: "readiness-verifier", depends_on: [], input_contract: [], output_contract: ["finding"], required_skills: [] }] }],
 };
 
 function wired(): ServerDeps {

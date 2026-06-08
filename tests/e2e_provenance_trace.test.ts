@@ -19,7 +19,7 @@ const writer: Agent = { slug: "fix-writer", primitives: ["CREATE"], input_types:
 
 const standard: Standard = {
   slug: "scan-and-fix", domain: "eirtests", agents: [scout, analyst, writer],
-  phases: [{ name: "sense", agent: "site-scout" }, { name: "interpret", agent: "site-analyst" }, { name: "create", agent: "fix-writer" }],
+  phases: [{ name: "sense", chairs: [{ role: "sense", agent_slug: "site-scout", depends_on: [], input_contract: [], output_contract: ["page-model"], required_skills: [] }] }, { name: "interpret", chairs: [{ role: "interpret", agent_slug: "site-analyst", depends_on: [], input_contract: [], output_contract: ["finding"], required_skills: [] }] }, { name: "create", chairs: [{ role: "create", agent_slug: "fix-writer", depends_on: [], input_contract: [], output_contract: ["fix-patch"], required_skills: [] }] }],
 };
 
 const invoke: AgentInvoker = ({ agent }) =>

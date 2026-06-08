@@ -147,9 +147,9 @@ describe("T18 — recorder durability through mid-tool-call crash", () => {
         domain: "demo",
         agents: [SENSOR, SUMMARIZER, FINALIZER],
         phases: [
-          { name: "sense", agent: "sensor" },
-          { name: "interpret", agent: "summarizer" },
-          { name: "finalize", agent: "summarizer-2" },
+          { name: "sense", chairs: [{ role: "sense", agent_slug: "sensor", depends_on: [], input_contract: [], output_contract: ["raw-note"], required_skills: [] }] },
+          { name: "interpret", chairs: [{ role: "interpret", agent_slug: "summarizer", depends_on: [], input_contract: [], output_contract: ["summary"], required_skills: [] }] },
+          { name: "finalize", chairs: [{ role: "finalize", agent_slug: "summarizer-2", depends_on: [], input_contract: [], output_contract: ["summary"], required_skills: [] }] },
         ],
       },
       deps,

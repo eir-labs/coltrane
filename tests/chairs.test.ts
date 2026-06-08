@@ -566,7 +566,7 @@ describe("chairs — runtime dispatch", () => {
     const a = agent("a", { input_types: [], output_types: ["Interpretation"] });
     const b = agent("b", { input_types: ["Interpretation"], output_types: ["Plan"] });
     // Hand-rolled (composeStandard would catch this). Cast through unknown
-    // because PhaseDefInput accepts both shapes.
+    // because we're bypassing composeStandard's validation here.
     const std = {
       slug: "bad-input",
       domain: "test",
@@ -815,95 +815,25 @@ describe("chairs — runtime dispatch", () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Migration — end-state assertions (4 tests, GREEN once standards are migrated)
+// Migration — loader-reject assertion (1 test).
 //
-// Reframe: the migration was a one-shot hand-edit committed in 5352724.
-// No codemod script ships in the repo. These tests assert the END STATE
-// (no legacy phase.agent on disk, every phase has chairs, every chair's
-// agent_slug resolves) rather than testing a codemod script that doesn't exist.
+// (removed) tests #1/#2/#4 — codemod is not a public OSS feature; cajal hand-migrated.
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe("chairs — migration (on-disk genome)", () => {
-  const REPO_ROOT = join(__dirname, "..");
-  const SHIPPED_STANDARDS = [
-    "patent-triage-v0",
-    "project-bootstrap-v0",
-    "seed-from-local-repos-v0",
-    "sub_thread_invocation",
-    "summarize",
-    "synthesis-walk-v0",
-    "user_flow_correctness",
-  ];
-
-  it("every shipped standard has no legacy 'agent' field on any phase", () => {
-    for (const slug of SHIPPED_STANDARDS) {
-      const p = join(REPO_ROOT, "standards", `${slug}.json`);
-      if (!existsSync(p)) continue;
-      const json = JSON.parse(readFileSync(p, "utf-8")) as {
-        phases?: { name: string; agent?: unknown }[];
-      };
-      for (const phase of json.phases ?? []) {
-        expect(
-          phase.agent,
-          `standard ${slug} phase ${phase.name} still has legacy 'agent' field`,
-        ).toBeUndefined();
-      }
-    }
-  });
-
-  it("every shipped standard has at least one chair per phase", () => {
-    for (const slug of SHIPPED_STANDARDS) {
-      const p = join(REPO_ROOT, "standards", `${slug}.json`);
-      if (!existsSync(p)) continue;
-      const json = JSON.parse(readFileSync(p, "utf-8")) as {
-        phases?: { name: string; chairs?: unknown[] }[];
-      };
-      for (const phase of json.phases ?? []) {
-        expect(
-          Array.isArray(phase.chairs),
-          `standard ${slug} phase ${phase.name} missing chairs[]`,
-        ).toBe(true);
-        expect(
-          (phase.chairs ?? []).length,
-          `standard ${slug} phase ${phase.name} has empty chairs[]`,
-        ).toBeGreaterThanOrEqual(1);
-      }
-    }
-  });
-
-  it("every chair's agent_slug references an existing agents/*.json file", () => {
-    for (const slug of SHIPPED_STANDARDS) {
-      const p = join(REPO_ROOT, "standards", `${slug}.json`);
-      if (!existsSync(p)) continue;
-      const json = JSON.parse(readFileSync(p, "utf-8")) as {
-        phases?: { name: string; chairs?: { agent_slug?: string; role?: string }[] }[];
-      };
-      for (const phase of json.phases ?? []) {
-        for (const chair of phase.chairs ?? []) {
-          expect(
-            chair.agent_slug,
-            `standard ${slug} phase ${phase.name} chair ${chair.role} missing agent_slug`,
-          ).toBeDefined();
-          const agentPath = join(REPO_ROOT, "agents", `${chair.agent_slug}.json`);
-          expect(
-            existsSync(agentPath),
-            `standard ${slug} chair ${chair.role} agent_slug "${chair.agent_slug}" doesn't resolve to agents/${chair.agent_slug}.json`,
-          ).toBe(true);
-        }
-      }
-    }
-  });
-
-  it("loadGenome composes every shipped standard with no load_errors against it", async () => {
-    const { loadGenome } = await import("../src/loader.js");
-    const genome = loadGenome(REPO_ROOT);
-    for (const slug of SHIPPED_STANDARDS) {
-      const errs = genome.load_errors.filter((e) => e.slug === slug);
-      expect(
-        errs,
-        `standard ${slug} produced load errors: ${errs.map((e) => e.error).join("; ")}`,
-      ).toHaveLength(0);
-      expect(genome.standards.has(slug), `standard ${slug} not in genome after load`).toBe(true);
-    }
+describe("chairs — migration (loader reject)", () => {
+  it("loader rejects any standard JSON containing legacy phase.agent", () => {
+    // Construct a standard JSON literal with the legacy shape and assert
+    // composeStandard rejects it with a clear error naming the legacy field.
+    const a = agent("a");
+    const legacyStandard = {
+      slug: "legacy-shape",
+      domain: "test",
+      agents: [a],
+      phases: [{ name: "p1", agent: "a" }],
+    };
+    expect(() =>
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      composeStandard(legacyStandard as any),
+    ).toThrow(/legacy|phase\.agent|not supported|chairs.*required/i);
   });
 });

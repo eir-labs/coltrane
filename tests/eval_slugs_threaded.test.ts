@@ -38,7 +38,7 @@ describe("evals: eval_slugs survive compose → persist → reload (#123)", () =
       slug: "eval-rt",
       domain: "demo",
       agents: [sensor, summarizer],
-      phases: [{ name: "sense", agent: "sensor" }, { name: "interpret", agent: "summarizer" }],
+      phases: [{ name: "sense", chairs: [{ role: "sense", agent_slug: "sensor", depends_on: [], input_contract: [], output_contract: ["raw-note"], required_skills: [] }] }, { name: "interpret", chairs: [{ role: "interpret", agent_slug: "summarizer", depends_on: [], input_contract: [], output_contract: ["summary"], required_skills: [] }] }],
       eval_slugs: ["nonempty-summary"],
     }, deps);
     expect(r.ok).toBe(true);

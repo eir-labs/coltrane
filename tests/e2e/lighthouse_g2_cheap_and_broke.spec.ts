@@ -135,7 +135,7 @@ describe("lighthouse G2 / L2 cheap-and-broke — PASS requires shipped_artifact_
         slug: "cheap-and-broke-standard",
         domain: "demo",
         agents: [], // ← no agents declared
-        phases: [{ name: "ghost-phase", agent: "ghost-agent" }], // ← refs an agent that doesn't exist
+        phases: [{ name: "ghost-phase", chairs: [{ role: "ghost-phase", agent_slug: "ghost-agent", depends_on: [], input_contract: [], output_contract: ["Interpretation"], required_skills: [] }] }], // ← refs an agent that doesn't exist
       },
       deps,
     );
@@ -167,7 +167,7 @@ describe("lighthouse G2 / L2 cheap-and-broke — PASS requires shipped_artifact_
         slug: "real-standard",
         domain: "demo",
         agents: [realAgent],
-        phases: [{ name: "sense", agent: "real-sensor" }],
+        phases: [{ name: "sense", chairs: [{ role: "sense", agent_slug: "real-sensor", depends_on: [], input_contract: [], output_contract: ["Signal"], required_skills: [] }] }],
       },
       deps,
     );

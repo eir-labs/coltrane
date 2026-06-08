@@ -85,8 +85,8 @@ const standardA: Standard = {
   domain: "eirtests",
   agents: [scoutA, analystA],
   phases: [
-    { name: "sense", agent: "scout-A" },
-    { name: "interpret", agent: "analyst-A" },
+    { name: "sense", chairs: [{ role: "sense", agent_slug: "scout-A", depends_on: [], input_contract: [], output_contract: ["page-model"], required_skills: [] }] },
+    { name: "interpret", chairs: [{ role: "interpret", agent_slug: "analyst-A", depends_on: [], input_contract: [], output_contract: ["finding"], required_skills: [] }] },
   ],
 };
 const standardB: Standard = {
@@ -94,8 +94,8 @@ const standardB: Standard = {
   domain: "eirtests",
   agents: [scoutB, analystB],
   phases: [
-    { name: "sense", agent: "scout-B" },
-    { name: "interpret", agent: "analyst-B" },
+    { name: "sense", chairs: [{ role: "sense", agent_slug: "scout-B", depends_on: [], input_contract: [], output_contract: ["page-model"], required_skills: [] }] },
+    { name: "interpret", chairs: [{ role: "interpret", agent_slug: "analyst-B", depends_on: [], input_contract: [], output_contract: ["finding"], required_skills: [] }] },
   ],
 };
 

@@ -179,8 +179,8 @@ describe("Rob #132 — standard_compose resolves agent slugs from the genome", (
       domain: "demo",
       agents: ["scout", "summarizer"], // plain strings, NOT full Agent objects
       phases: [
-        { name: "sense", agent: "scout" },
-        { name: "interpret", agent: "summarizer" },
+        { name: "sense", chairs: [{ role: "sense", agent_slug: "scout", depends_on: [], input_contract: [], output_contract: ["raw-note"], required_skills: [] }] },
+        { name: "interpret", chairs: [{ role: "interpret", agent_slug: "summarizer", depends_on: [], input_contract: [], output_contract: ["summary"], required_skills: [] }] },
       ],
     }, deps);
 
@@ -195,7 +195,7 @@ describe("Rob #132 — standard_compose resolves agent slugs from the genome", (
       agents: [
         { slug: "scout", primitives: ["SENSE"], input_types: [], output_types: ["raw-note"], domain: "demo" },
       ],
-      phases: [{ name: "sense", agent: "scout" }],
+      phases: [{ name: "sense", chairs: [{ role: "sense", agent_slug: "scout", depends_on: [], input_contract: [], output_contract: ["raw-note"], required_skills: [] }] }],
     }, deps);
 
     expect(res.ok).toBe(true);
@@ -207,7 +207,7 @@ describe("Rob #132 — standard_compose resolves agent slugs from the genome", (
       slug: "with-ghost",
       domain: "demo",
       agents: ["ghost-agent"],
-      phases: [{ name: "x", agent: "ghost-agent" }],
+      phases: [{ name: "x", chairs: [{ role: "x", agent_slug: "ghost-agent", depends_on: [], input_contract: [], output_contract: ["Interpretation"], required_skills: [] }] }],
     }, deps);
 
     expect(res.ok).toBe(false);

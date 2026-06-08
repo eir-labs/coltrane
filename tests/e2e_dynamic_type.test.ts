@@ -55,8 +55,8 @@ const standard: Standard = {
   domain: "eirtests",
   agents: [upstream, downstream],
   phases: [
-    { name: "find", agent: "finder" },
-    { name: "score", agent: "scorer" },
+    { name: "find", chairs: [{ role: "find", agent_slug: "finder", depends_on: [], input_contract: [], output_contract: ["raw-finding"], required_skills: [] }] },
+    { name: "score", chairs: [{ role: "score", agent_slug: "scorer", depends_on: [], input_contract: [], output_contract: ["scored-finding"], required_skills: [] }] },
   ],
 };
 

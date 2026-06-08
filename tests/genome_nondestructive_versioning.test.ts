@@ -31,11 +31,11 @@ describe("non-destructive genome writes", () => {
     const slug = "vtest";
 
     // v1 — single-phase standard
-    await dispatchTool("standard_compose", { slug, domain: "demo", agents: [sensor2], phases: [{ name: "sense", agent: "sensor2" }] }, deps);
+    await dispatchTool("standard_compose", { slug, domain: "demo", agents: [sensor2], phases: [{ name: "sense", chairs: [{ role: "sense", agent_slug: "sensor2", depends_on: [], input_contract: [], output_contract: ["note"], required_skills: [] }] }] }, deps);
     const v1 = readFileSync(join(dir, "standards", `${slug}.json`), "utf8");
 
     // v2 — different content (adds a second phase)
-    await dispatchTool("standard_compose", { slug, domain: "demo", agents: [sensor2, summarizer2], phases: [{ name: "sense", agent: "sensor2" }, { name: "interpret", agent: "summarizer2" }] }, deps);
+    await dispatchTool("standard_compose", { slug, domain: "demo", agents: [sensor2, summarizer2], phases: [{ name: "sense", chairs: [{ role: "sense", agent_slug: "sensor2", depends_on: [], input_contract: [], output_contract: ["note"], required_skills: [] }] }, { name: "interpret", chairs: [{ role: "interpret", agent_slug: "summarizer2", depends_on: [], input_contract: [], output_contract: ["gist"], required_skills: [] }] }] }, deps);
     const v2 = readFileSync(join(dir, "standards", `${slug}.json`), "utf8");
 
     expect(v2).not.toBe(v1); // current file updated to v2
@@ -52,7 +52,7 @@ describe("non-destructive genome writes", () => {
     const dir = mkdtempSync(join(tmpdir(), "coltrane-ver-"));
     const deps = makeDeps(dir);
     const slug = "idemp";
-    const args = { slug, domain: "demo", agents: [sensor2], phases: [{ name: "sense", agent: "sensor2" }] };
+    const args = { slug, domain: "demo", agents: [sensor2], phases: [{ name: "sense", chairs: [{ role: "sense", agent_slug: "sensor2", depends_on: [], input_contract: [], output_contract: ["note"], required_skills: [] }] }] };
     await dispatchTool("standard_compose", args, deps);
     await dispatchTool("standard_compose", args, deps);
     const histDir = join(dir, ".coltrane", "history", "standards", slug);

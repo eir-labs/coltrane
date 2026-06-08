@@ -48,7 +48,7 @@ describe("MCP write-through: compose → dispatch in one session", () => {
       slug: "live-compose-test",
       domain: "demo",
       agents: [sensor2, summarizer2],
-      phases: [{ name: "sense", agent: "sensor2" }, { name: "interpret", agent: "summarizer2" }],
+      phases: [{ name: "sense", chairs: [{ role: "sense", agent_slug: "sensor2", depends_on: [], input_contract: [], output_contract: ["note"], required_skills: [] }] }, { name: "interpret", chairs: [{ role: "interpret", agent_slug: "summarizer2", depends_on: [], input_contract: [], output_contract: ["gist"], required_skills: [] }] }],
     }, deps);
     expect(compose.ok).toBe(true);
 

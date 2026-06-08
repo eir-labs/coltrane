@@ -60,7 +60,7 @@ const GOLD_TRANSCRIPT: UserFlowTranscript = [
     user_intent: "now compose a standard called 'inbox_triage' that uses priority_sorter in a single SENSE phase",
     claude_response: "Composed standard 'inbox_triage' with agent_slugs=['priority_sorter'] and one phase named 'sense' that runs priority_sorter. The agent created in turn 0 is now referenced.",
     tool_calls: [
-      { tool_name: "standard_compose", args: { slug: "inbox_triage", agent_slugs: ["priority_sorter"], phases: [{ name: "sense", agent: "priority_sorter" }] } },
+      { tool_name: "standard_compose", args: { slug: "inbox_triage", agent_slugs: ["priority_sorter"], phases: [{ name: "sense", chairs: [{ role: "sense", agent_slug: "priority_sorter", depends_on: [], input_contract: [], output_contract: ["sorted-inbox"], required_skills: [] }] }] } },
     ],
     post_turn_genome_state: {
       slug: "user_test_genome",
@@ -68,7 +68,7 @@ const GOLD_TRANSCRIPT: UserFlowTranscript = [
         { slug: "priority_sorter", primitives: ["SENSE"], output_types: ["sorted-inbox"] },
       ],
       standards: [
-        { slug: "inbox_triage", agent_slugs: ["priority_sorter"], phases: [{ name: "sense", agent: "priority_sorter" }] },
+        { slug: "inbox_triage", agent_slugs: ["priority_sorter"], phases: [{ name: "sense", chairs: [{ role: "sense", agent_slug: "priority_sorter", depends_on: [], input_contract: [], output_contract: ["sorted-inbox"], required_skills: [] }] }] },
       ],
       types: [],
     },

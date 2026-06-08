@@ -51,7 +51,9 @@ describe("genome file-loading: all five classes load from files", () => {
     const g = loadGenome(dir);
     const s = g.standards.get("summarize");
     expect(s).toBeDefined();
-    expect(s!.phases.map((p) => p.agent)).toEqual(["sensor", "summarizer"]);
+    // composeStandard normalizes legacy {name, agent} phases to single-chair
+    // phases — the bound agent_slug now lives on chairs[0].agent_slug.
+    expect(s!.phases.map((p) => p.chairs?.[0]?.agent_slug)).toEqual(["sensor", "summarizer"]);
     expect(s!.agents.length).toBe(2);
     rmSync(dir, { recursive: true, force: true });
   });

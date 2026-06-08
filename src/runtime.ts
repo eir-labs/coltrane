@@ -5,6 +5,7 @@
 // that carries model_version + (empty, v0) eval_scores — honestly un-tempered.
 import { randomUUID } from "node:crypto";
 import type { Standard, Agent } from "./composition.js";
+import { normalizePhase } from "./composition.js";
 import { PRIMITIVE_OUTPUT_TYPE } from "./core_types.js";
 import { sha256Hex, canonJson, runFingerprint, outputContentHash, CANONICAL_FORM_VERSION } from "./canonical_form.js";
 import type { OutputStore, OutputRecord } from "./outputs.js";
@@ -229,9 +230,18 @@ export async function runGig(
       }
     : null;
 
-  for (const phase of standard.phases) {
-    const agent = standard.agents.find((a) => a.slug === phase.agent);
-    if (!agent) throw new RuntimeError(`phase "${phase.name}" references unknown agent "${phase.agent}"`);
+  // Resolve agent-by-slug once (used for legacy-phase normalization).
+  const agentBySlug = new Map(standard.agents.map((a) => [a.slug, a]));
+  for (const phaseInput of standard.phases) {
+    const phase = normalizePhase(phaseInput, agentBySlug);
+    // v0 dispatch: walk chairs in declaration order, serially. Parallel
+    // dispatch of independent chairs lands with the runtime PR (it.todo
+    // tests in chairs.test.ts cover that). Today's single-chair phases
+    // (the codemod's output for legacy {name, agent} standards) flow
+    // through here unchanged.
+    for (const chair of phase.chairs) {
+    const agent = standard.agents.find((a) => a.slug === chair.agent_slug);
+    if (!agent) throw new RuntimeError(`phase "${phase.name}" chair "${chair.role}" references unknown agent "${chair.agent_slug}"`);
     const primitive = agent.primitives[0];
     if (!primitive) throw new RuntimeError(`agent "${agent.slug}" declares no primitive`);
     const domain_type = agent.output_types[0];
@@ -280,6 +290,7 @@ export async function runGig(
     // provenance: this output is derived_from each upstream input it consumed.
     for (const i of inputs) deps.outputs.addRef(rec.id, i.id, "derived_from", primitive);
     produced.push(rec);
+    }
   }
 
   const genome_hash = genomeHash(standard);

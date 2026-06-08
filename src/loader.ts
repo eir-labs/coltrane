@@ -1,6 +1,6 @@
 import { readdirSync, readFileSync, existsSync, statSync, writeFileSync, mkdirSync } from "node:fs";
 import { join, extname } from "node:path";
-import { defineAgent, composeStandard, CompositionError, type Agent, type Standard, type PhaseDef } from "./composition.js";
+import { defineAgent, composeStandard, CompositionError, type Agent, type Standard, type PhaseDefInput } from "./composition.js";
 import type { Primitive } from "./core_types.js";
 
 export interface CoreTypeRecord {
@@ -36,7 +36,7 @@ export interface StandardFileDef {
   slug: string;
   domain: string;
   agent_slugs: readonly string[];
-  phases: readonly PhaseDef[];
+  phases: readonly PhaseDefInput[];
   eval_slugs?: readonly string[];
 }
 // Skills and evals have no composer yet — load them as slug-keyed records (structurally

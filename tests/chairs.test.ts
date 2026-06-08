@@ -14,9 +14,7 @@ import {
   defineAgent,
   composeStandard,
   CompositionError,
-  // @ts-expect-error — pending implementation
   type Chair,
-  // @ts-expect-error — pending implementation
   type PhaseDef,
 } from "../src";
 
@@ -33,7 +31,6 @@ function agent(
     primitives: ["INTERPRET"],
     input_types: opts.input_types ?? ["Signal"],
     output_types: opts.output_types ?? ["Interpretation"],
-    domain: null,
     skill_slugs: opts.skill_slugs ?? [],
   });
 }

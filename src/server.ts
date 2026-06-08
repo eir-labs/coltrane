@@ -23,7 +23,7 @@ import { MemoryLedger, type Ledger } from "./ledger.js";
 import { standardSimulate } from "./simulate.js";
 import { runGig, BudgetExhausted, type AgentInvoker } from "./runtime.js";
 import { makeClaudeInvoker } from "./claude_invoker.js";
-import { composeStandard, defineAgent, CompositionError, type Standard, type Agent, type AgentDef, type PhaseDef } from "./composition.js";
+import { composeStandard, defineAgent, CompositionError, type Standard, type Agent, type AgentDef, type PhaseDef, type PhaseDefInput } from "./composition.js";
 import { PRIMITIVE_OUTPUT_TYPE, type Primitive } from "./core_types.js";
 import { proposeTypeChange, type DomainTypeDef } from "./type_versioning.js";
 import { proposeAgentChange, evolveProfile, type AgentProfile } from "./agent_profile.js";
@@ -387,7 +387,7 @@ export async function dispatchTool(slug: string, args: Record<string, unknown>, 
             }
             return a as Agent;
           });
-          const sPhases = (args["phases"] as PhaseDef[]) ?? [];
+          const sPhases = (args["phases"] as PhaseDefInput[]) ?? [];
           // Carry eval_slugs through compose → live map → persisted file so a
           // declared eval reaches the runtime (preserved from main).
           const sEvalSlugs = Array.isArray(args["eval_slugs"]) ? (args["eval_slugs"] as string[]) : undefined;
@@ -453,7 +453,7 @@ export async function dispatchTool(slug: string, args: Record<string, unknown>, 
             slug: String(args["standard_slug"] ?? "pipeline-check"),
             domain: String(args["domain"] ?? ""),
             agents: ((args["agents"] as Agent[]) ?? []),
-            phases: ((args["phases"] as PhaseDef[]) ?? []),
+            phases: ((args["phases"] as PhaseDefInput[]) ?? []),
           });
           return { ok: true, requires_approval: approval, data: { valid: true, errors: [], illegal_progressions: [], unsatisfied_inputs: [] } };
         } catch (e) {

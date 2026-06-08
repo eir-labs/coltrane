@@ -34,6 +34,12 @@ export interface OutputRecord {
   domain: string;
   gig_id: string;
   agent_slug: string;
+  // The chair role within the standard that produced this output. Populated by
+  // the runtime when the writer is a chair (the normal path); legacy hand-rolled
+  // writes that don't supply a role leave it undefined. Downstream chairs use it
+  // to address each upstream's output individually (per-role addressability), so
+  // that N parallel upstreams binding the SAME agent are still distinguishable.
+  from_role?: string | undefined;
   phase?: string | undefined;
   primitive: string;
   data: Record<string, unknown>; // validated against core + domain schema at write
@@ -53,6 +59,7 @@ export interface OutputWrite {
   domain: string;
   gig_id: string;
   agent_slug: string;
+  from_role?: string | undefined;
   phase?: string | undefined;
   primitive: string;
   data: Record<string, unknown>;
@@ -228,6 +235,7 @@ export function createOutputStore(registry: Registry, options?: OutputStoreOptio
         domain: o.domain,
         gig_id: o.gig_id,
         agent_slug: o.agent_slug,
+        from_role: o.from_role,
         phase: o.phase,
         primitive: o.primitive,
         data: o.data,

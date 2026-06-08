@@ -402,12 +402,16 @@ export async function runGig(
     }
 
     // Write the typed output (outputs.write validates data vs the domain schema).
+    // Tag with `from_role` so downstream chairs (especially the fan-in shape
+    // where N parallel upstreams share the same agent) can address each
+    // upstream's output by source role, not just by agent_slug.
     const rec = deps.outputs.write({
       core_type: PRIMITIVE_OUTPUT_TYPE[primitive],
       domain_type,
       domain: agent.domain ?? standard.domain,
       gig_id,
       agent_slug: agent.slug,
+      from_role: chair.role,
       phase: phaseName,
       primitive,
       data,

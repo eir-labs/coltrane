@@ -619,24 +619,199 @@ describe("chairs — runtime dispatch", () => {
   });
 
   // fan-in cardinality — N upstream chairs all produce same type, 1 downstream consumes all N
-  it.todo(
-    "fan-in completeness: a chair with depends_on of N upstream chairs starts only after ALL N produce their output_contract",
-  );
-  it.todo(
-    "fan-in: if any 1 of N upstream chairs fails, the downstream chair does not run and the phase aborts naming the failing upstream",
-  );
-  it.todo(
-    "fan-in: downstream chair receives outputs from all N upstream chairs in its input scope (not just the first to complete)",
-  );
-  it.todo(
-    "fan-in: ordering of N parallel upstream chairs is not observable downstream (commutative; consumer treats them as a set)",
-  );
-  it.todo(
-    "fan-in: each upstream chair's output is distinguishable downstream by source role (consumer can address them individually)",
-  );
-  it.todo(
-    "fan-in: partial completion is never visible — the downstream chair never sees fewer than N upstream outputs",
-  );
+
+  // Shared fan-in fixture: 3 upstream chairs (u1, u2, u3) each binding agent
+  // `up` (produces Interpretation), and 1 downstream chair `sink` binding
+  // agent `down` (consumes Interpretation, produces Plan) with
+  // depends_on=[u1,u2,u3]. Built per-test so each gets a fresh standard.
+  function fanInStandard(downInputContract: string[] = ["Interpretation"]) {
+    const up = agent("up", { input_types: [], output_types: ["Interpretation"] });
+    const down = agent("down", {
+      input_types: ["Interpretation"],
+      output_types: ["Plan"],
+    });
+    return composeStandard({
+      slug: "fan-in",
+      domain: "test",
+      agents: [up, down],
+      phases: [
+        {
+          name: "p1",
+          chairs: [
+            chair("u1", "up", { output_contract: ["Interpretation"] }),
+            chair("u2", "up", { output_contract: ["Interpretation"] }),
+            chair("u3", "up", { output_contract: ["Interpretation"] }),
+            chair("sink", "down", {
+              depends_on: ["u1", "u2", "u3"],
+              input_contract: downInputContract,
+              output_contract: ["Plan"],
+            }),
+          ],
+        } as PhaseDef,
+      ],
+    });
+  }
+
+  it("fan-in completeness: a chair with depends_on of N upstream chairs starts only after ALL N produce their output_contract", async () => {
+    // sink depends_on [u1,u2,u3]. We park 2 of 3 upstreams behind release
+    // gates and let the 3rd complete fast. sink must NOT begin until the
+    // last upstream resolves.
+    const std = fanInStandard();
+    let upEntered = 0;
+    let upCompleted = 0;
+    let sinkStarted = false;
+    let releaseLater: (() => void) | null = null;
+    const lateGate = new Promise<void>((r) => { releaseLater = r; });
+    const invoke: AgentInvoker = async ({ agent }) => {
+      if (agent.slug === "up") {
+        const myIdx = upEntered++;
+        // First two complete promptly; the third parks until externally released.
+        if (myIdx === 2) await lateGate;
+        upCompleted++;
+        return { value: `up-${myIdx}` };
+      }
+      sinkStarted = true;
+      return { value: "sink" };
+    };
+    const { outputs, ledger } = setup();
+    const gig = runGig(std, {}, { outputs, ledger, invoke });
+    // Let the two fast upstreams finish; sink must still be blocked.
+    await new Promise((r) => setTimeout(r, 30));
+    expect(sinkStarted).toBe(false);
+    expect(upCompleted).toBe(2);
+    // Release the last upstream; sink must now run.
+    releaseLater!();
+    const res = await gig;
+    expect(upCompleted).toBe(3);
+    expect(sinkStarted).toBe(true);
+    expect(res.outputs.length).toBe(4);
+  });
+
+  it("fan-in: if any 1 of N upstream chairs fails, the downstream chair does not run and the phase aborts naming the failing upstream", async () => {
+    const std = fanInStandard();
+    let sinkRan = false;
+    let upCalls = 0;
+    const invoke: AgentInvoker = ({ agent }) => {
+      if (agent.slug === "up") {
+        upCalls++;
+        // u2 throws (deterministic across the parallel batch).
+        if (upCalls === 2) throw new Error("upstream-explode");
+        return { value: `up-${upCalls}` };
+      }
+      sinkRan = true;
+      return { value: "sink" };
+    };
+    const { outputs, ledger } = setup();
+    const err = await runGig(std, {}, { outputs, ledger, invoke }).catch((e) => e);
+    expect(err).toBeInstanceOf(RuntimeError);
+    expect(String(err.message)).toMatch(/u1|u2|u3/);
+    expect(String(err.message)).toMatch(/upstream-explode/);
+    expect(sinkRan).toBe(false);
+  });
+
+  it("fan-in: downstream chair receives outputs from all N upstream chairs in its input scope (not just the first to complete)", async () => {
+    const std = fanInStandard();
+    let sinkInputCount = -1;
+    const seenValues: string[] = [];
+    let upCalls = 0;
+    const invoke: AgentInvoker = ({ agent, inputs }) => {
+      if (agent.slug === "up") {
+        upCalls++;
+        return { value: `up-${upCalls}` };
+      }
+      sinkInputCount = inputs.length;
+      for (const i of inputs) seenValues.push(i.data["value"] as string);
+      return { value: "sink" };
+    };
+    const { outputs, ledger } = setup();
+    await runGig(std, {}, { outputs, ledger, invoke });
+    expect(sinkInputCount).toBe(3);
+    expect(new Set(seenValues)).toEqual(new Set(["up-1", "up-2", "up-3"]));
+  });
+
+  it("fan-in: ordering of N parallel upstream chairs is not observable downstream (commutative; consumer treats them as a set)", async () => {
+    // Run twice: once with upstream sleep durations 30/10/20 (so completion
+    // order is u2, u3, u1); once with 5/25/15 (so order is u1, u3, u2).
+    // The downstream chair must see the SAME ordered tuple of (from_role,
+    // value) both times — declared depends_on order, not completion order.
+    async function runWithSleeps(sleeps: [number, number, number]) {
+      const std = fanInStandard();
+      let upCalls = 0;
+      let sinkSeen: Array<{ from_role: string | undefined; value: unknown }> = [];
+      const invoke: AgentInvoker = async ({ agent, inputs }) => {
+        if (agent.slug === "up") {
+          const myIdx = upCalls++;
+          await new Promise((r) => setTimeout(r, sleeps[myIdx]!));
+          return { value: `value-${myIdx}` };
+        }
+        sinkSeen = inputs.map((i) => ({
+          from_role: i.from_role,
+          value: i.data["value"],
+        }));
+        return { value: "sink" };
+      };
+      const { outputs, ledger } = setup();
+      await runGig(std, {}, { outputs, ledger, invoke });
+      return sinkSeen;
+    }
+    const runA = await runWithSleeps([30, 10, 20]);
+    const runB = await runWithSleeps([5, 25, 15]);
+    // Both runs must yield the SAME declared order: u1 first, u2 second, u3 third.
+    expect(runA.map((s) => s.from_role)).toEqual(["u1", "u2", "u3"]);
+    expect(runB.map((s) => s.from_role)).toEqual(["u1", "u2", "u3"]);
+  });
+
+  it("fan-in: each upstream chair's output is distinguishable downstream by source role (consumer can address them individually)", async () => {
+    // sink must be able to filter its inputs by from_role to pick out
+    // specifically u2's output, even though u1/u2/u3 all bind the same agent.
+    const std = fanInStandard();
+    let upCalls = 0;
+    let foundU2Value: unknown = undefined;
+    let byRole: Record<string, unknown> = {};
+    const invoke: AgentInvoker = ({ agent, inputs }) => {
+      if (agent.slug === "up") {
+        upCalls++;
+        return { value: `from-up-call-${upCalls}` };
+      }
+      // Per-role addressability: index inputs by from_role.
+      for (const i of inputs) {
+        if (i.from_role) byRole[i.from_role] = i.data["value"];
+      }
+      foundU2Value = byRole["u2"];
+      return { value: "sink" };
+    };
+    const { outputs, ledger } = setup();
+    await runGig(std, {}, { outputs, ledger, invoke });
+    // Each upstream output must carry its from_role tag.
+    expect(Object.keys(byRole).sort()).toEqual(["u1", "u2", "u3"]);
+    // And the values must be distinct (not collapsed) — N parallel upstreams
+    // binding the same agent must each have addressable identity downstream.
+    const distinct = new Set(Object.values(byRole));
+    expect(distinct.size).toBe(3);
+    expect(foundU2Value).toBeDefined();
+  });
+
+  it("fan-in: partial completion is never visible — the downstream chair never sees fewer than N upstream outputs", async () => {
+    // Sample sink's inputs.length every time it would conceivably run. The
+    // runtime contract: sink is invoked exactly once, with exactly N inputs.
+    // It is never invoked with 0, 1, or 2 inputs as a partial-progress snapshot.
+    const std = fanInStandard();
+    const sinkInvocations: number[] = [];
+    let upCalls = 0;
+    const invoke: AgentInvoker = async ({ agent, inputs }) => {
+      if (agent.slug === "up") {
+        upCalls++;
+        // Stagger so partial visibility would be a real bug if it existed.
+        await new Promise((r) => setTimeout(r, upCalls * 5));
+        return { value: `up-${upCalls}` };
+      }
+      sinkInvocations.push(inputs.length);
+      return { value: "sink" };
+    };
+    const { outputs, ledger } = setup();
+    await runGig(std, {}, { outputs, ledger, invoke });
+    expect(sinkInvocations).toEqual([3]);
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

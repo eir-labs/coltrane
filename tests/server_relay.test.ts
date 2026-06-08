@@ -1,0 +1,128 @@
+// Unit tests for the relay's JSON-RPC message routing.
+//
+// The relay's correctness reduces to: which inbound messages does it
+// intercept (server_restart), which outbound responses does it augment
+// (tools/list), and what does it forward verbatim (everything else). The
+// child-process spawn/kill loop is harder to test in-process; that's
+// covered by the e2e harness when the relay ships to a real client.
+
+import { describe, it, expect } from "vitest";
+import {
+  matchServerRestart,
+  isToolsListResponse,
+  augmentToolsList,
+  buildRestartResponse,
+} from "../src/server_relay.js";
+
+describe("server_relay — server_restart interception", () => {
+  it("matches a tools/call for server_restart and returns its id", () => {
+    const msg = {
+      jsonrpc: "2.0" as const,
+      id: 42,
+      method: "tools/call",
+      params: { name: "server_restart", arguments: {} },
+    };
+    expect(matchServerRestart(msg)).toBe(42);
+  });
+
+  it("ignores tools/call for other tools", () => {
+    const msg = {
+      jsonrpc: "2.0" as const,
+      id: 7,
+      method: "tools/call",
+      params: { name: "gig_dispatch", arguments: {} },
+    };
+    expect(matchServerRestart(msg)).toBeUndefined();
+  });
+
+  it("ignores non-tools/call methods", () => {
+    const msg = {
+      jsonrpc: "2.0" as const,
+      id: 1,
+      method: "tools/list",
+      params: {},
+    };
+    expect(matchServerRestart(msg)).toBeUndefined();
+  });
+
+  it("treats null id as a valid match (notifications-shaped requests)", () => {
+    const msg = {
+      jsonrpc: "2.0" as const,
+      id: null,
+      method: "tools/call",
+      params: { name: "server_restart" },
+    };
+    expect(matchServerRestart(msg)).toBe(null);
+  });
+});
+
+describe("server_relay — tools/list augmentation", () => {
+  it("detects a tools/list response by its result.tools shape", () => {
+    const msg = {
+      jsonrpc: "2.0" as const,
+      id: 1,
+      result: { tools: [{ name: "gig_dispatch" }] },
+    };
+    expect(isToolsListResponse(msg)).toBe(true);
+  });
+
+  it("rejects responses without a tools array", () => {
+    const msg = {
+      jsonrpc: "2.0" as const,
+      id: 1,
+      result: { ok: true },
+    };
+    expect(isToolsListResponse(msg)).toBe(false);
+  });
+
+  it("rejects requests (anything with a method)", () => {
+    const msg = {
+      jsonrpc: "2.0" as const,
+      id: 1,
+      method: "tools/list",
+      result: { tools: [] },
+    };
+    expect(isToolsListResponse(msg)).toBe(false);
+  });
+
+  it("appends server_restart to a tools/list response", () => {
+    const msg = {
+      jsonrpc: "2.0" as const,
+      id: 1,
+      result: { tools: [{ name: "gig_dispatch" }] },
+    };
+    augmentToolsList(msg);
+    const tools = (msg.result as { tools: { name: string }[] }).tools;
+    expect(tools.map((t) => t.name)).toContain("server_restart");
+    expect(tools).toHaveLength(2);
+  });
+
+  it("does not double-insert server_restart if the child already advertises it", () => {
+    const msg = {
+      jsonrpc: "2.0" as const,
+      id: 1,
+      result: { tools: [{ name: "server_restart" }, { name: "gig_dispatch" }] },
+    };
+    augmentToolsList(msg);
+    const tools = (msg.result as { tools: { name: string }[] }).tools;
+    expect(tools.filter((t) => t.name === "server_restart")).toHaveLength(1);
+  });
+});
+
+describe("server_relay — restart response shape", () => {
+  it("builds a JSON-RPC response carrying the original id", () => {
+    const resp = buildRestartResponse(99);
+    expect(resp).toMatchObject({
+      jsonrpc: "2.0",
+      id: 99,
+      result: {
+        content: [{ type: "text" }],
+      },
+    });
+  });
+
+  it("preserves null id (matches the client's notification-shaped id)", () => {
+    const resp = buildRestartResponse(null);
+    expect(resp.id).toBe(null);
+  });
+});

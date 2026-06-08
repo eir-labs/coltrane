@@ -126,3 +126,20 @@ describe("server_relay — restart response shape", () => {
     expect(resp.id).toBe(null);
   });
 });
+
+describe("server_restart — registry spec + server-side guard", () => {
+  it("server_restart is registered in MCP_TOOLS so tool_inspect sees it", async () => {
+    const { MCP_TOOLS } = await import("../src/mcp.js");
+    const spec = MCP_TOOLS.find((s) => s.slug === "server_restart");
+    expect(spec, "server_restart missing from MCP_TOOLS").toBeDefined();
+    expect(spec!.category).toBe("improve");
+  });
+
+  it("server-side handler errors loudly if the relay didn't intercept", async () => {
+    const { bootstrapServerDeps, dispatchTool } = await import("../src/server.js");
+    const deps = bootstrapServerDeps(".");
+    const result = await dispatchTool("server_restart", {}, deps);
+    expect(result.ok).toBe(false);
+    expect((result as { error: string }).error).toMatch(/relay/i);
+  });
+});

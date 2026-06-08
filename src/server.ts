@@ -614,6 +614,23 @@ export async function dispatchTool(slug: string, args: Record<string, unknown>, 
           },
         };
       }
+      case "server_restart": {
+        // PR #141 — the relay parent-process intercepts this call before it
+        // reaches the server child. If execution reaches this handler, the
+        // relay is misconfigured (typically: COLTRANE_SERVER_DIRECT=1 was
+        // set, bypassing the relay) and the conversation will lose its pipe
+        // if the server is killed.
+        //
+        // The registry spec exists for discoverability (tool_inspect,
+        // system_audit). This guard turns "silent miss" into "loud error"
+        // when the relay isn't catching.
+        return {
+          ok: false,
+          requires_approval: approval,
+          error:
+            "server_restart was not intercepted by the relay; the server child cannot restart itself in place. This usually means COLTRANE_SERVER_DIRECT=1 was set on the parent process, so the relay was skipped. Restart Claude Code without that env var (or use Rob's pre-relay workaround: `claude mcp remove coltrane -s local` → `claude mcp add coltrane node /path/to/dist/src/server_entry.js` → `/branch` → `claude -r <session-id>`). See docs/mcp_hot_reload.md.",
+        };
+      }
       case "health_check": {
         const targetSlug = String(args["slug"] ?? "");
         const targetKind = String(args["kind"] ?? args["entity_type"] ?? "");

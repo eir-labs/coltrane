@@ -53,6 +53,15 @@ export const MCP_TOOLS: readonly MCPToolDef[] = [
   // disk and updates the live deps in place (no MCP server restart needed).
   // Returns the diff vs the prior state, plus any load_errors from the new genome.
   { slug: "genome_reload",                 category: "improve", input_schema: obj({}), output_schema: obj({ reloaded: "boolean", changes: "object", load_errors: "array" }) },
+  // server_restart — Rob #N / PR #141. Picks up new server bytes after
+  // npm run build without ending the Claude Code conversation. This entry
+  // exists so coltrane's own introspection (tool_inspect, system_audit)
+  // sees the tool — but the server itself never executes it. The relay
+  // parent-process catches `tools/call server_restart` before it reaches
+  // the child server, kills + respawns the child, and replies. If the
+  // server-side handler below is ever reached, the relay is misconfigured
+  // (typically: COLTRANE_SERVER_DIRECT=1 was set, bypassing the relay).
+  { slug: "server_restart",                category: "improve", input_schema: obj({}), output_schema: obj({ restarted: "boolean", note: "string" }) },
   { slug: "system_audit",                  category: "improve", input_schema: obj({ scope: "string", check: "string" }), output_schema: obj({ findings: "array" }) },
   { slug: "proposal_create",               category: "improve", input_schema: obj({ change_type: "string", target: "string", changes: "object", reason: "string", evidence: "object" }), output_schema: obj({ proposal_id: "string", cascade_impact: "object" }) },
   { slug: "tool_propose",                  category: "improve", input_schema: obj({ slug: "string", type: "string", spec: "object", reason: "string" }), output_schema: obj({ proposal_id: "string" }) },

@@ -68,7 +68,7 @@ const invoke: AgentInvoker = ({ agent }) =>
 function wireDeps(): ServerDeps {
   const registry = createRegistry();
   registry.registerType(upstreamType);
-  // NOTE: downstreamType is INTENTIONALLY not pre-registered.
+  // NOTE: downstreamType is INTENTIONALLY not pre-declared.
   // It will be registered MID-GIG via the MCP tool, then consumed by the downstream agent.
   return {
     registry,

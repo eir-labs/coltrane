@@ -12,7 +12,7 @@
 // standard's prompt_templates and feeds them — SENSE first to normalize the
 // transcript, INTERPRET second to score the criteria. Returns a structured
 // verdict with per-criterion score + rationale + overall pass/fail at the
-// pre-registered threshold.
+// configured threshold.
 
 import { execFileSync } from "node:child_process";
 import { writeFileSync, unlinkSync, readFileSync } from "node:fs";

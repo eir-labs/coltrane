@@ -13,7 +13,7 @@
 // Honest about scope: this test is a fingerprint of TODAY's composer behavior. The 3-hop
 // cycle case (A→B→C→A) where composition lets it through is itself the adversarial signal —
 // we record both outcomes (rejected | accepted) so the test passes regardless, but logs the
-// gap. That is the apoha: name what the detector does NOT cover.
+// gap. That is the scope boundary: name what the detector does NOT cover.
 //
 // Pattern lifted from coltrane_lifecycle.spec.ts (sequential it() blocks, shared tempdir
 // is unnecessary here — these are pure composition+runtime calls, no genome on disk).
@@ -154,7 +154,7 @@ describe("standard with cycle (adversarial unique-unknown)", () => {
     }
 
     // Honest gap: composer accepted the 3-cycle (2-hop pairwise check misses A→B→C→A).
-    // This is a known apoha of today's detector. We now verify the runtime does not
+    // This is a known scope-gap of today's detector. We now verify the runtime does not
     // infinite-loop on the accepted-but-cyclic standard.
     expect(composed).not.toBeNull();
 

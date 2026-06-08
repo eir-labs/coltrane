@@ -1,17 +1,12 @@
-// Fix Rob's #134 — agent.domain=null|undefined should be compatible with any
-// standard's domain, not rejected.
+// agent.domain=null|undefined should be compatible with any standard's
+// domain, not rejected. Issue #134.
 //
-// Pre-reg
-// =======
-// predict: composeStandard accepts an agent whose .domain is null OR undefined,
-//          treating it as domain-agnostic. The only reject case is when the
-//          agent declares an EXPLICIT domain that conflicts with the standard's.
-// test:    this file
-// kill:    if the loose-null check fires on a legitimately conflicting domain,
-//          we break the existing strictness gate
-// apoha:   NOT removing the strictness — explicit conflicts still throw. NOT
-//          touching defineAgent's default-to-null normalization.
-// verdict: green expected post-fix
+// Intent: composeStandard accepts an agent whose .domain is null OR undefined,
+// treating it as domain-agnostic. The only reject case is when the agent
+// declares an EXPLICIT domain that conflicts with the standard's.
+//
+// Non-goals: not removing the strictness — explicit conflicts still throw.
+// Not touching defineAgent's default-to-null normalization.
 
 import { describe, it, expect } from "vitest";
 import { defineAgent, composeStandard, CompositionError, type Agent } from "../src/composition.js";

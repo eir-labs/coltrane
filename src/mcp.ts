@@ -35,12 +35,6 @@ export const MCP_TOOLS: readonly MCPToolDef[] = [
   { slug: "agent_evolve",                  category: "build", input_schema: obj({ slug: "string", changes: "object", reason: "string", evidence: "object" }), output_schema: obj({ new_version: "number", cascade_check: "object" }) },
   { slug: "standard_compose",              category: "build", input_schema: obj({ slug: "string", domain: "string", agents: "array", phases: "array", eval_slugs: "array", depth_overrides: "object", composition_schema: "object", credits_formula: "string" }), output_schema: obj({ standard_id: "string", validation_result: "object" }) },
   { slug: "standard_simulate",             category: "build", input_schema: obj({ standard_slug: "string", mock_input: "object", depth: "string" }), output_schema: obj({ phases: "array", estimated_cost: "number", estimated_duration: "number" }) },
-  // prereg_seal — the discover→define seam mechanism. Takes a draft pre-reg's
-  // sealed triplet (predict, kill, apoha), validates minimum content, computes
-  // sha256_pre_verdict over the canonical-JSON, writes an append-only ledger
-  // entry, and returns the SEALED state. Engine: src/pre_reg.ts.
-  { slug: "prereg_seal",                   category: "build", input_schema: obj({ pre_reg_id: "string", kind: "string", sealed: "object", sealed_by: "string" }), output_schema: obj({ pre_reg_id: "string", pre_reg_hash: "string", sealed_at: "string", kind: "string", sealed_by: "string" }) },
-
   { slug: "gig_dispatch",                  category: "run", input_schema: obj({ standard_slug: "string", input: "object", depth: "string", company_id: "string" }), output_schema: obj({ gig_id: "string", manifest: "object" }) },
   { slug: "gig_monitor",                   category: "run", input_schema: obj({ gig_id: "string" }), output_schema: obj({ status: "string", phases_complete: "number", current_agent: "string", outputs_so_far: "array" }) },
   { slug: "gig_abort",                     category: "run", input_schema: obj({ gig_id: "string", reason: "string" }), output_schema: obj({ aborted: "boolean", cleanup_result: "object" }) },
@@ -81,8 +75,6 @@ export const MCP_TOOLS: readonly MCPToolDef[] = [
   { slug: "skill_promote",                 category: "build", input_schema: obj({ slug: "string", status: "string" }), output_schema: obj({ slug: "string", status: "string", promoted: "boolean" }) },
 
   { slug: "charter_suggest_update", category: "manage_context", input_schema: obj({ company_id: "string", field: "string", current_value: "string", suggested_value: "string", evidence: "object" }), output_schema: obj({ proposal_id: "string" }) },
-
-  { slug: "lever_tensor_compute_cover", category: "build", input_schema: obj({ tasks: "array", k_object_dimension: "number", failure_library: "object" }), output_schema: obj({ K_minimal: "number", cover_complete: "boolean", umbra_remaining: "array", permutation_assignment: "array", transverse_score: "number" }) },
 ];
 
 // Lifecycle promotion order — forward-only. agent/standard share the same chain;

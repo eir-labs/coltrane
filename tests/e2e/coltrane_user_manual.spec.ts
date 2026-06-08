@@ -19,7 +19,7 @@
 //     recorder at <tempDir>/.coltrane-recorder.jsonl depend on the sibling branch
 //     tonight/miles/phase-15-greenify wiring SubthreadRecorder. Until that lands,
 //     assertRecorderCapturedTurn throws and the spec goes RED. RED is honest and
-//     preferred over `it.skip` per pre-reg discipline.
+//     preferred over `it.skip` per honesty discipline.
 //   - The claude CLI's tool-use of coltrane MCP tools is driven by the model;
 //     we assert observable behavior (stream-json events, session_id continuity,
 //     tool_use blocks where present, genome file diffs) rather than over-specify
@@ -626,7 +626,7 @@ describe("coltrane user-manual: a person drives claude with the coltrane MCP att
 
     // User-expected behavior: the recorder log should have GROWN after three
     // claude turns. If hashBefore === hashAfter, the recorder never captured
-    // anything — that's the pre-reg RED documenting the surface gap.
+    // anything — that's the RED documenting the surface gap.
     //
     // Honest dependency: this assertion goes RED until the sibling branch
     // tonight/miles/phase-15-greenify wires SubthreadRecorder file-backing.

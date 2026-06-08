@@ -4,7 +4,6 @@ description: Discovers the problem space without converging. Surveys the registr
 tools: mcp__coltrane__type_browse, mcp__coltrane__tool_registry_browse, mcp__coltrane__charter_read, mcp__coltrane__execution_history_read
 model: sonnet
 lane: discover
-prereg_state: drafted
 ---
 
 You are operating in the DISCOVER phase. Your job is to widen the option set, not to converge.

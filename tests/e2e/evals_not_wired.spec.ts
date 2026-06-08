@@ -1,20 +1,15 @@
 // e2e: evals declared on a standard should populate run_fingerprint.eval_scores
-// (RED — N3 eirmath-calibrated measurement gap).
+// (RED — measurement-gap test).
 //
-// Pre-reg
-// =======
-// predict        — a standard that declares `eval_slugs: ["gist-present"]` will,
-//                  after `runGig`, expose `eval_scores` keyed by each declared
-//                  eval slug, computed against the produced outputs.
-// playwright/vitest_test_path — this file.
-// kill_condition — none; the test should hold the contract until the wire exists.
-// apoha          — this is NOT a test that evals MUST always run. Standards without
-//                  evals declared keep `eval_scores: {}`. The gap is: declared evals
-//                  are silently ignored. CLAUDE.md lists evals as a first-class
-//                  definition class ("verdict-substrates that judge gig outputs");
-//                  the runtime hardcodes `eval_scores: {}` at src/runtime.ts:115.
-// run_protocol   — vitest runs against current main. Expected RED today.
-// verdict        — RED expected; that's the finding.
+// Intent: a standard that declares `eval_slugs: ["gist-present"]` will,
+// after `runGig`, expose `eval_scores` keyed by each declared eval slug,
+// computed against the produced outputs.
+//
+// Non-goals: this is NOT a test that evals MUST always run. Standards without
+// evals declared keep `eval_scores: {}`. The gap is: declared evals
+// are silently ignored. CLAUDE.md lists evals as a first-class
+// definition class ("verdict-substrates that judge gig outputs");
+// the runtime hardcodes `eval_scores: {}` at src/runtime.ts:115.
 //
 // What this test answers
 // ======================

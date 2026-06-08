@@ -38,12 +38,12 @@ you yet. Two ways to start —
    accept or reject. Which way?"
 
 For (2): the repo survey is **`seed-from-local-repos-v0`**. The chat-log synthesis — reading
-`~/.claude/projects/*.jsonl` and clustering by voice / lane / repo — is **`synthesis-walk-v0`**
-(`source-walker → voice-clusterer → ratchet-extractor → synthesis-writer`). Conduct whichever
-is present (conductor mode: this thread walks the phases, never a hand-rolled scan); the
-chat-log walk is the real magic, so lead with it when it's available. Steps 2–5 below are the
-repo-survey mechanism. Either way, end by sealing `.coltrane/tuned.json` (Step 5) and
-appending what you learned to this file (Step 4).
+`~/.claude/projects/*.jsonl` and clustering by author / lane / repo — is **`synthesis-walk-v0`**
+(`source-walker → event-clusterer → synthesis-writer`). Conduct whichever is present
+(conductor mode: this thread walks the phases, never a hand-rolled scan); the chat-log walk
+is the real magic, so lead with it when it's available. Steps 2–5 below are the repo-survey
+mechanism. Either way, end by writing `.coltrane/tuned.json` (Step 5) and appending what
+you learned to this file (Step 4).
 
 **Step 2 — ask permission to scan adjacent repos.** (The "tune it to your work" branch.)
 
@@ -69,12 +69,12 @@ First, read every existing file under `agents/`, `standards/`, `skills/`, `core_
 
 For example:
 - a research scientist might get an EDIT to `code-reviewer` (`tools` narrowed,
-  `predict` re-pointed at LaTeX/Jupyter) plus NEW `literature-scout` + `claim-bounder`
-- a backend engineer might get an EDIT to `code-reviewer` (predict re-pointed
+  scope re-pointed at LaTeX/Jupyter) plus NEW `literature-scout` + `claim-bounder`
+- a backend engineer might get an EDIT to `code-reviewer` (scope re-pointed
   at their language) plus NEW `migration-planner` + `incident-responder`
 
 For each proposal, show: the file path, whether it's an edit or new, and a one-line
-`predict`. Ask which they want applied. Apply only the ones they say yes to.
+scope description. Ask which they want applied. Apply only the ones they say yes to.
 
 Never silently overwrite. The set grows; it does not get replaced.
 
@@ -257,35 +257,21 @@ baseline behavior is intact.
 
 ---
 
-## Pre-registration discipline — coltrane-oss adoption
+## Change discipline
 
-Every meaningful change ships with these fields, **sealed before the work starts**:
+Every meaningful change ships with these fields, **stated before the work starts**:
 
 | field | what |
 |---|---|
-| `predict` | what will ship |
-| `playwright_test_path` (or `vitest_test_path`) | the test that proves the predict, RED-first |
-| `kill_condition` | when stop |
-| `apoha` | what this is NOT |
+| `scope` | what will ship |
+| `playwright_test_path` (or `vitest_test_path`) | the test that proves the scope, RED-first |
+| `stop_condition` | when to stop |
+| `non_goals` | what this change is NOT |
 | `run_protocol` | how the work runs |
-| `verdict` | RIPENED · RIPENED-DIFFERENTLY · PARTLY-RIPENED · NOT-RIPENED |
-
-Sealing moment = PR ready-for-review. `sha256_pre_verdict` computed over the canonical
-pre-reg fields locks predict + kill + apoha + test from mutating after seal.
+| `outcome` | completed · partial · refined · not-completed |
 
 Test must land RED before code. Code makes it green. Hollow-green (test passes for the
 wrong reason) is the failure mode the discipline closes.
-
----
-
-## Verdict vocabulary
-
-- **RIPENED** — predict held; kill didn't fire; test green
-- **RIPENED-DIFFERENTLY** — predict held in shape but mutated in execution; tell the truth
-- **PARTLY-RIPENED** — partial signal; kept what came; named what didn't
-- **NOT-RIPENED** — kill fired or predict missed; the work observed itself
-
-Never use FAIL. Never use PASS without naming what specifically held.
 
 ---
 

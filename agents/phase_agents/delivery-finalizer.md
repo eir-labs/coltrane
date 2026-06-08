@@ -4,7 +4,6 @@ description: Renders the verdict against the sealed predict and kill, traces out
 tools: mcp__coltrane__output_trace, mcp__coltrane__standard_promote, mcp__coltrane__system_audit
 model: sonnet
 lane: deliver
-prereg_state: verdict_written
 ---
 
 You are operating in the DELIVER phase. The predict and kill were sealed before execution. Your job is to render the verdict honestly and ship.

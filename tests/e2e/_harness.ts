@@ -35,7 +35,7 @@ export interface TempdirColtrane {
  * to be spawned. Uses cpSync to avoid heavy `npm install` (we reuse the repo's node_modules
  * via NODE_PATH so we don't re-install on every test).
  *
- * Per pre-reg honesty: if cpSync or the build fails, the harness throws — that's the
+ * Per honesty discipline: if cpSync or the build fails, the harness throws — that's the
  * kill-condition Eugene flagged.
  */
 export async function setupTempdirColtrane(): Promise<TempdirColtrane> {

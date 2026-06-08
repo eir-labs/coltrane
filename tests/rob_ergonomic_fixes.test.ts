@@ -1,17 +1,14 @@
-// Rob's three independent ergonomic fixes — #131, #133, #132.
+// Three independent ergonomic fixes — issues #131, #133, #132.
 //
 // Three separate verify-gates in one file. Each test mirrors its issue body's
-// example: the exact shape Rob's client sent that the server should now accept.
+// example: the exact shape the client sent that the server should now accept.
 //
-// Pre-reg
-// =======
 // #131 — type_register normalizes schema-without-properties wrapper
 // #133 — output_write accepts no domain_type
 // #132 — standard_compose resolves agent slugs from the genome
-// test:    this file
-// apoha:   NOT removing strictness on the well-formed path; only widening the
-//          accepted input shapes that Rob hit when his client sent the obvious
-//          (but unwrapped) form.
+//
+// Non-goals: not removing strictness on the well-formed path; only widening the
+// accepted input shapes the client hit when sending the obvious (but unwrapped) form.
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";

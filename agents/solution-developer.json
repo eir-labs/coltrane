@@ -13,5 +13,5 @@
   "lane": "develop",
   "model": "sonnet",
   "prompt_file": "agents/phase_agents/solution-developer.md",
-  "description": "Generates the files under the sealed charter. Writes .coltrane/agents/, .coltrane/standards/, .coltrane/skills/, .coltrane/types/, .claude/, CLAUDE.md, tests/preseed/, README.md, the project's first scaffold-prereg. Sealed-fields are frozen; only appendable post-seal."
+  "description": "Generates the project files from the charter. Writes .coltrane/agents/, .coltrane/standards/, .coltrane/skills/, .coltrane/types/, .claude/, CLAUDE.md, tests/preseed/, README.md, and an initial scaffold. Charter fields define scope; only appendable adjustments after define."
 }

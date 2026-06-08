@@ -82,8 +82,7 @@
           ]
         }
       ],
-      "intent": "Produce the final FILEABLE / REFINE-FIRST / NOT-FILEABLE verdict with named axis of refinement when needed. When FILEABLE, also produce a provisional-draft skeleton. Outputs: triage-verdict (always) + provisional-draft (FILEABLE only).",
-      "ripens_pre_reg": true
+      "intent": "Produce the final FILEABLE / REFINE-FIRST / NOT-FILEABLE verdict with named axis of refinement when needed. When FILEABLE, also produce a provisional-draft skeleton. Outputs: triage-verdict (always) + provisional-draft (FILEABLE only)."
     }
   ],
   "input_types": [

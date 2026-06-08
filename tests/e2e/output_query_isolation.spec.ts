@@ -210,7 +210,7 @@ describe("output_query isolation across gigs (T7 follow-up)", () => {
     const idsA_after = new Set(rowsA_after.map((r) => r.id));
     expect(idsA_after.has(bFinding!.id)).toBe(false);
 
-    // the apoha statement: query(gig_A) is NOT { everything reachable via
+    // the scope statement: query(gig_A) is NOT { everything reachable via
     // derived_from from A } — it is exactly { rows whose gig_id === A }
     expect(rowsA_after.map((r) => r.gig_id)).not.toContain(gigB);
   });

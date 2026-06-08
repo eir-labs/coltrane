@@ -11,7 +11,7 @@
 // Driving it directly is a USAGE test, not a stub — the only thing this skips is
 // the JSON-RPC framing, which the final `transport boot` test exercises live.
 //
-// Pre-reg apoha: NO `it.skip`, NO stubbed coltrane tools, NO `true === true`
+// Non-goals: NO `it.skip`, NO stubbed coltrane tools, NO `true === true`
 // assertions. Every step verifies a coltrane-observable side effect — a file on
 // disk, a ledger entry, a returned identity hash, a typed error from the boundary.
 

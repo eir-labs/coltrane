@@ -23,7 +23,7 @@
 //
 //      The null-to-empty-string collapse means callers can't distinguish
 //      "I sent null" from "I sent ''" at the boundary, and a null-data payload
-//      becomes an empty object before validation sees it. That's an apoha:
+//      becomes an empty object before validation sees it. That's a scope-gap:
 //      the boundary erases adversarial intent before the validator can name it.
 //
 // Honest about scope: this is a fingerprint of TODAY's validator behavior +
@@ -141,7 +141,7 @@ describe("schema validation edge cases (adversarial — required-field-substance
   //    b) When the WHOLE `data` is null at the dispatchTool boundary, the
   //       coercion `data ?? {}` swallows the null → an empty object reaches
   //       validate → rejected for missing required, but the user's "I sent null"
-  //       signal is lost. Recorded as apoha: the boundary erases adversarial
+  //       signal is lost. Recorded as scope-gap: the boundary erases adversarial
   //       intent before the validator can name it.
   // ───────────────────────────────────────────────────────────────────────────
   it("required field set to null is REJECTED and error message names the failing field", async () => {

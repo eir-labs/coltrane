@@ -1,5 +1,5 @@
 // persona: platform team needing observability + reproducibility
-// pre-reg: failure-closed-on-version-bump test is expected RED if coltrane has no
+// note: failure-closed-on-version-bump test is expected RED if coltrane has no
 // API-version concept on resume yet — that's a publishable gap, not a bug.
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";

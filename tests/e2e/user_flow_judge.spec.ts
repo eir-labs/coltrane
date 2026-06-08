@@ -8,7 +8,7 @@
 //              intent. Judge should score <= 2/5 (overall_pass false) and
 //              rationale should mention drift.
 //   3. REPRO — same transcript scored twice. Criteria list identical; per-criterion
-//              scores within +/- 1.0 (the noise band the standard pre-registered).
+//              scores within +/- 1.0 (the noise band the standard configured).
 //
 // Honesty contracts:
 //   - The REPRO check may legitimately fail if the judge is too noisy. If it
@@ -205,7 +205,7 @@ describe("user_flow_judge — gap-1 LLM-judge for user-flow behavioral correctne
     // Criteria-list identity is non-negotiable.
     expect(Object.keys(v1.criteria).sort()).toEqual(Object.keys(v2.criteria).sort());
 
-    // Per-criterion: scores within the pre-registered noise band.
+    // Per-criterion: scores within the configured noise band.
     const noiseBand = standard.scoring?.noise_band_repro ?? 1.0;
     const drift: Record<string, number> = {};
     for (const c of USER_FLOW_CRITERIA) {

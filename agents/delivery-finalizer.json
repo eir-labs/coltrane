@@ -14,6 +14,5 @@
   "lane": "deliver",
   "model": "sonnet",
   "prompt_file": "agents/phase_agents/delivery-finalizer.md",
-  "description": "Ripens the birth pre-reg. git init + first commit + run preseed e2e specs + ripen verdict (RIPENED / PARTLY-RIPENED / RIPENED-DIFFERENTLY / KILL-FIRED / ABORTED) + chime welcome to the project owner.",
-  "ripens_pre_reg": true
+  "description": "Closes out the project bootstrap. git init + first commit + run preseed e2e specs + write the project's final outcome (completed / partial / refined / aborted) + announce the project to the owner."
 }

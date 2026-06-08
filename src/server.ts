@@ -29,7 +29,6 @@ import { proposeTypeChange, type DomainTypeDef } from "./type_versioning.js";
 import { proposeAgentChange, evolveProfile, type AgentProfile } from "./agent_profile.js";
 import { checkGrantTTL, validatePlanAgainstGrant, type AccessGrant, type PlanCheck } from "./access_grant.js";
 import { loadCharter, CharterError } from "./charter.js";
-import { sealPreReg, MemoryPreRegLedger, PreRegSealError, type PreRegLedger, type SealedFields } from "./pre_reg.js";
 import { readFileSync, existsSync } from "node:fs";
 import { randomUUID, createHash } from "node:crypto";
 import { join } from "node:path";
@@ -60,10 +59,6 @@ export interface ServerDeps {
   // the content-addressed file here + ledger-seal its identity. Without it, they compute
   // + return the identity but don't write (validation path).
   genome_dir?: string | undefined;
-  // Pre-reg ledger for the discover→define seam. Defaults to MemoryPreRegLedger
-  // at bootstrap; tests inject their own. The ledger is append-only + rejects
-  // double-seal of the same pre_reg_id.
-  pre_reg_ledger?: PreRegLedger | undefined;
   // Soft-fail load errors from the most recent loadGenome (Rob #129).
   // Surfaced by system_health + refreshed by genome_reload (Rob #130).
   load_errors?: LoadError[] | undefined;
@@ -401,37 +396,6 @@ export async function dispatchTool(slug: string, args: Record<string, unknown>, 
           return { ok: true, requires_approval: approval, data: { standard_id: std.slug, content_hash: sealed.content_hash, dependency_hash: sealed.dependency_hash, effective_hash: sealed.effective_hash, validation_result: { valid: true } } };
         } catch (e) {
           if (e instanceof CompositionError) return { ok: false, requires_approval: approval, error: e.message, data: { validation_result: { valid: false, error: e.message } } };
-          throw e;
-        }
-      }
-      case "prereg_seal": {
-        // The discover→define seam: validate the {predict, kill, apoha} triplet,
-        // compute sha256_pre_verdict, write the ledger entry, return SEALED state.
-        // Engine: src/pre_reg.ts. Ledger: deps.pre_reg_ledger (Memory by default).
-        const pre_reg_id = String(args["pre_reg_id"] ?? "");
-        const kind = String(args["kind"] ?? "");
-        const sealed_by = String(args["sealed_by"] ?? "");
-        const sealed = (args["sealed"] as SealedFields) ?? undefined;
-        if (!pre_reg_id) return { ok: false, requires_approval: approval, error: "prereg_seal requires pre_reg_id" };
-        if (!kind) return { ok: false, requires_approval: approval, error: "prereg_seal requires kind" };
-        if (!sealed_by) return { ok: false, requires_approval: approval, error: "prereg_seal requires sealed_by" };
-        if (!sealed) return { ok: false, requires_approval: approval, error: "prereg_seal requires sealed: {predict, kill, apoha}" };
-        const ledger = deps.pre_reg_ledger ?? new MemoryPreRegLedger();
-        try {
-          const { ledger_entry } = sealPreReg({ pre_reg_id, kind, sealed, sealed_by }, ledger);
-          return {
-            ok: true,
-            requires_approval: approval,
-            data: {
-              pre_reg_id: ledger_entry.pre_reg_id,
-              pre_reg_hash: ledger_entry.pre_reg_hash,
-              sealed_at: ledger_entry.sealed_at,
-              kind: ledger_entry.kind,
-              sealed_by: ledger_entry.sealed_by,
-            },
-          };
-        } catch (e) {
-          if (e instanceof PreRegSealError) return { ok: false, requires_approval: approval, error: e.message };
           throw e;
         }
       }

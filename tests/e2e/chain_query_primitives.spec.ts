@@ -129,7 +129,7 @@ describe("chain_query primitives (T7) — failure_rate + cycle_lineage", () => {
         agent_slug: voice,
         data: {
           criteria: {},
-          overall_verdict_shade: v.pass ? "full-soft-RIPENED" : "KILLED",
+          overall_verdict_shade: v.pass ? "pass" : "fail",
         },
       });
     }
@@ -141,7 +141,7 @@ describe("chain_query primitives (T7) — failure_rate + cycle_lineage", () => {
     expect(res.ok).toBe(true);
     const outs = (res.data as { outputs: Array<{ data: Record<string, unknown> }> }).outputs;
     const total = outs.length;
-    const failed = outs.filter((o) => o.data["overall_verdict_shade"] === "KILLED").length;
+    const failed = outs.filter((o) => o.data["overall_verdict_shade"] === "fail").length;
     const rate = total === 0 ? 0 : failed / total;
     expect(total).toBe(5);
     expect(failed).toBe(2);

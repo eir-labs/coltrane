@@ -42,7 +42,7 @@
       },
       "overall_verdict_shade": {
         "type": "string",
-        "enum": ["full-soft-RIPENED", "partly", "KILLED", "UNJUDGEABLE"]
+        "enum": ["pass", "mixed", "fail", "not-judgeable"]
       },
       "top_insight": { "type": "string" }
     }

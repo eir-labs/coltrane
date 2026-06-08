@@ -817,7 +817,7 @@ describe("chairs — runtime dispatch", () => {
 // ─────────────────────────────────────────────────────────────────────────────
 // Migration — loader-reject assertion (1 test).
 //
-// (removed) tests #1/#2/#4 — codemod is not a public OSS feature; cajal hand-migrated.
+// (removed) tests #1/#2/#4 — codemod is not a public OSS feature; migration was hand-applied.
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe("chairs — migration (loader reject)", () => {

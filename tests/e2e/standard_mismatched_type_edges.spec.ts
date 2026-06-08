@@ -5,7 +5,7 @@
 //   1) src/composition.ts composeStandard — the wired check is in lines 114-128:
 //      for every phase i > 0, each declared input_type must appear in the running
 //      set of upstream output_types, else CompositionError. This test fingerprints
-//      that gate AND probes its apoha:
+//      that gate AND probes its scope boundaries:
 //
 //        a) edge-mismatch at phase 2 → must reject (the positive contract)
 //        b) phase-0 mismatch (declared inputs that nobody produces, AND no upstream
@@ -28,7 +28,7 @@
 //      input-edge runtime check" addition trips this test for the right reason.
 //
 // Honest about scope: this is a fingerprint of TODAY's composer + runtime, with
-// the apohas named in the assertions. The gaps recorded here are the bug-bash
+// the scope boundaries named in the assertions. The gaps recorded here are the bug-bash
 // findings — when they get closed, the test gets flipped to assert rejection.
 //
 // Pattern lifted from standard_with_cycle.spec.ts (sequential it() blocks,

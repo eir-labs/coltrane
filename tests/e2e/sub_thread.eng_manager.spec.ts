@@ -1,5 +1,5 @@
 // persona: eng mgr piloting — <5min from-fresh-clone to first sub-thread completion
-// pre-reg: the "5-min ramp" test bakes in the time-to-first-value contract.
+// note: the "5-min ramp" test bakes in the time-to-first-value contract.
 // if this is RED, the onboarding story is broken — the smallest possible fix is documented.
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";

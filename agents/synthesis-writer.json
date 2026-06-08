@@ -6,5 +6,5 @@
   "domain": "introspection",
   "lane": "synthesize",
   "model": "sonnet",
-  "description": "Emits markdown (human) + structured JSON (training feed) syntheses. Both outputs cite the same source-event seal-chain."
+  "description": "Emits markdown (human) + structured JSON (training feed) syntheses from clustered events. Both outputs cite the same source-event references."
 }

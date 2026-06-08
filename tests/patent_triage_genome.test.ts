@@ -66,9 +66,12 @@ describe("patent-triage-v0 — composition wiring (structural)", () => {
   });
 
   it("standard has 4 phases in correct order", () => {
-    const phases = (standard as { phases: { name: string; agent: string }[] }).phases;
+    const phases = (
+      standard as { phases: { name: string; chairs: { agent_slug: string }[] }[] }
+    ).phases;
     expect(phases.map((p) => p.name)).toEqual(["cleave", "search-novelty", "refine-claim", "judge"]);
-    expect(phases.map((p) => p.agent)).toEqual([
+    // Post-chair migration: each phase carries a single chair holding the agent.
+    expect(phases.map((p) => p.chairs[0]!.agent_slug)).toEqual([
       "diamond-cutter",
       "novelty-searcher",
       "claim-rewriter",

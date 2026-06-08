@@ -8,11 +8,33 @@
   "phases": [
     {
       "name": "sense",
-      "agent": "user_flow_sensor"
+      "chairs": [
+        {
+          "role": "sense",
+          "agent_slug": "user_flow_sensor",
+          "depends_on": [],
+          "input_contract": [],
+          "output_contract": [
+            "user-flow-transcript"
+          ],
+          "required_skills": []
+        }
+      ]
     },
     {
       "name": "interpret",
-      "agent": "user_flow_judge"
+      "chairs": [
+        {
+          "role": "interpret",
+          "agent_slug": "user_flow_judge",
+          "depends_on": [],
+          "input_contract": [],
+          "output_contract": [
+            "user-flow-verdict"
+          ],
+          "required_skills": []
+        }
+      ]
     }
   ],
   "identity": {

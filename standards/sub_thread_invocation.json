@@ -8,11 +8,33 @@
   "phases": [
     {
       "name": "sense",
-      "agent": "sub_thread_trace_sensor"
+      "chairs": [
+        {
+          "role": "sense",
+          "agent_slug": "sub_thread_trace_sensor",
+          "depends_on": [],
+          "input_contract": [],
+          "output_contract": [
+            "parsed-conversation-trace"
+          ],
+          "required_skills": []
+        }
+      ]
     },
     {
       "name": "interpret",
-      "agent": "sub_thread_soft_judge"
+      "chairs": [
+        {
+          "role": "interpret",
+          "agent_slug": "sub_thread_soft_judge",
+          "depends_on": [],
+          "input_contract": [],
+          "output_contract": [
+            "soft-verdict"
+          ],
+          "required_skills": []
+        }
+      ]
     }
   ],
   "identity": {

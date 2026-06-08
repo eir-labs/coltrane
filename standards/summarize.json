@@ -8,11 +8,33 @@
   "phases": [
     {
       "name": "sense",
-      "agent": "sensor"
+      "chairs": [
+        {
+          "role": "sense",
+          "agent_slug": "sensor",
+          "depends_on": [],
+          "input_contract": [],
+          "output_contract": [
+            "raw-note"
+          ],
+          "required_skills": []
+        }
+      ]
     },
     {
       "name": "interpret",
-      "agent": "summarizer"
+      "chairs": [
+        {
+          "role": "interpret",
+          "agent_slug": "summarizer",
+          "depends_on": [],
+          "input_contract": [],
+          "output_contract": [
+            "summary"
+          ],
+          "required_skills": []
+        }
+      ]
     }
   ]
 }

@@ -37,23 +37,67 @@
   "phases": [
     {
       "name": "discover",
-      "agent": "domain-explorer",
+      "chairs": [
+        {
+          "role": "discover",
+          "agent_slug": "domain-explorer",
+          "depends_on": [],
+          "input_contract": [],
+          "output_contract": [
+            "repo-survey"
+          ],
+          "required_skills": []
+        }
+      ],
       "intent": "Diverge. Survey the problem space. Scan cwd for use-case hints (package.json / pyproject.toml / .git history / README). Ask the user 'what kind of project?' if not inferable. Output a domain-survey artifact naming the candidate use-cases + their tensions. Refuses premature convergence."
     },
     {
       "name": "define",
-      "agent": "problem-definer",
+      "chairs": [
+        {
+          "role": "define",
+          "agent_slug": "problem-definer",
+          "depends_on": [],
+          "input_contract": [],
+          "output_contract": [
+            "project-charter"
+          ],
+          "required_skills": []
+        }
+      ],
       "intent": "Converge. From the domain-survey, name the falsifiable: what is this project for, what would falsify it, what is it explicitly NOT. Emit a project-charter (kind=research-experiment | code-change | ops-readiness | idea-exploration | mixed). The SEAL fires at the discover→define seam — sha256_pre_verdict computed over {predict, kill, apoha}. This IS the project's birth pre-reg.",
       "seals_pre_reg": true
     },
     {
       "name": "develop",
-      "agent": "solution-developer",
+      "chairs": [
+        {
+          "role": "develop",
+          "agent_slug": "solution-developer",
+          "depends_on": [],
+          "input_contract": [],
+          "output_contract": [
+            "Artifact"
+          ],
+          "required_skills": []
+        }
+      ],
       "intent": "Generate the files. Under the sealed charter: write .coltrane/agents/, .coltrane/standards/, .coltrane/skills/, .coltrane/types/, .claude/agents/ (compiled view), .claude/commands/ (first-class slash commands), CLAUDE.md, tests/e2e/preseed/ specs, tonight/ substrate, README.md, and the project's first scaffold-prereg in the ledger. All sealed-fields of the charter are now FROZEN; appendable post-seal."
     },
     {
       "name": "deliver",
-      "agent": "delivery-finalizer",
+      "chairs": [
+        {
+          "role": "deliver",
+          "agent_slug": "delivery-finalizer",
+          "depends_on": [],
+          "input_contract": [],
+          "output_contract": [
+            "Verdict"
+          ],
+          "required_skills": []
+        }
+      ],
       "intent": "Ripen + verdict. git init the project, first commit, run the preseed e2e specs to confirm the fleet's behavior matches charter, ripen the birth pre-reg (RIPENED / PARTLY-RIPENED / RIPENED-DIFFERENTLY / KILL-FIRED / ABORTED), and chime a tight welcome to the project owner. The verdict is the deliverable.",
       "ripens_pre_reg": true
     }

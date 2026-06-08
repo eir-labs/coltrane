@@ -1,7 +1,7 @@
 {
   "slug": "synthesis-walk-v0",
   "domain": "introspection",
-  "description": "Walk recent activity across repos, Claude Code session transcripts, working dirs, and Drive — emit a sealed synthesis ledger (human-readable markdown + machine-readable structured JSON) that captures who contributed what, what ratcheted, what failed, and what's queued. The synthesis IS the training-data substrate.",
+  "description": "Walk recent activity across repos, Claude Code session transcripts, working dirs, and Drive — emit a synthesis ledger (human-readable markdown + machine-readable structured JSON) that captures who contributed what, what landed, what failed, and what's queued.",
   "execution_modes": {
     "conductor_mode": {
       "default": true,
@@ -20,70 +20,89 @@
   },
   "agent_slugs": [
     "source-walker",
-    "voice-clusterer",
-    "ratchet-extractor",
-    "synthesis-writer",
-    "sealer"
+    "event-clusterer",
+    "synthesis-writer"
   ],
   "phases": [
     {
       "name": "discover",
-      "agent": "source-walker",
-      "intent": "Diverge. Catalog all sources for the synthesis window: (a) git logs across registered repos, (b) Claude Code session jsonl under ~/.claude/projects/, (c) /tmp working dirs created in the window, (d) Drive doc index (My Drive recent + ots-stamped artifacts), (e) Slack channel history if permitted. Emit a sources_catalog raw-note. Refuses premature interpretation."
+      "chairs": [
+        {
+          "role": "discover",
+          "agent_slug": "source-walker",
+          "depends_on": [],
+          "input_contract": [],
+          "output_contract": [
+            "repo-survey"
+          ],
+          "required_skills": []
+        }
+      ],
+      "intent": "Diverge. Catalog all sources for the synthesis window: (a) git logs across registered repos, (b) Claude Code session jsonl under ~/.claude/projects/, (c) /tmp working dirs created in the window, (d) Drive doc index, (e) Slack channel history if permitted. Emit a sources_catalog. Refuses premature interpretation."
     },
     {
       "name": "cluster",
-      "agent": "voice-clusterer",
-      "intent": "Converge along voice axis. Group source-events by letterhead (cajal · miles · groove · subhuti · lighthouse · Eugene · external) + lane (substrate-architecture · math · audience-modeling · chain-keeping · etc) + repo. Emit a clustered repo-survey."
-    },
-    {
-      "name": "interpret",
-      "agent": "ratchet-extractor",
-      "intent": "Apply substrate math (per docs/sleep_substrate.md): eigenvector centrality on citation graph + TDA H0/H1 on event-graph + bleach (apoha) to surface ratchets. Emit ratchet-list interpretation + failure-shell carved-faces + cross-witness convergences.",
-      "seals_pre_reg": false
+      "chairs": [
+        {
+          "role": "cluster",
+          "agent_slug": "event-clusterer",
+          "depends_on": [],
+          "input_contract": [],
+          "output_contract": [
+            "Interpretation"
+          ],
+          "required_skills": []
+        }
+      ],
+      "intent": "Converge along author and lane axes. Group source-events by author, repo, and lane (architecture · math · review · etc). Emit a clustered view of the discover-phase catalog."
     },
     {
       "name": "synthesize",
-      "agent": "synthesis-writer",
-      "intent": "Generate the deliverables: (a) human-readable markdown with per-voice contribution + top ratchets + verdicts + PR mentions + load-bearing seals, (b) machine-readable structured JSON for training feed. The two outputs cite the same source-event seal-chain."
-    },
-    {
-      "name": "seal",
-      "agent": "sealer",
-      "intent": "Ripen + verdict. sha-stamp the synthesis · seal to .coltrane/syntheses/<window_id>/ · attribution_chain to source events · forward-sha to prior synthesis-walk. Verdict: RIPENED / PARTLY-RIPENED / RIPENED-DIFFERENTLY based on whether the window had cohesion or fragmented activity.",
-      "ripens_pre_reg": true
+      "chairs": [
+        {
+          "role": "synthesize",
+          "agent_slug": "synthesis-writer",
+          "depends_on": [],
+          "input_contract": [],
+          "output_contract": [
+            "Artifact"
+          ],
+          "required_skills": []
+        }
+      ],
+      "intent": "Generate the deliverables: (a) human-readable markdown with per-author contribution + landings + PR mentions, (b) machine-readable structured JSON for training feed. Both outputs cite the same source-event references."
     }
   ],
-  "input_types": ["raw-note"],
-  "output_types": ["Artifact", "Verdict"],
+  "input_types": [
+    "raw-note"
+  ],
+  "output_types": [
+    "Artifact"
+  ],
   "sources": {
     "git_repos": [
-      "eir/coltrane",
-      "eir/coltrane-oss",
-      "eir/operations",
-      "eir/slack_ant",
-      "eir/resonance_topology"
+      "registered repos (see repo_register)"
     ],
     "claude_threads": "~/.claude/projects/**/transcripts/*.jsonl",
-    "tmp_workspaces": "/tmp/coltrane_* /tmp/ops_*",
-    "drive_recent": "Google Drive My Drive recent files (with permission)",
+    "tmp_workspaces": "/tmp/coltrane_*",
+    "drive_recent": "Google Drive recent files (with permission)",
     "slack_channels": "configured per workspace; permission-gated"
   },
   "window_options": [
-    "24h", "48h", "7d", "30d", "custom <ISO-8601 start> <ISO-8601 end>"
+    "24h",
+    "48h",
+    "7d",
+    "30d",
+    "custom <ISO-8601 start> <ISO-8601 end>"
   ],
   "outputs": {
     "markdown_synthesis": ".coltrane/syntheses/<window_id>/synthesis.md",
-    "structured_synthesis": ".coltrane/syntheses/<window_id>/synthesis.json",
-    "audit_seal": ".coltrane/syntheses/<window_id>/seal.json (sha + attribution_chain + prev_synthesis_sha)"
+    "structured_synthesis": ".coltrane/syntheses/<window_id>/synthesis.json"
   },
   "rules": [
     "sources walked READ-ONLY · never edits source events",
     "Claude Code session jsonl + /tmp + Drive read with explicit user permission per session",
-    "attribution_chain MUST credit source event_ids · synthesis is not original content, it is a developed-negative",
-    "forward-sha chain across consecutive synthesis-walks (per subhuti chain-keeper PR #43)",
-    "synthesis output is read-only once sealed (per lighthouse INV2 / fix-bath)",
-    "RIPENED-DIFFERENTLY is a valid verdict; not all windows have coherent ratchets",
-    "no eirmath imports · OSS-discipline holds · non-defense apoha"
+    "citations MUST credit source event ids · synthesis is not original content, it is derived",
+    "synthesis output is read-only once written"
   ]
 }

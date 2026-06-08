@@ -142,8 +142,8 @@ describe("T14: genome hot-reload — agent_define mid-gig, next gig sees the new
         domain: "demo",
         agents: [sensorAgent, baselineSummarizer],
         phases: [
-          { name: "sense", agent: "sensor" },
-          { name: "interpret", agent: "baseline-summarizer" },
+          { name: "sense", chairs: [{ role: "sense", agent_slug: "sensor", depends_on: [], input_contract: [], output_contract: ["Interpretation"], required_skills: [] }] },
+          { name: "interpret", chairs: [{ role: "interpret", agent_slug: "baseline-summarizer", depends_on: [], input_contract: [], output_contract: ["Interpretation"], required_skills: [] }] },
         ],
       },
       deps,
@@ -201,8 +201,8 @@ describe("T14: genome hot-reload — agent_define mid-gig, next gig sees the new
         domain: "demo",
         agents: [sensorAgent, hotAgent],
         phases: [
-          { name: "sense", agent: "sensor" },
-          { name: "interpret", agent: "hot-summarizer" },
+          { name: "sense", chairs: [{ role: "sense", agent_slug: "sensor", depends_on: [], input_contract: [], output_contract: ["Interpretation"], required_skills: [] }] },
+          { name: "interpret", chairs: [{ role: "interpret", agent_slug: "hot-summarizer", depends_on: [], input_contract: [], output_contract: ["Interpretation"], required_skills: [] }] },
         ],
       },
       deps,
@@ -223,7 +223,7 @@ describe("T14: genome hot-reload — agent_define mid-gig, next gig sees the new
     const reloadedGenome = loadGenome(genomeDir);
     expect(reloadedGenome.agents.has("hot-summarizer")).toBe(true);
     expect(reloadedGenome.standards.has("hot-standard")).toBe(true);
-    expect(reloadedGenome.standards.get("hot-standard")!.phases.map((p) => p.agent)).toEqual([
+    expect(reloadedGenome.standards.get("hot-standard")!.phases.map((p) => p.chairs[0]!.agent_slug)).toEqual([
       "sensor",
       "hot-summarizer",
     ]);

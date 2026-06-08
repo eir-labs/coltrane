@@ -4,7 +4,7 @@
   "extends": "Verdict",
   "domain": "seeding",
   "status": "active",
-  "description": "The DELIVER-phase verdict of seed-from-local-repos-v0. Names which drafts the user accepted, which they rejected, which they refined — and what landed in the active fleet. Sealed at the develop→deliver seam.",
+  "description": "The DELIVER-phase verdict of seed-from-local-repos-v0. Names which drafts the user accepted, which they rejected, which they refined — and what landed in the active fleet.",
   "schema": {
     "type": "object",
     "properties": {
@@ -60,10 +60,10 @@
         }
       },
 
-      "ripeness":         { "type": "string", "enum": ["RIPENED", "PARTLY-RIPENED", "RIPENED-DIFFERENTLY", "KILL-FIRED", "ABORTED"] },
-      "next_step_hint":   { "type": "string", "description": "What to run next: typically `project-bootstrap-v0 --use-case <inferred>`." }
+      "outcome":          { "type": "string", "enum": ["completed", "partial", "refined", "aborted"] },
+      "next_step_hint":   { "type": "string", "description": "What to run next." }
     },
-    "required": ["input_refs", "repos_surveyed", "pass", "checks", "ripeness"]
+    "required": ["input_refs", "repos_surveyed", "pass", "checks", "outcome"]
   },
   "required_fields": []
 }

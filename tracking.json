@@ -71,10 +71,10 @@
       "remaining_NEEDS_RUNTIME": [],
       "e2e_and_store": [
         { "path": "tests/e2e_provenance_trace.test.ts", "owner": "eng", "assertions": 2, "status": "shipped", "note": "E6 — artifact→signal full trace through MCP surface; root signal has empty ancestor closure (trace excludes self, returns ancestors)." },
-        { "path": "tests/e2e_backward_compat.test.ts", "owner": "eng", "assertions": 2, "status": "shipped", "note": "E2 — 25 scans through gig_dispatch → findings view projects 25 correct v1 rows; codechange note excluded (apoha)." },
+        { "path": "tests/e2e_backward_compat.test.ts", "owner": "eng", "assertions": 2, "status": "shipped", "note": "E2 — 25 scans through gig_dispatch → findings view projects 25 correct v1 rows; codechange note excluded (out of scope)." },
         { "path": "tests/e2e_bug_fix_standard.test.ts", "owner": "eng", "assertions": 2, "status": "shipped", "note": "E3 — 5-phase find→triage→plan→fix→review runs in declared order, none skipped; 5-hop trace reaches root defect." },
         { "path": "tests/outputs.test.ts", "owner": "eng", "assertions": 8, "status": "shipped", "note": "O5 — §6 store direct: append/query, provenance walk, invalid-relation+dangling-endpoint reject, validation-at-write, findings view, cycle-safe trace." },
-        { "path": "tests/e2e_dynamic_type.test.ts", "owner": "eng", "assertions": 2, "status": "shipped", "note": "E4 — type registered MID-GIG via dispatchTool visible to downstream validation; bad-shape output blocked at write (apoha)." }
+        { "path": "tests/e2e_dynamic_type.test.ts", "owner": "eng", "assertions": 2, "status": "shipped", "note": "E4 — type registered MID-GIG via dispatchTool visible to downstream validation; bad-shape output blocked at write (boundary check)." }
       ],
       "remaining": ["§13 bootstrap sequence", "A6 recorder_audit (shipped — see §9)", "real Claude AgentInvoker live validation (the spawn seam — needs CLI+key, out of unit scope)"]
     },

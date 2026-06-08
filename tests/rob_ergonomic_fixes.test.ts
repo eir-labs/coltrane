@@ -1,17 +1,14 @@
-// Rob's three independent ergonomic fixes — #131, #133, #132.
+// Three independent ergonomic fixes — issues #131, #133, #132.
 //
 // Three separate verify-gates in one file. Each test mirrors its issue body's
-// example: the exact shape Rob's client sent that the server should now accept.
+// example: the exact shape the client sent that the server should now accept.
 //
-// Pre-reg
-// =======
 // #131 — type_register normalizes schema-without-properties wrapper
 // #133 — output_write accepts no domain_type
 // #132 — standard_compose resolves agent slugs from the genome
-// test:    this file
-// apoha:   NOT removing strictness on the well-formed path; only widening the
-//          accepted input shapes that Rob hit when his client sent the obvious
-//          (but unwrapped) form.
+//
+// Non-goals: not removing strictness on the well-formed path; only widening the
+// accepted input shapes the client hit when sending the obvious (but unwrapped) form.
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
@@ -179,8 +176,8 @@ describe("Rob #132 — standard_compose resolves agent slugs from the genome", (
       domain: "demo",
       agents: ["scout", "summarizer"], // plain strings, NOT full Agent objects
       phases: [
-        { name: "sense", agent: "scout" },
-        { name: "interpret", agent: "summarizer" },
+        { name: "sense", chairs: [{ role: "sense", agent_slug: "scout", depends_on: [], input_contract: [], output_contract: ["raw-note"], required_skills: [] }] },
+        { name: "interpret", chairs: [{ role: "interpret", agent_slug: "summarizer", depends_on: [], input_contract: [], output_contract: ["summary"], required_skills: [] }] },
       ],
     }, deps);
 
@@ -195,7 +192,7 @@ describe("Rob #132 — standard_compose resolves agent slugs from the genome", (
       agents: [
         { slug: "scout", primitives: ["SENSE"], input_types: [], output_types: ["raw-note"], domain: "demo" },
       ],
-      phases: [{ name: "sense", agent: "scout" }],
+      phases: [{ name: "sense", chairs: [{ role: "sense", agent_slug: "scout", depends_on: [], input_contract: [], output_contract: ["raw-note"], required_skills: [] }] }],
     }, deps);
 
     expect(res.ok).toBe(true);
@@ -207,7 +204,7 @@ describe("Rob #132 — standard_compose resolves agent slugs from the genome", (
       slug: "with-ghost",
       domain: "demo",
       agents: ["ghost-agent"],
-      phases: [{ name: "x", agent: "ghost-agent" }],
+      phases: [{ name: "x", chairs: [{ role: "x", agent_slug: "ghost-agent", depends_on: [], input_contract: [], output_contract: ["Interpretation"], required_skills: [] }] }],
     }, deps);
 
     expect(res.ok).toBe(false);

@@ -4,9 +4,9 @@ Pre-built conversation priors that condition a Claude session's behavioral defau
 
 Each `<lane>.jsonl` is a parentUuid-chained sequence of user/assistant turns in pure I/O form: user posts the artifact (diff, error, file), assistant responds in lane-shaped voice. No instructions, no recipes, no preamble — just demonstrated behavior across many cases.
 
-A consumer wanting to spawn a lane-shaped Steve:
-1. Copy `seeds/<lane>.jsonl` to `~/.claude/projects/<project-slug>/<steve-uuid>.jsonl`
-2. Spawn `claude --resume <steve-uuid>`
+To spawn a lane-shaped Claude session from a seed:
+1. Copy `seeds/<lane>.jsonl` to `~/.claude/projects/<project-slug>/<session-uuid>.jsonl`
+2. Spawn `claude --resume <session-uuid>`
 3. The session resumes with the demonstrated behavior loaded as recent context
 
 ## current lanes
@@ -17,7 +17,7 @@ A consumer wanting to spawn a lane-shaped Steve:
 
 - Density matters: longer + more diverse seed → broader behavioral coverage
 - Format purity matters: pure I/O > mixed prose (per N=20 empirical, see PR #115)
-- parentUuid integrity matters: append-without-chain-link fails silently (per cajal's adversarial probe)
+- parentUuid integrity matters: append-without-chain-link fails silently
 - Capability uplift unproven beyond UX-bypass artifacts; behavioral defaulting is the validated claim
 
 ## how a seed is used at runtime (planned)

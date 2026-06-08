@@ -85,8 +85,8 @@ const standardA: Standard = {
   domain: "eirtests",
   agents: [scoutA, analystA],
   phases: [
-    { name: "sense", agent: "scout-A" },
-    { name: "interpret", agent: "analyst-A" },
+    { name: "sense", chairs: [{ role: "sense", agent_slug: "scout-A", depends_on: [], input_contract: [], output_contract: ["page-model"], required_skills: [] }] },
+    { name: "interpret", chairs: [{ role: "interpret", agent_slug: "analyst-A", depends_on: [], input_contract: [], output_contract: ["finding"], required_skills: [] }] },
   ],
 };
 const standardB: Standard = {
@@ -94,8 +94,8 @@ const standardB: Standard = {
   domain: "eirtests",
   agents: [scoutB, analystB],
   phases: [
-    { name: "sense", agent: "scout-B" },
-    { name: "interpret", agent: "analyst-B" },
+    { name: "sense", chairs: [{ role: "sense", agent_slug: "scout-B", depends_on: [], input_contract: [], output_contract: ["page-model"], required_skills: [] }] },
+    { name: "interpret", chairs: [{ role: "interpret", agent_slug: "analyst-B", depends_on: [], input_contract: [], output_contract: ["finding"], required_skills: [] }] },
   ],
 };
 
@@ -210,7 +210,7 @@ describe("output_query isolation across gigs (T7 follow-up)", () => {
     const idsA_after = new Set(rowsA_after.map((r) => r.id));
     expect(idsA_after.has(bFinding!.id)).toBe(false);
 
-    // the apoha statement: query(gig_A) is NOT { everything reachable via
+    // the scope statement: query(gig_A) is NOT { everything reachable via
     // derived_from from A } — it is exactly { rows whose gig_id === A }
     expect(rowsA_after.map((r) => r.gig_id)).not.toContain(gigB);
   });

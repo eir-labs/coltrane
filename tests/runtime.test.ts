@@ -50,8 +50,8 @@ const standard: Standard = {
   domain: "eirtests",
   agents: [scout, analyst],
   phases: [
-    { name: "sense", agent: "site-scout" },
-    { name: "interpret", agent: "site-analyst" },
+    { name: "sense", chairs: [{ role: "sense", agent_slug: "site-scout", depends_on: [], input_contract: [], output_contract: ["page-model"], required_skills: [] }] },
+    { name: "interpret", chairs: [{ role: "interpret", agent_slug: "site-analyst", depends_on: [], input_contract: [], output_contract: ["finding"], required_skills: [] }] },
   ],
 };
 
@@ -137,7 +137,7 @@ describe("runtime: gig execution end-to-end", () => {
 
   it("rejects a phase referencing an unknown agent", async () => {
     const { outputs, ledger } = setup();
-    const broken: Standard = { ...standard, phases: [{ name: "x", agent: "ghost" }] };
+    const broken: Standard = { ...standard, phases: [{ name: "x", chairs: [{ role: "x", agent_slug: "ghost", depends_on: [], input_contract: [], output_contract: ["Interpretation"], required_skills: [] }] }] };
     await expect(runGig(broken, {}, { outputs, ledger, invoke: mockInvoke })).rejects.toThrow(RuntimeError);
   });
 

@@ -30,8 +30,8 @@ describe("P5 — standard composition with invalid agent mix", () => {
         domain: "eirtests",
         agents: [a_signal_out],
         phases: [
-          { name: "fetch", agent: "fetcher" },
-          { name: "interpret", agent: "ghost-agent" },
+          { name: "fetch", chairs: [{ role: "fetch", agent_slug: "fetcher", depends_on: [], input_contract: [], output_contract: ["site-cache"], required_skills: [] }] },
+          { name: "interpret", chairs: [{ role: "interpret", agent_slug: "ghost-agent", depends_on: [], input_contract: [], output_contract: ["Interpretation"], required_skills: [] }] },
         ],
       }),
     ).toThrow();
@@ -44,8 +44,8 @@ describe("P5 — standard composition with invalid agent mix", () => {
         domain: "eirtests",
         agents: [a_signal_out, a_review],
         phases: [
-          { name: "fetch", agent: "fetcher" },
-          { name: "review", agent: "review-panel" },
+          { name: "fetch", chairs: [{ role: "fetch", agent_slug: "fetcher", depends_on: [], input_contract: [], output_contract: ["site-cache"], required_skills: [] }] },
+          { name: "review", chairs: [{ role: "review", agent_slug: "review-panel", depends_on: [], input_contract: [], output_contract: ["dimension-review"], required_skills: [] }] },
         ],
       }),
     ).toThrow();
@@ -58,9 +58,9 @@ describe("P5 — standard composition with invalid agent mix", () => {
         domain: "eirtests",
         agents: [a_signal_out, a_interp_in_signal_out, a_review],
         phases: [
-          { name: "fetch", agent: "fetcher" },
-          { name: "analyze", agent: "trust-analyst" },
-          { name: "review", agent: "review-panel" },
+          { name: "fetch", chairs: [{ role: "fetch", agent_slug: "fetcher", depends_on: [], input_contract: [], output_contract: ["site-cache"], required_skills: [] }] },
+          { name: "analyze", chairs: [{ role: "analyze", agent_slug: "trust-analyst", depends_on: [], input_contract: [], output_contract: ["dimension-analysis"], required_skills: [] }] },
+          { name: "review", chairs: [{ role: "review", agent_slug: "review-panel", depends_on: [], input_contract: [], output_contract: ["dimension-review"], required_skills: [] }] },
         ],
       }),
     ).not.toThrow();
@@ -79,7 +79,7 @@ describe("P5 — standard composition with invalid agent mix", () => {
         slug: "readiness-scan",
         domain: "eirtests",
         agents: [code_agent],
-        phases: [{ name: "fetch", agent: "code-fetcher" }],
+        phases: [{ name: "fetch", chairs: [{ role: "fetch", agent_slug: "code-fetcher", depends_on: [], input_contract: [], output_contract: ["codebase-signal"], required_skills: [] }] }],
       }),
     ).toThrow();
   });

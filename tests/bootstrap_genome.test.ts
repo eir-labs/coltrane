@@ -37,7 +37,7 @@ describe("§13 Bootstrap Run — genome boots from disk", () => {
     // 3. wire the server on the booted registry and run a gig through the MCP surface
     const scout: Agent = { slug: "scout", primitives: ["SENSE"], input_types: [], output_types: ["page-model"], domain: "eirtests" };
     const analyst: Agent = { slug: "analyst", primitives: ["INTERPRET"], input_types: ["page-model"], output_types: ["finding"], domain: "eirtests" };
-    const scan: Standard = { slug: "scan", domain: "eirtests", agents: [scout, analyst], phases: [{ name: "sense", agent: "scout" }, { name: "interpret", agent: "analyst" }] };
+    const scan: Standard = { slug: "scan", domain: "eirtests", agents: [scout, analyst], phases: [{ name: "sense", chairs: [{ role: "sense", agent_slug: "scout", depends_on: [], input_contract: [], output_contract: ["page-model"], required_skills: [] }] }, { name: "interpret", chairs: [{ role: "interpret", agent_slug: "analyst", depends_on: [], input_contract: [], output_contract: ["finding"], required_skills: [] }] }] };
     const invoke: AgentInvoker = ({ agent }) => (agent.slug === "scout" ? { url: "/" } : { title: "x" });
     const deps: ServerDeps = { registry, outputs: createOutputStore(registry), ledger: new MemoryLedger(), standards: new Map([[scan.slug, scan]]), invoke, model_version: "m" };
 

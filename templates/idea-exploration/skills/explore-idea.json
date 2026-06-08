@@ -1,6 +1,0 @@
-{
-  "slug": "explore-idea",
-  "domain": "idea-exploration",
-  "trigger": "Slash command `/coltrane-explore-idea <topic>` OR direct MCP invocation `standard_dispatch(slug='idea_exploration_protocol', input={topic, context?, constraints?})`.",
-  "md": "Dispatch the `idea_exploration_protocol` standard with the user's topic as the seed-topic. Walk all 5 phases: discover → define_audience → define_seal → develop → deliver. REFUSE to converge during discover until ≥7 candidates surface. SEAL fires at define_seal; sha256 over each candidate's {predict, kill_condition, apoha}. Archive non-developed candidates as unsown-seeds with seal-hash intact. Emit verdict bundle including unsown-seed integrity check."
-}

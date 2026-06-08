@@ -4,7 +4,7 @@
   "extends": "Signal",
   "domain": "seeding",
   "status": "active",
-  "description": "Survey-level snapshot of a single repo found while seeding from local work. Apoha-bounded: signals only, no deep code read. Captures the SHAPE of the user's work at this repo without committing to mechanism.",
+  "description": "Survey-level snapshot of a single repo found while seeding from local work. Scope-bounded: signals only, no deep code read. Captures the SHAPE of the user's work at this repo without committing to mechanism.",
   "schema": {
     "type": "object",
     "properties": {

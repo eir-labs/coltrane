@@ -13,6 +13,5 @@
   "lane": "define",
   "model": "sonnet",
   "prompt_file": "agents/phase_agents/problem-definer.md",
-  "description": "Converges. Names the falsifiable: predict + kill + apoha. Emits the project-charter at the discover\u2192define seam (the sealed birth pre-reg).",
-  "seals_pre_reg": true
+  "description": "Converges. Names what the project is and is not: scope, success criteria, explicit non-goals. Emits the project-charter at the discover\u2192define seam."
 }

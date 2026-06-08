@@ -1,5 +1,5 @@
 // persona: research lab — deterministic replay + nested invocation lineage
-// pre-reg: hardest set. requires coltrane to seal sub-thread lineage at resume.
+// note: hardest set. requires coltrane to seal sub-thread lineage at resume.
 // expected to be largely RED until coltrane wires a SubthreadRecorder.
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";

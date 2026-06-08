@@ -46,12 +46,14 @@ describe("genome file-loading: all five classes load from files", () => {
     writeJson(dir, "agents", "summarizer.json", { slug: "summarizer", primitives: ["INTERPRET"], input_types: ["raw-note"], output_types: ["summary"], domain: "demo" });
     writeJson(dir, "standards", "summarize.json", {
       slug: "summarize", domain: "demo", agent_slugs: ["sensor", "summarizer"],
-      phases: [{ name: "sense", agent: "sensor" }, { name: "interpret", agent: "summarizer" }],
+      phases: [{ name: "sense", chairs: [{ role: "sense", agent_slug: "sensor", depends_on: [], input_contract: [], output_contract: ["raw-note"], required_skills: [] }] }, { name: "interpret", chairs: [{ role: "interpret", agent_slug: "summarizer", depends_on: [], input_contract: [], output_contract: ["summary"], required_skills: [] }] }],
     });
     const g = loadGenome(dir);
     const s = g.standards.get("summarize");
     expect(s).toBeDefined();
-    expect(s!.phases.map((p) => p.agent)).toEqual(["sensor", "summarizer"]);
+    // composeStandard normalizes legacy {name, agent} phases to single-chair
+    // phases — the bound agent_slug now lives on chairs[0].agent_slug.
+    expect(s!.phases.map((p) => p.chairs?.[0]?.agent_slug)).toEqual(["sensor", "summarizer"]);
     expect(s!.agents.length).toBe(2);
     rmSync(dir, { recursive: true, force: true });
   });
@@ -70,7 +72,7 @@ describe("genome file-loading: all five classes load from files", () => {
   // loads; the offending file is recorded in load_errors.
   it("records a standard referencing an unknown agent as a load_error", () => {
     const dir = scratchGenome();
-    writeJson(dir, "standards", "broken.json", { slug: "broken", domain: "demo", agent_slugs: ["ghost"], phases: [{ name: "x", agent: "ghost" }] });
+    writeJson(dir, "standards", "broken.json", { slug: "broken", domain: "demo", agent_slugs: ["ghost"], phases: [{ name: "x", chairs: [{ role: "x", agent_slug: "ghost", depends_on: [], input_contract: [], output_contract: ["Interpretation"], required_skills: [] }] }] });
     const g = loadGenome(dir);
     expect(g.standards.has("broken")).toBe(false);
     const err = g.load_errors.find((e) => e.kind === "standard" && e.slug === "broken");

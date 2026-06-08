@@ -1,14 +1,12 @@
-// ADVERSARIAL REVIEW of PR #99 (cajal/wire-cost-budget-enforcement).
+// ADVERSARIAL REVIEW of PR #99 (cost-budget-enforcement wiring).
 //
 // PR #99 wired `runGig`'s budget enforcement: BudgetInput, BudgetState,
 // BudgetExhausted, computeAppendCost. It ships with 6 happy-path-shaped tests
 // (tests/cost_budget_enforcement.test.ts) proving the WIRE WORKS.
 //
-// Eugene's directive: prove the wire is also HONEST under adversarial probing.
-// Subhuti just demonstrated by probing their own causality enforcement and finding
-// that `validate_derived_from` resolves orphan SHAs pointing at TAMPERED chains —
-// "formal causality layer trusts existence, not integrity." This file is the same
-// stress test applied to the cost-budget wire.
+// This file proves the wire is also HONEST under adversarial probing — the
+// same family of issue as the formal-causality layer that resolves orphan
+// SHAs pointing at TAMPERED chains ("trusts existence, not integrity").
 //
 // Probes attempted (10 total — covered 8 here; the other 2 are noted in PR body):
 //   1. Bypass via no-output / throwing invoker      → HOLE (orphan outputs + inflated spent)
@@ -86,8 +84,8 @@ const standard: Standard = {
   domain: "eirtests",
   agents: [scout, analyst],
   phases: [
-    { name: "sense", agent: "site-scout" },
-    { name: "interpret", agent: "site-analyst" },
+    { name: "sense", chairs: [{ role: "sense", agent_slug: "site-scout", depends_on: [], input_contract: [], output_contract: ["page-model"], required_skills: [] }] },
+    { name: "interpret", chairs: [{ role: "interpret", agent_slug: "site-analyst", depends_on: [], input_contract: [], output_contract: ["finding"], required_skills: [] }] },
   ],
 };
 
@@ -224,7 +222,7 @@ describe("PR #99 adversarial review — cost-budget enforcement", () => {
 
   // ─────────────────────────────────────────────────────────────────────────
   // PROBE 1 + PROBE 9: orphan outputs + inflated spent on mid-gig failure.
-  // THE MOST CRITICAL FINDING — twin of subhuti's "trusts existence not integrity"
+  // THE MOST CRITICAL FINDING — same family as "trusts existence not integrity"
   // ─────────────────────────────────────────────────────────────────────────
 
   it("HOLE [CRITICAL] — invoker throws mid-gig: prior-phase output orphaned in store, NO ledger entry written", async () => {
@@ -239,8 +237,8 @@ describe("PR #99 adversarial review — cost-budget enforcement", () => {
     ).rejects.toThrow("invoker exploded");
 
     // RECEIPT: phase-1's output IS in the store but the gig has no ledger entry.
-    // This is the same family of bug as subhuti's "validate_derived_from accepts
-    // orphan SHAs": the substrate has artifacts whose provenance is unrecorded.
+    // This is the same family of bug as "validate_derived_from accepts orphan
+    // SHAs": the substrate has artifacts whose provenance is unrecorded.
     expect(outputs.all().length).toBe(1); // phase-1 output orphaned
     expect(ledger.query({}).length).toBe(0); // no ledger record exists
     expect(outputs.all()[0]?.agent_slug).toBe("site-scout"); // it's phase-1's
@@ -362,7 +360,7 @@ describe("PR #99 adversarial review — cost-budget enforcement", () => {
       slug: "broken",
       domain: "eirtests",
       agents: [scout],
-      phases: [{ name: "p", agent: "nonexistent" }],
+      phases: [{ name: "p", chairs: [{ role: "p", agent_slug: "nonexistent", depends_on: [], input_contract: [], output_contract: ["Interpretation"], required_skills: [] }] }],
     };
     const { outputs, ledger } = setup();
     await expect(

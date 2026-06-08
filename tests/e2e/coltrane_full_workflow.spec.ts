@@ -11,7 +11,7 @@
 // Driving it directly is a USAGE test, not a stub — the only thing this skips is
 // the JSON-RPC framing, which the final `transport boot` test exercises live.
 //
-// Pre-reg apoha: NO `it.skip`, NO stubbed coltrane tools, NO `true === true`
+// Non-goals: NO `it.skip`, NO stubbed coltrane tools, NO `true === true`
 // assertions. Every step verifies a coltrane-observable side effect — a file on
 // disk, a ledger entry, a returned identity hash, a typed error from the boundary.
 
@@ -199,7 +199,7 @@ describe("phase 18 — full coltrane workflow (define → evolve → gig → typ
         slug: "bad-standard",
         domain: "phase18",
         agents: [{ slug: "bad-pipeline", primitives: ["CREATE"], input_types: [], output_types: ["phase18-summary"], domain: "phase18" }],
-        phases: [{ name: "make", agent: "bad-pipeline" }],
+        phases: [{ name: "make", chairs: [{ role: "make", agent_slug: "bad-pipeline", depends_on: [], input_contract: [], output_contract: ["phase18-summary"], required_skills: [] }] }],
       },
       deps,
     );
@@ -220,8 +220,8 @@ describe("phase 18 — full coltrane workflow (define → evolve → gig → typ
         domain: "phase18",
         agents,
         phases: [
-          { name: "sense", agent: "freshly-defined-sensor" },
-          { name: "interpret", agent: "freshly-defined-summarizer" },
+          { name: "sense", chairs: [{ role: "sense", agent_slug: "freshly-defined-sensor", depends_on: [], input_contract: [], output_contract: ["phase18-note"], required_skills: [] }] },
+          { name: "interpret", chairs: [{ role: "interpret", agent_slug: "freshly-defined-summarizer", depends_on: [], input_contract: [], output_contract: ["phase18-summary"], required_skills: [] }] },
         ],
       },
       deps,
@@ -247,8 +247,8 @@ describe("phase 18 — full coltrane workflow (define → evolve → gig → typ
           { slug: "freshly-defined-sensor", primitives: ["SENSE"], input_types: [], output_types: ["phase18-note"], domain: "phase18" },
         ],
         phases: [
-          { name: "sense", agent: "freshly-defined-sensor" },
-          { name: "phantom", agent: "does-not-exist" }, // illegal
+          { name: "sense", chairs: [{ role: "sense", agent_slug: "freshly-defined-sensor", depends_on: [], input_contract: [], output_contract: ["phase18-note"], required_skills: [] }] },
+          { name: "phantom", chairs: [{ role: "phantom", agent_slug: "does-not-exist", depends_on: [], input_contract: [], output_contract: ["Interpretation"], required_skills: [] }] }, // illegal
         ],
       },
       deps,

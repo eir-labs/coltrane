@@ -13,7 +13,7 @@
 // Honest about scope: this test is a fingerprint of TODAY's composer behavior. The 3-hop
 // cycle case (A→B→C→A) where composition lets it through is itself the adversarial signal —
 // we record both outcomes (rejected | accepted) so the test passes regardless, but logs the
-// gap. That is the apoha: name what the detector does NOT cover.
+// gap. That is the scope boundary: name what the detector does NOT cover.
 //
 // Pattern lifted from coltrane_lifecycle.spec.ts (sequential it() blocks, shared tempdir
 // is unnecessary here — these are pure composition+runtime calls, no genome on disk).
@@ -71,8 +71,8 @@ describe("standard with cycle (adversarial unique-unknown)", () => {
         domain: "demo",
         agents: [a, b],
         phases: [
-          { name: "phaseA", agent: "A" },
-          { name: "phaseB", agent: "B" },
+          { name: "phaseA", chairs: [{ role: "phaseA", agent_slug: "A", depends_on: [], input_contract: [], output_contract: ["a-out"], required_skills: [] }] },
+          { name: "phaseB", chairs: [{ role: "phaseB", agent_slug: "B", depends_on: [], input_contract: [], output_contract: ["b-out"], required_skills: [] }] },
         ],
       }),
     ).toThrowError(CompositionError);
@@ -85,8 +85,8 @@ describe("standard with cycle (adversarial unique-unknown)", () => {
         domain: "demo",
         agents: [a, b],
         phases: [
-          { name: "phaseA", agent: "A" },
-          { name: "phaseB", agent: "B" },
+          { name: "phaseA", chairs: [{ role: "phaseA", agent_slug: "A", depends_on: [], input_contract: [], output_contract: ["a-out"], required_skills: [] }] },
+          { name: "phaseB", chairs: [{ role: "phaseB", agent_slug: "B", depends_on: [], input_contract: [], output_contract: ["b-out"], required_skills: [] }] },
         ],
       });
       // unreachable
@@ -137,9 +137,9 @@ describe("standard with cycle (adversarial unique-unknown)", () => {
         domain: "demo",
         agents: [a, b, c],
         phases: [
-          { name: "phaseA", agent: "A3" },
-          { name: "phaseB", agent: "B3" },
-          { name: "phaseC", agent: "C3" },
+          { name: "phaseA", chairs: [{ role: "phaseA", agent_slug: "A3", depends_on: [], input_contract: [], output_contract: ["a3-out"], required_skills: [] }] },
+          { name: "phaseB", chairs: [{ role: "phaseB", agent_slug: "B3", depends_on: [], input_contract: [], output_contract: ["b3-out"], required_skills: [] }] },
+          { name: "phaseC", chairs: [{ role: "phaseC", agent_slug: "C3", depends_on: [], input_contract: [], output_contract: ["c-out"], required_skills: [] }] },
         ],
       });
     } catch (e) {
@@ -154,7 +154,7 @@ describe("standard with cycle (adversarial unique-unknown)", () => {
     }
 
     // Honest gap: composer accepted the 3-cycle (2-hop pairwise check misses A→B→C→A).
-    // This is a known apoha of today's detector. We now verify the runtime does not
+    // This is a known scope-gap of today's detector. We now verify the runtime does not
     // infinite-loop on the accepted-but-cyclic standard.
     expect(composed).not.toBeNull();
 
@@ -227,7 +227,7 @@ describe("standard with cycle (adversarial unique-unknown)", () => {
         slug: "self-cycle",
         domain: "demo",
         agents: [a],
-        phases: [{ name: "phaseA", agent: "Aself" }],
+        phases: [{ name: "phaseA", chairs: [{ role: "phaseA", agent_slug: "Aself", depends_on: [], input_contract: [], output_contract: ["aself-out"], required_skills: [] }] }],
       });
     } catch (e) {
       composeErr = e as Error;

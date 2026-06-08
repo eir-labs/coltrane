@@ -8,10 +8,10 @@
 //
 // Honesty contracts:
 //   - if a test produced no transcript (recorder empty per phase-15 F1), SENSE
-//     reports turns=[] and INTERPRET returns UNJUDGEABLE. We do NOT fabricate.
+//     reports turns=[] and INTERPRET returns not-judgeable. We do NOT fabricate.
 //   - coltrane's existing buildPrompt has no slot for per-phase prompt_templates,
 //     so this runner wires its own invoker that reads templates from the standard
-//     file. That's the RIPENED-DIFFERENTLY gap the PR documents.
+//     file. That's the gap the PR documents.
 
 import { execFileSync, spawn } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
@@ -39,7 +39,7 @@ interface Phase15TestCase {
 
 // Phase-15 cleaned up tempdirs in afterAll → nothing persisted past the run. To make
 // phase-16 soft-judge meaningful we capture fresh artifacts for two representative
-// cases the pre-reg explicitly names: one passing (eng_manager #2) and one
+// cases this run explicitly names: one passing (eng_manager #2) and one
 // failing-equivalent (solo_dev #1, the empty-recorder case).
 const PHASE15_TEST_CASES: Phase15TestCase[] = [
   {
@@ -157,7 +157,7 @@ function makeJudgeInvoker(promptTemplates: Record<string, string>): AgentInvoker
               inter_turn_coherence: { score: null, rationale: `judge failed: ${msg.slice(0, 200)}` },
               graceful_degradation: { score: null, rationale: `judge failed: ${msg.slice(0, 200)}` },
             },
-            overall_verdict_shade: "UNJUDGEABLE",
+            overall_verdict_shade: "not-judgeable",
             top_insight: `judge invocation failed (${msg.slice(0, 200)}); soft-verdict could not be produced`,
           };
       return fallback;
@@ -247,7 +247,7 @@ function renderMarkdown(results: SoftJudgeResult[]): string {
   lines.push("");
   lines.push("For both cases the recorder log is written EMPTY — mirroring the exact phase-15 finding");
   lines.push("that coltrane has no `SubthreadRecorder` wired. The soft-judge surfaces this as");
-  lines.push("UNJUDGEABLE for any criterion that requires multi-turn evidence.");
+  lines.push("not-judgeable for any criterion that requires multi-turn evidence.");
   lines.push("");
   lines.push("## Per-test soft-verdict");
   lines.push("");
@@ -293,7 +293,7 @@ function renderMarkdown(results: SoftJudgeResult[]): string {
   }
   lines.push("## Phase-15 cases that CANNOT be soft-judged");
   lines.push("");
-  lines.push("Per honest pre-reg discipline, the following phase-15 tests cannot be soft-judged from");
+  lines.push("Per honesty discipline, the following phase-15 tests cannot be soft-judged from");
   lines.push("existing artifacts because phase-15 produced no persisted transcripts. The soft-judge");
   lines.push("is meaningful ONLY where a real conversation can be inspected:");
   lines.push("");
@@ -307,11 +307,11 @@ function renderMarkdown(results: SoftJudgeResult[]): string {
   lines.push("the recorder is wired, the soft-judge's INTERPRET phase can score the recorded turn-list");
   lines.push("directly without needing to re-capture transcripts.");
   lines.push("");
-  lines.push("## Apoha — what this soft-judge is NOT");
+  lines.push("## Non-goals — what this soft-judge is NOT");
   lines.push("");
   lines.push("- NOT a replacement for the hard RED/GREEN asserts (those still own correctness)");
   lines.push("- NOT a new judge framework (REUSES runGig + claude_invoker.extractJson)");
-  lines.push("- NOT fabricating turns when none exist (returns UNJUDGEABLE with diagnosis)");
+  lines.push("- NOT fabricating turns when none exist (returns not-judgeable with diagnosis)");
   lines.push("- NOT modifying phase-15's tests (this branch is purely additive)");
   lines.push("");
   return lines.join("\n");

@@ -10,7 +10,7 @@
 //       — the partial state from the crash doesn't poison the next run
 //   (e) execution_history_read does NOT list the crashed gig (no fake seal)
 //
-// This is the "lock-before-look" ratchet enforced at the runtime boundary:
+// This is the "lock-before-look" invariant enforced at the runtime boundary:
 // a half-finished gig must look half-finished to every read path, and the
 // substrate must absorb a crash without corrupting forward-flow.
 //
@@ -21,7 +21,7 @@
 // Crash simulation: inject an AgentInvoker that throws on phase 2 of a 3-phase
 // standard. This is shape-equivalent to a real Claude subprocess dying mid-
 // tool-call — the runtime sees a thrown error from invoke(), and we assert the
-// observable state afterwards. The pre_reg honesty: this is a unit-shape test
+// observable state afterwards. The honesty note: this is a unit-shape test
 // of the runtime's crash semantics, NOT a Claude-subprocess-killing test (the
 // kill seam is non-deterministic across hosts).
 
@@ -147,9 +147,9 @@ describe("T18 — recorder durability through mid-tool-call crash", () => {
         domain: "demo",
         agents: [SENSOR, SUMMARIZER, FINALIZER],
         phases: [
-          { name: "sense", agent: "sensor" },
-          { name: "interpret", agent: "summarizer" },
-          { name: "finalize", agent: "summarizer-2" },
+          { name: "sense", chairs: [{ role: "sense", agent_slug: "sensor", depends_on: [], input_contract: [], output_contract: ["raw-note"], required_skills: [] }] },
+          { name: "interpret", chairs: [{ role: "interpret", agent_slug: "summarizer", depends_on: [], input_contract: [], output_contract: ["summary"], required_skills: [] }] },
+          { name: "finalize", chairs: [{ role: "finalize", agent_slug: "summarizer-2", depends_on: [], input_contract: [], output_contract: ["summary"], required_skills: [] }] },
         ],
       },
       deps,
@@ -253,7 +253,7 @@ describe("T18 — recorder durability through mid-tool-call crash", () => {
     expect(m.outputs_so_far[0]!.domain_type).toBe("raw-note");
 
     // execution_history_read filters by gig_id — the crashed gig must not
-    // appear (its absence from the ledger IS the apoha kill for "complete").
+    // appear (its absence from the ledger IS the scope boundary for "complete").
     const history = await dispatchTool(
       "execution_history_read",
       { gig_id: crashedGigId },

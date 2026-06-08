@@ -11,29 +11,73 @@
   "phases": [
     {
       "name": "discover",
-      "agent": "domain-explorer",
-      "intent": "Diverge. Scan the user's home directory (default: ~/) for git repositories. Per repo, produce a SURVEY-LEVEL repo-survey signal: README first lines, manifest files, commit rhythm (30d), top-level structure, CLAUDE.md/.claude presence. Apoha: SURVEY ONLY — no deep code read, no file-by-file analysis. Bound by frozen-params: top-N most-recently-touched repos (default N=20), max-depth 1 below ~/, skip node_modules + venv + .git internals."
+      "chairs": [
+        {
+          "role": "discover",
+          "agent_slug": "domain-explorer",
+          "depends_on": [],
+          "input_contract": [],
+          "output_contract": [
+            "repo-survey"
+          ],
+          "required_skills": []
+        }
+      ],
+      "intent": "Diverge. Scan the user's home directory (default: ~/) for git repositories. Per repo, produce a survey-level signal: README first lines, manifest files, commit rhythm (30d), top-level structure, CLAUDE.md/.claude presence. Survey only — no deep code read, no file-by-file analysis. Bounded by parameters fixed at the start of the run: top-N most-recently-touched repos (default N=20), max-depth 1 below ~/, skip node_modules + venv + .git internals."
     },
     {
       "name": "define",
-      "agent": "problem-definer",
-      "intent": "Converge. From the repo-survey cohort, extract a pattern-extraction interpretation: user_signature (one-line characterization), recurrent_workflows (multi-step sequences observed across repos), agent_like_roles (implicit roles the user plays), recurrent_domain_shapes (data shapes the user repeatedly works with). SEAL the predict: 'these N patterns are real + these M agents/standards/types are worth drafting'. The kill: pattern_extraction.confidence_band = low across all observations. The apoha: this DOES NOT propose anything specific to a future project — it only names the user's existing work-shape. Compute sha256_pre_verdict via prereg_seal."
+      "chairs": [
+        {
+          "role": "define",
+          "agent_slug": "problem-definer",
+          "depends_on": [],
+          "input_contract": [],
+          "output_contract": [
+            "project-charter"
+          ],
+          "required_skills": []
+        }
+      ],
+      "intent": "Converge. From the repo-survey cohort, extract a pattern-extraction interpretation: user_signature (one-line characterization), recurrent_workflows (multi-step sequences observed across repos), agent_like_roles (implicit roles the user plays), recurrent_domain_shapes (data shapes the user repeatedly works with). State the prediction: these N patterns are real and these M agents/standards/types are worth drafting. Abort condition: pattern_extraction.confidence_band = low across all observations. Out of scope for this phase: proposing anything specific to a future project — this phase only names the user's existing work-shape. Freeze the prediction before continuing."
     },
     {
       "name": "develop",
-      "agent": "solution-developer",
+      "chairs": [
+        {
+          "role": "develop",
+          "agent_slug": "solution-developer",
+          "depends_on": [],
+          "input_contract": [],
+          "output_contract": [
+            "Artifact"
+          ],
+          "required_skills": []
+        }
+      ],
       "intent": "Generate drafts. For each agent_like_role → emit a draft-agent-profile with proposed primitives + system_prompt + tools_allowlist. For each recurrent_workflow → emit a draft-standard with phases. For each recurrent_domain_shape → emit a draft-domain-type with extends + schema. All start at user_acceptance: pending. Present drafts to the user inline (conductor mode). User reviews + responds (accept / reject / refine). On accept: write to .coltrane/agents/, .coltrane/standards/, .coltrane/types/. On refine: user edits inline, then accept. On reject: discard. NEVER auto-adopt — user accepts every artifact at the boundary."
     },
     {
       "name": "deliver",
-      "agent": "delivery-finalizer",
-      "intent": "Ripen + report. Emit a seeding-verdict: how many surveyed, how many extracted, how many drafted, how many accepted/refined/rejected per kind. Compute ripeness: RIPENED (every kind had ≥1 acceptance), PARTLY-RIPENED (some kinds empty), RIPENED-DIFFERENTLY (user refined heavily — different fruit than predicted), KILL-FIRED (low confidence + no acceptances), ABORTED (user stopped mid-flight). Update the user's README to mirror the active fleet (Claude-maintained 'active projects' section). Next-step hint: typically 'now run project-bootstrap-v0 --use-case <inferred>'."
+      "chairs": [
+        {
+          "role": "deliver",
+          "agent_slug": "delivery-finalizer",
+          "depends_on": [],
+          "input_contract": [],
+          "output_contract": [
+            "Verdict"
+          ],
+          "required_skills": []
+        }
+      ],
+      "intent": "Finalize and report. Emit a seeding-verdict: how many surveyed, how many extracted, how many drafted, how many accepted/refined/rejected per kind. Classify the run: complete (every kind had ≥1 acceptance), partial (some kinds empty), refined (user refined heavily — different result than expected), aborted-low-confidence (low confidence + no acceptances), aborted-by-user (user stopped mid-flight). Update the user's README to mirror the active fleet (Claude-maintained 'active projects' section)."
     }
   ],
   "execution_modes": {
     "conductor_mode": {
       "default": true,
-      "description": "User clones coltrane-oss, says 'let's do seed-from-local-repos-v0' or 'fan out and learn about my work from my local repos'. Claude reads this standard, walks the 4 phases, prompts the user at each seal-seam + each draft-acceptance moment.",
+      "description": "User clones coltrane-oss, says 'let's do seed-from-local-repos-v0' or 'fan out and learn about my work from my local repos'. Claude reads this standard, walks the 4 phases, prompts the user at each phase boundary + each draft-acceptance moment.",
       "user_invocation_examples": [
         "let's do seed-from-local-repos-v0",
         "fan out and learn about my work from my local repos",
@@ -47,16 +91,25 @@
     "score_is_the_same": "The standard JSON IS the score regardless of mode."
   },
   "outputs": {
-    "discover": ["repo-survey"],
-    "define":   ["pattern-extraction"],
-    "develop":  ["draft-agent-profile", "draft-standard", "draft-domain-type"],
-    "deliver":  ["seeding-verdict"]
+    "discover": [
+      "repo-survey"
+    ],
+    "define": [
+      "pattern-extraction"
+    ],
+    "develop": [
+      "draft-agent-profile",
+      "draft-standard",
+      "draft-domain-type"
+    ],
+    "deliver": [
+      "seeding-verdict"
+    ]
   },
-  "apoha": [
-    "NOT an ongoing crawl — this is a one-time seeding exercise. Re-running it later is allowed (e.g., quarterly) but each run is a discrete seal-cycle.",
+  "out_of_scope": [
+    "NOT an ongoing crawl — this is a one-time seeding exercise. Re-running it later is allowed (e.g., quarterly) but each run is a discrete cycle.",
     "NOT a code-aware deep read — survey-level only. Repo-survey signals capture shape, not mechanism.",
     "NOT auto-adoption — every draft requires user accept at the develop→deliver seam.",
-    "NOT scanning everything — bounded by top-N + max-depth + skip-list. Frozen ex-ante per R5.",
-    "NOT a replacement for project-bootstrap-v0 — this seeds the FRAMEWORK; project-bootstrap-v0 seeds individual PROJECTS. Two layers."
+    "NOT scanning everything — bounded by top-N + max-depth + skip-list. Fixed at the start of the run."
   ]
 }

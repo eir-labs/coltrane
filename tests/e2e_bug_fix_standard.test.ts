@@ -29,8 +29,8 @@ const phaseOrder = ["find", "triage", "plan", "fix", "review"];
 const bugFix: Standard = {
   slug: "bug-fix", domain: "codechange", agents,
   phases: [
-    { name: "find", agent: "detector" }, { name: "triage", agent: "triager" },
-    { name: "plan", agent: "planner" }, { name: "fix", agent: "fixer" }, { name: "review", agent: "reviewer" },
+    { name: "find", chairs: [{ role: "find", agent_slug: "detector", depends_on: [], input_contract: [], output_contract: ["defect"], required_skills: [] }] }, { name: "triage", chairs: [{ role: "triage", agent_slug: "triager", depends_on: [], input_contract: [], output_contract: ["triage"], required_skills: [] }] },
+    { name: "plan", chairs: [{ role: "plan", agent_slug: "planner", depends_on: [], input_contract: [], output_contract: ["fix-plan"], required_skills: [] }] }, { name: "fix", chairs: [{ role: "fix", agent_slug: "fixer", depends_on: [], input_contract: [], output_contract: ["patch"], required_skills: [] }] }, { name: "review", chairs: [{ role: "review", agent_slug: "reviewer", depends_on: [], input_contract: [], output_contract: ["fix-review"], required_skills: [] }] },
   ],
 };
 

@@ -106,8 +106,8 @@ describe("skills_now_fire — the post-wire contract", () => {
         domain: SKILL_DOMAIN,
         agent_slugs: ["sensor", "summarizer"],
         phases: [
-          { name: "sense", agent: "sensor" },
-          { name: "interpret", agent: "summarizer" },
+          { name: "sense", chairs: [{ role: "sense", agent_slug: "sensor", depends_on: [], input_contract: [], output_contract: ["raw-note"], required_skills: [] }] },
+          { name: "interpret", chairs: [{ role: "interpret", agent_slug: "summarizer", depends_on: [], input_contract: [], output_contract: ["summary"], required_skills: [] }] },
         ],
       }),
     );

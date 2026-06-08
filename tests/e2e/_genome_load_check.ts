@@ -12,5 +12,5 @@ console.log(JSON.stringify({
   slug: s.slug,
   domain: s.domain,
   agents: s.agents.map((a) => a.slug),
-  phases: s.phases.map((p) => ({ name: p.name, agent: p.agent })),
+  phases: s.phases.map((p) => ({ name: p.name, chairs: p.chairs.map((c) => c.role) })),
 }, null, 2));

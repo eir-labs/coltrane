@@ -9,7 +9,7 @@
 //   5. /coltrane-resume project-alpha             → restore + back in DISCOVER
 //   6. /coltrane-portfolio                         → alpha current; beta parked
 //
-// Honest pre-reg: if /coltrane-new doesn't exist (gap in players-bridge PR #19),
+// Honest scope: if /coltrane-new doesn't exist (gap in players-bridge PR #19),
 // turns 1/3 will not advance the portfolio and the spec is RED-honest. The
 // portfolio.jsonl assertions document the precise gap.
 

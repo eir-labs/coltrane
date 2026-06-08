@@ -25,7 +25,7 @@ const summarize: Standard = {
   slug: "summarize",
   domain: "demo",
   agents: [sensor, summarizer],
-  phases: [{ name: "sense", agent: "sensor" }, { name: "interpret", agent: "summarizer" }],
+  phases: [{ name: "sense", chairs: [{ role: "sense", agent_slug: "sensor", depends_on: [], input_contract: [], output_contract: ["raw-note"], required_skills: [] }] }, { name: "interpret", chairs: [{ role: "interpret", agent_slug: "summarizer", depends_on: [], input_contract: [], output_contract: ["summary"], required_skills: [] }] }],
 };
 
 interface AffectedStandard { slug: string; type_check_passed: boolean; errors: string[] }

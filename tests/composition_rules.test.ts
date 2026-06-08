@@ -43,8 +43,8 @@ describe("standard composition: cross-phase §3", () => {
         domain: "eirtests",
         agents: [sensor, creator],
         phases: [
-          { name: "sense", agent: "sensor" },
-          { name: "make", agent: "creator" },
+          { name: "sense", chairs: [{ role: "sense", agent_slug: "sensor", depends_on: [], input_contract: [], output_contract: ["raw-note"], required_skills: [] }] },
+          { name: "make", chairs: [{ role: "make", agent_slug: "creator", depends_on: [], input_contract: [], output_contract: ["artifact"], required_skills: [] }] },
         ],
       }),
     ).toThrow();
@@ -59,8 +59,8 @@ describe("standard composition: cross-phase §3", () => {
         domain: "eirtests",
         agents: [planner, creator],
         phases: [
-          { name: "plan", agent: "planner" },
-          { name: "make", agent: "creator" },
+          { name: "plan", chairs: [{ role: "plan", agent_slug: "planner", depends_on: [], input_contract: [], output_contract: ["plan-doc"], required_skills: [] }] },
+          { name: "make", chairs: [{ role: "make", agent_slug: "creator", depends_on: [], input_contract: [], output_contract: ["artifact"], required_skills: [] }] },
         ],
       }),
     ).not.toThrow();
@@ -87,8 +87,8 @@ describe("standard composition: cycles", () => {
         domain: "eirtests",
         agents: [a, b],
         phases: [
-          { name: "a", agent: "a" },
-          { name: "b", agent: "b" },
+          { name: "a", chairs: [{ role: "a", agent_slug: "a", depends_on: [], input_contract: [], output_contract: ["Artifact"], required_skills: [] }] },
+          { name: "b", chairs: [{ role: "b", agent_slug: "b", depends_on: [], input_contract: [], output_contract: ["x"], required_skills: [] }] },
         ],
       }),
     ).toThrow();

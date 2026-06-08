@@ -181,8 +181,8 @@ describe("coltrane lifecycle: bootstrap → define → reload → run → evolve
         domain: "demo",
         agents: [a1Data.agent, (a2.data as { agent: Agent }).agent],
         phases: [
-          { name: "sense", agent: "sensor" },
-          { name: "interpret", agent: "summarizer" },
+          { name: "sense", chairs: [{ role: "sense", agent_slug: "sensor", depends_on: [], input_contract: [], output_contract: ["raw-note"], required_skills: [] }] },
+          { name: "interpret", chairs: [{ role: "interpret", agent_slug: "summarizer", depends_on: [], input_contract: [], output_contract: ["summary"], required_skills: [] }] },
         ],
       },
       deps,
@@ -454,8 +454,8 @@ describe("coltrane lifecycle: bootstrap → define → reload → run → evolve
         domain: "demo",
         agents: [known],
         phases: [
-          { name: "sense", agent: "sensor" },
-          { name: "interpret", agent: "ghost" }, // ghost not in agents[]
+          { name: "sense", chairs: [{ role: "sense", agent_slug: "sensor", depends_on: [], input_contract: [], output_contract: ["raw-note"], required_skills: [] }] },
+          { name: "interpret", chairs: [{ role: "interpret", agent_slug: "ghost", depends_on: [], input_contract: [], output_contract: ["Interpretation"], required_skills: [] }] }, // ghost not in agents[]
         ],
       },
       deps,

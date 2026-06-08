@@ -4,7 +4,7 @@
 // and records one ledger entry with a deterministic genome_hash + a run_fingerprint
 // that carries model_version + (empty, v0) eval_scores — honestly un-tempered.
 import { randomUUID } from "node:crypto";
-import type { Standard, Agent } from "./composition.js";
+import type { Standard, Agent, Chair } from "./composition.js";
 import { PRIMITIVE_OUTPUT_TYPE } from "./core_types.js";
 import { sha256Hex, canonJson, runFingerprint, outputContentHash, CANONICAL_FORM_VERSION } from "./canonical_form.js";
 import type { OutputStore, OutputRecord } from "./outputs.js";
@@ -229,57 +229,196 @@ export async function runGig(
       }
     : null;
 
+  // Resolve agent-by-slug once.
+  const agentBySlug = new Map(standard.agents.map((a) => [a.slug, a]));
+
+  // Cross-phase role → output map. A chair in phase N can depends_on a chair
+  // in phase 0..N-1; this map carries each completed chair's output by role so
+  // downstream chairs can resolve their depends_on regardless of phase.
+  const producedByRole = new Map<string, OutputRecord>();
+
   for (const phase of standard.phases) {
-    const agent = standard.agents.find((a) => a.slug === phase.agent);
-    if (!agent) throw new RuntimeError(`phase "${phase.name}" references unknown agent "${phase.agent}"`);
+
+    // Per-phase DAG executor. Chairs whose `depends_on` is fully covered by
+    // already-produced roles form the next dispatch-batch and run in parallel
+    // via Promise.allSettled. Failures from any chair in the batch are joined
+    // into a single RuntimeError naming every failing chair role. Cross-phase
+    // depends_on works because `producedByRole` carries across phases.
+    const remaining = new Map<string, Chair>();
+    for (const ch of phase.chairs) remaining.set(ch.role, ch);
+
+    while (remaining.size > 0) {
+      // Topological level: every chair whose depends_on ⊂ already-produced roles.
+      const ready: Chair[] = [];
+      for (const ch of remaining.values()) {
+        if (ch.depends_on.every((dep) => producedByRole.has(dep))) ready.push(ch);
+      }
+      if (ready.length === 0) {
+        // No chair can advance — at least one depends_on is unresolved at
+        // runtime even though composition passed. Shouldn't happen since
+        // composeStandard rejects forward/unknown/cycle, but guard so a
+        // hand-rolled Standard literal can't wedge the runtime silently.
+        const stuck = [...remaining.values()].map((c) => c.role).join(", ");
+        throw new RuntimeError(`phase "${phase.name}" cannot advance — chairs [${stuck}] have unresolved depends_on`);
+      }
+
+      // Per-chair work happens in two stages so non-invocation failures
+      // (BudgetExhausted, contract violations, programming-level errors like
+      // TypeError from a circular gig_input) propagate UNWRAPPED through the
+      // synchronous pre-stage; only the actual invoker rejection is caught
+      // and aggregated into a phase-level "chair(s) failed" RuntimeError that
+      // names every failing chair.
+      const prepared = ready.map((chair) => prepareChair(chair, phase.name));
+
+      const settled = await Promise.allSettled(
+        prepared.map((p) => invokeAndWriteChair(p)),
+      );
+
+      const failures: string[] = [];
+      const failureErrors: string[] = [];
+      for (let i = 0; i < settled.length; i++) {
+        const r = settled[i]!;
+        const ch = ready[i]!;
+        if (r.status === "rejected") {
+          failures.push(ch.role);
+          const reason = r.reason instanceof Error ? r.reason.message : String(r.reason);
+          failureErrors.push(`${ch.role}: ${reason}`);
+        } else {
+          producedByRole.set(ch.role, r.value);
+          produced.push(r.value);
+        }
+      }
+      if (failures.length > 0) {
+        throw new RuntimeError(
+          `phase "${phase.name}" aborted — chair(s) failed: ${failures.join(", ")} (${failureErrors.join(" | ")})`,
+        );
+      }
+
+      // Drop completed chairs from remaining so the next iteration picks up
+      // chairs unblocked by this batch.
+      for (const ch of ready) remaining.delete(ch.role);
+    }
+  }
+
+  // Stage 1 — synchronous pre-invocation prep. Resolves the agent, checks the
+  // input_contract against actual upstream output types, enforces the per-chair
+  // budget, and gathers everything the invocation needs. Throws synchronously
+  // for BudgetExhausted / programming-level errors so they propagate UNWRAPPED.
+  interface PreparedChair {
+    chair: Chair;
+    phaseName: string;
+    agent: Agent;
+    primitive: Agent["primitives"][number];
+    domain_type: string;
+    inputs: OutputRecord[];
+    skills: readonly SkillRecord[];
+  }
+
+  function prepareChair(chair: Chair, phaseName: string): PreparedChair {
+    const agent = standard.agents.find((a) => a.slug === chair.agent_slug);
+    if (!agent) throw new RuntimeError(`phase "${phaseName}" chair "${chair.role}" references unknown agent "${chair.agent_slug}"`);
     const primitive = agent.primitives[0];
     if (!primitive) throw new RuntimeError(`agent "${agent.slug}" declares no primitive`);
     const domain_type = agent.output_types[0];
     if (!domain_type) throw new RuntimeError(`agent "${agent.slug}" declares no output_type`);
 
-    // gather upstream: prior outputs whose domain_type this agent consumes.
-    const inputs = produced.filter((o) => agent.input_types.includes(o.domain_type));
+    // Gather upstream inputs. When the chair declares depends_on, use the
+    // OutputRecords of those specific roles. When it doesn't (legacy / no-deps
+    // chair), fall back to the legacy behavior — all prior outputs whose
+    // domain_type this agent's input_types declares it consumes. This keeps
+    // runtime.test.ts (which uses legacy `{name, agent}` phases) working.
+    let inputs: OutputRecord[];
+    if (chair.depends_on.length > 0) {
+      inputs = [];
+      for (const dep of chair.depends_on) {
+        const rec = producedByRole.get(dep);
+        if (!rec) {
+          throw new RuntimeError(`chair "${chair.role}" depends_on "${dep}" which has not been produced`);
+        }
+        inputs.push(rec);
+      }
+    } else {
+      inputs = produced.filter((o) => agent.input_types.includes(o.domain_type));
+    }
 
-    // resolve this agent's skill bindings (slugs) against the genome's skills map.
-    // Unknown slugs are skipped — the absence surfaces as a missing Skills layer
-    // in the prompt rather than crashing the gig.
+    // Runtime input_contract check: every type the chair declares it expects
+    // on input must be present among the domain_types of its actual upstream
+    // inputs. Empty input_contract skips the check.
+    if (chair.input_contract.length > 0) {
+      const upstreamTypes = new Set(inputs.map((o) => o.domain_type));
+      for (const need of chair.input_contract) {
+        if (!upstreamTypes.has(need)) {
+          throw new RuntimeError(
+            `chair "${chair.role}" input_contract requires "${need}" but upstream outputs only provide [${[...upstreamTypes].join(",")}]`,
+          );
+        }
+      }
+    }
+
+    // Resolve this agent's skill bindings (slugs) against the genome's skills
+    // map. Unknown slugs surface as a missing Skills layer in the prompt.
     const skills = resolveSkills(agent.skill_slugs, deps.skills);
 
-    // BUDGET CHECK — pre-invocation. If balance < cost-of-next-append, the
-    // agent transitions to "depleted" and the runtime raises BudgetExhausted.
-    // No agent invocation, no output write, no ledger entry — the gig halts.
+    // BUDGET CHECK — pre-invocation. Synchronous so BudgetExhausted (and a
+    // TypeError thrown from JSON.stringify on a circular gig_input) propagate
+    // unwrapped to the caller rather than being aggregated as a chair failure.
     if (budget) {
-      const cost = computeAppendCost({ agent, phase: phase.name, inputs, gig_input: gigInput }, budget.base_cost, budget.k);
+      const cost = computeAppendCost({ agent, phase: phaseName, inputs, gig_input: gigInput }, budget.base_cost, budget.k);
       if (budget.balance < cost) {
         budget.agent_state = "depleted";
         budget.depleted_agent = agent.slug;
         budget.depleted_at = new Date().toISOString();
         throw new BudgetExhausted(agent.slug, budget.balance, cost, budget);
       }
-      // Solvent — deduct the cost immediately so concurrent reasoning sees
-      // the post-spend balance. agent_state stays "active".
       budget.spent += cost;
       budget.balance = budget.opening - budget.spent + budget.credit;
     }
 
-    const data = await deps.invoke({ agent, phase: phase.name, inputs, gig_input: gigInput, skills });
+    return { chair, phaseName, agent, primitive, domain_type, inputs, skills };
+  }
 
-    // write the typed output (outputs.write validates data vs the domain schema → throws on bad-schema).
+  // Stage 2 — actual invocation + post-invocation output_contract check + write.
+  // Errors here ARE aggregated by Promise.allSettled and surfaced as a phase-
+  // level RuntimeError naming every failing chair role.
+  async function invokeAndWriteChair(p: PreparedChair): Promise<OutputRecord> {
+    const { chair, phaseName, agent, primitive, domain_type, inputs, skills } = p;
+    const data = await deps.invoke({ agent, phase: phaseName, inputs, gig_input: gigInput, skills });
+
+    // Runtime output_contract check: every type the chair promised to produce
+    // must be covered by the bound agent's declared output_types. Empty
+    // output_contract is already rejected at compose time; this is the runtime
+    // mirror (a hand-rolled Standard literal could still ship an empty one).
+    if (chair.output_contract.length > 0) {
+      const producedTypes = new Set(agent.output_types);
+      for (const promised of chair.output_contract) {
+        if (!producedTypes.has(promised)) {
+          throw new RuntimeError(
+            `chair "${chair.role}" output_contract promises "${promised}" but agent "${agent.slug}" produced types [${agent.output_types.join(",")}]`,
+          );
+        }
+      }
+    }
+
+    // Write the typed output (outputs.write validates data vs the domain schema).
+    // Tag with `from_role` so downstream chairs (especially the fan-in shape
+    // where N parallel upstreams share the same agent) can address each
+    // upstream's output by source role, not just by agent_slug.
     const rec = deps.outputs.write({
       core_type: PRIMITIVE_OUTPUT_TYPE[primitive],
       domain_type,
       domain: agent.domain ?? standard.domain,
       gig_id,
       agent_slug: agent.slug,
-      phase: phase.name,
+      from_role: chair.role,
+      phase: phaseName,
       primitive,
       data,
       input_refs: inputs.map((i) => i.id),
     });
 
-    // provenance: this output is derived_from each upstream input it consumed.
+    // Provenance: this output is derived_from each upstream input it consumed.
     for (const i of inputs) deps.outputs.addRef(rec.id, i.id, "derived_from", primitive);
-    produced.push(rec);
+    return rec;
   }
 
   const genome_hash = genomeHash(standard);

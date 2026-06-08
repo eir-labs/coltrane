@@ -11,26 +11,85 @@
   "phases": [
     {
       "name": "cleave",
-      "agent": "diamond-cutter",
+      "chairs": [
+        {
+          "role": "cleave",
+          "agent_slug": "diamond-cutter",
+          "depends_on": [],
+          "input_contract": [],
+          "output_contract": [
+            "claim-draft",
+            "failure-modes"
+          ],
+          "required_skills": [
+            "diamond-cutting-discipline"
+          ]
+        }
+      ],
       "intent": "Find the clean cleave plane. From the invention-spec, produce one single-sentence independent claim, enumerate ≥3 named failure modes with bounds, and enumerate ≥5 distinctions (what this is NOT relative to prior art). Outputs: claim-draft + failure-modes."
     },
     {
       "name": "search-novelty",
-      "agent": "novelty-searcher",
+      "chairs": [
+        {
+          "role": "search-novelty",
+          "agent_slug": "novelty-searcher",
+          "depends_on": [],
+          "input_contract": [],
+          "output_contract": [
+            "prior-art-hit",
+            "novelty-verdict"
+          ],
+          "required_skills": [
+            "diamond-cutting-discipline"
+          ]
+        }
+      ],
       "intent": "Search a prior-art corpus (patents + literature) for nearest-neighbor matches to the claim; report hits with similarity scores; aggregate into a novelty-verdict (PASS / FAIL / TOO-CLOSE-TO-CALL). Outputs: prior-art-hit (list) + novelty-verdict."
     },
     {
       "name": "refine-claim",
-      "agent": "claim-rewriter",
+      "chairs": [
+        {
+          "role": "refine-claim",
+          "agent_slug": "claim-rewriter",
+          "depends_on": [],
+          "input_contract": [],
+          "output_contract": [
+            "claim-draft"
+          ],
+          "required_skills": [
+            "diamond-cutting-discipline"
+          ]
+        }
+      ],
       "intent": "Rewrite the claim to maximize defensible scope given the novelty-verdict; enforce single-cleave discipline (one independent claim, ≤3 functional elements joined by `comprising`). Output: refined claim-draft."
     },
     {
       "name": "judge",
-      "agent": "verdict-judger",
-      "intent": "Produce the final FILEABLE / REFINE-FIRST / NOT-FILEABLE verdict with named axis of refinement when needed. When FILEABLE, also produce a provisional-draft skeleton. Outputs: triage-verdict (always) + provisional-draft (FILEABLE only).",
-      "ripens_pre_reg": true
+      "chairs": [
+        {
+          "role": "judge",
+          "agent_slug": "verdict-judger",
+          "depends_on": [],
+          "input_contract": [],
+          "output_contract": [
+            "triage-verdict",
+            "provisional-draft"
+          ],
+          "required_skills": [
+            "diamond-cutting-discipline"
+          ]
+        }
+      ],
+      "intent": "Produce the final FILEABLE / REFINE-FIRST / NOT-FILEABLE verdict with named axis of refinement when needed. When FILEABLE, also produce a provisional-draft skeleton. Outputs: triage-verdict (always) + provisional-draft (FILEABLE only)."
     }
   ],
-  "input_types": ["invention-spec"],
-  "output_types": ["triage-verdict", "provisional-draft"]
+  "input_types": [
+    "invention-spec"
+  ],
+  "output_types": [
+    "triage-verdict",
+    "provisional-draft"
+  ]
 }

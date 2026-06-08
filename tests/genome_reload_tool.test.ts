@@ -1,18 +1,14 @@
-// Fix Rob's #130 — genome_reload MCP tool.
+// genome_reload MCP tool. Issue #130.
 //
-// Pre-reg
-// =======
-// predict: dispatching `genome_reload` against a live deps re-reads the genome
-//          dir, mutates deps.standards / deps.skills / deps.evals / deps.registry
-//          IN PLACE, and returns a diff (added / modified / removed) plus load_errors.
-// test:    this file
-// kill:    if reload mutates deps for visible additions but skips removals or
-//          modifications, the test catches it row-by-row
-// apoha:   NOT changing the underlying genome contract — same loadGenome shape
-//          is re-invoked. NOT swapping deps wholesale — captured references
-//          (OutputStore keeps its registry pointer) keep working because the
-//          registry mutates in place. NOT a hot-reload of agent invokers or
-//          running gigs.
+// Intent: dispatching `genome_reload` against a live deps re-reads the genome
+// dir, mutates deps.standards / deps.skills / deps.evals / deps.registry
+// IN PLACE, and returns a diff (added / modified / removed) plus load_errors.
+//
+// Non-goals: not changing the underlying genome contract — same loadGenome shape
+// is re-invoked. Not swapping deps wholesale — captured references
+// (OutputStore keeps its registry pointer) keep working because the
+// registry mutates in place. Not a hot-reload of agent invokers or
+// running gigs.
 // verdict: green expected post-fix
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
@@ -91,7 +87,7 @@ describe("genome_reload MCP tool (Rob #130)", () => {
       slug: "summarize",
       domain: "demo",
       agent_slugs: ["scout", "summarizer"],
-      phases: [{ name: "sense", agent: "scout" }, { name: "interpret", agent: "summarizer" }],
+      phases: [{ name: "sense", chairs: [{ role: "sense", agent_slug: "scout", depends_on: [], input_contract: [], output_contract: ["raw-note"], required_skills: [] }] }, { name: "interpret", chairs: [{ role: "interpret", agent_slug: "summarizer", depends_on: [], input_contract: [], output_contract: ["summary"], required_skills: [] }] }],
     });
 
     const res = await dispatchTool("genome_reload", {}, deps);
@@ -148,7 +144,7 @@ describe("genome_reload MCP tool (Rob #130)", () => {
       slug: "broken",
       domain: "demo",
       agent_slugs: ["ghost"],
-      phases: [{ name: "x", agent: "ghost" }],
+      phases: [{ name: "x", chairs: [{ role: "x", agent_slug: "ghost", depends_on: [], input_contract: [], output_contract: ["Interpretation"], required_skills: [] }] }],
     });
 
     const res = await dispatchTool("genome_reload", {}, deps);
@@ -164,7 +160,7 @@ describe("genome_reload MCP tool (Rob #130)", () => {
       slug: "broken",
       domain: "demo",
       agent_slugs: ["ghost"],
-      phases: [{ name: "x", agent: "ghost" }],
+      phases: [{ name: "x", chairs: [{ role: "x", agent_slug: "ghost", depends_on: [], input_contract: [], output_contract: ["Interpretation"], required_skills: [] }] }],
     });
     await dispatchTool("genome_reload", {}, deps);
     const res = await dispatchTool("system_health", {}, deps);

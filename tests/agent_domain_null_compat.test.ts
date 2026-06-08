@@ -1,17 +1,12 @@
-// Fix Rob's #134 — agent.domain=null|undefined should be compatible with any
-// standard's domain, not rejected.
+// agent.domain=null|undefined should be compatible with any standard's
+// domain, not rejected. Issue #134.
 //
-// Pre-reg
-// =======
-// predict: composeStandard accepts an agent whose .domain is null OR undefined,
-//          treating it as domain-agnostic. The only reject case is when the
-//          agent declares an EXPLICIT domain that conflicts with the standard's.
-// test:    this file
-// kill:    if the loose-null check fires on a legitimately conflicting domain,
-//          we break the existing strictness gate
-// apoha:   NOT removing the strictness — explicit conflicts still throw. NOT
-//          touching defineAgent's default-to-null normalization.
-// verdict: green expected post-fix
+// Intent: composeStandard accepts an agent whose .domain is null OR undefined,
+// treating it as domain-agnostic. The only reject case is when the agent
+// declares an EXPLICIT domain that conflicts with the standard's.
+//
+// Non-goals: not removing the strictness — explicit conflicts still throw.
+// Not touching defineAgent's default-to-null normalization.
 
 import { describe, it, expect } from "vitest";
 import { defineAgent, composeStandard, CompositionError, type Agent } from "../src/composition.js";
@@ -31,7 +26,7 @@ describe("agent.domain null/undefined is domain-agnostic (Rob #134)", () => {
       slug: "demo-standard",
       domain: "elder-scam-shield",
       agents: [agentNoDomain],
-      phases: [{ name: "sense", agent: "scout" }],
+      phases: [{ name: "sense", chairs: [{ role: "sense", agent_slug: "scout", depends_on: [], input_contract: [], output_contract: ["raw-note"], required_skills: [] }] }],
     });
     expect(composed.slug).toBe("demo-standard");
   });
@@ -49,7 +44,7 @@ describe("agent.domain null/undefined is domain-agnostic (Rob #134)", () => {
       slug: "demo-standard-2",
       domain: "elder-scam-shield",
       agents: [agentNullDomain],
-      phases: [{ name: "sense", agent: "scout-from-defineAgent" }],
+      phases: [{ name: "sense", chairs: [{ role: "sense", agent_slug: "scout-from-defineAgent", depends_on: [], input_contract: [], output_contract: ["raw-note"], required_skills: [] }] }],
     });
     expect(composed.slug).toBe("demo-standard-2");
   });
@@ -65,7 +60,7 @@ describe("agent.domain null/undefined is domain-agnostic (Rob #134)", () => {
       slug: "demo-standard-3",
       domain: "elder-scam-shield",
       agents: [agentExplicitDomain],
-      phases: [{ name: "sense", agent: "scout-elsewhere" }],
+      phases: [{ name: "sense", chairs: [{ role: "sense", agent_slug: "scout-elsewhere", depends_on: [], input_contract: [], output_contract: ["raw-note"], required_skills: [] }] }],
     })).toThrow(CompositionError);
   });
 });

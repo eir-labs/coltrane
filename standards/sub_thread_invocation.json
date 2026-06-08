@@ -8,11 +8,33 @@
   "phases": [
     {
       "name": "sense",
-      "agent": "sub_thread_trace_sensor"
+      "chairs": [
+        {
+          "role": "sense",
+          "agent_slug": "sub_thread_trace_sensor",
+          "depends_on": [],
+          "input_contract": [],
+          "output_contract": [
+            "parsed-conversation-trace"
+          ],
+          "required_skills": []
+        }
+      ]
     },
     {
       "name": "interpret",
-      "agent": "sub_thread_soft_judge"
+      "chairs": [
+        {
+          "role": "interpret",
+          "agent_slug": "sub_thread_soft_judge",
+          "depends_on": [],
+          "input_contract": [],
+          "output_contract": [
+            "soft-verdict"
+          ],
+          "required_skills": []
+        }
+      ]
     }
   ],
   "identity": {
@@ -23,6 +45,6 @@
   },
   "prompt_templates": {
     "sense": "You are the SENSE phase of the sub_thread_invocation standard.\n\nINPUT: gig_input.transcript_path (string, absolute) + gig_input.recorder_log_path (string, absolute). Either file may be empty or missing — that is itself a finding and must be reported verbatim.\n\nTASK: parse the transcript (typically stream-json from `claude -p --output-format stream-json`) into a structured `parsed-conversation-trace`. For each turn extract: parent_session_id (null if root), child_session_id, prompt (user/parent prompt text), response (assistant text), timestamp (ISO8601 or null), tool_calls (array, may be empty). Also report whether the recorder log was empty.\n\nOUTPUT (single JSON object, no fence, no prose):\n{\n  \"transcript_path\": \"<echo of input>\",\n  \"recorder_log_path\": \"<echo of input>\",\n  \"transcript_present\": <bool>,\n  \"recorder_log_present\": <bool>,\n  \"recorder_log_empty\": <bool>,\n  \"turns\": [\n    { \"turn_idx\": 0, \"parent_session_id\": null, \"child_session_id\": \"<sid>\", \"prompt\": \"<text>\", \"response\": \"<text>\", \"timestamp\": \"<iso or null>\", \"tool_calls\": [] }\n  ],\n  \"notes\": \"<any honesty-note about parse failures or empty inputs>\"\n}\n\nIf the transcript file is missing or empty, set transcript_present=false, turns=[], and put the diagnosis in `notes`. Do NOT fabricate turns.",
-    "interpret": "You are the INTERPRET phase of the sub_thread_invocation standard — the soft-judge.\n\nINPUT: a `parsed-conversation-trace` from the SENSE phase (gig_input.trace).\n\nTASK: score the conversation on four soft criteria the hard-asserts cannot reach. Each criterion gets a 0-100 score and a rationale grounded in the actual turns (or, if turns=[], a rationale that names exactly why the criterion cannot be judged from this trace).\n\nCRITERIA:\n  a. parent_context_preservation: when the child --resumes with a follow-up, does the parent's named context (deals, units, north-stars, prior outputs) survive into the child's next response? Look for echoes of prior-turn entities.\n  b. child_stay_on_task: across N turns, does the assistant stay focused on the parent's original ask, or drift to unrelated content?\n  c. inter_turn_coherence: do successive responses build on each other (referencing prior turns, accumulating state) or read as disjoint single-shots?\n  d. graceful_degradation: if the conversation exceeds the context window or hits a structural failure, does the response degrade gracefully (summarize + continue, name the limit) or hard-fail (stack trace, silent corruption)?\n\nUNJUDGEABLE CASE: if turns=[] (because the underlying test failed before producing a transcript), do NOT fabricate scores. Set each score to null and put the diagnosis in `rationale`. Set `overall_verdict_shade` to \"UNJUDGEABLE\".\n\nVERDICT SHADE (overall):\n  - \"full-soft-RIPENED\": all four scores >= 70, no structural failures\n  - \"partly\": at least one score >= 70 AND no score in {null, 0..29}, OR mixed signal\n  - \"KILLED\": any score < 30 OR a structural failure observed\n  - \"UNJUDGEABLE\": turns=[] or trace insufficient\n\nOUTPUT (single JSON object, no fence, no prose):\n{\n  \"criteria\": {\n    \"parent_context_preservation\": { \"score\": <0-100 or null>, \"rationale\": \"<text>\" },\n    \"child_stay_on_task\":          { \"score\": <0-100 or null>, \"rationale\": \"<text>\" },\n    \"inter_turn_coherence\":        { \"score\": <0-100 or null>, \"rationale\": \"<text>\" },\n    \"graceful_degradation\":        { \"score\": <0-100 or null>, \"rationale\": \"<text>\" }\n  },\n  \"overall_verdict_shade\": \"full-soft-RIPENED | partly | KILLED | UNJUDGEABLE\",\n  \"top_insight\": \"<the one finding the hard-asserts missed; ground it in a specific turn or in the structural absence of one>\"\n}"
+    "interpret": "You are the INTERPRET phase of the sub_thread_invocation standard — the soft-judge.\n\nINPUT: a `parsed-conversation-trace` from the SENSE phase (gig_input.trace).\n\nTASK: score the conversation on four soft criteria the hard-asserts cannot reach. Each criterion gets a 0-100 score and a rationale grounded in the actual turns (or, if turns=[], a rationale that names exactly why the criterion cannot be judged from this trace).\n\nCRITERIA:\n  a. parent_context_preservation: when the child --resumes with a follow-up, does the parent's named context (deals, units, north-stars, prior outputs) survive into the child's next response? Look for echoes of prior-turn entities.\n  b. child_stay_on_task: across N turns, does the assistant stay focused on the parent's original ask, or drift to unrelated content?\n  c. inter_turn_coherence: do successive responses build on each other (referencing prior turns, accumulating state) or read as disjoint single-shots?\n  d. graceful_degradation: if the conversation exceeds the context window or hits a structural failure, does the response degrade gracefully (summarize + continue, name the limit) or hard-fail (stack trace, silent corruption)?\n\nnot-judgeable CASE: if turns=[] (because the underlying test failed before producing a transcript), do NOT fabricate scores. Set each score to null and put the diagnosis in `rationale`. Set `overall_verdict_shade` to \"unjudgeable\".\n\nVERDICT SHADE (overall):\n  - \"full-soft-pass\": all four scores >= 70, no structural failures\n  - \"partly\": at least one score >= 70 AND no score in {null, 0..29}, OR mixed signal\n  - \"fail\": any score < 30 OR a structural failure observed\n  - \"unjudgeable\": turns=[] or trace insufficient\n\nOUTPUT (single JSON object, no fence, no prose):\n{\n  \"criteria\": {\n    \"parent_context_preservation\": { \"score\": <0-100 or null>, \"rationale\": \"<text>\" },\n    \"child_stay_on_task\":          { \"score\": <0-100 or null>, \"rationale\": \"<text>\" },\n    \"inter_turn_coherence\":        { \"score\": <0-100 or null>, \"rationale\": \"<text>\" },\n    \"graceful_degradation\":        { \"score\": <0-100 or null>, \"rationale\": \"<text>\" }\n  },\n  \"overall_verdict_shade\": \"full-soft-pass | partly | fail | unjudgeable\",\n  \"top_insight\": \"<the one finding the hard-asserts missed; ground it in a specific turn or in the structural absence of one>\"\n}"
   }
 }

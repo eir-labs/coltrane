@@ -1,5 +1,5 @@
 // persona: solo CC dev running 3+ concurrent sub-thread agents
-// pre-reg: many RED. failures document where coltrane-oss's sub-thread invocation
+// note: many RED. failures document where coltrane-oss's sub-thread invocation
 // surface is incomplete vs. claude CLI's `claude -p` / `--resume` shape.
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";

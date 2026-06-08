@@ -14,7 +14,7 @@ const summary: DomainType = {
 const writer: Agent = { slug: "writer", primitives: ["INTERPRET"], input_types: [], output_types: ["summary"], domain: "demo" };
 const standard: Standard = {
   slug: "eval-judge-test", domain: "demo", agents: [writer],
-  phases: [{ name: "interpret", agent: "writer" }],
+  phases: [{ name: "interpret", chairs: [{ role: "interpret", agent_slug: "writer", depends_on: [], input_contract: [], output_contract: ["summary"], required_skills: [] }] }],
   eval_slugs: ["gist-present"],
 };
 const evals = new Map<string, EvalRecord>([

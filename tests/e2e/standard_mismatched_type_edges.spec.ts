@@ -5,7 +5,7 @@
 //   1) src/composition.ts composeStandard — the wired check is in lines 114-128:
 //      for every phase i > 0, each declared input_type must appear in the running
 //      set of upstream output_types, else CompositionError. This test fingerprints
-//      that gate AND probes its apoha:
+//      that gate AND probes its scope boundaries:
 //
 //        a) edge-mismatch at phase 2 → must reject (the positive contract)
 //        b) phase-0 mismatch (declared inputs that nobody produces, AND no upstream
@@ -28,7 +28,7 @@
 //      input-edge runtime check" addition trips this test for the right reason.
 //
 // Honest about scope: this is a fingerprint of TODAY's composer + runtime, with
-// the apohas named in the assertions. The gaps recorded here are the bug-bash
+// the scope boundaries named in the assertions. The gaps recorded here are the bug-bash
 // findings — when they get closed, the test gets flipped to assert rejection.
 //
 // Pattern lifted from standard_with_cycle.spec.ts (sequential it() blocks,
@@ -78,8 +78,8 @@ describe("standard with mismatched type-edges (adversarial unique-unknown)", () 
         domain: "demo",
         agents: [producer, consumer],
         phases: [
-          { name: "phase1", agent: "ProducerX" },
-          { name: "phase2", agent: "ConsumerY" },
+          { name: "phase1", chairs: [{ role: "phase1", agent_slug: "ProducerX", depends_on: [], input_contract: [], output_contract: ["phase1-x-out"], required_skills: [] }] },
+          { name: "phase2", chairs: [{ role: "phase2", agent_slug: "ConsumerY", depends_on: [], input_contract: [], output_contract: ["phase2-out"], required_skills: [] }] },
         ],
       }),
     ).toThrowError(CompositionError);
@@ -92,8 +92,8 @@ describe("standard with mismatched type-edges (adversarial unique-unknown)", () 
         domain: "demo",
         agents: [producer, consumer],
         phases: [
-          { name: "phase1", agent: "ProducerX" },
-          { name: "phase2", agent: "ConsumerY" },
+          { name: "phase1", chairs: [{ role: "phase1", agent_slug: "ProducerX", depends_on: [], input_contract: [], output_contract: ["phase1-x-out"], required_skills: [] }] },
+          { name: "phase2", chairs: [{ role: "phase2", agent_slug: "ConsumerY", depends_on: [], input_contract: [], output_contract: ["phase2-out"], required_skills: [] }] },
         ],
       });
       expect.fail("expected CompositionError but composeStandard returned");
@@ -132,7 +132,7 @@ describe("standard with mismatched type-edges (adversarial unique-unknown)", () 
         slug: "phase0-mismatch",
         domain: "demo",
         agents: [orphan],
-        phases: [{ name: "phase0", agent: "OrphanPhase0" }],
+        phases: [{ name: "phase0", chairs: [{ role: "phase0", agent_slug: "OrphanPhase0", depends_on: [], input_contract: [], output_contract: ["orphan-out"], required_skills: [] }] }],
       });
     } catch (e) {
       composeErr = e as Error;
@@ -149,7 +149,7 @@ describe("standard with mismatched type-edges (adversarial unique-unknown)", () 
       slug: "phase0-mismatch-run",
       domain: "demo",
       agents: [orphan],
-      phases: [{ name: "phase0", agent: "OrphanPhase0" }],
+      phases: [{ name: "phase0", chairs: [{ role: "phase0", agent_slug: "OrphanPhase0", depends_on: [], input_contract: [], output_contract: ["orphan-out"], required_skills: [] }] }],
     });
 
     const registry = createRegistry();
@@ -213,8 +213,8 @@ describe("standard with mismatched type-edges (adversarial unique-unknown)", () 
         domain: "demo",
         agents: [producer, sneaky],
         phases: [
-          { name: "phase1", agent: "ProducerE" },
-          { name: "phase2", agent: "SneakyEmpty" },
+          { name: "phase1", chairs: [{ role: "phase1", agent_slug: "ProducerE", depends_on: [], input_contract: [], output_contract: ["e-out"], required_skills: [] }] },
+          { name: "phase2", chairs: [{ role: "phase2", agent_slug: "SneakyEmpty", depends_on: [], input_contract: [], output_contract: ["sneaky-out"], required_skills: [] }] },
         ],
       });
     } catch (e) {
@@ -252,8 +252,8 @@ describe("standard with mismatched type-edges (adversarial unique-unknown)", () 
         domain: "demo",
         agents: [a, b],
         phases: [
-          { name: "p1", agent: "Pa" },
-          { name: "p2", agent: "Pb" },
+          { name: "p1", chairs: [{ role: "p1", agent_slug: "Pa", depends_on: [], input_contract: [], output_contract: ["good-input"], required_skills: [] }] },
+          { name: "p2", chairs: [{ role: "p2", agent_slug: "Pb", depends_on: [], input_contract: [], output_contract: ["b-out"], required_skills: [] }] },
         ],
       }),
     ).toThrowError(/bogus-input/);
@@ -289,8 +289,8 @@ describe("standard with mismatched type-edges (adversarial unique-unknown)", () 
       domain: "demo",
       agents: [producer, consumer] as const,
       phases: [
-        { name: "p1", agent: "RtProducer" },
-        { name: "p2", agent: "RtConsumer" },
+        { name: "p1", chairs: [{ role: "p1", agent_slug: "RtProducer", depends_on: [], input_contract: [], output_contract: ["rt-x"], required_skills: [] }] },
+        { name: "p2", chairs: [{ role: "p2", agent_slug: "RtConsumer", depends_on: [], input_contract: [], output_contract: ["rt-final"], required_skills: [] }] },
       ] as const,
     };
 

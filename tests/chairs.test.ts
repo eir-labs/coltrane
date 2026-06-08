@@ -341,6 +341,26 @@ describe("chairs — runtime dispatch", () => {
   it.todo("phase aborts if any chair fails and names the failing chair");
   it.todo("input_contract present in upstream outputs before invocation, else error");
   it.todo("output_contract produced after invocation, else error");
+
+  // fan-in cardinality — N upstream chairs all produce same type, 1 downstream consumes all N
+  it.todo(
+    "fan-in completeness: a chair with depends_on of N upstream chairs starts only after ALL N produce their output_contract",
+  );
+  it.todo(
+    "fan-in: if any 1 of N upstream chairs fails, the downstream chair does not run and the phase aborts naming the failing upstream",
+  );
+  it.todo(
+    "fan-in: downstream chair receives outputs from all N upstream chairs in its input scope (not just the first to complete)",
+  );
+  it.todo(
+    "fan-in: ordering of N parallel upstream chairs is not observable downstream (commutative; consumer treats them as a set)",
+  );
+  it.todo(
+    "fan-in: each upstream chair's output is distinguishable downstream by source role (consumer can address them individually)",
+  );
+  it.todo(
+    "fan-in: partial completion is never visible — the downstream chair never sees fewer than N upstream outputs",
+  );
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

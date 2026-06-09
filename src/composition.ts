@@ -82,6 +82,13 @@ const REASONING = new Set<Primitive>(["INTERPRET", "PLAN", "SENSE"]);
 
 export function defineAgent(def: AgentDef): Agent {
   const prims = def.primitives;
+  // A string passes `.length === 0`, so a wrong-type `primitives` (e.g. "SENSE")
+  // would otherwise load a broken agent silently. Reject non-arrays by field name.
+  if (!Array.isArray(prims)) {
+    throw new CompositionError(
+      `agent ${def.slug}: "primitives" must be an array, got ${typeof prims}`,
+    );
+  }
   if (prims.length === 0) {
     throw new CompositionError(`agent ${def.slug} has no primitives`);
   }
@@ -116,7 +123,7 @@ export function defineAgent(def: AgentDef): Agent {
     primitives: prims,
     input_types: def.input_types ?? [],
     output_types:
-      def.output_types ?? prims.map((p) => PRIMITIVE_OUTPUT_TYPE[p]).slice(-1),
+      def.output_types ?? prims.map((p) => PRIMITIVE_OUTPUT_TYPE[p as Primitive]).slice(-1),
     domain: def.domain ?? null,
     allowed_tools: def.allowed_tools ?? [],
     disallowed_tools: def.disallowed_tools ?? [],

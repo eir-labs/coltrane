@@ -39,7 +39,19 @@ export class FileLedger implements Ledger {
     if (!entry.gig_id) throw new LedgerError("ledger entry requires gig_id");
     if (!entry.genome_hash) throw new LedgerError("ledger entry requires genome_hash");
     if (!entry.run_fingerprint) throw new LedgerError("ledger entry requires run_fingerprint");
-    appendFileSync(this.path, JSON.stringify(entry) + "\n");
+    try {
+      appendFileSync(this.path, JSON.stringify(entry) + "\n");
+    } catch (e) {
+      // Wrap raw fs failures (EACCES / EPERM / EROFS / ENOSPC) in a typed
+      // LedgerError so callers see a structured error, not a leaking SystemError.
+      // The append is stateless — once the path is writable again, a retry on the
+      // same instance succeeds (no cached fd to reset).
+      const sys = e as NodeJS.ErrnoException;
+      const err = new LedgerError(`failed to append to ledger at ${this.path}: ${sys.message}`);
+      (err as { cause?: unknown }).cause = e;
+      if (sys.code !== undefined) (err as { code?: string }).code = sys.code;
+      throw err;
+    }
   }
 
   query(filter: LedgerQuery = {}): LedgerEntry[] {

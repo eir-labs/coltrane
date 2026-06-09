@@ -11,6 +11,7 @@ export * from "./coltrane_profile.js";
 export * from "./learner.js";
 export * from "./registry.js";
 export * from "./loader.js";
+export * from "./canonical_core_types.js";
 export * from "./canonical_form.js";
 export * from "./ledger.js";
 export * from "./outputs.js";

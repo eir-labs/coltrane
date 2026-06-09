@@ -1,0 +1,44 @@
+{
+  "slug": "e2e-suite-v0",
+  "domain": "e2e",
+  "agent_slugs": [
+    "e2e-runner",
+    "e2e-suite-judge"
+  ],
+  "phases": [
+    {
+      "name": "run",
+      "chairs": [
+        {
+          "role": "verify",
+          "agent_slug": "e2e-runner",
+          "depends_on": [],
+          "input_contract": [],
+          "output_contract": [
+            "e2e-verdict"
+          ],
+          "required_skills": []
+        }
+      ]
+    },
+    {
+      "name": "judge",
+      "chairs": [
+        {
+          "role": "judge",
+          "agent_slug": "e2e-suite-judge",
+          "depends_on": [
+            "verify"
+          ],
+          "input_contract": [
+            "e2e-verdict"
+          ],
+          "output_contract": [
+            "e2e-report"
+          ],
+          "required_skills": []
+        }
+      ]
+    }
+  ]
+}

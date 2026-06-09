@@ -1,0 +1,12 @@
+{
+  "slug": "e2e-suite-judge",
+  "primitives": [
+    "JUDGE"
+  ],
+  "input_types": [
+    "e2e-verdict"
+  ],
+  "output_types": [
+    "e2e-report"
+  ]
+}

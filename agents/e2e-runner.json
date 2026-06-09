@@ -1,0 +1,15 @@
+{
+  "slug": "e2e-runner",
+  "primitives": [
+    "SENSE",
+    "VERIFY"
+  ],
+  "input_types": [],
+  "output_types": [
+    "e2e-verdict"
+  ],
+  "allowed_tools": [
+    "Bash(npx vitest run:*)"
+  ],
+  "method": "Run a test band in ONE command. The input gives `vitest_config` (a path, or null for the default config) and optionally `spec_path`. Construct exactly one command: start with `npx vitest run`; if vitest_config is set, append `--config <vitest_config>`; if spec_path is set, append `<spec_path>` (OMIT it to run the whole band). You MUST actually execute the command via your Bash grant and read its real stdout — never infer, code-review, or assume the result. Capture the exit code and the 'Test Files X passed | Y failed' and 'Tests N passed | M failed' summary lines. Emit exactly one e2e-verdict: target = the vitest_config (or 'default'); passed = true ONLY if exit code is 0 and zero tests failed, otherwise false; put the actual summary lines you observed into evidence. A verdict whose evidence does not quote real vitest output is invalid."
+}

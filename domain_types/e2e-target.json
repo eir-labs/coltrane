@@ -1,0 +1,25 @@
+{
+  "slug": "e2e-target",
+  "version": 1,
+  "extends": "Signal",
+  "domain": "e2e",
+  "status": "active",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "spec_path": {
+        "type": "string"
+      },
+      "suite": {
+        "type": "string"
+      },
+      "kind": {
+        "type": "string"
+      }
+    }
+  },
+  "required_fields": [
+    "spec_path",
+    "kind"
+  ]
+}

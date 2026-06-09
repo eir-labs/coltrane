@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 // Production stdio entry for the Coltrane MCP server.
 //
 // Two modes, branched on `COLTRANE_SERVER_DIRECT`:

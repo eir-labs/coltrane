@@ -2,6 +2,7 @@ import { readdirSync, readFileSync, existsSync, statSync, writeFileSync, mkdirSy
 import { join, extname } from "node:path";
 import { defineAgent, composeStandard, CompositionError, type Agent, type Standard, type PhaseDef } from "./composition.js";
 import type { Primitive } from "./core_types.js";
+import { CANONICAL_CORE_TYPES } from "./canonical_core_types.js";
 
 export interface CoreTypeRecord {
   slug: string;
@@ -126,7 +127,15 @@ export function loadGenome(root: string): LoadedGenome {
   if (firstCoreFailure) {
     throw new GenomeLoadError(firstCoreFailure.error);
   }
-  const coreList = coreRead.files;
+  // Genome extension Phase 1 (docs/genome-extension.md): when a genome root has NO
+  // core_types/ of its own, seed the canonical, immutable 6 the engine owns — so a
+  // downstream consumer boots without hand-copying core substrate. A PARTIAL
+  // core_types/ (some-but-not-all 6) still hard-fails the strict gate below; that's
+  // a corrupt genome, not a fresh one.
+  const coreList =
+    coreRead.files.length > 0
+      ? coreRead.files
+      : CANONICAL_CORE_TYPES.map((data) => ({ path: "<engine-canonical>", data }));
 
   const core_types = new Map<string, CoreTypeRecord>();
   const core_type_paths = new Map<string, string>();

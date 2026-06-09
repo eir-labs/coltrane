@@ -23,6 +23,18 @@ describe("§13 Bootstrap Run — genome boots from disk", () => {
     );
   });
 
+  // The build gate that makes soft-fail (#129) safe. loadGenome SKIPS a malformed
+  // definition at runtime (resilience — one bad file shouldn't brick a live session
+  // or a downstream consumer). But the REPO's own genome must be clean: a committed
+  // broken agent/standard/type would otherwise soft-fail silently and never turn CI
+  // red. This asserts the shipped genome has zero load_errors, so a broken definition
+  // fails the build instead of slipping through.
+  it("the real repo genome loads with zero load_errors (a broken committed definition fails the build)", () => {
+    const genome = loadGenome(REPO_ROOT);
+    const detail = genome.load_errors.map((e) => `  [${e.kind}] ${e.path}: ${e.error}`).join("\n");
+    expect(genome.load_errors, `committed genome has load_errors:\n${detail}`).toEqual([]);
+  });
+
   it("a registry reconstituted from the disk genome runs a full gig end-to-end (rebuild litmus)", async () => {
     // 1. boot the registry from FILES — no hardcoded core types
     const genome = loadGenome(REPO_ROOT);

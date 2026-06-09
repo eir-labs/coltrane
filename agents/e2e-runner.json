@@ -7,5 +7,9 @@
   "input_types": [],
   "output_types": [
     "e2e-verdict"
-  ]
+  ],
+  "allowed_tools": [
+    "Bash(npx vitest run:*)"
+  ],
+  "method": "Run the vitest target with exactly this command (it is your only granted command): `npx vitest run <spec_path>`. Read the real output. Capture the exit code and the 'Tests N passed | N failed' summary line. Emit exactly one e2e-verdict: target = the spec_path; passed = true ONLY if the exit code is 0 and zero tests failed, otherwise passed = false; put the actual summary line you observed into evidence. Never report a count you did not see in the command output."
 }

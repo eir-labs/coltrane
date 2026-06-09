@@ -1,10 +1,44 @@
 {
-  "name": "coltrane",
+  "name": "@eir-dev/coltrane",
   "version": "0.1.0",
+  "description": "A methodology engine — a typed substrate for defining agents, composing multi-phase standards, dispatching gigs, and sealing every output to a content-addressed ledger. Ships as an MCP server.",
   "type": "module",
   "license": "Apache-2.0",
+  "author": "Eir",
+  "homepage": "https://github.com/eir-dev/coltrane#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/eir-dev/coltrane.git"
+  },
+  "bugs": {
+    "url": "https://github.com/eir-dev/coltrane/issues"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "claude",
+    "agents",
+    "methodology",
+    "workflow-engine"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
   "bin": {
-    "coltrane": "./dist/bin/coltrane.js"
+    "coltrane-server": "./dist/src/server_entry.js"
+  },
+  "files": [
+    "dist/src",
+    "agents",
+    "standards",
+    "skills",
+    "domain_types",
+    "core_types",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
   },
   "scripts": {
     "build": "tsc",

@@ -25,6 +25,9 @@ interface PackageJson {
   keywords?: readonly string[];
   files?: readonly string[];
   bin?: string | Record<string, string>;
+  main?: string;
+  types?: string;
+  exports?: Record<string, unknown>;
   engines?: { node?: string };
   publishConfig?: { access?: string; registry?: string };
   private?: boolean;
@@ -33,6 +36,23 @@ interface PackageJson {
 function readPkg(): PackageJson {
   return JSON.parse(readFileSync(PKG_PATH, "utf-8")) as PackageJson;
 }
+
+describe("npm-publish metadata — library import surface (downstream `import from \"@eir-dev/coltrane\"`)", () => {
+  it("declares main → dist/src/index.js", () => {
+    expect(readPkg().main).toBe("./dist/src/index.js");
+  });
+  it("declares types → dist/src/index.d.ts", () => {
+    expect(readPkg().types).toBe("./dist/src/index.d.ts");
+  });
+  it("declares an exports map with a root entry", () => {
+    const root = readPkg().exports?.["."] as { import?: string; types?: string } | undefined;
+    expect(root?.import).toBe("./dist/src/index.js");
+    expect(root?.types).toBe("./dist/src/index.d.ts");
+  });
+  it("the declared entry resolves to an existing file post-build", () => {
+    expect(existsSync(join(REPO_ROOT, readPkg().main ?? ""))).toBe(true);
+  });
+});
 
 describe("npm-publish metadata — name + scope", () => {
   it("name is scoped under @eir-dev", () => {

@@ -1,0 +1,25 @@
+{
+  "slug": "e2e-verdict",
+  "version": 1,
+  "extends": "Verdict",
+  "domain": "e2e",
+  "status": "active",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "target": {
+        "type": "string"
+      },
+      "passed": {
+        "type": "boolean"
+      },
+      "evidence": {
+        "type": "string"
+      }
+    }
+  },
+  "required_fields": [
+    "target",
+    "passed"
+  ]
+}

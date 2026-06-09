@@ -1,0 +1,11 @@
+{
+  "slug": "e2e-runner",
+  "primitives": [
+    "SENSE",
+    "VERIFY"
+  ],
+  "input_types": [],
+  "output_types": [
+    "e2e-verdict"
+  ]
+}

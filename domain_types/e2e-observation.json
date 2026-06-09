@@ -1,0 +1,31 @@
+{
+  "slug": "e2e-observation",
+  "version": 1,
+  "extends": "Signal",
+  "domain": "e2e",
+  "status": "active",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "target": {
+        "type": "string"
+      },
+      "exit_code": {
+        "type": "number"
+      },
+      "passed": {
+        "type": "number"
+      },
+      "failed": {
+        "type": "number"
+      },
+      "stdout_tail": {
+        "type": "string"
+      }
+    }
+  },
+  "required_fields": [
+    "target",
+    "exit_code"
+  ]
+}

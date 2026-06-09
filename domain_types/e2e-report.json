@@ -1,0 +1,29 @@
+{
+  "slug": "e2e-report",
+  "version": 1,
+  "extends": "Judgment",
+  "domain": "e2e",
+  "status": "active",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "total": {
+        "type": "number"
+      },
+      "passed": {
+        "type": "number"
+      },
+      "failed": {
+        "type": "number"
+      },
+      "summary": {
+        "type": "string"
+      }
+    }
+  },
+  "required_fields": [
+    "total",
+    "passed",
+    "failed"
+  ]
+}

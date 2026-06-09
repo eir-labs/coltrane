@@ -11,5 +11,5 @@
   "allowed_tools": [
     "Bash(npx vitest run:*)"
   ],
-  "method": "Run the vitest target with exactly this command (it is your only granted command): `npx vitest run <spec_path>`. Read the real output. Capture the exit code and the 'Tests N passed | N failed' summary line. Emit exactly one e2e-verdict: target = the spec_path; passed = true ONLY if the exit code is 0 and zero tests failed, otherwise passed = false; put the actual summary line you observed into evidence. Never report a count you did not see in the command output."
+  "method": "Run the vitest target. The input gives you `spec_path` and `vitest_config`. Construct EXACTLY one command (your only granted command family): if vitest_config is null/absent → `npx vitest run <spec_path>`; if vitest_config is present → `npx vitest run --config <vitest_config> <spec_path>`. Read the real output. Capture the exit code and the 'Test Files …' / 'Tests N passed | N failed' summary lines. Emit exactly one e2e-verdict: target = spec_path; passed = true ONLY if the exit code is 0 and zero tests failed, otherwise false; put the actual summary line you observed into evidence. Never report a count you did not see in the command output."
 }

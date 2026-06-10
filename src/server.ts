@@ -16,7 +16,7 @@ import {
   PromotionError,
 } from "./mcp.js";
 import { createRegistry, loadRegistry, type Registry, type DomainType } from "./registry.js";
-import { loadGenome, type SkillRecord, type EvalRecord, type LoadError } from "./loader.js";
+import { loadGenome, resolveGenome, type SkillRecord, type EvalRecord, type LoadError } from "./loader.js";
 import { sealAgentDefinition, sealDefinition, recordIdentity } from "./genome_writer.js";
 import { createOutputStore, defaultOutputsPersistDir, type OutputStore } from "./outputs.js";
 import { MemoryLedger, type Ledger } from "./ledger.js";
@@ -513,7 +513,7 @@ export async function dispatchTool(slug: string, args: Record<string, unknown>, 
         if (!deps.genome_dir) {
           return { ok: false, requires_approval: approval, error: "genome_reload requires deps.genome_dir; this server wasn't bootstrapped from a genome directory" };
         }
-        const fresh = loadGenome(deps.genome_dir);
+        const fresh = resolveGenome(deps.genome_dir);
 
         // Diff each definition class against the live deps.
         const standardsBefore = new Map(deps.standards ?? []);
@@ -1037,7 +1037,7 @@ function loadedGenomeHash(genome: LoadedGenome): string {
  */
 export function bootstrapServerDeps(genomeRoot?: string): ServerDeps {
   const root = genomeRoot ?? process.env["COLTRANE_GENOME"] ?? process.cwd();
-  const genome = loadGenome(root);
+  const genome = resolveGenome(root); // manifest-aware: honors a consumer's `extends` base
   const registry = loadRegistry(genome);
   return {
     registry,
@@ -1088,7 +1088,7 @@ function openSubthreadRecorderFromEnv(deps: ServerDeps): SubthreadRecorder | nul
   const api_version = process.env["COLTRANE_API_VERSION"] ?? "1.0.0";
   const parent_session_id = process.env["COLTRANE_PARENT_SESSION_ID"] ?? null;
   const model_version = process.env["COLTRANE_MODEL"] ?? deps.model_version ?? "claude-cli-default";
-  const genome = deps.genome_dir ? loadGenome(deps.genome_dir) : null;
+  const genome = deps.genome_dir ? resolveGenome(deps.genome_dir) : null;
   const genome_hash = genome ? loadedGenomeHash(genome) : "no-genome";
   const run_fp = runFingerprint({
     genome_hash,

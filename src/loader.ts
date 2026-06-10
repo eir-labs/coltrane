@@ -1,5 +1,5 @@
 import { readdirSync, readFileSync, existsSync, statSync, writeFileSync, mkdirSync } from "node:fs";
-import { join, extname } from "node:path";
+import { join, extname, resolve, isAbsolute } from "node:path";
 import { defineAgent, composeStandard, CompositionError, type Agent, type Standard, type PhaseDef } from "./composition.js";
 import type { Primitive } from "./core_types.js";
 import { CANONICAL_CORE_TYPES } from "./canonical_core_types.js";
@@ -370,4 +370,49 @@ export function loadLayeredGenome(roots: readonly string[]): LoadedGenome {
   }
 
   return { core_types, domain_types, agents, standards, skills, evals, load_errors, provenance };
+}
+
+/**
+ * Manifest-aware genome load (genome extension Phase 2 — opt-in). A genome root may
+ * declare the base(s) it extends in a `genome.json` manifest: `{ "extends": [<path>] }`
+ * (absolute, or relative to that root). resolveGenome walks the extends chain, flattens
+ * it to a layer stack (bases first, this root last, deduped + cycle-guarded), and resolves
+ * it via loadLayeredGenome. No manifest → a plain single-root load. This is what the
+ * running server (bootstrapServerDeps) calls, so a downstream consumer's declared base
+ * is honored automatically.
+ */
+export function resolveGenome(root: string): LoadedGenome {
+  const chain = resolveExtendsChain(root);
+  return chain.length === 1 ? loadGenome(root) : loadLayeredGenome(chain);
+}
+
+function readGenomeManifest(root: string): readonly string[] {
+  const p = join(root, "genome.json");
+  if (!existsSync(p)) return [];
+  try {
+    const data = JSON.parse(readFileSync(p, "utf-8")) as { extends?: unknown };
+    return Array.isArray(data.extends) ? data.extends.filter((e): e is string => typeof e === "string") : [];
+  } catch {
+    return []; // malformed manifest → treat as no base (don't crash the load)
+  }
+}
+
+function resolveExtendsChain(root: string): string[] {
+  const ordered: string[] = [];
+  const done = new Set<string>();
+  const onStack = new Set<string>();
+  const visit = (r: string): void => {
+    const real = resolve(r);
+    if (done.has(real)) return;
+    if (onStack.has(real)) throw new GenomeLoadError(`genome extends cycle detected at ${real}`);
+    onStack.add(real);
+    for (const base of readGenomeManifest(real)) {
+      visit(isAbsolute(base) ? base : join(real, base));
+    }
+    onStack.delete(real);
+    done.add(real);
+    ordered.push(real); // post-order: bases land before the root that extends them
+  };
+  visit(root);
+  return ordered;
 }

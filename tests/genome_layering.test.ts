@@ -8,7 +8,7 @@ import { describe, it, expect } from "vitest";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { loadLayeredGenome } from "../src/loader.js";
+import { loadLayeredGenome, resolveGenome } from "../src/loader.js";
 
 function writeJson(dir: string, sub: string, name: string, obj: unknown): void {
   const d = join(dir, sub);
@@ -77,6 +77,46 @@ describe("genome layering: a consumer genome extends a base", () => {
     } finally {
       rmSync(base, { recursive: true, force: true });
       rmSync(consumer, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("manifest-declared base: resolveGenome reads `extends` and layers", () => {
+  it("a consumer's genome.json `extends` pulls in the base + composes its players", () => {
+    const base = mkdtempSync(join(tmpdir(), "coltrane-mbase-"));
+    const consumer = mkdtempSync(join(tmpdir(), "coltrane-mconsumer-"));
+    try {
+      writeJson(base, "agents", "base-scout.json", { slug: "base-scout", primitives: ["SENSE"], output_types: ["Signal"] });
+      // the consumer DECLARES its base (opt-in)
+      writeFileSync(join(consumer, "genome.json"), JSON.stringify({ extends: [base] }));
+      writeJson(consumer, "standards", "flow.json", {
+        slug: "flow",
+        domain: "widgetco",
+        agent_slugs: ["base-scout"],
+        phases: [{ name: "sense", chairs: [{ role: "sense", agent_slug: "base-scout", depends_on: [], input_contract: [], output_contract: ["Signal"], required_skills: [] }] }],
+      });
+
+      const g = resolveGenome(consumer);
+
+      expect(g.load_errors, JSON.stringify(g.load_errors)).toEqual([]);
+      expect(g.agents.has("base-scout")).toBe(true);
+      expect(g.standards.has("flow")).toBe(true);
+      expect(g.provenance?.get("agent:base-scout")).toBe(base);
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+      rmSync(consumer, { recursive: true, force: true });
+    }
+  });
+
+  it("no manifest = a plain single-root load (backward compatible)", () => {
+    const root = mkdtempSync(join(tmpdir(), "coltrane-nomanifest-"));
+    try {
+      writeJson(root, "agents", "solo.json", { slug: "solo", primitives: ["SENSE"], output_types: ["Signal"] });
+      const g = resolveGenome(root);
+      expect(g.agents.has("solo")).toBe(true);
+      expect(g.core_types.size).toBe(6);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
     }
   });
 });

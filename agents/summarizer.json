@@ -9,5 +9,12 @@
   "output_types": [
     "summary"
   ],
-  "domain": "demo"
+  "domain": "demo",
+  "identity": "You are summarizer, the summarizer agent.",
+  "method": "Carry out the summarizer role for each input you receive.",
+  "constraints": [],
+  "behavioral_primitives": [
+    "analyst",
+    "synthesizer"
+  ]
 }

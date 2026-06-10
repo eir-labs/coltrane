@@ -26,6 +26,7 @@
 // kill seam is non-deterministic across hosts).
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { TEST_BEHAVIOR } from "../_support/agents.js";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 
@@ -52,7 +53,7 @@ let deps: ServerDeps;
 // agent producing its own typed output.
 let threePhaseStandard: Standard;
 
-const SENSOR: Agent = {
+const SENSOR: Agent = { ...TEST_BEHAVIOR,
   slug: "sensor",
   primitives: ["SENSE"],
   input_types: [],
@@ -60,7 +61,7 @@ const SENSOR: Agent = {
   domain: "demo",
 };
 
-const SUMMARIZER: Agent = {
+const SUMMARIZER: Agent = { ...TEST_BEHAVIOR,
   slug: "summarizer",
   primitives: ["INTERPRET"],
   input_types: ["raw-note"],
@@ -68,7 +69,7 @@ const SUMMARIZER: Agent = {
   domain: "demo",
 };
 
-const FINALIZER: Agent = {
+const FINALIZER: Agent = { ...TEST_BEHAVIOR,
   slug: "summarizer-2",
   primitives: ["INTERPRET"],
   input_types: ["summary"],

@@ -14,6 +14,7 @@
 //   T4 — agent_state transitions to "depleted" when budget exhausted
 //   T5 — no budget specified → no enforcement (back-compat)
 import { describe, it, expect } from "vitest";
+import { TEST_BEHAVIOR } from "./_support/agents.js";
 import {
   runGig,
   BudgetExhausted,
@@ -43,14 +44,14 @@ const finding: DomainType = {
   required_fields: ["title"],
 };
 
-const scout: Agent = {
+const scout: Agent = { ...TEST_BEHAVIOR,
   slug: "site-scout",
   primitives: ["SENSE"],
   input_types: [],
   output_types: ["page-model"],
   domain: "eirtests",
 };
-const analyst: Agent = {
+const analyst: Agent = { ...TEST_BEHAVIOR,
   slug: "site-analyst",
   primitives: ["INTERPRET"],
   input_types: ["page-model"],

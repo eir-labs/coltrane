@@ -5,6 +5,7 @@
 // proper fix for the e2e-band problem ("an LLM should not babysit a deterministic
 // command"): the deterministic step becomes a code chair, sealed like any other output.
 import { describe, it, expect } from "vitest";
+import { TEST_BEHAVIOR } from "./_support/agents.js";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import {
@@ -86,7 +87,7 @@ describe("a chair backed by a skill runs deterministic code, not the model", () 
 
   it("a skill-backed chair feeds its deterministic output to a downstream agent chair", async () => {
     // adder (skill) -> reporter (agent). The agent must see the skill's {sum:8} as input.
-    const reporter = defineAgent({
+    const reporter = defineAgent({ ...TEST_BEHAVIOR,
       slug: "reporter",
       primitives: ["INTERPRET"],
       input_types: ["Signal"],

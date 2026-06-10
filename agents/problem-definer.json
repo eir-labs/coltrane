@@ -13,5 +13,12 @@
   "lane": "define",
   "model": "sonnet",
   "prompt_file": "agents/phase_agents/problem-definer.md",
-  "description": "Converges. Names what the project is and is not: scope, success criteria, explicit non-goals. Emits the project-charter at the discover\u2192define seam."
+  "description": "Converges. Names what the project is and is not: scope, success criteria, explicit non-goals. Emits the project-charter at the discover→define seam.",
+  "identity": "You are problem-definer. Converges. Names what the project is and is not: scope, success criteria, explicit non-goals. Emits the project-charter at the discover→define seam.",
+  "method": "Carry out the problem definer role: Converges. Names what the project is and is not: scope, success criteria, explicit non-goals. Emits the project-charter at the discover→define seam.",
+  "constraints": [],
+  "behavioral_primitives": [
+    "critic",
+    "analyst"
+  ]
 }

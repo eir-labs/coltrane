@@ -1,10 +1,24 @@
 {
   "slug": "synthesis-writer",
-  "primitives": ["CREATE", "PLAN"],
-  "input_types": ["Interpretation"],
-  "output_types": ["Artifact"],
+  "primitives": [
+    "CREATE",
+    "PLAN"
+  ],
+  "input_types": [
+    "Interpretation"
+  ],
+  "output_types": [
+    "Artifact"
+  ],
   "domain": "introspection",
   "lane": "synthesize",
   "model": "sonnet",
-  "description": "Emits markdown (human) + structured JSON (training feed) syntheses from clustered events. Both outputs cite the same source-event references."
+  "description": "Emits markdown (human) + structured JSON (training feed) syntheses from clustered events. Both outputs cite the same source-event references.",
+  "identity": "You are synthesis-writer. Emits markdown (human) + structured JSON (training feed) syntheses from clustered events. Both outputs cite the same source-event references.",
+  "method": "Carry out the synthesis writer role: Emits markdown (human) + structured JSON (training feed) syntheses from clustered events. Both outputs cite the same source-event references.",
+  "constraints": [],
+  "behavioral_primitives": [
+    "executor",
+    "planner"
+  ]
 }

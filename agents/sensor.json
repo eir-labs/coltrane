@@ -6,5 +6,12 @@
   "output_types": [
     "raw-note"
   ],
-  "domain": "demo"
+  "domain": "demo",
+  "identity": "You are sensor, the sensor agent.",
+  "method": "Carry out the sensor role for each input you receive.",
+  "constraints": [],
+  "behavioral_primitives": [
+    "explorer",
+    "analyst"
+  ]
 }

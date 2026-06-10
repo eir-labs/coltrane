@@ -1,11 +1,27 @@
 {
   "slug": "claim-rewriter",
-  "primitives": ["INTERPRET", "PLAN"],
-  "input_types": ["claim-draft"],
-  "output_types": ["claim-draft"],
+  "primitives": [
+    "INTERPRET",
+    "PLAN"
+  ],
+  "input_types": [
+    "claim-draft"
+  ],
+  "output_types": [
+    "claim-draft"
+  ],
   "lane": "refine-claim",
   "model": "sonnet",
   "prompt_file": "agents/phase_agents/claim-rewriter.md",
-  "skill_slugs": ["diamond-cutting-discipline"],
-  "description": "Rewrites the claim to maximize defensible scope given the novelty-verdict. Enforces the single-cleave discipline: one independent claim, ≤3 functional elements joined by `comprising`. Output: refined claim-draft. Note: declared input_types is `claim-draft` only — the agent also reads the upstream novelty-verdict from the substrate at runtime, but it is not declared as a strict input_type to avoid the one-hop cycle the composition layer detects between this agent and novelty-searcher (which consumes claim-draft + produces novelty-verdict)."
+  "skill_slugs": [
+    "diamond-cutting-discipline"
+  ],
+  "description": "Rewrites the claim to maximize defensible scope given the novelty-verdict. Enforces the single-cleave discipline: one independent claim, ≤3 functional elements joined by `comprising`. Output: refined claim-draft. Note: declared input_types is `claim-draft` only — the agent also reads the upstream novelty-verdict from the substrate at runtime, but it is not declared as a strict input_type to avoid the one-hop cycle the composition layer detects between this agent and novelty-searcher (which consumes claim-draft + produces novelty-verdict).",
+  "identity": "You are claim-rewriter. Rewrites the claim to maximize defensible scope given the novelty-verdict. Enforces the single-cleave discipline: one independent claim, ≤3 functional elements joined by `comprising`. Output: refined claim-draft. Note: declared input_types is `claim-draft` only — the agent also reads the upstream novelty-verdict from the substrate at runtime, but it is not declared as a strict input_type to avoid the one-hop cycle the composition layer detects between this agent and novelty-searcher (which consumes claim-draft + produces novelty-verdict).",
+  "method": "Carry out the claim rewriter role: Rewrites the claim to maximize defensible scope given the novelty-verdict. Enforces the single-cleave discipline: one independent claim, ≤3 functional elements joined by `comprising`. Output: refined claim-draft. Note: declared input_types is `claim-draft` only — the agent also reads the upstream novelty-verdict from the substrate at runtime, but it is not declared as a strict input_type to avoid the one-hop cycle the composition layer detects between this agent and novelty-searcher (which consumes claim-draft + produces novelty-verdict).",
+  "constraints": [],
+  "behavioral_primitives": [
+    "analyst",
+    "synthesizer"
+  ]
 }

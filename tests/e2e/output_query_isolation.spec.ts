@@ -21,6 +21,7 @@
 // in output_trace, and we file the follow-up.
 
 import { describe, it, expect } from "vitest";
+import { TEST_BEHAVIOR } from "../_support/agents.js";
 import {
   dispatchTool,
   createRegistry,
@@ -51,28 +52,28 @@ const finding: DomainType = {
   required_fields: ["title"],
 };
 
-const scoutA: Agent = {
+const scoutA: Agent = { ...TEST_BEHAVIOR,
   slug: "scout-A",
   primitives: ["SENSE"],
   input_types: [],
   output_types: ["page-model"],
   domain: "eirtests",
 };
-const analystA: Agent = {
+const analystA: Agent = { ...TEST_BEHAVIOR,
   slug: "analyst-A",
   primitives: ["INTERPRET"],
   input_types: ["page-model"],
   output_types: ["finding"],
   domain: "eirtests",
 };
-const scoutB: Agent = {
+const scoutB: Agent = { ...TEST_BEHAVIOR,
   slug: "scout-B",
   primitives: ["SENSE"],
   input_types: [],
   output_types: ["page-model"],
   domain: "eirtests",
 };
-const analystB: Agent = {
+const analystB: Agent = { ...TEST_BEHAVIOR,
   slug: "analyst-B",
   primitives: ["INTERPRET"],
   input_types: ["page-model"],

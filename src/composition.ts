@@ -27,6 +27,21 @@ export interface AgentDef {
   // and injects as the prompt's Skills layer (layer 3 of 5). Absent/empty = no
   // skills attach; the prompt skips the Skills section entirely.
   skill_slugs?: readonly string[];
+  // Behavioral representation — REQUIRED. An agent without identity/method/constraints/
+  // disposition is the bug this whole change closes; there is no valid agent without them.
+  identity: string;
+  method: string;
+  constraints: readonly string[];
+  behavioral_primitives: readonly BelbinRole[];
+  // Cage / economy envelope — optional, with a REAL deny-by-default / gig-fallback reason
+  // (not back-compat): absent code_tool_access = deny code tools; absent model_tier = the
+  // gig/invoker default model; absent max_tool_calls/max_token_budget = the gig budget
+  // governs; absent depth_profile = the gig depth applies.
+  model_tier?: ModelTier;
+  max_tool_calls?: number;
+  max_token_budget?: number;
+  code_tool_access?: CodeToolAccess;
+  depth_profile?: Depth;
 }
 
 export interface Agent {
@@ -36,13 +51,13 @@ export interface Agent {
   output_types: readonly string[];
   domain: string | null;
   // Behavioral representation — the agent's own prose, NOT capability (capability lives
-  // in skills). buildPrompt renders these into the Identity / Method / Constraints
-  // layers. Without them the prompt is contentless scaffold and the model confabulates.
-  // Optional so existing Agent literals stay valid; a real genome agent declares them.
-  identity?: string;            // who you are — role / stance (Identity layer)
-  method?: string;              // how you do THIS agent's job — the step-by-step (Method layer)
-  constraints?: readonly string[]; // the negative space — never-invent / cite-sources (Constraints layer)
-  behavioral_primitives?: readonly BelbinRole[]; // Belbin pairing (2 in tension) → Disposition layer
+  // in skills). buildPrompt renders these into the Disposition / Identity / Method /
+  // Constraints layers. REQUIRED: an agent without them renders a contentless prompt and
+  // the model confabulates — that is the bug this closes, so the type forbids it.
+  identity: string;             // who you are — role / stance (Identity layer)
+  method: string;               // how you do THIS agent's job — the step-by-step (Method layer)
+  constraints: readonly string[]; // the negative space — never-invent / cite-sources (Constraints layer)
+  behavioral_primitives: readonly BelbinRole[]; // Belbin pairing (2 in tension) → Disposition layer
   // Cage grant — optional so hand-built Agent literals stay valid; defineAgent always
   // sets them ([] = no grant). The invoker treats absent/empty as deny-by-default.
   allowed_tools?: readonly string[];
@@ -108,6 +123,13 @@ export interface Standard {
 
 export class CompositionError extends Error {}
 
+// A definition that is structurally parseable but INCOMPLETE against the current schema —
+// e.g. an agent missing its now-required behavioral representation. Distinct from
+// CompositionError (a malformed/illegal definition): an incomplete genome must be UPGRADED
+// (fill in the missing features), so the loader HARD-fails on this rather than soft-skipping
+// the file. Underdeveloped is not the same as broken.
+export class GenomeIncompleteError extends Error {}
+
 const ROOT_PRIMITIVES = new Set<Primitive>(["SENSE"]);
 const NEEDS_UPSTREAM_REASONING = new Set<Primitive>(["CREATE"]);
 const NEEDS_TARGET = new Set<Primitive>(["VERIFY"]);
@@ -151,6 +173,25 @@ export function defineAgent(def: AgentDef): Agent {
     }
   }
 
+  // Behavioral representation is mandatory — checked AFTER the structural (primitive)
+  // validation so a malformed agent reports its structural defect first. Missing behavioral
+  // representation is INCOMPLETE (a schema-migration gap, distinct from malformed): like any
+  // invalid agent it HARD-fails the load — a genome must load cleanly to run, never hollow.
+  if (typeof def.identity !== "string" || def.identity.trim() === "") {
+    throw new GenomeIncompleteError(`agent ${def.slug}: identity is required (who the agent is) — fill it in to upgrade the genome`);
+  }
+  if (typeof def.method !== "string" || def.method.trim() === "") {
+    throw new GenomeIncompleteError(`agent ${def.slug}: method is required (how the agent works) — fill it in to upgrade the genome`);
+  }
+  if (!Array.isArray(def.behavioral_primitives) || def.behavioral_primitives.length === 0) {
+    throw new GenomeIncompleteError(`agent ${def.slug}: behavioral_primitives (disposition) is required — fill it in to upgrade the genome`);
+  }
+  if (!Array.isArray(def.constraints)) {
+    throw new GenomeIncompleteError(`agent ${def.slug}: constraints is required (use [] for none) — fill it in to upgrade the genome`);
+  }
+
+  // Conditional spread for the optional rich fields — assigning an explicit `undefined`
+  // would violate exactOptionalPropertyTypes, so only include a field when it's present.
   return {
     slug: def.slug,
     primitives: prims,
@@ -161,6 +202,15 @@ export function defineAgent(def: AgentDef): Agent {
     allowed_tools: def.allowed_tools ?? [],
     disallowed_tools: def.disallowed_tools ?? [],
     skill_slugs: def.skill_slugs ?? [],
+    identity: def.identity,
+    method: def.method,
+    constraints: def.constraints,
+    behavioral_primitives: def.behavioral_primitives,
+    ...(def.model_tier !== undefined ? { model_tier: def.model_tier } : {}),
+    ...(def.max_tool_calls !== undefined ? { max_tool_calls: def.max_tool_calls } : {}),
+    ...(def.max_token_budget !== undefined ? { max_token_budget: def.max_token_budget } : {}),
+    ...(def.code_tool_access !== undefined ? { code_tool_access: def.code_tool_access } : {}),
+    ...(def.depth_profile !== undefined ? { depth_profile: def.depth_profile } : {}),
   };
 }
 

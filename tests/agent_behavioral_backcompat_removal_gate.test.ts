@@ -1,33 +1,23 @@
-// DEPRECATION GATE — intentionally RED. Do not "fix" it by weakening the assertion.
+// ENFORCEMENT GUARD — behavioral fields are mandatory.
 //
-// This test fails on purpose and is SUPPOSED to keep failing until the very last step of
-// the behavioral-representation work: after identity/method are wired end to end (ingest
-// -> persist -> load -> render, see agent_behavioral_representation.test.ts) AND that
-// replacement is proven green, the transitional BACK-COMPAT must be removed — namely the
-// affordance that lets an agent exist with no identity/method (the optional fields on
-// AgentDef/Agent that keep today's lean agents loading during the migration).
-//
-// This gate goes GREEN only when that back-compat is gone:
-//   - identity and method become REQUIRED to define an agent (defineAgent rejects a lean one)
-//   - every existing agent definition has been migrated to carry them
-//
-// WHEN THIS TURNS GREEN, also delete the transitional back-compat test
-// "omits the behavioral layers cleanly when an agent declares none (back-compat)" in
-// tests/agent_behavioral_representation.test.ts — it asserts the affordance this gate
-// exists to remove, and the two cannot both be green.
+// This began as a deprecation gate (RED on purpose) while identity/method/constraints/
+// disposition were optional. Now that the migration is done — the fields are required on
+// AgentDef/Agent and every agent definition carries them — this guard is GREEN and stays
+// green: it asserts the requirement can't silently regress back to optional. defineAgent
+// must reject an agent with no behavioral representation rather than run it hollow.
 import { describe, it, expect } from "vitest";
-import { defineAgent } from "../src";
+import { defineAgent, type AgentDef } from "../src";
 
-describe("BACK-COMPAT REMOVAL GATE (expected RED until cleanup)", () => {
-  it("rejects an agent defined with no identity and no method — behavioral fields are mandatory", () => {
+describe("behavioral fields are mandatory (no optional escape hatch)", () => {
+  it("rejects an agent defined with no identity/method/disposition", () => {
+    // cast past the compile-time guard to prove the RUNTIME validation also rejects it
     expect(() =>
       defineAgent({
         slug: "lean-agent",
         primitives: ["INTERPRET"],
         input_types: [],
         output_types: ["Interpretation"],
-        // no identity, no method — the transitional back-compat must be gone for this to throw
-      }),
+      } as unknown as AgentDef),
     ).toThrow(/identity|method|behavioral/i);
   });
 });

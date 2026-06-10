@@ -19,6 +19,7 @@
 // is unnecessary here — these are pure composition+runtime calls, no genome on disk).
 
 import { describe, expect, it } from "vitest";
+import { TEST_BEHAVIOR } from "../_support/agents.js";
 
 import {
   CompositionError,
@@ -40,7 +41,7 @@ import {
 
 function buildCyclicAgents(): { a: Agent; b: Agent } {
   // A: INTERPRET, consumes "b-out", produces "a-out"
-  const a = defineAgent({
+  const a = defineAgent({ ...TEST_BEHAVIOR,
     slug: "A",
     primitives: ["INTERPRET"],
     input_types: ["b-out"],
@@ -48,7 +49,7 @@ function buildCyclicAgents(): { a: Agent; b: Agent } {
     domain: "demo",
   });
   // B: INTERPRET, consumes "a-out", produces "b-out"  ← closes the cycle
-  const b = defineAgent({
+  const b = defineAgent({ ...TEST_BEHAVIOR,
     slug: "B",
     primitives: ["INTERPRET"],
     input_types: ["a-out"],
@@ -107,21 +108,21 @@ describe("standard with cycle (adversarial unique-unknown)", () => {
   //    terminates anyway (linear phase walk). Either outcome is informative.
   // ──────────────────────────────────────────────────────────────────────────
   it("composeStandard 3-agent cycle (A→B→C→A): rejection OR runtime-safe acceptance, no infinite loop", async () => {
-    const a = defineAgent({
+    const a = defineAgent({ ...TEST_BEHAVIOR,
       slug: "A3",
       primitives: ["INTERPRET"],
       input_types: ["c-out"], // consumes C
       output_types: ["a3-out"],
       domain: "demo",
     });
-    const b = defineAgent({
+    const b = defineAgent({ ...TEST_BEHAVIOR,
       slug: "B3",
       primitives: ["INTERPRET"],
       input_types: ["a3-out"], // consumes A
       output_types: ["b3-out"],
       domain: "demo",
     });
-    const c = defineAgent({
+    const c = defineAgent({ ...TEST_BEHAVIOR,
       slug: "C3",
       primitives: ["INTERPRET"],
       input_types: ["b3-out"], // consumes B   (cycle: A→B→C→A)
@@ -212,7 +213,7 @@ describe("standard with cycle (adversarial unique-unknown)", () => {
   //    handle the same-agent edge case. Either reject OR runtime-safe accept.
   // ──────────────────────────────────────────────────────────────────────────
   it("composeStandard self-cycle (A consumes own output): rejection OR runtime termination", async () => {
-    const a = defineAgent({
+    const a = defineAgent({ ...TEST_BEHAVIOR,
       slug: "Aself",
       primitives: ["INTERPRET"],
       input_types: ["aself-out"], // consumes own output type

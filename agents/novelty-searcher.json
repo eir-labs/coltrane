@@ -1,11 +1,28 @@
 {
   "slug": "novelty-searcher",
-  "primitives": ["SENSE", "JUDGE"],
-  "input_types": ["claim-draft"],
-  "output_types": ["prior-art-hit", "novelty-verdict"],
+  "primitives": [
+    "SENSE",
+    "JUDGE"
+  ],
+  "input_types": [
+    "claim-draft"
+  ],
+  "output_types": [
+    "prior-art-hit",
+    "novelty-verdict"
+  ],
   "lane": "search-novelty",
   "model": "sonnet",
   "prompt_file": "agents/phase_agents/novelty-searcher.md",
-  "skill_slugs": ["diamond-cutting-discipline"],
-  "description": "Searches a prior-art corpus (patents + literature) for nearest-neighbor matches to the cleaved claim. Emits prior-art-hit signals (with similarity scores) + aggregates them into a novelty-verdict. SENSE the corpus, JUDGE the distance."
+  "skill_slugs": [
+    "diamond-cutting-discipline"
+  ],
+  "description": "Searches a prior-art corpus (patents + literature) for nearest-neighbor matches to the cleaved claim. Emits prior-art-hit signals (with similarity scores) + aggregates them into a novelty-verdict. SENSE the corpus, JUDGE the distance.",
+  "identity": "You are novelty-searcher. Searches a prior-art corpus (patents + literature) for nearest-neighbor matches to the cleaved claim. Emits prior-art-hit signals (with similarity scores) + aggregates them into a novelty-verdict. SENSE the corpus, JUDGE the distance.",
+  "method": "Carry out the novelty searcher role: Searches a prior-art corpus (patents + literature) for nearest-neighbor matches to the cleaved claim. Emits prior-art-hit signals (with similarity scores) + aggregates them into a novelty-verdict. SENSE the corpus, JUDGE the distance.",
+  "constraints": [],
+  "behavioral_primitives": [
+    "explorer",
+    "analyst"
+  ]
 }

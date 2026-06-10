@@ -35,6 +35,7 @@
 // One of these will fail RED. That's the finding.
 
 import { describe, it, expect } from "vitest";
+import { TEST_BEHAVIOR } from "../_support/agents.js";
 import {
   createRegistry,
   createOutputStore,
@@ -47,8 +48,8 @@ import {
 
 describe("e2e: evals declared on a standard must populate eval_scores (RED — N3 measurement gap)", () => {
   it("a standard declaring eval_slugs propagates them through composition", () => {
-    const sensor = defineAgent({ slug: "sensor", primitives: ["SENSE"], output_types: ["raw-note"], domain: "demo" });
-    const summarizer = defineAgent({
+    const sensor = defineAgent({ ...TEST_BEHAVIOR, slug: "sensor", primitives: ["SENSE"], output_types: ["raw-note"], domain: "demo" });
+    const summarizer = defineAgent({ ...TEST_BEHAVIOR,
       slug: "summarizer",
       primitives: ["INTERPRET"],
       input_types: ["raw-note"],
@@ -90,8 +91,8 @@ describe("e2e: evals declared on a standard must populate eval_scores (RED — N
       required_fields: ["gist"],
     });
 
-    const sensor = defineAgent({ slug: "sensor", primitives: ["SENSE"], output_types: ["raw-note"], domain: "demo" });
-    const summarizer = defineAgent({
+    const sensor = defineAgent({ ...TEST_BEHAVIOR, slug: "sensor", primitives: ["SENSE"], output_types: ["raw-note"], domain: "demo" });
+    const summarizer = defineAgent({ ...TEST_BEHAVIOR,
       slug: "summarizer",
       primitives: ["INTERPRET"],
       input_types: ["raw-note"],
@@ -165,8 +166,8 @@ describe("e2e: evals declared on a standard must populate eval_scores (RED — N
       required_fields: ["gist"],
     });
 
-    const sensor = defineAgent({ slug: "sensor", primitives: ["SENSE"], output_types: ["raw-note"], domain: "demo" });
-    const summarizer = defineAgent({
+    const sensor = defineAgent({ ...TEST_BEHAVIOR, slug: "sensor", primitives: ["SENSE"], output_types: ["raw-note"], domain: "demo" });
+    const summarizer = defineAgent({ ...TEST_BEHAVIOR,
       slug: "summarizer",
       primitives: ["INTERPRET"],
       input_types: ["raw-note"],

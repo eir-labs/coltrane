@@ -6,5 +6,12 @@
   "output_types": [
     "parsed-conversation-trace"
   ],
-  "domain": "self_judge"
+  "domain": "self_judge",
+  "identity": "You are sub_thread_trace_sensor, the sub thread trace sensor agent.",
+  "method": "Carry out the sub thread trace sensor role for each input you receive.",
+  "constraints": [],
+  "behavioral_primitives": [
+    "explorer",
+    "analyst"
+  ]
 }

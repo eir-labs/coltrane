@@ -5,6 +5,7 @@
 // the code path (agents via defineAgent, standards via composeStandard), and that the
 // shipped example genome (the worked hello-band) loads + composes from disk.
 import { describe, it, expect } from "vitest";
+import { TEST_BEHAVIOR } from "./_support/agents.js";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, cpSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -31,7 +32,7 @@ function writeJson(dir: string, sub: string, name: string, obj: unknown) {
 describe("genome file-loading: all five classes load from files", () => {
   it("loads agents from files, validated through defineAgent", () => {
     const dir = scratchGenome();
-    writeJson(dir, "agents", "sensor.json", { slug: "sensor", primitives: ["SENSE"], output_types: ["raw-note"], domain: "demo" });
+    writeJson(dir, "agents", "sensor.json", { ...TEST_BEHAVIOR, slug: "sensor", primitives: ["SENSE"], output_types: ["raw-note"], domain: "demo" });
     const g = loadGenome(dir);
     const a = g.agents.get("sensor");
     expect(a).toBeDefined();
@@ -42,8 +43,8 @@ describe("genome file-loading: all five classes load from files", () => {
 
   it("loads standards from files, resolving agent_slugs + composing", () => {
     const dir = scratchGenome();
-    writeJson(dir, "agents", "sensor.json", { slug: "sensor", primitives: ["SENSE"], output_types: ["raw-note"], domain: "demo" });
-    writeJson(dir, "agents", "summarizer.json", { slug: "summarizer", primitives: ["INTERPRET"], input_types: ["raw-note"], output_types: ["summary"], domain: "demo" });
+    writeJson(dir, "agents", "sensor.json", { ...TEST_BEHAVIOR, slug: "sensor", primitives: ["SENSE"], output_types: ["raw-note"], domain: "demo" });
+    writeJson(dir, "agents", "summarizer.json", { ...TEST_BEHAVIOR, slug: "summarizer", primitives: ["INTERPRET"], input_types: ["raw-note"], output_types: ["summary"], domain: "demo" });
     writeJson(dir, "standards", "summarize.json", {
       slug: "summarize", domain: "demo", agent_slugs: ["sensor", "summarizer"],
       phases: [{ name: "sense", chairs: [{ role: "sense", agent_slug: "sensor", depends_on: [], input_contract: [], output_contract: ["raw-note"], required_skills: [] }] }, { name: "interpret", chairs: [{ role: "interpret", agent_slug: "summarizer", depends_on: [], input_contract: [], output_contract: ["summary"], required_skills: [] }] }],
@@ -83,8 +84,8 @@ describe("genome file-loading: all five classes load from files", () => {
 
   it("records duplicate agent slug as a load_error on the second file", () => {
     const dir = scratchGenome();
-    writeJson(dir, "agents", "a.json", { slug: "dup", primitives: ["SENSE"], domain: "demo" });
-    writeJson(dir, "agents", "b.json", { slug: "dup", primitives: ["SENSE"], domain: "demo" });
+    writeJson(dir, "agents", "a.json", { ...TEST_BEHAVIOR, slug: "dup", primitives: ["SENSE"], domain: "demo" });
+    writeJson(dir, "agents", "b.json", { ...TEST_BEHAVIOR, slug: "dup", primitives: ["SENSE"], domain: "demo" });
     const g = loadGenome(dir);
     // The first one wins; the second is skipped + recorded.
     expect(g.agents.has("dup")).toBe(true);

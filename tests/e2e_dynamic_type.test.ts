@@ -2,6 +2,7 @@
 // agent in the same gig. Proves "no file changes to add a type" works end-to-end
 // through the runtime (not just at load time).
 import { describe, it, expect } from "vitest";
+import { TEST_BEHAVIOR } from "./_support/agents.js";
 import {
   dispatchTool,
   createRegistry,
@@ -34,7 +35,7 @@ const downstreamType: DomainType = {
   required_fields: ["description", "severity_score"],
 };
 
-const upstream: Agent = {
+const upstream: Agent = { ...TEST_BEHAVIOR,
   slug: "finder",
   primitives: ["INTERPRET"],
   input_types: [],
@@ -42,7 +43,7 @@ const upstream: Agent = {
   domain: "eirtests",
 };
 
-const downstream: Agent = {
+const downstream: Agent = { ...TEST_BEHAVIOR,
   slug: "scorer",
   primitives: ["JUDGE"],
   input_types: ["raw-finding"],

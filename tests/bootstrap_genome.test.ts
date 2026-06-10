@@ -6,6 +6,7 @@
 // Counter-claim: the disk genome is missing/!=6 core types, or a gig can't run
 // on the registry that was reconstituted purely from files.
 import { describe, it, expect } from "vitest";
+import { TEST_BEHAVIOR } from "./_support/agents.js";
 import { fileURLToPath } from "node:url";
 import {
   loadGenome, loadRegistry, createOutputStore, MemoryLedger, dispatchTool,
@@ -47,8 +48,8 @@ describe("§13 Bootstrap Run — genome boots from disk", () => {
     registry.registerType(finding);
 
     // 3. wire the server on the booted registry and run a gig through the MCP surface
-    const scout: Agent = { slug: "scout", primitives: ["SENSE"], input_types: [], output_types: ["page-model"], domain: "eirtests" };
-    const analyst: Agent = { slug: "analyst", primitives: ["INTERPRET"], input_types: ["page-model"], output_types: ["finding"], domain: "eirtests" };
+    const scout: Agent = { ...TEST_BEHAVIOR, slug: "scout", primitives: ["SENSE"], input_types: [], output_types: ["page-model"], domain: "eirtests" };
+    const analyst: Agent = { ...TEST_BEHAVIOR, slug: "analyst", primitives: ["INTERPRET"], input_types: ["page-model"], output_types: ["finding"], domain: "eirtests" };
     const scan: Standard = { slug: "scan", domain: "eirtests", agents: [scout, analyst], phases: [{ name: "sense", chairs: [{ role: "sense", agent_slug: "scout", depends_on: [], input_contract: [], output_contract: ["page-model"], required_skills: [] }] }, { name: "interpret", chairs: [{ role: "interpret", agent_slug: "analyst", depends_on: [], input_contract: [], output_contract: ["finding"], required_skills: [] }] }] };
     const invoke: AgentInvoker = ({ agent }) => (agent.slug === "scout" ? { url: "/" } : { title: "x" });
     const deps: ServerDeps = { registry, outputs: createOutputStore(registry), ledger: new MemoryLedger(), standards: new Map([[scan.slug, scan]]), invoke, model_version: "m" };

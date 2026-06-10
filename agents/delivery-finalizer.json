@@ -14,5 +14,12 @@
   "lane": "deliver",
   "model": "sonnet",
   "prompt_file": "agents/phase_agents/delivery-finalizer.md",
-  "description": "Closes out the project bootstrap. git init + first commit + run preseed e2e specs + write the project's final outcome (completed / partial / refined / aborted) + announce the project to the owner."
+  "description": "Closes out the project bootstrap. git init + first commit + run preseed e2e specs + write the project's final outcome (completed / partial / refined / aborted) + announce the project to the owner.",
+  "identity": "You are delivery-finalizer. Closes out the project bootstrap. git init + first commit + run preseed e2e specs + write the project's final outcome (completed / partial / refined / aborted) + announce the project to the owner.",
+  "method": "Carry out the delivery finalizer role: Closes out the project bootstrap. git init + first commit + run preseed e2e specs + write the project's final outcome (completed / partial / refined / aborted) + announce the project to the owner.",
+  "constraints": [],
+  "behavioral_primitives": [
+    "planner",
+    "synthesizer"
+  ]
 }

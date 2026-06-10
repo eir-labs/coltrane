@@ -11,6 +11,7 @@
 // accepted input shapes the client hit when sending the obvious (but unwrapped) form.
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { TEST_BEHAVIOR } from "./_support/agents.js";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -150,13 +151,13 @@ describe("Rob #132 — standard_compose resolves agent slugs from the genome", (
   beforeEach(() => {
     root = mkdtempSync(join(tmpdir(), "coltrane-fix132-"));
     seedCoreTypes(root);
-    writeJson(join(root, "agents"), "scout.json", {
+    writeJson(join(root, "agents"), "scout.json", { ...TEST_BEHAVIOR,
       slug: "scout",
       primitives: ["SENSE"],
       output_types: ["raw-note"],
       domain: "demo",
     });
-    writeJson(join(root, "agents"), "summarizer.json", {
+    writeJson(join(root, "agents"), "summarizer.json", { ...TEST_BEHAVIOR,
       slug: "summarizer",
       primitives: ["INTERPRET"],
       input_types: ["raw-note"],

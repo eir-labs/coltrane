@@ -1,10 +1,24 @@
 {
   "slug": "source-walker",
-  "primitives": ["SENSE", "INTERPRET"],
-  "input_types": ["raw-note"],
-  "output_types": ["repo-survey"],
+  "primitives": [
+    "SENSE",
+    "INTERPRET"
+  ],
+  "input_types": [
+    "raw-note"
+  ],
+  "output_types": [
+    "repo-survey"
+  ],
   "domain": "introspection",
   "lane": "discover",
   "model": "sonnet",
-  "description": "Catalogs sources for synthesis window: git logs, Claude Code sessions, /tmp working dirs, Drive index, Slack channels. Permission-gated for private sources. Emits sources_catalog · refuses premature interpretation."
+  "description": "Catalogs sources for synthesis window: git logs, Claude Code sessions, /tmp working dirs, Drive index, Slack channels. Permission-gated for private sources. Emits sources_catalog · refuses premature interpretation.",
+  "identity": "You are source-walker. Catalogs sources for synthesis window: git logs, Claude Code sessions, /tmp working dirs, Drive index, Slack channels. Permission-gated for private sources. Emits sources_catalog · refuses premature interpretation.",
+  "method": "Carry out the source walker role: Catalogs sources for synthesis window: git logs, Claude Code sessions, /tmp working dirs, Drive index, Slack channels. Permission-gated for private sources. Emits sources_catalog · refuses premature interpretation.",
+  "constraints": [],
+  "behavioral_primitives": [
+    "explorer",
+    "analyst"
+  ]
 }

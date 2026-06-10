@@ -35,6 +35,10 @@ const agentDef = {
   primitives: ["SENSE"],
   output_types: ["raw-note"],
   domain: "test-substrate",
+  identity: "you scan the substrate for raw signal",
+  method: "observe and record one raw note",
+  constraints: [],
+  behavioral_primitives: ["explorer", "analyst"],
 };
 
 describe("substrate identity loop — MCP-or-not-at-all", () => {

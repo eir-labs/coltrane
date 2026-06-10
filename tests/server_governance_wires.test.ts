@@ -42,7 +42,7 @@ const grant: AccessGrant = {
 
 describe("agent_define", () => {
   it("validates + constructs an agent through the router", async () => {
-    const r = await dispatchTool("agent_define", { slug: "scout", primitives: ["SENSE"], output_types: ["page-model"], domain: "eirtests" }, makeDeps());
+    const r = await dispatchTool("agent_define", { slug: "scout", primitives: ["SENSE"], output_types: ["page-model"], domain: "eirtests", identity: "you scan the site", method: "crawl and record page-models", constraints: [], behavioral_primitives: ["explorer", "analyst"] }, makeDeps());
     expect(r.ok).toBe(true);
     expect(r.not_implemented).toBeFalsy();
     expect((r.data as { agent: { slug: string } }).agent.slug).toBe("scout");

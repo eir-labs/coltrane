@@ -1,10 +1,24 @@
 {
   "slug": "event-clusterer",
-  "primitives": ["INTERPRET", "JUDGE"],
-  "input_types": ["repo-survey"],
-  "output_types": ["Interpretation"],
+  "primitives": [
+    "INTERPRET",
+    "JUDGE"
+  ],
+  "input_types": [
+    "repo-survey"
+  ],
+  "output_types": [
+    "Interpretation"
+  ],
   "domain": "introspection",
   "lane": "cluster",
   "model": "sonnet",
-  "description": "Groups source events by author, repo, and lane. Emits a clustered view of the discover-phase catalog."
+  "description": "Groups source events by author, repo, and lane. Emits a clustered view of the discover-phase catalog.",
+  "identity": "You are event-clusterer. Groups source events by author, repo, and lane. Emits a clustered view of the discover-phase catalog.",
+  "method": "Carry out the event clusterer role: Groups source events by author, repo, and lane. Emits a clustered view of the discover-phase catalog.",
+  "constraints": [],
+  "behavioral_primitives": [
+    "analyst",
+    "synthesizer"
+  ]
 }

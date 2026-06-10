@@ -31,7 +31,7 @@ describe("evolving an agent's behavior changes what the runtime loads", () => {
     mkdirSync(join(dir, "agents"), { recursive: true });
     writeFileSync(
       join(dir, "agents", "fact-checker.json"),
-      JSON.stringify({ slug: "fact-checker", primitives: ["INTERPRET"], input_types: [], output_types: ["Interpretation"], domain: "verification", identity: I1, method: "old method" }),
+      JSON.stringify({ slug: "fact-checker", primitives: ["INTERPRET"], input_types: [], output_types: ["Interpretation"], domain: "verification", identity: I1, method: "old method", constraints: [], behavioral_primitives: ["explorer", "critic"] }),
     );
 
     const r = await dispatchTool("agent_evolve", { slug: "fact-checker", changes: { identity: I2, method: M2 } }, deps(dir));

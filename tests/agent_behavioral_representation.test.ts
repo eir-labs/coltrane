@@ -45,7 +45,7 @@ describe("agent_define ingest captures behavioral fields (not discards them)", (
     const dir = mkdtempSync(join(tmpdir(), "coltrane-agentdef-"));
     const r = await dispatchTool(
       "agent_define",
-      { slug: "fact-checker", primitives: ["INTERPRET"], input_types: [], output_types: ["Interpretation"], domain: "verification", identity: IDENTITY, method: METHOD, constraints: CONSTRAINTS },
+      { slug: "fact-checker", primitives: ["INTERPRET"], input_types: [], output_types: ["Interpretation"], domain: "verification", identity: IDENTITY, method: METHOD, constraints: CONSTRAINTS, behavioral_primitives: ["explorer", "critic"] },
       deps(dir),
     );
     expect(r.ok).toBe(true);
@@ -60,7 +60,7 @@ describe("agent_define ingest captures behavioral fields (not discards them)", (
     const dir = mkdtempSync(join(tmpdir(), "coltrane-agentdef-"));
     const r = await dispatchTool(
       "agent_define",
-      { slug: "fact-checker", primitives: ["INTERPRET"], input_types: [], output_types: ["Interpretation"], domain: "verification", identity: IDENTITY, method: METHOD, constraints: CONSTRAINTS },
+      { slug: "fact-checker", primitives: ["INTERPRET"], input_types: [], output_types: ["Interpretation"], domain: "verification", identity: IDENTITY, method: METHOD, constraints: CONSTRAINTS, behavioral_primitives: ["explorer", "critic"] },
       deps(dir),
     );
     const agent = (r.data as { agent: Agent }).agent;
@@ -77,7 +77,7 @@ describe("loadGenome carries behavioral fields onto the runtime Agent", () => {
     mkdirSync(join(dir, "agents"), { recursive: true });
     writeFileSync(
       join(dir, "agents", "fact-checker.json"),
-      JSON.stringify({ slug: "fact-checker", primitives: ["INTERPRET"], input_types: [], output_types: ["Interpretation"], domain: "verification", identity: IDENTITY, method: METHOD, constraints: CONSTRAINTS }),
+      JSON.stringify({ slug: "fact-checker", primitives: ["INTERPRET"], input_types: [], output_types: ["Interpretation"], domain: "verification", identity: IDENTITY, method: METHOD, constraints: CONSTRAINTS, behavioral_primitives: ["explorer", "critic"] }),
     );
     const g = loadGenome(dir);
     const agent = g.agents.get("fact-checker");
@@ -99,6 +99,7 @@ describe("buildPrompt renders the behavioral representation", () => {
     identity: IDENTITY,
     method: METHOD,
     constraints: CONSTRAINTS,
+    behavioral_primitives: ["explorer", "critic"],
     allowed_tools: ["web_search", "fetch_url"],
   };
   const ctx = (over: Partial<AgentInvocationContext> = {}): AgentInvocationContext => ({
@@ -131,13 +132,7 @@ describe("buildPrompt renders the behavioral representation", () => {
 
   // NOTE: the Disposition layer (Layer 1, the Belbin cognitive-role pairing) is pinned in
   // tests/prompt_full_parity.test.ts against the baseline fixtures, not here. This file
-  // covers the identity/method/constraints/tool-catalog stack.
-
-  it("omits the behavioral layers cleanly when an agent declares none (back-compat)", () => {
-    const lean: Agent = { slug: "bare", primitives: ["INTERPRET"], input_types: [], output_types: ["Interpretation"], domain: null };
-    const p = buildPrompt({ agent: lean, phase: "p", inputs: [], gig_input: {} });
-    expect(p).toContain("# Identity");      // still renders the base identity line
-    expect(p).not.toMatch(/#+\s*Method/i);  // no empty Method section
-    expect(p).not.toMatch(/#+\s*Constraints/i);
-  });
+  // covers the identity/method/constraints/tool-catalog stack. (The transitional
+  // "omits layers when an agent declares none" back-compat test was removed when the
+  // behavioral fields became required — there is no longer a lean agent to omit for.)
 });

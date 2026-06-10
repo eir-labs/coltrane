@@ -9,13 +9,14 @@
 // Not touching defineAgent's default-to-null normalization.
 
 import { describe, it, expect } from "vitest";
+import { TEST_BEHAVIOR } from "./_support/agents.js";
 import { defineAgent, composeStandard, CompositionError, type Agent } from "../src/composition.js";
 
 describe("agent.domain null/undefined is domain-agnostic (Rob #134)", () => {
   it("an agent with domain undefined composes into any standard", () => {
     // Build an agent OBJECT directly (skipping defineAgent's normalize) — this
     // is how the MCP path constructs Agents from raw client JSON in #132.
-    const agentNoDomain: Agent = {
+    const agentNoDomain: Agent = { ...TEST_BEHAVIOR,
       slug: "scout",
       primitives: ["SENSE"],
       input_types: [],
@@ -32,7 +33,7 @@ describe("agent.domain null/undefined is domain-agnostic (Rob #134)", () => {
   });
 
   it("an agent with domain null composes into any standard (existing behavior preserved)", () => {
-    const agentNullDomain = defineAgent({
+    const agentNullDomain = defineAgent({ ...TEST_BEHAVIOR,
       slug: "scout-from-defineAgent",
       primitives: ["SENSE"],
       output_types: ["raw-note"],
@@ -50,7 +51,7 @@ describe("agent.domain null/undefined is domain-agnostic (Rob #134)", () => {
   });
 
   it("an agent with an explicit conflicting domain STILL throws (strictness preserved)", () => {
-    const agentExplicitDomain = defineAgent({
+    const agentExplicitDomain = defineAgent({ ...TEST_BEHAVIOR,
       slug: "scout-elsewhere",
       primitives: ["SENSE"],
       output_types: ["raw-note"],

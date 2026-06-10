@@ -3,6 +3,7 @@
 // this keeps the actual prior content, snapshotted under .coltrane/history/ so a
 // definition is recoverable, not just provably-changed.
 import { describe, it, expect } from "vitest";
+import { TEST_BEHAVIOR } from "./_support/agents.js";
 import { dispatchTool, type ServerDeps } from "../src/server.js";
 import { createRegistry, type DomainType } from "../src/registry.js";
 import { createOutputStore } from "../src/outputs.js";
@@ -14,8 +15,8 @@ import { tmpdir } from "node:os";
 
 const note: DomainType = { slug: "note", extends: "Signal", domain: "demo", schema: { type: "object", properties: { text: { type: "string" } } }, required_fields: [] };
 const gist: DomainType = { slug: "gist", extends: "Interpretation", domain: "demo", schema: { type: "object", properties: { text: { type: "string" } } }, required_fields: [] };
-const sensor2: Agent = { slug: "sensor2", primitives: ["SENSE"], input_types: [], output_types: ["note"], domain: "demo" };
-const summarizer2: Agent = { slug: "summarizer2", primitives: ["INTERPRET"], input_types: ["note"], output_types: ["gist"], domain: "demo" };
+const sensor2: Agent = { ...TEST_BEHAVIOR, slug: "sensor2", primitives: ["SENSE"], input_types: [], output_types: ["note"], domain: "demo" };
+const summarizer2: Agent = { ...TEST_BEHAVIOR, slug: "summarizer2", primitives: ["INTERPRET"], input_types: ["note"], output_types: ["gist"], domain: "demo" };
 
 function makeDeps(dir: string): ServerDeps {
   const registry = createRegistry();

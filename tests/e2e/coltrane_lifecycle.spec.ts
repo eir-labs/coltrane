@@ -11,6 +11,7 @@
 // concrete value or specific error class — no toBeDefined-only padding.
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { TEST_BEHAVIOR } from "../_support/agents.js";
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -418,7 +419,7 @@ describe("coltrane lifecycle: bootstrap → define → reload → run → evolve
   // ──────────────────────────────────────────────────────────────────────────
   it("workflow 6a: defining an agent with illegal pipeline (CREATE without upstream reasoning) throws CompositionError", () => {
     expect(() =>
-      defineAgent({
+      defineAgent({ ...TEST_BEHAVIOR,
         slug: "bad-creator",
         primitives: ["CREATE"], // CREATE at position 0 has no upstream INTERPRET/PLAN
         input_types: [],
@@ -440,7 +441,7 @@ describe("coltrane lifecycle: bootstrap → define → reload → run → evolve
   });
 
   it("workflow 6b: composing a standard that references an undefined agent throws CompositionError", () => {
-    const known: Agent = {
+    const known: Agent = { ...TEST_BEHAVIOR,
       slug: "sensor",
       primitives: ["SENSE"],
       input_types: [],

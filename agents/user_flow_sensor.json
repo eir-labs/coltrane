@@ -6,5 +6,12 @@
   "output_types": [
     "user-flow-transcript"
   ],
-  "domain": "self_judge"
+  "domain": "self_judge",
+  "identity": "You are user_flow_sensor, the user flow sensor agent.",
+  "method": "Carry out the user flow sensor role for each input you receive.",
+  "constraints": [],
+  "behavioral_primitives": [
+    "explorer",
+    "analyst"
+  ]
 }

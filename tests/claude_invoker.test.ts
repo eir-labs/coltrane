@@ -2,10 +2,11 @@
 // (tolerant JSON extraction from model output). The spawn itself is the non-
 // deterministic seam (needs the claude CLI + a key) and is not unit-tested.
 import { describe, it, expect } from "vitest";
+import { TEST_BEHAVIOR } from "./_support/agents.js";
 import { buildPrompt, extractJson, type AgentInvocationContext } from "../src";
 import type { Agent } from "../src";
 
-const agent: Agent = {
+const agent: Agent = { ...TEST_BEHAVIOR,
   slug: "site-analyst",
   primitives: ["INTERPRET"],
   input_types: ["page-model"],
@@ -23,11 +24,15 @@ function ctx(overrides: Partial<AgentInvocationContext> = {}): AgentInvocationCo
   };
 }
 
-describe("buildPrompt: the 5-layer hierarchy", () => {
-  it("includes disposition (primitives), identity, context, and a typed task", () => {
+// NOTE: the behavioral CONTENT of buildPrompt (disposition/identity/method/constraints/
+// tool-catalog/depth) is covered combinatorially by tests/agent_matrix.test.ts and against
+// golden baselines by tests/prompt_full_parity.test.ts. This file keeps only buildPrompt's
+// structural mechanics that those don't exercise (layer presence/order, upstream-input and
+// output-schema rendering, ctx-resolved skills) plus extractJson.
+describe("buildPrompt: layer structure + mechanics", () => {
+  it("emits the layer headers and a typed JSON-only task", () => {
     const p = buildPrompt(ctx());
     expect(p).toContain("# Disposition");
-    expect(p).toContain("INTERPRET");
     expect(p).toContain("# Identity");
     expect(p).toContain("site-analyst");
     expect(p).toContain("# Context");

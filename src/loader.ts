@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync, existsSync, statSync, writeFileSync, mkdirSync } from "node:fs";
 import { join, extname, resolve, isAbsolute, dirname } from "node:path";
 import { createRequire } from "node:module";
-import { defineAgent, composeStandard, CompositionError, type Agent, type Standard, type PhaseDef } from "./composition.js";
+import { defineAgent, composeStandard, CompositionError, GenomeIncompleteError, type Agent, type AgentDef, type Standard, type PhaseDef } from "./composition.js";
 import type { Primitive } from "./core_types.js";
 import { CANONICAL_CORE_TYPES } from "./canonical_core_types.js";
 
@@ -25,15 +25,10 @@ export interface DomainTypeRecord {
 // On-disk shapes for the remaining three definition classes. Agents are AgentDef-shaped
 // (validated through defineAgent). A standard file references its agents by slug (DRY —
 // agents are authored once under agents/) and is composed through composeStandard.
-export interface AgentFileDef {
-  slug: string;
-  primitives: readonly Primitive[];
-  input_types?: readonly string[];
-  output_types?: readonly string[];
-  domain?: string;
-  allowed_tools?: readonly string[];   // blast-radius cage — declared in the genome file
-  disallowed_tools?: readonly string[];
-}
+// An agent's on-disk genome shape IS an AgentDef (slug + primitives + behavioral
+// representation + cage). defineAgent validates it; a genome agent missing the required
+// behavioral fields fails to load loudly (soft per-file error) rather than running hollow.
+export type AgentFileDef = AgentDef;
 export interface StandardFileDef {
   slug: string;
   domain: string;
@@ -225,11 +220,17 @@ export function loadGenome(
       agents.set(def.slug, defineAgent(def));
       agent_paths.set(def.slug, path);
     } catch (e) {
+      // An agent that fails to VALIDATE — malformed (bad primitives / illegal progression,
+      // CompositionError) OR incomplete against the schema (missing behavioral, the
+      // GenomeIncompleteError) — HARD-fails the whole load. A genome must load cleanly to
+      // run; a standard with a quietly-missing chair would produce silently-wrong outputs.
+      // (Non-validation issues like a duplicate-slug collision still soft-fail below.)
+      if (e instanceof CompositionError || e instanceof GenomeIncompleteError) throw e;
       load_errors.push({
         kind: "agent",
         path,
         slug,
-        error: e instanceof CompositionError || e instanceof Error ? e.message : String(e),
+        error: e instanceof Error ? e.message : String(e),
       });
     }
   }

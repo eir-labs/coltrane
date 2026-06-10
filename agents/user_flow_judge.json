@@ -9,5 +9,12 @@
   "output_types": [
     "user-flow-verdict"
   ],
-  "domain": "self_judge"
+  "domain": "self_judge",
+  "identity": "You are user_flow_judge, the user flow judge agent.",
+  "method": "Carry out the user flow judge role for each input you receive.",
+  "constraints": [],
+  "behavioral_primitives": [
+    "analyst",
+    "synthesizer"
+  ]
 }

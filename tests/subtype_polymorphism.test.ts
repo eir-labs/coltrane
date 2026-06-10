@@ -84,6 +84,27 @@ describe("subtype polymorphism: a core-type contract accepts any domain subtype"
     );
   });
 
+  it("an eval declared on a CORE type judges a domain subtype filling it (polymorphic eval)", async () => {
+    const registry = createRegistry();
+    registry.registerType({ slug: "domain-verdict", extends: "Verdict", domain: "x", schema: { properties: { decided: { type: "boolean" } } }, required_fields: ["decided"] });
+    const outputs = createOutputStore(registry);
+    const ledger = new MemoryLedger();
+    const checker: Agent = { slug: "checker", primitives: ["VERIFY"], input_types: [], output_types: ["domain-verdict"], domain: "x" };
+    const std: Standard = {
+      slug: "v",
+      domain: "x",
+      agents: [checker],
+      phases: [{ name: "verify", chairs: [{ role: "verify", agent_slug: "checker", depends_on: [], input_contract: [], output_contract: ["domain-verdict"], required_skills: [] }] }],
+      eval_slugs: ["v-check"],
+    };
+    const evals = new Map([["v-check", { slug: "v-check", on_type: "Verdict", non_empty_fields: ["decided"] }]]);
+    const invoke: AgentInvoker = () => ({ decided: true });
+    const res = await runGig(std, {}, { outputs, ledger, invoke, evals });
+    // the eval is declared on core `Verdict`; the produced `domain-verdict` subtype is judged
+    // (was 0.0 under exact on_type matching)
+    expect(res.eval_scores["v-check"]).toBe(1.0);
+  });
+
   it("a domain-type contract stays EXACT — an unrelated subtype is not pulled in", async () => {
     const { outputs, ledger } = setup();
     // base-analyst variant that declares a DOMAIN input — must NOT accept widget-finding

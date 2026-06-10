@@ -191,6 +191,41 @@ describe("genome layering — review follow-ups", () => {
     }
   });
 
+  it("multi-base order: `extends: [a, b]` layers a (lowest) → b (highest); b overrides a", () => {
+    const a = mkdtempSync(join(tmpdir(), "coltrane-mb-a-"));
+    const b = mkdtempSync(join(tmpdir(), "coltrane-mb-b-"));
+    const consumer = mkdtempSync(join(tmpdir(), "coltrane-mb-c-"));
+    try {
+      writeJson(a, "agents", "shared.json", { slug: "shared", primitives: ["SENSE"], output_types: ["Signal"], allowed_tools: ["a-tool"] });
+      writeJson(b, "agents", "shared.json", { slug: "shared", primitives: ["SENSE"], output_types: ["Signal"], allowed_tools: ["b-tool"] });
+      writeFileSync(join(consumer, "genome.json"), JSON.stringify({ extends: [a, b] }));
+      const g = resolveGenome(consumer);
+      // array order is lowest → highest, so b (last) wins
+      expect(g.agents.get("shared")?.allowed_tools).toEqual(["b-tool"]);
+      expect(g.provenance?.get("agent:shared")).toBe(b);
+    } finally {
+      rmSync(a, { recursive: true, force: true });
+      rmSync(b, { recursive: true, force: true });
+      rmSync(consumer, { recursive: true, force: true });
+    }
+  });
+
+  it("skills + evals inherit across layers (resolved at gig-time against the merged maps)", () => {
+    const base = mkdtempSync(join(tmpdir(), "coltrane-se-base-"));
+    const consumer = mkdtempSync(join(tmpdir(), "coltrane-se-cons-"));
+    try {
+      writeJson(base, "skills", "base-skill.json", { slug: "base-skill", md: "base reasoning" });
+      writeJson(base, "evals", "base-eval.json", { slug: "base-eval", on_type: "Signal", non_empty_fields: ["id"] });
+      writeJson(consumer, "agents", "c.json", { slug: "c", primitives: ["SENSE"], output_types: ["Signal"], domain: "widgetco" });
+      const g = loadLayeredGenome([base, consumer]);
+      expect(g.skills.has("base-skill")).toBe(true);
+      expect(g.evals.has("base-eval")).toBe(true);
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+      rmSync(consumer, { recursive: true, force: true });
+    }
+  });
+
   it("consumer references slug X AND overrides slug X — the standard resolves to the OVERRIDE", () => {
     const base = mkdtempSync(join(tmpdir(), "coltrane-ovbase-"));
     const consumer = mkdtempSync(join(tmpdir(), "coltrane-ovcons-"));

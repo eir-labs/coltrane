@@ -501,7 +501,9 @@ function scoreEval(slug: string, produced: readonly OutputRecord[], evals?: Read
   const ev = evals?.get(slug);
   if (!ev) return 0.0;
   const onType = typeof ev["on_type"] === "string" ? (ev["on_type"] as string) : undefined;
-  const targets = onType ? produced.filter((o) => o.domain_type === onType) : produced;
+  // Subtype-aware (genome extension): an eval declared on a CORE type judges any domain
+  // subtype filling it, same as a core-type contract — so polymorphism reaches evals too.
+  const targets = onType ? produced.filter((o) => outputSatisfiesType(o, onType)) : produced;
   if (targets.length === 0) return 0.0;
   const fields = Array.isArray(ev["non_empty_fields"]) ? (ev["non_empty_fields"] as string[]) : [];
   if (fields.length > 0) {

@@ -2,7 +2,7 @@ import { readdirSync, readFileSync, existsSync, statSync, writeFileSync, mkdirSy
 import { join, extname, resolve, isAbsolute, dirname } from "node:path";
 import { createRequire } from "node:module";
 import { defineAgent, composeStandard, CompositionError, GenomeIncompleteError, type Agent, type AgentDef, type Standard, type PhaseDef } from "./composition.js";
-import { loadSkillPackage } from "./skills.js";
+import { loadSkillPackage, SkillLoadError } from "./skills.js";
 import type { Primitive } from "./core_types.js";
 import { CANONICAL_CORE_TYPES } from "./canonical_core_types.js";
 
@@ -286,47 +286,34 @@ export function loadGenome(
     }
   }
 
-  // skills/ + evals/ — slug-keyed records. Soft-fail per file.
-  const skillRead = readJsonDir<SkillRecord>(join(root, "skills"));
-  for (const f of skillRead.parse_failures) {
-    load_errors.push({ kind: "skill", path: f.path, slug: null, error: f.error });
-  }
+  // skills/<slug>/ PACKAGE directories are the ONLY skill format (the flat {slug, md} JSON
+  // is retired — no backwards-compat). A genome skill must be a COMPLETE package: meta +
+  // >=1 fixture (its pre-registered contract) + >=1 half (code and/or reasoning). Malformed
+  // (SkillLoadError) OR incomplete HARD-fails the load — a genome must load cleanly to run,
+  // mirroring the agent behavioral gate. Only a duplicate-slug collision soft-fails.
   const skills = new Map<string, SkillRecord>();
   const skill_paths = new Map<string, string>();
-  for (const { path, data: s } of skillRead.files) {
-    const slug = typeof s?.slug === "string" ? s.slug : null;
-    try {
-      if (!s.slug) throw new Error(`required field "slug" is missing`);
-      if (skills.has(s.slug)) {
-        throw new Error(`duplicate skill slug "${s.slug}" (first seen in ${skill_paths.get(s.slug)})`);
-      }
-      skills.set(s.slug, s);
-      skill_paths.set(s.slug, path);
-    } catch (e) {
-      load_errors.push({ kind: "skill", path, slug, error: e instanceof Error ? e.message : String(e) });
-    }
-  }
-  // skills/<slug>/ PACKAGE directories — the dual-artifact skill format. Each package
-  // contributes a SkillRecord carrying its dir + content identity so the runtime can resolve
-  // its code/reasoning halves. (TODO migration: the flat {slug, md} JSON read above is the
-  // pre-package format being retired — skills become packages with a mandatory fixtures
-  // contract, hard-failing an incomplete one, exactly like the agent behavioral gate.)
   const skillsDir = join(root, "skills");
   if (existsSync(skillsDir)) {
     for (const entry of readdirSync(skillsDir, { withFileTypes: true })) {
       if (!entry.isDirectory()) continue;
       const pkgDir = join(skillsDir, entry.name);
       if (!existsSync(join(pkgDir, "meta.json"))) continue;
-      try {
-        const pkg = loadSkillPackage(pkgDir);
-        if (skills.has(pkg.meta.slug)) {
-          throw new Error(`duplicate skill slug "${pkg.meta.slug}" (first seen in ${skill_paths.get(pkg.meta.slug)})`);
-        }
-        skills.set(pkg.meta.slug, { ...pkg.meta, slug: pkg.meta.slug, package_dir: pkgDir, code_hash: pkg.codeHash, md_path: pkg.mdPath });
-        skill_paths.set(pkg.meta.slug, pkgDir);
-      } catch (e) {
-        load_errors.push({ kind: "skill", path: pkgDir, slug: entry.name, error: e instanceof Error ? e.message : String(e) });
+      const pkg = loadSkillPackage(pkgDir); // SkillLoadError (malformed) propagates → hard-fail
+      if (pkg.fixtures.length === 0) {
+        throw new SkillLoadError(`skill ${pkg.meta.slug}: no fixtures — a skill must ship its pre-registered contract (fixtures capture intent at creation; deferring them loses it)`);
       }
+      if (pkg.codeHash === null && pkg.mdPath === null) {
+        throw new SkillLoadError(`skill ${pkg.meta.slug}: empty — needs a code half (skill.mjs) and/or a reasoning half (skill.md)`);
+      }
+      if (skills.has(pkg.meta.slug)) {
+        load_errors.push({ kind: "skill", path: pkgDir, slug: pkg.meta.slug, error: `duplicate skill slug "${pkg.meta.slug}" (first seen in ${skill_paths.get(pkg.meta.slug)})` });
+        continue;
+      }
+      // resolve the reasoning half into the record so the prompt's Skills layer renders it
+      const md = pkg.mdPath ? readFileSync(pkg.mdPath, "utf-8") : undefined;
+      skills.set(pkg.meta.slug, { ...pkg.meta, slug: pkg.meta.slug, package_dir: pkgDir, code_hash: pkg.codeHash, ...(md !== undefined ? { md } : {}) });
+      skill_paths.set(pkg.meta.slug, pkgDir);
     }
   }
 

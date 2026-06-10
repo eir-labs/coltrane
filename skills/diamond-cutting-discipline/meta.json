@@ -1,0 +1,19 @@
+{
+  "slug": "diamond-cutting-discipline",
+  "version": 1,
+  "skill_type": "analysis",
+  "permission": {
+    "tier": 0
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "verdict": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "verdict"
+    ]
+  }
+}

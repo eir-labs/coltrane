@@ -6,6 +6,7 @@
 // shipped example genome (the worked hello-band) loads + composes from disk.
 import { describe, it, expect } from "vitest";
 import { TEST_BEHAVIOR } from "./_support/agents.js";
+import { writeSkillPackage } from "./_support/genome.js";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, cpSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -59,9 +60,9 @@ describe("genome file-loading: all five classes load from files", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it("loads skills + evals as slug-keyed records", () => {
+  it("loads skill packages + evals as slug-keyed records", () => {
     const dir = scratchGenome();
-    writeJson(dir, "skills", "summarize-tight.json", { slug: "summarize-tight", md: "Be terse." });
+    writeSkillPackage(dir, { slug: "summarize-tight", md: "Be terse." });
     writeJson(dir, "evals", "gist-present.json", { slug: "gist-present", asserts: "output has a gist" });
     const g = loadGenome(dir);
     expect(g.skills.get("summarize-tight")).toBeDefined();

@@ -11,6 +11,7 @@
 import { describe, it, expect } from "vitest";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
+import { mkdirSync, writeFileSync } from "node:fs";
 import {
   loadSkillPackage,
   hashSkillCode,
@@ -18,6 +19,7 @@ import {
   SkillLoadError,
 } from "../src/skills.js";
 import { loadGenome } from "../src/loader.js";
+import { makeGenomeDir, rmGenome, seedCoreTypes, writeSkillPackage } from "./_support/genome.js";
 
 const REPO_ROOT = fileURLToPath(new URL("..", import.meta.url));
 const NUMBER_ADDER = join(REPO_ROOT, "skills/number-adder");
@@ -61,11 +63,45 @@ describe("skill package loading + identity", () => {
     expect(() => loadSkillPackage(CORRUPT_META)).toThrow(SkillLoadError);
   });
 
-  it("loads package skills AND legacy {slug, md} skills into one genome map (coexistence)", () => {
+  it("loads package skills from the genome; the flat {slug, md} format is retired", () => {
+    // the repo's own packages load (number-adder = pure-code; summarize-tight = migrated)
     const g = loadGenome(REPO_ROOT);
-    // legacy single-file skill (skills/summarize-tight.json) still loads
-    expect(g.skills.has("summarize-tight")).toBe(true);
-    // the new package (skills/number-adder/) is folded into the same map
     expect(g.skills.has("number-adder")).toBe(true);
+    expect(g.skills.has("summarize-tight")).toBe(true);
+
+    // a FLAT {slug, md} skill no longer loads — no package dir, so it's ignored (no backwards-compat)
+    const dir = makeGenomeDir();
+    try {
+      seedCoreTypes(dir);
+      mkdirSync(join(dir, "skills"), { recursive: true });
+      writeFileSync(join(dir, "skills", "flatty.json"), JSON.stringify({ slug: "flatty", md: "be terse" }));
+      expect(loadGenome(dir).skills.has("flatty")).toBe(false);
+    } finally {
+      rmGenome(dir);
+    }
+  });
+
+  it("a genome skill missing its fixtures HARD-fails the load (incomplete = upgrade, not skip)", () => {
+    const dir = makeGenomeDir();
+    try {
+      seedCoreTypes(dir);
+      writeSkillPackage(dir, { slug: "no-contract", md: "a reasoning half but no fixtures", fixtures: [] });
+      expect(() => loadGenome(dir)).toThrow(SkillLoadError);
+    } finally {
+      rmGenome(dir);
+    }
+  });
+
+  it("a genome skill with neither a code nor a reasoning half HARD-fails the load", () => {
+    const dir = makeGenomeDir();
+    try {
+      seedCoreTypes(dir);
+      mkdirSync(join(dir, "skills", "empty-shell", "fixtures"), { recursive: true });
+      writeFileSync(join(dir, "skills", "empty-shell", "meta.json"), JSON.stringify({ slug: "empty-shell", version: 1, permission: { tier: 0 } }));
+      writeFileSync(join(dir, "skills", "empty-shell", "fixtures", "f.json"), JSON.stringify({ id: "f", input: {}, assertions: [] }));
+      expect(() => loadGenome(dir)).toThrow(SkillLoadError);
+    } finally {
+      rmGenome(dir);
+    }
   });
 });

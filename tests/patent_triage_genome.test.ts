@@ -115,13 +115,12 @@ describe("patent-triage-v0 — composition wiring (structural)", () => {
 });
 
 describe("patent-triage-v0 — diamond-cutting-discipline skill wiring", () => {
-  it("skills/diamond-cutting-discipline.json exists and parses", () => {
-    const p = join(REPO_ROOT, "skills", "diamond-cutting-discipline.json");
-    expect(existsSync(p)).toBe(true);
-    const s = readJson(p);
-    expect(s.slug).toBe("diamond-cutting-discipline");
-    expect(typeof s.md).toBe("string");
-    expect((s.md as string).length).toBeGreaterThan(500);
+  it("skills/diamond-cutting-discipline/ is a package with a substantial reasoning half", () => {
+    const dir = join(REPO_ROOT, "skills", "diamond-cutting-discipline");
+    expect(existsSync(join(dir, "meta.json"))).toBe(true);
+    expect(readJson(join(dir, "meta.json")).slug).toBe("diamond-cutting-discipline");
+    const md = readFileSync(join(dir, "skill.md"), "utf8");
+    expect(md.length).toBeGreaterThan(500);
   });
 
   it("all 4 patent-triage agents declare skill_slugs containing diamond-cutting-discipline", () => {

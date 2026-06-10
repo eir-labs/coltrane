@@ -6,6 +6,7 @@
 // RED-first: loadLayeredGenome does not exist yet.
 import { describe, it, expect } from "vitest";
 import { TEST_BEHAVIOR } from "./_support/agents.js";
+import { writeSkillPackage } from "./_support/genome.js";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -215,7 +216,7 @@ describe("genome layering — review follow-ups", () => {
     const base = mkdtempSync(join(tmpdir(), "coltrane-se-base-"));
     const consumer = mkdtempSync(join(tmpdir(), "coltrane-se-cons-"));
     try {
-      writeJson(base, "skills", "base-skill.json", { slug: "base-skill", md: "base reasoning" });
+      writeSkillPackage(base, { slug: "base-skill", md: "base reasoning" });
       writeJson(base, "evals", "base-eval.json", { slug: "base-eval", on_type: "Signal", non_empty_fields: ["id"] });
       writeJson(consumer, "agents", "c.json", { ...TEST_BEHAVIOR, slug: "c", primitives: ["SENSE"], output_types: ["Signal"], domain: "widgetco" });
       const g = loadLayeredGenome([base, consumer]);

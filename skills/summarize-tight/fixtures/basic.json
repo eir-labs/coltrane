@@ -1,0 +1,13 @@
+{
+  "id": "basic",
+  "description": "contract: produces the typed output. Runs once the reasoning half is resolved in eval mode — see skills open questions.",
+  "input": {
+    "text": "the new index halves p99 latency; it shipped tuesday"
+  },
+  "assertions": [
+    {
+      "path": "summary",
+      "op": "is_string"
+    }
+  ]
+}

@@ -25,17 +25,9 @@ describe("skills: open questions", () => {
     grounding: "this thread (2026-06-11) + the determinism gradient (v1 ~10%, code returns null); the existing assertion ops in skill_subprocess.checkAssertion",
   });
 
-  open("retire the flat {slug, md} skill format", {
-    question: "Should every skill be a package (skills/<slug>/), with the pre-package flat {slug, md} JSON removed entirely — no backwards-compat coexistence?",
-    resolves_when: "the loader loads ONLY skills/<slug>/ packages; the existing flat skills (summarize-tight, diamond-cutting-discipline) are migrated to packages; a test asserts a flat-JSON skill no longer loads.",
-    grounding: "this thread (2026-06-11, Eugene: no backwards-compat) + the agent migration precedent (lean agents hard-fail, flat format retired)",
-  });
-
-  open("fixtures-mandatory completeness gate for skills", {
-    question: "Does a genome skill with no fixtures (or no halves) HARD-fail the load, the way a lean agent does — fixtures being the skill's pre-registered contract, cheapest at creation?",
-    resolves_when: "loadGenome hard-fails a fixture-less / empty skill package (re-thrown, not soft-skipped); a test asserts an incomplete skill blocks the load while a complete one loads.",
-    grounding: "this thread + the agent GenomeIncompleteError precedent (incomplete = upgrade, not skip); docs/skills-as-first-class.md (fixtures as the skill's tests)",
-  });
+  // RESOLVED (OPEN -> GREEN, 2026-06-11): "retire the flat {slug, md} skill format" and
+  // "fixtures-mandatory completeness gate" — the loader now loads ONLY packages, the flat
+  // skills were migrated, and an incomplete skill hard-fails. See skill_package_loading.test.ts.
 
   open("when a skill earns determinism (auto-promotion)", {
     question: "At what evidence threshold does the evolve loop propose moving a resolved field from model to code, and who approves it?",

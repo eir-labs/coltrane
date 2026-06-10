@@ -39,6 +39,22 @@ export function writeRawAgent(root: string, fileName: string, content: string): 
 export function writeStandard(root: string, std: { slug: string } & Record<string, unknown>): void {
   writeJson(root, "standards", `${std.slug}.json`, std);
 }
+/** Write a COMPLETE skill package (meta + a reasoning half + a fixture) — the only valid
+ *  skill format. Omit `fixtures` (set to []) to author a deliberately-incomplete one for the
+ *  hard-fail gate. */
+export function writeSkillPackage(
+  root: string,
+  o: { slug: string; md?: string; code?: string; fixtures?: unknown[] },
+): void {
+  const d = join(root, "skills", o.slug);
+  mkdirSync(join(d, "fixtures"), { recursive: true });
+  writeFileSync(join(d, "meta.json"), JSON.stringify({ slug: o.slug, version: 1, permission: { tier: 0 } }, null, 2));
+  if (o.md !== undefined) writeFileSync(join(d, "skill.md"), o.md);
+  if (o.code !== undefined) writeFileSync(join(d, "skill.mjs"), o.code);
+  if (o.md === undefined && o.code === undefined) writeFileSync(join(d, "skill.md"), "reasoning half");
+  const fixtures = o.fixtures ?? [{ id: "basic", input: {}, assertions: [] }];
+  fixtures.forEach((fx, i) => writeFileSync(join(d, "fixtures", `f${i}.json`), JSON.stringify(fx)));
+}
 export function writeType(root: string, t: { slug: string } & Record<string, unknown>): void {
   writeJson(root, "domain_types", `${t.slug}.json`, t);
 }

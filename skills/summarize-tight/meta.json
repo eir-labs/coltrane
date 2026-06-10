@@ -1,0 +1,20 @@
+{
+  "slug": "summarize-tight",
+  "version": 1,
+  "skill_type": "analysis",
+  "permission": {
+    "tier": 0
+  },
+  "domain": "demo",
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "summary": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "summary"
+    ]
+  }
+}

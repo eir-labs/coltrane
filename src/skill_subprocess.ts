@@ -21,6 +21,8 @@ export interface SkillMeta {
   output_type?: string;
   determinism_ratio?: number;
   permission?: { tier?: number };
+  /** Per-skill execution ceiling. Caps the caller-supplied timeout (whichever is smaller). */
+  timeout_ms?: number;
 }
 
 export interface SkillFixture {
@@ -68,13 +70,19 @@ export function loadFixtures(skillDir: string): SkillFixture[] {
  *  skill at a tier other than its declared one — used by the cage matrix to exercise one
  *  capability probe across every tier. */
 export function executeSkill(skillDir: string, input: unknown, timeoutMs = 120_000, tierOverride?: number): ExecuteResult {
-  const tier = tierOverride ?? (readSkillMeta(skillDir).permission?.tier ?? 0);
+  const meta = readSkillMeta(skillDir);
+  const tier = tierOverride ?? (meta.permission?.tier ?? 0);
+  // the skill's own meta.timeout_ms caps the caller's timeout — a runaway code half can't
+  // outlive its declared budget. SIGKILL (not the default SIGTERM) is the kill signal so a
+  // SIGTERM-trapping child can't survive the timeout.
+  const timeout = typeof meta.timeout_ms === "number" ? Math.min(timeoutMs, meta.timeout_ms) : timeoutMs;
   const started = Date.now();
   const res = spawnSync("node", [...tierFlags(tier), RUNNER, skillDir], {
     input: JSON.stringify(input),
     encoding: "utf-8",
     maxBuffer: 64 * 1024 * 1024,
-    timeout: timeoutMs,
+    timeout,
+    killSignal: "SIGKILL",
   });
   const duration_ms = Date.now() - started;
   if (res.error) return { ok: false, error: String(res.error.message), duration_ms };
@@ -124,14 +132,19 @@ export interface FixtureReport {
   total: number;
   passed: number;
   pass_rate: number;
-  deterministic: boolean; // every fixture stable across runs
+  deterministic: boolean; // every fixture stable across ALL runs
+  determinism_runs: number; // how many times each fixture was run to read determinism
   results: FixtureResult[];
 }
 
+// How many times each fixture runs to read determinism. >=3 so a coincidentally-stable pair
+// can't pass as deterministic — a flaky skill that happens to agree twice gets caught.
+const DETERMINISM_RUNS = 3;
+
 /**
- * Run every fixture for a skill. Each fixture is executed twice: once to check it
- * matches expected_output + assertions (the test suite + evolution gate), and a second
- * time to confirm identical output (the determinism meter). A pure skill is green +
+ * Run every fixture for a skill. Each fixture is executed DETERMINISM_RUNS times: the first
+ * run is checked against expected_output + assertions (the test suite + evolution gate); all
+ * runs must produce identical output (the determinism meter). A pure skill is green +
  * deterministic; a candidate skill.mjs that regresses a fixture fails here — the gate.
  */
 export function runSkillFixtures(skillDir: string): FixtureReport {
@@ -142,9 +155,9 @@ export function runSkillFixtures(skillDir: string): FixtureReport {
   let deterministic = true;
 
   for (const fx of fixtures) {
-    const r1 = executeSkill(skillDir, fx.input);
-    const r2 = executeSkill(skillDir, fx.input);
-    const stable = r1.ok && r2.ok && deepEqual(r1.output, r2.output);
+    const runs = Array.from({ length: DETERMINISM_RUNS }, () => executeSkill(skillDir, fx.input));
+    const r1 = runs[0]!;
+    const stable = runs.every((r) => r.ok) && runs.every((r) => deepEqual(r.output, r1.output));
     const matchesExpected = fx.expected_output === undefined || deepEqual(r1.output, fx.expected_output);
     const assertionsHold = (fx.assertions ?? []).every((a) => checkAssertion(r1.output, a));
     const ok = r1.ok && matchesExpected && assertionsHold;
@@ -159,6 +172,7 @@ export function runSkillFixtures(skillDir: string): FixtureReport {
     passed,
     pass_rate: fixtures.length ? passed / fixtures.length : 0,
     deterministic,
+    determinism_runs: DETERMINISM_RUNS,
     results,
   };
 }

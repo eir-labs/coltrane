@@ -6,8 +6,9 @@
 // those records, the evolution gate, and composition — is declared here as typed
 // stubs so the RED contract suite typechecks and fails honestly on assertions (not on
 // missing imports). Each stub throws NotImplemented; the build fills them in green.
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, mkdtempSync, mkdirSync, copyFileSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { createHash } from "node:crypto";
 import {
   type SkillMeta,
@@ -16,6 +17,7 @@ import {
   readSkillMeta,
   executeSkill,
   loadFixtures,
+  runSkillFixtures,
 } from "./skill_subprocess.js";
 
 export {
@@ -159,9 +161,25 @@ export interface EvolutionVerdict {
   accepted: boolean;
   failing_fixtures: string[]; // fixtures the candidate regressed (empty when accepted)
 }
-/** Run a candidate skill.mjs against the package's fixtures; accept iff none regress. */
-export function evolveSkill(_dir: string, _candidateCodePath: string): EvolutionVerdict {
-  throw new NotImplemented("evolveSkill");
+/** Run a candidate skill.mjs against the package's fixtures; accept iff none regress. The
+ *  fixtures are the evolution gate: an "improvement" that breaks any committed contract is
+ *  rejected, and the broken fixtures are named. */
+export function evolveSkill(dir: string, candidateCodePath: string): EvolutionVerdict {
+  const tmp = mkdtempSync(join(tmpdir(), "coltrane-evolve-"));
+  try {
+    copyFileSync(join(dir, "meta.json"), join(tmp, "meta.json"));
+    const fxSrc = join(dir, "fixtures");
+    if (existsSync(fxSrc)) {
+      mkdirSync(join(tmp, "fixtures"), { recursive: true });
+      for (const f of readdirSync(fxSrc)) copyFileSync(join(fxSrc, f), join(tmp, "fixtures", f));
+    }
+    copyFileSync(candidateCodePath, join(tmp, "skill.mjs"));
+    const report = runSkillFixtures(tmp);
+    const failing_fixtures = report.results.filter((r) => !r.passed).map((r) => r.id);
+    return { accepted: failing_fixtures.length === 0, failing_fixtures };
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
 }
 
 // ── Composition (test 8) ──────────────────────────────────────────────────────

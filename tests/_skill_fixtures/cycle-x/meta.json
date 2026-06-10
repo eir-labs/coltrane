@@ -1,0 +1,16 @@
+{
+  "slug": "cycle-x",
+  "version": 1,
+  "permission": { "tier": 0 },
+  "composable_with": ["cycle-y"],
+  "input_schema": {
+    "type": "object",
+    "properties": { "y_out": { "type": "string" } }
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": { "x_out": { "type": "string" } },
+    "required": ["x_out"]
+  },
+  "description": "Composition cycle fixture: x consumes y's output AND y consumes x's output. composeSkills must detect the cycle and raise SkillCompositionCycleError, never deadlock."
+}

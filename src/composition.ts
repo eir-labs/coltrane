@@ -44,6 +44,12 @@ export interface Chair {
   input_contract: readonly string[];
   output_contract: readonly string[];
   required_skills: readonly string[];
+  // Skills-as-first-class (docs/skills-as-first-class.md): a chair MAY be backed by a
+  // skill package instead of an agent. Mutually exclusive with a non-empty agent_slug —
+  // a skill-backed chair runs the skill's deterministic code half (no model invocation),
+  // which is how the "an LLM should not babysit a deterministic command" path is fixed.
+  // Declared here; compose-time validation + runtime routing land in Phase 1.
+  skill_slug?: string;
 }
 
 export interface PhaseDef {

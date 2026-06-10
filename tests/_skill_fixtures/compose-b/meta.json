@@ -1,0 +1,18 @@
+{
+  "slug": "compose-b",
+  "version": 1,
+  "skill_type": "analysis",
+  "permission": { "tier": 0 },
+  "composable_with": ["compose-a"],
+  "input_schema": {
+    "type": "object",
+    "properties": { "tokens": { "type": "array" } },
+    "required": ["tokens"]
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": { "count": { "type": "number" } },
+    "required": ["count"]
+  },
+  "description": "Composition fixture B: counts tokens. Its input references compose-a's `tokens` output, fixing the execution order A -> B."
+}

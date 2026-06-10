@@ -1,0 +1,11 @@
+{
+  "slug": "thrower",
+  "version": 1,
+  "permission": { "tier": 0 },
+  "output_schema": {
+    "type": "object",
+    "properties": { "label": { "type": "string" } },
+    "required": ["label"]
+  },
+  "description": "Test-only probe: a skill whose code half throws. Under graceful degradation the runtime treats run() throwing as 'resolved nothing' — the model handles the whole output, the gig never dies."
+}

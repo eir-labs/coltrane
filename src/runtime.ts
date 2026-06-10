@@ -42,6 +42,11 @@ export interface RunDeps {
   // Absent = each invocation sees `skills: []` (back-compat — unit suites that
   // don't supply skills still run green; the agent simply gets no skill layer).
   skills?: ReadonlyMap<string, SkillRecord> | undefined;
+  // Skills-as-first-class: maps a skill slug → its package directory on disk, so a
+  // skill-backed chair (Chair.skill_slug) can be executed via the permission-tiered
+  // subprocess instead of the model. Absent = no skill chairs resolvable. Declared
+  // here; runtime routing (executeSkillChair) lands in Phase 1.
+  skill_dirs?: ReadonlyMap<string, string> | undefined;
   // 5th-class eval definitions, slug-keyed. When supplied, scoreEval resolves a
   // declared eval_slug against this map and judges the produced outputs against
   // its contract. Absent = an unresolvable eval scores 0.0 (can't attest it held).

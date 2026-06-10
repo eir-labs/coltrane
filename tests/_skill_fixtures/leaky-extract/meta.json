@@ -1,0 +1,20 @@
+{
+  "slug": "leaky-extract",
+  "version": 1,
+  "skill_type": "extraction",
+  "permission": { "tier": 0 },
+  "input_schema": {
+    "type": "object",
+    "properties": { "text": { "type": "string" } },
+    "required": ["text"]
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "char_count": { "type": "number" },
+      "sentiment": { "type": "string" }
+    },
+    "required": ["char_count", "sentiment"]
+  },
+  "description": "Test-only probe: the code half returns char_count PLUS an out-of-schema field. The typing guarantee must drop the out-of-schema field — code can only resolve fields that exist in the output schema."
+}

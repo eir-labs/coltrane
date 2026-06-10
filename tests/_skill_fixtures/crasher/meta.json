@@ -1,0 +1,7 @@
+{
+  "slug": "crasher",
+  "version": 1,
+  "permission": { "tier": 0 },
+  "timeout_ms": 1500,
+  "description": "Test-only probe: a skill that never returns (infinite loop). The executor must time it out and SIGKILL the subprocess, returning ok:false — a runaway code half cannot hang a gig."
+}

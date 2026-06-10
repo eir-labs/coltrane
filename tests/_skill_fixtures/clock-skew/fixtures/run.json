@@ -1,0 +1,6 @@
+{
+  "id": "run",
+  "description": "Output is a number (assertion passes) but is NOT stable across runs (determinism fails).",
+  "input": {},
+  "assertions": [{ "path": "t", "op": "is_number" }]
+}

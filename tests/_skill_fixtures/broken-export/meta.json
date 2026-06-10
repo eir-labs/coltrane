@@ -1,0 +1,6 @@
+{
+  "slug": "broken-export",
+  "version": 1,
+  "permission": { "tier": 0 },
+  "description": "Test-only probe: skill.mjs exports no run(input). The executor must return an ACTIONABLE error that names the missing contract — not a vague parse failure."
+}

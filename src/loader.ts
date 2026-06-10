@@ -1,5 +1,6 @@
 import { readdirSync, readFileSync, existsSync, statSync, writeFileSync, mkdirSync } from "node:fs";
-import { join, extname } from "node:path";
+import { join, extname, resolve, isAbsolute, dirname } from "node:path";
+import { createRequire } from "node:module";
 import { defineAgent, composeStandard, CompositionError, type Agent, type Standard, type PhaseDef } from "./composition.js";
 import type { Primitive } from "./core_types.js";
 import { CANONICAL_CORE_TYPES } from "./canonical_core_types.js";
@@ -50,7 +51,7 @@ export interface EvalRecord { slug: string; [k: string]: unknown }
 // gate around core_types still hard-throws — that's the minimum the system
 // needs to function. Anything past that softens.
 export interface LoadError {
-  readonly kind: "domain_type" | "agent" | "standard" | "skill" | "eval";
+  readonly kind: "domain_type" | "agent" | "standard" | "skill" | "eval" | "manifest";
   readonly path: string;
   readonly slug: string | null;
   readonly error: string;
@@ -68,6 +69,10 @@ export interface LoadedGenome {
   evals: Map<string, EvalRecord>;
   // Rob #129 — per-definition load failures recorded here instead of throwing.
   load_errors: LoadError[];
+  // Genome extension (docs/genome-extension.md): when this genome was resolved from
+  // a layer stack, maps `${kind}:${slug}` → the layer root that supplied the effective
+  // definition (highest layer wins on override). Absent for a single-root load.
+  provenance?: ReadonlyMap<string, string>;
 }
 
 export class GenomeLoadError extends Error {}
@@ -116,7 +121,10 @@ const REQUIRED_CORE_SLUGS = new Set([
   "Verdict",
 ]);
 
-export function loadGenome(root: string): LoadedGenome {
+export function loadGenome(
+  root: string,
+  opts?: { inheritedAgents?: ReadonlyMap<string, Agent> },
+): LoadedGenome {
   const load_errors: LoadError[] = [];
 
   // core_types/ stays STRICTLY hard-fail: the system can't function without
@@ -248,7 +256,10 @@ export function loadGenome(root: string): LoadedGenome {
       }
       const resolved: Agent[] = [];
       for (const aslug of def.agent_slugs ?? []) {
-        const a = agents.get(aslug);
+        // Resolve against this layer's own agents first, then agents inherited from
+        // lower layers (genome extension) — so a consumer standard can compose base
+        // players it didn't define itself.
+        const a = agents.get(aslug) ?? opts?.inheritedAgents?.get(aslug);
         if (!a) {
           throw new Error(`field "agent_slugs" references unknown agent "${aslug}"`);
         }
@@ -315,4 +326,176 @@ export function loadGenome(root: string): LoadedGenome {
   }
 
   return { core_types, domain_types, agents, standards, skills, evals, load_errors };
+}
+
+/**
+ * Resolve a LAYERED genome from a stack of roots, lowest → highest (genome extension
+ * Phase 2 — docs/genome-extension.md). Each root is loaded as a normal genome, then
+ * folded so a higher layer's definitions OVERRIDE a lower layer's by slug, per class.
+ * A consumer extends a base by passing [baseRoot, consumerRoot]: it inherits the base,
+ * adds its own, and overrides where it specializes. `provenance` records which layer
+ * supplied each effective definition. core_types are the immutable 6 (every layer
+ * provides them, seeded or on-disk); the top layer's are used.
+ */
+export function loadLayeredGenome(roots: readonly string[]): LoadedGenome {
+  if (roots.length === 0) {
+    throw new GenomeLoadError("loadLayeredGenome requires at least one root");
+  }
+  const domain_types = new Map<string, DomainTypeRecord>();
+  const agents = new Map<string, Agent>();
+  const standards = new Map<string, Standard>();
+  const skills = new Map<string, SkillRecord>();
+  const evals = new Map<string, EvalRecord>();
+  const load_errors: LoadError[] = [];
+  const provenance = new Map<string, string>();
+  let core_types: ReadonlyMap<string, CoreTypeRecord> = new Map();
+
+  const fold = <V>(into: Map<string, V>, from: ReadonlyMap<string, V>, root: string, kind: string) => {
+    for (const [slug, val] of from) {
+      into.set(slug, val); // higher layer overrides
+      provenance.set(`${kind}:${slug}`, root);
+    }
+  };
+
+  for (const root of roots) {
+    // Each layer loaded normally (core types seeded), with the agents accumulated
+    // from lower layers passed in — so this layer's standards can compose them.
+    const layer = loadGenome(root, { inheritedAgents: agents });
+    core_types = layer.core_types; // immutable 6 — top layer's (all identical)
+    fold(domain_types, layer.domain_types, root, "domain_type");
+    fold(agents, layer.agents, root, "agent");
+    fold(standards, layer.standards, root, "standard");
+    fold(skills, layer.skills, root, "skill");
+    fold(evals, layer.evals, root, "eval");
+    for (const e of layer.load_errors) load_errors.push(e);
+  }
+
+  return { core_types, domain_types, agents, standards, skills, evals, load_errors, provenance };
+}
+
+/**
+ * Manifest-aware genome load (genome extension Phase 2 — opt-in). A genome root may
+ * declare the base(s) it extends in a `genome.json` manifest: `{ "extends": [<path>] }`
+ * (absolute, or relative to that root). resolveGenome walks the extends chain, flattens
+ * it to a layer stack (bases first, this root last, deduped + cycle-guarded), and resolves
+ * it via loadLayeredGenome. No manifest → a plain single-root load. This is what the
+ * running server (bootstrapServerDeps) calls, so a downstream consumer's declared base
+ * is honored automatically.
+ */
+export function resolveGenome(root: string): LoadedGenome {
+  const { roots, pinErrors } = resolveExtendsChain(root);
+  const genome = roots.length === 1 ? loadGenome(root) : loadLayeredGenome(roots);
+  if (pinErrors.length === 0) return genome;
+  return { ...genome, load_errors: [...genome.load_errors, ...pinErrors] };
+}
+
+/**
+ * Genome cascade check (genome extension Phase 3 — docs/genome-extension.md). Given a
+ * consumer genome and two base versions (`fromBase` it currently validates against,
+ * `toBase` a candidate), report what in the CONSUMER layer breaks when the base advances
+ * — e.g. a consumer standard that composes a base player the new base removed/renamed.
+ *
+ * `broken` = consumer-layer load_errors present against toBase but NOT fromBase (the
+ * base change broke them). `healed` = the inverse (informational). Lets a consumer
+ * decide whether to adopt a new base before pinning to it.
+ */
+export interface CascadeReport {
+  broken: LoadError[];
+  healed: LoadError[];
+}
+export function genomeCascadeCheck(consumerRoot: string, fromBase: string, toBase: string): CascadeReport {
+  const consumerReal = resolve(consumerRoot);
+  const consumerLayerErrors = (base: string): LoadError[] =>
+    loadLayeredGenome([base, consumerRoot]).load_errors.filter((e) =>
+      resolve(e.path).startsWith(consumerReal),
+    );
+  const key = (e: LoadError): string => `${e.kind}:${e.slug ?? ""}:${e.error}`;
+  const fromErrs = consumerLayerErrors(fromBase);
+  const toErrs = consumerLayerErrors(toBase);
+  const fromKeys = new Set(fromErrs.map(key));
+  const toKeys = new Set(toErrs.map(key));
+  return {
+    broken: toErrs.filter((e) => !fromKeys.has(key(e))),
+    healed: fromErrs.filter((e) => !toKeys.has(key(e))),
+  };
+}
+
+function readGenomeManifest(root: string): readonly string[] {
+  const p = join(root, "genome.json");
+  if (!existsSync(p)) return [];
+  try {
+    const data = JSON.parse(readFileSync(p, "utf-8")) as { extends?: unknown };
+    return Array.isArray(data.extends) ? data.extends.filter((e): e is string => typeof e === "string") : [];
+  } catch {
+    return []; // malformed manifest → treat as no base (don't crash the load)
+  }
+}
+
+function resolveExtendsChain(root: string): { roots: string[]; pinErrors: LoadError[] } {
+  const ordered: string[] = [];
+  const pinErrors: LoadError[] = [];
+  const done = new Set<string>();
+  const onStack = new Set<string>();
+  const visit = (r: string): void => {
+    const real = resolve(r);
+    if (done.has(real)) return;
+    if (onStack.has(real)) throw new GenomeLoadError(`genome extends cycle detected at ${real}`);
+    onStack.add(real);
+    for (const spec of readGenomeManifest(real)) {
+      const resolved = resolveExtendsEntry(spec, real, pinErrors);
+      if (resolved) visit(resolved);
+    }
+    onStack.delete(real);
+    done.add(real);
+    ordered.push(real); // post-order: bases land before the root that extends them
+  };
+  visit(root);
+  return { roots: ordered, pinErrors };
+}
+
+// Split a package spec into name + optional version pin. Handles scoped names:
+//   "@scope/pkg@1.2.3" → { name: "@scope/pkg", version: "1.2.3" }
+//   "@scope/pkg"       → { name: "@scope/pkg" }
+//   "pkg@1.2.3"        → { name: "pkg", version: "1.2.3" }
+function parsePackageSpec(spec: string): { name: string; version?: string } {
+  const slash = spec.startsWith("@") ? spec.indexOf("/") : 0;
+  const at = spec.indexOf("@", slash + 1);
+  return at > 0 ? { name: spec.slice(0, at), version: spec.slice(at + 1) } : { name: spec };
+}
+
+// Resolve one `extends` entry to a genome root. A path (./ , / , absolute) resolves
+// relative to the declaring root. Anything else is an npm package spec
+// (`@scope/pkg[@version]`): resolve the installed package's dir from the declaring
+// root's node_modules; if a version was pinned, warn (manifest load_error) when the
+// installed version differs — the pin records "validated against vX", so a mismatch
+// means re-run the cascade and re-pin. Returns null (with a recorded error) if the
+// package can't be resolved.
+function resolveExtendsEntry(spec: string, fromRoot: string, pinErrors: LoadError[]): string | null {
+  if (spec.startsWith(".") || isAbsolute(spec) || spec.startsWith("/")) {
+    return isAbsolute(spec) ? spec : join(fromRoot, spec);
+  }
+  const { name, version } = parsePackageSpec(spec);
+  const manifestPath = join(fromRoot, "genome.json");
+  try {
+    const req = createRequire(join(fromRoot, "package.json"));
+    const pkgJsonPath = req.resolve(`${name}/package.json`);
+    const installed = JSON.parse(readFileSync(pkgJsonPath, "utf-8")) as { version?: string };
+    if (version && installed.version && version !== installed.version) {
+      pinErrors.push({
+        kind: "manifest",
+        path: manifestPath,
+        slug: name,
+        error: `extends: base "${name}" pinned to ${version} but ${installed.version} is installed — re-run cascade + re-pin`,
+      });
+    }
+    return dirname(pkgJsonPath);
+  } catch {
+    pinErrors.push({
+      kind: "manifest",
+      path: manifestPath,
+      slug: name,
+      error: `extends: cannot resolve base package "${name}" from ${fromRoot} (is it installed?)`,
+    });
+    return null;
+  }
 }

@@ -5,7 +5,7 @@
 // that carries model_version + (empty, v0) eval_scores — honestly un-tempered.
 import { randomUUID } from "node:crypto";
 import type { Standard, Agent, Chair } from "./composition.js";
-import { PRIMITIVE_OUTPUT_TYPE } from "./core_types.js";
+import { PRIMITIVE_OUTPUT_TYPE, CORE_TYPES } from "./core_types.js";
 import { sha256Hex, canonJson, runFingerprint, outputContentHash, CANONICAL_FORM_VERSION } from "./canonical_form.js";
 import type { OutputStore, OutputRecord } from "./outputs.js";
 import type { Ledger } from "./ledger.js";
@@ -204,6 +204,20 @@ function genomeHash(standard: Standard): string {
  * outputs that match its input_types, produces a typed output, which is validated
  * + stored + provenance-linked. One immutable ledger entry records the run.
  */
+
+// Subtype-aware type match (docs/genome-extension.md — polymorphism). A declared
+// type is satisfied by an output of the SAME domain_type (exact) OR — when the
+// declared type is a CORE type — by any output whose core_type is that core (i.e.
+// a domain type extending it). Domain-type declarations stay exact; only core-type
+// declarations are polymorphic, so a base player written against `Interpretation`
+// consumes any downstream subtype while domain contracts keep their precision.
+const CORE_TYPE_SET: ReadonlySet<string> = new Set(CORE_TYPES);
+function outputSatisfiesType(output: OutputRecord, declared: string): boolean {
+  if (output.domain_type === declared) return true;
+  if (CORE_TYPE_SET.has(declared) && output.core_type === declared) return true;
+  return false;
+}
+
 export async function runGig(
   standard: Standard,
   gigInput: Record<string, unknown>,
@@ -338,18 +352,19 @@ export async function runGig(
         inputs.push(rec);
       }
     } else {
-      inputs = produced.filter((o) => agent.input_types.includes(o.domain_type));
+      inputs = produced.filter((o) => agent.input_types.some((t) => outputSatisfiesType(o, t)));
     }
 
     // Runtime input_contract check: every type the chair declares it expects
-    // on input must be present among the domain_types of its actual upstream
-    // inputs. Empty input_contract skips the check.
+    // on input must be satisfied by its actual upstream inputs. Subtype-aware
+    // (docs/genome-extension.md): a core-type requirement is met by any domain
+    // subtype extending it; a domain-type requirement stays exact. Empty skips.
     if (chair.input_contract.length > 0) {
-      const upstreamTypes = new Set(inputs.map((o) => o.domain_type));
       for (const need of chair.input_contract) {
-        if (!upstreamTypes.has(need)) {
+        if (!inputs.some((o) => outputSatisfiesType(o, need))) {
+          const provided = inputs.map((o) => o.domain_type).join(",");
           throw new RuntimeError(
-            `chair "${chair.role}" input_contract requires "${need}" but upstream outputs only provide [${[...upstreamTypes].join(",")}]`,
+            `chair "${chair.role}" input_contract requires "${need}" but upstream outputs only provide [${provided}]`,
           );
         }
       }
@@ -486,7 +501,9 @@ function scoreEval(slug: string, produced: readonly OutputRecord[], evals?: Read
   const ev = evals?.get(slug);
   if (!ev) return 0.0;
   const onType = typeof ev["on_type"] === "string" ? (ev["on_type"] as string) : undefined;
-  const targets = onType ? produced.filter((o) => o.domain_type === onType) : produced;
+  // Subtype-aware (genome extension): an eval declared on a CORE type judges any domain
+  // subtype filling it, same as a core-type contract — so polymorphism reaches evals too.
+  const targets = onType ? produced.filter((o) => outputSatisfiesType(o, onType)) : produced;
   if (targets.length === 0) return 0.0;
   const fields = Array.isArray(ev["non_empty_fields"]) ? (ev["non_empty_fields"] as string[]) : [];
   if (fields.length > 0) {

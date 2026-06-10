@@ -1,6 +1,19 @@
 import Ajv from "ajv";
 import { CORE_TYPES, type CoreType } from "./core_types.js";
+import { CANONICAL_CORE_TYPES } from "./canonical_core_types.js";
 import type { LoadedGenome } from "./loader.js";
+
+// Base-type property inheritance (docs/genome-extension.md). A domain type extending
+// a core type inherits the core's schema PROPERTIES — the base fields are "around at
+// runtime" because the core is always loaded — so a subtype instance may carry them.
+// The subtype OVERLOADS (same-named field wins) and EXTENDS (adds new fields). The 6
+// cores are immutable, so we read their properties straight from the canonical set.
+const CORE_SCHEMA_PROPS: Readonly<Record<string, Record<string, unknown>>> = Object.fromEntries(
+  CANONICAL_CORE_TYPES.map((c) => [
+    c.slug,
+    ((c.schema as { properties?: Record<string, unknown> }).properties ?? {}),
+  ]),
+);
 
 export const RESOLVE_WEIGHTS = {
   field_coverage: 0.4,
@@ -128,9 +141,14 @@ export function createRegistry(initial: DomainType[] = []): Registry {
       if (!output.domain_type) return { valid: true, errors: [] };
       const dt = types.get(output.domain_type);
       if (!dt) return { valid: false, errors: [`unknown domain_type "${output.domain_type}"`] };
+      // Inherit the base core type's properties, then let the subtype overload +
+      // extend. required stays the subtype's own (base fields are available, not
+      // forced) so existing instances that don't carry base fields still validate.
+      const baseProps = CORE_SCHEMA_PROPS[dt.extends] ?? {};
+      const ownProps = (dt.schema as { properties?: Record<string, unknown> }).properties ?? {};
       const schema = {
         type: "object",
-        properties: (dt.schema as { properties?: Record<string, unknown> }).properties ?? {},
+        properties: { ...baseProps, ...ownProps },
         required: dt.required_fields,
         additionalProperties: false,
       };

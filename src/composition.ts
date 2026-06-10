@@ -1,5 +1,16 @@
 import type { Primitive } from "./core_types.js";
 import { PRIMITIVE_OUTPUT_TYPE } from "./core_types.js";
+import type { ModelTier, Depth } from "./pricing.js";
+
+// The per-agent code-tool exposure gate (old AgentPermissions.code_tool_access). Scales
+// the agent's access to Claude Code's built-in file/exec tools, independent of MCP grant.
+export type CodeToolAccess = "none" | "read" | "write" | "full";
+
+// The Belbin cognitive-role pairing (exactly 2, held "in tension") — the agent's
+// DISPOSITION. This is a DIFFERENT axis from `primitives` (the process step that resolves
+// output type). The old runtime rendered this as Layer 1; the new engine dropped it.
+export type BelbinRole =
+  | "explorer" | "analyst" | "critic" | "synthesizer" | "planner" | "executor" | "audience_modeler";
 
 export interface AgentDef {
   slug: string;
@@ -24,6 +35,14 @@ export interface Agent {
   input_types: readonly string[];
   output_types: readonly string[];
   domain: string | null;
+  // Behavioral representation — the agent's own prose, NOT capability (capability lives
+  // in skills). buildPrompt renders these into the Identity / Method / Constraints
+  // layers. Without them the prompt is contentless scaffold and the model confabulates.
+  // Optional so existing Agent literals stay valid; a real genome agent declares them.
+  identity?: string;            // who you are — role / stance (Identity layer)
+  method?: string;              // how you do THIS agent's job — the step-by-step (Method layer)
+  constraints?: readonly string[]; // the negative space — never-invent / cite-sources (Constraints layer)
+  behavioral_primitives?: readonly BelbinRole[]; // Belbin pairing (2 in tension) → Disposition layer
   // Cage grant — optional so hand-built Agent literals stay valid; defineAgent always
   // sets them ([] = no grant). The invoker treats absent/empty as deny-by-default.
   allowed_tools?: readonly string[];
@@ -31,6 +50,14 @@ export interface Agent {
   // Skill bindings (slugs) the runtime resolves into the prompt's Skills layer.
   // Optional so hand-built Agent literals stay valid; defineAgent always sets ([]).
   skill_slugs?: readonly string[];
+  // Merged-type fields (the locked decision: one rich agent type absorbing the orphaned
+  // AgentProfile + the Player lane). Tuning + the cage's economy/blast-radius envelope —
+  // declared here so the runtime can read them; currently unwired (RED).
+  model_tier?: ModelTier;          // → resolves to a concrete --model per gig (economy/standard/premium)
+  max_tool_calls?: number;         // per-agent cap → --max-turns; a runaway agent can't burn the gig
+  max_token_budget?: number;       // per-agent spend ceiling
+  code_tool_access?: CodeToolAccess; // gates Claude Code built-in Read/Write/Edit/Bash
+  depth_profile?: Depth;           // per-agent depth/tuning (skim/quick/standard/deep)
 }
 
 // A chair is one named seat in a phase. It binds a role-name within the standard

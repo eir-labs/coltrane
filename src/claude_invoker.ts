@@ -10,6 +10,19 @@ import { randomUUID } from "node:crypto";
 import type { AgentInvocationContext, AgentInvoker } from "./runtime.js";
 import type { Registry } from "./registry.js";
 
+// Belbin cognitive-role descriptions for the Disposition layer (the agent's stance, 2
+// "in tension"). Strings match the old runtime verbatim so a restored prompt reaches
+// parity with the baseline fixtures. Reference data; buildPrompt wires it in.
+export const BELBIN_DESCRIPTIONS: Record<string, string> = {
+  explorer: "Navigates unknown territory, discovers structure, maps the landscape.",
+  analyst: "Finds patterns, extracts meaning, builds structured understanding from raw data.",
+  critic: "Challenges assumptions, finds weaknesses, demands evidence for every claim.",
+  synthesizer: "Combines disparate inputs into coherent wholes, resolves contradictions.",
+  planner: "Decomposes goals into sequences, allocates resources, designs strategies.",
+  executor: "Produces concrete artifacts, writes code, builds deliverables.",
+  audience_modeler: "Understands user perspectives, models personas, anticipates needs.",
+};
+
 // The 5-layer prompt hierarchy: Disposition → Identity → Skills → Context → Task.
 // Pure: same context in, same prompt out. Hashable, reviewable, testable.
 // Layer 3 (Skills) is emitted when the AgentInvocationContext carries resolved

@@ -94,6 +94,16 @@ extending `Signal` must include `Signal`'s required fields (schema ⊇ base sche
 is not enforced today (a domain type declares its own schema with no superset check). It
 is a prerequisite for subtype-aware contracts and for safe `agents`/`standards` overrides.
 
+> **Migration note — schema inheritance & `additionalProperties: false`.** Domain-type
+> validation uses `additionalProperties: false`, so before inheritance a subtype could
+> carry *only* its own declared fields. With schema inheritance, the effective schema
+> merges the base core type's properties (subtype overloads + extends), so a subtype
+> instance may now also carry its **base's** fields. This is non-breaking (base fields are
+> *allowed*, not *required* — `required` stays the subtype's own, so existing instances
+> still validate) — but a consumer whose upstream validators didn't expect base fields on
+> a subtype should be aware they're now accepted. A *narrower* overload holds (the
+> subtype's tighter constraint wins, not widened back to the base).
+
 ---
 
 ## Versioning

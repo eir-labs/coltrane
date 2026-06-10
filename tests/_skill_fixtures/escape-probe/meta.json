@@ -1,0 +1,6 @@
+{
+  "slug": "escape-probe",
+  "version": 1,
+  "permission": { "tier": 0 },
+  "description": "Test-only probe: a tier-0 skill that ATTEMPTS an fs-write. The permission cage must deny it."
+}

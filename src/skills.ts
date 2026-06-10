@@ -6,7 +6,8 @@
 // those records, the evolution gate, and composition — is declared here as typed
 // stubs so the RED contract suite typechecks and fails honestly on assertions (not on
 // missing imports). Each stub throws NotImplemented; the build fills them in green.
-import { readFileSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
+import { join } from "node:path";
 import { createHash } from "node:crypto";
 import {
   type SkillMeta,
@@ -14,6 +15,7 @@ import {
   type ExecuteResult,
   readSkillMeta,
   executeSkill,
+  loadFixtures,
 } from "./skill_subprocess.js";
 
 export {
@@ -60,9 +62,29 @@ export interface SkillPackage {
   fixtures: SkillFixture[];
   mdPath: string | null;   // dual-artifact reasoning half (skill.md), if present
 }
-/** Load a skill package: meta + code (hash-verified) + fixtures + the reasoning half. */
-export function loadSkillPackage(_dir: string): SkillPackage {
-  throw new NotImplemented("loadSkillPackage");
+/** Load a skill package: meta + code (content-hashed) + fixtures + the reasoning half.
+ *  A malformed package (unreadable/sluggless meta, bad fixture shape) raises SkillLoadError;
+ *  an ABSENT code half is allowed (codeHash null) — that degrades to pure reasoning at run. */
+export function loadSkillPackage(dir: string): SkillPackage {
+  let meta: SkillPackage["meta"];
+  try {
+    meta = JSON.parse(readFileSync(join(dir, "meta.json"), "utf-8")) as SkillPackage["meta"];
+  } catch (e) {
+    throw new SkillLoadError(`skill package ${dir}: cannot read meta.json — ${e instanceof Error ? e.message : String(e)}`);
+  }
+  if (!meta || typeof meta.slug !== "string" || meta.slug.trim() === "") {
+    throw new SkillLoadError(`skill package ${dir}: meta.json is missing a slug`);
+  }
+  const codePath = join(dir, "skill.mjs");
+  const codeHash = existsSync(codePath) ? hashSkillCode(codePath) : null;
+  const mdPath = existsSync(join(dir, "skill.md")) ? join(dir, "skill.md") : null;
+  const fixtures = loadFixtures(dir);
+  for (const fx of fixtures) {
+    if (typeof fx.id !== "string" || fx.id.trim() === "" || fx.input === undefined) {
+      throw new SkillLoadError(`skill package ${meta.slug}: a fixture has an invalid shape (each needs a non-empty id and an input)`);
+    }
+  }
+  return { dir, meta, codeHash, fixtures, mdPath };
 }
 
 // ── Code-first / model-residual resolution (Phase 2) ──────────────────────────

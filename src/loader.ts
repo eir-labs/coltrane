@@ -2,6 +2,7 @@ import { readdirSync, readFileSync, existsSync, statSync, writeFileSync, mkdirSy
 import { join, extname, resolve, isAbsolute, dirname } from "node:path";
 import { createRequire } from "node:module";
 import { defineAgent, composeStandard, CompositionError, GenomeIncompleteError, type Agent, type AgentDef, type Standard, type PhaseDef } from "./composition.js";
+import { loadSkillPackage } from "./skills.js";
 import type { Primitive } from "./core_types.js";
 import { CANONICAL_CORE_TYPES } from "./canonical_core_types.js";
 
@@ -303,6 +304,29 @@ export function loadGenome(
       skill_paths.set(s.slug, path);
     } catch (e) {
       load_errors.push({ kind: "skill", path, slug, error: e instanceof Error ? e.message : String(e) });
+    }
+  }
+  // skills/<slug>/ PACKAGE directories — the dual-artifact skill format. Each package
+  // contributes a SkillRecord carrying its dir + content identity so the runtime can resolve
+  // its code/reasoning halves. (TODO migration: the flat {slug, md} JSON read above is the
+  // pre-package format being retired — skills become packages with a mandatory fixtures
+  // contract, hard-failing an incomplete one, exactly like the agent behavioral gate.)
+  const skillsDir = join(root, "skills");
+  if (existsSync(skillsDir)) {
+    for (const entry of readdirSync(skillsDir, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const pkgDir = join(skillsDir, entry.name);
+      if (!existsSync(join(pkgDir, "meta.json"))) continue;
+      try {
+        const pkg = loadSkillPackage(pkgDir);
+        if (skills.has(pkg.meta.slug)) {
+          throw new Error(`duplicate skill slug "${pkg.meta.slug}" (first seen in ${skill_paths.get(pkg.meta.slug)})`);
+        }
+        skills.set(pkg.meta.slug, { ...pkg.meta, slug: pkg.meta.slug, package_dir: pkgDir, code_hash: pkg.codeHash, md_path: pkg.mdPath });
+        skill_paths.set(pkg.meta.slug, pkgDir);
+      } catch (e) {
+        load_errors.push({ kind: "skill", path: pkgDir, slug: entry.name, error: e instanceof Error ? e.message : String(e) });
+      }
     }
   }
 

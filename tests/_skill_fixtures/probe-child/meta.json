@@ -1,0 +1,1 @@
+{ "slug": "probe-child", "version": 1, "permission": { "tier": 0 }, "description": "Cage probe: spawns a child process. child-process is granted only at tier 2." }

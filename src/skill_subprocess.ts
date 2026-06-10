@@ -64,9 +64,11 @@ export function loadFixtures(skillDir: string): SkillFixture[] {
     .map((f) => JSON.parse(readFileSync(join(dir, f), "utf-8")) as SkillFixture);
 }
 
-/** Run a skill's execution half in a permission-scoped subprocess. */
-export function executeSkill(skillDir: string, input: unknown, timeoutMs = 120_000): ExecuteResult {
-  const tier = readSkillMeta(skillDir).permission?.tier ?? 0;
+/** Run a skill's execution half in a permission-scoped subprocess. `tierOverride` runs the
+ *  skill at a tier other than its declared one — used by the cage matrix to exercise one
+ *  capability probe across every tier. */
+export function executeSkill(skillDir: string, input: unknown, timeoutMs = 120_000, tierOverride?: number): ExecuteResult {
+  const tier = tierOverride ?? (readSkillMeta(skillDir).permission?.tier ?? 0);
   const started = Date.now();
   const res = spawnSync("node", [...tierFlags(tier), RUNNER, skillDir], {
     input: JSON.stringify(input),

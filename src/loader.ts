@@ -68,6 +68,10 @@ export interface LoadedGenome {
   evals: Map<string, EvalRecord>;
   // Rob #129 — per-definition load failures recorded here instead of throwing.
   load_errors: LoadError[];
+  // Genome extension (docs/genome-extension.md): when this genome was resolved from
+  // a layer stack, maps `${kind}:${slug}` → the layer root that supplied the effective
+  // definition (highest layer wins on override). Absent for a single-root load.
+  provenance?: ReadonlyMap<string, string>;
 }
 
 export class GenomeLoadError extends Error {}
@@ -315,4 +319,47 @@ export function loadGenome(root: string): LoadedGenome {
   }
 
   return { core_types, domain_types, agents, standards, skills, evals, load_errors };
+}
+
+/**
+ * Resolve a LAYERED genome from a stack of roots, lowest → highest (genome extension
+ * Phase 2 — docs/genome-extension.md). Each root is loaded as a normal genome, then
+ * folded so a higher layer's definitions OVERRIDE a lower layer's by slug, per class.
+ * A consumer extends a base by passing [baseRoot, consumerRoot]: it inherits the base,
+ * adds its own, and overrides where it specializes. `provenance` records which layer
+ * supplied each effective definition. core_types are the immutable 6 (every layer
+ * provides them, seeded or on-disk); the top layer's are used.
+ */
+export function loadLayeredGenome(roots: readonly string[]): LoadedGenome {
+  if (roots.length === 0) {
+    throw new GenomeLoadError("loadLayeredGenome requires at least one root");
+  }
+  const domain_types = new Map<string, DomainTypeRecord>();
+  const agents = new Map<string, Agent>();
+  const standards = new Map<string, Standard>();
+  const skills = new Map<string, SkillRecord>();
+  const evals = new Map<string, EvalRecord>();
+  const load_errors: LoadError[] = [];
+  const provenance = new Map<string, string>();
+  let core_types: ReadonlyMap<string, CoreTypeRecord> = new Map();
+
+  const fold = <V>(into: Map<string, V>, from: ReadonlyMap<string, V>, root: string, kind: string) => {
+    for (const [slug, val] of from) {
+      into.set(slug, val); // higher layer overrides
+      provenance.set(`${kind}:${slug}`, root);
+    }
+  };
+
+  for (const root of roots) {
+    const layer = loadGenome(root); // each layer loaded normally (core types seeded)
+    core_types = layer.core_types; // immutable 6 — top layer's (all identical)
+    fold(domain_types, layer.domain_types, root, "domain_type");
+    fold(agents, layer.agents, root, "agent");
+    fold(standards, layer.standards, root, "standard");
+    fold(skills, layer.skills, root, "skill");
+    fold(evals, layer.evals, root, "eval");
+    for (const e of layer.load_errors) load_errors.push(e);
+  }
+
+  return { core_types, domain_types, agents, standards, skills, evals, load_errors, provenance };
 }

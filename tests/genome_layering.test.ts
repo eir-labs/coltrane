@@ -16,6 +16,14 @@ function writeJson(dir: string, sub: string, name: string, obj: unknown): void {
   writeFileSync(join(d, name), JSON.stringify(obj));
 }
 
+// fake an installed npm package under <consumer>/node_modules/<pkg>, shipping a genome
+function writeInstalledPackage(consumerRoot: string, pkg: string, version: string): void {
+  const pkgDir = join(consumerRoot, "node_modules", pkg);
+  mkdirSync(pkgDir, { recursive: true });
+  writeFileSync(join(pkgDir, "package.json"), JSON.stringify({ name: pkg, version }));
+  writeJson(pkgDir, "agents", "base-player.json", { slug: "base-player", primitives: ["SENSE"], output_types: ["Signal"] });
+}
+
 describe("genome layering: a consumer genome extends a base", () => {
   it("inherits base definitions, adds its own, and overrides base by slug", () => {
     const base = mkdtempSync(join(tmpdir(), "coltrane-base-"));
@@ -163,6 +171,57 @@ describe("genome cascade: base-evolution impact on the consumer layer", () => {
     } finally {
       rmSync(fromBase, { recursive: true, force: true });
       rmSync(toBase, { recursive: true, force: true });
+      rmSync(consumer, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("package-resolved base + version pinning", () => {
+  it("resolves a base by package name and honors a MATCHING version pin", () => {
+    const consumer = mkdtempSync(join(tmpdir(), "coltrane-pkg-"));
+    try {
+      writeInstalledPackage(consumer, "@test/base", "1.0.0");
+      writeFileSync(join(consumer, "genome.json"), JSON.stringify({ extends: ["@test/base@1.0.0"] }));
+      writeJson(consumer, "standards", "flow.json", {
+        slug: "flow",
+        domain: "widgetco",
+        agent_slugs: ["base-player"],
+        phases: [{ name: "sense", chairs: [{ role: "sense", agent_slug: "base-player", depends_on: [], input_contract: [], output_contract: ["Signal"], required_skills: [] }] }],
+      });
+      const g = resolveGenome(consumer);
+      expect(g.load_errors, JSON.stringify(g.load_errors)).toEqual([]);
+      expect(g.agents.has("base-player")).toBe(true);
+      expect(g.standards.has("flow")).toBe(true);
+    } finally {
+      rmSync(consumer, { recursive: true, force: true });
+    }
+  });
+
+  it("a version-pin MISMATCH surfaces a manifest load_error (pinned vX, installed vY)", () => {
+    const consumer = mkdtempSync(join(tmpdir(), "coltrane-pin-"));
+    try {
+      writeInstalledPackage(consumer, "@test/base", "2.0.0"); // installed 2.0.0
+      writeFileSync(join(consumer, "genome.json"), JSON.stringify({ extends: ["@test/base@1.0.0"] })); // pinned 1.0.0
+      const g = resolveGenome(consumer);
+      const pinErr = g.load_errors.find((e) => e.kind === "manifest" && e.slug === "@test/base");
+      expect(pinErr, "expected a manifest pin-mismatch load_error").toBeDefined();
+      expect(pinErr!.error).toMatch(/pinned to 1\.0\.0/);
+      expect(pinErr!.error).toMatch(/2\.0\.0 is installed/);
+      // the base still loaded (mismatch is a warning, not a hard fail)
+      expect(g.agents.has("base-player")).toBe(true);
+    } finally {
+      rmSync(consumer, { recursive: true, force: true });
+    }
+  });
+
+  it("an unresolvable base package surfaces a manifest load_error", () => {
+    const consumer = mkdtempSync(join(tmpdir(), "coltrane-noresolve-"));
+    try {
+      writeFileSync(join(consumer, "genome.json"), JSON.stringify({ extends: ["@test/not-installed"] }));
+      const g = resolveGenome(consumer);
+      const err = g.load_errors.find((e) => e.kind === "manifest" && /cannot resolve base package/.test(e.error));
+      expect(err).toBeDefined();
+    } finally {
       rmSync(consumer, { recursive: true, force: true });
     }
   });

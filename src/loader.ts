@@ -1,5 +1,6 @@
 import { readdirSync, readFileSync, existsSync, statSync, writeFileSync, mkdirSync } from "node:fs";
-import { join, extname, resolve, isAbsolute } from "node:path";
+import { join, extname, resolve, isAbsolute, dirname } from "node:path";
+import { createRequire } from "node:module";
 import { defineAgent, composeStandard, CompositionError, type Agent, type Standard, type PhaseDef } from "./composition.js";
 import type { Primitive } from "./core_types.js";
 import { CANONICAL_CORE_TYPES } from "./canonical_core_types.js";
@@ -50,7 +51,7 @@ export interface EvalRecord { slug: string; [k: string]: unknown }
 // gate around core_types still hard-throws — that's the minimum the system
 // needs to function. Anything past that softens.
 export interface LoadError {
-  readonly kind: "domain_type" | "agent" | "standard" | "skill" | "eval";
+  readonly kind: "domain_type" | "agent" | "standard" | "skill" | "eval" | "manifest";
   readonly path: string;
   readonly slug: string | null;
   readonly error: string;
@@ -382,8 +383,10 @@ export function loadLayeredGenome(roots: readonly string[]): LoadedGenome {
  * is honored automatically.
  */
 export function resolveGenome(root: string): LoadedGenome {
-  const chain = resolveExtendsChain(root);
-  return chain.length === 1 ? loadGenome(root) : loadLayeredGenome(chain);
+  const { roots, pinErrors } = resolveExtendsChain(root);
+  const genome = roots.length === 1 ? loadGenome(root) : loadLayeredGenome(roots);
+  if (pinErrors.length === 0) return genome;
+  return { ...genome, load_errors: [...genome.load_errors, ...pinErrors] };
 }
 
 /**
@@ -428,8 +431,9 @@ function readGenomeManifest(root: string): readonly string[] {
   }
 }
 
-function resolveExtendsChain(root: string): string[] {
+function resolveExtendsChain(root: string): { roots: string[]; pinErrors: LoadError[] } {
   const ordered: string[] = [];
+  const pinErrors: LoadError[] = [];
   const done = new Set<string>();
   const onStack = new Set<string>();
   const visit = (r: string): void => {
@@ -437,13 +441,61 @@ function resolveExtendsChain(root: string): string[] {
     if (done.has(real)) return;
     if (onStack.has(real)) throw new GenomeLoadError(`genome extends cycle detected at ${real}`);
     onStack.add(real);
-    for (const base of readGenomeManifest(real)) {
-      visit(isAbsolute(base) ? base : join(real, base));
+    for (const spec of readGenomeManifest(real)) {
+      const resolved = resolveExtendsEntry(spec, real, pinErrors);
+      if (resolved) visit(resolved);
     }
     onStack.delete(real);
     done.add(real);
     ordered.push(real); // post-order: bases land before the root that extends them
   };
   visit(root);
-  return ordered;
+  return { roots: ordered, pinErrors };
+}
+
+// Split a package spec into name + optional version pin. Handles scoped names:
+//   "@scope/pkg@1.2.3" → { name: "@scope/pkg", version: "1.2.3" }
+//   "@scope/pkg"       → { name: "@scope/pkg" }
+//   "pkg@1.2.3"        → { name: "pkg", version: "1.2.3" }
+function parsePackageSpec(spec: string): { name: string; version?: string } {
+  const slash = spec.startsWith("@") ? spec.indexOf("/") : 0;
+  const at = spec.indexOf("@", slash + 1);
+  return at > 0 ? { name: spec.slice(0, at), version: spec.slice(at + 1) } : { name: spec };
+}
+
+// Resolve one `extends` entry to a genome root. A path (./ , / , absolute) resolves
+// relative to the declaring root. Anything else is an npm package spec
+// (`@scope/pkg[@version]`): resolve the installed package's dir from the declaring
+// root's node_modules; if a version was pinned, warn (manifest load_error) when the
+// installed version differs — the pin records "validated against vX", so a mismatch
+// means re-run the cascade and re-pin. Returns null (with a recorded error) if the
+// package can't be resolved.
+function resolveExtendsEntry(spec: string, fromRoot: string, pinErrors: LoadError[]): string | null {
+  if (spec.startsWith(".") || isAbsolute(spec) || spec.startsWith("/")) {
+    return isAbsolute(spec) ? spec : join(fromRoot, spec);
+  }
+  const { name, version } = parsePackageSpec(spec);
+  const manifestPath = join(fromRoot, "genome.json");
+  try {
+    const req = createRequire(join(fromRoot, "package.json"));
+    const pkgJsonPath = req.resolve(`${name}/package.json`);
+    const installed = JSON.parse(readFileSync(pkgJsonPath, "utf-8")) as { version?: string };
+    if (version && installed.version && version !== installed.version) {
+      pinErrors.push({
+        kind: "manifest",
+        path: manifestPath,
+        slug: name,
+        error: `extends: base "${name}" pinned to ${version} but ${installed.version} is installed — re-run cascade + re-pin`,
+      });
+    }
+    return dirname(pkgJsonPath);
+  } catch {
+    pinErrors.push({
+      kind: "manifest",
+      path: manifestPath,
+      slug: name,
+      error: `extends: cannot resolve base package "${name}" from ${fromRoot} (is it installed?)`,
+    });
+    return null;
+  }
 }

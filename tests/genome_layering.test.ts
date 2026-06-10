@@ -54,4 +54,29 @@ describe("genome layering: a consumer genome extends a base", () => {
       rmSync(consumer, { recursive: true, force: true });
     }
   });
+
+  it("a consumer standard composes a BASE agent — cross-layer reference resolves", () => {
+    const base = mkdtempSync(join(tmpdir(), "coltrane-base2-"));
+    const consumer = mkdtempSync(join(tmpdir(), "coltrane-consumer2-"));
+    try {
+      // base ships a DOMAIN-AGNOSTIC player (#134) — composable into any domain;
+      // consumer writes a standard that seats it (didn't define it itself)
+      writeJson(base, "agents", "base-scout.json", { slug: "base-scout", primitives: ["SENSE"], output_types: ["Signal"] });
+      writeJson(consumer, "standards", "widget-flow.json", {
+        slug: "widget-flow",
+        domain: "widgetco",
+        agent_slugs: ["base-scout"],
+        phases: [{ name: "sense", chairs: [{ role: "sense", agent_slug: "base-scout", depends_on: [], input_contract: [], output_contract: ["Signal"], required_skills: [] }] }],
+      });
+
+      const g = loadLayeredGenome([base, consumer]);
+
+      expect(g.load_errors, JSON.stringify(g.load_errors)).toEqual([]);
+      expect(g.standards.has("widget-flow")).toBe(true);
+      expect(g.provenance?.get("standard:widget-flow")).toBe(consumer);
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+      rmSync(consumer, { recursive: true, force: true });
+    }
+  });
 });

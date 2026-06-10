@@ -120,7 +120,10 @@ const REQUIRED_CORE_SLUGS = new Set([
   "Verdict",
 ]);
 
-export function loadGenome(root: string): LoadedGenome {
+export function loadGenome(
+  root: string,
+  opts?: { inheritedAgents?: ReadonlyMap<string, Agent> },
+): LoadedGenome {
   const load_errors: LoadError[] = [];
 
   // core_types/ stays STRICTLY hard-fail: the system can't function without
@@ -252,7 +255,10 @@ export function loadGenome(root: string): LoadedGenome {
       }
       const resolved: Agent[] = [];
       for (const aslug of def.agent_slugs ?? []) {
-        const a = agents.get(aslug);
+        // Resolve against this layer's own agents first, then agents inherited from
+        // lower layers (genome extension) — so a consumer standard can compose base
+        // players it didn't define itself.
+        const a = agents.get(aslug) ?? opts?.inheritedAgents?.get(aslug);
         if (!a) {
           throw new Error(`field "agent_slugs" references unknown agent "${aslug}"`);
         }
@@ -351,7 +357,9 @@ export function loadLayeredGenome(roots: readonly string[]): LoadedGenome {
   };
 
   for (const root of roots) {
-    const layer = loadGenome(root); // each layer loaded normally (core types seeded)
+    // Each layer loaded normally (core types seeded), with the agents accumulated
+    // from lower layers passed in — so this layer's standards can compose them.
+    const layer = loadGenome(root, { inheritedAgents: agents });
     core_types = layer.core_types; // immutable 6 — top layer's (all identical)
     fold(domain_types, layer.domain_types, root, "domain_type");
     fold(agents, layer.agents, root, "agent");

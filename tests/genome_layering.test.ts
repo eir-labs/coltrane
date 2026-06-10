@@ -9,6 +9,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadLayeredGenome, resolveGenome, genomeCascadeCheck } from "../src/loader.js";
+import { bootstrapServerDeps, dispatchTool } from "../src";
 
 function writeJson(dir: string, sub: string, name: string, obj: unknown): void {
   const d = join(dir, sub);
@@ -176,6 +177,51 @@ describe("genome cascade: base-evolution impact on the consumer layer", () => {
   });
 });
 
+describe("genome layering — review follow-ups", () => {
+  it("an extends cycle (A → B → A) is detected and rejected", () => {
+    const a = mkdtempSync(join(tmpdir(), "coltrane-cyc-a-"));
+    const b = mkdtempSync(join(tmpdir(), "coltrane-cyc-b-"));
+    try {
+      writeFileSync(join(a, "genome.json"), JSON.stringify({ extends: [b] }));
+      writeFileSync(join(b, "genome.json"), JSON.stringify({ extends: [a] }));
+      expect(() => resolveGenome(a)).toThrow(/cycle/i);
+    } finally {
+      rmSync(a, { recursive: true, force: true });
+      rmSync(b, { recursive: true, force: true });
+    }
+  });
+
+  it("consumer references slug X AND overrides slug X — the standard resolves to the OVERRIDE", () => {
+    const base = mkdtempSync(join(tmpdir(), "coltrane-ovbase-"));
+    const consumer = mkdtempSync(join(tmpdir(), "coltrane-ovcons-"));
+    try {
+      // base + consumer both define agnostic "shared"; distinguish by allowed_tools
+      writeJson(base, "agents", "shared.json", { slug: "shared", primitives: ["SENSE"], output_types: ["Signal"], allowed_tools: ["base-tool"] });
+      writeJson(consumer, "agents", "shared.json", { slug: "shared", primitives: ["SENSE"], output_types: ["Signal"], allowed_tools: ["consumer-tool"] });
+      writeJson(consumer, "standards", "flow.json", {
+        slug: "flow",
+        domain: "widgetco",
+        agent_slugs: ["shared"],
+        phases: [{ name: "sense", chairs: [{ role: "sense", agent_slug: "shared", depends_on: [], input_contract: [], output_contract: ["Signal"], required_skills: [] }] }],
+      });
+
+      const g = loadLayeredGenome([base, consumer]);
+
+      expect(g.load_errors).toEqual([]);
+      // override-wins at the genome level
+      expect(g.agents.get("shared")?.allowed_tools).toEqual(["consumer-tool"]);
+      expect(g.provenance?.get("agent:shared")).toBe(consumer);
+      // and the standard's reference resolved to the consumer-overridden agent, not the base
+      const flow = g.standards.get("flow");
+      const seated = flow?.agents.find((a) => a.slug === "shared");
+      expect(seated?.allowed_tools).toEqual(["consumer-tool"]);
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+      rmSync(consumer, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("package-resolved base + version pinning", () => {
   it("resolves a base by package name and honors a MATCHING version pin", () => {
     const consumer = mkdtempSync(join(tmpdir(), "coltrane-pkg-"));
@@ -209,6 +255,23 @@ describe("package-resolved base + version pinning", () => {
       expect(pinErr!.error).toMatch(/2\.0\.0 is installed/);
       // the base still loaded (mismatch is a warning, not a hard fail)
       expect(g.agents.has("base-player")).toBe(true);
+    } finally {
+      rmSync(consumer, { recursive: true, force: true });
+    }
+  });
+
+  it("the pin-mismatch warning + provenance are queryable at runtime via system_health", async () => {
+    const consumer = mkdtempSync(join(tmpdir(), "coltrane-rt-"));
+    try {
+      writeInstalledPackage(consumer, "@test/base", "2.0.0"); // installed 2.0.0
+      writeFileSync(join(consumer, "genome.json"), JSON.stringify({ extends: ["@test/base@1.0.0"] })); // pinned 1.0.0
+      const deps = bootstrapServerDeps(consumer);
+      const res = await dispatchTool("system_health", {}, deps);
+      const data = res.data as { load_errors: Array<{ kind: string; error: string }>; provenance: Record<string, string> };
+      // #2 — pin mismatch is readable at runtime, not boot-time-only
+      expect(data.load_errors.some((e) => e.kind === "manifest" && /pinned to 1\.0\.0/.test(e.error))).toBe(true);
+      // #4 — provenance is exposed; the base player is attributed to a layer
+      expect(Object.keys(data.provenance).some((k) => k.startsWith("agent:base-player"))).toBe(true);
     } finally {
       rmSync(consumer, { recursive: true, force: true });
     }

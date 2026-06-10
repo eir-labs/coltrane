@@ -65,6 +65,9 @@ export interface ServerDeps {
   // Live agent map from the genome — surfaced for standard_compose slug
   // resolution (Rob #132) AND genome_reload diff/refresh (Rob #130).
   agents?: Map<string, Agent> | undefined;
+  // Genome extension — per-slug layer provenance (`${kind}:${slug}` → layer root),
+  // surfaced via system_health so runtime callers can check a definition's origin.
+  provenance?: ReadonlyMap<string, string> | undefined;
 }
 
 export interface ToolResult {
@@ -503,6 +506,9 @@ export async function dispatchTool(slug: string, args: Record<string, unknown>, 
             tool_stats: {}, bottlenecks: [], budget: { spent: gigs_run, remaining: null },
             // Rob #129 — surface what was skipped at load so operators see broken files
             load_errors: deps.load_errors ?? [],
+            // genome extension — per-slug layer provenance, queryable at runtime (e.g.
+            // a consumer checking "is this player coming from where I expect" before composing)
+            provenance: deps.provenance ? Object.fromEntries(deps.provenance) : {},
           },
         };
       }
@@ -1054,6 +1060,7 @@ export function bootstrapServerDeps(genomeRoot?: string): ServerDeps {
     genome_dir: root, // ← genome-mutation tools persist + ledger-seal into the live genome
     load_errors: [...genome.load_errors], // ← Rob #129 — surfaced via system_health
     agents: new Map(genome.agents), // ← Rob #130 + #132 — slug-resolve + reload-diff
+    provenance: genome.provenance, // ← genome extension — which layer supplied each def
   };
 }
 

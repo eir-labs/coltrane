@@ -38,6 +38,22 @@ describe("schema inheritance: a subtype inherits its base core type's properties
     expect(res.valid).toBe(false);
   });
 
+  it("a NARROWER overload holds — the subtype's tighter constraint wins, not widened to base", () => {
+    const r = createRegistry();
+    // Signal base `source` is any string; narrow it to a URL pattern on the subtype
+    r.registerType({
+      slug: "url-signal",
+      extends: "Signal",
+      domain: "x",
+      schema: { properties: { source: { type: "string", pattern: "^https?://" } } },
+      required_fields: ["source"],
+    });
+    // a matching URL passes
+    expect(r.validate({ core_type: "Signal", domain_type: "url-signal", data: { source: "http://x" } }).valid).toBe(true);
+    // a plain string FAILS — the subtype's narrower pattern held (was not widened to base's any-string)
+    expect(r.validate({ core_type: "Signal", domain_type: "url-signal", data: { source: "not-a-url" } }).valid).toBe(false);
+  });
+
   it("a subtype can OVERLOAD a base field with its own type (subtype wins)", () => {
     const r = createRegistry();
     // Interpretation base declares `confidence`; overload it to a string

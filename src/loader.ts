@@ -386,6 +386,37 @@ export function resolveGenome(root: string): LoadedGenome {
   return chain.length === 1 ? loadGenome(root) : loadLayeredGenome(chain);
 }
 
+/**
+ * Genome cascade check (genome extension Phase 3 — docs/genome-extension.md). Given a
+ * consumer genome and two base versions (`fromBase` it currently validates against,
+ * `toBase` a candidate), report what in the CONSUMER layer breaks when the base advances
+ * — e.g. a consumer standard that composes a base player the new base removed/renamed.
+ *
+ * `broken` = consumer-layer load_errors present against toBase but NOT fromBase (the
+ * base change broke them). `healed` = the inverse (informational). Lets a consumer
+ * decide whether to adopt a new base before pinning to it.
+ */
+export interface CascadeReport {
+  broken: LoadError[];
+  healed: LoadError[];
+}
+export function genomeCascadeCheck(consumerRoot: string, fromBase: string, toBase: string): CascadeReport {
+  const consumerReal = resolve(consumerRoot);
+  const consumerLayerErrors = (base: string): LoadError[] =>
+    loadLayeredGenome([base, consumerRoot]).load_errors.filter((e) =>
+      resolve(e.path).startsWith(consumerReal),
+    );
+  const key = (e: LoadError): string => `${e.kind}:${e.slug ?? ""}:${e.error}`;
+  const fromErrs = consumerLayerErrors(fromBase);
+  const toErrs = consumerLayerErrors(toBase);
+  const fromKeys = new Set(fromErrs.map(key));
+  const toKeys = new Set(toErrs.map(key));
+  return {
+    broken: toErrs.filter((e) => !fromKeys.has(key(e))),
+    healed: fromErrs.filter((e) => !toKeys.has(key(e))),
+  };
+}
+
 function readGenomeManifest(root: string): readonly string[] {
   const p = join(root, "genome.json");
   if (!existsSync(p)) return [];

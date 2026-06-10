@@ -8,7 +8,7 @@ import { describe, it, expect } from "vitest";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { loadLayeredGenome, resolveGenome } from "../src/loader.js";
+import { loadLayeredGenome, resolveGenome, genomeCascadeCheck } from "../src/loader.js";
 
 function writeJson(dir: string, sub: string, name: string, obj: unknown): void {
   const d = join(dir, sub);
@@ -117,6 +117,53 @@ describe("manifest-declared base: resolveGenome reads `extends` and layers", () 
       expect(g.core_types.size).toBe(6);
     } finally {
       rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("genome cascade: base-evolution impact on the consumer layer", () => {
+  it("reports a consumer standard that breaks when the base drops the player it composes", () => {
+    const fromBase = mkdtempSync(join(tmpdir(), "coltrane-from-"));
+    const toBase = mkdtempSync(join(tmpdir(), "coltrane-to-"));
+    const consumer = mkdtempSync(join(tmpdir(), "coltrane-casc-"));
+    try {
+      // fromBase ships base-scout; toBase renamed it away (base-scout no longer exists)
+      writeJson(fromBase, "agents", "base-scout.json", { slug: "base-scout", primitives: ["SENSE"], output_types: ["Signal"] });
+      writeJson(toBase, "agents", "base-finder.json", { slug: "base-finder", primitives: ["SENSE"], output_types: ["Signal"] });
+      // consumer composes base-scout — fine against fromBase, broken against toBase
+      writeJson(consumer, "standards", "flow.json", {
+        slug: "flow",
+        domain: "widgetco",
+        agent_slugs: ["base-scout"],
+        phases: [{ name: "sense", chairs: [{ role: "sense", agent_slug: "base-scout", depends_on: [], input_contract: [], output_contract: ["Signal"], required_skills: [] }] }],
+      });
+
+      const report = genomeCascadeCheck(consumer, fromBase, toBase);
+
+      expect(report.broken.length).toBe(1);
+      expect(report.broken[0]?.slug).toBe("flow");
+      expect(report.broken[0]?.error).toMatch(/base-scout/);
+    } finally {
+      rmSync(fromBase, { recursive: true, force: true });
+      rmSync(toBase, { recursive: true, force: true });
+      rmSync(consumer, { recursive: true, force: true });
+    }
+  });
+
+  it("a consumer that uses nothing base-specific has an empty cascade", () => {
+    const fromBase = mkdtempSync(join(tmpdir(), "coltrane-from2-"));
+    const toBase = mkdtempSync(join(tmpdir(), "coltrane-to2-"));
+    const consumer = mkdtempSync(join(tmpdir(), "coltrane-casc2-"));
+    try {
+      writeJson(fromBase, "agents", "base-a.json", { slug: "base-a", primitives: ["SENSE"], output_types: ["Signal"] });
+      writeJson(toBase, "agents", "base-b.json", { slug: "base-b", primitives: ["SENSE"], output_types: ["Signal"] });
+      writeJson(consumer, "agents", "own.json", { slug: "own", primitives: ["SENSE"], output_types: ["Signal"], domain: "widgetco" });
+      const report = genomeCascadeCheck(consumer, fromBase, toBase);
+      expect(report.broken).toEqual([]);
+    } finally {
+      rmSync(fromBase, { recursive: true, force: true });
+      rmSync(toBase, { recursive: true, force: true });
+      rmSync(consumer, { recursive: true, force: true });
     }
   });
 });

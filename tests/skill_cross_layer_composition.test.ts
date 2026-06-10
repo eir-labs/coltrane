@@ -13,9 +13,10 @@ import { loadLayeredGenome } from "../src/loader.js";
 
 function writeSkillPackage(root: string, slug: string, meta: Record<string, unknown>, code: string): void {
   const d = join(root, "skills", slug);
-  mkdirSync(d, { recursive: true });
+  mkdirSync(join(d, "fixtures"), { recursive: true });
   writeFileSync(join(d, "meta.json"), JSON.stringify({ slug, version: 1, permission: { tier: 0 }, ...meta }));
   writeFileSync(join(d, "skill.mjs"), code);
+  writeFileSync(join(d, "fixtures", "f.json"), JSON.stringify({ id: "f", input: {}, assertions: [] }));
 }
 
 describe("skill packages cross genome layers", () => {
@@ -49,17 +50,17 @@ describe("skill packages cross genome layers", () => {
     }
   });
 
-  it("package skills and legacy {slug, md} skills inherit side by side across layers", () => {
+  it("a flat {slug, md} skill is ignored across layers — only packages inherit (flat format retired)", () => {
     const base = mkdtempSync(join(tmpdir(), "coltrane-base-"));
     const consumer = mkdtempSync(join(tmpdir(), "coltrane-consumer-"));
     try {
-      // base ships a legacy single-file skill...
+      // base ships a FLAT skill (the retired pre-package format) — it must NOT load...
       mkdirSync(join(base, "skills"), { recursive: true });
       writeFileSync(join(base, "skills", "legacy.json"), JSON.stringify({ slug: "legacy", domain: "base", md: "be tight" }));
-      // ...and the consumer ships a package skill
+      // ...and the consumer ships a real package
       writeSkillPackage(consumer, "pkg-skill", { skill_type: "extraction" }, "export default function run(){return {}}");
       const g = loadLayeredGenome([base, consumer]);
-      expect(g.skills.has("legacy")).toBe(true);
+      expect(g.skills.has("legacy")).toBe(false);
       expect(g.skills.has("pkg-skill")).toBe(true);
     } finally {
       rmSync(base, { recursive: true, force: true });

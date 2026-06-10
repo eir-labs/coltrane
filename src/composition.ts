@@ -268,18 +268,24 @@ export function composeStandard(def: {
       }
       seenRoles.set(ch.role, ph.name);
 
-      const ag = agentBySlug.get(ch.agent_slug);
-      if (!ag) {
-        throw new CompositionError(
-          `standard ${def.slug}: chair "${ch.role}" references unknown agent "${ch.agent_slug}" (not in standard's agents list)`,
-        );
-      }
-      const declared = new Set(ag.skill_slugs ?? []);
-      for (const sk of ch.required_skills) {
-        if (!declared.has(sk)) {
+      // A skill-backed chair (skill_slug set, no agent_slug) runs the skill's deterministic
+      // code half instead of an agent — skip the agent/required-skills checks for it. The
+      // type-flow (input/output_contract) below still applies.
+      const isSkillChair = !!ch.skill_slug && (ch.agent_slug ?? "") === "";
+      if (!isSkillChair) {
+        const ag = agentBySlug.get(ch.agent_slug);
+        if (!ag) {
           throw new CompositionError(
-            `standard ${def.slug}: chair "${ch.role}" requires skill "${sk}" which agent "${ag.slug}" does not declare`,
+            `standard ${def.slug}: chair "${ch.role}" references unknown agent "${ch.agent_slug}" (not in standard's agents list)`,
           );
+        }
+        const declared = new Set(ag.skill_slugs ?? []);
+        for (const sk of ch.required_skills) {
+          if (!declared.has(sk)) {
+            throw new CompositionError(
+              `standard ${def.slug}: chair "${ch.role}" requires skill "${sk}" which agent "${ag.slug}" does not declare`,
+            );
+          }
         }
       }
       if (ch.output_contract.length === 0) {
@@ -386,6 +392,7 @@ export function composeStandard(def: {
   // treat the chair set as the phase's agents (order: declaration order).
   for (const ph of phases) {
     for (const ch of ph.chairs) {
+      if (ch.skill_slug && !ch.agent_slug) continue; // skill-backed chair: no agent to domain-check
       const ag = agentBySlug.get(ch.agent_slug)!; // existence verified above
       // Rob #134: agents with no explicit domain (null OR undefined) are
       // domain-agnostic — compatible with any standard. Only reject when the
@@ -405,6 +412,7 @@ export function composeStandard(def: {
     // For the legacy primitive-graph check we consider each chair in turn,
     // treating prior chairs (same phase or earlier) as the upstream bag.
     for (const ch of ph.chairs) {
+      if (ch.skill_slug && !ch.agent_slug) continue; // skill-backed chair: not in the primitive graph
       const ag = agentBySlug.get(ch.agent_slug)!;
       if (i > 0) {
         for (const it of ag.input_types) {
@@ -436,6 +444,12 @@ export function composeStandard(def: {
     // After processing all chairs in this phase, fold their primitives + outputs
     // into the upstream bag for subsequent phases.
     for (const ch of ph.chairs) {
+      if (ch.skill_slug && !ch.agent_slug) {
+        // a skill-backed chair produces its declared output_contract types — fold those into
+        // the upstream bag so a downstream agent chair can consume them.
+        for (const ot of ch.output_contract) upstreamOutputs.add(ot);
+        continue;
+      }
       const ag = agentBySlug.get(ch.agent_slug)!;
       for (const p of ag.primitives) upstreamPhasePrimitives.add(p);
       for (const ot of ag.output_types) upstreamOutputs.add(ot);

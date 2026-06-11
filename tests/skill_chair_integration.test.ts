@@ -83,6 +83,15 @@ describe("a chair backed by a skill runs deterministic code, not the model", () 
     expect(res.outputs[0]!.data).toEqual({ sum: 8 });
     // and it's recorded in the ledger like any other output
     expect(ledger.count()).toBe(1);
+    // the sealed entry carries the skill's identity (slug + version + verified code_hash + tier),
+    // so an audit can trace this output back to the exact skill that produced it — the chair→skill
+    // provenance edge, not just the slug in agent_slug.
+    const prov = res.outputs[0]!.skill_provenance;
+    expect(prov, "skill-backed output is missing skill_provenance").toBeTruthy();
+    expect(prov!.slug).toBe("number-adder");
+    expect(prov!.version).toBe(1);
+    expect(prov!.tier).toBe(0);
+    expect(prov!.code_hash, "code_hash should be the verified on-disk hash").toMatch(/[0-9a-f]{16,}/);
   });
 
   it("a skill-backed chair feeds its deterministic output to a downstream agent chair", async () => {

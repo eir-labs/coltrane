@@ -9,9 +9,11 @@
 //   code file missing   -> pure-reasoning mode
 //   (run() returns invalid output -> rejected as null; covered in residual/validation)
 import { describe, it, expect } from "vitest";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
-import { resolveSkill, loadSkillPackage, type ResidualInvoker } from "../src/skills.js";
+import { resolveSkill, loadSkillPackage, skillChainEvents, type ResidualInvoker } from "../src/skills.js";
 
 const REPO_ROOT = fileURLToPath(new URL("..", import.meta.url));
 const F = (slug: string) => join(REPO_ROOT, "tests/_skill_fixtures", slug);
@@ -48,5 +50,16 @@ describe("graceful degradation — code is an optimization, not a dependency", (
 
   it("degradation never throws — resolveSkill always returns a usable result", async () => {
     await expect(resolveSkill(F("thrower"), { text: "hi" }, fillLabel)).resolves.toBeTruthy();
+  });
+
+  it("records WHY it degraded on the chain event — audit-replay reads the reason, not just field_origins", async () => {
+    // the reason lives on the ResolutionResult AND on the sealed event, so a replay of
+    // "why did this skill degrade across N runs" reads from the durable chain.
+    const chainDir = mkdtempSync(join(tmpdir(), "coltrane-chain-"));
+    const r = await resolveSkill(F("thrower"), { text: "hi" }, fillLabel, { chainDir });
+    const events = skillChainEvents("thrower", undefined, { chainDir });
+    expect(events.length).toBe(1);
+    expect(events[0]!.degraded_reason ?? "", "degraded reason was not sealed on the event").toMatch(/throw|error|boom/i);
+    expect(events[0]!.degraded_reason).toBe(r.degraded?.reason);
   });
 });

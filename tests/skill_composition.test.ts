@@ -32,6 +32,15 @@ describe("skill composition", () => {
     expect(() => composeSkills([F("cycle-x"), F("cycle-y")])).toThrow(SkillCompositionCycleError);
   });
 
+  it("names the full cycle path (A → B → A), not just the re-entered node", () => {
+    // a one-node message can't be regression-tested for the RIGHT cycle; the path can.
+    let msg = "";
+    try { composeSkills([F("cycle-x"), F("cycle-y")]); } catch (e) { msg = (e as Error).message; }
+    expect(msg).toMatch(/cycle-x/);
+    expect(msg).toMatch(/cycle-y/);
+    expect(msg, "path should be rendered with arrows and close the loop").toMatch(/→.*→/);
+  });
+
   it("rejects an invalid pairing (not in composable_with) loudly", () => {
     expect(() => composeSkills([F("compose-a"), F("loner")])).toThrow(/composable_with|not composable/i);
   });

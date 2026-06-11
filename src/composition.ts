@@ -32,7 +32,11 @@ export interface AgentDef {
   identity: string;
   method: string;
   constraints: readonly string[];
-  behavioral_primitives: readonly BelbinRole[];
+  // EXACTLY two Belbin roles, held in equal tension — the Disposition layer. The pairing is
+  // the contract: a lone role collapses to a single voice, three+ dilute the tension that
+  // makes the disposition load-bearing. Typed as a 2-tuple (compile-time) AND validated for
+  // cardinality at defineAgent (runtime, for the JSON-authored path that parses as `any`).
+  behavioral_primitives: readonly [BelbinRole, BelbinRole];
   // Cage / economy envelope — optional, with a REAL deny-by-default / gig-fallback reason
   // (not back-compat): absent code_tool_access = deny code tools; absent model_tier = the
   // gig/invoker default model; absent max_tool_calls/max_token_budget = the gig budget
@@ -57,7 +61,7 @@ export interface Agent {
   identity: string;             // who you are — role / stance (Identity layer)
   method: string;               // how you do THIS agent's job — the step-by-step (Method layer)
   constraints: readonly string[]; // the negative space — never-invent / cite-sources (Constraints layer)
-  behavioral_primitives: readonly BelbinRole[]; // Belbin pairing (2 in tension) → Disposition layer
+  behavioral_primitives: readonly [BelbinRole, BelbinRole]; // exactly two Belbin roles in equal tension → Disposition layer
   // Cage grant — optional so hand-built Agent literals stay valid; defineAgent always
   // sets them ([] = no grant). The invoker treats absent/empty as deny-by-default.
   allowed_tools?: readonly string[];
@@ -183,8 +187,19 @@ export function defineAgent(def: AgentDef): Agent {
   if (typeof def.method !== "string" || def.method.trim() === "") {
     throw new GenomeIncompleteError(`agent ${def.slug}: method is required (how the agent works) — fill it in to upgrade the genome`);
   }
-  if (!Array.isArray(def.behavioral_primitives) || def.behavioral_primitives.length === 0) {
+  // Widen past the compile-time 2-tuple: the JSON-authored path reaches here as `any`, so the
+  // disposition's arity is only really known at runtime — these guards protect that path.
+  const bp = def.behavioral_primitives as readonly BelbinRole[];
+  if (!Array.isArray(bp) || bp.length === 0) {
     throw new GenomeIncompleteError(`agent ${def.slug}: behavioral_primitives (disposition) is required — fill it in to upgrade the genome`);
+  }
+  // The disposition is a PAIRING: exactly two roles in tension. One role is a single voice;
+  // three+ dilute the tension. A genome carrying a non-pair is malformed against the contract,
+  // so it hard-fails the load rather than rendering a confused Disposition layer.
+  if (bp.length !== 2) {
+    throw new GenomeIncompleteError(
+      `agent ${def.slug}: behavioral_primitives must be exactly two roles in tension, got ${bp.length} — a disposition is a pairing`,
+    );
   }
   if (!Array.isArray(def.constraints)) {
     throw new GenomeIncompleteError(`agent ${def.slug}: constraints is required (use [] for none) — fill it in to upgrade the genome`);

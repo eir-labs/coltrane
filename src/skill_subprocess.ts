@@ -124,7 +124,7 @@ function canon(v: unknown): unknown {
 export interface FixtureResult {
   id: string;
   passed: boolean;   // matches expected_output + all assertions hold
-  stable: boolean;   // identical output across two runs (determinism)
+  stable: boolean;   // identical output across all DETERMINISM_RUNS executions (determinism)
   error?: string;
 }
 export interface FixtureReport {

@@ -7,7 +7,7 @@ export const TEST_BEHAVIOR: Pick<AgentDef, "identity" | "method" | "constraints"
   identity: "test agent",
   method: "perform the test task",
   constraints: [],
-  behavioral_primitives: ["analyst", "synthesizer"] as BelbinRole[],
+  behavioral_primitives: ["analyst", "synthesizer"] as [BelbinRole, BelbinRole],
 };
 
 /** An AgentDef with behavioral defaults filled — override anything via `o`. */

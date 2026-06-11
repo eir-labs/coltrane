@@ -27,7 +27,7 @@ import { createRegistry } from "../src/registry.js";
 import { createOutputStore } from "../src/outputs.js";
 import { MemoryLedger } from "../src/ledger.js";
 import { loadGenome } from "../src/loader.js";
-import { buildPrompt, type AgentInvocationContext } from "../src";
+import { buildPrompt, defineAgent, GenomeIncompleteError, type AgentInvocationContext } from "../src";
 import type { Agent } from "../src";
 
 const IDENTITY = "You are fact-checker. You never accept a plausible-sounding claim without a retrieved source — you read like an explorer and challenge like a critic.";
@@ -67,6 +67,29 @@ describe("agent_define ingest captures behavioral fields (not discards them)", (
     expect(agent.identity).toBe(IDENTITY);
     expect(agent.method).toBe(METHOD);
     expect(agent.constraints).toEqual(CONSTRAINTS);
+  });
+});
+
+// ── The disposition is a PAIRING — exactly two roles in tension, enforced at the door ─────
+describe("behavioral_primitives cardinality — a disposition is a pair, not a solo or a crowd", () => {
+  const base = {
+    slug: "card", primitives: ["INTERPRET"] as const, input_types: [], output_types: ["Interpretation"],
+    domain: "verification", identity: IDENTITY, method: METHOD, constraints: CONSTRAINTS,
+  };
+  it("hard-fails a one-role disposition (a solo voice has no tension)", () => {
+    // a single role is not a pairing — cast past the tuple type to prove the RUNTIME guard
+    // (the JSON-authored path parses as `any`, so the compile-time tuple is not enough)
+    const def = { ...base, behavioral_primitives: ["analyst"] as unknown as [import("../src").BelbinRole, import("../src").BelbinRole] };
+    expect(() => defineAgent(def)).toThrow(GenomeIncompleteError);
+    expect(() => defineAgent(def)).toThrow(/exactly two/i);
+  });
+  it("hard-fails a three-role disposition (a crowd dilutes the tension)", () => {
+    const def = { ...base, behavioral_primitives: ["analyst", "critic", "planner"] as unknown as [import("../src").BelbinRole, import("../src").BelbinRole] };
+    expect(() => defineAgent(def)).toThrow(GenomeIncompleteError);
+  });
+  it("accepts exactly two roles", () => {
+    const a = defineAgent({ ...base, behavioral_primitives: ["analyst", "critic"] });
+    expect(a.behavioral_primitives).toEqual(["analyst", "critic"]);
   });
 });
 

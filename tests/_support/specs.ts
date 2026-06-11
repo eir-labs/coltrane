@@ -25,7 +25,7 @@ const CORE: Record<string, string> = {
   SENSE: "Signal", INTERPRET: "Interpretation", JUDGE: "Judgment",
   PLAN: "Plan", CREATE: "Artifact", VERIFY: "Verdict",
 };
-const DISPOSITION: Record<string, BelbinRole[]> = {
+const DISPOSITION: Record<string, readonly [BelbinRole, BelbinRole]> = {
   SENSE: ["explorer", "analyst"], INTERPRET: ["analyst", "synthesizer"], JUDGE: ["critic", "analyst"],
   PLAN: ["planner", "synthesizer"], CREATE: ["executor", "planner"], VERIFY: ["critic", "executor"],
 };
@@ -82,7 +82,7 @@ export function materialize(topo: TopologySpec): MaterializedGenome {
       input_types: inputTypes(n),
       output_types: [typeFor(n.primitive)],
       domain: "gen",
-      behavioral_primitives: DISPOSITION[n.primitive] ?? ["analyst", "synthesizer"],
+      behavioral_primitives: DISPOSITION[n.primitive] ?? (["analyst", "synthesizer"] as [BelbinRole, BelbinRole]),
       ...(n.tier ? { model_tier: n.tier } : {}),
     }),
   );

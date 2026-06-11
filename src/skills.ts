@@ -117,6 +117,11 @@ function pick(o: Record<string, unknown>, keys: readonly string[]): Record<strin
   return r;
 }
 
+// Warn once (not per-call) when resolutions run with no chainDir: every such call records
+// NO SkillChainEvent, so determinism_ratio never accumulates. The absence is a real gap, not
+// a no-op — surface it once so it's visible without spamming a tight resolve loop.
+let warnedNoChainDir = false;
+
 /** Run code first, compute the residual, let the model fill only the gap, tag origins.
  *  When `opts.chainDir` is set, append a SkillChainEvent recording this resolution. */
 export async function resolveSkill(
@@ -125,6 +130,10 @@ export async function resolveSkill(
   invoke: ResidualInvoker,
   opts?: SkillChainOpts,
 ): Promise<ResolutionResult> {
+  if (!opts?.chainDir && !warnedNoChainDir) {
+    warnedNoChainDir = true;
+    console.warn("[skills] resolveSkill running without chainDir — no SkillChainEvent recorded; determinism_ratio will not accumulate.");
+  }
   const pkg = loadSkillPackage(dir);
   // schema fields bound what code/model may resolve. No schema → the code's own keys are
   // the shape (nothing is "unresolved"), so the model is never asked.
@@ -178,6 +187,7 @@ export async function resolveSkill(
       duration_ms,
       permission_violations: [],
       field_origins,
+      ...(degraded ? { degraded_reason: degraded.reason } : {}),
     });
   }
 
@@ -199,8 +209,14 @@ export interface SkillChainEvent {
   code_hash: string;
   tier: number;
   duration_ms: number;
+  // v2 hook — Node `--permission` denials are silent today, so this is written `[]` until a
+  // capture path lands. Kept in the shape now so the event format doesn't change when it does.
   permission_violations: string[];
   field_origins: Record<string, FieldOrigin>;
+  // Why a resolution fell back to pure reasoning (no code half / hash mismatch / code threw),
+  // recorded ON the event so an audit-replay of "why did this skill degrade across N runs"
+  // reads from the chain, not just the live ResolutionResult. Absent = resolved cleanly.
+  degraded_reason?: string;
 }
 /** Read the recorded resolution events for a skill+version — the log determinism reads from. */
 export function skillChainEvents(slug: string, version?: number, opts?: SkillChainOpts): SkillChainEvent[] {
@@ -311,19 +327,26 @@ export function composeSkills(dirs: readonly string[]): CompositionResult {
     }
   }
 
-  // 4. topological order (deterministic, independent of input order); cycle → cycle error
+  // 4. topological order (deterministic, independent of input order); cycle → cycle error.
+  // The error names the FULL cycle path (A → B → C → A), not just the node we re-entered —
+  // a one-node message can't be regression-tested for the right cycle, and a multi-node
+  // cycle is undebuggable without its path. The in-progress (color-1) stack IS the path.
   const order: string[] = [];
   const state = new Map<string, 0 | 1 | 2>();
-  const visit = (s: string): void => {
+  const visit = (s: string, path: string[]): void => {
     const st = state.get(s) ?? 0;
     if (st === 2) return;
-    if (st === 1) throw new SkillCompositionCycleError(`skill composition cycle involving "${s}"`);
+    if (st === 1) {
+      const from = path.indexOf(s);
+      const cycle = [...path.slice(from), s].join(" → ");
+      throw new SkillCompositionCycleError(`skill composition cycle: ${cycle}`);
+    }
     state.set(s, 1);
-    for (const d of [...deps.get(s)!].sort()) visit(d);
+    for (const d of [...deps.get(s)!].sort()) visit(d, [...path, s]);
     state.set(s, 2);
     order.push(s);
   };
-  for (const s of [...slugs].sort()) visit(s);
+  for (const s of [...slugs].sort()) visit(s, []);
 
   // 5. merged residual: fields no skill's code resolves (a pure-reasoning skill resolves none)
   const merged = new Set<string>();

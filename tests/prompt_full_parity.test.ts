@@ -23,7 +23,7 @@ const golden = (file: string): string => readFileSync(join(FIX, `old_runtime_pro
 interface Spec {
   file: string;
   slug: string;
-  disposition: BelbinRole[];
+  disposition: [BelbinRole, BelbinRole];
   identity: string;
   method: string;
   constraints: string[];

@@ -7,6 +7,7 @@ import { randomUUID } from "node:crypto";
 import type { Standard, Agent, Chair } from "./composition.js";
 import { PRIMITIVE_OUTPUT_TYPE, CORE_TYPES } from "./core_types.js";
 import { executeSkill } from "./skill_subprocess.js";
+import { loadSkillPackage } from "./skills.js";
 
 // core type → the process primitive that produces it (reverse of PRIMITIVE_OUTPUT_TYPE).
 // A skill-backed chair seals its output as this primitive/core when its output_contract is
@@ -436,6 +437,9 @@ export async function runGig(
     let data: Record<string, unknown>;
     let producer_slug: string;
     let domain: string;
+    // Skill-backed chairs record which skill (version + verified code_hash + tier) sealed the
+    // output, so the ledger entry traces back to the exact SkillChainEvent. Undefined for agents.
+    let skill_provenance: { slug: string; version: number; code_hash: string; tier: number } | undefined;
 
     if (p.skill_dir) {
       // SKILL-BACKED chair: run the deterministic code half in the permission cage — the
@@ -448,6 +452,13 @@ export async function runGig(
       data = (r.output && typeof r.output === "object" ? r.output : {}) as Record<string, unknown>;
       producer_slug = chair.skill_slug!;
       domain = standard.domain;
+      const pkg = loadSkillPackage(p.skill_dir);
+      skill_provenance = {
+        slug: pkg.meta.slug,
+        version: pkg.meta.version,
+        code_hash: pkg.codeHash ?? "",
+        tier: pkg.meta.permission?.tier ?? 0,
+      };
     } else {
       const agent = p.agent!;
       data = await deps.invoke({ agent, phase: phaseName, inputs, gig_input: gigInput, skills });
@@ -483,6 +494,7 @@ export async function runGig(
       primitive,
       data,
       input_refs: inputs.map((i) => i.id),
+      skill_provenance,
     });
 
     // Provenance: this output is derived_from each upstream input it consumed.

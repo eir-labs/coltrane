@@ -1,0 +1,9 @@
+{
+  "id": "basic",
+  "description": "3 + 5 = 8",
+  "input": { "a": 3, "b": 5 },
+  "expected_output": { "sum": 8 },
+  "assertions": [
+    { "path": "sum", "op": "equals", "value": 8 }
+  ]
+}

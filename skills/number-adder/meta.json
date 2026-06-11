@@ -1,0 +1,10 @@
+{
+  "slug": "number-adder",
+  "version": 1,
+  "skill_type": "extraction",
+  "input_type": "addends",
+  "output_type": "sum-result",
+  "determinism_ratio": 1.0,
+  "permission": { "tier": 0 },
+  "description": "Add two numbers. Pure, deterministic — the smallest skill that proves the package + fixtures + determinism loop."
+}

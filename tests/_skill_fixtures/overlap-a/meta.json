@@ -1,0 +1,12 @@
+{
+  "slug": "overlap-a",
+  "version": 1,
+  "permission": { "tier": 0 },
+  "composable_with": ["overlap-b"],
+  "output_schema": {
+    "type": "object",
+    "properties": { "n": { "type": "number" } },
+    "required": ["n"]
+  },
+  "description": "Test-only probe: outputs `n` as a number. Paired with overlap-b (which types `n` as a string) to prove an overlapping-field TYPE CONFLICT fails composition."
+}

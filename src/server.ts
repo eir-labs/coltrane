@@ -408,6 +408,12 @@ export async function dispatchTool(slug: string, args: Record<string, unknown>, 
             defineAgent({
               slug: String(args["slug"] ?? "pipeline-check"),
               primitives: args["primitives"] as Primitive[],
+              // synthetic agent: only the primitive progression is under test here, so the
+              // behavioral fields are stubs that satisfy defineAgent's required-field gate.
+              identity: "pipeline validation stub",
+              method: "validate the primitive progression",
+              constraints: [],
+              behavioral_primitives: ["analyst", "critic"],
             });
             return { ok: true, requires_approval: approval, data: { valid: true, errors: [], illegal_progressions: [], unsatisfied_inputs: [] } };
           } catch (e) {
@@ -688,15 +694,28 @@ export async function dispatchTool(slug: string, args: Record<string, unknown>, 
         return { ok: true, requires_approval: approval, data: { status, aborted: status === "running", cleanup_result: { reason: String(args["reason"] ?? "") } } };
       }
       case "agent_define": {
-        const def: { slug: string; primitives: Primitive[]; input_types: string[]; output_types: string[]; domain?: string; allowed_tools?: string[]; disallowed_tools?: string[] } = {
+        // Read the FULL advertised contract (mcp.ts): behavioral representation + cage.
+        // identity/method/constraints/behavioral_primitives are required — defineAgent
+        // rejects the def loudly if they're missing, so they can't be silently dropped.
+        const def: AgentDef = {
           slug: String(args["slug"] ?? ""),
           primitives: ((args["primitives"] as Primitive[]) ?? []),
           input_types: arr(args["input_types"]),
           output_types: arr(args["output_types"]),
+          identity: String(args["identity"] ?? ""),
+          method: String(args["method"] ?? ""),
+          constraints: arr(args["constraints"]),
+          behavioral_primitives: (args["behavioral_primitives"] as AgentDef["behavioral_primitives"]) ?? [],
         };
         if (args["domain"]) def.domain = String(args["domain"]);
         if (args["allowed_tools"]) def.allowed_tools = arr(args["allowed_tools"]);
         if (args["disallowed_tools"]) def.disallowed_tools = arr(args["disallowed_tools"]);
+        const perms = args["permissions"] && typeof args["permissions"] === "object" ? (args["permissions"] as Record<string, unknown>) : undefined;
+        if (perms?.["model_tier"]) def.model_tier = perms["model_tier"] as NonNullable<AgentDef["model_tier"]>;
+        if (perms?.["code_tool_access"]) def.code_tool_access = perms["code_tool_access"] as NonNullable<AgentDef["code_tool_access"]>;
+        if (typeof perms?.["max_tool_calls"] === "number") def.max_tool_calls = perms["max_tool_calls"];
+        if (typeof perms?.["max_token_budget"] === "number") def.max_token_budget = perms["max_token_budget"];
+        if (args["depth_profile"]) def.depth_profile = args["depth_profile"] as NonNullable<AgentDef["depth_profile"]>;
         // Governance gate: each allowed_tools slug must be registered. tool_propose
         // alone does NOT register; tool_register lands the slug. Unknown slugs are
         // rejected so the cage cannot grant scope to a tool the registry doesn't know.

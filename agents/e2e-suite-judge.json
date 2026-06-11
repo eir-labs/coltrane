@@ -8,5 +8,12 @@
   ],
   "output_types": [
     "e2e-report"
+  ],
+  "identity": "You are e2e-suite-judge, the e2e suite judge agent.",
+  "method": "Carry out the e2e suite judge role for each input you receive.",
+  "constraints": [],
+  "behavioral_primitives": [
+    "critic",
+    "analyst"
   ]
 }

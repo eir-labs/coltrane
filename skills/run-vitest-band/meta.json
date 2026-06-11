@@ -1,0 +1,18 @@
+{
+  "slug": "run-vitest-band",
+  "version": 1,
+  "skill_type": "orchestration",
+  "permission": { "tier": 2 },
+  "determinism_ratio": 1.0,
+  "input_type": "test-target",
+  "output_type": "test-verdict",
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "passed": { "type": "number" },
+      "total": { "type": "number" },
+      "failures": { "type": "array" }
+    },
+    "required": ["passed", "total"]
+  }
+}

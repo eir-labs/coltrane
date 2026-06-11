@@ -1,0 +1,16 @@
+{
+  "slug": "cycle-y",
+  "version": 1,
+  "permission": { "tier": 0 },
+  "composable_with": ["cycle-x"],
+  "input_schema": {
+    "type": "object",
+    "properties": { "x_out": { "type": "string" } }
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": { "y_out": { "type": "string" } },
+    "required": ["y_out"]
+  },
+  "description": "Composition cycle fixture: paired with cycle-x to form an unsatisfiable A<->B dependency."
+}

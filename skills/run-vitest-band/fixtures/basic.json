@@ -1,0 +1,9 @@
+{
+  "id": "basic",
+  "description": "contract: the verdict is a {passed, total} pair of numbers. (Not auto-run at load — it spawns the test command; the verdict shape is the contract.)",
+  "input": { "target": "tests/example_hello_band.test.ts" },
+  "assertions": [
+    { "path": "passed", "op": "is_number" },
+    { "path": "total", "op": "is_number" }
+  ]
+}

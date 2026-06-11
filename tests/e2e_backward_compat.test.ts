@@ -4,6 +4,7 @@
 // Counter-claim: the view returns wrong rows (a non-eirtests / non-finding output
 // leaks in), or projects stale/misjoined columns.
 import { describe, it, expect } from "vitest";
+import { TEST_BEHAVIOR } from "./_support/agents.js";
 import {
   dispatchTool, createRegistry, createOutputStore, MemoryLedger,
   type ServerDeps, type DomainType, type AgentInvoker, type Standard, type Agent,
@@ -17,8 +18,8 @@ const finding: DomainType = {
 };
 const note: DomainType = { slug: "note", extends: "Interpretation", domain: "codechange", schema: { properties: { body: { type: "string" } } }, required_fields: ["body"] };
 
-const scout: Agent = { slug: "site-scout", primitives: ["SENSE"], input_types: [], output_types: ["page-model"], domain: "eirtests" };
-const verifier: Agent = { slug: "readiness-verifier", primitives: ["VERIFY"], input_types: ["page-model"], output_types: ["finding"], domain: "eirtests" };
+const scout: Agent = { ...TEST_BEHAVIOR, slug: "site-scout", primitives: ["SENSE"], input_types: [], output_types: ["page-model"], domain: "eirtests" };
+const verifier: Agent = { ...TEST_BEHAVIOR, slug: "readiness-verifier", primitives: ["VERIFY"], input_types: ["page-model"], output_types: ["finding"], domain: "eirtests" };
 const scan: Standard = {
   slug: "readiness-scan", domain: "eirtests", agents: [scout, verifier],
   phases: [{ name: "sense", chairs: [{ role: "sense", agent_slug: "site-scout", depends_on: [], input_contract: [], output_contract: ["page-model"], required_skills: [] }] }, { name: "verify", chairs: [{ role: "verify", agent_slug: "readiness-verifier", depends_on: [], input_contract: [], output_contract: ["finding"], required_skills: [] }] }],

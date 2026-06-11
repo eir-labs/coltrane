@@ -1,5 +1,16 @@
 import type { Primitive } from "./core_types.js";
 import { PRIMITIVE_OUTPUT_TYPE } from "./core_types.js";
+import type { ModelTier, Depth } from "./pricing.js";
+
+// The per-agent code-tool exposure gate (old AgentPermissions.code_tool_access). Scales
+// the agent's access to Claude Code's built-in file/exec tools, independent of MCP grant.
+export type CodeToolAccess = "none" | "read" | "write" | "full";
+
+// The Belbin cognitive-role pairing (exactly 2, held "in tension") — the agent's
+// DISPOSITION. This is a DIFFERENT axis from `primitives` (the process step that resolves
+// output type). The old runtime rendered this as Layer 1; the new engine dropped it.
+export type BelbinRole =
+  | "explorer" | "analyst" | "critic" | "synthesizer" | "planner" | "executor" | "audience_modeler";
 
 export interface AgentDef {
   slug: string;
@@ -16,6 +27,25 @@ export interface AgentDef {
   // and injects as the prompt's Skills layer (layer 3 of 5). Absent/empty = no
   // skills attach; the prompt skips the Skills section entirely.
   skill_slugs?: readonly string[];
+  // Behavioral representation — REQUIRED. An agent without identity/method/constraints/
+  // disposition is the bug this whole change closes; there is no valid agent without them.
+  identity: string;
+  method: string;
+  constraints: readonly string[];
+  // EXACTLY two Belbin roles, held in equal tension — the Disposition layer. The pairing is
+  // the contract: a lone role collapses to a single voice, three+ dilute the tension that
+  // makes the disposition load-bearing. Typed as a 2-tuple (compile-time) AND validated for
+  // cardinality at defineAgent (runtime, for the JSON-authored path that parses as `any`).
+  behavioral_primitives: readonly [BelbinRole, BelbinRole];
+  // Cage / economy envelope — optional, with a REAL deny-by-default / gig-fallback reason
+  // (not back-compat): absent code_tool_access = deny code tools; absent model_tier = the
+  // gig/invoker default model; absent max_tool_calls/max_token_budget = the gig budget
+  // governs; absent depth_profile = the gig depth applies.
+  model_tier?: ModelTier;
+  max_tool_calls?: number;
+  max_token_budget?: number;
+  code_tool_access?: CodeToolAccess;
+  depth_profile?: Depth;
 }
 
 export interface Agent {
@@ -24,6 +54,14 @@ export interface Agent {
   input_types: readonly string[];
   output_types: readonly string[];
   domain: string | null;
+  // Behavioral representation — the agent's own prose, NOT capability (capability lives
+  // in skills). buildPrompt renders these into the Disposition / Identity / Method /
+  // Constraints layers. REQUIRED: an agent without them renders a contentless prompt and
+  // the model confabulates — that is the bug this closes, so the type forbids it.
+  identity: string;             // who you are — role / stance (Identity layer)
+  method: string;               // how you do THIS agent's job — the step-by-step (Method layer)
+  constraints: readonly string[]; // the negative space — never-invent / cite-sources (Constraints layer)
+  behavioral_primitives: readonly [BelbinRole, BelbinRole]; // exactly two Belbin roles in equal tension → Disposition layer
   // Cage grant — optional so hand-built Agent literals stay valid; defineAgent always
   // sets them ([] = no grant). The invoker treats absent/empty as deny-by-default.
   allowed_tools?: readonly string[];
@@ -31,6 +69,14 @@ export interface Agent {
   // Skill bindings (slugs) the runtime resolves into the prompt's Skills layer.
   // Optional so hand-built Agent literals stay valid; defineAgent always sets ([]).
   skill_slugs?: readonly string[];
+  // Merged-type fields (the locked decision: one rich agent type absorbing the orphaned
+  // AgentProfile + the Player lane). Tuning + the cage's economy/blast-radius envelope —
+  // declared here so the runtime can read them; currently unwired (RED).
+  model_tier?: ModelTier;          // → resolves to a concrete --model per gig (economy/standard/premium)
+  max_tool_calls?: number;         // per-agent cap → --max-turns; a runaway agent can't burn the gig
+  max_token_budget?: number;       // per-agent spend ceiling
+  code_tool_access?: CodeToolAccess; // gates Claude Code built-in Read/Write/Edit/Bash
+  depth_profile?: Depth;           // per-agent depth/tuning (skim/quick/standard/deep)
 }
 
 // A chair is one named seat in a phase. It binds a role-name within the standard
@@ -44,6 +90,12 @@ export interface Chair {
   input_contract: readonly string[];
   output_contract: readonly string[];
   required_skills: readonly string[];
+  // Skills-as-first-class (docs/skills-as-first-class.md): a chair MAY be backed by a
+  // skill package instead of an agent. Mutually exclusive with a non-empty agent_slug —
+  // a skill-backed chair runs the skill's deterministic code half (no model invocation),
+  // which is how the "an LLM should not babysit a deterministic command" path is fixed.
+  // Declared here; compose-time validation + runtime routing land in Phase 1.
+  skill_slug?: string;
 }
 
 export interface PhaseDef {
@@ -74,6 +126,13 @@ export interface Standard {
 }
 
 export class CompositionError extends Error {}
+
+// A definition that is structurally parseable but INCOMPLETE against the current schema —
+// e.g. an agent missing its now-required behavioral representation. Distinct from
+// CompositionError (a malformed/illegal definition): an incomplete genome must be UPGRADED
+// (fill in the missing features), so the loader HARD-fails on this rather than soft-skipping
+// the file. Underdeveloped is not the same as broken.
+export class GenomeIncompleteError extends Error {}
 
 const ROOT_PRIMITIVES = new Set<Primitive>(["SENSE"]);
 const NEEDS_UPSTREAM_REASONING = new Set<Primitive>(["CREATE"]);
@@ -118,6 +177,36 @@ export function defineAgent(def: AgentDef): Agent {
     }
   }
 
+  // Behavioral representation is mandatory — checked AFTER the structural (primitive)
+  // validation so a malformed agent reports its structural defect first. Missing behavioral
+  // representation is INCOMPLETE (a schema-migration gap, distinct from malformed): like any
+  // invalid agent it HARD-fails the load — a genome must load cleanly to run, never hollow.
+  if (typeof def.identity !== "string" || def.identity.trim() === "") {
+    throw new GenomeIncompleteError(`agent ${def.slug}: identity is required (who the agent is) — fill it in to upgrade the genome`);
+  }
+  if (typeof def.method !== "string" || def.method.trim() === "") {
+    throw new GenomeIncompleteError(`agent ${def.slug}: method is required (how the agent works) — fill it in to upgrade the genome`);
+  }
+  // Widen past the compile-time 2-tuple: the JSON-authored path reaches here as `any`, so the
+  // disposition's arity is only really known at runtime — these guards protect that path.
+  const bp = def.behavioral_primitives as readonly BelbinRole[];
+  if (!Array.isArray(bp) || bp.length === 0) {
+    throw new GenomeIncompleteError(`agent ${def.slug}: behavioral_primitives (disposition) is required — fill it in to upgrade the genome`);
+  }
+  // The disposition is a PAIRING: exactly two roles in tension. One role is a single voice;
+  // three+ dilute the tension. A genome carrying a non-pair is malformed against the contract,
+  // so it hard-fails the load rather than rendering a confused Disposition layer.
+  if (bp.length !== 2) {
+    throw new GenomeIncompleteError(
+      `agent ${def.slug}: behavioral_primitives must be exactly two roles in tension, got ${bp.length} — a disposition is a pairing`,
+    );
+  }
+  if (!Array.isArray(def.constraints)) {
+    throw new GenomeIncompleteError(`agent ${def.slug}: constraints is required (use [] for none) — fill it in to upgrade the genome`);
+  }
+
+  // Conditional spread for the optional rich fields — assigning an explicit `undefined`
+  // would violate exactOptionalPropertyTypes, so only include a field when it's present.
   return {
     slug: def.slug,
     primitives: prims,
@@ -128,6 +217,15 @@ export function defineAgent(def: AgentDef): Agent {
     allowed_tools: def.allowed_tools ?? [],
     disallowed_tools: def.disallowed_tools ?? [],
     skill_slugs: def.skill_slugs ?? [],
+    identity: def.identity,
+    method: def.method,
+    constraints: def.constraints,
+    behavioral_primitives: def.behavioral_primitives,
+    ...(def.model_tier !== undefined ? { model_tier: def.model_tier } : {}),
+    ...(def.max_tool_calls !== undefined ? { max_tool_calls: def.max_tool_calls } : {}),
+    ...(def.max_token_budget !== undefined ? { max_token_budget: def.max_token_budget } : {}),
+    ...(def.code_tool_access !== undefined ? { code_tool_access: def.code_tool_access } : {}),
+    ...(def.depth_profile !== undefined ? { depth_profile: def.depth_profile } : {}),
   };
 }
 
@@ -185,18 +283,24 @@ export function composeStandard(def: {
       }
       seenRoles.set(ch.role, ph.name);
 
-      const ag = agentBySlug.get(ch.agent_slug);
-      if (!ag) {
-        throw new CompositionError(
-          `standard ${def.slug}: chair "${ch.role}" references unknown agent "${ch.agent_slug}" (not in standard's agents list)`,
-        );
-      }
-      const declared = new Set(ag.skill_slugs ?? []);
-      for (const sk of ch.required_skills) {
-        if (!declared.has(sk)) {
+      // A skill-backed chair (skill_slug set, no agent_slug) runs the skill's deterministic
+      // code half instead of an agent — skip the agent/required-skills checks for it. The
+      // type-flow (input/output_contract) below still applies.
+      const isSkillChair = !!ch.skill_slug && (ch.agent_slug ?? "") === "";
+      if (!isSkillChair) {
+        const ag = agentBySlug.get(ch.agent_slug);
+        if (!ag) {
           throw new CompositionError(
-            `standard ${def.slug}: chair "${ch.role}" requires skill "${sk}" which agent "${ag.slug}" does not declare`,
+            `standard ${def.slug}: chair "${ch.role}" references unknown agent "${ch.agent_slug}" (not in standard's agents list)`,
           );
+        }
+        const declared = new Set(ag.skill_slugs ?? []);
+        for (const sk of ch.required_skills) {
+          if (!declared.has(sk)) {
+            throw new CompositionError(
+              `standard ${def.slug}: chair "${ch.role}" requires skill "${sk}" which agent "${ag.slug}" does not declare`,
+            );
+          }
         }
       }
       if (ch.output_contract.length === 0) {
@@ -303,6 +407,7 @@ export function composeStandard(def: {
   // treat the chair set as the phase's agents (order: declaration order).
   for (const ph of phases) {
     for (const ch of ph.chairs) {
+      if (ch.skill_slug && !ch.agent_slug) continue; // skill-backed chair: no agent to domain-check
       const ag = agentBySlug.get(ch.agent_slug)!; // existence verified above
       // Rob #134: agents with no explicit domain (null OR undefined) are
       // domain-agnostic — compatible with any standard. Only reject when the
@@ -322,6 +427,7 @@ export function composeStandard(def: {
     // For the legacy primitive-graph check we consider each chair in turn,
     // treating prior chairs (same phase or earlier) as the upstream bag.
     for (const ch of ph.chairs) {
+      if (ch.skill_slug && !ch.agent_slug) continue; // skill-backed chair: not in the primitive graph
       const ag = agentBySlug.get(ch.agent_slug)!;
       if (i > 0) {
         for (const it of ag.input_types) {
@@ -353,6 +459,12 @@ export function composeStandard(def: {
     // After processing all chairs in this phase, fold their primitives + outputs
     // into the upstream bag for subsequent phases.
     for (const ch of ph.chairs) {
+      if (ch.skill_slug && !ch.agent_slug) {
+        // a skill-backed chair produces its declared output_contract types — fold those into
+        // the upstream bag so a downstream agent chair can consume them.
+        for (const ot of ch.output_contract) upstreamOutputs.add(ot);
+        continue;
+      }
       const ag = agentBySlug.get(ch.agent_slug)!;
       for (const p of ag.primitives) upstreamPhasePrimitives.add(p);
       for (const ot of ag.output_types) upstreamOutputs.add(ot);

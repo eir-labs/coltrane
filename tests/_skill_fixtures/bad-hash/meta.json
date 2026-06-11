@@ -1,0 +1,12 @@
+{
+  "slug": "bad-hash",
+  "version": 1,
+  "permission": { "tier": 0 },
+  "code_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+  "output_schema": {
+    "type": "object",
+    "properties": { "echo": { "type": "string" } },
+    "required": ["echo"]
+  },
+  "description": "Test-only probe: meta declares a code_hash that does NOT match skill.mjs on disk. The loader must detect the mismatch and degrade to pure-reasoning mode (never run unverified code)."
+}

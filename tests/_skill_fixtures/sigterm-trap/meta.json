@@ -1,0 +1,7 @@
+{
+  "slug": "sigterm-trap",
+  "version": 1,
+  "permission": { "tier": 1 },
+  "timeout_ms": 1500,
+  "description": "Test-only probe: traps SIGTERM and writes a heartbeat marker in a tight loop (self-terminating after ~8s so a RED run cannot leak a spinner). A polite kill bounces off; the executor must ESCALATE to SIGKILL, after which the heartbeat must STOP."
+}

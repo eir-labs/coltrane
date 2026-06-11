@@ -1,0 +1,1 @@
+{ "slug": "probe-fs-read", "version": 1, "permission": { "tier": 0 }, "description": "Cage probe: reads a file. fs-read is granted at every tier (the runner needs it to load the skill), so this is allowed at 0/1/2." }

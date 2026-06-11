@@ -1,0 +1,18 @@
+{
+  "slug": "compose-a",
+  "version": 1,
+  "skill_type": "extraction",
+  "permission": { "tier": 0 },
+  "composable_with": ["compose-b"],
+  "input_schema": {
+    "type": "object",
+    "properties": { "text": { "type": "string" } },
+    "required": ["text"]
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": { "tokens": { "type": "array" } },
+    "required": ["tokens"]
+  },
+  "description": "Composition fixture A: tokenizes text. compose-b consumes its `tokens` output, so A must run first."
+}

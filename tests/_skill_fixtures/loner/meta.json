@@ -1,0 +1,12 @@
+{
+  "slug": "loner",
+  "version": 1,
+  "permission": { "tier": 0 },
+  "composable_with": [],
+  "output_schema": {
+    "type": "object",
+    "properties": { "z": { "type": "string" } },
+    "required": ["z"]
+  },
+  "description": "Test-only probe: declares no composition partners. Composing it with compose-a must fail loudly — invalid composition is a compose-time error, not a silent merge."
+}

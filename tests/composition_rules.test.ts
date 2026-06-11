@@ -1,42 +1,43 @@
 import { describe, it, expect } from "vitest";
+import { TEST_BEHAVIOR } from "./_support/agents.js";
 import { defineAgent, composeStandard } from "../src";
 
 describe("agent composition: illegal progressions", () => {
   it("rejects in-agent CREATE after SENSE without intermediate INTERPRET or PLAN", () => {
     expect(() =>
-      defineAgent({ slug: "a", primitives: ["SENSE", "CREATE"] }),
+      defineAgent({ ...TEST_BEHAVIOR, slug: "a", primitives: ["SENSE", "CREATE"] }),
     ).toThrow();
   });
 
   it("accepts standalone VERIFY (cross-phase target check happens at composeStandard)", () => {
     expect(() =>
-      defineAgent({ slug: "a", primitives: ["VERIFY"] }),
+      defineAgent({ ...TEST_BEHAVIOR, slug: "a", primitives: ["VERIFY"] }),
     ).not.toThrow();
   });
 
   it("accepts CREATE after INTERPRET", () => {
     expect(() =>
-      defineAgent({ slug: "a", primitives: ["INTERPRET", "CREATE"] }),
+      defineAgent({ ...TEST_BEHAVIOR, slug: "a", primitives: ["INTERPRET", "CREATE"] }),
     ).not.toThrow();
   });
 
   it("accepts CREATE after PLAN", () => {
     expect(() =>
-      defineAgent({ slug: "a", primitives: ["PLAN", "CREATE"] }),
+      defineAgent({ ...TEST_BEHAVIOR, slug: "a", primitives: ["PLAN", "CREATE"] }),
     ).not.toThrow();
   });
 
   it("accepts VERIFY with an upstream target", () => {
     expect(() =>
-      defineAgent({ slug: "a", primitives: ["JUDGE", "VERIFY"] }),
+      defineAgent({ ...TEST_BEHAVIOR, slug: "a", primitives: ["JUDGE", "VERIFY"] }),
     ).not.toThrow();
   });
 });
 
 describe("standard composition: cross-phase §3", () => {
   it("rejects a standard whose first CREATE phase has no upstream INTERPRET or PLAN", () => {
-    const sensor = defineAgent({ slug: "sensor", primitives: ["SENSE"], output_types: ["raw-note"] });
-    const creator = defineAgent({ slug: "creator", primitives: ["CREATE"], input_types: ["raw-note"], output_types: ["artifact"] });
+    const sensor = defineAgent({ ...TEST_BEHAVIOR, slug: "sensor", primitives: ["SENSE"], output_types: ["raw-note"] });
+    const creator = defineAgent({ ...TEST_BEHAVIOR, slug: "creator", primitives: ["CREATE"], input_types: ["raw-note"], output_types: ["artifact"] });
     expect(() =>
       composeStandard({
         slug: "no-reasoning",
@@ -51,8 +52,8 @@ describe("standard composition: cross-phase §3", () => {
   });
 
   it("accepts a standard where an upstream phase supplies PLAN before a CREATE phase", () => {
-    const planner = defineAgent({ slug: "planner", primitives: ["PLAN"], output_types: ["plan-doc"] });
-    const creator = defineAgent({ slug: "creator", primitives: ["CREATE"], input_types: ["plan-doc"], output_types: ["artifact"] });
+    const planner = defineAgent({ ...TEST_BEHAVIOR, slug: "planner", primitives: ["PLAN"], output_types: ["plan-doc"] });
+    const creator = defineAgent({ ...TEST_BEHAVIOR, slug: "creator", primitives: ["CREATE"], input_types: ["plan-doc"], output_types: ["artifact"] });
     expect(() =>
       composeStandard({
         slug: "with-plan",
@@ -69,13 +70,13 @@ describe("standard composition: cross-phase §3", () => {
 
 describe("standard composition: cycles", () => {
   it("rejects circular type dependencies", () => {
-    const a = defineAgent({
+    const a = defineAgent({ ...TEST_BEHAVIOR,
       slug: "a",
       primitives: ["INTERPRET"],
       input_types: ["x"],
       output_types: ["y"],
     });
-    const b = defineAgent({
+    const b = defineAgent({ ...TEST_BEHAVIOR,
       slug: "b",
       primitives: ["INTERPRET"],
       input_types: ["y"],
@@ -98,7 +99,7 @@ describe("standard composition: cycles", () => {
 describe("standard compositions named in the spec", () => {
   it("Analyst composes SENSE + INTERPRET + JUDGE", () => {
     expect(() =>
-      defineAgent({
+      defineAgent({ ...TEST_BEHAVIOR,
         slug: "analyst",
         primitives: ["SENSE", "INTERPRET", "JUDGE"],
       }),
@@ -107,13 +108,13 @@ describe("standard compositions named in the spec", () => {
 
   it("Reviewer composes JUDGE + VERIFY", () => {
     expect(() =>
-      defineAgent({ slug: "reviewer", primitives: ["JUDGE", "VERIFY"] }),
+      defineAgent({ ...TEST_BEHAVIOR, slug: "reviewer", primitives: ["JUDGE", "VERIFY"] }),
     ).not.toThrow();
   });
 
   it("Builder composes PLAN + CREATE + VERIFY", () => {
     expect(() =>
-      defineAgent({
+      defineAgent({ ...TEST_BEHAVIOR,
         slug: "builder",
         primitives: ["PLAN", "CREATE", "VERIFY"],
       }),
@@ -122,7 +123,7 @@ describe("standard compositions named in the spec", () => {
 
   it("Explorer composes SENSE + INTERPRET + PLAN", () => {
     expect(() =>
-      defineAgent({
+      defineAgent({ ...TEST_BEHAVIOR,
         slug: "explorer",
         primitives: ["SENSE", "INTERPRET", "PLAN"],
       }),
@@ -131,13 +132,13 @@ describe("standard compositions named in the spec", () => {
 
   it("Reporter composes INTERPRET + CREATE", () => {
     expect(() =>
-      defineAgent({ slug: "reporter", primitives: ["INTERPRET", "CREATE"] }),
+      defineAgent({ ...TEST_BEHAVIOR, slug: "reporter", primitives: ["INTERPRET", "CREATE"] }),
     ).not.toThrow();
   });
 
   it("Full-Chain composes all six primitives", () => {
     expect(() =>
-      defineAgent({
+      defineAgent({ ...TEST_BEHAVIOR,
         slug: "full",
         primitives: ["SENSE", "INTERPRET", "JUDGE", "PLAN", "CREATE", "VERIFY"],
       }),

@@ -1,0 +1,1 @@
+{ "slug": "probe-fs-write", "version": 1, "permission": { "tier": 0 }, "description": "Cage probe: writes a file. fs-write is granted at tier >= 1, denied at tier 0." }

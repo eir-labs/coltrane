@@ -1,11 +1,31 @@
 {
   "slug": "verdict-judger",
-  "primitives": ["INTERPRET", "VERIFY", "CREATE"],
-  "input_types": ["claim-draft", "novelty-verdict", "failure-modes"],
-  "output_types": ["triage-verdict", "provisional-draft"],
+  "primitives": [
+    "INTERPRET",
+    "VERIFY",
+    "CREATE"
+  ],
+  "input_types": [
+    "claim-draft",
+    "novelty-verdict",
+    "failure-modes"
+  ],
+  "output_types": [
+    "triage-verdict",
+    "provisional-draft"
+  ],
   "lane": "judge",
   "model": "sonnet",
   "prompt_file": "agents/phase_agents/verdict-judger.md",
-  "skill_slugs": ["diamond-cutting-discipline"],
-  "description": "Produces the final FILEABLE / REFINE-FIRST / NOT-FILEABLE verdict for the patent triage, with a named axis of refinement when refinement is needed. Reads the refined claim + novelty + failure-modes; verifies against triage criteria; if verdict is FILEABLE, creates a provisional-draft skeleton. Output: triage-verdict (always) + provisional-draft (FILEABLE only)."
+  "skill_slugs": [
+    "diamond-cutting-discipline"
+  ],
+  "description": "Produces the final FILEABLE / REFINE-FIRST / NOT-FILEABLE verdict for the patent triage, with a named axis of refinement when refinement is needed. Reads the refined claim + novelty + failure-modes; verifies against triage criteria; if verdict is FILEABLE, creates a provisional-draft skeleton. Output: triage-verdict (always) + provisional-draft (FILEABLE only).",
+  "identity": "You are verdict-judger. Produces the final FILEABLE / REFINE-FIRST / NOT-FILEABLE verdict for the patent triage, with a named axis of refinement when refinement is needed. Reads the refined claim + novelty + failure-modes; verifies against triage criteria; if verdict is FILEABLE, creates a provisional-draft skeleton. Output: triage-verdict (always) + provisional-draft (FILEABLE only).",
+  "method": "Carry out the verdict judger role: Produces the final FILEABLE / REFINE-FIRST / NOT-FILEABLE verdict for the patent triage, with a named axis of refinement when refinement is needed. Reads the refined claim + novelty + failure-modes; verifies against triage criteria; if verdict is FILEABLE, creates a provisional-draft skeleton. Output: triage-verdict (always) + provisional-draft (FILEABLE only).",
+  "constraints": [],
+  "behavioral_primitives": [
+    "analyst",
+    "synthesizer"
+  ]
 }

@@ -13,5 +13,12 @@
   "lane": "develop",
   "model": "sonnet",
   "prompt_file": "agents/phase_agents/solution-developer.md",
-  "description": "Generates the project files from the charter. Writes .coltrane/agents/, .coltrane/standards/, .coltrane/skills/, .coltrane/types/, .claude/, CLAUDE.md, tests/preseed/, README.md, and an initial scaffold. Charter fields define scope; only appendable adjustments after define."
+  "description": "Generates the project files from the charter. Writes .coltrane/agents/, .coltrane/standards/, .coltrane/skills/, .coltrane/types/, .claude/, CLAUDE.md, tests/preseed/, README.md, and an initial scaffold. Charter fields define scope; only appendable adjustments after define.",
+  "identity": "You are solution-developer. Generates the project files from the charter. Writes .coltrane/agents/, .coltrane/standards/, .coltrane/skills/, .coltrane/types/, .claude/, CLAUDE.md, tests/preseed/, README.md, and an initial scaffold. Charter fields define scope; only appendable adjustments after define.",
+  "method": "Carry out the solution developer role: Generates the project files from the charter. Writes .coltrane/agents/, .coltrane/standards/, .coltrane/skills/, .coltrane/types/, .claude/, CLAUDE.md, tests/preseed/, README.md, and an initial scaffold. Charter fields define scope; only appendable adjustments after define.",
+  "constraints": [],
+  "behavioral_primitives": [
+    "planner",
+    "synthesizer"
+  ]
 }

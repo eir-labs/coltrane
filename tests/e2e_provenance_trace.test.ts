@@ -4,6 +4,7 @@
 // Counter-claim: the trace breaks or drops an edge (an ancestor missing), or
 // a root signal falsely reports ancestors it never had.
 import { describe, it, expect } from "vitest";
+import { TEST_BEHAVIOR } from "./_support/agents.js";
 import {
   dispatchTool, createRegistry, createOutputStore, MemoryLedger,
   type ServerDeps, type DomainType, type AgentInvoker, type Standard, type Agent,
@@ -13,9 +14,9 @@ const pageModel: DomainType = { slug: "page-model", extends: "Signal", domain: "
 const finding: DomainType = { slug: "finding", extends: "Interpretation", domain: "eirtests", schema: { properties: { title: { type: "string" } } }, required_fields: ["title"] };
 const fixPatch: DomainType = { slug: "fix-patch", extends: "Artifact", domain: "eirtests", schema: { properties: { summary: { type: "string" } } }, required_fields: ["summary"] };
 
-const scout: Agent = { slug: "site-scout", primitives: ["SENSE"], input_types: [], output_types: ["page-model"], domain: "eirtests" };
-const analyst: Agent = { slug: "site-analyst", primitives: ["INTERPRET"], input_types: ["page-model"], output_types: ["finding"], domain: "eirtests" };
-const writer: Agent = { slug: "fix-writer", primitives: ["CREATE"], input_types: ["finding"], output_types: ["fix-patch"], domain: "eirtests" };
+const scout: Agent = { ...TEST_BEHAVIOR, slug: "site-scout", primitives: ["SENSE"], input_types: [], output_types: ["page-model"], domain: "eirtests" };
+const analyst: Agent = { ...TEST_BEHAVIOR, slug: "site-analyst", primitives: ["INTERPRET"], input_types: ["page-model"], output_types: ["finding"], domain: "eirtests" };
+const writer: Agent = { ...TEST_BEHAVIOR, slug: "fix-writer", primitives: ["CREATE"], input_types: ["finding"], output_types: ["fix-patch"], domain: "eirtests" };
 
 const standard: Standard = {
   slug: "scan-and-fix", domain: "eirtests", agents: [scout, analyst, writer],

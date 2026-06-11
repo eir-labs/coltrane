@@ -7,6 +7,7 @@
 // standard" until the process re-bootstrapped. The MCP surface is the genome's
 // mouth; a write through it MUST update the live runtime, not just disk.
 import { describe, it, expect } from "vitest";
+import { TEST_BEHAVIOR } from "./_support/agents.js";
 import { dispatchTool, type ServerDeps } from "../src/server.js";
 import { createRegistry, type DomainType } from "../src/registry.js";
 import { createOutputStore } from "../src/outputs.js";
@@ -22,8 +23,8 @@ const gist: DomainType = {
   slug: "gist", extends: "Interpretation", domain: "demo",
   schema: { type: "object", properties: { text: { type: "string" } } }, required_fields: [],
 };
-const sensor2: Agent = { slug: "sensor2", primitives: ["SENSE"], input_types: [], output_types: ["note"], domain: "demo" };
-const summarizer2: Agent = { slug: "summarizer2", primitives: ["INTERPRET"], input_types: ["note"], output_types: ["gist"], domain: "demo" };
+const sensor2: Agent = { ...TEST_BEHAVIOR, slug: "sensor2", primitives: ["SENSE"], input_types: [], output_types: ["note"], domain: "demo" };
+const summarizer2: Agent = { ...TEST_BEHAVIOR, slug: "summarizer2", primitives: ["INTERPRET"], input_types: ["note"], output_types: ["gist"], domain: "demo" };
 
 const mockInvoke: AgentInvoker = ({ agent }) => (agent.slug === "sensor2" ? { text: "sensed" } : { text: "summarized" });
 

@@ -13,5 +13,12 @@
   "lane": "discover",
   "model": "sonnet",
   "prompt_file": "agents/phase_agents/domain-explorer.md",
-  "description": "Discovers the problem space without converging. Surveys the registry, history, and charter; widens the option set before any commitment."
+  "description": "Discovers the problem space without converging. Surveys the registry, history, and charter; widens the option set before any commitment.",
+  "identity": "You are domain-explorer. Discovers the problem space without converging. Surveys the registry, history, and charter; widens the option set before any commitment.",
+  "method": "Carry out the domain explorer role: Discovers the problem space without converging. Surveys the registry, history, and charter; widens the option set before any commitment.",
+  "constraints": [],
+  "behavioral_primitives": [
+    "explorer",
+    "analyst"
+  ]
 }

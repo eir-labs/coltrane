@@ -48,6 +48,11 @@ export interface OutputRecord {
   cost_usd?: number | undefined;
   tokens_used?: number | undefined;
   duration_ms?: number | undefined;
+  // When the producer is a skill-backed chair (deterministic code, no model), this pins
+  // WHICH skill produced the output — slug + version + verified code_hash + permission tier.
+  // It closes the chair→skill provenance gap: an audit can trace the ledger entry back to the
+  // exact SkillChainEvent. Absent for model-backed (agent) chairs; agent_slug carries those.
+  skill_provenance?: { slug: string; version: number; code_hash: string; tier: number } | undefined;
 }
 
 // What a caller supplies to write(). id + created_at are assigned by the store;
@@ -67,6 +72,7 @@ export interface OutputWrite {
   cost_usd?: number | undefined;
   tokens_used?: number | undefined;
   duration_ms?: number | undefined;
+  skill_provenance?: { slug: string; version: number; code_hash: string; tier: number } | undefined;
 }
 
 // §6 `output_refs` row — one typed edge of the provenance graph.
@@ -244,6 +250,7 @@ export function createOutputStore(registry: Registry, options?: OutputStoreOptio
         cost_usd: o.cost_usd,
         tokens_used: o.tokens_used,
         duration_ms: o.duration_ms,
+        skill_provenance: o.skill_provenance,
       };
       outputs.set(rec.id, rec);
       if (outputsDir) {

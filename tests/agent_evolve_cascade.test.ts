@@ -10,6 +10,7 @@
 //   4. on success: persist agents/<slug>.json + rebind the in-memory standard
 //      so a subsequent genome_hash actually moves
 import { describe, it, expect } from "vitest";
+import { TEST_BEHAVIOR } from "./_support/agents.js";
 import { dispatchTool, type ServerDeps } from "../src/server.js";
 import { createRegistry } from "../src/registry.js";
 import { createOutputStore } from "../src/outputs.js";
@@ -19,8 +20,8 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-const sensor: Agent = { slug: "sensor", primitives: ["SENSE"], input_types: [], output_types: ["raw-note"], domain: "demo" };
-const summarizer: Agent = { slug: "summarizer", primitives: ["INTERPRET"], input_types: ["raw-note"], output_types: ["summary"], domain: "demo" };
+const sensor: Agent = { ...TEST_BEHAVIOR, slug: "sensor", primitives: ["SENSE"], input_types: [], output_types: ["raw-note"], domain: "demo" };
+const summarizer: Agent = { ...TEST_BEHAVIOR, slug: "summarizer", primitives: ["INTERPRET"], input_types: ["raw-note"], output_types: ["summary"], domain: "demo" };
 const summarize: Standard = {
   slug: "summarize",
   domain: "demo",

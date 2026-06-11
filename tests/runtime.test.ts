@@ -3,6 +3,7 @@
 // records one immutable entry with a deterministic genome_hash + run_fingerprint.
 // This is the E1 foundation (NL goal → standard → executed → outputs in store).
 import { describe, it, expect } from "vitest";
+import { TEST_BEHAVIOR } from "./_support/agents.js";
 import {
   runGig,
   RuntimeError,
@@ -30,14 +31,14 @@ const finding: DomainType = {
   required_fields: ["title"],
 };
 
-const scout: Agent = {
+const scout: Agent = { ...TEST_BEHAVIOR,
   slug: "site-scout",
   primitives: ["SENSE"],
   input_types: [],
   output_types: ["page-model"],
   domain: "eirtests",
 };
-const analyst: Agent = {
+const analyst: Agent = { ...TEST_BEHAVIOR,
   slug: "site-analyst",
   primitives: ["INTERPRET"],
   input_types: ["page-model"],

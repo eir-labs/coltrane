@@ -1,0 +1,7 @@
+{
+  "slug": "spawner",
+  "version": 1,
+  "skill_type": "orchestration",
+  "permission": { "tier": 2 },
+  "description": "Test-only probe: a tier-2 skill that spawns a child process. Proves --allow-child-process is granted at tier 2 and DENIED below it (the tier x capability matrix)."
+}

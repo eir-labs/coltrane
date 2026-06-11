@@ -9,6 +9,45 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { AgentInvocationContext, AgentInvoker } from "./runtime.js";
 import type { Registry } from "./registry.js";
+import type { ModelTier } from "./pricing.js";
+import type { CodeToolAccess } from "./composition.js";
+
+// Per-tier model resolution (the old MODEL_TIER_MAP: economy/standard/premium →
+// haiku/sonnet/opus). An agent's model_tier picks the concrete spawn model; falls back to
+// the invoker's static default only when the agent declares no tier.
+export const MODEL_TIER_MAP: Record<ModelTier, string> = {
+  economy: "claude-haiku-4-5",
+  standard: "claude-sonnet-4-6",
+  premium: "claude-opus-4-8",
+};
+function resolveModel(tier: ModelTier | undefined, fallback: string | undefined): string | undefined {
+  return tier ? MODEL_TIER_MAP[tier] : fallback;
+}
+
+// code_tool_access → the built-in code tools the cage denies. none denies all; read keeps
+// Read; write keeps Read/Write/Edit; full denies none; unset adds no denial layer.
+const CODE_TOOLS = ["Read", "Write", "Edit", "Bash"] as const;
+function codeToolDenials(access: CodeToolAccess | undefined): string[] {
+  switch (access) {
+    case "none": return [...CODE_TOOLS];
+    case "read": return ["Write", "Edit", "Bash"];
+    case "write": return ["Bash"];
+    default: return []; // "full" or unset → no code-tool denial
+  }
+}
+
+// Belbin cognitive-role descriptions for the Disposition layer (the agent's stance, 2
+// "in tension"). Strings match the old runtime verbatim so a restored prompt reaches
+// parity with the baseline fixtures. Reference data; buildPrompt wires it in.
+export const BELBIN_DESCRIPTIONS: Record<string, string> = {
+  explorer: "Navigates unknown territory, discovers structure, maps the landscape.",
+  analyst: "Finds patterns, extracts meaning, builds structured understanding from raw data.",
+  critic: "Challenges assumptions, finds weaknesses, demands evidence for every claim.",
+  synthesizer: "Combines disparate inputs into coherent wholes, resolves contradictions.",
+  planner: "Decomposes goals into sequences, allocates resources, designs strategies.",
+  executor: "Produces concrete artifacts, writes code, builds deliverables.",
+  audience_modeler: "Understands user perspectives, models personas, anticipates needs.",
+};
 
 // The 5-layer prompt hierarchy: Disposition → Identity → Skills → Context → Task.
 // Pure: same context in, same prompt out. Hashable, reviewable, testable.
@@ -21,33 +60,60 @@ export function buildPrompt(ctx: AgentInvocationContext, outputSchema?: Record<s
   const a = ctx.agent;
   const layers: string[] = [];
 
-  // 1. Disposition — the behavioral primitives (how you think).
-  layers.push(`# Disposition\nYou operate with the primitive(s): ${a.primitives.join(", ")}.`);
+  // 1. Disposition — the Belbin cognitive-role pairing, held in tension (how you think).
+  const dispo = a.behavioral_primitives.map((r) => `- **${r}**: ${BELBIN_DESCRIPTIONS[r] ?? r}`).join("\n");
+  layers.push(
+    `# Disposition\nYou hold these cognitive modes in equal tension:\n${dispo}\nHold every mode active throughout your work; none dominates.`,
+  );
 
-  // 2. Identity — who you are.
-  layers.push(`# Identity\nYou are the agent "${a.slug}"${a.domain ? ` in the "${a.domain}" domain` : ""}.`);
+  // 2. Identity — who you are: the slug line plus the agent's own prose.
+  layers.push(
+    `# Identity\nYou are the agent "${a.slug}"${a.domain ? ` in the "${a.domain}" domain` : ""}.\n\n${a.identity}`,
+  );
 
-  // 3. Skills — content the agent's bound skills contribute to the prompt. Each
+  // 3. Method — how THIS agent does its job, the step-by-step.
+  layers.push(`# Method\n${a.method}`);
+
+  // 4. Skills — content the agent's bound skills contribute to the prompt. Each
   // skill renders as `## <slug>` + its text payload. We pick the first non-empty
   // string from the conventional content keys (`md`, then `text`, then `body`);
   // a slug-only SkillRecord still renders its slug so the model knows it's bound.
-  const skillBlocks = (ctx.skills ?? []).map((s) => {
-    const text =
-      (typeof s["md"] === "string" && (s["md"] as string)) ||
-      (typeof s["text"] === "string" && (s["text"] as string)) ||
-      (typeof s["body"] === "string" && (s["body"] as string)) ||
-      "";
-    return `## ${s.slug}${text ? `\n${text}` : ""}`;
-  });
+  const resolved = ctx.skills ?? [];
+  const skillBlocks = resolved.length > 0
+    ? resolved.map((s) => {
+        const text =
+          (typeof s["md"] === "string" && (s["md"] as string)) ||
+          (typeof s["text"] === "string" && (s["text"] as string)) ||
+          (typeof s["body"] === "string" && (s["body"] as string)) ||
+          "";
+        return `## ${s.slug}${text ? `\n${text}` : ""}`;
+      })
+    // No resolved content this gig — still name the bound skills so the model knows it has
+    // them (matches the old runtime's skills index).
+    : (a.skill_slugs ?? []).map((slug) => `## ${slug}`);
   if (skillBlocks.length > 0) {
     layers.push(`# Skills\n${skillBlocks.join("\n\n")}`);
   }
 
-  // 4. Context — the gig input + the upstream typed outputs you consume.
+  // 5. Constraints — the negative space (never-invent / cite-sources). Omitted when empty.
+  if (a.constraints.length > 0) {
+    layers.push(`# Constraints\n${a.constraints.map((c) => `- ${c}`).join("\n")}`);
+  }
+
+  // 6. Available Tools — name every granted tool so the model knows it has them and uses
+  // them (the cage grants access; the prompt must grant awareness, or the tools sit unused).
+  if (a.allowed_tools && a.allowed_tools.length > 0) {
+    layers.push(
+      `# Available Tools\nThese tools are available to you — call them directly:\n${a.allowed_tools.map((t) => `- ${t}`).join("\n")}`,
+    );
+  }
+
+  // 7. Context — the gig input + the upstream typed outputs you consume + depth tuning.
   const inputsBlock = ctx.inputs.length
     ? ctx.inputs.map((o) => `- ${o.domain_type} (from ${o.agent_slug}): ${JSON.stringify(o.data)}`).join("\n")
     : "(none — you are a root agent)";
-  layers.push(`# Context\nGig input: ${JSON.stringify(ctx.gig_input)}\nUpstream outputs:\n${inputsBlock}`);
+  const depthLine = a.depth_profile ? `Depth: ${a.depth_profile}\n` : "";
+  layers.push(`# Context\n${depthLine}Gig input: ${JSON.stringify(ctx.gig_input)}\nUpstream outputs:\n${inputsBlock}`);
 
   // 5. Task — produce exactly one typed output as JSON matching its schema.
   const outType = a.output_types[0] ?? "output";
@@ -99,10 +165,12 @@ export interface ClaudeInvokerOptions {
 export function buildInvokerArgs(
   prompt: string,
   mcpConfigPath: string,
-  opts: { model?: string | undefined; allowed_tools?: readonly string[] | undefined; disallowed_tools?: readonly string[] | undefined },
+  opts: { model?: string | undefined; allowed_tools?: readonly string[] | undefined; disallowed_tools?: readonly string[] | undefined; max_tool_calls?: number | undefined },
 ): string[] {
   const args = ["-p", prompt];
   if (opts.model) args.push("--model", opts.model);
+  // per-agent blast-radius cap: a runaway agent can't burn past its own turn budget.
+  if (opts.max_tool_calls !== undefined) args.push("--max-turns", String(opts.max_tool_calls));
   // the cage floor: no ambient MCP servers leak into the spawn, ever.
   args.push("--mcp-config", mcpConfigPath, "--strict-mcp-config");
   if (opts.allowed_tools && opts.allowed_tools.length > 0) args.push("--allowedTools", opts.allowed_tools.join(","));
@@ -140,10 +208,12 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
       : servers;
     writeFileSync(cfgPath, JSON.stringify({ mcpServers: enriched }));
     try {
+      const a = ctx.agent;
       const args = buildInvokerArgs(prompt, cfgPath, {
-        model: opts.model,
-        allowed_tools: ctx.agent.allowed_tools,
-        disallowed_tools: ctx.agent.disallowed_tools,
+        model: resolveModel(a.model_tier, opts.model),
+        allowed_tools: a.allowed_tools,
+        disallowed_tools: [...(a.disallowed_tools ?? []), ...codeToolDenials(a.code_tool_access)],
+        max_tool_calls: a.max_tool_calls,
       });
       return extractJson(run(bin, args));
     } finally {

@@ -6,6 +6,15 @@
 import { randomUUID } from "node:crypto";
 import type { Standard, Agent, Chair } from "./composition.js";
 import { PRIMITIVE_OUTPUT_TYPE, CORE_TYPES } from "./core_types.js";
+import { executeSkill } from "./skill_subprocess.js";
+import { loadSkillPackage } from "./skills.js";
+
+// core type → the process primitive that produces it (reverse of PRIMITIVE_OUTPUT_TYPE).
+// A skill-backed chair seals its output as this primitive/core when its output_contract is
+// a core type.
+const CORE_TO_PRIMITIVE: Record<string, Agent["primitives"][number]> = Object.fromEntries(
+  Object.entries(PRIMITIVE_OUTPUT_TYPE).map(([prim, core]) => [String(core), prim as Agent["primitives"][number]]),
+);
 import { sha256Hex, canonJson, runFingerprint, outputContentHash, CANONICAL_FORM_VERSION } from "./canonical_form.js";
 import type { OutputStore, OutputRecord } from "./outputs.js";
 import type { Ledger } from "./ledger.js";
@@ -42,6 +51,11 @@ export interface RunDeps {
   // Absent = each invocation sees `skills: []` (back-compat — unit suites that
   // don't supply skills still run green; the agent simply gets no skill layer).
   skills?: ReadonlyMap<string, SkillRecord> | undefined;
+  // Skills-as-first-class: maps a skill slug → its package directory on disk, so a
+  // skill-backed chair (Chair.skill_slug) can be executed via the permission-tiered
+  // subprocess instead of the model. Absent = no skill chairs resolvable. Declared
+  // here; runtime routing (executeSkillChair) lands in Phase 1.
+  skill_dirs?: ReadonlyMap<string, string> | undefined;
   // 5th-class eval definitions, slug-keyed. When supplied, scoreEval resolves a
   // declared eval_slug against this map and judges the produced outputs against
   // its contract. Absent = an unresolvable eval scores 0.0 (can't attest it held).
@@ -321,7 +335,8 @@ export async function runGig(
   interface PreparedChair {
     chair: Chair;
     phaseName: string;
-    agent: Agent;
+    agent?: Agent;          // undefined for a skill-backed chair
+    skill_dir?: string;     // set for a skill-backed chair (runs deterministic code, no model)
     primitive: Agent["primitives"][number];
     domain_type: string;
     inputs: OutputRecord[];
@@ -329,6 +344,28 @@ export async function runGig(
   }
 
   function prepareChair(chair: Chair, phaseName: string): PreparedChair {
+    // A skill-backed chair runs the skill's deterministic code half — no agent, no model.
+    if (chair.skill_slug && (chair.agent_slug ?? "") === "") {
+      const dir = deps.skill_dirs?.get(chair.skill_slug);
+      if (!dir) throw new RuntimeError(`phase "${phaseName}" chair "${chair.role}" is skill-backed ("${chair.skill_slug}") but no skill_dir is registered`);
+      const domain_type = chair.output_contract[0] ?? "Signal";
+      const primitive = CORE_TO_PRIMITIVE[domain_type] ?? "SENSE";
+      const inputs: OutputRecord[] = [];
+      for (const dep of chair.depends_on) {
+        const rec = producedByRole.get(dep);
+        if (!rec) throw new RuntimeError(`chair "${chair.role}" depends_on "${dep}" which has not been produced`);
+        inputs.push(rec);
+      }
+      if (chair.input_contract.length > 0) {
+        for (const need of chair.input_contract) {
+          if (!inputs.some((o) => outputSatisfiesType(o, need))) {
+            throw new RuntimeError(`chair "${chair.role}" input_contract requires "${need}" but upstream outputs only provide [${inputs.map((o) => o.domain_type).join(",")}]`);
+          }
+        }
+      }
+      return { chair, phaseName, skill_dir: dir, primitive, domain_type, inputs, skills: [] };
+    }
+
     const agent = standard.agents.find((a) => a.slug === chair.agent_slug);
     if (!agent) throw new RuntimeError(`phase "${phaseName}" chair "${chair.role}" references unknown agent "${chair.agent_slug}"`);
     const primitive = agent.primitives[0];
@@ -396,22 +433,50 @@ export async function runGig(
   // Errors here ARE aggregated by Promise.allSettled and surfaced as a phase-
   // level RuntimeError naming every failing chair role.
   async function invokeAndWriteChair(p: PreparedChair): Promise<OutputRecord> {
-    const { chair, phaseName, agent, primitive, domain_type, inputs, skills } = p;
-    const data = await deps.invoke({ agent, phase: phaseName, inputs, gig_input: gigInput, skills });
+    const { chair, phaseName, primitive, domain_type, inputs, skills } = p;
+    let data: Record<string, unknown>;
+    let producer_slug: string;
+    let domain: string;
+    // Skill-backed chairs record which skill (version + verified code_hash + tier) sealed the
+    // output, so the ledger entry traces back to the exact SkillChainEvent. Undefined for agents.
+    let skill_provenance: { slug: string; version: number; code_hash: string; tier: number } | undefined;
 
-    // Runtime output_contract check: every type the chair promised to produce
-    // must be covered by the bound agent's declared output_types. Empty
-    // output_contract is already rejected at compose time; this is the runtime
-    // mirror (a hand-rolled Standard literal could still ship an empty one).
-    if (chair.output_contract.length > 0) {
-      const producedTypes = new Set(agent.output_types);
-      for (const promised of chair.output_contract) {
-        if (!producedTypes.has(promised)) {
-          throw new RuntimeError(
-            `chair "${chair.role}" output_contract promises "${promised}" but agent "${agent.slug}" produced types [${agent.output_types.join(",")}]`,
-          );
+    if (p.skill_dir) {
+      // SKILL-BACKED chair: run the deterministic code half in the permission cage — the
+      // model is never invoked. The skill reads the merged upstream data (or the gig input
+      // when it's a root chair). This is the proper fix for "an LLM should not babysit a
+      // deterministic command": the command IS the chair.
+      const skillInput = inputs.length > 0 ? Object.assign({}, ...inputs.map((i) => i.data)) : gigInput;
+      const r = executeSkill(p.skill_dir, skillInput);
+      if (!r.ok) throw new RuntimeError(`skill chair "${chair.role}" ("${chair.skill_slug}") failed: ${r.error}`);
+      data = (r.output && typeof r.output === "object" ? r.output : {}) as Record<string, unknown>;
+      producer_slug = chair.skill_slug!;
+      domain = standard.domain;
+      const pkg = loadSkillPackage(p.skill_dir);
+      skill_provenance = {
+        slug: pkg.meta.slug,
+        version: pkg.meta.version,
+        code_hash: pkg.codeHash ?? "",
+        tier: pkg.meta.permission?.tier ?? 0,
+      };
+    } else {
+      const agent = p.agent!;
+      data = await deps.invoke({ agent, phase: phaseName, inputs, gig_input: gigInput, skills });
+      // Runtime output_contract check: every type the chair promised must be covered by the
+      // bound agent's declared output_types (compose-time mirror; a hand-rolled literal could
+      // still ship a mismatch).
+      if (chair.output_contract.length > 0) {
+        const producedTypes = new Set(agent.output_types);
+        for (const promised of chair.output_contract) {
+          if (!producedTypes.has(promised)) {
+            throw new RuntimeError(
+              `chair "${chair.role}" output_contract promises "${promised}" but agent "${agent.slug}" produced types [${agent.output_types.join(",")}]`,
+            );
+          }
         }
       }
+      producer_slug = agent.slug;
+      domain = agent.domain ?? standard.domain;
     }
 
     // Write the typed output (outputs.write validates data vs the domain schema).
@@ -421,14 +486,15 @@ export async function runGig(
     const rec = deps.outputs.write({
       core_type: PRIMITIVE_OUTPUT_TYPE[primitive],
       domain_type,
-      domain: agent.domain ?? standard.domain,
+      domain,
       gig_id,
-      agent_slug: agent.slug,
+      agent_slug: producer_slug,
       from_role: chair.role,
       phase: phaseName,
       primitive,
       data,
       input_refs: inputs.map((i) => i.id),
+      skill_provenance,
     });
 
     // Provenance: this output is derived_from each upstream input it consumed.

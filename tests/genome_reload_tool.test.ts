@@ -12,6 +12,7 @@
 // verdict: green expected post-fix
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { TEST_BEHAVIOR } from "./_support/agents.js";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -42,7 +43,7 @@ describe("genome_reload MCP tool (Rob #130)", () => {
   beforeEach(() => {
     root = mkdtempSync(join(tmpdir(), "coltrane-genome-reload-"));
     seedCoreTypes(root);
-    writeJson(join(root, "agents"), "scout.json", {
+    writeJson(join(root, "agents"), "scout.json", { ...TEST_BEHAVIOR,
       slug: "scout",
       primitives: ["SENSE"],
       output_types: ["raw-note"],
@@ -67,7 +68,7 @@ describe("genome_reload MCP tool (Rob #130)", () => {
   it("adding new agents/types/standards on disk + reload makes them visible without restart", async () => {
     expect(deps.standards?.size ?? 0).toBe(0);
 
-    writeJson(join(root, "agents"), "summarizer.json", {
+    writeJson(join(root, "agents"), "summarizer.json", { ...TEST_BEHAVIOR,
       slug: "summarizer",
       primitives: ["INTERPRET"],
       input_types: ["raw-note"],

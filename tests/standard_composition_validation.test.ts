@@ -1,21 +1,22 @@
 import { describe, it, expect } from "vitest";
+import { TEST_BEHAVIOR } from "./_support/agents.js";
 import { defineAgent, composeStandard } from "../src";
 
-const a_signal_out = defineAgent({
+const a_signal_out = defineAgent({ ...TEST_BEHAVIOR,
   slug: "fetcher",
   primitives: ["SENSE"],
   input_types: ["url"],
   output_types: ["site-cache"],
 });
 
-const a_interp_in_signal_out = defineAgent({
+const a_interp_in_signal_out = defineAgent({ ...TEST_BEHAVIOR,
   slug: "trust-analyst",
   primitives: ["SENSE", "INTERPRET", "JUDGE"],
   input_types: ["site-cache"],
   output_types: ["dimension-analysis"],
 });
 
-const a_review = defineAgent({
+const a_review = defineAgent({ ...TEST_BEHAVIOR,
   slug: "review-panel",
   primitives: ["JUDGE", "VERIFY"],
   input_types: ["dimension-analysis"],
@@ -67,7 +68,7 @@ describe("P5 — standard composition with invalid agent mix", () => {
   });
 
   it("rejects a phase that targets the wrong domain (agent.domain ≠ standard.domain)", () => {
-    const code_agent = defineAgent({
+    const code_agent = defineAgent({ ...TEST_BEHAVIOR,
       slug: "code-fetcher",
       primitives: ["SENSE"],
       input_types: ["repo-uri"],

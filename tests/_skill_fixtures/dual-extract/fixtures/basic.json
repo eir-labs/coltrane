@@ -1,0 +1,6 @@
+{
+  "id": "basic",
+  "description": "Code resolves char_count deterministically; sentiment is residual.",
+  "input": { "text": "good day" },
+  "assertions": [{ "path": "char_count", "op": "equals", "value": 8 }]
+}

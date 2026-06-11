@@ -8,6 +8,7 @@ import {
   dispatchTool, createRegistry, createOutputStore, MemoryLedger,
   type ServerDeps, type DomainType, type AgentInvoker, type Standard, type Agent,
 } from "../src";
+import { TEST_BEHAVIOR } from "./_support/agents.js";
 
 const types: DomainType[] = [
   { slug: "defect", extends: "Signal", domain: "codechange", schema: { properties: { symptom: { type: "string" } } }, required_fields: ["symptom"] },
@@ -18,11 +19,11 @@ const types: DomainType[] = [
 ];
 
 const agents: Agent[] = [
-  { slug: "detector", primitives: ["SENSE"], input_types: [], output_types: ["defect"], domain: "codechange" },
-  { slug: "triager", primitives: ["INTERPRET"], input_types: ["defect"], output_types: ["triage"], domain: "codechange" },
-  { slug: "planner", primitives: ["PLAN"], input_types: ["triage"], output_types: ["fix-plan"], domain: "codechange" },
-  { slug: "fixer", primitives: ["CREATE"], input_types: ["fix-plan"], output_types: ["patch"], domain: "codechange" },
-  { slug: "reviewer", primitives: ["VERIFY"], input_types: ["patch"], output_types: ["fix-review"], domain: "codechange" },
+  { ...TEST_BEHAVIOR, slug: "detector", primitives: ["SENSE"], input_types: [], output_types: ["defect"], domain: "codechange" },
+  { ...TEST_BEHAVIOR, slug: "triager", primitives: ["INTERPRET"], input_types: ["defect"], output_types: ["triage"], domain: "codechange" },
+  { ...TEST_BEHAVIOR, slug: "planner", primitives: ["PLAN"], input_types: ["triage"], output_types: ["fix-plan"], domain: "codechange" },
+  { ...TEST_BEHAVIOR, slug: "fixer", primitives: ["CREATE"], input_types: ["fix-plan"], output_types: ["patch"], domain: "codechange" },
+  { ...TEST_BEHAVIOR, slug: "reviewer", primitives: ["VERIFY"], input_types: ["patch"], output_types: ["fix-review"], domain: "codechange" },
 ];
 
 const phaseOrder = ["find", "triage", "plan", "fix", "review"];

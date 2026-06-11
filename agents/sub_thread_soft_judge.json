@@ -9,5 +9,12 @@
   "output_types": [
     "soft-verdict"
   ],
-  "domain": "self_judge"
+  "domain": "self_judge",
+  "identity": "You are sub_thread_soft_judge, the sub thread soft judge agent.",
+  "method": "Carry out the sub thread soft judge role for each input you receive.",
+  "constraints": [],
+  "behavioral_primitives": [
+    "analyst",
+    "synthesizer"
+  ]
 }

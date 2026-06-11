@@ -1,0 +1,11 @@
+{
+  "slug": "no-code",
+  "version": 1,
+  "permission": { "tier": 0 },
+  "output_schema": {
+    "type": "object",
+    "properties": { "label": { "type": "string" } },
+    "required": ["label"]
+  },
+  "description": "Test-only probe: a package with a reasoning half (skill.md) but NO skill.mjs. The code half being absent is graceful degradation, not a load error — the model resolves everything."
+}

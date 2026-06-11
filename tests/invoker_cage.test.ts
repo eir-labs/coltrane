@@ -4,6 +4,7 @@
 // This is what makes "add a standard that uses playwright" SAFE — the agent declares
 // allowed_tools and the spawn is caged to exactly that. Ports OG's claude-launcher.
 import { describe, it, expect } from "vitest";
+import { TEST_BEHAVIOR } from "./_support/agents.js";
 import { buildInvokerArgs, makeClaudeInvoker } from "../src/claude_invoker.js";
 import { defineAgent } from "../src/composition.js";
 import type { AgentInvocationContext } from "../src/runtime.js";
@@ -37,7 +38,7 @@ describe("blast-radius cage: buildInvokerArgs (pure)", () => {
 
 describe("blast-radius cage: makeClaudeInvoker (seam, injectable spawn)", () => {
   it("a playwright agent is caged to exactly its tools, and the per-gig mcp-config is written then cleaned", () => {
-    const agent = defineAgent({
+    const agent = defineAgent({ ...TEST_BEHAVIOR,
       slug: "browser-scout", primitives: ["SENSE"], output_types: ["raw-note"], domain: "demo",
       allowed_tools: ["mcp__playwright__browser_navigate"],
     });

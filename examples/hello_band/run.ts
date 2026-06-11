@@ -30,13 +30,26 @@ export function runHelloBand(): Promise<GigResult> {
   });
 
   // 2. agents — a SENSE agent feeds an INTERPRET agent.
-  const sensor = defineAgent({ slug: "sensor", primitives: ["SENSE"], output_types: ["raw-note"], domain: "demo" });
+  const sensor = defineAgent({
+    slug: "sensor",
+    primitives: ["SENSE"],
+    output_types: ["raw-note"],
+    domain: "demo",
+    identity: "You are sensor, a SENSE agent that captures raw observations as notes.",
+    method: "Observe the input and record exactly one raw note of what you saw.",
+    constraints: ["Record only what is present in the input; never embellish."],
+    behavioral_primitives: ["explorer", "analyst"],
+  });
   const summarizer = defineAgent({
     slug: "summarizer",
     primitives: ["INTERPRET"],
     input_types: ["raw-note"],
     output_types: ["summary"],
     domain: "demo",
+    identity: "You are summarizer, an INTERPRET agent that distills notes into a tight summary.",
+    method: "Read the raw note and produce one clear, faithful summary of it.",
+    constraints: ["Keep the summary to the note's own content."],
+    behavioral_primitives: ["analyst", "synthesizer"],
   });
 
   // 3. standard — two ordered phases.

@@ -1,0 +1,6 @@
+{
+  "slug": "spawner-denied",
+  "version": 1,
+  "permission": { "tier": 0 },
+  "description": "Test-only probe: the SAME child-process spawn as `spawner`, but declared tier 0. The cage must DENY the spawn — same code, lower tier, different verdict (the matrix's deny side)."
+}

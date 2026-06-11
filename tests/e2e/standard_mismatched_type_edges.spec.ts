@@ -36,6 +36,7 @@
 // composition+runtime calls).
 
 import { describe, expect, it } from "vitest";
+import { TEST_BEHAVIOR } from "../_support/agents.js";
 
 import {
   CompositionError,
@@ -56,7 +57,7 @@ import {
 describe("standard with mismatched type-edges (adversarial unique-unknown)", () => {
   it("composeStandard rejects phase-2 input with no upstream producer (X→ , Y in)", () => {
     // Phase 1 agent: produces "phase1-x-out"
-    const producer = defineAgent({
+    const producer = defineAgent({ ...TEST_BEHAVIOR,
       slug: "ProducerX",
       primitives: ["INTERPRET"],
       input_types: [], // phase 0, reads gig_input
@@ -64,7 +65,7 @@ describe("standard with mismatched type-edges (adversarial unique-unknown)", () 
       domain: "demo",
     });
     // Phase 2 agent: declares INCOMPATIBLE input "phase2-y-in" — nobody produces it.
-    const consumer = defineAgent({
+    const consumer = defineAgent({ ...TEST_BEHAVIOR,
       slug: "ConsumerY",
       primitives: ["INTERPRET"],
       input_types: ["phase2-y-in"], // upstream produces "phase1-x-out" — mismatch
@@ -118,7 +119,7 @@ describe("standard with mismatched type-edges (adversarial unique-unknown)", () 
   //    against gig_input shape. Garbage in, garbage through.
   // ──────────────────────────────────────────────────────────────────────────
   it("APOHA: phase-0 with declared input_types that no one produces is SILENTLY ACCEPTED + runtime runs with empty inputs", async () => {
-    const orphan = defineAgent({
+    const orphan = defineAgent({ ...TEST_BEHAVIOR,
       slug: "OrphanPhase0",
       primitives: ["INTERPRET"],
       input_types: ["nobody-makes-this"], // phase 0, declared but no upstream/gig surface validates it
@@ -190,14 +191,14 @@ describe("standard with mismatched type-edges (adversarial unique-unknown)", () 
   //    composition ACCEPTS phases whose input_types is [""].
   // ──────────────────────────────────────────────────────────────────────────
   it("APOHA: empty-string input_type slug is SILENTLY ACCEPTED by composeStandard's short-circuit", () => {
-    const producer = defineAgent({
+    const producer = defineAgent({ ...TEST_BEHAVIOR,
       slug: "ProducerE",
       primitives: ["INTERPRET"],
       input_types: [],
       output_types: ["e-out"],
       domain: "demo",
     });
-    const sneaky = defineAgent({
+    const sneaky = defineAgent({ ...TEST_BEHAVIOR,
       slug: "SneakyEmpty",
       primitives: ["INTERPRET"],
       input_types: [""], // falsy slug — short-circuit hides this from the check
@@ -231,14 +232,14 @@ describe("standard with mismatched type-edges (adversarial unique-unknown)", () 
   //    upstream-produced. composeStandard must reject on the unmatched one.
   // ──────────────────────────────────────────────────────────────────────────
   it("composeStandard rejects multi-input phase when ONE input has no producer (partial mismatch)", () => {
-    const a = defineAgent({
+    const a = defineAgent({ ...TEST_BEHAVIOR,
       slug: "Pa",
       primitives: ["INTERPRET"],
       input_types: [],
       output_types: ["good-input"],
       domain: "demo",
     });
-    const b = defineAgent({
+    const b = defineAgent({ ...TEST_BEHAVIOR,
       slug: "Pb",
       primitives: ["INTERPRET"],
       input_types: ["good-input", "bogus-input"], // bogus is unproduced upstream
@@ -266,14 +267,14 @@ describe("standard with mismatched type-edges (adversarial unique-unknown)", () 
   //    This is the strongest bug-bash finding — the runtime has zero defense.
   // ──────────────────────────────────────────────────────────────────────────
   it("APOHA: runtime runs broken standard with empty inputs + no warning when composition is bypassed", async () => {
-    const producer = defineAgent({
+    const producer = defineAgent({ ...TEST_BEHAVIOR,
       slug: "RtProducer",
       primitives: ["INTERPRET"],
       input_types: [],
       output_types: ["rt-x"],
       domain: "demo",
     });
-    const consumer = defineAgent({
+    const consumer = defineAgent({ ...TEST_BEHAVIOR,
       slug: "RtConsumer",
       primitives: ["INTERPRET"],
       input_types: ["rt-y"], // mismatch — upstream produces rt-x, consumer wants rt-y

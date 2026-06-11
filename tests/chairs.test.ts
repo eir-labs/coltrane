@@ -10,6 +10,7 @@
 // incrementally as the schema / composition / runtime / migration commits land.
 
 import { describe, it, expect } from "vitest";
+import { TEST_BEHAVIOR } from "./_support/agents.js";
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -35,7 +36,7 @@ function agent(
     output_types: string[];
   }> = {},
 ) {
-  return defineAgent({
+  return defineAgent({ ...TEST_BEHAVIOR,
     slug,
     primitives: ["INTERPRET"],
     input_types: opts.input_types ?? ["Signal"],

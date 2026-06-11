@@ -3,6 +3,7 @@
 // it a real (deterministic) judge: resolve the eval by slug, require its on_type
 // was produced, and check the declared non_empty_fields actually hold.
 import { describe, it, expect } from "vitest";
+import { TEST_BEHAVIOR } from "./_support/agents.js";
 import { runGig, createRegistry, createOutputStore, MemoryLedger, type DomainType, type AgentInvoker } from "../src";
 import type { Standard, Agent } from "../src";
 import type { EvalRecord } from "../src/loader.js";
@@ -11,7 +12,7 @@ const summary: DomainType = {
   slug: "summary", extends: "Interpretation", domain: "demo",
   schema: { type: "object", properties: { gist: { type: "string" } } }, required_fields: [],
 };
-const writer: Agent = { slug: "writer", primitives: ["INTERPRET"], input_types: [], output_types: ["summary"], domain: "demo" };
+const writer: Agent = { ...TEST_BEHAVIOR, slug: "writer", primitives: ["INTERPRET"], input_types: [], output_types: ["summary"], domain: "demo" };
 const standard: Standard = {
   slug: "eval-judge-test", domain: "demo", agents: [writer],
   phases: [{ name: "interpret", chairs: [{ role: "interpret", agent_slug: "writer", depends_on: [], input_contract: [], output_contract: ["summary"], required_skills: [] }] }],

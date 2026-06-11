@@ -139,6 +139,10 @@ export function createRegistry(initial: DomainType[] = []): Registry {
       // doesn't fit a typed plan-shape yet. The core_type discipline still
       // holds; only the domain-schema strictness is bypassed.
       if (!output.domain_type) return { valid: true, errors: [] };
+      // A bare CORE type as the domain_type is a freeform output of that core (e.g. a
+      // skill-backed chair that produces a plain Signal, no domain subtype). The core_type
+      // discipline still holds; there's just no domain schema to enforce — same as above.
+      if (isCoreType(output.domain_type)) return { valid: true, errors: [] };
       const dt = types.get(output.domain_type);
       if (!dt) return { valid: false, errors: [`unknown domain_type "${output.domain_type}"`] };
       // Inherit the base core type's properties, then let the subtype overload +

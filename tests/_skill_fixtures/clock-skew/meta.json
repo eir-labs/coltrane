@@ -1,0 +1,7 @@
+{
+  "slug": "clock-skew",
+  "version": 1,
+  "skill_type": "extraction",
+  "permission": { "tier": 0 },
+  "description": "Test-only probe: a skill whose output differs every run (Math.random). The fixture/determinism runner must read it as NON-deterministic — the sister run never matches."
+}

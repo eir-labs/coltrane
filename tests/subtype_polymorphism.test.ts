@@ -7,6 +7,7 @@
 // RED-first: today the runtime gathers inputs by EXACT domain_type, so a base agent
 // declaring input `Interpretation` never sees a `widget-finding` (extends Interpretation).
 import { describe, it, expect } from "vitest";
+import { TEST_BEHAVIOR } from "./_support/agents.js";
 import {
   runGig,
   createRegistry,
@@ -33,7 +34,7 @@ const assessment: DomainType = {
   required_fields: ["verdict"],
 };
 
-const finder: Agent = {
+const finder: Agent = { ...TEST_BEHAVIOR,
   slug: "finder",
   primitives: ["INTERPRET"],
   input_types: [],
@@ -41,7 +42,7 @@ const finder: Agent = {
   domain: "widgetco",
 };
 // the base player: declares input against the CORE type, not a domain type
-const baseAnalyst: Agent = {
+const baseAnalyst: Agent = { ...TEST_BEHAVIOR,
   slug: "base-analyst",
   primitives: ["JUDGE"],
   input_types: ["Interpretation"],
@@ -89,7 +90,7 @@ describe("subtype polymorphism: a core-type contract accepts any domain subtype"
     registry.registerType({ slug: "domain-verdict", extends: "Verdict", domain: "x", schema: { properties: { decided: { type: "boolean" } } }, required_fields: ["decided"] });
     const outputs = createOutputStore(registry);
     const ledger = new MemoryLedger();
-    const checker: Agent = { slug: "checker", primitives: ["VERIFY"], input_types: [], output_types: ["domain-verdict"], domain: "x" };
+    const checker: Agent = { ...TEST_BEHAVIOR, slug: "checker", primitives: ["VERIFY"], input_types: [], output_types: ["domain-verdict"], domain: "x" };
     const std: Standard = {
       slug: "v",
       domain: "x",
@@ -108,7 +109,7 @@ describe("subtype polymorphism: a core-type contract accepts any domain subtype"
   it("a domain-type contract stays EXACT — an unrelated subtype is not pulled in", async () => {
     const { outputs, ledger } = setup();
     // base-analyst variant that declares a DOMAIN input — must NOT accept widget-finding
-    const exactAnalyst: Agent = { ...baseAnalyst, slug: "exact-analyst", input_types: ["assessment"] };
+    const exactAnalyst: Agent = { ...TEST_BEHAVIOR, ...baseAnalyst, slug: "exact-analyst", input_types: ["assessment"] };
     const exactStandard: Standard = {
       ...standard,
       agents: [finder, exactAnalyst],

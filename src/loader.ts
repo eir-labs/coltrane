@@ -1,7 +1,8 @@
 import { readdirSync, readFileSync, existsSync, statSync, writeFileSync, mkdirSync } from "node:fs";
 import { join, extname, resolve, isAbsolute, dirname } from "node:path";
 import { createRequire } from "node:module";
-import { defineAgent, composeStandard, CompositionError, type Agent, type Standard, type PhaseDef } from "./composition.js";
+import { defineAgent, composeStandard, CompositionError, GenomeIncompleteError, type Agent, type AgentDef, type Standard, type PhaseDef } from "./composition.js";
+import { loadSkillPackage, SkillLoadError } from "./skills.js";
 import type { Primitive } from "./core_types.js";
 import { CANONICAL_CORE_TYPES } from "./canonical_core_types.js";
 
@@ -25,15 +26,10 @@ export interface DomainTypeRecord {
 // On-disk shapes for the remaining three definition classes. Agents are AgentDef-shaped
 // (validated through defineAgent). A standard file references its agents by slug (DRY —
 // agents are authored once under agents/) and is composed through composeStandard.
-export interface AgentFileDef {
-  slug: string;
-  primitives: readonly Primitive[];
-  input_types?: readonly string[];
-  output_types?: readonly string[];
-  domain?: string;
-  allowed_tools?: readonly string[];   // blast-radius cage — declared in the genome file
-  disallowed_tools?: readonly string[];
-}
+// An agent's on-disk genome shape IS an AgentDef (slug + primitives + behavioral
+// representation + cage). defineAgent validates it; a genome agent missing the required
+// behavioral fields fails to load loudly (soft per-file error) rather than running hollow.
+export type AgentFileDef = AgentDef;
 export interface StandardFileDef {
   slug: string;
   domain: string;
@@ -225,11 +221,17 @@ export function loadGenome(
       agents.set(def.slug, defineAgent(def));
       agent_paths.set(def.slug, path);
     } catch (e) {
+      // An agent that fails to VALIDATE — malformed (bad primitives / illegal progression,
+      // CompositionError) OR incomplete against the schema (missing behavioral, the
+      // GenomeIncompleteError) — HARD-fails the whole load. A genome must load cleanly to
+      // run; a standard with a quietly-missing chair would produce silently-wrong outputs.
+      // (Non-validation issues like a duplicate-slug collision still soft-fail below.)
+      if (e instanceof CompositionError || e instanceof GenomeIncompleteError) throw e;
       load_errors.push({
         kind: "agent",
         path,
         slug,
-        error: e instanceof CompositionError || e instanceof Error ? e.message : String(e),
+        error: e instanceof Error ? e.message : String(e),
       });
     }
   }
@@ -284,24 +286,34 @@ export function loadGenome(
     }
   }
 
-  // skills/ + evals/ — slug-keyed records. Soft-fail per file.
-  const skillRead = readJsonDir<SkillRecord>(join(root, "skills"));
-  for (const f of skillRead.parse_failures) {
-    load_errors.push({ kind: "skill", path: f.path, slug: null, error: f.error });
-  }
+  // skills/<slug>/ PACKAGE directories are the ONLY skill format (the flat {slug, md} JSON
+  // is retired — no backwards-compat). A genome skill must be a COMPLETE package: meta +
+  // >=1 fixture (its pre-registered contract) + >=1 half (code and/or reasoning). Malformed
+  // (SkillLoadError) OR incomplete HARD-fails the load — a genome must load cleanly to run,
+  // mirroring the agent behavioral gate. Only a duplicate-slug collision soft-fails.
   const skills = new Map<string, SkillRecord>();
   const skill_paths = new Map<string, string>();
-  for (const { path, data: s } of skillRead.files) {
-    const slug = typeof s?.slug === "string" ? s.slug : null;
-    try {
-      if (!s.slug) throw new Error(`required field "slug" is missing`);
-      if (skills.has(s.slug)) {
-        throw new Error(`duplicate skill slug "${s.slug}" (first seen in ${skill_paths.get(s.slug)})`);
+  const skillsDir = join(root, "skills");
+  if (existsSync(skillsDir)) {
+    for (const entry of readdirSync(skillsDir, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const pkgDir = join(skillsDir, entry.name);
+      if (!existsSync(join(pkgDir, "meta.json"))) continue;
+      const pkg = loadSkillPackage(pkgDir); // SkillLoadError (malformed) propagates → hard-fail
+      if (pkg.fixtures.length === 0) {
+        throw new SkillLoadError(`skill ${pkg.meta.slug}: no fixtures — a skill must ship its pre-registered contract (fixtures capture intent at creation; deferring them loses it)`);
       }
-      skills.set(s.slug, s);
-      skill_paths.set(s.slug, path);
-    } catch (e) {
-      load_errors.push({ kind: "skill", path, slug, error: e instanceof Error ? e.message : String(e) });
+      if (pkg.codeHash === null && pkg.mdPath === null) {
+        throw new SkillLoadError(`skill ${pkg.meta.slug}: empty — needs a code half (skill.mjs) and/or a reasoning half (skill.md)`);
+      }
+      if (skills.has(pkg.meta.slug)) {
+        load_errors.push({ kind: "skill", path: pkgDir, slug: pkg.meta.slug, error: `duplicate skill slug "${pkg.meta.slug}" (first seen in ${skill_paths.get(pkg.meta.slug)})` });
+        continue;
+      }
+      // resolve the reasoning half into the record so the prompt's Skills layer renders it
+      const md = pkg.mdPath ? readFileSync(pkg.mdPath, "utf-8") : undefined;
+      skills.set(pkg.meta.slug, { ...pkg.meta, slug: pkg.meta.slug, package_dir: pkgDir, code_hash: pkg.codeHash, ...(md !== undefined ? { md } : {}) });
+      skill_paths.set(pkg.meta.slug, pkgDir);
     }
   }
 

@@ -1,0 +1,20 @@
+{
+  "slug": "dual-extract",
+  "version": 1,
+  "skill_type": "extraction",
+  "permission": { "tier": 0 },
+  "input_schema": {
+    "type": "object",
+    "properties": { "text": { "type": "string" } },
+    "required": ["text"]
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "char_count": { "type": "number" },
+      "sentiment": { "type": "string" }
+    },
+    "required": ["char_count", "sentiment"]
+  },
+  "description": "Dual-artifact skill: the code half deterministically resolves char_count; sentiment is left as residual for the model. Proves code-first / model-fills-the-gap with field-origin tagging."
+}

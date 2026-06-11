@@ -1,0 +1,12 @@
+{
+  "slug": "overlap-b",
+  "version": 1,
+  "permission": { "tier": 0 },
+  "composable_with": ["overlap-a"],
+  "output_schema": {
+    "type": "object",
+    "properties": { "n": { "type": "string" } },
+    "required": ["n"]
+  },
+  "description": "Test-only probe: outputs `n` as a string — conflicting with overlap-a's number. Skills sharing an output field must declare identical types."
+}

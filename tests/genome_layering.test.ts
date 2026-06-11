@@ -5,6 +5,8 @@
 //
 // RED-first: loadLayeredGenome does not exist yet.
 import { describe, it, expect } from "vitest";
+import { TEST_BEHAVIOR } from "./_support/agents.js";
+import { writeSkillPackage } from "./_support/genome.js";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -22,7 +24,7 @@ function writeInstalledPackage(consumerRoot: string, pkg: string, version: strin
   const pkgDir = join(consumerRoot, "node_modules", pkg);
   mkdirSync(pkgDir, { recursive: true });
   writeFileSync(join(pkgDir, "package.json"), JSON.stringify({ name: pkg, version }));
-  writeJson(pkgDir, "agents", "base-player.json", { slug: "base-player", primitives: ["SENSE"], output_types: ["Signal"] });
+  writeJson(pkgDir, "agents", "base-player.json", { ...TEST_BEHAVIOR, slug: "base-player", primitives: ["SENSE"], output_types: ["Signal"] });
 }
 
 describe("genome layering: a consumer genome extends a base", () => {
@@ -31,13 +33,13 @@ describe("genome layering: a consumer genome extends a base", () => {
     const consumer = mkdtempSync(join(tmpdir(), "coltrane-consumer-"));
     try {
       // BASE layer: an agent + a domain type (no core_types — seeded by the engine)
-      writeJson(base, "agents", "base-agent.json", { slug: "base-agent", primitives: ["SENSE"], output_types: ["Signal"], domain: "base" });
-      writeJson(base, "agents", "shared-agent.json", { slug: "shared-agent", primitives: ["SENSE"], output_types: ["Signal"], domain: "base" });
+      writeJson(base, "agents", "base-agent.json", { ...TEST_BEHAVIOR, slug: "base-agent", primitives: ["SENSE"], output_types: ["Signal"], domain: "base" });
+      writeJson(base, "agents", "shared-agent.json", { ...TEST_BEHAVIOR, slug: "shared-agent", primitives: ["SENSE"], output_types: ["Signal"], domain: "base" });
       writeJson(base, "domain_types", "base-type.json", { slug: "base-type", version: 1, extends: "Signal", domain: "base", status: "active", schema: { type: "object", properties: { x: { type: "string" } } }, required_fields: ["x"] });
 
       // CONSUMER layer: adds its own agent + OVERRIDES shared-agent (different domain)
-      writeJson(consumer, "agents", "widget-agent.json", { slug: "widget-agent", primitives: ["INTERPRET"], output_types: ["Interpretation"], domain: "widgetco" });
-      writeJson(consumer, "agents", "shared-agent.json", { slug: "shared-agent", primitives: ["SENSE"], output_types: ["Signal"], domain: "widgetco" });
+      writeJson(consumer, "agents", "widget-agent.json", { ...TEST_BEHAVIOR, slug: "widget-agent", primitives: ["INTERPRET"], output_types: ["Interpretation"], domain: "widgetco" });
+      writeJson(consumer, "agents", "shared-agent.json", { ...TEST_BEHAVIOR, slug: "shared-agent", primitives: ["SENSE"], output_types: ["Signal"], domain: "widgetco" });
 
       const g = loadLayeredGenome([base, consumer]); // lowest → highest
 
@@ -70,7 +72,7 @@ describe("genome layering: a consumer genome extends a base", () => {
     try {
       // base ships a DOMAIN-AGNOSTIC player (#134) — composable into any domain;
       // consumer writes a standard that seats it (didn't define it itself)
-      writeJson(base, "agents", "base-scout.json", { slug: "base-scout", primitives: ["SENSE"], output_types: ["Signal"] });
+      writeJson(base, "agents", "base-scout.json", { ...TEST_BEHAVIOR, slug: "base-scout", primitives: ["SENSE"], output_types: ["Signal"] });
       writeJson(consumer, "standards", "widget-flow.json", {
         slug: "widget-flow",
         domain: "widgetco",
@@ -95,7 +97,7 @@ describe("manifest-declared base: resolveGenome reads `extends` and layers", () 
     const base = mkdtempSync(join(tmpdir(), "coltrane-mbase-"));
     const consumer = mkdtempSync(join(tmpdir(), "coltrane-mconsumer-"));
     try {
-      writeJson(base, "agents", "base-scout.json", { slug: "base-scout", primitives: ["SENSE"], output_types: ["Signal"] });
+      writeJson(base, "agents", "base-scout.json", { ...TEST_BEHAVIOR, slug: "base-scout", primitives: ["SENSE"], output_types: ["Signal"] });
       // the consumer DECLARES its base (opt-in)
       writeFileSync(join(consumer, "genome.json"), JSON.stringify({ extends: [base] }));
       writeJson(consumer, "standards", "flow.json", {
@@ -120,7 +122,7 @@ describe("manifest-declared base: resolveGenome reads `extends` and layers", () 
   it("no manifest = a plain single-root load (backward compatible)", () => {
     const root = mkdtempSync(join(tmpdir(), "coltrane-nomanifest-"));
     try {
-      writeJson(root, "agents", "solo.json", { slug: "solo", primitives: ["SENSE"], output_types: ["Signal"] });
+      writeJson(root, "agents", "solo.json", { ...TEST_BEHAVIOR, slug: "solo", primitives: ["SENSE"], output_types: ["Signal"] });
       const g = resolveGenome(root);
       expect(g.agents.has("solo")).toBe(true);
       expect(g.core_types.size).toBe(6);
@@ -137,8 +139,8 @@ describe("genome cascade: base-evolution impact on the consumer layer", () => {
     const consumer = mkdtempSync(join(tmpdir(), "coltrane-casc-"));
     try {
       // fromBase ships base-scout; toBase renamed it away (base-scout no longer exists)
-      writeJson(fromBase, "agents", "base-scout.json", { slug: "base-scout", primitives: ["SENSE"], output_types: ["Signal"] });
-      writeJson(toBase, "agents", "base-finder.json", { slug: "base-finder", primitives: ["SENSE"], output_types: ["Signal"] });
+      writeJson(fromBase, "agents", "base-scout.json", { ...TEST_BEHAVIOR, slug: "base-scout", primitives: ["SENSE"], output_types: ["Signal"] });
+      writeJson(toBase, "agents", "base-finder.json", { ...TEST_BEHAVIOR, slug: "base-finder", primitives: ["SENSE"], output_types: ["Signal"] });
       // consumer composes base-scout — fine against fromBase, broken against toBase
       writeJson(consumer, "standards", "flow.json", {
         slug: "flow",
@@ -164,9 +166,9 @@ describe("genome cascade: base-evolution impact on the consumer layer", () => {
     const toBase = mkdtempSync(join(tmpdir(), "coltrane-to2-"));
     const consumer = mkdtempSync(join(tmpdir(), "coltrane-casc2-"));
     try {
-      writeJson(fromBase, "agents", "base-a.json", { slug: "base-a", primitives: ["SENSE"], output_types: ["Signal"] });
-      writeJson(toBase, "agents", "base-b.json", { slug: "base-b", primitives: ["SENSE"], output_types: ["Signal"] });
-      writeJson(consumer, "agents", "own.json", { slug: "own", primitives: ["SENSE"], output_types: ["Signal"], domain: "widgetco" });
+      writeJson(fromBase, "agents", "base-a.json", { ...TEST_BEHAVIOR, slug: "base-a", primitives: ["SENSE"], output_types: ["Signal"] });
+      writeJson(toBase, "agents", "base-b.json", { ...TEST_BEHAVIOR, slug: "base-b", primitives: ["SENSE"], output_types: ["Signal"] });
+      writeJson(consumer, "agents", "own.json", { ...TEST_BEHAVIOR, slug: "own", primitives: ["SENSE"], output_types: ["Signal"], domain: "widgetco" });
       const report = genomeCascadeCheck(consumer, fromBase, toBase);
       expect(report.broken).toEqual([]);
     } finally {
@@ -196,8 +198,8 @@ describe("genome layering — review follow-ups", () => {
     const b = mkdtempSync(join(tmpdir(), "coltrane-mb-b-"));
     const consumer = mkdtempSync(join(tmpdir(), "coltrane-mb-c-"));
     try {
-      writeJson(a, "agents", "shared.json", { slug: "shared", primitives: ["SENSE"], output_types: ["Signal"], allowed_tools: ["a-tool"] });
-      writeJson(b, "agents", "shared.json", { slug: "shared", primitives: ["SENSE"], output_types: ["Signal"], allowed_tools: ["b-tool"] });
+      writeJson(a, "agents", "shared.json", { ...TEST_BEHAVIOR, slug: "shared", primitives: ["SENSE"], output_types: ["Signal"], allowed_tools: ["a-tool"] });
+      writeJson(b, "agents", "shared.json", { ...TEST_BEHAVIOR, slug: "shared", primitives: ["SENSE"], output_types: ["Signal"], allowed_tools: ["b-tool"] });
       writeFileSync(join(consumer, "genome.json"), JSON.stringify({ extends: [a, b] }));
       const g = resolveGenome(consumer);
       // array order is lowest → highest, so b (last) wins
@@ -214,9 +216,9 @@ describe("genome layering — review follow-ups", () => {
     const base = mkdtempSync(join(tmpdir(), "coltrane-se-base-"));
     const consumer = mkdtempSync(join(tmpdir(), "coltrane-se-cons-"));
     try {
-      writeJson(base, "skills", "base-skill.json", { slug: "base-skill", md: "base reasoning" });
+      writeSkillPackage(base, { slug: "base-skill", md: "base reasoning" });
       writeJson(base, "evals", "base-eval.json", { slug: "base-eval", on_type: "Signal", non_empty_fields: ["id"] });
-      writeJson(consumer, "agents", "c.json", { slug: "c", primitives: ["SENSE"], output_types: ["Signal"], domain: "widgetco" });
+      writeJson(consumer, "agents", "c.json", { ...TEST_BEHAVIOR, slug: "c", primitives: ["SENSE"], output_types: ["Signal"], domain: "widgetco" });
       const g = loadLayeredGenome([base, consumer]);
       expect(g.skills.has("base-skill")).toBe(true);
       expect(g.evals.has("base-eval")).toBe(true);
@@ -231,8 +233,8 @@ describe("genome layering — review follow-ups", () => {
     const consumer = mkdtempSync(join(tmpdir(), "coltrane-ovcons-"));
     try {
       // base + consumer both define agnostic "shared"; distinguish by allowed_tools
-      writeJson(base, "agents", "shared.json", { slug: "shared", primitives: ["SENSE"], output_types: ["Signal"], allowed_tools: ["base-tool"] });
-      writeJson(consumer, "agents", "shared.json", { slug: "shared", primitives: ["SENSE"], output_types: ["Signal"], allowed_tools: ["consumer-tool"] });
+      writeJson(base, "agents", "shared.json", { ...TEST_BEHAVIOR, slug: "shared", primitives: ["SENSE"], output_types: ["Signal"], allowed_tools: ["base-tool"] });
+      writeJson(consumer, "agents", "shared.json", { ...TEST_BEHAVIOR, slug: "shared", primitives: ["SENSE"], output_types: ["Signal"], allowed_tools: ["consumer-tool"] });
       writeJson(consumer, "standards", "flow.json", {
         slug: "flow",
         domain: "widgetco",

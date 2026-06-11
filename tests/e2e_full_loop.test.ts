@@ -4,6 +4,7 @@
 // same entry an MCP client hits. The agent invoker is mocked (deterministic) so the
 // orchestration is exercised without spawning Claude.
 import { describe, it, expect } from "vitest";
+import { TEST_BEHAVIOR } from "./_support/agents.js";
 import {
   dispatchTool,
   createRegistry,
@@ -30,8 +31,8 @@ const finding: DomainType = {
   required_fields: ["title"],
 };
 
-const scout: Agent = { slug: "site-scout", primitives: ["SENSE"], input_types: [], output_types: ["page-model"], domain: "eirtests" };
-const analyst: Agent = { slug: "site-analyst", primitives: ["INTERPRET"], input_types: ["page-model"], output_types: ["finding"], domain: "eirtests" };
+const scout: Agent = { ...TEST_BEHAVIOR, slug: "site-scout", primitives: ["SENSE"], input_types: [], output_types: ["page-model"], domain: "eirtests" };
+const analyst: Agent = { ...TEST_BEHAVIOR, slug: "site-analyst", primitives: ["INTERPRET"], input_types: ["page-model"], output_types: ["finding"], domain: "eirtests" };
 const readinessScan: Standard = {
   slug: "readiness-scan",
   domain: "eirtests",

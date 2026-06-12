@@ -144,6 +144,19 @@ export function extractJson(text: string): Record<string, unknown> {
   throw new Error("unbalanced JSON object in model output");
 }
 
+// The wall-clock bound on one chair's spawn. A tool-granted child has no inherent
+// terminus (it can search/loop), and the gig runs the spawn synchronously — so without
+// this bound one wedged child wedges the whole server. SIGKILL, not SIGTERM: a
+// signal-trapping child can't outlive its budget. Long enough for a tool-using chair
+// (a capped search agent runs minutes), far below an operator-visible hang.
+export const DEFAULT_CHAIR_TIMEOUT_MS = 10 * 60_000;
+
+// Spawn bounds passed to the run seam (execFileSync options in the default runner).
+export interface SpawnBounds {
+  timeout: number;
+  killSignal: "SIGKILL";
+}
+
 export interface ClaudeInvokerOptions {
   bin?: string | undefined; // default "claude"
   model?: string | undefined; // passed to --model if set
@@ -151,7 +164,9 @@ export interface ClaudeInvokerOptions {
   // The MCP servers the cage permits the spawn to load. Empty = no MCP tools at all.
   // With --strict-mcp-config, ONLY these load — never the host's ambient servers.
   mcpServers?: Record<string, unknown> | undefined;
-  run?: ((bin: string, args: string[]) => string) | undefined; // injectable spawn (tests)
+  run?: ((bin: string, args: string[], spawn: SpawnBounds) => string) | undefined; // injectable spawn (tests)
+  // Per-deployment override of the per-chair wall-clock bound.
+  timeout_ms?: number | undefined;
   // When set, the spawned child receives COLTRANE_PARENT_SESSION_ID so its first
   // recorded turn seals the lineage edge to its parent.
   parent_session_id?: string | undefined;
@@ -185,7 +200,9 @@ export function buildInvokerArgs(
 // env so the recorder seals the parent → child lineage edge on the child's first turn.
 export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker {
   const bin = opts.bin ?? "claude";
-  const run = opts.run ?? ((b: string, args: string[]) => execFileSync(b, args, { encoding: "utf-8", maxBuffer: 64 * 1024 * 1024 }));
+  const run = opts.run ?? ((b: string, args: string[], spawn: SpawnBounds) =>
+    execFileSync(b, args, { encoding: "utf-8", maxBuffer: 64 * 1024 * 1024, timeout: spawn.timeout, killSignal: spawn.killSignal }));
+  const spawnBounds: SpawnBounds = { timeout: opts.timeout_ms ?? DEFAULT_CHAIR_TIMEOUT_MS, killSignal: "SIGKILL" };
   return (ctx) => {
     const outType = ctx.agent.output_types[0];
     const schema = opts.registry?.listTypes().find((t) => t.slug === outType)?.schema as
@@ -215,7 +232,7 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
         disallowed_tools: [...(a.disallowed_tools ?? []), ...codeToolDenials(a.code_tool_access)],
         max_tool_calls: a.max_tool_calls,
       });
-      return extractJson(run(bin, args));
+      return extractJson(run(bin, args, spawnBounds));
     } finally {
       try { unlinkSync(cfgPath); } catch { /* best-effort cleanup */ }
     }

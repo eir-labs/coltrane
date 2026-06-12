@@ -1072,7 +1072,12 @@ export function bootstrapServerDeps(genomeRoot?: string): ServerDeps {
     outputs: createOutputStore(registry, { persistDir: defaultOutputsPersistDir() }),
     ledger: new MemoryLedger(),
     standards: genome.standards, // ← gig_dispatch can now resolve file-defined standards
-    invoke: makeClaudeInvoker({ registry, model: process.env["COLTRANE_MODEL"] }),
+    invoke: makeClaudeInvoker({
+      registry,
+      model: process.env["COLTRANE_MODEL"],
+      // per-chair wall-clock bound; COLTRANE_CHAIR_TIMEOUT_MS overrides for slow deployments
+      ...(process.env["COLTRANE_CHAIR_TIMEOUT_MS"] ? { timeout_ms: Number(process.env["COLTRANE_CHAIR_TIMEOUT_MS"]) } : {}),
+    }),
     model_version: process.env["COLTRANE_MODEL"] ?? "claude-cli-default",
     skills: genome.skills, // ← skill substrate — runGig resolves agent.skill_slugs into prompt
     evals: genome.evals, // ← 5th-class eval substrate — runGig judges declared eval_slugs

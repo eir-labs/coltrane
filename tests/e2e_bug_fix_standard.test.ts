@@ -49,7 +49,7 @@ function wired(): ServerDeps {
 describe("E3: bug-fix standard runs all phases in order", () => {
   it("all 5 phases execute, in declared order, none skipped", async () => {
     const deps = wired();
-    const d = await dispatchTool("gig_dispatch", { standard_slug: "bug-fix", input: {} }, deps);
+    const d = await dispatchTool("gig_dispatch", { wait: true, standard_slug: "bug-fix", input: {} }, deps);
     expect(d.ok).toBe(true);
     expect((d.data as { manifest: { output_count: number } }).manifest.output_count).toBe(5);
 
@@ -62,7 +62,7 @@ describe("E3: bug-fix standard runs all phases in order", () => {
 
   it("the review verdict traces back to the original defect (full chain intact)", async () => {
     const deps = wired();
-    const d = await dispatchTool("gig_dispatch", { standard_slug: "bug-fix", input: {} }, deps);
+    const d = await dispatchTool("gig_dispatch", { wait: true, standard_slug: "bug-fix", input: {} }, deps);
     const q = await dispatchTool("output_query", { gig_id: (d.data as { gig_id: string }).gig_id }, deps);
     const outs = (q.data as { outputs: { id: string; domain_type: string }[] }).outputs;
     const review = outs.find((o) => o.domain_type === "fix-review")!;

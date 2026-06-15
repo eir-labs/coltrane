@@ -54,7 +54,7 @@ describe("§13 Bootstrap Run — genome boots from disk", () => {
     const invoke: AgentInvoker = ({ agent }) => (agent.slug === "scout" ? { url: "/" } : { title: "x" });
     const deps: ServerDeps = { registry, outputs: createOutputStore(registry), ledger: new MemoryLedger(), standards: new Map([[scan.slug, scan]]), invoke, model_version: "m" };
 
-    const d = await dispatchTool("gig_dispatch", { standard_slug: "scan", input: {} }, deps);
+    const d = await dispatchTool("gig_dispatch", { wait: true, standard_slug: "scan", input: {} }, deps);
     expect(d.ok).toBe(true);
     expect((d.data as { manifest: { output_count: number } }).manifest.output_count).toBe(2);
     // the outputs validated against the disk-booted core types

@@ -118,18 +118,37 @@ export function buildRestartResponse(id: string | number | null): JsonRpcMessage
   };
 }
 
+/** Parse the `initialize` request's id from a captured raw line (null if unparseable). */
+export function initRequestId(line: string | null): string | number | null | undefined {
+  if (!line) return undefined;
+  try { return (JSON.parse(line) as JsonRpcMessage).id ?? null; } catch { return undefined; }
+}
+
 /**
  * Run the relay. Spawns the child, wires stdio, intercepts server_restart.
  * Never returns under normal operation.
+ *
+ * The MCP handshake survives a child swap: the client `initialize`d once (against the FIRST
+ * child) and believes the session is live, so after a restart it sends `tools/call` straight
+ * to a fresh child that never received `initialize`. An uninitialized MCP server holds the
+ * call forever → the client hangs. So the relay CAPTURES the client's `initialize` request +
+ * `notifications/initialized`, and REPLAYS them to every new child before un-gating it —
+ * swallowing the replay's duplicate `initialize` response so the client never sees it twice.
  */
 export async function runRelay(opts: { entryPath: string }): Promise<void> {
   let child = spawnChild(opts.entryPath);
 
+  // Captured client handshake, replayed to each new child after a restart.
+  let storedInit: string | null = null;
+  let storedInitialized: string | null = null;
+  // During a replay, the new child's `initialize` response carries the original request id;
+  // the client already got one from the prior child, so the forwarder must swallow this dup.
+  let replayInitId: string | number | null | undefined = undefined;
+  let onInitReplayed: (() => void) | null = null;
+
   const forwardChildToParent = (c: RelayChild) => {
     const rl = createInterface({ input: c.stdout });
     rl.on("line", (line) => {
-      // Try to parse; augment tools/list responses if matched. Otherwise pass
-      // through verbatim.
       let msg: JsonRpcMessage | null = null;
       try {
         msg = JSON.parse(line) as JsonRpcMessage;
@@ -137,19 +156,27 @@ export async function runRelay(opts: { entryPath: string }): Promise<void> {
         process.stdout.write(line + "\n");
         return;
       }
+      // Swallow the replayed-handshake `initialize` response (a response = no method, and its
+      // id matches the captured initialize). Then send `notifications/initialized` so the new
+      // child reaches serving state, and signal the restart to complete.
+      if (msg && replayInitId !== undefined && msg.method === undefined && msg.id === replayInitId) {
+        if (storedInitialized) c.stdin.write(storedInitialized + "\n");
+        replayInitId = undefined;
+        const done = onInitReplayed;
+        onInitReplayed = null;
+        done?.();
+        return; // never forward the duplicate to the client
+      }
       if (msg && isToolsListResponse(msg)) {
         augmentToolsList(msg);
         process.stdout.write(JSON.stringify(msg) + "\n");
         return;
       }
-      // Pass through verbatim. Re-serializing would lose unknown fields, so
-      // forward the original line.
+      // Pass through verbatim. Re-serializing would lose unknown fields.
       process.stdout.write(line + "\n");
     });
     c.on("exit", (code) => {
-      process.stderr.write(
-        `[coltrane-relay] child server exited code=${code ?? "null"}\n`,
-      );
+      process.stderr.write(`[coltrane-relay] child server exited code=${code ?? "null"}\n`);
     });
   };
 
@@ -171,6 +198,23 @@ export async function runRelay(opts: { entryPath: string }): Promise<void> {
     }
     child = spawnChild(opts.entryPath);
     forwardChildToParent(child);
+    // Replay the captured handshake so the new child reaches serving state BEFORE the relay
+    // tells the client the restart is done. Without this the next tools/call hangs forever.
+    if (storedInit) {
+      await new Promise<void>((resolve) => {
+        onInitReplayed = resolve;
+        replayInitId = initRequestId(storedInit);
+        child.stdin.write(storedInit + "\n");
+        // Safety: if the new child never answers the handshake, don't wedge the relay forever.
+        setTimeout(() => {
+          if (onInitReplayed) {
+            replayInitId = undefined;
+            onInitReplayed = null;
+            resolve();
+          }
+        }, 10_000);
+      });
+    }
   };
 
   const parentIn = createInterface({ input: process.stdin });
@@ -183,10 +227,14 @@ export async function runRelay(opts: { entryPath: string }): Promise<void> {
       return;
     }
     if (msg) {
+      // Capture the handshake as it passes through (still forwarded to the first child).
+      if (msg.method === "initialize") storedInit = line;
+      else if (msg.method === "notifications/initialized") storedInitialized = line;
+
       const restartId = matchServerRestart(msg);
       if (restartId !== undefined) {
-        // Handle locally. Reply only after the new child is up so the client
-        // knows it's safe to send the next tool call.
+        // Handle locally. Reply only after the new child is up AND re-initialized, so the
+        // client's next tool call lands on a serving child rather than hanging.
         void restartChild().then(() => {
           process.stdout.write(JSON.stringify(buildRestartResponse(restartId)) + "\n");
         });

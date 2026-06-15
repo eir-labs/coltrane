@@ -29,9 +29,10 @@ import { proposeTypeChange, type DomainTypeDef } from "./type_versioning.js";
 import { proposeAgentChange, evolveProfile, type AgentProfile } from "./agent_profile.js";
 import { checkGrantTTL, validatePlanAgainstGrant, type AccessGrant, type PlanCheck } from "./access_grant.js";
 import { loadCharter, CharterError } from "./charter.js";
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, mkdirSync, appendFileSync, readdirSync } from "node:fs";
 import { randomUUID, createHash } from "node:crypto";
 import { join } from "node:path";
+import { newGigRun, applyGigProgress, gigEventLogLine, type GigRunState } from "./gig_tracker.js";
 import { SubthreadRecorder, ApiVersionMismatchError } from "./subthread_recorder.js";
 import { canonJson, runFingerprint, CANONICAL_FORM_VERSION } from "./canonical_form.js";
 import type { LoadedGenome } from "./loader.js";
@@ -68,6 +69,12 @@ export interface ServerDeps {
   // Genome extension — per-slug layer provenance (`${kind}:${slug}` → layer root),
   // surfaced via system_health so runtime callers can check a definition's origin.
   provenance?: ReadonlyMap<string, string> | undefined;
+  // Live gig state for async dispatch. gig_dispatch (async) registers a run here and
+  // updates it from runGig's progress events; gig_monitor reads it. Set by bootstrap.
+  gig_runs?: Map<string, GigRunState> | undefined;
+  // Base dir for per-gig agent logs (<base>/<gig_id>/<role>.jsonl). Set by bootstrap to
+  // the outputs persist dir; absent → no file tee (state-only observability, e.g. tests).
+  gig_log_base?: string | undefined;
 }
 
 export interface ToolResult {
@@ -305,48 +312,99 @@ export async function dispatchTool(slug: string, args: Record<string, unknown>, 
           if (typeof budgetArg["base_cost"] === "number") budget.base_cost = budgetArg["base_cost"] as number;
           if (typeof budgetArg["k"] === "number") budget.k = budgetArg["k"] as number;
         }
-        try {
-          const res = await runGig(standard, (args["input"] as Record<string, unknown>) ?? {}, {
-            outputs: deps.outputs,
-            ledger: deps.ledger,
-            invoke: deps.invoke,
-            model_version: deps.model_version,
-            skills: deps.skills,
-            evals: deps.evals,
-            budget,
-          });
-          return {
-            ok: true,
-            requires_approval: approval,
-            data: {
-              gig_id: res.gig_id,
-              manifest: {
-                genome_hash: res.genome_hash,
-                run_fingerprint: res.run_fingerprint,
-                output_count: res.outputs.length,
-                ...(res.budget_state ? { budget_state: res.budget_state } : {}),
-              },
-            },
-          };
-        } catch (e) {
-          if (e instanceof BudgetExhausted) {
+        const gigInput = (args["input"] as Record<string, unknown>) ?? {};
+        // Synchronous mode (opt-in via wait:true) — block, return the manifest. The
+        // deterministic test path and any caller that wants the answer in one call.
+        const wait = args["wait"] === true;
+        if (wait) {
+          try {
+            const res = await runGig(standard, gigInput, {
+              outputs: deps.outputs, ledger: deps.ledger, invoke: deps.invoke,
+              model_version: deps.model_version, skills: deps.skills, evals: deps.evals, budget,
+            });
             return {
-              ok: false,
-              requires_approval: approval,
-              error: e.message,
-              data: { budget_exhausted: true, agent_slug: e.agent_slug, balance: e.balance, cost: e.cost, budget_state: e.state },
+              ok: true, requires_approval: approval,
+              data: {
+                gig_id: res.gig_id,
+                manifest: {
+                  genome_hash: res.genome_hash, run_fingerprint: res.run_fingerprint, output_count: res.outputs.length,
+                  ...(res.budget_state ? { budget_state: res.budget_state } : {}),
+                },
+              },
             };
+          } catch (e) {
+            if (e instanceof BudgetExhausted) {
+              return { ok: false, requires_approval: approval, error: e.message,
+                data: { budget_exhausted: true, agent_slug: e.agent_slug, balance: e.balance, cost: e.cost, budget_state: e.state } };
+            }
+            throw e;
           }
-          throw e;
         }
+        // Async mode (default) — register live state, run in the background, return the id
+        // immediately so the caller can poll gig_monitor + tail the per-chair logs instead of
+        // blocking for the whole run ("synchronous dispatch is not a good pattern").
+        const gigId = randomUUID();
+        const runs = deps.gig_runs ?? (deps.gig_runs = new Map());
+        const state = newGigRun(gigId, slug2, standard.phases.length, new Date().toISOString());
+        runs.set(gigId, state);
+        const logDir = deps.gig_log_base ? join(deps.gig_log_base, "gigs", gigId) : undefined;
+        const onProgress = (ev: Parameters<typeof applyGigProgress>[1]): void => {
+          applyGigProgress(state, ev);
+          // tee each chair's child events to its own jsonl — the agent-layer log
+          if (logDir && ev.type === "agent_event") {
+            try { mkdirSync(logDir, { recursive: true }); appendFileSync(join(logDir, `${ev.role}.jsonl`), JSON.stringify(ev.event) + "\n"); } catch { /* best-effort */ }
+          }
+          // compact milestone line to stderr (captured in the MCP log)
+          const line = gigEventLogLine(gigId, ev);
+          if (line) { try { process.stderr.write(line + "\n"); } catch { /* best-effort */ } }
+        };
+        void runGig(standard, gigInput, {
+          outputs: deps.outputs, ledger: deps.ledger, invoke: deps.invoke,
+          model_version: deps.model_version, skills: deps.skills, evals: deps.evals, budget,
+          gig_id: gigId, onProgress,
+        })
+          .then((res) => {
+            state.status = "complete"; state.finished_at = new Date().toISOString();
+            state.run_fingerprint = res.run_fingerprint; state.genome_hash = res.genome_hash; state.outputs_count = res.outputs.length;
+          })
+          .catch((e: unknown) => {
+            state.status = "failed"; state.finished_at = new Date().toISOString();
+            state.error = e instanceof Error ? e.message : String(e);
+            onProgress({ type: "gig_failed", error: state.error });
+          });
+        return {
+          ok: true, requires_approval: approval,
+          data: { gig_id: gigId, status: "running", ...(logDir ? { log_dir: logDir } : {}) },
+        };
       }
       case "gig_monitor": {
         const gid = String(args["gig_id"] ?? "");
+        // Prefer the live state map (async runs). Falls back to the ledger/outputs read for a
+        // synchronously-completed gig (or one from a prior server lifetime, not in the map).
+        const live = deps.gig_runs?.get(gid);
+        if (live) {
+          const outs = deps.outputs.all().filter((o) => o.gig_id === gid);
+          return {
+            ok: true, requires_approval: approval,
+            data: {
+              status: live.status,
+              standard_slug: live.standard_slug,
+              current_phase: live.current_phase ?? null,
+              phases_total: live.phases_total,
+              phases_complete: live.phases_seen.length,
+              chairs: Object.values(live.chairs),
+              outputs_count: live.outputs_count,
+              outputs_so_far: outs,
+              ...(live.run_fingerprint ? { run_fingerprint: live.run_fingerprint } : {}),
+              ...(live.error ? { error: live.error } : {}),
+              ...(live.finished_at ? { finished_at: live.finished_at } : {}),
+            },
+          };
+        }
         const outs = deps.outputs.all().filter((o) => o.gig_id === gid);
         const done = deps.ledger.query({ gig_id: gid }).length > 0;
         return {
-          ok: true,
-          requires_approval: approval,
+          ok: true, requires_approval: approval,
           data: {
             status: done ? "complete" : outs.length > 0 ? "running" : "unknown",
             phases_complete: outs.length,
@@ -354,6 +412,34 @@ export async function dispatchTool(slug: string, args: Record<string, unknown>, 
             outputs_so_far: outs,
           },
         };
+      }
+      case "gig_logs": {
+        // The agent-layer transcript, served (not hand-read off disk). gig_monitor gives the
+        // coltrane-layer summary; this returns each chair's child events from the per-chair
+        // jsonl the async dispatcher tees. Filter by role and/or event type; tail the last N.
+        const gid = String(args["gig_id"] ?? "");
+        const roleFilter = args["role"] ? String(args["role"]) : undefined;
+        const typeFilter = args["type"] ? String(args["type"]) : undefined;
+        const tail = typeof args["tail"] === "number" ? (args["tail"] as number) : undefined;
+        const dir = deps.gig_log_base ? join(deps.gig_log_base, "gigs", gid) : undefined;
+        if (!dir || !existsSync(dir)) {
+          return { ok: true, requires_approval: approval, data: { gig_id: gid, roles: [], count: 0, events: [] } };
+        }
+        const roleFiles = readdirSync(dir).filter((f) => f.endsWith(".jsonl")).map((f) => f.slice(0, -6));
+        const roles = roleFilter ? roleFiles.filter((r) => r === roleFilter) : roleFiles;
+        const events: Array<Record<string, unknown>> = [];
+        for (const role of roles) {
+          const lines = readFileSync(join(dir, `${role}.jsonl`), "utf8").split("\n").filter(Boolean);
+          for (const l of lines) {
+            try {
+              const e = JSON.parse(l) as Record<string, unknown>;
+              if (typeFilter && e["type"] !== typeFilter) continue;
+              events.push({ role, ...e });
+            } catch { /* skip malformed */ }
+          }
+        }
+        const sliced = tail !== undefined ? events.slice(-tail) : events;
+        return { ok: true, requires_approval: approval, data: { gig_id: gid, roles, count: events.length, events: sliced } };
       }
       case "tool_registry_browse": {
         let tools = [...MCP_TOOLS];
@@ -1085,6 +1171,8 @@ export function bootstrapServerDeps(genomeRoot?: string): ServerDeps {
     load_errors: [...genome.load_errors], // ← Rob #129 — surfaced via system_health
     agents: new Map(genome.agents), // ← Rob #130 + #132 — slug-resolve + reload-diff
     provenance: genome.provenance, // ← genome extension — which layer supplied each def
+    gig_runs: new Map(), // ← async dispatch — live gig state gig_monitor reads
+    gig_log_base: defaultOutputsPersistDir(), // ← per-gig agent logs at <base>/gigs/<id>/<role>.jsonl
   };
 }
 

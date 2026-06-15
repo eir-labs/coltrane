@@ -13,6 +13,7 @@ import { randomUUID } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { Registry } from "./registry.js";
+import { CORE_TYPES } from "./core_types.js";
 
 // §6 output_refs.relation CHECK constraint, as a closed set.
 export const REF_RELATIONS = [
@@ -121,6 +122,12 @@ export interface OutputStore {
   trace(id: string, opts?: { max_depth?: number }): OutputRecord[];
   // T8: the backward-compat findings view.
   findings(): Finding[];
+  // Resolve a domain (or core) type slug to its core type. A core type resolves to
+  // itself; a domain subtype resolves to its `extends`. Returns null for an unknown
+  // type. The runtime uses this to seal each of a multi-output chair's declared types
+  // under the right core (a type's core comes from its OWN extends, since an agent's
+  // primitives and output_types are not 1:1).
+  coreTypeOf(typeSlug: string): string | null;
 }
 
 export interface OutputStoreOptions {
@@ -368,6 +375,11 @@ export function createOutputStore(registry: Registry, options?: OutputStoreOptio
         });
       }
       return rows;
+    },
+    coreTypeOf(typeSlug) {
+      if ((CORE_TYPES as readonly string[]).includes(typeSlug)) return typeSlug;
+      const dt = registry.listTypes().find((t) => t.slug === typeSlug);
+      return dt ? dt.extends : null;
     },
   };
 }

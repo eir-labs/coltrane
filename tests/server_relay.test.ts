@@ -12,6 +12,7 @@ import {
   isToolsListResponse,
   augmentToolsList,
   buildRestartResponse,
+  initRequestId,
 } from "../src/server_relay.js";
 
 describe("server_relay — server_restart interception", () => {
@@ -106,6 +107,22 @@ describe("server_relay — tools/list augmentation", () => {
     augmentToolsList(msg);
     const tools = (msg.result as { tools: { name: string }[] }).tools;
     expect(tools.filter((t) => t.name === "server_restart")).toHaveLength(1);
+  });
+});
+
+describe("server_relay — captured-handshake replay", () => {
+  it("extracts the initialize request id from a captured raw line", () => {
+    const line = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} });
+    expect(initRequestId(line)).toBe(1);
+  });
+  it("returns undefined for a null capture (no initialize seen yet)", () => {
+    expect(initRequestId(null)).toBeUndefined();
+  });
+  it("returns undefined for an unparseable line", () => {
+    expect(initRequestId("not json")).toBeUndefined();
+  });
+  it("preserves a null id", () => {
+    expect(initRequestId(JSON.stringify({ jsonrpc: "2.0", id: null, method: "initialize" }))).toBe(null);
   });
 });
 

@@ -37,7 +37,7 @@ function wired(): ServerDeps {
 describe("E6: full provenance trace artifact → signal", () => {
   it("traces the artifact back through the interpretation to the original signal", async () => {
     const deps = wired();
-    const d = await dispatchTool("gig_dispatch", { standard_slug: "scan-and-fix", input: { site_url: "x.com" } }, deps);
+    const d = await dispatchTool("gig_dispatch", { wait: true, standard_slug: "scan-and-fix", input: { site_url: "x.com" } }, deps);
     const { gig_id } = d.data as { gig_id: string };
 
     const q = await dispatchTool("output_query", { gig_id }, deps);
@@ -58,7 +58,7 @@ describe("E6: full provenance trace artifact → signal", () => {
 
   it("a root signal has no ancestors — trace returns the empty closure, no phantom edges", async () => {
     const deps = wired();
-    const d = await dispatchTool("gig_dispatch", { standard_slug: "scan-and-fix", input: {} }, deps);
+    const d = await dispatchTool("gig_dispatch", { wait: true, standard_slug: "scan-and-fix", input: {} }, deps);
     const { gig_id } = d.data as { gig_id: string };
     const q = await dispatchTool("output_query", { gig_id }, deps);
     const sig = (q.data as { outputs: { id: string; domain_type: string }[] }).outputs.find((o) => o.domain_type === "page-model")!;

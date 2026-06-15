@@ -54,7 +54,7 @@ describe("MCP write-through: compose → dispatch in one session", () => {
     expect(compose.ok).toBe(true);
 
     // Same deps, same session — the dispatcher must see what we just composed.
-    const run = await dispatchTool("gig_dispatch", { standard_slug: "live-compose-test", input: {} }, deps);
+    const run = await dispatchTool("gig_dispatch", { wait: true, standard_slug: "live-compose-test", input: {} }, deps);
     expect(run.ok).toBe(true);
     expect((run.data as { manifest: { output_count: number } }).manifest.output_count).toBe(2);
   });

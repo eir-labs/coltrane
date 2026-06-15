@@ -40,7 +40,7 @@ describe("E2: backward-compat findings view at scale", () => {
     const deps = wired();
     const N = 25; // spirit of "100 scans" — fast + deterministic
     for (let n = 0; n < N; n++) {
-      const r = await dispatchTool("gig_dispatch", { standard_slug: "readiness-scan", input: { n } }, deps);
+      const r = await dispatchTool("gig_dispatch", { wait: true, standard_slug: "readiness-scan", input: { n } }, deps);
       expect(r.ok).toBe(true);
     }
     const rows = deps.outputs.findings();
@@ -53,7 +53,7 @@ describe("E2: backward-compat findings view at scale", () => {
 
   it("a non-eirtests note never leaks into the findings view", async () => {
     const deps = wired();
-    await dispatchTool("gig_dispatch", { standard_slug: "readiness-scan", input: { n: 0 } }, deps);
+    await dispatchTool("gig_dispatch", { wait: true, standard_slug: "readiness-scan", input: { n: 0 } }, deps);
     // a codechange note written straight to the store must NOT appear in findings()
     deps.outputs.write({ core_type: "Interpretation", domain_type: "note", domain: "codechange", gig_id: "g-note", agent_slug: "code-scout", primitive: "INTERPRET", data: { body: "not a finding" } });
     const rows = deps.outputs.findings();

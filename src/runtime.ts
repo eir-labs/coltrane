@@ -32,7 +32,34 @@ export interface AgentInvocationContext {
   inputs: readonly OutputRecord[]; // upstream outputs matching this agent's input_types
   gig_input: Record<string, unknown>;
   skills?: readonly SkillRecord[];
+  // Agent-layer observability: the invoker calls this for each event the child emits
+  // (stream-json: tool_use, tool_result, assistant text, result). The runtime forwards
+  // them to RunDeps.onProgress tagged with phase+role so a live monitor can show what a
+  // chair's child is doing without hunting its session transcript by mtime.
+  onEvent?: (ev: AgentStreamEvent) => void;
 }
+
+// One parsed event from a chair's child process (a stream-json line). `type` is the
+// child's event type ("assistant" | "tool_use" | "tool_result" | "result" | …); `raw`
+// carries the full event for a consumer that wants more than the summary fields.
+export interface AgentStreamEvent {
+  type: string;
+  tool?: string | undefined;      // for tool_use: the tool name
+  text?: string | undefined;      // for assistant/result: any text payload
+  raw?: unknown;                  // the full parsed event
+}
+
+// Coltrane-layer observability: the runtime fires one of these at each gig milestone so a
+// caller (the async dispatcher) can track progress live instead of waiting for the whole
+// synchronous run. agent_event re-emits a chair's child events, tagged with phase+role.
+export type GigProgressEvent =
+  | { type: "phase_start"; phase: string; roles: string[] }
+  | { type: "chair_start"; phase: string; role: string; producer: string }
+  | { type: "chair_complete"; phase: string; role: string; producer: string; output_types: string[]; duration_ms: number }
+  | { type: "chair_failed"; phase: string; role: string; error: string }
+  | { type: "agent_event"; phase: string; role: string; event: AgentStreamEvent }
+  | { type: "gig_complete"; outputs: number }
+  | { type: "gig_failed"; error: string };
 
 // The one non-deterministic seam. Inject a deterministic fn in tests; the real
 // Claude subprocess call in the stdio entry. The runtime around it is deterministic.
@@ -70,6 +97,15 @@ export interface RunDeps {
    * BudgetState is returned in GigResult.budget_state.
    */
   budget?: BudgetInput | undefined;
+  // Live progress sink. Fired at each gig milestone (phase/chair/agent-event/complete) so an
+  // async dispatcher can surface a running gig's state. Absent = no progress emitted (the
+  // synchronous path is unaffected). Guarded best-effort — a sink that throws is swallowed
+  // so observability can't fail the gig.
+  onProgress?: ((ev: GigProgressEvent) => void) | undefined;
+  // Pre-assigned gig id. The async dispatcher generates the id up front (to create the live
+  // state entry + return it immediately) and passes it in so state and result share one id.
+  // Absent = the runtime mints one (the synchronous path).
+  gig_id?: string | undefined;
 }
 
 /**
@@ -237,9 +273,14 @@ export async function runGig(
   gigInput: Record<string, unknown>,
   deps: RunDeps,
 ): Promise<GigResult> {
-  const gig_id = randomUUID();
+  const gig_id = deps.gig_id ?? randomUUID();
   const started_at = new Date().toISOString();
   const produced: OutputRecord[] = [];
+
+  // Best-effort progress sink — a logging/monitor sink must never break the run.
+  const emit = (ev: GigProgressEvent): void => {
+    try { deps.onProgress?.(ev); } catch { /* observability must not fail the gig */ }
+  };
 
   // Budget state. When deps.budget is undefined, enforcement is OFF (back-compat).
   // When present, we track an in-memory BudgetState mirroring budget-state.json.
@@ -269,6 +310,7 @@ export async function runGig(
   const producedByRole = new Map<string, OutputRecord[]>();
 
   for (const phase of standard.phases) {
+    emit({ type: "phase_start", phase: phase.name, roles: phase.chairs.map((c) => c.role) });
 
     // Per-phase DAG executor. Chairs whose `depends_on` is fully covered by
     // already-produced roles form the next dispatch-batch and run in parallel
@@ -314,6 +356,7 @@ export async function runGig(
           failures.push(ch.role);
           const reason = r.reason instanceof Error ? r.reason.message : String(r.reason);
           failureErrors.push(`${ch.role}: ${reason}`);
+          emit({ type: "chair_failed", phase: phase.name, role: ch.role, error: reason });
         } else {
           producedByRole.set(ch.role, r.value);
           produced.push(...r.value);
@@ -456,6 +499,9 @@ export async function runGig(
   // level RuntimeError naming every failing chair role.
   async function invokeAndWriteChair(p: PreparedChair): Promise<OutputRecord[]> {
     const { chair, phaseName, inputs, skills, output_specs } = p;
+    const t0 = Date.now();
+    const producerHint = chair.skill_slug || p.agent?.slug || chair.agent_slug || chair.role;
+    emit({ type: "chair_start", phase: phaseName, role: chair.role, producer: producerHint });
     let data: Record<string, unknown>;
     let producer_slug: string;
     let domain: string;
@@ -483,7 +529,10 @@ export async function runGig(
       };
     } else {
       const agent = p.agent!;
-      data = await deps.invoke({ agent, phase: phaseName, inputs, gig_input: gigInput, skills });
+      data = await deps.invoke({
+        agent, phase: phaseName, inputs, gig_input: gigInput, skills,
+        onEvent: (ev) => emit({ type: "agent_event", phase: phaseName, role: chair.role, event: ev }),
+      });
       // Runtime output_contract check: every type the chair promised must be covered by the
       // bound agent's declared output_types (compose-time mirror; a hand-rolled literal could
       // still ship a mismatch).
@@ -542,6 +591,10 @@ export async function runGig(
         `chair "${chair.role}" produced no recognized output — expected one of [${output_specs.map((s) => s.domain_type).join(", ")}]`,
       );
     }
+    emit({
+      type: "chair_complete", phase: phaseName, role: chair.role, producer: producer_slug,
+      output_types: written.map((w) => w.domain_type), duration_ms: Date.now() - t0,
+    });
     return written;
   }
 
@@ -587,6 +640,7 @@ export async function runGig(
 
   const result: GigResult = { gig_id, standard_slug: standard.slug, genome_hash, run_fingerprint, outputs: produced, eval_scores, status: "complete" };
   if (budget) result.budget_state = budget;
+  emit({ type: "gig_complete", outputs: produced.length });
   return result;
 }
 

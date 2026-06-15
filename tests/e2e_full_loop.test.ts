@@ -65,7 +65,7 @@ describe("E1: full loop through the MCP surface", () => {
     const deps = wiredServer();
 
     // 1. dispatch a standard through the MCP tool surface
-    const dispatch = await dispatchTool("gig_dispatch", { standard_slug: "readiness-scan", input: { site_url: "example.com" } }, deps);
+    const dispatch = await dispatchTool("gig_dispatch", { wait: true, standard_slug: "readiness-scan", input: { site_url: "example.com" } }, deps);
     expect(dispatch.ok).toBe(true);
     const { gig_id, manifest } = dispatch.data as { gig_id: string; manifest: { output_count: number; genome_hash: string } };
     expect(gig_id).toBeTruthy();
@@ -92,7 +92,7 @@ describe("E1: full loop through the MCP surface", () => {
 
   it("unknown standard is rejected, not silently run", async () => {
     const deps = wiredServer();
-    const r = await dispatchTool("gig_dispatch", { standard_slug: "no-such-standard" }, deps);
+    const r = await dispatchTool("gig_dispatch", { wait: true, standard_slug: "no-such-standard" }, deps);
     expect(r.ok).toBe(false);
     expect(r.error).toMatch(/unknown standard/);
   });

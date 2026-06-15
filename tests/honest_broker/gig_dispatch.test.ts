@@ -76,7 +76,8 @@ interface DispatchResult {
 
 async function callPrimary(args: Record<string, unknown>): Promise<DispatchResult> {
   const deps = makeInProcessDeps();
-  const r = await dispatchTool("gig_dispatch", args, deps);
+  // wait:true → synchronous manifest (the contract these cases assert); async is the default.
+  const r = await dispatchTool("gig_dispatch", { ...args, wait: true }, deps);
   return JSON.parse(JSON.stringify(r)) as DispatchResult;
 }
 
@@ -92,7 +93,7 @@ async function callSecondary(args: Record<string, unknown>): Promise<DispatchRes
   );
   try {
     await client.connect(transport);
-    const res = await client.callTool({ name: "gig_dispatch", arguments: args });
+    const res = await client.callTool({ name: "gig_dispatch", arguments: { ...args, wait: true } });
     // CallToolResult wraps the dispatcher's text-encoded JSON in content[0].text.
     const content = (res as { content?: Array<{ type?: string; text?: string }> }).content ?? [];
     const first = content[0];

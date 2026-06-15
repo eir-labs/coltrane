@@ -2,12 +2,12 @@
 // `claude` CLI (Claude Code IS the cognition — the prime directive's "depend on
 // nothing but Claude Code"). buildPrompt is pure + testable; runClaude is the one
 // non-deterministic seam (spawns the CLI, parses structured output).
-import { execFileSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { writeFileSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
-import type { AgentInvocationContext, AgentInvoker } from "./runtime.js";
+import type { AgentInvocationContext, AgentInvoker, AgentStreamEvent } from "./runtime.js";
 import type { Registry } from "./registry.js";
 import type { ModelTier } from "./pricing.js";
 import type { CodeToolAccess } from "./composition.js";
@@ -187,7 +187,7 @@ export interface ClaudeInvokerOptions {
   // The MCP servers the cage permits the spawn to load. Empty = no MCP tools at all.
   // With --strict-mcp-config, ONLY these load — never the host's ambient servers.
   mcpServers?: Record<string, unknown> | undefined;
-  run?: ((bin: string, args: string[], spawn: SpawnBounds) => string) | undefined; // injectable spawn (tests)
+  run?: ((bin: string, args: string[], spawn: SpawnBounds) => string | Promise<string>) | undefined; // injectable spawn (tests)
   // Per-deployment override of the per-chair wall-clock bound.
   timeout_ms?: number | undefined;
   // When set, the spawned child receives COLTRANE_PARENT_SESSION_ID so its first
@@ -223,10 +223,11 @@ export function buildInvokerArgs(
 // env so the recorder seals the parent → child lineage edge on the child's first turn.
 export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker {
   const bin = opts.bin ?? "claude";
-  const run = opts.run ?? ((b: string, args: string[], spawn: SpawnBounds) =>
-    execFileSync(b, args, { encoding: "utf-8", maxBuffer: 64 * 1024 * 1024, timeout: spawn.timeout, killSignal: spawn.killSignal }));
+  // Injected run (tests) short-circuits the spawn: plain mode, returns the JSON blob directly.
+  // Absent → the default streaming spawn below runs the real CLI with stream-json.
+  const customRun = opts.run;
   const spawnBounds: SpawnBounds = { timeout: opts.timeout_ms ?? DEFAULT_CHAIR_TIMEOUT_MS, killSignal: "SIGKILL" };
-  return (ctx) => {
+  return async (ctx) => {
     const types = opts.registry?.listTypes() ?? [];
     const schemaOf = (slug: string | undefined) =>
       (types.find((t) => t.slug === slug)?.schema as Record<string, unknown> | undefined);
@@ -255,15 +256,106 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
     writeFileSync(cfgPath, JSON.stringify({ mcpServers: enriched }));
     try {
       const a = ctx.agent;
-      const args = buildInvokerArgs(prompt, cfgPath, {
+      const baseArgs = buildInvokerArgs(prompt, cfgPath, {
         model: resolveModel(a.model_tier, opts.model),
         allowed_tools: a.allowed_tools,
         disallowed_tools: [...(a.disallowed_tools ?? []), ...codeToolDenials(a.code_tool_access)],
         max_tool_calls: a.max_tool_calls,
       });
-      return extractJson(run(bin, args, spawnBounds));
+      // Custom run (tests): plain mode, the returned string IS the JSON blob — no streaming.
+      if (customRun) return extractJson(await customRun(bin, baseArgs, spawnBounds));
+      // Default: stream-json so the child's tool calls / reasoning are observable LIVE. Each
+      // event is forwarded to ctx.onEvent (the runtime tees it to the gig's per-chair log);
+      // the final result text is extracted from the stream and parsed into the typed output.
+      const args = [...baseArgs, "--output-format", "stream-json", "--verbose"];
+      const stdout = await spawnStreaming(bin, args, spawnBounds, ctx.onEvent);
+      return extractJson(finalText(stdout));
     } finally {
       try { unlinkSync(cfgPath); } catch { /* best-effort cleanup */ }
     }
   };
+}
+
+// Spawn a child and stream its stdout line-by-line. Each complete line is parsed as a
+// stream-json event and forwarded (granularly) to onEvent as it arrives — this is the
+// agent-layer observability seam. Returns the full stdout on clean exit; rejects on
+// non-zero exit (with stderr) or timeout (SIGKILL, so a signal-trapping child can't survive).
+function spawnStreaming(
+  bin: string,
+  args: readonly string[],
+  bounds: SpawnBounds,
+  onEvent?: (ev: AgentStreamEvent) => void,
+): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
+    const child = spawn(bin, [...args], { stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+    let buf = "";
+    const timer = setTimeout(() => {
+      child.kill("SIGKILL");
+      reject(new Error(`chair child timed out after ${bounds.timeout}ms (SIGKILL)`));
+    }, bounds.timeout);
+    child.stdout.on("data", (chunk: Buffer) => {
+      const s = chunk.toString();
+      stdout += s;
+      buf += s;
+      let nl: number;
+      while ((nl = buf.indexOf("\n")) >= 0) {
+        const line = buf.slice(0, nl).trim();
+        buf = buf.slice(nl + 1);
+        if (!line || !onEvent) continue;
+        try { forwardStreamEvent(JSON.parse(line), onEvent); } catch { /* non-json line */ }
+      }
+    });
+    child.stderr.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
+    child.on("error", (e) => { clearTimeout(timer); reject(e); });
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      if (code !== 0) reject(new Error(`claude exited ${code}: ${stderr.slice(0, 500)}`));
+      else resolve(stdout);
+    });
+  });
+}
+
+// Map a child stream-json event to granular AgentStreamEvents. assistant content explodes
+// into per-block tool_use / text events (so a monitor sees each tool call); result passes
+// its text; everything else passes its type + raw.
+function forwardStreamEvent(evt: Record<string, unknown>, onEvent: (ev: AgentStreamEvent) => void): void {
+  const type = String(evt["type"] ?? "event");
+  if (type === "assistant" && evt["message"] && typeof evt["message"] === "object") {
+    const content = (evt["message"] as { content?: Array<Record<string, unknown>> }).content ?? [];
+    for (const b of content) {
+      const bt = String(b["type"] ?? "");
+      if (bt === "tool_use") onEvent({ type: "tool_use", tool: String(b["name"] ?? ""), raw: b });
+      else if (bt === "text") onEvent({ type: "assistant", text: String(b["text"] ?? ""), raw: b });
+    }
+    return;
+  }
+  if (type === "result") {
+    onEvent({ type: "result", text: typeof evt["result"] === "string" ? (evt["result"] as string) : undefined, raw: evt });
+    return;
+  }
+  onEvent({ type, raw: evt });
+}
+
+// Extract the final result text from a stream-json stdout: the `result` event's text, else
+// concatenated assistant text. Falls back to raw stdout when nothing parsed (plain -p mode).
+function finalText(stdout: string): string {
+  const lines = stdout.split("\n").map((l) => l.trim()).filter(Boolean);
+  let result: string | undefined;
+  const assistant: string[] = [];
+  let parsedAny = false;
+  for (const l of lines) {
+    try {
+      const e = JSON.parse(l) as Record<string, unknown>;
+      parsedAny = true;
+      if (e["type"] === "result" && typeof e["result"] === "string") result = e["result"] as string;
+      else if (e["type"] === "assistant" && e["message"] && typeof e["message"] === "object") {
+        const content = (e["message"] as { content?: Array<Record<string, unknown>> }).content ?? [];
+        for (const b of content) if (b["type"] === "text") assistant.push(String(b["text"] ?? ""));
+      }
+    } catch { /* non-json */ }
+  }
+  if (!parsedAny) return stdout;
+  return result ?? assistant.join("\n");
 }

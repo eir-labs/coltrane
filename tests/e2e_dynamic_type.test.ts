@@ -96,7 +96,7 @@ describe("E4 — type created mid-execution, consumed by downstream agent", () =
     expect(reg.ok).toBe(true);
 
     // dispatch the gig
-    const r = await dispatchTool("gig_dispatch", {
+    const r = await dispatchTool("gig_dispatch", { wait: true,
       standard_slug: standard.slug,
       input: {},
     }, deps);
@@ -140,7 +140,7 @@ describe("E4 — type created mid-execution, consumed by downstream agent", () =
 
     // dispatch should either fail OR record a partial result; what must NOT happen
     // is silent persistence of an invalid scored-finding.
-    await dispatchTool("gig_dispatch", { standard_slug: standard.slug, input: {} }, deps2).catch(() => undefined);
+    await dispatchTool("gig_dispatch", { wait: true, standard_slug: standard.slug, input: {} }, deps2).catch(() => undefined);
     const outs = await dispatchTool("output_query", { domain_type: "scored-finding" }, deps2);
     const data = outs.data as { outputs: unknown[] };
     expect(data.outputs.length).toBe(0);

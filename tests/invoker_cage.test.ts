@@ -37,7 +37,7 @@ describe("blast-radius cage: buildInvokerArgs (pure)", () => {
 });
 
 describe("blast-radius cage: makeClaudeInvoker (seam, injectable spawn)", () => {
-  it("a playwright agent is caged to exactly its tools, and the per-gig mcp-config is written then cleaned", () => {
+  it("a playwright agent is caged to exactly its tools, and the per-gig mcp-config is written then cleaned", async () => {
     const agent = defineAgent({ ...TEST_BEHAVIOR,
       slug: "browser-scout", primitives: ["SENSE"], output_types: ["raw-note"], domain: "demo",
       allowed_tools: ["mcp__playwright__browser_navigate"],
@@ -47,7 +47,7 @@ describe("blast-radius cage: makeClaudeInvoker (seam, injectable spawn)", () => 
       run: (_bin, args) => { sawArgs = args; return '{"text":"saw the page"}'; },
     });
     const ctx = { agent, gig_input: { url: "x" }, inputs: [] } as unknown as AgentInvocationContext;
-    const out = invoke(ctx);
+    const out = await invoke(ctx);
     expect(out).toEqual({ text: "saw the page" });
     // caged: only playwright's nav tool, ambient MCP denied
     expect(sawArgs.indexOf("--allowedTools")).toBeGreaterThan(-1);

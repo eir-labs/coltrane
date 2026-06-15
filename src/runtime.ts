@@ -31,6 +31,12 @@ export interface AgentInvocationContext {
   phase: string;
   inputs: readonly OutputRecord[]; // upstream outputs matching this agent's input_types
   gig_input: Record<string, unknown>;
+  // The output types THIS chair seals — the chair's output_contract intersected with the
+  // agent's declared outputs (#174). A multi-capability agent bound to a single-purpose chair
+  // produces only the promised subset, not its whole catalogue. The Claude invoker keys its
+  // Task layer on this so the model is asked for exactly these types. Absent/empty (legacy
+  // hand-rolled ctx) → the invoker falls back to the agent's full output_types.
+  output_types?: readonly string[];
   skills?: readonly SkillRecord[];
   // Agent-layer observability: the invoker calls this for each event the child emits
   // (stream-json: tool_use, tool_result, assistant text, result). The runtime forwards
@@ -491,9 +497,15 @@ export async function runGig(
       budget.balance = budget.opening - budget.spent + budget.credit;
     }
 
-    // Seal one record per declared output type. Single-output agents → one spec (the
-    // invoker blob is the data); multi-output agents → one per type (blob keyed by type).
-    const output_specs = outputSpecsFor(agent.output_types, primitive);
+    // Seal one record per type THIS CHAIR promises (#174): the output_contract is the SELECTOR,
+    // not just a check — a chair bound to a multi-output agent seals only the subset it declares,
+    // intersected with the agent's real outputs (so a stray contract entry can't conjure a type
+    // the agent doesn't produce; the post-invocation check below still reports that mismatch).
+    // Empty contract (legacy hand-rolled chair) → fall back to the agent's full output set.
+    const wanted = chair.output_contract.length
+      ? agent.output_types.filter((t) => chair.output_contract.includes(t))
+      : agent.output_types;
+    const output_specs = outputSpecsFor(wanted, primitive);
     return { chair, phaseName, agent, primitive, domain_type, output_specs, inputs, skills };
   }
 
@@ -534,6 +546,7 @@ export async function runGig(
       const agent = p.agent!;
       data = await deps.invoke({
         agent, phase: phaseName, inputs, gig_input: gigInput, skills,
+        output_types: output_specs.map((s) => s.domain_type), // #174 — the chair's promised subset
         onEvent: (ev) => emit({ type: "agent_event", phase: phaseName, role: chair.role, event: ev }),
       });
       // Runtime output_contract check: every type the chair promised must be covered by the
@@ -553,21 +566,21 @@ export async function runGig(
       domain = agent.domain ?? standard.domain;
     }
 
-    // Seal one record per declared output type. For a single-output chair the invoker
-    // blob IS the output's data; for a multi-output chair the blob is keyed by domain_type
-    // (each value is that type's data) — a SENSE+JUDGE agent returns { hit: {...},
-    // verdict: {...} } and we seal a Signal record AND a Judgment record from one pass.
-    // Tag each with `from_role` so downstream chairs can address an upstream's outputs by
-    // source role; all records of this chair share its input provenance.
-    const multi = output_specs.length > 1;
+    // Seal one record per type this chair seals. The invoker blob may be keyed by domain_type
+    // (a SENSE+JUDGE agent returns { hit: {...}, verdict: {...} } → a Signal AND a Judgment from
+    // one pass) OR, for a lone unkeyed output, BE the data directly. So: prefer a key matching
+    // the type; for a single sealed type, fall back to the whole blob when no such key exists.
+    // This keeps narrowing correct even when an over-eager invoker returns extra keys (#174) —
+    // the chair seals only its promised types and reads each from its own key.
+    // A keyed type may be CONDITIONAL (e.g. a verdict's provisional-draft only on FILEABLE), so a
+    // missing key is skipped, not an error — the downstream input_contract check fails loudly if a
+    // consumer actually needed a type that wasn't produced. Tag each with `from_role`.
+    const single = output_specs.length === 1;
     const written: OutputRecord[] = [];
     for (const spec of output_specs) {
-      // Single-output: the blob IS the data. Multi-output: read the blob's per-type key.
-      // A multi-output type may be CONDITIONAL (e.g. a verdict's provisional-draft only on
-      // FILEABLE), so a missing key is skipped, not an error — the downstream input_contract
-      // check is what fails loudly if a consumer actually needed a type that wasn't produced.
-      const slice = multi ? (data[spec.domain_type] as Record<string, unknown> | undefined) : data;
-      if (multi && (slice === undefined || slice === null)) continue;
+      const keyed = data[spec.domain_type] as Record<string, unknown> | undefined;
+      const slice = keyed !== undefined && keyed !== null ? keyed : single ? data : undefined;
+      if (slice === undefined || slice === null) continue;
       if (typeof slice !== "object" || slice === null) {
         throw new RuntimeError(
           `chair "${chair.role}" output "${spec.domain_type}" must be a JSON object, got ${typeof slice}`,

@@ -31,55 +31,64 @@ describe("patent-triage-v0 end-to-end via deterministic invoker", () => {
     const standard = genome.standards.get("patent-triage-v0");
     expect(standard, "patent-triage-v0 standard should load").toBeDefined();
 
-    // Stubbed invoker — returns realistic per-agent output shapes matching
-    // each agent's declared output_type schema. The first output_type in the
-    // agent's declaration is what the runtime persists.
+    // Stubbed invoker. The patent agents are MULTI-output (diamond-cutter, novelty-searcher,
+    // and verdict-judger each declare 2 output types), so their blob is keyed by domain_type
+    // and the runtime seals one record per key. claim-rewriter is single-output (the blob is
+    // its data). verdict-judger's provisional-draft is conditional (FILEABLE only) and is
+    // omitted here for the REFINE-FIRST path.
     const invoke: AgentInvoker = (ctx) => {
       switch (ctx.agent.slug) {
         case "diamond-cutter":
-          // first output_type is claim-draft
           return {
-            invention_id: "test-invention-1",
-            independent_claims: [
-              "An ordered method for ranking input documents by their distance to a labeled reference set.",
-            ],
-            dependent_claims: [],
-            preamble: "A method for relevance scoring.",
-            minimum_viable_text: "Single-claim minimum viable text.",
+            "claim-draft": {
+              invention_id: "test-invention-1",
+              independent_claims: ["An ordered method for ranking input documents by their distance to a labeled reference set."],
+              dependent_claims: [],
+              preamble: "A method for relevance scoring.",
+              minimum_viable_text: "Single-claim minimum viable text.",
+            },
+            "failure-modes": {
+              invention_id: "test-invention-1",
+              named_failure_modes: [{ name: "ranking ties", bound: "fails when distances collide" }],
+              what_this_is_not: ["NOT a clustering method (no groups are formed)"],
+            },
           };
         case "novelty-searcher":
-          // first output_type is prior-art-hit
           return {
-            source: "USPTO",
-            url: "https://patents.google.com/patent/US00000000",
-            title: "Stub prior art reference (deterministic)",
-            snippet: "Comparator method for input documents using a labeled set.",
-            publication_date: "2020-01-01",
-            kind: "patent",
-            relevance_score: 0.42,
+            "prior-art-hit": {
+              source: "USPTO",
+              url: "https://patents.google.com/patent/US00000000",
+              title: "Stub prior art reference (deterministic)",
+              snippet: "Comparator method for input documents using a labeled set.",
+              publication_date: "2020-01-01",
+              kind: "patent",
+              relevance_score: 0.42,
+            },
+            "novelty-verdict": {
+              invention_id: "test-invention-1",
+              verdict: "TOO-CLOSE-TO-CALL",
+              rationale: "One reference covers the ranking step but not the labeled-anchor refinement.",
+              distance_score: 0.42,
+            },
           };
-        case "claim-rewriter":
-          // first output_type is claim-draft (refined)
+        case "claim-rewriter": // single-output: the blob IS the claim-draft data
           return {
             invention_id: "test-invention-1",
-            independent_claims: [
-              "An ordered method for ranking input documents by their proximity to a labeled reference set, wherein the labeled reference set is anchored to a verified source corpus.",
-            ],
-            dependent_claims: [
-              "The method of claim 1, wherein the labeled reference set comprises at least one peer-reviewed publication.",
-            ],
+            independent_claims: ["An ordered method for ranking input documents by their proximity to a labeled reference set, wherein the labeled reference set is anchored to a verified source corpus."],
+            dependent_claims: ["The method of claim 1, wherein the labeled reference set comprises at least one peer-reviewed publication."],
             preamble: "A method for relevance scoring with verified anchors.",
             minimum_viable_text: "Refined single-claim text with verified-anchor refinement.",
           };
-        case "verdict-judger":
-          // first output_type is triage-verdict
+        case "verdict-judger": // multi-output; provisional-draft omitted (REFINE-FIRST, not FILEABLE)
           return {
-            invention_id: "test-invention-1",
-            recommended: "REFINE-FIRST",
-            rationale: "Independent claim is defensible but one dependent claim could be tightened to clarify the verified-anchor requirement.",
-            tests_passed: ["claim-form", "novelty-distance", "boundary-named"],
-            tests_failed: [],
-            next_step: "Refine dependent claim 1 to specify the verification mechanism for the anchor corpus.",
+            "triage-verdict": {
+              invention_id: "test-invention-1",
+              recommended: "REFINE-FIRST",
+              rationale: "Independent claim is defensible but one dependent claim could be tightened to clarify the verified-anchor requirement.",
+              tests_passed: ["claim-form", "novelty-distance", "boundary-named"],
+              tests_failed: [],
+              next_step: "Refine dependent claim 1 to specify the verification mechanism for the anchor corpus.",
+            },
           };
         default:
           throw new Error(`unexpected agent slug in deterministic invoker: ${ctx.agent.slug}`);
@@ -98,13 +107,22 @@ describe("patent-triage-v0 end-to-end via deterministic invoker", () => {
     );
 
     expect(result.status).toBe("complete");
-    expect(result.outputs.length).toBe(4); // four phases, four outputs
+    // 4 phases, but multi-output chairs seal more than one record each: cleave→2
+    // (claim-draft + failure-modes), search-novelty→2 (prior-art-hit + novelty-verdict),
+    // refine-claim→1 (claim-draft), judge→1 (triage-verdict; provisional-draft omitted) = 6.
+    expect(result.outputs.length).toBe(6);
 
     const types = result.outputs.map((o) => o.domain_type);
-    expect(types).toEqual(["claim-draft", "prior-art-hit", "claim-draft", "triage-verdict"]);
+    expect(types).toEqual(["claim-draft", "failure-modes", "prior-art-hit", "novelty-verdict", "claim-draft", "triage-verdict"]);
+    // the bug this fixes: the novelty-verdict is now its OWN sealed record, not swallowed
+    // into the prior-art-hit, so a downstream judge can actually consume it.
+    const noveltyVerdict = result.outputs.find((o) => o.domain_type === "novelty-verdict");
+    expect(noveltyVerdict, "novelty-verdict must be sealed as its own record").toBeDefined();
+    expect(noveltyVerdict!.core_type).toBe("Judgment");
 
-    const finalOutput = result.outputs[result.outputs.length - 1];
-    expect(finalOutput!.domain_type).toBe("triage-verdict");
+    // the triage-verdict is found by type, not by position (it's no longer guaranteed last).
+    const finalOutput = result.outputs.find((o) => o.domain_type === "triage-verdict");
+    expect(finalOutput, "triage-verdict missing").toBeDefined();
     const verdictData = finalOutput!.data as { recommended: string; rationale: string };
     expect(verdictData.recommended).toBeDefined();
     expect(["FILE", "FILEABLE", "REFINE-FIRST", "DO-NOT-FILE", "NEEDS-WORK", "NOT-FILEABLE", "GO", "NO-GO"]).toContain(verdictData.recommended);
@@ -123,11 +141,11 @@ describe("patent-triage-v0 end-to-end via deterministic invoker", () => {
     const outputs = createOutputStore(registry);
 
     const invoke: AgentInvoker = (ctx) => {
-      // Minimal valid shapes per agent's first output_type
-      if (ctx.agent.slug === "diamond-cutter") return { independent_claims: ["x"] };
-      if (ctx.agent.slug === "novelty-searcher") return { source: "X", title: "Y", url: "Z" };
+      // Minimal valid shapes; multi-output agents return a blob keyed by domain_type.
+      if (ctx.agent.slug === "diamond-cutter") return { "claim-draft": { independent_claims: ["x"] }, "failure-modes": { named_failure_modes: ["tie"] } };
+      if (ctx.agent.slug === "novelty-searcher") return { "prior-art-hit": { source: "X", title: "Y", url: "Z" }, "novelty-verdict": { verdict: "PASS", rationale: "—" } };
       if (ctx.agent.slug === "claim-rewriter") return { independent_claims: ["x refined"] };
-      if (ctx.agent.slug === "verdict-judger") return { recommended: "REFINE-FIRST", rationale: "—" };
+      if (ctx.agent.slug === "verdict-judger") return { "triage-verdict": { recommended: "REFINE-FIRST", rationale: "—" } };
       throw new Error(`bad slug: ${ctx.agent.slug}`);
     };
 

@@ -261,9 +261,12 @@ export async function runGig(
   const agentBySlug = new Map(standard.agents.map((a) => [a.slug, a]));
 
   // Cross-phase role → output map. A chair in phase N can depends_on a chair
-  // in phase 0..N-1; this map carries each completed chair's output by role so
-  // downstream chairs can resolve their depends_on regardless of phase.
-  const producedByRole = new Map<string, OutputRecord>();
+  // in phase 0..N-1; this map carries each completed chair's outputS by role so
+  // downstream chairs can resolve their depends_on regardless of phase. A chair can
+  // seal MORE than one record (one per declared output type — e.g. a SENSE+JUDGE agent
+  // yields both a Signal hit and a Judgment verdict), so a role maps to a LIST; a
+  // dependent receives all of a role's records and picks the type its contract needs.
+  const producedByRole = new Map<string, OutputRecord[]>();
 
   for (const phase of standard.phases) {
 
@@ -313,7 +316,7 @@ export async function runGig(
           failureErrors.push(`${ch.role}: ${reason}`);
         } else {
           producedByRole.set(ch.role, r.value);
-          produced.push(r.value);
+          produced.push(...r.value);
         }
       }
       if (failures.length > 0) {
@@ -339,8 +342,22 @@ export async function runGig(
     skill_dir?: string;     // set for a skill-backed chair (runs deterministic code, no model)
     primitive: Agent["primitives"][number];
     domain_type: string;
+    // One spec per declared output type the chair seals. Single-output chairs have one
+    // entry (the invoker blob IS its data); multi-output chairs have N (the invoker blob
+    // is keyed by domain_type). Each type's core_type comes from its OWN extends, since an
+    // agent's primitives and output_types are not 1:1.
+    output_specs: Array<{ domain_type: string; core_type: string; primitive: Agent["primitives"][number] }>;
     inputs: OutputRecord[];
     skills: readonly SkillRecord[];
+  }
+
+  // Resolve a chair's declared output types into seal-specs (type → core → primitive).
+  function outputSpecsFor(domainTypes: readonly string[], fallbackPrimitive: Agent["primitives"][number]): PreparedChair["output_specs"] {
+    return domainTypes.map((dt) => {
+      const core = deps.outputs.coreTypeOf(dt) ?? PRIMITIVE_OUTPUT_TYPE[fallbackPrimitive];
+      const primitive = (CORE_TO_PRIMITIVE[core] ?? fallbackPrimitive) as Agent["primitives"][number];
+      return { domain_type: dt, core_type: core, primitive };
+    });
   }
 
   function prepareChair(chair: Chair, phaseName: string): PreparedChair {
@@ -352,9 +369,9 @@ export async function runGig(
       const primitive = CORE_TO_PRIMITIVE[domain_type] ?? "SENSE";
       const inputs: OutputRecord[] = [];
       for (const dep of chair.depends_on) {
-        const rec = producedByRole.get(dep);
-        if (!rec) throw new RuntimeError(`chair "${chair.role}" depends_on "${dep}" which has not been produced`);
-        inputs.push(rec);
+        const recs = producedByRole.get(dep);
+        if (!recs?.length) throw new RuntimeError(`chair "${chair.role}" depends_on "${dep}" which has not been produced`);
+        inputs.push(...recs);
       }
       if (chair.input_contract.length > 0) {
         for (const need of chair.input_contract) {
@@ -363,7 +380,9 @@ export async function runGig(
           }
         }
       }
-      return { chair, phaseName, skill_dir: dir, primitive, domain_type, inputs, skills: [] };
+      // A skill-backed chair seals exactly one output (its deterministic code returns one blob).
+      const output_specs = [{ domain_type, core_type: PRIMITIVE_OUTPUT_TYPE[primitive], primitive }];
+      return { chair, phaseName, skill_dir: dir, primitive, domain_type, output_specs, inputs, skills: [] };
     }
 
     const agent = standard.agents.find((a) => a.slug === chair.agent_slug);
@@ -382,11 +401,11 @@ export async function runGig(
     if (chair.depends_on.length > 0) {
       inputs = [];
       for (const dep of chair.depends_on) {
-        const rec = producedByRole.get(dep);
-        if (!rec) {
+        const recs = producedByRole.get(dep);
+        if (!recs?.length) {
           throw new RuntimeError(`chair "${chair.role}" depends_on "${dep}" which has not been produced`);
         }
-        inputs.push(rec);
+        inputs.push(...recs);
       }
     } else {
       inputs = produced.filter((o) => agent.input_types.some((t) => outputSatisfiesType(o, t)));
@@ -426,14 +445,17 @@ export async function runGig(
       budget.balance = budget.opening - budget.spent + budget.credit;
     }
 
-    return { chair, phaseName, agent, primitive, domain_type, inputs, skills };
+    // Seal one record per declared output type. Single-output agents → one spec (the
+    // invoker blob is the data); multi-output agents → one per type (blob keyed by type).
+    const output_specs = outputSpecsFor(agent.output_types, primitive);
+    return { chair, phaseName, agent, primitive, domain_type, output_specs, inputs, skills };
   }
 
   // Stage 2 — actual invocation + post-invocation output_contract check + write.
   // Errors here ARE aggregated by Promise.allSettled and surfaced as a phase-
   // level RuntimeError naming every failing chair role.
-  async function invokeAndWriteChair(p: PreparedChair): Promise<OutputRecord> {
-    const { chair, phaseName, primitive, domain_type, inputs, skills } = p;
+  async function invokeAndWriteChair(p: PreparedChair): Promise<OutputRecord[]> {
+    const { chair, phaseName, inputs, skills, output_specs } = p;
     let data: Record<string, unknown>;
     let producer_slug: string;
     let domain: string;
@@ -479,27 +501,48 @@ export async function runGig(
       domain = agent.domain ?? standard.domain;
     }
 
-    // Write the typed output (outputs.write validates data vs the domain schema).
-    // Tag with `from_role` so downstream chairs (especially the fan-in shape
-    // where N parallel upstreams share the same agent) can address each
-    // upstream's output by source role, not just by agent_slug.
-    const rec = deps.outputs.write({
-      core_type: PRIMITIVE_OUTPUT_TYPE[primitive],
-      domain_type,
-      domain,
-      gig_id,
-      agent_slug: producer_slug,
-      from_role: chair.role,
-      phase: phaseName,
-      primitive,
-      data,
-      input_refs: inputs.map((i) => i.id),
-      skill_provenance,
-    });
-
-    // Provenance: this output is derived_from each upstream input it consumed.
-    for (const i of inputs) deps.outputs.addRef(rec.id, i.id, "derived_from", primitive);
-    return rec;
+    // Seal one record per declared output type. For a single-output chair the invoker
+    // blob IS the output's data; for a multi-output chair the blob is keyed by domain_type
+    // (each value is that type's data) — a SENSE+JUDGE agent returns { hit: {...},
+    // verdict: {...} } and we seal a Signal record AND a Judgment record from one pass.
+    // Tag each with `from_role` so downstream chairs can address an upstream's outputs by
+    // source role; all records of this chair share its input provenance.
+    const multi = output_specs.length > 1;
+    const written: OutputRecord[] = [];
+    for (const spec of output_specs) {
+      // Single-output: the blob IS the data. Multi-output: read the blob's per-type key.
+      // A multi-output type may be CONDITIONAL (e.g. a verdict's provisional-draft only on
+      // FILEABLE), so a missing key is skipped, not an error — the downstream input_contract
+      // check is what fails loudly if a consumer actually needed a type that wasn't produced.
+      const slice = multi ? (data[spec.domain_type] as Record<string, unknown> | undefined) : data;
+      if (multi && (slice === undefined || slice === null)) continue;
+      if (typeof slice !== "object" || slice === null) {
+        throw new RuntimeError(
+          `chair "${chair.role}" output "${spec.domain_type}" must be a JSON object, got ${typeof slice}`,
+        );
+      }
+      const rec = deps.outputs.write({
+        core_type: spec.core_type,
+        domain_type: spec.domain_type,
+        domain,
+        gig_id,
+        agent_slug: producer_slug,
+        from_role: chair.role,
+        phase: phaseName,
+        primitive: spec.primitive,
+        data: slice as Record<string, unknown>,
+        input_refs: inputs.map((i) => i.id),
+        skill_provenance,
+      });
+      for (const i of inputs) deps.outputs.addRef(rec.id, i.id, "derived_from", spec.primitive);
+      written.push(rec);
+    }
+    if (written.length === 0) {
+      throw new RuntimeError(
+        `chair "${chair.role}" produced no recognized output — expected one of [${output_specs.map((s) => s.domain_type).join(", ")}]`,
+      );
+    }
+    return written;
   }
 
   const genome_hash = genomeHash(standard);

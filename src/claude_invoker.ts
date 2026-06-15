@@ -56,7 +56,14 @@ export const BELBIN_DESCRIPTIONS: Record<string, string> = {
 // genome's skills map and passes the records through. Empty/absent → the Skills
 // section is omitted entirely (no empty header, no noise) so the model only
 // sees skills the agent actually declared.
-export function buildPrompt(ctx: AgentInvocationContext, outputSchema?: Record<string, unknown>): string {
+export function buildPrompt(
+  ctx: AgentInvocationContext,
+  outputSchema?: Record<string, unknown>,
+  // Per-type schemas for a MULTI-output agent (slug → schema). When the agent declares
+  // more than one output type, the Task layer asks for a blob keyed by type rather than a
+  // single object — the runtime then seals one record per key.
+  outputSchemas?: Record<string, Record<string, unknown> | undefined>,
+): string {
   const a = ctx.agent;
   const layers: string[] = [];
 
@@ -115,13 +122,29 @@ export function buildPrompt(ctx: AgentInvocationContext, outputSchema?: Record<s
   const depthLine = a.depth_profile ? `Depth: ${a.depth_profile}\n` : "";
   layers.push(`# Context\n${depthLine}Gig input: ${JSON.stringify(ctx.gig_input)}\nUpstream outputs:\n${inputsBlock}`);
 
-  // 5. Task — produce exactly one typed output as JSON matching its schema.
-  const outType = a.output_types[0] ?? "output";
-  const schemaHint = outputSchema ? `\nIt must match this JSON schema:\n${JSON.stringify(outputSchema)}` : "";
-  layers.push(
-    `# Task\nProduce exactly one "${outType}".${schemaHint}\n` +
-      `Respond with ONLY a single JSON object (the output's data) — no prose, no code fence.`,
-  );
+  // 5. Task — produce the chair's declared typed output(s) as JSON.
+  if (a.output_types.length > 1) {
+    // multi-output: one JSON object keyed by each output-type slug; each value is that
+    // type's data. The runtime seals one record per key (a SENSE+JUDGE agent yields its
+    // Signal and its Judgment in one pass).
+    const perType = a.output_types
+      .map((t) => {
+        const s = outputSchemas?.[t];
+        return `  "${t}": <object${s ? ` matching ${JSON.stringify(s)}` : ""}>`;
+      })
+      .join(",\n");
+    layers.push(
+      `# Task\nProduce one object for EACH of your output types: ${a.output_types.map((t) => `"${t}"`).join(", ")}.\n` +
+        `Respond with ONLY a single JSON object keyed by output-type name — no prose, no code fence:\n{\n${perType}\n}`,
+    );
+  } else {
+    const outType = a.output_types[0] ?? "output";
+    const schemaHint = outputSchema ? `\nIt must match this JSON schema:\n${JSON.stringify(outputSchema)}` : "";
+    layers.push(
+      `# Task\nProduce exactly one "${outType}".${schemaHint}\n` +
+        `Respond with ONLY a single JSON object (the output's data) — no prose, no code fence.`,
+    );
+  }
 
   return layers.join("\n\n");
 }
@@ -204,11 +227,17 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
     execFileSync(b, args, { encoding: "utf-8", maxBuffer: 64 * 1024 * 1024, timeout: spawn.timeout, killSignal: spawn.killSignal }));
   const spawnBounds: SpawnBounds = { timeout: opts.timeout_ms ?? DEFAULT_CHAIR_TIMEOUT_MS, killSignal: "SIGKILL" };
   return (ctx) => {
+    const types = opts.registry?.listTypes() ?? [];
+    const schemaOf = (slug: string | undefined) =>
+      (types.find((t) => t.slug === slug)?.schema as Record<string, unknown> | undefined);
     const outType = ctx.agent.output_types[0];
-    const schema = opts.registry?.listTypes().find((t) => t.slug === outType)?.schema as
-      | Record<string, unknown>
-      | undefined;
-    const prompt = buildPrompt(ctx, schema);
+    const schema = schemaOf(outType);
+    // For a multi-output agent, resolve every declared type's schema so the Task layer can
+    // ask for a blob keyed by type; the runtime seals one record per key.
+    const outputSchemas = ctx.agent.output_types.length > 1
+      ? Object.fromEntries(ctx.agent.output_types.map((t) => [t, schemaOf(t)]))
+      : undefined;
+    const prompt = buildPrompt(ctx, schema, outputSchemas);
     // per-gig mcp-config: only the deployment-permitted servers (empty by default).
     const cfgPath = join(tmpdir(), `coltrane-mcp-${randomUUID()}.json`);
     const servers = opts.mcpServers ?? {};

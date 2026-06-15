@@ -7,12 +7,28 @@
   "schema": {
     "type": "object",
     "properties": {
-      "invention_id": { "type": "string" },
-      "nearest_prior_art": { "type": "array" },
-      "distance_score": { "type": "number" },
-      "verdict": { "type": "string" },
-      "rationale": { "type": "string" }
+      "invention_id": {
+        "type": "string"
+      },
+      "nearest_prior_art": {
+        "type": "array"
+      },
+      "coverage_fraction": {
+        "type": "number"
+      },
+      "verdict": {
+        "type": "string"
+      },
+      "rationale": {
+        "type": "string"
+      },
+      "caveat": {
+        "type": "string"
+      }
     }
   },
-  "required_fields": ["verdict", "rationale"]
+  "required_fields": [
+    "verdict",
+    "rationale"
+  ]
 }

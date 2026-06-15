@@ -1,0 +1,10 @@
+{
+  "slug": "element-mapping-matrix",
+  "version": 1,
+  "skill_type": "analysis",
+  "input_type": "elements-and-refs",
+  "output_type": "anticipation-matrix",
+  "determinism_ratio": 1.0,
+  "permission": { "tier": 0 },
+  "description": "Scaffold the element x reference anticipation matrix (rows = claim elements, cols = prior-art refs, cells default 'unmapped') and compute coverage_fraction from any filled cells. The deterministic structure the model then fills cell-by-cell — replaces a hand-typed confidence with a recomputable measure."
+}

@@ -1,0 +1,10 @@
+{
+  "slug": "claim-element-decompose",
+  "version": 1,
+  "skill_type": "extraction",
+  "input_type": "claim-text",
+  "output_type": "claim-elements",
+  "determinism_ratio": 1.0,
+  "permission": { "tier": 0 },
+  "description": "Split an independent claim into its functional elements on 'comprising' / ';' / 'wherein'. Pure/deterministic — the element list feeds prior-art search and the element-mapping matrix."
+}

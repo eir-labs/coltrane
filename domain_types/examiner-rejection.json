@@ -1,0 +1,27 @@
+{
+  "slug": "examiner-rejection",
+  "version": 1,
+  "extends": "Judgment",
+  "domain": "patent-triage",
+  "status": "active",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "rejections": {
+        "type": "array"
+      },
+      "all_cleared": {
+        "type": "boolean"
+      },
+      "statutes_checked": {
+        "type": "array"
+      },
+      "caveat": {
+        "type": "string"
+      }
+    }
+  },
+  "required_fields": [
+    "rejections"
+  ]
+}

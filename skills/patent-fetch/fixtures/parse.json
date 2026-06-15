@@ -1,0 +1,18 @@
+{
+  "id": "parse",
+  "description": "parses a PatentsView payload into structured hits, corpus tagged patentsview",
+  "input": {
+    "query": "permission tier subprocess sandbox",
+    "mock_response": {
+      "patents": [
+        { "patent_id": "US10000000", "patent_title": "Sandboxed execution of untrusted code", "patent_date": "2018-06-19", "patent_abstract": "A method for executing untrusted code in a permission-scoped subprocess." }
+      ]
+    }
+  },
+  "assertions": [
+    { "path": "corpus", "op": "equals", "value": "patentsview" },
+    { "path": "hits", "op": "exists" },
+    { "path": "hits.0.title", "op": "is_string" },
+    { "path": "hits.0.patent_number", "op": "equals", "value": "US10000000" }
+  ]
+}

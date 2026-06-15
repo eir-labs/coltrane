@@ -1,0 +1,39 @@
+{
+  "slug": "examine-round-record",
+  "version": 1,
+  "extends": "Interpretation",
+  "domain": "patent-triage",
+  "status": "active",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "round_n": {
+        "type": "number"
+      },
+      "amended_claim": {
+        "type": "string"
+      },
+      "claim_state_sha": {
+        "type": "string"
+      },
+      "rejection_state_sha": {
+        "type": "string"
+      },
+      "predecessor_sha": {
+        "type": "string"
+      },
+      "survived": {
+        "type": "boolean"
+      },
+      "caveat": {
+        "type": "string"
+      }
+    }
+  },
+  "required_fields": [
+    "round_n",
+    "claim_state_sha",
+    "rejection_state_sha",
+    "predecessor_sha"
+  ]
+}

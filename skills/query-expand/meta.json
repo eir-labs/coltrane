@@ -1,0 +1,10 @@
+{
+  "slug": "query-expand",
+  "version": 1,
+  "skill_type": "extraction",
+  "input_type": "claim-elements",
+  "output_type": "search-queries",
+  "determinism_ratio": 1.0,
+  "permission": { "tier": 0 },
+  "description": "Turn a claim's functional elements into a deterministic set of prior-art search queries (keyword sets, stopwords stripped). Pure — no I/O, no model."
+}

@@ -1,0 +1,11 @@
+{
+  "slug": "patent-fetch",
+  "version": 1,
+  "skill_type": "extraction",
+  "input_type": "patent-query",
+  "output_type": "patent-hits",
+  "corpus": "patentsview",
+  "determinism_ratio": 1.0,
+  "permission": { "tier": 0 },
+  "description": "Query the USPTO PatentsView corpus for prior art. Deterministic core is the parser (mock_response -> structured hits); the live path fetches when given a query. corpus is always 'patentsview' so coverage-report can attest which corpus was searched."
+}

@@ -7,12 +7,27 @@
   "schema": {
     "type": "object",
     "properties": {
-      "title": { "type": "string" },
-      "description": { "type": "string" },
-      "repo_url": { "type": "string" },
-      "field_of_use": { "type": "string" },
-      "filed_by": { "type": "string" }
+      "title": {
+        "type": "string"
+      },
+      "description": {
+        "type": "string"
+      },
+      "repo_url": {
+        "type": "string"
+      },
+      "field_of_use": {
+        "type": "string"
+      },
+      "filed_by": {
+        "type": "string"
+      },
+      "caveat": {
+        "type": "string"
+      }
     }
   },
-  "required_fields": ["description"]
+  "required_fields": [
+    "description"
+  ]
 }

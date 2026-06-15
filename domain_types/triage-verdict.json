@@ -7,13 +7,37 @@
   "schema": {
     "type": "object",
     "properties": {
-      "invention_id": { "type": "string" },
-      "recommended": { "type": "string" },
-      "rationale": { "type": "string" },
-      "tests_passed": { "type": "array" },
-      "tests_failed": { "type": "array" },
-      "next_step": { "type": "string" }
+      "invention_id": {
+        "type": "string"
+      },
+      "recommended": {
+        "type": "string",
+        "enum": [
+          "FILEABLE",
+          "REFINE-FIRST",
+          "NOT-FILEABLE",
+          "INSUFFICIENT-EVIDENCE"
+        ]
+      },
+      "rationale": {
+        "type": "string"
+      },
+      "tests_passed": {
+        "type": "array"
+      },
+      "tests_failed": {
+        "type": "array"
+      },
+      "next_step": {
+        "type": "string"
+      },
+      "caveat": {
+        "type": "string"
+      }
     }
   },
-  "required_fields": ["recommended", "rationale"]
+  "required_fields": [
+    "recommended",
+    "rationale"
+  ]
 }

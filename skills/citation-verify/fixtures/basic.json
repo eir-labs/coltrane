@@ -1,0 +1,14 @@
+{
+  "id": "grounded",
+  "description": "a claim whose terms appear in the fetched text is verified via fetch",
+  "input": {
+    "claim": "Deno enforces permissions through runtime interception",
+    "fetched_text": "The security model is enforced by the Deno runtime through interception of permission-bearing operations, and is not dependent on the underlying operating system.",
+    "method": "fetch"
+  },
+  "assertions": [
+    { "path": "verified", "op": "is_boolean" },
+    { "path": "method", "op": "equals", "value": "fetch" },
+    { "path": "coverage", "op": "is_number" }
+  ]
+}

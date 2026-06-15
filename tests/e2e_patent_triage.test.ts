@@ -68,7 +68,7 @@ describe("patent-triage-v0 end-to-end via deterministic invoker", () => {
               invention_id: "test-invention-1",
               verdict: "TOO-CLOSE-TO-CALL",
               rationale: "One reference covers the ranking step but not the labeled-anchor refinement.",
-              distance_score: 0.42,
+              coverage_fraction: 0.42,
             },
           };
         case "claim-rewriter": // single-output: the blob IS the claim-draft data

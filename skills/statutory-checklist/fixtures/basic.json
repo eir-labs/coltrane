@@ -1,0 +1,16 @@
+{
+  "id": "one-open-statute",
+  "description": "all four statutes present; an unaddressed §112 keeps all_cleared false",
+  "input": {
+    "assessments": {
+      "§101": { "cleared": true },
+      "§102": { "cleared": true },
+      "§103": { "cleared": true }
+    }
+  },
+  "assertions": [
+    { "path": "all_cleared", "op": "equals", "value": false },
+    { "path": "statutes_checked", "op": "exists" },
+    { "path": "checklist.3.cleared", "op": "equals", "value": false }
+  ]
+}

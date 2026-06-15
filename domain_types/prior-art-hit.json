@@ -7,14 +7,44 @@
   "schema": {
     "type": "object",
     "properties": {
-      "source": { "type": "string" },
-      "url": { "type": "string" },
-      "title": { "type": "string" },
-      "snippet": { "type": "string" },
-      "publication_date": { "type": "string" },
-      "kind": { "type": "string" },
-      "relevance_score": { "type": "number" }
+      "source": {
+        "type": "string"
+      },
+      "url": {
+        "type": "string"
+      },
+      "title": {
+        "type": "string"
+      },
+      "snippet": {
+        "type": "string"
+      },
+      "publication_date": {
+        "type": "string"
+      },
+      "kind": {
+        "type": "string"
+      },
+      "relevance_score": {
+        "type": "number"
+      },
+      "verified": {
+        "type": "boolean"
+      },
+      "verification_method": {
+        "type": "string",
+        "enum": [
+          "fetch",
+          "snippet"
+        ]
+      },
+      "caveat": {
+        "type": "string"
+      }
     }
   },
-  "required_fields": ["source", "title"]
+  "required_fields": [
+    "source",
+    "title"
+  ]
 }

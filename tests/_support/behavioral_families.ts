@@ -55,6 +55,7 @@ export const SHAPER = [
 /** Agents whose substrate is external — they owe RETRIEVAL constraints AND a tool grant.
  *  (Other SENSE agents are input-grounded: their substrate IS the gig input.) */
 export const EXTERNAL_SUBSTRATE: Record<string, string> = {
+  "prior-art-scout": "web + USPTO PatentsView (prior-art corpora)",
   "novelty-searcher": "web (prior-art corpora)",
   "source-walker": "filesystem (local sources)",
   "domain-explorer": "coltrane registry (types, tools, charter, history)",

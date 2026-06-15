@@ -1,0 +1,10 @@
+{
+  "slug": "statutory-checklist",
+  "version": 1,
+  "skill_type": "verification",
+  "input_type": "statute-assessments",
+  "output_type": "statutory-checklist",
+  "determinism_ratio": 1.0,
+  "permission": { "tier": 0 },
+  "description": "Scaffold the patentability statutory checklist (§101 eligibility, §102 anticipation, §103 obviousness, §112 enablement+definiteness): every statute always present with its question; the examiner fills each verdict. all_cleared is derived (true iff every statute is marked cleared). Deterministic structure — the rubric the adversary cannot skip a statute on."
+}

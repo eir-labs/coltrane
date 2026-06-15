@@ -1,0 +1,38 @@
+{
+  "slug": "verdict-record",
+  "version": 1,
+  "extends": "Verdict",
+  "domain": "patent-triage",
+  "status": "active",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "recommended": {
+        "type": "string",
+        "enum": [
+          "FILEABLE",
+          "REFINE-FIRST",
+          "NOT-FILEABLE",
+          "INSUFFICIENT-EVIDENCE"
+        ]
+      },
+      "disclosure_input_sha": {
+        "type": "string"
+      },
+      "coverage_report_sha": {
+        "type": "string"
+      },
+      "examine_round_record_sha": {
+        "type": "string"
+      },
+      "caveat": {
+        "type": "string"
+      }
+    }
+  },
+  "required_fields": [
+    "disclosure_input_sha",
+    "coverage_report_sha",
+    "examine_round_record_sha"
+  ]
+}

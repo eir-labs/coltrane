@@ -1,0 +1,11 @@
+{
+  "id": "three-elements",
+  "description": "a comprising-claim with two clauses + a wherein splits into elements",
+  "input": {
+    "claim_text": "A method comprising: spawning a process with permission flags from a declared grant; verifying a content hash of the code unit, wherein a mismatch substitutes a model-reasoning resolution."
+  },
+  "assertions": [
+    { "path": "elements", "op": "exists" },
+    { "path": "elements.0", "op": "is_string" }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "id": "basic",
+  "description": "two claim elements expand to per-element keyword queries plus a combined query",
+  "input": {
+    "elements": [
+      "spawning a process with operating-system permission flags from a declared grant",
+      "content-hash verification of the code unit before execution"
+    ]
+  },
+  "assertions": [
+    { "path": "queries", "op": "exists" },
+    { "path": "queries.0", "op": "is_string" }
+  ]
+}

@@ -7,11 +7,24 @@
   "schema": {
     "type": "object",
     "properties": {
-      "invention_id": { "type": "string" },
-      "named_failure_modes": { "type": "array" },
-      "boundary_conditions": { "type": "array" },
-      "what_this_is_not": { "type": "array" }
+      "invention_id": {
+        "type": "string"
+      },
+      "named_failure_modes": {
+        "type": "array"
+      },
+      "boundary_conditions": {
+        "type": "array"
+      },
+      "what_this_is_not": {
+        "type": "array"
+      },
+      "caveat": {
+        "type": "string"
+      }
     }
   },
-  "required_fields": ["named_failure_modes"]
+  "required_fields": [
+    "named_failure_modes"
+  ]
 }

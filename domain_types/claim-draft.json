@@ -7,12 +7,27 @@
   "schema": {
     "type": "object",
     "properties": {
-      "invention_id": { "type": "string" },
-      "independent_claims": { "type": "array" },
-      "dependent_claims": { "type": "array" },
-      "preamble": { "type": "string" },
-      "minimum_viable_text": { "type": "string" }
+      "invention_id": {
+        "type": "string"
+      },
+      "independent_claims": {
+        "type": "array"
+      },
+      "dependent_claims": {
+        "type": "array"
+      },
+      "preamble": {
+        "type": "string"
+      },
+      "minimum_viable_text": {
+        "type": "string"
+      },
+      "caveat": {
+        "type": "string"
+      }
     }
   },
-  "required_fields": ["independent_claims"]
+  "required_fields": [
+    "independent_claims"
+  ]
 }

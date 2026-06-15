@@ -1,0 +1,10 @@
+{
+  "slug": "citation-verify",
+  "version": 1,
+  "skill_type": "verification",
+  "input_type": "citation-claim",
+  "output_type": "citation-verdict",
+  "determinism_ratio": 1.0,
+  "permission": { "tier": 0 },
+  "description": "Ground a claim about a source against the source's FETCHED text: returns verified + the supporting quote, or unverified. Codifies retrieved-not-recalled — a claim is verified only when its key terms actually appear in the fetched text, never from a snippet or memory."
+}

@@ -1,0 +1,77 @@
+{
+  "slug": "patent-triage-v1",
+  "domain": "patent-triage",
+  "description": "Patentability triage v1 — grounded and adversarial. analyze the disclosure -> draft the broadest defensible claim + dependent tree -> search patents AND literature (coverage-report attests the corpus) -> map element x reference anticipation -> examine (adversary tries to reject on every statute) -> amend to survive -> judge with a hard-gated verdict (no FILEABLE without patent coverage + a survived round; INSUFFICIENT-EVIDENCE otherwise) -> draft a provisional with real enablement only when FILEABLE. The examine<->amend loop is caller-driven up to max_examine_rounds; survival is a predecessor chain over examine-round-records.",
+  "agent_slugs": [
+    "disclosure-analyst",
+    "claim-architect",
+    "prior-art-scout",
+    "anticipation-mapper",
+    "patent-examiner",
+    "claim-amender",
+    "triage-judge",
+    "spec-drafter"
+  ],
+  "phases": [
+    {
+      "name": "analyze",
+      "chairs": [
+        { "role": "analyze", "agent_slug": "disclosure-analyst", "depends_on": [], "input_contract": [], "output_contract": ["invention-analysis"], "required_skills": [] }
+      ],
+      "intent": "De-spin the disclosure: state the real technical contribution, contrast it with what the inventor claims is novel, enumerate candidate inventive concepts (plural) and embodiments."
+    },
+    {
+      "name": "claim",
+      "chairs": [
+        { "role": "claim", "agent_slug": "claim-architect", "depends_on": [], "input_contract": [], "output_contract": ["claim-draft"], "required_skills": ["claim-element-decompose", "diamond-cutting-discipline"] }
+      ],
+      "intent": "Cut the broadest defensible independent claim AND a dependent fallback tree; grade the cleave; name every stripped feature as representation vs load-bearing."
+    },
+    {
+      "name": "search",
+      "chairs": [
+        { "role": "search", "agent_slug": "prior-art-scout", "depends_on": [], "input_contract": [], "output_contract": ["prior-art-hit", "novelty-verdict", "coverage-report"], "required_skills": ["query-expand", "patent-fetch", "citation-verify"] }
+      ],
+      "intent": "Search patents (USPTO PatentsView) AND literature per claim element; retrieve + verify each hit (fetched, not snippet); emit a coverage-report attesting which corpora were actually searched."
+    },
+    {
+      "name": "map",
+      "chairs": [
+        { "role": "map", "agent_slug": "anticipation-mapper", "depends_on": [], "input_contract": [], "output_contract": ["novelty-analysis"], "required_skills": ["element-mapping-matrix"] }
+      ],
+      "intent": "Build the element x reference anticipation matrix (§102 per element + §103 obviousness combinations) with a derived coverage_fraction. Evidence only — no rejection call."
+    },
+    {
+      "name": "examine",
+      "chairs": [
+        { "role": "examine", "agent_slug": "patent-examiner", "depends_on": [], "input_contract": [], "output_contract": ["examiner-rejection"], "required_skills": ["statutory-checklist"] }
+      ],
+      "intent": "Adversary: try to reject the claim on every statute (§101/§102/§103/§112) via the statutory checklist; silence on a statute is not a clear. The only seat that rejects."
+    },
+    {
+      "name": "amend",
+      "chairs": [
+        { "role": "amend", "agent_slug": "claim-amender", "depends_on": [], "input_contract": [], "output_contract": ["examine-round-record"], "required_skills": ["claim-element-decompose"] }
+      ],
+      "intent": "Narrow the claim to overcome the rejections or concede; seal an examine-round-record chained to its predecessor so survival is recomputable across rounds."
+    },
+    {
+      "name": "judge",
+      "chairs": [
+        { "role": "judge", "agent_slug": "triage-judge", "depends_on": [], "input_contract": [], "output_contract": ["triage-verdict", "verdict-record"], "required_skills": ["citation-verify"] }
+      ],
+      "intent": "Hard-gated verdict: no FILEABLE without a patent corpus searched (coverage gate) AND a claim that survived >=1 examine round (survival gate); INSUFFICIENT-EVIDENCE otherwise. Seal a verdict-record with predecessor links to the disclosure, coverage-report, and final examine-round-record."
+    },
+    {
+      "name": "draft",
+      "chairs": [
+        { "role": "draft", "agent_slug": "spec-drafter", "depends_on": [], "input_contract": [], "output_contract": ["provisional-draft"], "required_skills": [] }
+      ],
+      "intent": "Only on a FILEABLE verdict: a provisional with real §112 enablement — at least one worked embodiment + how-to-build, the surviving claim tree, and an abstract. On any other verdict, nothing."
+    }
+  ],
+  "max_examine_rounds": 3,
+  "eval_slugs": ["claim-tree-eval", "enablement-eval"],
+  "input_types": ["invention-disclosure"],
+  "output_types": ["triage-verdict", "verdict-record", "provisional-draft"]
+}

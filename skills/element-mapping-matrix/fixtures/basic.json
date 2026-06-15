@@ -1,0 +1,13 @@
+{
+  "id": "coverage",
+  "description": "2 elements x 1 ref with one present cell -> matrix + coverage_fraction 0.5",
+  "input": {
+    "elements": ["spawn with declared grant", "hash-mismatch to model reasoning"],
+    "references": ["NodeShield"],
+    "cells": { "0:0": "present", "1:0": "absent" }
+  },
+  "assertions": [
+    { "path": "coverage_fraction", "op": "equals", "value": 0.5 },
+    { "path": "matrix.0.cells.0.status", "op": "equals", "value": "present" }
+  ]
+}

@@ -7,12 +7,27 @@
   "schema": {
     "type": "object",
     "properties": {
-      "invention_id": { "type": "string" },
-      "markdown_text": { "type": "string" },
-      "sections": { "type": "object" },
-      "estimated_filing_cost_usd": { "type": "number" },
-      "recommended_next_step": { "type": "string" }
+      "invention_id": {
+        "type": "string"
+      },
+      "markdown_text": {
+        "type": "string"
+      },
+      "sections": {
+        "type": "object"
+      },
+      "estimated_filing_cost_usd": {
+        "type": "number"
+      },
+      "recommended_next_step": {
+        "type": "string"
+      },
+      "caveat": {
+        "type": "string"
+      }
     }
   },
-  "required_fields": ["markdown_text"]
+  "required_fields": [
+    "markdown_text"
+  ]
 }

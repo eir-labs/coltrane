@@ -1,0 +1,30 @@
+{
+  "slug": "coverage-report",
+  "version": 1,
+  "extends": "Signal",
+  "domain": "patent-triage",
+  "status": "active",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "corpora_searched": {
+        "type": "array"
+      },
+      "query_log": {
+        "type": "array"
+      },
+      "patent_hit_count": {
+        "type": "number"
+      },
+      "literature_hit_count": {
+        "type": "number"
+      },
+      "caveat": {
+        "type": "string"
+      }
+    }
+  },
+  "required_fields": [
+    "corpora_searched"
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "id": "fileable-with-coverage-and-survival",
+  "description": "FILEABLE with a patent corpus searched and a survived round passes through",
+  "input": { "recommended": "FILEABLE", "corpora_searched": ["USPTO PatentsView", "literature"], "survival_count": 1 },
+  "assertions": [
+    { "path": "recommended", "op": "equals", "value": "FILEABLE" },
+    { "path": "gated", "op": "equals", "value": false }
+  ]
+}

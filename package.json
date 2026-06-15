@@ -50,7 +50,7 @@
     "access": "public"
   },
   "scripts": {
-    "build": "tsc && cp src/skill_runner.mjs dist/src/",
+    "build": "tsc && cp src/skill_runner.mjs dist/src/ && chmod +x dist/src/server_entry.js dist/src/server_relay.js",
     "dev": "tsc --watch",
     "prepare": "npm run build",
     "test": "vitest run",

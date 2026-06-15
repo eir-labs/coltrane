@@ -122,23 +122,27 @@ export function buildPrompt(
   const depthLine = a.depth_profile ? `Depth: ${a.depth_profile}\n` : "";
   layers.push(`# Context\n${depthLine}Gig input: ${JSON.stringify(ctx.gig_input)}\nUpstream outputs:\n${inputsBlock}`);
 
-  // 5. Task — produce the chair's declared typed output(s) as JSON.
-  if (a.output_types.length > 1) {
+  // 5. Task — produce the types THIS CHAIR promises as JSON. #174: the chair's output_contract
+  // (threaded as ctx.output_types) is the selector — a multi-capability agent at a single-purpose
+  // chair is asked for only its promised subset, not its whole catalogue. Legacy ctx without it
+  // falls back to the agent's full output_types.
+  const sealTypes = ctx.output_types?.length ? ctx.output_types : a.output_types;
+  if (sealTypes.length > 1) {
     // multi-output: one JSON object keyed by each output-type slug; each value is that
     // type's data. The runtime seals one record per key (a SENSE+JUDGE agent yields its
     // Signal and its Judgment in one pass).
-    const perType = a.output_types
+    const perType = sealTypes
       .map((t) => {
         const s = outputSchemas?.[t];
         return `  "${t}": <object${s ? ` matching ${JSON.stringify(s)}` : ""}>`;
       })
       .join(",\n");
     layers.push(
-      `# Task\nProduce one object for EACH of your output types: ${a.output_types.map((t) => `"${t}"`).join(", ")}.\n` +
+      `# Task\nProduce one object for EACH of your output types: ${sealTypes.map((t) => `"${t}"`).join(", ")}.\n` +
         `Respond with ONLY a single JSON object keyed by output-type name — no prose, no code fence:\n{\n${perType}\n}`,
     );
   } else {
-    const outType = a.output_types[0] ?? "output";
+    const outType = sealTypes[0] ?? "output";
     const schemaHint = outputSchema ? `\nIt must match this JSON schema:\n${JSON.stringify(outputSchema)}` : "";
     layers.push(
       `# Task\nProduce exactly one "${outType}".${schemaHint}\n` +
@@ -231,12 +235,15 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
     const types = opts.registry?.listTypes() ?? [];
     const schemaOf = (slug: string | undefined) =>
       (types.find((t) => t.slug === slug)?.schema as Record<string, unknown> | undefined);
-    const outType = ctx.agent.output_types[0];
+    // #174 — schemas follow the chair's promised subset (ctx.output_types), not the agent's
+    // whole catalogue; legacy ctx without it falls back to the agent's full output_types.
+    const sealTypes = ctx.output_types?.length ? ctx.output_types : ctx.agent.output_types;
+    const outType = sealTypes[0];
     const schema = schemaOf(outType);
-    // For a multi-output agent, resolve every declared type's schema so the Task layer can
+    // For a multi-output chair, resolve every promised type's schema so the Task layer can
     // ask for a blob keyed by type; the runtime seals one record per key.
-    const outputSchemas = ctx.agent.output_types.length > 1
-      ? Object.fromEntries(ctx.agent.output_types.map((t) => [t, schemaOf(t)]))
+    const outputSchemas = sealTypes.length > 1
+      ? Object.fromEntries(sealTypes.map((t) => [t, schemaOf(t)]))
       : undefined;
     const prompt = buildPrompt(ctx, schema, outputSchemas);
     // per-gig mcp-config: only the deployment-permitted servers (empty by default).

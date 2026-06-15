@@ -32,6 +32,7 @@ describe.skipIf(!LIVE)("patent-triage v1 — live acceptance (grounded, not v0's
       ledger: deps.ledger,
       invoke: deps.invoke!,
       skills: deps.skills,
+      skill_dirs: deps.skill_dirs, // ← the gate phase is a skill-backed chair
       model_version: deps.model_version,
     });
     expect(res.status).toBe("complete");
@@ -42,10 +43,16 @@ describe.skipIf(!LIVE)("patent-triage v1 — live acceptance (grounded, not v0's
     const corpora = (coverage!.data["corpora_searched"] as string[]) ?? [];
     expect(corpora.some((c) => /patent|patentsview|uspto|espacenet|lens/i.test(String(c))), `corpora: ${JSON.stringify(corpora)}`).toBe(true);
 
-    // honesty: the verdict is on the closed enum — and any FILEABLE cleared the hard gate
-    const verdict = res.outputs.find((o) => o.domain_type === "triage-verdict");
-    expect(verdict, "v1 must emit a triage-verdict").toBeDefined();
-    const rec = String(verdict!.data["recommended"]);
+    // honesty: the FINAL verdict is the one the deterministic gate chair sealed (from_role
+    // "gate"), on the closed enum. The gate guarantees any FILEABLE cleared coverage + survival.
+    const gated = res.outputs.find((o) => o.domain_type === "triage-verdict" && o.from_role === "gate");
+    expect(gated, "v1 must emit a gate-sealed triage-verdict").toBeDefined();
+    const rec = String(gated!.data["recommended"]);
     expect(["FILEABLE", "REFINE-FIRST", "NOT-FILEABLE", "INSUFFICIENT-EVIDENCE"]).toContain(rec);
+    if (rec === "FILEABLE") {
+      // structurally impossible without patent coverage + a survived round — the gate enforces it
+      expect(gated!.data["has_patent_coverage"]).toBe(true);
+      expect(Number(gated!.data["survival_count"])).toBeGreaterThanOrEqual(1);
+    }
   }, 1_800_000);
 });

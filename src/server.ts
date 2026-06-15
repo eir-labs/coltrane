@@ -53,6 +53,11 @@ export interface ServerDeps {
   // agent's skill_slugs into actual SkillRecords (rendered as the prompt's
   // Skills layer by the Claude invoker).
   skills?: Map<string, SkillRecord> | undefined;
+  // Skills-as-first-class — slug → skill package dir on disk, so a skill-backed chair
+  // (Chair.skill_slug, no agent) runs the skill's deterministic code half in the cage.
+  // Without it, a standard that declares a skill chair (e.g. patent-triage-v1's verdict-gate
+  // gate) fails the chair at dispatch. Derived from `skills` (each record's package_dir).
+  skill_dirs?: Map<string, string> | undefined;
   // 5th-class eval definitions, slug-keyed. Passed to runGig so a standard's
   // declared eval_slugs are judged against real contracts (not a presence stub).
   evals?: Map<string, EvalRecord> | undefined;
@@ -320,7 +325,7 @@ export async function dispatchTool(slug: string, args: Record<string, unknown>, 
           try {
             const res = await runGig(standard, gigInput, {
               outputs: deps.outputs, ledger: deps.ledger, invoke: deps.invoke,
-              model_version: deps.model_version, skills: deps.skills, evals: deps.evals, budget,
+              model_version: deps.model_version, skills: deps.skills, skill_dirs: deps.skill_dirs, evals: deps.evals, budget,
             });
             return {
               ok: true, requires_approval: approval,
@@ -360,7 +365,7 @@ export async function dispatchTool(slug: string, args: Record<string, unknown>, 
         };
         void runGig(standard, gigInput, {
           outputs: deps.outputs, ledger: deps.ledger, invoke: deps.invoke,
-          model_version: deps.model_version, skills: deps.skills, evals: deps.evals, budget,
+          model_version: deps.model_version, skills: deps.skills, skill_dirs: deps.skill_dirs, evals: deps.evals, budget,
           gig_id: gigId, onProgress,
         })
           .then((res) => {
@@ -1166,6 +1171,8 @@ export function bootstrapServerDeps(genomeRoot?: string): ServerDeps {
     }),
     model_version: process.env["COLTRANE_MODEL"] ?? "claude-cli-default",
     skills: genome.skills, // ← skill substrate — runGig resolves agent.skill_slugs into prompt
+    // skill-backed chairs (Chair.skill_slug) run the skill's code half — map slug → package dir.
+    skill_dirs: new Map([...genome.skills.values()].map((s): [string, string] => [s.slug, String(s.package_dir)])),
     evals: genome.evals, // ← 5th-class eval substrate — runGig judges declared eval_slugs
     genome_dir: root, // ← genome-mutation tools persist + ledger-seal into the live genome
     load_errors: [...genome.load_errors], // ← Rob #129 — surfaced via system_health

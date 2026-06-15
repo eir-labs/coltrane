@@ -187,8 +187,26 @@ describe("patent-triage v1 · gates (must-fire — grounded by the verdict-gate 
   it("the verdict-gate hard-guard skill exists", () => {
     expect(skillPkg("verdict-gate")).toBe(true);
   });
-  it("triage-judge constructs its verdict through verdict-gate", () => {
-    expect((agent("triage-judge")?.["skill_slugs"] as string[]) ?? []).toContain("verdict-gate");
+  // The gate is a deterministic skill-backed CHAIR (runtime enforcement), not prompt guidance
+  // bound into the judge: a dedicated "gate" phase runs the verdict-gate skill between judge and
+  // draft, so the wrong verdict cannot be SEALED — not merely discouraged.
+  it("the standard runs verdict-gate as its own skill-backed chair between judge and draft", () => {
+    const phases = (standard("patent-triage-v1")?.["phases"] as Array<{ name: string; chairs: Array<{ role: string; skill_slug?: string; agent_slug?: string; depends_on?: string[]; output_contract?: string[] }> }>) ?? [];
+    const names = phases.map((p) => p.name);
+    const gateIdx = names.indexOf("gate");
+    expect(gateIdx, "a 'gate' phase must exist").toBeGreaterThan(names.indexOf("judge"));
+    expect(gateIdx, "gate must come before draft").toBeLessThan(names.indexOf("draft"));
+    const gateChair = phases[gateIdx]?.chairs?.[0];
+    expect(gateChair?.skill_slug, "gate chair is backed by the verdict-gate skill").toBe("verdict-gate");
+    expect(gateChair?.agent_slug ?? "", "gate chair has no agent — it is deterministic code").toBe("");
+    expect(gateChair?.depends_on ?? [], "gate depends on the judge's candidate").toContain("judge");
+    expect(gateChair?.output_contract ?? [], "gate seals the final triage-verdict").toContain("triage-verdict");
+  });
+  it("the drafter acts on the GATED verdict (draft depends on the gate, not the judge)", () => {
+    const phases = (standard("patent-triage-v1")?.["phases"] as Array<{ name: string; chairs: Array<{ role: string; depends_on?: string[] }> }>) ?? [];
+    const draft = phases.find((p) => p.name === "draft")?.chairs?.[0];
+    expect(draft?.depends_on ?? [], "draft must consume the gate's verdict").toContain("gate");
+    expect(draft?.depends_on ?? [], "draft must NOT bypass the gate to the judge").not.toContain("judge");
   });
   // the negative-form behavior (coverage/survival must-fire) lives in patent_triage_v1_gates.test.ts.
 });

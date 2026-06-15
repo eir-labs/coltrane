@@ -2,9 +2,9 @@
   "slug": "verdict-gate",
   "version": 1,
   "skill_type": "verification",
-  "input_type": "verdict-candidate",
-  "output_type": "gated-verdict",
+  "input_type": "triage-verdict",
+  "output_type": "triage-verdict",
   "determinism_ratio": 1.0,
   "permission": { "tier": 0 },
-  "description": "The hard guard the triage-judge constructs its verdict THROUGH: a FILEABLE candidate that lacks patent-corpus coverage OR a survived examine round is deterministically downgraded to INSUFFICIENT-EVIDENCE, with the gate reasons recorded. Construction-time, not grading-time — the wrong verdict cannot be emitted."
+  "description": "The hard guard that sits as its own chair between the judge's candidate verdict and the sealed triage-verdict: a FILEABLE candidate lacking patent-corpus coverage OR a survived examine round is deterministically downgraded to INSUFFICIENT-EVIDENCE, with the gate reasons recorded. Runtime enforcement, not prompt guidance — the wrong verdict cannot be sealed."
 }

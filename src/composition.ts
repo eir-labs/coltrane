@@ -112,6 +112,13 @@ export interface StandardDef {
   // Names declared here are looked up in the loaded genome's evals registry at
   // runGig time; their scores land in run_fingerprint.eval_scores.
   eval_slugs?: readonly string[];
+  // The gig contract (#177): types that enter the standard from OUTSIDE — gig input or
+  // produced by another standard in a cross-standard DAG. The agent-level primitive-graph
+  // gates treat these as "available upstream": a faithful agent that consumes a type produced
+  // elsewhere composes, and a standalone-CREATE agent whose reasoner arrives this way is
+  // admitted. The chair contracts (input_contract/depends_on) remain the authoritative
+  // per-role dataflow; this only stops the coarse agent-level gate from rejecting real inputs.
+  input_types?: readonly string[];
 }
 
 // Standard.phases is canonical PhaseDef (chairs). Legacy {name, agent} form is
@@ -123,6 +130,9 @@ export interface Standard {
   agents: readonly Agent[];
   phases: readonly PhaseDef[];
   eval_slugs?: readonly string[];
+  // the gig contract (#177) — types entering from outside the standard. Optional on the type so
+  // hand-built Standard literals stay valid; composeStandard always populates it ([] when absent).
+  input_types?: readonly string[];
 }
 
 export class CompositionError extends Error {}
@@ -235,6 +245,7 @@ export function composeStandard(def: {
   agents: readonly Agent[];
   phases: readonly PhaseDef[];
   eval_slugs?: readonly string[];
+  input_types?: readonly string[]; // the gig contract (#177) — types entering from outside the standard
 }): Standard {
   const agentBySlug = new Map(def.agents.map((a) => [a.slug, a]));
 
@@ -420,7 +431,11 @@ export function composeStandard(def: {
     }
   }
 
-  const upstreamOutputs = new Set<string>();
+  // The gig contract (#177): types entering from outside the standard count as available
+  // upstream for the agent-level gates — a faithful agent consuming a cross-standard/gig input
+  // is not "input from nowhere", and such an input can be a standalone-CREATE's reasoner.
+  const standardInputs = new Set<string>(def.input_types ?? []);
+  const upstreamOutputs = new Set<string>(standardInputs);
   const upstreamPhasePrimitives = new Set<Primitive>();
   for (let i = 0; i < phases.length; i++) {
     const ph = phases[i]!;
@@ -442,7 +457,11 @@ export function composeStandard(def: {
       if (firstPrim && NEEDS_UPSTREAM_REASONING.has(firstPrim)) {
         const agentSelfHasReasoning = ag.primitives.slice(1).some((u) => u === "INTERPRET" || u === "PLAN");
         const phaseUpstreamHasReasoning = upstreamPhasePrimitives.has("INTERPRET") || upstreamPhasePrimitives.has("PLAN");
-        if (!agentSelfHasReasoning && !phaseUpstreamHasReasoning) {
+        // #177: a standalone CREATE whose input arrives as a gig/cross-standard input has its
+        // reasoner supplied from outside the standard — the in-standard upstream isn't the only
+        // valid source of reasoning.
+        const gigSuppliesReasoning = ag.input_types.some((it) => standardInputs.has(it));
+        if (!agentSelfHasReasoning && !phaseUpstreamHasReasoning && !gigSuppliesReasoning) {
           throw new CompositionError(
             `standard ${def.slug}: phase ${ph.name} (${ag.slug}) starts with CREATE but no upstream phase supplies INTERPRET or PLAN`,
           );
@@ -498,7 +517,7 @@ export function composeStandard(def: {
     }
   }
 
-  const std: Standard = { slug: def.slug, domain: def.domain, agents: def.agents, phases };
+  const std: Standard = { slug: def.slug, domain: def.domain, agents: def.agents, phases, input_types: [...standardInputs] };
   if (def.eval_slugs && def.eval_slugs.length > 0) {
     std.eval_slugs = def.eval_slugs;
   }

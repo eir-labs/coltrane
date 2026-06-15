@@ -35,7 +35,7 @@ and — only if fileable — a provisional with **real enablement**. Otherwise a
 ## Methodology — the score
 
 ```
-analyze → claim → search → map → [ examine ⇄ amend ]×K → judge → (draft)
+analyze → claim → search → map → [ examine ⇄ amend ]×K → judge → gate → (draft)
 ```
 
 | phase | does |
@@ -45,8 +45,9 @@ analyze → claim → search → map → [ examine ⇄ amend ]×K → judge → 
 | **search** | prior art across **patents *and* literature**, per claim element, iteratively; emit a **coverage-report** (corpora + query log) |
 | **map** | element × reference **matrix**: §102 anticipation per element + §103 obviousness combinations |
 | **examine ⇄ amend** | an **adversary** tries to kill the claim (§101/§102/§103/§112); an amender narrows to survive or concedes; loop until it survives or dies |
-| **judge** | verdict with a real `INSUFFICIENT-EVIDENCE` state and hard gates |
-| **draft** (conditional) | provisional with embodiments + how-to-build, only if fileable |
+| **judge** | the *candidate* verdict (incl. a real `INSUFFICIENT-EVIDENCE` state), with a verdict-record auditable back to its inputs — the model states its honest call, it does not enforce the gate |
+| **gate** | a **deterministic skill-backed chair** (`verdict-gate`, no model) that hard-guards the candidate: a FILEABLE without a patent corpus actually searched OR without a survived examine round is downgraded to `INSUFFICIENT-EVIDENCE`. Runtime enforcement — the wrong verdict cannot be *sealed*, not merely discouraged. Seals the final triage-verdict the drafter acts on |
+| **draft** (conditional) | provisional with embodiments + how-to-build, only if the **gated** verdict is fileable |
 
 ## Agents — 8 seats
 
@@ -62,8 +63,12 @@ clears the behavioral floor. The v0 four (`diamond-cutter`, `novelty-searcher`,
 | **anticipation-mapper** | analyst + critic | INTERPRET · JUDGE | build the element × ref matrix; §102/§103 calls | element-mapping-matrix |
 | **patent-examiner** (adversary) | critic + executor | JUDGE · VERIFY | *try to reject the claim* on every statute | statutory-checklist |
 | **claim-amender** | planner + executor | INTERPRET · PLAN | narrow to survive the rejection, or concede (replaces claim-rewriter) | claim-element-decompose |
-| **triage-judge** | critic + synthesizer | JUDGE · VERIFY | verdict + confidence; **hard-gated** (replaces verdict-judger) | — |
-| **spec-drafter** | executor + planner | PLAN · CREATE | provisional with real enablement (gated) | — |
+| **triage-judge** | critic + synthesizer | JUDGE · VERIFY | the *candidate* verdict + auditable verdict-record (replaces verdict-judger); the hard gate is a downstream chair | citation-verify |
+| **spec-drafter** | executor + planner | PLAN · CREATE | provisional with real enablement (only on the gated-fileable verdict) | — |
+
+The hard gate is **not** an agent — it is a deterministic skill-backed chair (`verdict-gate`)
+seated between `judge` and `draft`, so the coverage/survival guards are runtime enforcement on
+the sealed verdict rather than prompt guidance the model is trusted to follow.
 
 ## Skills — the deterministic spine
 

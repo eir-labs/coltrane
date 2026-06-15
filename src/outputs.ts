@@ -14,6 +14,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import type { Registry } from "./registry.js";
 import { CORE_TYPES } from "./core_types.js";
+import { outputContentHash } from "./canonical_form.js";
 
 // §6 output_refs.relation CHECK constraint, as a closed set.
 export const REF_RELATIONS = [
@@ -44,6 +45,11 @@ export interface OutputRecord {
   phase?: string | undefined;
   primitive: string;
   data: Record<string, unknown>; // validated against core + domain schema at write
+  // Runtime-computed content hash of the canonical output (the same shape runFingerprint
+  // folds over). Stamped at write() so the provenance chain is hash-anchored without any
+  // agent needing a hashing tool: a downstream record's input_refs point at upstream ids
+  // whose content_sha pins exactly what was consumed. Deterministic over identical content.
+  content_sha: string;
   input_refs: string[];
   created_at: string;
   cost_usd?: number | undefined;
@@ -240,11 +246,12 @@ export function createOutputStore(registry: Registry, options?: OutputStoreOptio
           `output rejected: ${o.domain_type} failed schema validation — ${result.errors.join("; ")}`,
         );
       }
+      const domain_type_version = o.domain_type_version ?? 1;
       const rec: OutputRecord = {
         id: randomUUID(),
         core_type: o.core_type,
         domain_type: o.domain_type,
-        domain_type_version: o.domain_type_version ?? 1,
+        domain_type_version,
         domain: o.domain,
         gig_id: o.gig_id,
         agent_slug: o.agent_slug,
@@ -252,6 +259,16 @@ export function createOutputStore(registry: Registry, options?: OutputStoreOptio
         phase: o.phase,
         primitive: o.primitive,
         data: o.data,
+        content_sha: outputContentHash({
+          core_type: o.core_type,
+          domain_type: o.domain_type,
+          domain_type_version,
+          domain: o.domain,
+          primitive: o.primitive,
+          phase: o.phase,
+          agent_slug: o.agent_slug,
+          data: o.data,
+        }),
         input_refs: o.input_refs ?? [],
         created_at: new Date().toISOString(),
         cost_usd: o.cost_usd,

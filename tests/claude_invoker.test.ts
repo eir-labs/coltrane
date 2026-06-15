@@ -49,7 +49,7 @@ describe("buildPrompt: layer structure + mechanics", () => {
           {
             id: "o1", core_type: "Signal", domain_type: "page-model", domain_type_version: 1,
             domain: "eirtests", gig_id: "g1", agent_slug: "site-scout", primitive: "SENSE",
-            data: { url: "/products" }, input_refs: [], created_at: "now",
+            data: { url: "/products" }, input_refs: [], created_at: "now", content_sha: "0".repeat(64),
           },
         ],
       }),

@@ -409,7 +409,10 @@ export async function runGig(
       const dir = deps.skill_dirs?.get(chair.skill_slug);
       if (!dir) throw new RuntimeError(`phase "${phaseName}" chair "${chair.role}" is skill-backed ("${chair.skill_slug}") but no skill_dir is registered`);
       const domain_type = chair.output_contract[0] ?? "Signal";
-      const primitive = CORE_TO_PRIMITIVE[domain_type] ?? "SENSE";
+      // Resolve the core via the registry the same way an agent chair does (outputSpecsFor):
+      // output_contract[0] may be a DOMAIN type (e.g. triage-verdict → Verdict), not a bare core.
+      const core = deps.outputs.coreTypeOf(domain_type) ?? "Signal";
+      const primitive = CORE_TO_PRIMITIVE[core] ?? "SENSE";
       const inputs: OutputRecord[] = [];
       for (const dep of chair.depends_on) {
         const recs = producedByRole.get(dep);
@@ -424,7 +427,7 @@ export async function runGig(
         }
       }
       // A skill-backed chair seals exactly one output (its deterministic code returns one blob).
-      const output_specs = [{ domain_type, core_type: PRIMITIVE_OUTPUT_TYPE[primitive], primitive }];
+      const output_specs = [{ domain_type, core_type: core, primitive }];
       return { chair, phaseName, skill_dir: dir, primitive, domain_type, output_specs, inputs, skills: [] };
     }
 

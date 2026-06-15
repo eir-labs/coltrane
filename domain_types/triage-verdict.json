@@ -33,6 +33,21 @@
       },
       "caveat": {
         "type": "string"
+      },
+      "gated": {
+        "type": "boolean"
+      },
+      "gate_reasons": {
+        "type": "array"
+      },
+      "original_recommended": {
+        "type": "string"
+      },
+      "has_patent_coverage": {
+        "type": "boolean"
+      },
+      "survival_count": {
+        "type": "number"
       }
     }
   },

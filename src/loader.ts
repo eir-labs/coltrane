@@ -36,6 +36,7 @@ export interface StandardFileDef {
   agent_slugs: readonly string[];
   phases: readonly PhaseDef[];
   eval_slugs?: readonly string[];
+  input_types?: readonly string[]; // the gig contract (#177) — types entering from outside the standard
 }
 // Skills and evals have no composer yet — load them as slug-keyed records (structurally
 // validated: slug present + unique). Their richer contracts are a later layer.
@@ -274,6 +275,8 @@ export function loadGenome(
         agents: resolved,
         phases: def.phases,
         ...(def.eval_slugs ? { eval_slugs: def.eval_slugs } : {}),
+        // #177: the gig contract — types entering from outside the standard (gig / cross-standard).
+        ...(def.input_types ? { input_types: def.input_types } : {}),
       }));
       standard_paths.set(def.slug, path);
     } catch (e) {

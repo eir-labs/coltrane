@@ -537,6 +537,14 @@ export function composeStandard(def: {
   for (const ag of def.agents) {
     for (const it of ag.input_types) {
       if (produces.has(it)) {
+        // #183: the TRIGGER must be chair-scoped too, not just the #181 exoneration. `produces`
+        // and the loop above read agent-GLOBAL output_types/input_types — a capability envelope.
+        // A type the agent can globally read+write but which no chair in THIS standard realizes is
+        // not this standard's dataflow and cannot form a cycle here. Only a type a chair both
+        // produces AND consumes in-standard is a candidate; everything else is "not my problem".
+        const chairProduces = (producerRoles.get(it)?.length ?? 0) > 0;
+        const chairConsumes = (consumerRoles.get(it)?.length ?? 0) > 0;
+        if (!chairProduces || !chairConsumes) continue;
         // #181: the chair graph orders this type's producer before its consumer → legal pipeline.
         if (pipelineOrdered(it)) continue;
         const producer = produces.get(it)!;

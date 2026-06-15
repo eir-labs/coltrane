@@ -70,6 +70,10 @@ describe("standard composition: cross-phase §3", () => {
 
 describe("standard composition: cycles", () => {
   it("rejects circular type dependencies", () => {
+    // A circular dependency is expressed through the CHAIR dataflow (depends_on), which is the
+    // authoritative graph — not the agents' global I/O envelopes (#181/#183). chair a depends_on
+    // b and b depends_on a: a genuine loop the role DAG rejects (here as a forward reference,
+    // since each points at a later phase). Agent-global I/O alone no longer conjures a cycle.
     const a = defineAgent({ ...TEST_BEHAVIOR,
       slug: "a",
       primitives: ["INTERPRET"],
@@ -88,11 +92,11 @@ describe("standard composition: cycles", () => {
         domain: "eirtests",
         agents: [a, b],
         phases: [
-          { name: "a", chairs: [{ role: "a", agent_slug: "a", depends_on: [], input_contract: [], output_contract: ["Artifact"], required_skills: [] }] },
-          { name: "b", chairs: [{ role: "b", agent_slug: "b", depends_on: [], input_contract: [], output_contract: ["x"], required_skills: [] }] },
+          { name: "a", chairs: [{ role: "a", agent_slug: "a", depends_on: ["b"], input_contract: ["x"], output_contract: ["y"], required_skills: [] }] },
+          { name: "b", chairs: [{ role: "b", agent_slug: "b", depends_on: ["a"], input_contract: ["y"], output_contract: ["x"], required_skills: [] }] },
         ],
       }),
-    ).toThrow();
+    ).toThrow(/cycle|forward reference/i);
   });
 });
 

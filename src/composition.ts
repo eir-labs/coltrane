@@ -490,6 +490,43 @@ export function composeStandard(def: {
     }
   }
 
+  // #181 — the legacy agent-to-agent producer/consumer cycle check below reasons over
+  // agent-GLOBAL input_types/output_types. That collapses a multi-chair agent (one chair
+  // producing T, a later one consuming T via depends_on) into a single node and false-flags it as
+  // a self-cycle. The authoritative dataflow is the chair depends_on graph — already validated
+  // acyclic above (`dfs`). So defer to it: a type T that is produced AND consumed in-standard is a
+  // legal PIPELINE (not a cycle) when every chair consuming T transitively depends on a chair
+  // producing T. Only when that ordering is absent (the legacy no-depends_on shape, or a genuine
+  // loop the role DAG didn't already reject) does the coarser agent-global check still apply.
+  const transitiveDeps = new Map<string, Set<string>>();
+  function depsOf(role: string): Set<string> {
+    const cached = transitiveDeps.get(role);
+    if (cached) return cached;
+    const acc = new Set<string>();
+    transitiveDeps.set(role, acc); // set before recursion; the graph is already proven acyclic
+    for (const d of adj.get(role) ?? []) {
+      acc.add(d);
+      for (const x of depsOf(d)) acc.add(x);
+    }
+    return acc;
+  }
+  const producerRoles = new Map<string, string[]>();
+  const consumerRoles = new Map<string, string[]>();
+  for (const ph of phases) {
+    for (const ch of ph.chairs) {
+      for (const t of ch.output_contract) producerRoles.set(t, [...(producerRoles.get(t) ?? []), ch.role]);
+      for (const t of ch.input_contract) consumerRoles.set(t, [...(consumerRoles.get(t) ?? []), ch.role]);
+    }
+  }
+  // T is a clean in-standard pipeline iff a chair produces it AND every chair consuming it
+  // transitively depends_on a chair that produces it (producer precedes consumer, role-scoped).
+  const pipelineOrdered = (t: string): boolean => {
+    const producers = producerRoles.get(t) ?? [];
+    if (producers.length === 0) return false;
+    const consumers = consumerRoles.get(t) ?? [];
+    return consumers.every((c) => producers.some((p) => depsOf(c).has(p)));
+  };
+
   const produces = new Map<string, string>();
   for (const ag of def.agents) {
     for (const ot of ag.output_types) {
@@ -500,6 +537,8 @@ export function composeStandard(def: {
   for (const ag of def.agents) {
     for (const it of ag.input_types) {
       if (produces.has(it)) {
+        // #181: the chair graph orders this type's producer before its consumer → legal pipeline.
+        if (pipelineOrdered(it)) continue;
         const producer = produces.get(it)!;
         const producerAgent = agentBySlug.get(producer);
         if (producerAgent) {

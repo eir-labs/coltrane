@@ -445,7 +445,17 @@ export function composeStandard(def: {
       if (ch.skill_slug && !ch.agent_slug) continue; // skill-backed chair: not in the primitive graph
       const ag = agentBySlug.get(ch.agent_slug)!;
       if (i > 0) {
-        for (const it of ag.input_types) {
+        // #188: check what THIS PLACEMENT actually consumes, not the agent's GLOBAL input_types
+        // (its capability envelope across all roles) — so an agent reused across chairs isn't
+        // blocked at an early, lean placement by a type only a later chair needs. Mirror the
+        // runtime's own input resolution (prepareChair): a chair that declares an input_contract
+        // (or a depends_on) is in the faithful path — check its input_contract; a chair that
+        // declares neither falls back to the agent's input_types (the legacy all-prior-outputs
+        // filter the runtime uses for it). Checked against upstream-produced ∪ standard.input_types.
+        const consumed = ch.input_contract.length > 0
+          ? ch.input_contract
+          : ch.depends_on.length === 0 ? ag.input_types : [];
+        for (const it of consumed) {
           if (it && !upstreamOutputs.has(it)) {
             throw new CompositionError(
               `standard ${def.slug}: phase ${ph.name} input ${it} not produced upstream`,

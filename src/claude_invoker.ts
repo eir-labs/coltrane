@@ -11,7 +11,7 @@ import type { AgentInvocationContext, AgentInvoker, AgentStreamEvent } from "./r
 import type { Registry } from "./registry.js";
 import type { ModelTier } from "./pricing.js";
 import type { CodeToolAccess } from "./composition.js";
-import { resolveToolGrants, type ToolProviderRegistry } from "./tool_providers.js";
+import { assertToolGrantsResolvable, type ToolProviderRegistry } from "./tool_providers.js";
 import { playwrightServerFor } from "./playwright_cage.js";
 
 const EMPTY_TOOL_REGISTRY: ToolProviderRegistry = new Map();
@@ -262,17 +262,14 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
       const effectiveConfigs = browserCage
         ? { ...(opts.mcpServerConfigs ?? {}), playwright: browserCage }
         : (opts.mcpServerConfigs ?? {});
-      const resolved = resolveToolGrants(
+      // assertToolGrantsResolvable is the single source of the fail-closed guard (it throws on a
+      // dead name) AND returns the resolved servers — no duplicated inline throw.
+      const resolved = assertToolGrantsResolvable(
+        ctx.agent.slug,
         ctx.agent.allowed_tools ?? [],
         opts.toolProviders ?? EMPTY_TOOL_REGISTRY,
         effectiveConfigs,
       );
-      if (resolved.unknown.length > 0) {
-        throw new Error(
-          `agent "${ctx.agent.slug}" grants unresolvable tool(s) [${resolved.unknown.join(", ")}] — ` +
-            `no provider wired into the spawn (a granted tool with no provider is a dead name; register a provider or remove the grant)`,
-        );
-      }
       resolvedMcpServers = resolved.mcpServers;
     }
     const types = opts.registry?.listTypes() ?? [];

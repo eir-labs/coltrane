@@ -111,3 +111,23 @@ describe("#185 — the invoker fails closed at dispatch on a dead-name grant (be
       .rejects.toThrow(/playwright.*no provider|unresolvable|browser_navigate/i);
   });
 });
+
+// The production wiring — without this the resolver was reachable only via the browser cage and any
+// in-house grant (output_write, …) was a dead name. bootstrapServerDeps must build the genome→provider
+// bridge and pass it through, so a real engine-tool grant resolves while a typo still fails closed.
+describe("#185 — bootstrap wires a populated provider registry (the genome→provider bridge)", () => {
+  it("bootstrapServerDeps populates toolProviders from the engine's registered tool slugs", async () => {
+    const { bootstrapServerDeps } = await import("../src/server.js");
+    const deps = bootstrapServerDeps();
+    expect(deps.toolProviders, "bootstrap must wire a populated provider registry, not the empty default").toBeTruthy();
+    expect(deps.toolProviders!.size, "the bridge must cover the engine's tool surface").toBeGreaterThan(0);
+    expect(deps.toolProviders!.get("output_write"), "a real engine tool must resolve as in_house").toEqual({ tool: "output_write", kind: "in_house" });
+  });
+
+  it("a grant of a registered engine tool resolves; a typo is still a dead name (fail closed)", async () => {
+    const { bootstrapServerDeps } = await import("../src/server.js");
+    const reg = bootstrapServerDeps().toolProviders!;
+    expect(resolveToolGrants(["output_write"], reg, {}).unknown, "a registered in-house grant must resolve").toEqual([]);
+    expect(resolveToolGrants(["not_a_real_tool"], reg, {}).unknown, "an unregistered grant must remain a dead name").toEqual(["not_a_real_tool"]);
+  });
+});

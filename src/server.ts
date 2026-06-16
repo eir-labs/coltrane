@@ -24,6 +24,7 @@ import { MemoryLedger, type Ledger } from "./ledger.js";
 import { standardSimulate } from "./simulate.js";
 import { runGig, BudgetExhausted, type AgentInvoker } from "./runtime.js";
 import { makeClaudeInvoker } from "./claude_invoker.js";
+import type { ToolProvider } from "./tool_providers.js";
 import { composeStandard, defineAgent, CompositionError, type Standard, type Agent, type AgentDef, type PhaseDef } from "./composition.js";
 import { PRIMITIVE_OUTPUT_TYPE, type Primitive } from "./core_types.js";
 import { proposeTypeChange, type DomainTypeDef } from "./type_versioning.js";
@@ -81,6 +82,11 @@ export interface ServerDeps {
   // Base dir for per-gig agent logs (<base>/<gig_id>/<role>.jsonl). Set by bootstrap to
   // the outputs persist dir; absent → no file tee (state-only observability, e.g. tests).
   gig_log_base?: string | undefined;
+  // #185 — the genome→provider bridge: each registered engine tool slug → an in_house provider, so
+  // an agent's grant of a real engine tool RESOLVES instead of failing closed as a dead name. Built
+  // by bootstrap from REGISTERED_TOOL_SLUGS, passed to the invoker, and kept live by tool_register.
+  // Shared by reference with the invoker, so a mid-session register reaches resolution immediately.
+  toolProviders?: Map<string, ToolProvider> | undefined;
 }
 
 export interface ToolResult {
@@ -849,6 +855,9 @@ export async function dispatchTool(slug: string, args: Record<string, unknown>, 
           return { ok: false, requires_approval: approval, error: "tool_register requires slug" };
         }
         REGISTERED_TOOL_SLUGS.add(targetSlug);
+        // Keep the #185 provider bridge live: a freshly-registered tool must resolve for a same-
+        // session agent_define→dispatch (the registry and provider map share lifecycle).
+        deps.toolProviders?.set(targetSlug, { tool: targetSlug, kind: "in_house" });
         const registration_id = randomUUID();
         deps.ledger.append({
           gig_id: `tool_register:${registration_id}`,
@@ -1193,8 +1202,17 @@ export function bootstrapServerDeps(genomeRoot?: string): ServerDeps {
   const genome = resolveGenome(root); // manifest-aware: honors a consumer's `extends` base
   const registry = loadRegistry(genome);
   const mcpServerConfigs = readMcpServerConfigs(root);
+  // #185 — the genome→provider bridge the resolver needs to be reachable in production. Each
+  // registered engine tool slug (the coltrane MCP surface + anything tool_register added) becomes an
+  // in_house provider, so an agent that grants a real engine tool resolves instead of failing closed.
+  // Without this the resolver only ever saw the browser cage, so any non-playwright grant was a dead
+  // name. Shared by reference with the invoker so tool_register stays live (no restart needed).
+  const toolProviders = new Map<string, ToolProvider>(
+    [...REGISTERED_TOOL_SLUGS].map((slug) => [slug, { tool: slug, kind: "in_house" as const }]),
+  );
   return {
     registry,
+    toolProviders,
     // PR #78 follow-up: persist outputs to disk so the audit chain survives an
     // MCP session close (Rob cold-trial requirement). COLTRANE_OUTPUTS_DIR
     // overrides the default ~/.eir/coltrane_outputs path (tests + sandboxes).
@@ -1207,6 +1225,7 @@ export function bootstrapServerDeps(genomeRoot?: string): ServerDeps {
       // #185 — per-agent grant resolution wires each agent's MCP servers into its spawn (coltrane's
       // own server + any the deployment registers in .mcp.json). An unresolvable grant fails closed.
       mcpServerConfigs,
+      toolProviders, // the genome→provider bridge (above) — makes in_house grants resolvable
       // per-chair wall-clock bound; COLTRANE_CHAIR_TIMEOUT_MS overrides for slow deployments
       ...(process.env["COLTRANE_CHAIR_TIMEOUT_MS"] ? { timeout_ms: Number(process.env["COLTRANE_CHAIR_TIMEOUT_MS"]) } : {}),
     }),

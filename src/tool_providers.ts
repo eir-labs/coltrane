@@ -100,12 +100,13 @@ export function assertToolGrantsResolvable(
   allowed: readonly string[],
   registry: ToolProviderRegistry,
   mcpServerConfigs: Readonly<Record<string, unknown>> = {},
-): void {
-  const { unknown } = resolveToolGrants(allowed, registry, mcpServerConfigs);
-  if (unknown.length > 0) {
+): ResolvedGrants {
+  const resolved = resolveToolGrants(allowed, registry, mcpServerConfigs);
+  if (resolved.unknown.length > 0) {
     throw new Error(
-      `agent "${agentSlug}" grants unresolvable tool(s) [${unknown.join(", ")}] — no provider registered ` +
+      `agent "${agentSlug}" grants unresolvable tool(s) [${resolved.unknown.join(", ")}] — no provider registered ` +
         `(a granted tool with no provider is a dead name; register a provider or remove the grant)`,
     );
   }
+  return resolved;
 }

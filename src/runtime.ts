@@ -283,6 +283,25 @@ export async function runGig(
   const started_at = new Date().toISOString();
   const produced: OutputRecord[] = [];
 
+  // #156 — the standard's declared gig inputs. An entry chair (first phase, depends_on []) reads
+  // its typed input_contract from gigInput; those types are satisfied by the gig payload, not an
+  // upstream record. Validate the payload against every entry chair's contract BEFORE any chair
+  // fires — a missing gig input is a hard stop, so no model tokens are spent on bad input.
+  const standardInputs = new Set<string>(standard.input_types ?? []);
+  const firstPhase = standard.phases[0];
+  if (firstPhase) {
+    for (const ch of firstPhase.chairs) {
+      if (ch.depends_on.length > 0) continue;
+      for (const need of ch.input_contract) {
+        if (standardInputs.has(need) && gigInput[need] === undefined) {
+          throw new RuntimeError(
+            `gig input missing "${need}" required by entry chair "${ch.role}" (MissingGigInput)`,
+          );
+        }
+      }
+    }
+  }
+
   // Best-effort progress sink — a logging/monitor sink must never break the run.
   const emit = (ev: GigProgressEvent): void => {
     try { deps.onProgress?.(ev); } catch { /* observability must not fail the gig */ }
@@ -427,7 +446,9 @@ export async function runGig(
       }
       if (chair.input_contract.length > 0) {
         for (const need of chair.input_contract) {
-          if (!inputs.some((o) => outputSatisfiesType(o, need))) {
+          // #156: a type satisfied by an upstream record OR by the gig payload (entry-chair seed).
+          const fromGig = standardInputs.has(need) && gigInput[need] !== undefined;
+          if (!fromGig && !inputs.some((o) => outputSatisfiesType(o, need))) {
             throw new RuntimeError(`chair "${chair.role}" input_contract requires "${need}" but upstream outputs only provide [${inputs.map((o) => o.domain_type).join(",")}]`);
           }
         }
@@ -469,7 +490,9 @@ export async function runGig(
     // subtype extending it; a domain-type requirement stays exact. Empty skips.
     if (chair.input_contract.length > 0) {
       for (const need of chair.input_contract) {
-        if (!inputs.some((o) => outputSatisfiesType(o, need))) {
+        // #156: satisfied by an upstream record OR the gig payload (entry-chair typed seed).
+        const fromGig = standardInputs.has(need) && gigInput[need] !== undefined;
+        if (!fromGig && !inputs.some((o) => outputSatisfiesType(o, need))) {
           const provided = inputs.map((o) => o.domain_type).join(",");
           throw new RuntimeError(
             `chair "${chair.role}" input_contract requires "${need}" but upstream outputs only provide [${provided}]`,

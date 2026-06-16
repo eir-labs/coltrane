@@ -102,3 +102,29 @@ describe("skill_define persists a loadable package (audit E)", () => {
     expect(existsSync(join(dir, "skills", "no-fixtures")), "wrote a package that can't load").toBe(false);
   });
 });
+
+// ── DomainType · E — type_register persists a record the loader validates against DomainTypeSchema ──
+describe("type_register persists a schema-valid record that reloads (audit DomainType)", () => {
+  it("a registered type reloads with version + status, validated against DomainTypeSchema", async () => {
+    const dir = seedGenome("coltrane-typert-");
+    const r = await dispatchTool("type_register", {
+      slug: "roundtrip-type",
+      extends: "Signal",
+      domain: "demo",
+      schema: { properties: { note: { type: "string" } } },
+      required_fields: ["note"],
+      reason: "audit roundtrip",
+    }, deps(dir));
+    expect(r.ok, JSON.stringify(r)).toBe(true);
+
+    // persisted with the server-assigned fields the authored surface omits
+    const onDisk = JSON.parse(readFileSync(join(dir, "domain_types", "roundtrip-type.json"), "utf8"));
+    expect(onDisk.version).toBe(1);
+    expect(onDisk.status).toBe("active");
+
+    // a fresh load validates it against DomainTypeSchema (status enum + version) — no load error
+    const g = loadGenome(dir);
+    expect(g.load_errors.filter((e) => e.kind === "domain_type"), "type failed schema validation on load").toEqual([]);
+    expect(g.domain_types.get("roundtrip-type@1"), "type vanished on reload").toBeTruthy();
+  });
+});

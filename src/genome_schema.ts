@@ -124,14 +124,19 @@ export const EvalSchema = z.object({
   asserts: z.string().optional(),
 });
 
-// ── DomainType — drives type_register/type_extend + the loader's type-DEFINITION validation
-//    (distinct from registry.validate, which checks output DATA against a type's schema). ──
+// ── DomainType — the ONE source for the persisted type record. The loader's DomainTypeRecord and
+//    the registry's working projection both derive from this (no more three near-duplicate defs),
+//    and type_register's MCP surface is generated from it. version/status default (every on-disk
+//    file carries version:1 + status:"active"), so z.output has them present — the loader keys on
+//    `slug@version` and reads status — while z.input leaves them optional for the register op. ──
+export const DomainTypeStatusSchema = z.enum(["active", "deprecated", "retired"]);
 export const DomainTypeSchema = z.object({
   slug: z.string(),
-  version: z.number().optional(),
+  version: z.number().default(1),
   extends: z.string(),
   domain: z.string(),
-  status: z.string().optional(),
+  status: DomainTypeStatusSchema.default("active"),
+  description: z.string().optional(),
   schema: z.record(z.unknown()),
   required_fields: z.array(z.string()).default([]),
 });

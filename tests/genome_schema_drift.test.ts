@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { MCP_TOOLS } from "../src/mcp.js";
 import { loadGenome } from "../src/loader.js";
 import { defineAgent, type AgentDef } from "../src/composition.js";
-import { AgentSchema, StandardSchema, SkillSchema, zodToMcpProps } from "../src/genome_schema.js";
+import { AgentSchema, StandardSchema, SkillSchema, DomainTypeSchema, zodToMcpProps } from "../src/genome_schema.js";
 
 const REPO = fileURLToPath(new URL("..", import.meta.url));
 const schemaProps = (slug: string): string[] => {
@@ -112,4 +112,18 @@ describe("drift · litmus — MCP write-surfaces stay generated from the schema"
       expect(schemaPropType("agent_define", f), `${f} must advertise as array, not its element type`).toBe("array");
     });
   }
+
+  // type_register authors a SUBSET of the type record (version/status are server-assigned), so its
+  // surface is the authored projection of DomainTypeSchema + `reason`. Pin that the authored fields
+  // it advertises carry the schema's generated TYPES (a hand-rewrite that mistyped `schema` or
+  // `required_fields` fails here) and that it never advertises the server-assigned fields.
+  it("type_register advertises the schema-derived authored fields (+ reason), not the server-assigned ones", () => {
+    const props = schemaProps("type_register");
+    expect(props.sort()).toEqual(["domain", "extends", "reason", "required_fields", "schema", "slug"]);
+    const dt = zodToMcpProps(DomainTypeSchema);
+    expect(schemaPropType("type_register", "required_fields")).toBe(dt["required_fields"]); // "array"
+    expect(schemaPropType("type_register", "schema")).toBe(dt["schema"]);                   // "object"
+    expect(props).not.toContain("version"); // server-assigned
+    expect(props).not.toContain("status");  // server-assigned
+  });
 });

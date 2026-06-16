@@ -1,5 +1,5 @@
 import type { ChangeClass } from "./type_versioning.js";
-import { zodToMcpProps, AgentSchema, StandardSchema, SkillSchema } from "./genome_schema.js";
+import { zodToMcpProps, AgentSchema, StandardSchema, SkillSchema, DomainTypeSchema } from "./genome_schema.js";
 
 export type MCPCategory =
   | "understand"
@@ -20,6 +20,16 @@ const obj = (props: Record<string, string>) => ({
   properties: Object.fromEntries(Object.entries(props).map(([k, v]) => [k, { type: v }])),
 });
 
+// Select named fields from a generated prop map (preserving their derived JSON types).
+const pickProps = (src: Record<string, string>, keys: readonly string[]): Record<string, string> =>
+  Object.fromEntries(keys.filter((k) => src[k] !== undefined).map((k) => [k, src[k] as string]));
+
+// type_register's surface is the AUTHORED projection of DomainTypeSchema (the single source) — field
+// types are generated, so they can't drift from the schema; version/status are server-assigned (not
+// authored), and `reason` is approval metadata. (type_extend is an extension DELTA — fields_to_add is
+// not a restatement of the type record — so there's nothing to derive there.)
+const DT_AUTHORED = pickProps(zodToMcpProps(DomainTypeSchema), ["slug", "extends", "domain", "schema", "required_fields"]);
+
 export const MCP_TOOLS: readonly MCPToolDef[] = [
   { slug: "type_resolve",                  category: "understand", input_schema: obj({ core_type: "string", domain: "string", semantic_description: "string", required_fields: "array" }), output_schema: obj({ action: "string", candidates: "array", recommendation: "object" }) },
   { slug: "type_browse",                   category: "understand", input_schema: obj({ domain: "string", extends: "string", min_usage: "number", status: "string" }), output_schema: obj({ types: "array", stats: "object" }) },
@@ -30,7 +40,7 @@ export const MCP_TOOLS: readonly MCPToolDef[] = [
   { slug: "execution_history_read",        category: "understand", input_schema: obj({ company_id: "string", domain: "string" }), output_schema: obj({ gigs: "array", performance_summary: "object" }) },
   { slug: "access_grant_check",            category: "understand", input_schema: obj({ company_id: "string", resource_uri: "string", required_permissions: "array" }), output_schema: obj({ granted: "boolean", missing_permissions: "array", expires_in: "number" }) },
 
-  { slug: "type_register",                 category: "build", input_schema: obj({ slug: "string", extends: "string", domain: "string", schema: "object", required_fields: "array", reason: "string" }), output_schema: obj({ registered: "boolean", domain_type_id: "string", version: "number" }) },
+  { slug: "type_register",                 category: "build", input_schema: obj({ ...DT_AUTHORED, reason: "string" }), output_schema: obj({ registered: "boolean", domain_type_id: "string", version: "number" }) },
   { slug: "type_extend",                   category: "build", input_schema: obj({ slug: "string", domain: "string", fields_to_add: "object", reason: "string" }), output_schema: obj({ new_version: "number", changelog_entry: "string" }) },
   { slug: "agent_define",                  category: "build", input_schema: obj(zodToMcpProps(AgentSchema)), output_schema: obj({ agent_profile_id: "string", validation_result: "object" }) },
   { slug: "agent_evolve",                  category: "build", input_schema: obj({ slug: "string", changes: "object", reason: "string", evidence: "object" }), output_schema: obj({ new_version: "number", cascade_check: "object" }) },

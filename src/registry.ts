@@ -24,10 +24,11 @@ export const RESOLVE_WEIGHTS = {
   recency: 0.1,
 } as const;
 
-// DomainType is now derived from the single source (genome_schema.ts DomainTypeSchema). version +
-// status are optional additions; the load-bearing shape (slug/extends/domain/schema/required_fields)
-// is unchanged.
-export type DomainType = DomainTypeOutput;
+// The registry's working view of a domain type — the fields its resolve/validate logic reads — as an
+// explicit PROJECTION of the single Zod source (genome_schema.ts DomainTypeOutput), not a third
+// hand-written restatement. The persisted record additionally carries version/status/description,
+// which the registry doesn't use; deriving the shared fields keeps them from drifting from the source.
+export type DomainType = Pick<DomainTypeOutput, "slug" | "extends" | "domain" | "schema" | "required_fields">;
 
 export interface ResolveQuery {
   extends: string;

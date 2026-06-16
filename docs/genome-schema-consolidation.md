@@ -76,13 +76,23 @@ path** (define-via-handler → seal → persist → reload). The six sites: **A*
    `sealSkillPackage` writes the package layout (meta.json + skill.mjs/skill.md + fixtures/), and the
    handler refuses an incomplete package the loader would reject.
 
-Every fix is pinned by a **roundtrip test on the real path** (`tests/genome_write_roundtrip.test.ts`,
-the `browser_grant` case in `tests/agent_behavioral_representation.test.ts`).
+5. **DomainType · C + A** — `type_register`'s MCP surface was hand-written (could drift from
+   `DomainTypeSchema`), and the type was restated in *three* near-duplicate defs
+   (`loader.DomainTypeRecord` / `registry.DomainType` / `DomainTypeSchema`). Fixed: `DomainTypeSchema`
+   is the one source (status is now a proper enum, version/status default to match every on-disk
+   file, `description` modeled); `loader.DomainTypeRecord = DomainTypeOutput`; `registry.DomainType`
+   is an explicit `Pick<DomainTypeOutput, …>` projection of the fields the registry uses;
+   `type_register`'s surface is the generated authored projection of the schema + `reason`.
+   (`type_extend` stays hand-written — `fields_to_add` is an extension *delta*, not a restatement of
+   the type record, so there's nothing to derive.)
 
-**Fast-follow (works today but fragile, not yet de-drifted):** DomainType's MCP surface
-(`type_register`/`type_extend`) is hand-written, not generated from `DomainTypeSchema`; and there are
-three near-duplicate domain-type type defs (`loader.DomainTypeRecord` / `registry.DomainType` /
-`DomainTypeSchema`). DomainType roundtrips correctly (flat JSON), so this is hardening, not a bug.
+Every fix is pinned by a **roundtrip test on the real path** (`tests/genome_write_roundtrip.test.ts`,
+the `browser_grant` case in `tests/agent_behavioral_representation.test.ts`) and the standing surface
+litmus (`tests/genome_schema_drift.test.ts`).
+
+**Where it stands:** all five classes now derive type + constructor + (where applicable) MCP surface
++ handler + persist-format from one Zod source, each verified define→persist→reload. The only
+intentionally-not-derived surface is `type_extend` (an op delta, noted above).
 
 ## Two notes
 

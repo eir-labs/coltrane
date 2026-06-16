@@ -3,7 +3,7 @@ import { join, extname, resolve, isAbsolute, dirname } from "node:path";
 import { createRequire } from "node:module";
 import { defineAgent, composeStandard, CompositionError, GenomeIncompleteError, type Agent, type AgentDef, type Standard, type PhaseDef } from "./composition.js";
 import { loadSkillPackage, SkillLoadError } from "./skills.js";
-import { SkillSchema, EvalSchema, DomainTypeSchema, type SkillOutput, type EvalOutput } from "./genome_schema.js";
+import { SkillSchema, EvalSchema, DomainTypeSchema, type SkillOutput, type EvalOutput, type DomainTypeOutput } from "./genome_schema.js";
 import type { Primitive } from "./core_types.js";
 import { CANONICAL_CORE_TYPES } from "./canonical_core_types.js";
 
@@ -14,15 +14,10 @@ export interface CoreTypeRecord {
   schema: object;
 }
 
-export interface DomainTypeRecord {
-  slug: string;
-  version: number;
-  extends: string;
-  domain: string;
-  status: "active" | "deprecated" | "retired";
-  schema: object;
-  required_fields: readonly string[];
-}
+// The persisted domain-type record derives from the single Zod source (genome_schema.ts) — the
+// hand-written interface that restated the same shape is retired. version/status are present on the
+// output type (the schema defaults them), so the `slug@version` key + status reads stay sound.
+export type DomainTypeRecord = DomainTypeOutput;
 
 // On-disk shapes for the remaining three definition classes. Agents are AgentDef-shaped
 // (validated through defineAgent). A standard file references its agents by slug (DRY —

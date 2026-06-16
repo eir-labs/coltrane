@@ -1,4 +1,5 @@
 import Ajv from "ajv";
+import { type DomainTypeOutput } from "./genome_schema.js";
 import { CORE_TYPES, type CoreType } from "./core_types.js";
 import { CANONICAL_CORE_TYPES } from "./canonical_core_types.js";
 import type { LoadedGenome } from "./loader.js";
@@ -23,13 +24,10 @@ export const RESOLVE_WEIGHTS = {
   recency: 0.1,
 } as const;
 
-export interface DomainType {
-  slug: string;
-  extends: string;
-  domain: string;
-  schema: Record<string, unknown>;
-  required_fields: string[];
-}
+// DomainType is now derived from the single source (genome_schema.ts DomainTypeSchema). version +
+// status are optional additions; the load-bearing shape (slug/extends/domain/schema/required_fields)
+// is unchanged.
+export type DomainType = DomainTypeOutput;
 
 export interface ResolveQuery {
   extends: string;

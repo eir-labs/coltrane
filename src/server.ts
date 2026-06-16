@@ -17,6 +17,7 @@ import {
 } from "./mcp.js";
 import { createRegistry, loadRegistry, type Registry, type DomainType } from "./registry.js";
 import { loadGenome, resolveGenome, type SkillRecord, type EvalRecord, type LoadError } from "./loader.js";
+import { SkillSchema } from "./genome_schema.js";
 import { sealAgentDefinition, sealDefinition, recordIdentity } from "./genome_writer.js";
 import { createOutputStore, defaultOutputsPersistDir, type OutputStore } from "./outputs.js";
 import { MemoryLedger, type Ledger } from "./ledger.js";
@@ -909,7 +910,7 @@ export async function dispatchTool(slug: string, args: Record<string, unknown>, 
           const standards_affected: Array<{ slug: string; type_check_passed: boolean; errors: string[] }> = [];
           for (const std of deps.standards?.values() ?? []) {
             if (!std.agents.some((a) => a.slug === evolveSlug)) continue;
-            const rebound = std.agents.map((a) => (a.slug === evolveSlug ? { ...a, ...changes } : a));
+            const rebound = std.agents.map((a) => (a.slug === evolveSlug ? ({ ...a, ...changes } as Agent) : a));
             try {
               composeStandard({ slug: std.slug, domain: std.domain, agents: rebound, phases: std.phases, ...(std.eval_slugs ? { eval_slugs: std.eval_slugs } : {}) });
               standards_affected.push({ slug: std.slug, type_check_passed: true, errors: [] });
@@ -972,9 +973,15 @@ export async function dispatchTool(slug: string, args: Record<string, unknown>, 
         // gig in the same session resolves it into an agent's Skills layer.
         const skSlug = typeof args["slug"] === "string" ? (args["slug"] as string).trim() : "";
         if (!skSlug) return { ok: false, requires_approval: approval, error: "skill_define requires a non-empty slug" };
-        const def: SkillRecord = { slug: skSlug };
-        if (typeof args["domain"] === "string") def["domain"] = args["domain"];
-        if (typeof args["md"] === "string") def["md"] = args["md"];
+        // Validate against the single Zod source — skill_define is package-aware (meta + permission/
+        // network + fixtures + code/md), not the retired flat {slug, domain, md}. Unknown keys are
+        // dropped; a malformed declared field is rejected before the write/seal.
+        const skParsed = SkillSchema.safeParse({ ...args, slug: skSlug });
+        if (!skParsed.success) {
+          const why = skParsed.error.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`).join("; ");
+          return { ok: false, requires_approval: approval, error: `skill_define: ${why}` };
+        }
+        const def: SkillRecord = skParsed.data;
         const sealed = sealDefinition("skill_define", skSlug, def, deps.ledger, deps.genome_dir, "skills");
         deps.skills?.set(skSlug, def);
         return { ok: true, requires_approval: approval, data: { skill_id: skSlug, content_hash: sealed.content_hash, dependency_hash: sealed.dependency_hash, effective_hash: sealed.effective_hash } };
@@ -1151,10 +1158,26 @@ function loadedGenomeHash(genome: LoadedGenome): string {
  * root is COLTRANE_GENOME or the cwd. Pure + testable (no stdio); fails loud if the cwd
  * isn't a genome (loadGenome rejects a missing/invalid core_types/).
  */
+// #185 — the MCP servers a deployment makes available, keyed by server slug. The repo's .mcp.json
+// IS that registry (coltrane ships its own "coltrane" server; a deployment adds e.g. a browser
+// server there). Per-agent grant resolution wires only the servers an agent's allowed_tools name
+// into its spawn — deny-by-default. Falls back to coltrane's own server if .mcp.json is absent.
+function readMcpServerConfigs(root: string): Record<string, unknown> {
+  const path = join(root, ".mcp.json");
+  if (existsSync(path)) {
+    try {
+      const parsed = JSON.parse(readFileSync(path, "utf8")) as { mcpServers?: Record<string, unknown> };
+      if (parsed.mcpServers && typeof parsed.mcpServers === "object") return parsed.mcpServers;
+    } catch { /* fall through to the default */ }
+  }
+  return { coltrane: { command: "node", args: ["dist/src/server_entry.js"] } };
+}
+
 export function bootstrapServerDeps(genomeRoot?: string): ServerDeps {
   const root = genomeRoot ?? process.env["COLTRANE_GENOME"] ?? process.cwd();
   const genome = resolveGenome(root); // manifest-aware: honors a consumer's `extends` base
   const registry = loadRegistry(genome);
+  const mcpServerConfigs = readMcpServerConfigs(root);
   return {
     registry,
     // PR #78 follow-up: persist outputs to disk so the audit chain survives an
@@ -1166,6 +1189,9 @@ export function bootstrapServerDeps(genomeRoot?: string): ServerDeps {
     invoke: makeClaudeInvoker({
       registry,
       model: process.env["COLTRANE_MODEL"],
+      // #185 — per-agent grant resolution wires each agent's MCP servers into its spawn (coltrane's
+      // own server + any the deployment registers in .mcp.json). An unresolvable grant fails closed.
+      mcpServerConfigs,
       // per-chair wall-clock bound; COLTRANE_CHAIR_TIMEOUT_MS overrides for slow deployments
       ...(process.env["COLTRANE_CHAIR_TIMEOUT_MS"] ? { timeout_ms: Number(process.env["COLTRANE_CHAIR_TIMEOUT_MS"]) } : {}),
     }),

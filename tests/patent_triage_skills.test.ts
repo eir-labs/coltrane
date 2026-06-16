@@ -10,6 +10,7 @@ import { runSkillFixtures } from "../src/skill_subprocess.js";
 const REPO = fileURLToPath(new URL("..", import.meta.url));
 const SKILLS = [
   "patent-fetch",
+  "patent-search",
   "query-expand",
   "citation-verify",
   "claim-element-decompose",

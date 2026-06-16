@@ -45,6 +45,18 @@ Sources, by tier:
 - **EPO OPS** (HTTP) — official REST API, OAuth key, free tier. Best *structured* source (needs a key).
 - **USPTO Patent Public Search** (browser) — JSON behind a session; the search UX is JS-walled.
 
+### On discovery (search) vs verification (fetch)
+
+Per-patent **fetch** is reliable: the page is server-rendered, a plain GET works. **Search/discovery is
+the hostile surface** — Google Patents' `/xhr/query` backend *is* server-side JSON (so the HTTP tier
+*can* reach it), but it aggressively rate-limits bursts with a long, global IP penalty. `patent-search`
+ships as a **proof-of-concept**: it demonstrates the network cage governing a discovery skill
+(allowlist + GET-only + budget + backoff), and it **degrades honestly** — a throttle reports
+`status: "unreachable"` with zero candidates, never a fabricated result. It is *not* the production
+search. The accurate, suitable search lands with the **browser/PW tier** (Lane B), where a real
+session on the search UI is the right instrument. So: HTTP tier = solid verification + a discovery POC;
+browser tier = production discovery.
+
 ## The tool addition — a network permission tier on the skill cage
 
 The cage today is tiers 0/1/2 = filesystem-read / +write / +child; **network is denied at every

@@ -1,0 +1,107 @@
+{
+  "id": "google-patents-search",
+  "description": "Recorded Google Patents search JSON + a fetched candidate page → a grounded coverage-report (deterministic replay of the HTTP discovery tier: search → fetch top-K → hash-pinned records).",
+  "input": {
+    "query": "restricted code signing",
+    "max_results": 5,
+    "fetch_top": 1,
+    "search_json": {
+      "results": {
+        "total_num_results": 120163,
+        "cluster": [
+          {
+            "result": [
+              {
+                "id": "patent/US9652599B2/en",
+                "patent": {
+                  "publication_number": "US9652599B2",
+                  "title": "Restricted code signing",
+                  "snippet": "signing data such as code images",
+                  "priority_date": "2014-06-11"
+                }
+              },
+              {
+                "id": "patent/US9141150B1/en",
+                "patent": {
+                  "publication_number": "US9141150B1",
+                  "title": "Managing a tokenization service",
+                  "snippet": "tokenization of sensitive data",
+                  "priority_date": "2013-01-01"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "pages": {
+      "US9652599B2": "<!doctype html><html><head>\n<meta name=\"DC.title\" content=\"Restricted code signing\"/>\n<meta name=\"description\" content=\"A method and system is provided for signing data such as code images. In one embodiment, the method comprises receiving, from a requestor, a request to sign the data according to a requested configuration.\"/>\n</head><body>\n<dd itemprop=\"assigneeOriginal\">Arris Enterprises LLC</dd>\n<dd itemprop=\"inventor\">Alexander Medvinsky</dd>\n<dd itemprop=\"inventor\">Ali Negahdar</dd>\n<dd itemprop=\"inventor\">Xin Qiu</dd>\n<time itemprop=\"priorityDate\">2014-06-11</time>\n<time itemprop=\"filingDate\">2015-06-11</time>\n<time itemprop=\"publicationDate\">2017-05-16</time>\n<span itemprop=\"Code\">G06F21/10</span>\n<span itemprop=\"Code\">H04L9/3247</span>\n<span itemprop=\"Code\">H04L63/123</span>\n<section itemprop=\"abstract\"><div class=\"abstract\">A method and system is provided for signing data.</div></section>\n<section itemprop=\"claims\">\n<div class=\"claim\"><div class=\"claim-text\">1. A method of signing data, comprising: receiving, from a requester, a request to sign the data according to a requested configuration.</div></div>\n<div class=\"claim\"><div class=\"claim-text\">2. The method of claim 1, further comprising modifying the data according to the requested configuration.</div></div>\n</section>\n<div itemprop=\"backwardReferences\"><table><tbody>\n<tr><td><span itemprop=\"publicationNumber\">US20050246523A1</span></td></tr>\n<tr><td><span itemprop=\"publicationNumber\">US9141150B1</span></td></tr>\n<tr><td><span itemprop=\"publicationNumber\">US8572368B1</span></td></tr>\n</tbody></table></div>\n</body></html>"
+    }
+  },
+  "expected_output": {
+    "corpora_searched": [
+      {
+        "corpus": "Google Patents",
+        "status": "searched"
+      }
+    ],
+    "query_log": [
+      "restricted code signing"
+    ],
+    "patent_hit_count": 2,
+    "candidates": [
+      {
+        "publication_number": "US9652599B2",
+        "title": "Restricted code signing",
+        "snippet": "signing data such as code images",
+        "priority_date": "2014-06-11",
+        "url": "https://patents.google.com/patent/US9652599B2/en"
+      },
+      {
+        "publication_number": "US9141150B1",
+        "title": "Managing a tokenization service",
+        "snippet": "tokenization of sensitive data",
+        "priority_date": "2013-01-01",
+        "url": "https://patents.google.com/patent/US9141150B1/en"
+      }
+    ],
+    "records": [
+      {
+        "patent_number": "US9652599B2",
+        "source": "Google Patents",
+        "url": "https://patents.google.com/patent/US9652599B2/en",
+        "title": "Restricted code signing",
+        "abstract": "A method and system is provided for signing data such as code images. In one embodiment, the method comprises receiving, from a requestor, a request to sign the data according to a requested configuration.",
+        "assignee": "Arris Enterprises LLC",
+        "cpc_codes": [
+          "G06F21/10",
+          "H04L9/3247",
+          "H04L63/123"
+        ],
+        "claims": [
+          "1. A method of signing data, comprising: receiving, from a requester, a request to sign the data according to a requested configuration.",
+          "2. The method of claim 1, further comprising modifying the data according to the requested configuration."
+        ],
+        "claim_count": 2,
+        "verification_method": "fetch",
+        "verified": true,
+        "content_sha": "1b215baae6f71ef7d37f14492627c0684b887c92e0518fc5238c65c55abf557d"
+      }
+    ]
+  },
+  "assertions": [
+    {
+      "path": "patent_hit_count",
+      "op": "equals",
+      "value": 2
+    },
+    {
+      "path": "corpora_searched",
+      "op": "exists"
+    },
+    {
+      "path": "records",
+      "op": "exists"
+    }
+  ]
+}

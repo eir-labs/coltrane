@@ -1,0 +1,19 @@
+{
+  "slug": "patent-search",
+  "version": 1,
+  "skill_type": "extraction",
+  "input_type": "patent-query",
+  "output_type": "coverage-report",
+  "corpus": "Google Patents",
+  "determinism_ratio": 1.0,
+  "permission": {
+    "tier": 0,
+    "network": {
+      "allow": ["patents.google.com"],
+      "methods": ["GET"],
+      "max_requests": 40,
+      "max_bytes": 33554432
+    }
+  },
+  "description": "Grounded prior-art discovery over Google Patents — no browser. The /xhr/query backend is server-side JSON, so a plain HTTPS GET returns candidate publication numbers; the skill then fetches the top-K candidates' full pages and hash-pins each, emitting a coverage-report that attests the corpus searched + the query log + the fetched candidate records. The only host the cage permits is patents.google.com."
+}

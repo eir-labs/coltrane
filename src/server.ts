@@ -334,6 +334,7 @@ export async function dispatchTool(slug: string, args: Record<string, unknown>, 
                 gig_id: res.gig_id,
                 manifest: {
                   genome_hash: res.genome_hash, run_fingerprint: res.run_fingerprint, output_count: res.outputs.length,
+                  ...(res.usage ? { usage: res.usage } : {}), // #195 — settled model spend
                   ...(res.budget_state ? { budget_state: res.budget_state } : {}),
                 },
               },
@@ -372,6 +373,7 @@ export async function dispatchTool(slug: string, args: Record<string, unknown>, 
           .then((res) => {
             state.status = "complete"; state.finished_at = new Date().toISOString();
             state.run_fingerprint = res.run_fingerprint; state.genome_hash = res.genome_hash; state.outputs_count = res.outputs.length;
+            if (res.usage) state.usage = res.usage; // #195 — surface settled spend to gig_monitor
           })
           .catch((e: unknown) => {
             state.status = "failed"; state.finished_at = new Date().toISOString();
@@ -402,20 +404,22 @@ export async function dispatchTool(slug: string, args: Record<string, unknown>, 
               outputs_count: live.outputs_count,
               outputs_so_far: outs,
               ...(live.run_fingerprint ? { run_fingerprint: live.run_fingerprint } : {}),
+              ...(live.usage ? { usage: live.usage } : {}), // #195 — settled model spend, queryable by gig_id
               ...(live.error ? { error: live.error } : {}),
               ...(live.finished_at ? { finished_at: live.finished_at } : {}),
             },
           };
         }
         const outs = deps.outputs.all().filter((o) => o.gig_id === gid);
-        const done = deps.ledger.query({ gig_id: gid }).length > 0;
+        const entry = deps.ledger.query({ gig_id: gid })[0];
         return {
           ok: true, requires_approval: approval,
           data: {
-            status: done ? "complete" : outs.length > 0 ? "running" : "unknown",
+            status: entry ? "complete" : outs.length > 0 ? "running" : "unknown",
             phases_complete: outs.length,
             current_agent: outs.length ? outs[outs.length - 1]!.agent_slug : null,
             outputs_so_far: outs,
+            ...(entry?.usage ? { usage: entry.usage } : {}), // #195 — settled spend from the ledger (post-restart path)
           },
         };
       }

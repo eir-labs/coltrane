@@ -67,17 +67,14 @@ describe("patent-fetch · Slice 1 — the network permission grant (deny-by-defa
     const net = ((skillMeta("patent-fetch")?.["permission"] as Record<string, unknown>)?.["network"] as Record<string, unknown>) ?? {};
     expect(typeof net["max_requests"], "network.max_requests must bound egress").toBe("number");
   });
-  it("the skill cage parses + enforces the network grant (no longer net-blind)", () => {
-    // the deny-by-default cage must ENFORCE the allowlist — not merely mention 'network' in a
-    // comment. Assert an enforcement symbol that only exists once the grant is wired (RED today).
+  it("the skill cage synthesizes a host allowlist into the subprocess grant (Node --allow-net)", () => {
+    // cajal review (#186): an existence-grep alone can hollow-pass on a comment / TODO. So pin the
+    // CONCRETE mechanism — the cage must build Node's native --allow-net allowlist from the grant —
+    // and lean on the live spec for CORRECTNESS: tests/e2e/patent_fetch_live.spec.ts loads an
+    // allowlisted host and DENIES an off-allowlist one (existence + correctness together).
     const runner = existsSync(join(REPO, "src/skill_subprocess.ts"))
       ? readFileSync(join(REPO, "src/skill_subprocess.ts"), "utf8") : "";
-    const cage = existsSync(join(REPO, "src/skill_runner.mjs"))
-      ? readFileSync(join(REPO, "src/skill_runner.mjs"), "utf8") : "";
-    expect(
-      /isHostAllowed|assertHostAllowed|networkAllow|network\.allow|enforceNetwork|hostAllowlist/.test(runner + cage),
-      "the cage must implement allowlist enforcement, not just reference the word 'network'",
-    ).toBe(true);
+    expect(/--allow-net/.test(runner), "the cage must synthesize Node's --allow-net from network.allow").toBe(true);
   });
 });
 

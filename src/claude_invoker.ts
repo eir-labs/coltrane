@@ -11,6 +11,9 @@ import type { AgentInvocationContext, AgentInvoker, AgentStreamEvent } from "./r
 import type { Registry } from "./registry.js";
 import type { ModelTier } from "./pricing.js";
 import type { CodeToolAccess } from "./composition.js";
+import { resolveToolGrants, type ToolProviderRegistry } from "./tool_providers.js";
+
+const EMPTY_TOOL_REGISTRY: ToolProviderRegistry = new Map();
 
 // Per-tier model resolution (the old MODEL_TIER_MAP: economy/standard/premium →
 // haiku/sonnet/opus). An agent's model_tier picks the concrete spawn model; falls back to
@@ -190,7 +193,15 @@ export interface ClaudeInvokerOptions {
   registry?: Registry | undefined; // to resolve the output type's schema into the prompt
   // The MCP servers the cage permits the spawn to load. Empty = no MCP tools at all.
   // With --strict-mcp-config, ONLY these load — never the host's ambient servers.
+  // This is the BASE map; #185 resolution adds the per-agent servers its grants require.
   mcpServers?: Record<string, unknown> | undefined;
+  // #185 — tool-grant → provider resolution. `toolProviders` maps explicit tool names to
+  // providers; `mcpServerConfigs` maps an MCP server slug → its --mcp-config entry (coltrane
+  // ships its own "coltrane" server). Per invocation, the agent's allowed_tools resolve through
+  // these into the spawn's mcp-config; a grant with no provider fails the chair closed (a dead
+  // name never reaches the model). Absent = empty (only host-builtins resolve; any MCP grant fails).
+  toolProviders?: ToolProviderRegistry | undefined;
+  mcpServerConfigs?: Record<string, unknown> | undefined;
   run?: ((bin: string, args: string[], spawn: SpawnBounds) => string | Promise<string>) | undefined; // injectable spawn (tests)
   // Per-deployment override of the per-chair wall-clock bound.
   timeout_ms?: number | undefined;
@@ -231,7 +242,30 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
   // Absent → the default streaming spawn below runs the real CLI with stream-json.
   const customRun = opts.run;
   const spawnBounds: SpawnBounds = { timeout: opts.timeout_ms ?? DEFAULT_CHAIR_TIMEOUT_MS, killSignal: "SIGKILL" };
+  // #185 — grant resolution is enabled once the deployment wires a provider registry (either map
+  // present). Until then the invoker keeps its legacy pass-through (tools listed, no resolution) so
+  // a bare/test invoker is unaffected. bootstrapServerDeps always supplies mcpServerConfigs, so the
+  // running engine always resolves + fails closed.
+  const resolutionEnabled = opts.toolProviders !== undefined || opts.mcpServerConfigs !== undefined;
   return async (ctx) => {
+    // Resolve THIS agent's grants → the MCP servers it needs, FIRST: a grant with no resolvable
+    // provider is a dead name, so fail the chair closed before we build a prompt or spawn a child
+    // that advertises a tool it can't call.
+    let resolvedMcpServers: Record<string, unknown> = {};
+    if (resolutionEnabled) {
+      const resolved = resolveToolGrants(
+        ctx.agent.allowed_tools ?? [],
+        opts.toolProviders ?? EMPTY_TOOL_REGISTRY,
+        opts.mcpServerConfigs ?? {},
+      );
+      if (resolved.unknown.length > 0) {
+        throw new Error(
+          `agent "${ctx.agent.slug}" grants unresolvable tool(s) [${resolved.unknown.join(", ")}] — ` +
+            `no provider wired into the spawn (a granted tool with no provider is a dead name; register a provider or remove the grant)`,
+        );
+      }
+      resolvedMcpServers = resolved.mcpServers;
+    }
     const types = opts.registry?.listTypes() ?? [];
     const schemaOf = (slug: string | undefined) =>
       (types.find((t) => t.slug === slug)?.schema as Record<string, unknown> | undefined);
@@ -248,7 +282,8 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
     const prompt = buildPrompt(ctx, schema, outputSchemas);
     // per-gig mcp-config: only the deployment-permitted servers (empty by default).
     const cfgPath = join(tmpdir(), `coltrane-mcp-${randomUUID()}.json`);
-    const servers = opts.mcpServers ?? {};
+    // the base map (opts.mcpServers) + the per-agent servers its grants resolved to (#185).
+    const servers = { ...(opts.mcpServers ?? {}), ...resolvedMcpServers };
     const parent = opts.parent_session_id;
     // Inject parent_session_id env into every named server so children seal lineage.
     const enriched = parent

@@ -47,11 +47,21 @@ export interface ResolvedGrants {
   unknown: string[];
 }
 
-/** Resolve an agent's allowed_tools against the provider registry. Builtins pass (no server);
- *  MCP grants contribute their server config; in-house grants are listed; the rest are unknown. */
+/** Claude Code MCP tools follow the `mcp__<server>__<tool>` naming convention. Extract the server
+ *  slug so an MCP grant resolves to its server by convention — no per-tool registration needed. */
+export function mcpServerOf(grant: string): string | null {
+  const m = toolBaseName(grant).match(/^mcp__(.+?)__/);
+  return m ? m[1]! : null;
+}
+
+/** Resolve an agent's allowed_tools to providers. In order: a host-builtin passes (no server); an
+ *  explicit registry entry wins; an `mcp__<server>__*` grant resolves by convention to that server's
+ *  config from `mcpServerConfigs` (deployment-registered; coltrane ships its own); everything else —
+ *  including an MCP grant for an unconfigured server — is `unknown` (a dead name). */
 export function resolveToolGrants(
   allowed: readonly string[],
   registry: ToolProviderRegistry,
+  mcpServerConfigs: Readonly<Record<string, unknown>> = {},
 ): ResolvedGrants {
   const mcpServers: Record<string, unknown> = {};
   const inHouse: string[] = [];
@@ -60,12 +70,24 @@ export function resolveToolGrants(
     const base = toolBaseName(grant);
     if (HOST_BUILTINS.has(base)) continue;
     const prov = registry.get(base);
-    if (!prov) { unknown.push(grant); continue; }
-    if (prov.kind === "mcp" && prov.server) {
-      if (prov.config !== undefined) mcpServers[prov.server] = prov.config;
-    } else if (prov.kind === "in_house") {
-      inHouse.push(base);
+    if (prov) {
+      if (prov.kind === "mcp" && prov.server) {
+        if (prov.config !== undefined) mcpServers[prov.server] = prov.config;
+      } else if (prov.kind === "in_house") {
+        inHouse.push(base);
+      }
+      continue;
     }
+    const server = mcpServerOf(base);
+    if (server) {
+      if (Object.prototype.hasOwnProperty.call(mcpServerConfigs, server)) {
+        mcpServers[server] = mcpServerConfigs[server];
+      } else {
+        unknown.push(grant); // an MCP tool whose server has no registered config — a dead name
+      }
+      continue;
+    }
+    unknown.push(grant);
   }
   return { mcpServers, inHouse, unknown };
 }
@@ -77,8 +99,9 @@ export function assertToolGrantsResolvable(
   agentSlug: string,
   allowed: readonly string[],
   registry: ToolProviderRegistry,
+  mcpServerConfigs: Readonly<Record<string, unknown>> = {},
 ): void {
-  const { unknown } = resolveToolGrants(allowed, registry);
+  const { unknown } = resolveToolGrants(allowed, registry, mcpServerConfigs);
   if (unknown.length > 0) {
     throw new Error(
       `agent "${agentSlug}" grants unresolvable tool(s) [${unknown.join(", ")}] — no provider registered ` +

@@ -6,6 +6,17 @@
 // surfaces unknowns so dispatch can fail closed instead of launching a spawn that lists dead tools.
 import { describe, it, expect } from "vitest";
 import { resolveToolGrants, assertToolGrantsResolvable, type ToolProvider } from "../src/tool_providers.js";
+import { makeClaudeInvoker } from "../src/claude_invoker.js";
+import type { AgentInvocationContext } from "../src/runtime.js";
+
+const ctxFor = (allowed: string[]): AgentInvocationContext => ({
+  agent: {
+    slug: "scout", primitives: ["SENSE"], input_types: [], output_types: ["sig"], allowed_tools: allowed,
+    behavioral_primitives: ["explorer", "critic"], identity: "you are scout", method: "1. look 2. report 3. stop",
+    constraints: [], domain: "demo",
+  } as never,
+  phase: "p", inputs: [], gig_input: {},
+});
 
 const registry = new Map<string, ToolProvider>([
   ["browser_navigate", { tool: "browser_navigate", kind: "mcp", server: "eirtests", config: { command: "eirtests-mcp" } }],
@@ -44,5 +55,46 @@ describe("#185 — tool grants resolve to providers (no dead names)", () => {
       .toThrow(/grant-scout.*ghost_tool|ghost_tool.*no provider/i);
     expect(() => assertToolGrantsResolvable("ok-agent", ["Read", "output_write", "browser_navigate"], registry))
       .not.toThrow();
+  });
+});
+
+describe("#185 — mcp__<server>__<tool> grants resolve by convention", () => {
+  const empty = new Map<string, ToolProvider>();
+  const serverConfigs = { coltrane: { command: "node", args: ["dist/src/server_entry.js"] } };
+
+  it("an mcp__coltrane__* grant resolves to the coltrane server config (no per-tool registration)", () => {
+    const r = resolveToolGrants(["mcp__coltrane__output_write", "mcp__coltrane__type_browse"], empty, serverConfigs);
+    expect(r.unknown).toEqual([]);
+    expect(Object.keys(r.mcpServers)).toEqual(["coltrane"]); // both collapse to the one server
+    expect(r.mcpServers["coltrane"]).toEqual(serverConfigs.coltrane);
+  });
+
+  it("an mcp__ grant for a server with NO registered config is unknown (a dead name)", () => {
+    const r = resolveToolGrants(["mcp__eirtests__browser_navigate"], empty, serverConfigs);
+    expect(r.unknown).toEqual(["mcp__eirtests__browser_navigate"]); // eirtests not configured here
+    expect(Object.keys(r.mcpServers)).toEqual([]);
+  });
+
+  it("builtins + a configured-server mcp grant resolve together; the whole genome's grants are clean", () => {
+    const r = resolveToolGrants(["Bash(npx vitest run:*)", "Read", "WebFetch", "mcp__coltrane__standard_compose"], empty, serverConfigs);
+    expect(r.unknown).toEqual([]);
+    expect(Object.keys(r.mcpServers)).toEqual(["coltrane"]);
+  });
+});
+
+describe("#185 — the invoker fails closed at dispatch on a dead-name grant (before spawning)", () => {
+  it("an agent granting a tool with no provider rejects, and the child is never spawned", async () => {
+    let spawned = false;
+    // mcpServerConfigs present → resolution enabled
+    const invoke = makeClaudeInvoker({ mcpServerConfigs: {}, run: () => { spawned = true; return "{}"; } });
+    await expect(invoke(ctxFor(["ghost_tool"]))).rejects.toThrow(/ghost_tool.*no provider|unresolvable/i);
+    expect(spawned, "must not spawn a child that advertises a dead tool").toBe(false);
+  });
+
+  it("an agent granting only builtins resolves (reaches the spawn)", async () => {
+    let spawned = false;
+    const invoke = makeClaudeInvoker({ mcpServerConfigs: {}, run: () => { spawned = true; return JSON.stringify({ v: "sig" }); } });
+    await invoke(ctxFor(["Read", "WebFetch"]));
+    expect(spawned, "builtin-only grants must resolve and reach the spawn").toBe(true);
   });
 });

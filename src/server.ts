@@ -1151,10 +1151,26 @@ function loadedGenomeHash(genome: LoadedGenome): string {
  * root is COLTRANE_GENOME or the cwd. Pure + testable (no stdio); fails loud if the cwd
  * isn't a genome (loadGenome rejects a missing/invalid core_types/).
  */
+// #185 — the MCP servers a deployment makes available, keyed by server slug. The repo's .mcp.json
+// IS that registry (coltrane ships its own "coltrane" server; a deployment adds e.g. a browser
+// server there). Per-agent grant resolution wires only the servers an agent's allowed_tools name
+// into its spawn — deny-by-default. Falls back to coltrane's own server if .mcp.json is absent.
+function readMcpServerConfigs(root: string): Record<string, unknown> {
+  const path = join(root, ".mcp.json");
+  if (existsSync(path)) {
+    try {
+      const parsed = JSON.parse(readFileSync(path, "utf8")) as { mcpServers?: Record<string, unknown> };
+      if (parsed.mcpServers && typeof parsed.mcpServers === "object") return parsed.mcpServers;
+    } catch { /* fall through to the default */ }
+  }
+  return { coltrane: { command: "node", args: ["dist/src/server_entry.js"] } };
+}
+
 export function bootstrapServerDeps(genomeRoot?: string): ServerDeps {
   const root = genomeRoot ?? process.env["COLTRANE_GENOME"] ?? process.cwd();
   const genome = resolveGenome(root); // manifest-aware: honors a consumer's `extends` base
   const registry = loadRegistry(genome);
+  const mcpServerConfigs = readMcpServerConfigs(root);
   return {
     registry,
     // PR #78 follow-up: persist outputs to disk so the audit chain survives an
@@ -1166,6 +1182,9 @@ export function bootstrapServerDeps(genomeRoot?: string): ServerDeps {
     invoke: makeClaudeInvoker({
       registry,
       model: process.env["COLTRANE_MODEL"],
+      // #185 — per-agent grant resolution wires each agent's MCP servers into its spawn (coltrane's
+      // own server + any the deployment registers in .mcp.json). An unresolvable grant fails closed.
+      mcpServerConfigs,
       // per-chair wall-clock bound; COLTRANE_CHAIR_TIMEOUT_MS overrides for slow deployments
       ...(process.env["COLTRANE_CHAIR_TIMEOUT_MS"] ? { timeout_ms: Number(process.env["COLTRANE_CHAIR_TIMEOUT_MS"]) } : {}),
     }),

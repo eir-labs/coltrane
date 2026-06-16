@@ -17,8 +17,8 @@ import {
 } from "./mcp.js";
 import { createRegistry, loadRegistry, type Registry, type DomainType } from "./registry.js";
 import { loadGenome, resolveGenome, type SkillRecord, type EvalRecord, type LoadError } from "./loader.js";
-import { SkillSchema, AgentSchema } from "./genome_schema.js";
-import { sealAgentDefinition, sealDefinition, recordIdentity } from "./genome_writer.js";
+import { SkillSchema, AgentSchema, StandardSchema } from "./genome_schema.js";
+import { sealAgentDefinition, sealDefinition, sealSkillPackage, recordIdentity } from "./genome_writer.js";
 import { createOutputStore, defaultOutputsPersistDir, type OutputStore } from "./outputs.js";
 import { MemoryLedger, type Ledger } from "./ledger.js";
 import { standardSimulate } from "./simulate.js";
@@ -478,15 +478,23 @@ export async function dispatchTool(slug: string, args: Record<string, unknown>, 
             return a as Agent;
           });
           const sPhases = (args["phases"] as PhaseDef[]) ?? [];
-          // Carry eval_slugs through compose → live map → persisted file so a
-          // declared eval reaches the runtime (preserved from main).
-          const sEvalSlugs = Array.isArray(args["eval_slugs"]) ? (args["eval_slugs"] as string[]) : undefined;
-          const std = composeStandard({ slug: sSlug, domain: sDomain, agents: sAgents, phases: sPhases, ...(sEvalSlugs ? { eval_slugs: sEvalSlugs } : {}) });
+          // Carry EVERY passthrough field the schema declares (eval_slugs, input_types, output_types,
+          // max_examine_rounds, description, …) through compose → live map → persisted file. The
+          // handler used to thread only eval_slugs, silently dropping input_types/output_types/
+          // max_examine_rounds/description on both the compose call AND the persisted file — so a
+          // standard authored via the TOOL lost exactly the fields composeStandard preserves on the
+          // FILE path (audit finding D). Copy by the schema's own key list so it can't re-drift.
+          const STD_PASSTHROUGH = Object.keys(StandardSchema.shape).filter(
+            (k) => !["slug", "domain", "agents", "agent_slugs", "phases"].includes(k),
+          );
+          const extras: Record<string, unknown> = {};
+          for (const k of STD_PASSTHROUGH) if (args[k] !== undefined) extras[k] = args[k];
+          const std = composeStandard({ slug: sSlug, domain: sDomain, agents: sAgents, phases: sPhases, ...extras });
           // Write-through to the LIVE map so gig_dispatch sees the new standard
           // in the same session (no rebootstrap needed).
           deps.standards?.set(sSlug, std);
           // substrate seal: persist a loadable standards/<slug>.json (agent_slugs form) + ledger.
-          const fileDef = { slug: sSlug, domain: sDomain, agent_slugs: sAgents.map((a) => a.slug), phases: sPhases, ...(sEvalSlugs ? { eval_slugs: sEvalSlugs } : {}) };
+          const fileDef = { slug: sSlug, domain: sDomain, agent_slugs: sAgents.map((a) => a.slug), phases: sPhases, ...extras };
           const sealed = sealDefinition("standard_compose", sSlug, fileDef, deps.ledger, deps.genome_dir, "standards");
           return { ok: true, requires_approval: approval, data: { standard_id: std.slug, content_hash: sealed.content_hash, dependency_hash: sealed.dependency_hash, effective_hash: sealed.effective_hash, validation_result: { valid: true } } };
         } catch (e) {
@@ -974,7 +982,18 @@ export async function dispatchTool(slug: string, args: Record<string, unknown>, 
           return { ok: false, requires_approval: approval, error: `skill_define: ${why}` };
         }
         const def: SkillRecord = skParsed.data;
-        const sealed = sealDefinition("skill_define", skSlug, def, deps.ledger, deps.genome_dir, "skills");
+        // Persist the LOADABLE PACKAGE (skills/<slug>/…), not a flat skills/<slug>.json the loader
+        // skips — otherwise a defined skill seals fine but vanishes on reload (audit finding E). The
+        // loader hard-fails an incomplete package, so require what it requires up front: ≥1 fixture
+        // (the skill's pre-registered contract) + a code and/or reasoning half. Refuse here rather
+        // than write a package that would crash the next genome load.
+        if (!Array.isArray(def.fixtures) || def.fixtures.length === 0) {
+          return { ok: false, requires_approval: approval, error: "skill_define requires ≥1 fixture — a skill ships its pre-registered contract (the loader rejects a fixtureless package)" };
+        }
+        if (typeof def.code !== "string" && typeof def.md !== "string") {
+          return { ok: false, requires_approval: approval, error: "skill_define requires a code half (code) and/or a reasoning half (md) — an empty package can't load" };
+        }
+        const sealed = sealSkillPackage(def, deps.ledger, deps.genome_dir);
         deps.skills?.set(skSlug, def);
         return { ok: true, requires_approval: approval, data: { skill_id: skSlug, content_hash: sealed.content_hash, dependency_hash: sealed.dependency_hash, effective_hash: sealed.effective_hash } };
       }

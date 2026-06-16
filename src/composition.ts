@@ -527,12 +527,11 @@ export function composeStandard(def: {
     }
   }
 
-  const std: Standard = { slug: def.slug, domain: def.domain, agents: def.agents, phases, input_types: [...standardInputs] };
-  if (def.eval_slugs && def.eval_slugs.length > 0) std.eval_slugs = def.eval_slugs;
-  // Preserve the fields the genome declares + the seal covers — composition must not silently drop
-  // them (#genome-schema). The engine doesn't yet ENFORCE max_examine_rounds (separate task).
-  if (def.output_types !== undefined) std.output_types = def.output_types;
-  if (def.max_examine_rounds !== undefined) std.max_examine_rounds = def.max_examine_rounds;
-  if (def.description !== undefined) std.description = def.description;
+  // LOSS-FREE: spread the whole def, then override the two transform outputs — `phases` (the
+  // validated PhaseDef) and `input_types` (the deduped standard-input set). Every other declared
+  // field (eval_slugs / output_types / max_examine_rounds / description + anything added later to
+  // StandardSchema) rides through automatically, so composition can't silently drop a sealed field —
+  // the bug this whole change closes. The engine doesn't yet ENFORCE max_examine_rounds (separate task).
+  const std: Standard = { ...def, phases, input_types: [...standardInputs] };
   return std;
 }

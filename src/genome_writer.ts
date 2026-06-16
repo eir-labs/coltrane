@@ -136,3 +136,46 @@ export function sealAgentDefinition(def: AgentDef, ledger: Ledger, genome_dir?: 
   }
   return { agent, content_hash, dependency_hash, effective_hash };
 }
+
+/** Persist a skill as the LOADABLE PACKAGE the loader reads — skills/<slug>/{meta.json, skill.mjs?,
+ *  skill.md?, fixtures/*.json} — not a flat skills/<slug>.json the loader skips. The content fields
+ *  (`code` → skill.mjs, `md` → skill.md) and each fixture become their own files; meta.json holds the
+ *  remaining declared fields. Identity is hashed over the full canonical def, so the content_hash is
+ *  stable regardless of the on-disk split. Closes the skill_define → reload roundtrip (audit E).
+ *  The caller MUST pre-validate completeness (≥1 fixture + a code/reasoning half) — the loader
+ *  hard-fails an incomplete package, so an incomplete write would crash the next genome load. */
+export function sealSkillPackage(
+  def: Record<string, unknown> & { slug: string },
+  ledger: Ledger,
+  genome_dir?: string,
+): { content_hash: string; dependency_hash: string; effective_hash: string } {
+  const content_hash = sha256Hex(canonJson(def));
+  const dependency_hash = EMPTY_DEPENDENCY_HASH;
+  const effective_hash = effectiveHash(content_hash, dependency_hash);
+  if (genome_dir) {
+    const pkgDir = join(genome_dir, "skills", def.slug);
+    mkdirSync(pkgDir, { recursive: true });
+    const { fixtures, code, md, ...meta } = def;
+    writeFileSync(join(pkgDir, "meta.json"), JSON.stringify(meta, null, 2) + "\n");
+    if (typeof code === "string") writeFileSync(join(pkgDir, "skill.mjs"), code);
+    if (typeof md === "string") writeFileSync(join(pkgDir, "skill.md"), md);
+    if (Array.isArray(fixtures)) {
+      const fxDir = join(pkgDir, "fixtures");
+      mkdirSync(fxDir, { recursive: true });
+      fixtures.forEach((fx, i) =>
+        writeFileSync(join(fxDir, `fixture-${String(i + 1).padStart(3, "0")}.json`), JSON.stringify(fx, null, 2) + "\n"),
+      );
+    }
+    const now = new Date().toISOString();
+    ledger.append({
+      gig_id: `skill_define:${def.slug}:${randomUUID()}`,
+      standard_slug: "skill_define",
+      genome_hash: effective_hash,
+      run_fingerprint: effective_hash,
+      output_hashes: [content_hash],
+      started_at: now,
+      finished_at: now,
+    });
+  }
+  return { content_hash, dependency_hash, effective_hash };
+}

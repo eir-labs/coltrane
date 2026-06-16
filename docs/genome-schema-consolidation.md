@@ -45,10 +45,44 @@ zod was already a dependency, so there's no new dep.
 1. ✅ the Zod DNA module + Agent (template) + Standard preservation + the drift reds.
 2. ✅ **Skill** — `SkillSchema`, retire the bag, package-aware `skill_define`, loader validation.
 3. ✅ **Eval + DomainType** — schemas + loader validation; `registry.DomainType` derives from the schema.
-4. ☐ **Standard runtime-type swap** — derive the resolved `Standard` from the schema (file→resolved
-   transform keeps a derived runtime type). Deferred — not load-bearing for the drift the reds pin.
-5. ☐ **The litmus** — once every class derives from a schema, a standing test that no class's MCP
-   surface or constructor drifts (largely free, since they're generated).
+4. ✅ **Standard runtime-type swap** — `StandardDef`/`Standard` derive from `StandardSchema`
+   (z.input/z.output), overriding only `agents` (resolved) + `phases` (runtime PhaseDef).
+5. ✅ **The litmus** — a standing test that each migrated class's MCP surface equals its schema's
+   fields; plus a regression that array fields advertise as `array` (see audit finding 2 below).
+
+## The audit — did the push actually hit its thesis?
+
+After shipping the above we ran a **5 classes × 6 sites** audit (the thesis is that all six restate
+one source). The recurring failure was always the same: a restatement we *assumed* was unified was
+still hand-maintained, and it read green because a **unit test exercised a shortcut, not the real
+path** (define-via-handler → seal → persist → reload). The six sites: **A** type, **B** constructor,
+**C** MCP surface, **D** handler, **E** persist↔load, **F** load-validate. What the audit caught:
+
+1. **Agent · D** — `agent_define`'s handler hand-enumerated the def from a *retired nested
+   `permissions` object* and never read `browser_grant`, silently dropping the cage grant on every
+   MCP-authored agent. `defineAgent` itself was loss-free; the loss was upstream of it. Fixed: build
+   the def by iterating `AgentSchema`'s key list.
+2. **Agent · C (`zodToMcpProps`)** — every `z.array` field advertised as its *element's* scalar type
+   (`primitives` → `"string"`), so the client serialized the value wrong and `agent_define` rejected
+   it. `jsonTypeOf` was following `ZodArray._def.type` (the element). Fixed + regression-pinned.
+3. **Standard · B + D** — `composeStandard` built its return as a hand-enumerated literal, and the
+   `standard_compose` handler threaded only `eval_slugs` — dropping `input_types`/`output_types`/
+   `max_examine_rounds`/`description` on the compose call AND the persisted file. So a standard
+   authored via the *tool* lost the very fields composeStandard preserves on the *file* path. Fixed:
+   `composeStandard` spreads the def (loss-free); the handler copies passthrough fields by the schema
+   key list.
+4. **Skill · E** — `skill_define` sealed a flat `skills/<slug>.json`, but the loader reads package
+   *directories* — so a defined skill survived the session yet vanished on reload. Fixed:
+   `sealSkillPackage` writes the package layout (meta.json + skill.mjs/skill.md + fixtures/), and the
+   handler refuses an incomplete package the loader would reject.
+
+Every fix is pinned by a **roundtrip test on the real path** (`tests/genome_write_roundtrip.test.ts`,
+the `browser_grant` case in `tests/agent_behavioral_representation.test.ts`).
+
+**Fast-follow (works today but fragile, not yet de-drifted):** DomainType's MCP surface
+(`type_register`/`type_extend`) is hand-written, not generated from `DomainTypeSchema`; and there are
+three near-duplicate domain-type type defs (`loader.DomainTypeRecord` / `registry.DomainType` /
+`DomainTypeSchema`). DomainType roundtrips correctly (flat JSON), so this is hardening, not a bug.
 
 ## Two notes
 

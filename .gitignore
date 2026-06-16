@@ -15,3 +15,4 @@ tests/lint_guard/.scratch/
 .coltrane/
 
 .worktrees/
+.playwright-mcp/

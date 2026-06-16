@@ -1,4 +1,5 @@
 import Ajv from "ajv";
+import { type DomainTypeOutput } from "./genome_schema.js";
 import { CORE_TYPES, type CoreType } from "./core_types.js";
 import { CANONICAL_CORE_TYPES } from "./canonical_core_types.js";
 import type { LoadedGenome } from "./loader.js";
@@ -23,13 +24,11 @@ export const RESOLVE_WEIGHTS = {
   recency: 0.1,
 } as const;
 
-export interface DomainType {
-  slug: string;
-  extends: string;
-  domain: string;
-  schema: Record<string, unknown>;
-  required_fields: string[];
-}
+// The registry's working view of a domain type — the fields its resolve/validate logic reads — as an
+// explicit PROJECTION of the single Zod source (genome_schema.ts DomainTypeOutput), not a third
+// hand-written restatement. The persisted record additionally carries version/status/description,
+// which the registry doesn't use; deriving the shared fields keeps them from drifting from the source.
+export type DomainType = Pick<DomainTypeOutput, "slug" | "extends" | "domain" | "schema" | "required_fields">;
 
 export interface ResolveQuery {
   extends: string;

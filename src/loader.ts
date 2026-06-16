@@ -3,6 +3,7 @@ import { join, extname, resolve, isAbsolute, dirname } from "node:path";
 import { createRequire } from "node:module";
 import { defineAgent, composeStandard, CompositionError, GenomeIncompleteError, type Agent, type AgentDef, type Standard, type PhaseDef } from "./composition.js";
 import { loadSkillPackage, SkillLoadError } from "./skills.js";
+import { SkillSchema, EvalSchema, DomainTypeSchema, type SkillOutput, type EvalOutput, type DomainTypeOutput } from "./genome_schema.js";
 import type { Primitive } from "./core_types.js";
 import { CANONICAL_CORE_TYPES } from "./canonical_core_types.js";
 
@@ -13,15 +14,10 @@ export interface CoreTypeRecord {
   schema: object;
 }
 
-export interface DomainTypeRecord {
-  slug: string;
-  version: number;
-  extends: string;
-  domain: string;
-  status: "active" | "deprecated" | "retired";
-  schema: object;
-  required_fields: readonly string[];
-}
+// The persisted domain-type record derives from the single Zod source (genome_schema.ts) — the
+// hand-written interface that restated the same shape is retired. version/status are present on the
+// output type (the schema defaults them), so the `slug@version` key + status reads stay sound.
+export type DomainTypeRecord = DomainTypeOutput;
 
 // On-disk shapes for the remaining three definition classes. Agents are AgentDef-shaped
 // (validated through defineAgent). A standard file references its agents by slug (DRY —
@@ -37,11 +33,21 @@ export interface StandardFileDef {
   phases: readonly PhaseDef[];
   eval_slugs?: readonly string[];
   input_types?: readonly string[]; // the gig contract (#177) — types entering from outside the standard
+  output_types?: readonly string[];
+  max_examine_rounds?: number;
+  description?: string;
 }
-// Skills and evals have no composer yet — load them as slug-keyed records (structurally
-// validated: slug present + unique). Their richer contracts are a later layer.
-export interface SkillRecord { slug: string; [k: string]: unknown }
-export interface EvalRecord { slug: string; [k: string]: unknown }
+// Skills and evals derive their shape from the single Zod source (genome_schema.ts) — the
+// {slug;[k]:unknown} bag is retired. The runtime SkillRecord is the validated meta PLUS the
+// loader-resolved provenance (package_dir, code_hash) and the rendered reasoning half (the
+// invoker reads `md`/`text`/`body` for the prompt's Skills layer). EvalRecord IS the schema.
+export type SkillRecord = SkillOutput & {
+  package_dir?: string;
+  code_hash?: string | null;
+  text?: string;
+  body?: string;
+};
+export type EvalRecord = EvalOutput;
 
 // Per-definition load failure record. Surfaced via LoadedGenome.load_errors
 // so one broken file no longer blocks the whole genome (Rob #129). The strict
@@ -188,6 +194,13 @@ export function loadGenome(
           `field "extends" references "${d.extends}" which is not a core type`,
         );
       }
+      // Validate the file shape against the single Zod source (genome_schema.ts). Soft-fail per
+      // the domain_types stance above — a malformed type file is a typed LoadError, not a genome kill.
+      const typeCheck = DomainTypeSchema.safeParse(d);
+      if (!typeCheck.success) {
+        const why = typeCheck.error.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`).join("; ");
+        throw new Error(`type schema validation failed — ${why}`);
+      }
       domain_types.set(key, d);
       domain_type_paths.set(key, path);
     } catch (e) {
@@ -277,6 +290,10 @@ export function loadGenome(
         ...(def.eval_slugs ? { eval_slugs: def.eval_slugs } : {}),
         // #177: the gig contract — types entering from outside the standard (gig / cross-standard).
         ...(def.input_types ? { input_types: def.input_types } : {}),
+        // #genome-schema: fields the file declares must reach the runtime Standard, not be dropped.
+        ...(def.output_types ? { output_types: def.output_types } : {}),
+        ...(def.max_examine_rounds !== undefined ? { max_examine_rounds: def.max_examine_rounds } : {}),
+        ...(def.description ? { description: def.description } : {}),
       }));
       standard_paths.set(def.slug, path);
     } catch (e) {
@@ -309,6 +326,15 @@ export function loadGenome(
       if (pkg.codeHash === null && pkg.mdPath === null) {
         throw new SkillLoadError(`skill ${pkg.meta.slug}: empty — needs a code half (skill.mjs) and/or a reasoning half (skill.md)`);
       }
+      // Validate the meta against the single Zod source — a malformed declared field (e.g. a
+      // non-numeric determinism_ratio, a malformed permission/network grant) hard-fails the load,
+      // mirroring the package-completeness gate above. Shape only: this does NOT re-impose any
+      // fixtures-pass-to-promote ceremony — promotion strictness is a separate, tunable policy.
+      const metaCheck = SkillSchema.safeParse(pkg.meta);
+      if (!metaCheck.success) {
+        const why = metaCheck.error.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`).join("; ");
+        throw new SkillLoadError(`skill ${pkg.meta.slug}: meta failed schema validation — ${why}`);
+      }
       if (skills.has(pkg.meta.slug)) {
         load_errors.push({ kind: "skill", path: pkgDir, slug: pkg.meta.slug, error: `duplicate skill slug "${pkg.meta.slug}" (first seen in ${skill_paths.get(pkg.meta.slug)})` });
         continue;
@@ -333,7 +359,14 @@ export function loadGenome(
       if (evals.has(e.slug)) {
         throw new Error(`duplicate eval slug "${e.slug}" (first seen in ${eval_paths.get(e.slug)})`);
       }
-      evals.set(e.slug, e);
+      // Validate against the single Zod source — the {slug;[k]:unknown} bag is retired, so a
+      // malformed eval (e.g. a non-array non_empty_fields) is caught at load, not at score time.
+      const parsed = EvalSchema.safeParse(e);
+      if (!parsed.success) {
+        const why = parsed.error.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`).join("; ");
+        throw new Error(`eval schema validation failed — ${why}`);
+      }
+      evals.set(e.slug, parsed.data);
       eval_paths.set(e.slug, path);
     } catch (err) {
       load_errors.push({ kind: "eval", path, slug, error: err instanceof Error ? err.message : String(err) });

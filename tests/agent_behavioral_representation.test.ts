@@ -68,6 +68,26 @@ describe("agent_define ingest captures behavioral fields (not discards them)", (
     expect(agent.method).toBe(METHOD);
     expect(agent.constraints).toEqual(CONSTRAINTS);
   });
+
+  // Regression: the handler used to hand-enumerate the def and never read browser_grant (and read
+  // the tuning fields from a RETIRED nested `permissions` object) — so the cage grant was silently
+  // dropped on every MCP-authored agent. It now builds the def from AgentSchema. Pin the round-trip:
+  // browser_grant survives to the sealed file AND reloads.
+  it("persists browser_grant (the cage grant) to the sealed file and it reloads", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "coltrane-agentdef-cage-"));
+    const browser_grant = { allowed_origins: ["https://ppubs.uspto.gov"], isolated: true, headless: true };
+    const r = await dispatchTool(
+      "agent_define",
+      { slug: "caged-scout", primitives: ["SENSE"], input_types: [], output_types: ["Signal"], domain: "patents", identity: IDENTITY, method: METHOD, constraints: CONSTRAINTS, behavioral_primitives: ["explorer", "critic"], browser_grant },
+      deps(dir),
+    );
+    expect(r.ok, JSON.stringify(r)).toBe(true);
+    const persisted = JSON.parse(readFileSync(join(dir, "agents", "caged-scout.json"), "utf8"));
+    expect(persisted.browser_grant, "browser_grant dropped at the agent_define seal — the cage grant never persists").toEqual(browser_grant);
+    // and it must survive the load→in-memory-Agent roundtrip
+    const g = loadGenome(dir);
+    expect(g.agents.get("caged-scout")?.browser_grant, "browser_grant lost on load").toEqual(browser_grant);
+  });
 });
 
 // ── The disposition is a PAIRING — exactly two roles in tension, enforced at the door ─────

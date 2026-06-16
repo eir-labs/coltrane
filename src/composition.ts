@@ -1,6 +1,7 @@
 import type { Primitive } from "./core_types.js";
 import { PRIMITIVE_OUTPUT_TYPE } from "./core_types.js";
 import type { ModelTier, Depth } from "./pricing.js";
+import { AgentSchema, type AgentInput, type AgentOutput, type StandardInput, type StandardOutput } from "./genome_schema.js";
 
 // The per-agent code-tool exposure gate (old AgentPermissions.code_tool_access). Scales
 // the agent's access to Claude Code's built-in file/exec tools, independent of MCP grant.
@@ -12,72 +13,14 @@ export type CodeToolAccess = "none" | "read" | "write" | "full";
 export type BelbinRole =
   | "explorer" | "analyst" | "critic" | "synthesizer" | "planner" | "executor" | "audience_modeler";
 
-export interface AgentDef {
-  slug: string;
-  primitives: readonly Primitive[];
-  input_types?: readonly string[];
-  output_types?: readonly string[];
-  domain?: string;
-  // Blast-radius cage: the tool whitelist/blacklist the spawned claude is held to.
-  // Empty/absent = no per-agent tool grant (with --strict-mcp-config, the spawn gets
-  // NO ambient MCP tools — deny-by-default; declare allowed_tools to grant scope).
-  allowed_tools?: readonly string[];
-  disallowed_tools?: readonly string[];
-  // Skill bindings — slugs the runtime resolves against the genome's skills map
-  // and injects as the prompt's Skills layer (layer 3 of 5). Absent/empty = no
-  // skills attach; the prompt skips the Skills section entirely.
-  skill_slugs?: readonly string[];
-  // Behavioral representation — REQUIRED. An agent without identity/method/constraints/
-  // disposition is the bug this whole change closes; there is no valid agent without them.
-  identity: string;
-  method: string;
-  constraints: readonly string[];
-  // EXACTLY two Belbin roles, held in equal tension — the Disposition layer. The pairing is
-  // the contract: a lone role collapses to a single voice, three+ dilute the tension that
-  // makes the disposition load-bearing. Typed as a 2-tuple (compile-time) AND validated for
-  // cardinality at defineAgent (runtime, for the JSON-authored path that parses as `any`).
-  behavioral_primitives: readonly [BelbinRole, BelbinRole];
-  // Cage / economy envelope — optional, with a REAL deny-by-default / gig-fallback reason
-  // (not back-compat): absent code_tool_access = deny code tools; absent model_tier = the
-  // gig/invoker default model; absent max_tool_calls/max_token_budget = the gig budget
-  // governs; absent depth_profile = the gig depth applies.
-  model_tier?: ModelTier;
-  max_tool_calls?: number;
-  max_token_budget?: number;
-  code_tool_access?: CodeToolAccess;
-  depth_profile?: Depth;
-}
+// AgentDef + Agent are now DERIVED from the single source (genome_schema.ts `AgentSchema`):
+// AgentDef = z.input (what you author — optionals allowed), Agent = z.output (after parse). The
+// hand-written interfaces that drifted from the schema/MCP-surface/constructor are gone — add a
+// field once in AgentSchema and the type, the validator (defineAgent), and the MCP input_schema all
+// follow. ModelTier/Depth/Primitive/BelbinRole are imported above only for other uses in this file.
+export type AgentDef = AgentInput;
 
-export interface Agent {
-  slug: string;
-  primitives: readonly Primitive[];
-  input_types: readonly string[];
-  output_types: readonly string[];
-  domain: string | null;
-  // Behavioral representation — the agent's own prose, NOT capability (capability lives
-  // in skills). buildPrompt renders these into the Disposition / Identity / Method /
-  // Constraints layers. REQUIRED: an agent without them renders a contentless prompt and
-  // the model confabulates — that is the bug this closes, so the type forbids it.
-  identity: string;             // who you are — role / stance (Identity layer)
-  method: string;               // how you do THIS agent's job — the step-by-step (Method layer)
-  constraints: readonly string[]; // the negative space — never-invent / cite-sources (Constraints layer)
-  behavioral_primitives: readonly [BelbinRole, BelbinRole]; // exactly two Belbin roles in equal tension → Disposition layer
-  // Cage grant — optional so hand-built Agent literals stay valid; defineAgent always
-  // sets them ([] = no grant). The invoker treats absent/empty as deny-by-default.
-  allowed_tools?: readonly string[];
-  disallowed_tools?: readonly string[];
-  // Skill bindings (slugs) the runtime resolves into the prompt's Skills layer.
-  // Optional so hand-built Agent literals stay valid; defineAgent always sets ([]).
-  skill_slugs?: readonly string[];
-  // Merged-type fields (the locked decision: one rich agent type absorbing the orphaned
-  // AgentProfile + the Player lane). Tuning + the cage's economy/blast-radius envelope —
-  // declared here so the runtime can read them; currently unwired (RED).
-  model_tier?: ModelTier;          // → resolves to a concrete --model per gig (economy/standard/premium)
-  max_tool_calls?: number;         // per-agent cap → --max-turns; a runaway agent can't burn the gig
-  max_token_budget?: number;       // per-agent spend ceiling
-  code_tool_access?: CodeToolAccess; // gates Claude Code built-in Read/Write/Edit/Bash
-  depth_profile?: Depth;           // per-agent depth/tuning (skim/quick/standard/deep)
-}
+export type Agent = AgentOutput;
 
 // A chair is one named seat in a phase. It binds a role-name within the standard
 // to an agent (by slug), declares the upstream roles it depends on (depends_on),
@@ -103,37 +46,26 @@ export interface PhaseDef {
   chairs: readonly Chair[];
 }
 
-export interface StandardDef {
-  slug: string;
-  domain: string;
+// StandardDef (compose input) + Standard (runtime output) DERIVE from the single source
+// (genome_schema.ts `StandardSchema`) — add a passthrough field there (eval_slugs, input_types,
+// output_types, max_examine_rounds, description, the #177 gig contract …) and it appears on both
+// types automatically, so composeStandard can't silently drop it again. Only the two authoring-time
+// agent fields are overridden: the schema's `agents` (unknown[] — slugs/objects) and `agent_slugs`
+// (the file shape) are replaced by the RESOLVED `Agent[]` the composer produces, and `phases` is the
+// runtime PhaseDef (chairs with a required agent_slug). That file→resolved transform is the only
+// reason these stay derived types here rather than `z.output<StandardSchema>` directly.
+export type StandardDef = Omit<StandardInput, "agents" | "agent_slugs" | "phases"> & {
   agents: readonly Agent[];
   phases: readonly PhaseDef[];
-  // 5th-class evals: judge-shapes evaluated against the gig's produced outputs.
-  // Names declared here are looked up in the loaded genome's evals registry at
-  // runGig time; their scores land in run_fingerprint.eval_scores.
-  eval_slugs?: readonly string[];
-  // The gig contract (#177): types that enter the standard from OUTSIDE — gig input or
-  // produced by another standard in a cross-standard DAG. The agent-level primitive-graph
-  // gates treat these as "available upstream": a faithful agent that consumes a type produced
-  // elsewhere composes, and a standalone-CREATE agent whose reasoner arrives this way is
-  // admitted. The chair contracts (input_contract/depends_on) remain the authoritative
-  // per-role dataflow; this only stops the coarse agent-level gate from rejecting real inputs.
-  input_types?: readonly string[];
-}
+};
 
 // Standard.phases is canonical PhaseDef (chairs). Legacy {name, agent} form is
 // rejected at the composeStandard / loader / MCP boundary; it never reaches the
 // runtime.
-export interface Standard {
-  slug: string;
-  domain: string;
+export type Standard = Omit<StandardOutput, "agents" | "agent_slugs" | "phases"> & {
   agents: readonly Agent[];
   phases: readonly PhaseDef[];
-  eval_slugs?: readonly string[];
-  // the gig contract (#177) — types entering from outside the standard. Optional on the type so
-  // hand-built Standard literals stay valid; composeStandard always populates it ([] when absent).
-  input_types?: readonly string[];
-}
+};
 
 export class CompositionError extends Error {}
 
@@ -215,27 +147,29 @@ export function defineAgent(def: AgentDef): Agent {
     throw new GenomeIncompleteError(`agent ${def.slug}: constraints is required (use [] for none) — fill it in to upgrade the genome`);
   }
 
-  // Conditional spread for the optional rich fields — assigning an explicit `undefined`
-  // would violate exactOptionalPropertyTypes, so only include a field when it's present.
+  // LOSS-FREE projection via the single-source schema (genome_schema.ts AgentSchema): parse
+  // PRESERVES every field the schema declares (browser_grant, the cage grants, …) and applies
+  // defaults — no hand-enumerated literal to silently drop a sealed field (the bug this whole change
+  // closes). The structural + behavioral checks above already threw the precise error types; if the
+  // schema rejects a shape those missed, surface it as a load-hard GenomeIncompleteError.
+  let parsed: Agent;
+  try {
+    parsed = AgentSchema.parse(def);
+  } catch (e) {
+    throw new GenomeIncompleteError(`agent ${def.slug}: ${e instanceof Error ? e.message : String(e)}`);
+  }
+  // output_types derives from the last primitive's output type when not declared (stays here, not
+  // in the schema, because the default depends on another field). The cage arrays fill to [] to
+  // match the prior runtime shape (deny-by-default = an empty grant, never undefined).
+  const output_types = parsed.output_types.length > 0
+    ? parsed.output_types
+    : prims.map((p) => PRIMITIVE_OUTPUT_TYPE[p as Primitive]).slice(-1);
   return {
-    slug: def.slug,
-    primitives: prims,
-    input_types: def.input_types ?? [],
-    output_types:
-      def.output_types ?? prims.map((p) => PRIMITIVE_OUTPUT_TYPE[p as Primitive]).slice(-1),
-    domain: def.domain ?? null,
-    allowed_tools: def.allowed_tools ?? [],
-    disallowed_tools: def.disallowed_tools ?? [],
-    skill_slugs: def.skill_slugs ?? [],
-    identity: def.identity,
-    method: def.method,
-    constraints: def.constraints,
-    behavioral_primitives: def.behavioral_primitives,
-    ...(def.model_tier !== undefined ? { model_tier: def.model_tier } : {}),
-    ...(def.max_tool_calls !== undefined ? { max_tool_calls: def.max_tool_calls } : {}),
-    ...(def.max_token_budget !== undefined ? { max_token_budget: def.max_token_budget } : {}),
-    ...(def.code_tool_access !== undefined ? { code_tool_access: def.code_tool_access } : {}),
-    ...(def.depth_profile !== undefined ? { depth_profile: def.depth_profile } : {}),
+    ...parsed,
+    output_types,
+    allowed_tools: parsed.allowed_tools ?? [],
+    disallowed_tools: parsed.disallowed_tools ?? [],
+    skill_slugs: parsed.skill_slugs ?? [],
   };
 }
 
@@ -246,6 +180,9 @@ export function composeStandard(def: {
   phases: readonly PhaseDef[];
   eval_slugs?: readonly string[];
   input_types?: readonly string[]; // the gig contract (#177) — types entering from outside the standard
+  output_types?: readonly string[];
+  max_examine_rounds?: number;
+  description?: string;
 }): Standard {
   const agentBySlug = new Map(def.agents.map((a) => [a.slug, a]));
 
@@ -590,9 +527,11 @@ export function composeStandard(def: {
     }
   }
 
-  const std: Standard = { slug: def.slug, domain: def.domain, agents: def.agents, phases, input_types: [...standardInputs] };
-  if (def.eval_slugs && def.eval_slugs.length > 0) {
-    std.eval_slugs = def.eval_slugs;
-  }
+  // LOSS-FREE: spread the whole def, then override the two transform outputs — `phases` (the
+  // validated PhaseDef) and `input_types` (the deduped standard-input set). Every other declared
+  // field (eval_slugs / output_types / max_examine_rounds / description + anything added later to
+  // StandardSchema) rides through automatically, so composition can't silently drop a sealed field —
+  // the bug this whole change closes. The engine doesn't yet ENFORCE max_examine_rounds (separate task).
+  const std: Standard = { ...def, phases, input_types: [...standardInputs] };
   return std;
 }

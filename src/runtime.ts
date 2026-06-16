@@ -17,7 +17,7 @@ const CORE_TO_PRIMITIVE: Record<string, Agent["primitives"][number]> = Object.fr
 );
 import { sha256Hex, canonJson, runFingerprint, outputContentHash, CANONICAL_FORM_VERSION } from "./canonical_form.js";
 import type { OutputStore, OutputRecord } from "./outputs.js";
-import type { Ledger } from "./ledger.js";
+import type { Ledger, GigUsage } from "./ledger.js";
 import type { SkillRecord, EvalRecord } from "./loader.js";
 
 // What an agent invocation sees. The invoker returns the output `data` (validated
@@ -170,6 +170,8 @@ export interface GigResult {
   status: "complete";
   /** Final budget snapshot. Present only when a budget was supplied. */
   budget_state?: BudgetState;
+  /** Settled model spend (#195). Present when ≥1 real model invocation ran this gig. */
+  usage?: GigUsage;
 }
 
 export class RuntimeError extends Error {}
@@ -282,6 +284,37 @@ export async function runGig(
   const gig_id = deps.gig_id ?? randomUUID();
   const started_at = new Date().toISOString();
   const produced: OutputRecord[] = [];
+
+  // #195 — settled model spend, accumulated from each agent invocation's `result` event (the
+  // stream-json result carries usage + total_cost_usd + a per-model breakdown). These were
+  // forwarded to onEvent but dropped; we fold them here and persist on the ledger entry. JS is
+  // single-threaded, so += from the concurrent chair callbacks is race-free.
+  const usage: GigUsage = { input_tokens: 0, output_tokens: 0, total_cost_usd: 0, by_model: {} };
+  let sawUsage = false;
+  const captureUsage = (ev: AgentStreamEvent): void => {
+    if (ev.type !== "result") return;
+    const raw = ev.raw as Record<string, unknown> | undefined;
+    if (!raw) return;
+    const u = raw["usage"] as Record<string, unknown> | undefined;
+    const cost = typeof raw["total_cost_usd"] === "number" ? (raw["total_cost_usd"] as number) : 0;
+    const inTok = u && typeof u["input_tokens"] === "number" ? (u["input_tokens"] as number) : 0;
+    const outTok = u && typeof u["output_tokens"] === "number" ? (u["output_tokens"] as number) : 0;
+    usage.input_tokens += inTok;
+    usage.output_tokens += outTok;
+    usage.total_cost_usd += cost;
+    sawUsage = true;
+    // Per-model breakdown keyed by the ACTUAL model id that ran (not the configured tier).
+    const mu = raw["modelUsage"] as Record<string, Record<string, unknown>> | undefined;
+    if (mu) {
+      for (const [model, m] of Object.entries(mu)) {
+        const slot = usage.by_model[model] ?? { input_tokens: 0, output_tokens: 0, cost_usd: 0 };
+        slot.input_tokens += typeof m["inputTokens"] === "number" ? (m["inputTokens"] as number) : 0;
+        slot.output_tokens += typeof m["outputTokens"] === "number" ? (m["outputTokens"] as number) : 0;
+        slot.cost_usd += typeof m["costUSD"] === "number" ? (m["costUSD"] as number) : 0;
+        usage.by_model[model] = slot;
+      }
+    }
+  };
 
   // #156 — the standard's declared gig inputs. An entry chair (first phase, depends_on []) reads
   // its typed input_contract from gigInput; those types are satisfied by the gig payload, not an
@@ -570,7 +603,7 @@ export async function runGig(
       data = await deps.invoke({
         agent, phase: phaseName, inputs, gig_input: gigInput, skills,
         output_types: output_specs.map((s) => s.domain_type), // #174 — the chair's promised subset
-        onEvent: (ev) => emit({ type: "agent_event", phase: phaseName, role: chair.role, event: ev }),
+        onEvent: (ev) => { captureUsage(ev); emit({ type: "agent_event", phase: phaseName, role: chair.role, event: ev }); },
       });
       // Runtime output_contract check: every type the chair promised must be covered by the
       // bound agent's declared output_types (compose-time mirror; a hand-rolled literal could
@@ -598,6 +631,39 @@ export async function runGig(
     // A keyed type may be CONDITIONAL (e.g. a verdict's provisional-draft only on FILEABLE), so a
     // missing key is skipped, not an error — the downstream input_contract check fails loudly if a
     // consumer actually needed a type that wasn't produced. Tag each with `from_role`.
+    // #196 — fill placeholder provenance hashes with the REAL content_sha. Agents are asked to emit
+    // *_sha fields but have no hashing tool, so they fabricate sentinels (sha256:PLACEHOLDER-…); the
+    // sealed record then carries fake hashes and the "byte-reproducible survival chain" is hollow.
+    // The engine knows the truth: each consumed input's content_sha + the gig input's hash. Resolve a
+    // placeholder `<x>_sha` field to the input whose domain_type shares a name token, or the gig input
+    // for a disclosure/input field. Unresolved (e.g. a round-1 predecessor) → "" (honest: no predecessor).
+    // A real content hash is 64 hex (optionally `sha256:`-prefixed). A `*_sha` field holding
+    // anything else is a fabrication — the model can't hash its inputs, so it emits SOME sentinel,
+    // and the exact wording varies run to run ("sha256:PLACEHOLDER-…", "UNSEALED:no-hash-tool-…").
+    // Trigger on "not a real hash" rather than matching a known sentinel, so the backfill is robust
+    // to whatever the model invents (a hardcoded-sentinel match silently no-ops on new wording).
+    const REAL_SHA = /^(sha256:)?[0-9a-f]{64}$/i;
+    const shaByType = new Map<string, string>();
+    for (const inp of inputs) if (!shaByType.has(inp.domain_type)) shaByType.set(inp.domain_type, inp.content_sha);
+    // Hash the gig input lazily — only when a placeholder actually resolves to it (most outputs have
+    // no *_sha fields, and a hostile/circular gig input shouldn't be canonicalized unless needed).
+    let gigInputShaCache: string | undefined;
+    const gigInputSha = (): string => (gigInputShaCache ??= sha256Hex(canonJson(gigInput)));
+    const resolveSha = (field: string): string | undefined => {
+      const tokens = field.replace(/_sha$/i, "").split(/[_-]/).filter(Boolean);
+      for (const [type, sha] of shaByType) {
+        const ttok = type.split(/[-_]/);
+        if (tokens.some((t) => ttok.includes(t))) return sha;
+      }
+      if (tokens.includes("disclosure") || tokens.includes("input")) return gigInputSha();
+      return undefined;
+    };
+    const backfillShas = (obj: Record<string, unknown>): void => {
+      for (const [k, v] of Object.entries(obj)) {
+        if (/_sha$/i.test(k) && typeof v === "string" && !REAL_SHA.test(v)) obj[k] = resolveSha(k) ?? "";
+      }
+    };
+
     const single = output_specs.length === 1;
     const written: OutputRecord[] = [];
     for (const spec of output_specs) {
@@ -609,6 +675,7 @@ export async function runGig(
           `chair "${chair.role}" output "${spec.domain_type}" must be a JSON object, got ${typeof slice}`,
         );
       }
+      backfillShas(slice as Record<string, unknown>);
       const rec = deps.outputs.write({
         core_type: spec.core_type,
         domain_type: spec.domain_type,
@@ -620,6 +687,7 @@ export async function runGig(
         primitive: spec.primitive,
         data: slice as Record<string, unknown>,
         input_refs: inputs.map((i) => i.id),
+        input_shas: inputs.map((i) => i.content_sha), // #196 — real predecessor hashes, engine-stamped
         skill_provenance,
       });
       for (const i of inputs) deps.outputs.addRef(rec.id, i.id, "derived_from", spec.primitive);
@@ -668,6 +736,8 @@ export async function runGig(
     output_hashes,
     started_at,
     finished_at: new Date().toISOString(),
+    // settled model spend (#195) — omitted when no model ran (skill-only gigs / stubbed invokers).
+    ...(sawUsage ? { usage } : {}),
   });
 
   // Cycle complete — when a budget was supplied, mark it `settled` and
@@ -678,6 +748,7 @@ export async function runGig(
   }
 
   const result: GigResult = { gig_id, standard_slug: standard.slug, genome_hash, run_fingerprint, outputs: produced, eval_scores, status: "complete" };
+  if (sawUsage) result.usage = usage;
   if (budget) result.budget_state = budget;
   emit({ type: "gig_complete", outputs: produced.length });
   return result;

@@ -6,6 +6,7 @@
 // drops in-flight tracking — acceptable for v0, and a restart mid-gig is its own problem.
 
 import type { GigProgressEvent } from "./runtime.js";
+import type { GigUsage } from "./ledger.js";
 
 export interface GigChairState {
   role: string;
@@ -32,6 +33,9 @@ export interface GigRunState {
   run_fingerprint?: string;
   genome_hash?: string;
   error?: string;
+  // Settled model spend (#195), set when the run completes. Surfaced by gig_monitor so a
+  // gig's actual cost/tokens are queryable by gig_id, not just persisted on the ledger.
+  usage?: GigUsage;
 }
 
 export function newGigRun(gig_id: string, standard_slug: string, phases_total: number, now: string): GigRunState {

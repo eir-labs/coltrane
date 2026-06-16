@@ -17,12 +17,14 @@ import {
 } from "./mcp.js";
 import { createRegistry, loadRegistry, type Registry, type DomainType } from "./registry.js";
 import { loadGenome, resolveGenome, type SkillRecord, type EvalRecord, type LoadError } from "./loader.js";
-import { sealAgentDefinition, sealDefinition, recordIdentity } from "./genome_writer.js";
+import { SkillSchema, AgentSchema, StandardSchema } from "./genome_schema.js";
+import { sealAgentDefinition, sealDefinition, sealSkillPackage, recordIdentity } from "./genome_writer.js";
 import { createOutputStore, defaultOutputsPersistDir, type OutputStore } from "./outputs.js";
 import { MemoryLedger, type Ledger } from "./ledger.js";
 import { standardSimulate } from "./simulate.js";
 import { runGig, BudgetExhausted, type AgentInvoker } from "./runtime.js";
 import { makeClaudeInvoker } from "./claude_invoker.js";
+import type { ToolProvider } from "./tool_providers.js";
 import { composeStandard, defineAgent, CompositionError, type Standard, type Agent, type AgentDef, type PhaseDef } from "./composition.js";
 import { PRIMITIVE_OUTPUT_TYPE, type Primitive } from "./core_types.js";
 import { proposeTypeChange, type DomainTypeDef } from "./type_versioning.js";
@@ -80,6 +82,11 @@ export interface ServerDeps {
   // Base dir for per-gig agent logs (<base>/<gig_id>/<role>.jsonl). Set by bootstrap to
   // the outputs persist dir; absent → no file tee (state-only observability, e.g. tests).
   gig_log_base?: string | undefined;
+  // #185 — the genome→provider bridge: each registered engine tool slug → an in_house provider, so
+  // an agent's grant of a real engine tool RESOLVES instead of failing closed as a dead name. Built
+  // by bootstrap from REGISTERED_TOOL_SLUGS, passed to the invoker, and kept live by tool_register.
+  // Shared by reference with the invoker, so a mid-session register reaches resolution immediately.
+  toolProviders?: Map<string, ToolProvider> | undefined;
 }
 
 export interface ToolResult {
@@ -333,6 +340,7 @@ export async function dispatchTool(slug: string, args: Record<string, unknown>, 
                 gig_id: res.gig_id,
                 manifest: {
                   genome_hash: res.genome_hash, run_fingerprint: res.run_fingerprint, output_count: res.outputs.length,
+                  ...(res.usage ? { usage: res.usage } : {}), // #195 — settled model spend
                   ...(res.budget_state ? { budget_state: res.budget_state } : {}),
                 },
               },
@@ -371,6 +379,7 @@ export async function dispatchTool(slug: string, args: Record<string, unknown>, 
           .then((res) => {
             state.status = "complete"; state.finished_at = new Date().toISOString();
             state.run_fingerprint = res.run_fingerprint; state.genome_hash = res.genome_hash; state.outputs_count = res.outputs.length;
+            if (res.usage) state.usage = res.usage; // #195 — surface settled spend to gig_monitor
           })
           .catch((e: unknown) => {
             state.status = "failed"; state.finished_at = new Date().toISOString();
@@ -401,20 +410,22 @@ export async function dispatchTool(slug: string, args: Record<string, unknown>, 
               outputs_count: live.outputs_count,
               outputs_so_far: outs,
               ...(live.run_fingerprint ? { run_fingerprint: live.run_fingerprint } : {}),
+              ...(live.usage ? { usage: live.usage } : {}), // #195 — settled model spend, queryable by gig_id
               ...(live.error ? { error: live.error } : {}),
               ...(live.finished_at ? { finished_at: live.finished_at } : {}),
             },
           };
         }
         const outs = deps.outputs.all().filter((o) => o.gig_id === gid);
-        const done = deps.ledger.query({ gig_id: gid }).length > 0;
+        const entry = deps.ledger.query({ gig_id: gid })[0];
         return {
           ok: true, requires_approval: approval,
           data: {
-            status: done ? "complete" : outs.length > 0 ? "running" : "unknown",
+            status: entry ? "complete" : outs.length > 0 ? "running" : "unknown",
             phases_complete: outs.length,
             current_agent: outs.length ? outs[outs.length - 1]!.agent_slug : null,
             outputs_so_far: outs,
+            ...(entry?.usage ? { usage: entry.usage } : {}), // #195 — settled spend from the ledger (post-restart path)
           },
         };
       }
@@ -477,15 +488,23 @@ export async function dispatchTool(slug: string, args: Record<string, unknown>, 
             return a as Agent;
           });
           const sPhases = (args["phases"] as PhaseDef[]) ?? [];
-          // Carry eval_slugs through compose → live map → persisted file so a
-          // declared eval reaches the runtime (preserved from main).
-          const sEvalSlugs = Array.isArray(args["eval_slugs"]) ? (args["eval_slugs"] as string[]) : undefined;
-          const std = composeStandard({ slug: sSlug, domain: sDomain, agents: sAgents, phases: sPhases, ...(sEvalSlugs ? { eval_slugs: sEvalSlugs } : {}) });
+          // Carry EVERY passthrough field the schema declares (eval_slugs, input_types, output_types,
+          // max_examine_rounds, description, …) through compose → live map → persisted file. The
+          // handler used to thread only eval_slugs, silently dropping input_types/output_types/
+          // max_examine_rounds/description on both the compose call AND the persisted file — so a
+          // standard authored via the TOOL lost exactly the fields composeStandard preserves on the
+          // FILE path (audit finding D). Copy by the schema's own key list so it can't re-drift.
+          const STD_PASSTHROUGH = Object.keys(StandardSchema.shape).filter(
+            (k) => !["slug", "domain", "agents", "agent_slugs", "phases"].includes(k),
+          );
+          const extras: Record<string, unknown> = {};
+          for (const k of STD_PASSTHROUGH) if (args[k] !== undefined) extras[k] = args[k];
+          const std = composeStandard({ slug: sSlug, domain: sDomain, agents: sAgents, phases: sPhases, ...extras });
           // Write-through to the LIVE map so gig_dispatch sees the new standard
           // in the same session (no rebootstrap needed).
           deps.standards?.set(sSlug, std);
           // substrate seal: persist a loadable standards/<slug>.json (agent_slugs form) + ledger.
-          const fileDef = { slug: sSlug, domain: sDomain, agent_slugs: sAgents.map((a) => a.slug), phases: sPhases, ...(sEvalSlugs ? { eval_slugs: sEvalSlugs } : {}) };
+          const fileDef = { slug: sSlug, domain: sDomain, agent_slugs: sAgents.map((a) => a.slug), phases: sPhases, ...extras };
           const sealed = sealDefinition("standard_compose", sSlug, fileDef, deps.ledger, deps.genome_dir, "standards");
           return { ok: true, requires_approval: approval, data: { standard_id: std.slug, content_hash: sealed.content_hash, dependency_hash: sealed.dependency_hash, effective_hash: sealed.effective_hash, validation_result: { valid: true } } };
         } catch (e) {
@@ -785,28 +804,20 @@ export async function dispatchTool(slug: string, args: Record<string, unknown>, 
         return { ok: true, requires_approval: approval, data: { status, aborted: status === "running", cleanup_result: { reason: String(args["reason"] ?? "") } } };
       }
       case "agent_define": {
-        // Read the FULL advertised contract (mcp.ts): behavioral representation + cage.
-        // identity/method/constraints/behavioral_primitives are required — defineAgent
-        // rejects the def loudly if they're missing, so they can't be silently dropped.
-        const def: AgentDef = {
-          slug: String(args["slug"] ?? ""),
-          primitives: ((args["primitives"] as Primitive[]) ?? []),
-          input_types: arr(args["input_types"]),
-          output_types: arr(args["output_types"]),
-          identity: String(args["identity"] ?? ""),
-          method: String(args["method"] ?? ""),
-          constraints: arr(args["constraints"]),
-          behavioral_primitives: (args["behavioral_primitives"] as AgentDef["behavioral_primitives"]) ?? [],
-        };
-        if (args["domain"]) def.domain = String(args["domain"]);
-        if (args["allowed_tools"]) def.allowed_tools = arr(args["allowed_tools"]);
-        if (args["disallowed_tools"]) def.disallowed_tools = arr(args["disallowed_tools"]);
-        const perms = args["permissions"] && typeof args["permissions"] === "object" ? (args["permissions"] as Record<string, unknown>) : undefined;
-        if (perms?.["model_tier"]) def.model_tier = perms["model_tier"] as NonNullable<AgentDef["model_tier"]>;
-        if (perms?.["code_tool_access"]) def.code_tool_access = perms["code_tool_access"] as NonNullable<AgentDef["code_tool_access"]>;
-        if (typeof perms?.["max_tool_calls"] === "number") def.max_tool_calls = perms["max_tool_calls"];
-        if (typeof perms?.["max_token_budget"] === "number") def.max_token_budget = perms["max_token_budget"];
-        if (args["depth_profile"]) def.depth_profile = args["depth_profile"] as NonNullable<AgentDef["depth_profile"]>;
+        // Build the def by the SCHEMA's own field list (genome_schema.ts AgentSchema): copy exactly
+        // the fields the schema declares from args. This handler was one of the restatements that
+        // DRIFTED — it read a RETIRED nested `permissions` object for the tuning fields (the generated
+        // surface advertises them flat) and never read `browser_grant` at all, silently dropping the
+        // cage grant on every MCP-authored agent. Iterating the schema keys keeps the write-path from
+        // re-drifting (add a field to AgentSchema and it's copied automatically; none is invented). We
+        // deliberately do NOT parse here: defineAgent (inside sealAgentDefinition) runs the structural
+        // + composition checks and surfaces their precise typed errors — pre-parsing would mask a
+        // composition error (e.g. CREATE with no upstream reasoning) behind a generic schema error.
+        const built: Record<string, unknown> = {};
+        for (const key of Object.keys(AgentSchema.shape)) {
+          if (args[key] !== undefined) built[key] = args[key];
+        }
+        const def = built as unknown as AgentDef;
         // Governance gate: each allowed_tools slug must be registered. tool_propose
         // alone does NOT register; tool_register lands the slug. Unknown slugs are
         // rejected so the cage cannot grant scope to a tool the registry doesn't know.
@@ -844,6 +855,9 @@ export async function dispatchTool(slug: string, args: Record<string, unknown>, 
           return { ok: false, requires_approval: approval, error: "tool_register requires slug" };
         }
         REGISTERED_TOOL_SLUGS.add(targetSlug);
+        // Keep the #185 provider bridge live: a freshly-registered tool must resolve for a same-
+        // session agent_define→dispatch (the registry and provider map share lifecycle).
+        deps.toolProviders?.set(targetSlug, { tool: targetSlug, kind: "in_house" });
         const registration_id = randomUUID();
         deps.ledger.append({
           gig_id: `tool_register:${registration_id}`,
@@ -909,7 +923,7 @@ export async function dispatchTool(slug: string, args: Record<string, unknown>, 
           const standards_affected: Array<{ slug: string; type_check_passed: boolean; errors: string[] }> = [];
           for (const std of deps.standards?.values() ?? []) {
             if (!std.agents.some((a) => a.slug === evolveSlug)) continue;
-            const rebound = std.agents.map((a) => (a.slug === evolveSlug ? { ...a, ...changes } : a));
+            const rebound = std.agents.map((a) => (a.slug === evolveSlug ? ({ ...a, ...changes } as Agent) : a));
             try {
               composeStandard({ slug: std.slug, domain: std.domain, agents: rebound, phases: std.phases, ...(std.eval_slugs ? { eval_slugs: std.eval_slugs } : {}) });
               standards_affected.push({ slug: std.slug, type_check_passed: true, errors: [] });
@@ -972,10 +986,27 @@ export async function dispatchTool(slug: string, args: Record<string, unknown>, 
         // gig in the same session resolves it into an agent's Skills layer.
         const skSlug = typeof args["slug"] === "string" ? (args["slug"] as string).trim() : "";
         if (!skSlug) return { ok: false, requires_approval: approval, error: "skill_define requires a non-empty slug" };
-        const def: SkillRecord = { slug: skSlug };
-        if (typeof args["domain"] === "string") def["domain"] = args["domain"];
-        if (typeof args["md"] === "string") def["md"] = args["md"];
-        const sealed = sealDefinition("skill_define", skSlug, def, deps.ledger, deps.genome_dir, "skills");
+        // Validate against the single Zod source — skill_define is package-aware (meta + permission/
+        // network + fixtures + code/md), not the retired flat {slug, domain, md}. Unknown keys are
+        // dropped; a malformed declared field is rejected before the write/seal.
+        const skParsed = SkillSchema.safeParse({ ...args, slug: skSlug });
+        if (!skParsed.success) {
+          const why = skParsed.error.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`).join("; ");
+          return { ok: false, requires_approval: approval, error: `skill_define: ${why}` };
+        }
+        const def: SkillRecord = skParsed.data;
+        // Persist the LOADABLE PACKAGE (skills/<slug>/…), not a flat skills/<slug>.json the loader
+        // skips — otherwise a defined skill seals fine but vanishes on reload (audit finding E). The
+        // loader hard-fails an incomplete package, so require what it requires up front: ≥1 fixture
+        // (the skill's pre-registered contract) + a code and/or reasoning half. Refuse here rather
+        // than write a package that would crash the next genome load.
+        if (!Array.isArray(def.fixtures) || def.fixtures.length === 0) {
+          return { ok: false, requires_approval: approval, error: "skill_define requires ≥1 fixture — a skill ships its pre-registered contract (the loader rejects a fixtureless package)" };
+        }
+        if (typeof def.code !== "string" && typeof def.md !== "string") {
+          return { ok: false, requires_approval: approval, error: "skill_define requires a code half (code) and/or a reasoning half (md) — an empty package can't load" };
+        }
+        const sealed = sealSkillPackage(def, deps.ledger, deps.genome_dir);
         deps.skills?.set(skSlug, def);
         return { ok: true, requires_approval: approval, data: { skill_id: skSlug, content_hash: sealed.content_hash, dependency_hash: sealed.dependency_hash, effective_hash: sealed.effective_hash } };
       }
@@ -1151,12 +1182,37 @@ function loadedGenomeHash(genome: LoadedGenome): string {
  * root is COLTRANE_GENOME or the cwd. Pure + testable (no stdio); fails loud if the cwd
  * isn't a genome (loadGenome rejects a missing/invalid core_types/).
  */
+// #185 — the MCP servers a deployment makes available, keyed by server slug. The repo's .mcp.json
+// IS that registry (coltrane ships its own "coltrane" server; a deployment adds e.g. a browser
+// server there). Per-agent grant resolution wires only the servers an agent's allowed_tools name
+// into its spawn — deny-by-default. Falls back to coltrane's own server if .mcp.json is absent.
+function readMcpServerConfigs(root: string): Record<string, unknown> {
+  const path = join(root, ".mcp.json");
+  if (existsSync(path)) {
+    try {
+      const parsed = JSON.parse(readFileSync(path, "utf8")) as { mcpServers?: Record<string, unknown> };
+      if (parsed.mcpServers && typeof parsed.mcpServers === "object") return parsed.mcpServers;
+    } catch { /* fall through to the default */ }
+  }
+  return { coltrane: { command: "node", args: ["dist/src/server_entry.js"] } };
+}
+
 export function bootstrapServerDeps(genomeRoot?: string): ServerDeps {
   const root = genomeRoot ?? process.env["COLTRANE_GENOME"] ?? process.cwd();
   const genome = resolveGenome(root); // manifest-aware: honors a consumer's `extends` base
   const registry = loadRegistry(genome);
+  const mcpServerConfigs = readMcpServerConfigs(root);
+  // #185 — the genome→provider bridge the resolver needs to be reachable in production. Each
+  // registered engine tool slug (the coltrane MCP surface + anything tool_register added) becomes an
+  // in_house provider, so an agent that grants a real engine tool resolves instead of failing closed.
+  // Without this the resolver only ever saw the browser cage, so any non-playwright grant was a dead
+  // name. Shared by reference with the invoker so tool_register stays live (no restart needed).
+  const toolProviders = new Map<string, ToolProvider>(
+    [...REGISTERED_TOOL_SLUGS].map((slug) => [slug, { tool: slug, kind: "in_house" as const }]),
+  );
   return {
     registry,
+    toolProviders,
     // PR #78 follow-up: persist outputs to disk so the audit chain survives an
     // MCP session close (Rob cold-trial requirement). COLTRANE_OUTPUTS_DIR
     // overrides the default ~/.eir/coltrane_outputs path (tests + sandboxes).
@@ -1166,6 +1222,10 @@ export function bootstrapServerDeps(genomeRoot?: string): ServerDeps {
     invoke: makeClaudeInvoker({
       registry,
       model: process.env["COLTRANE_MODEL"],
+      // #185 — per-agent grant resolution wires each agent's MCP servers into its spawn (coltrane's
+      // own server + any the deployment registers in .mcp.json). An unresolvable grant fails closed.
+      mcpServerConfigs,
+      toolProviders, // the genome→provider bridge (above) — makes in_house grants resolvable
       // per-chair wall-clock bound; COLTRANE_CHAIR_TIMEOUT_MS overrides for slow deployments
       ...(process.env["COLTRANE_CHAIR_TIMEOUT_MS"] ? { timeout_ms: Number(process.env["COLTRANE_CHAIR_TIMEOUT_MS"]) } : {}),
     }),

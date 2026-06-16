@@ -74,6 +74,9 @@ export const StandardSchema = z.object({
   eval_slugs: z.array(z.string()).readonly().optional(),
   input_types: z.array(z.string()).readonly().optional(),
   output_types: z.array(z.string()).readonly().optional(),
+  // TODO(#194): plumbed end-to-end but NOT yet enforced — the runtime doesn't read this K-cap.
+  // A consumer reading it from the schema must not assume enforcement until #194 (the caller-driven
+  // examine⇄amend driver) lands. Tracked, non-blocking.
   max_examine_rounds: z.number().optional(),
   description: z.string().optional(),
 });
@@ -155,6 +158,9 @@ function jsonTypeOf(schema: z.ZodTypeAny): JsonType {
   // `schema`) to the inner type. Deliberately NOT `_def.type`: on a ZodArray that key holds the
   // ELEMENT schema, so following it would descend into the array and report the element's scalar
   // type — the bug that advertised `primitives: z.array(enum)` as "string" and broke agent_define.
+  // Bound is a deliberate safety cap, not a real limit: the genome's deepest field nests ~3 wrappers
+  // (e.g. `.array().readonly().optional()`), so 10 is unreachable in practice — it exists only so a
+  // future pathological/cyclic schema can't spin here. Raise it if a real field ever approaches it.
   for (let i = 0; i < 10; i++) {
     const def = (s as { _def?: { innerType?: z.ZodTypeAny; schema?: z.ZodTypeAny } })._def;
     const inner = def?.innerType ?? def?.schema;

@@ -54,6 +54,8 @@ export interface OutputRecord {
   // The content_sha of each input_ref, in the same order — the real, engine-computed predecessor
   // hashes (#196). Stamped at write() so the audit chain is byte-reproducible WITHOUT any agent
   // hashing: walk input_refs → input_shas to recompute provenance. Empty for root chairs.
+  // Timing: each value is the upstream record's content_sha AS SEALED (records are immutable once
+  // written), not a fresh re-hash — so there's no read-vs-write skew if an upstream is touched later.
   input_shas: string[];
   created_at: string;
   cost_usd?: number | undefined;

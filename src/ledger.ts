@@ -23,6 +23,8 @@ export interface LedgerEntry {
   finished_at: string;
   // Settled model spend (#195). Present for gigs with ≥1 real model invocation; the result
   // events carry it (usage + total_cost_usd) and it used to be forwarded-but-dropped.
+  // Back-compat: optional + additive — ledger lines written before #195 (no `usage` key) parse
+  // unchanged; readers treat absent as "spend not captured." No migration.
   usage?: GigUsage;
 }
 

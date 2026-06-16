@@ -637,7 +637,12 @@ export async function runGig(
     // The engine knows the truth: each consumed input's content_sha + the gig input's hash. Resolve a
     // placeholder `<x>_sha` field to the input whose domain_type shares a name token, or the gig input
     // for a disclosure/input field. Unresolved (e.g. a round-1 predecessor) → "" (honest: no predecessor).
-    const PLACEHOLDER_SHA = /^sha256:(UNCOMPUTED-)?PLACEHOLDER/i;
+    // A real content hash is 64 hex (optionally `sha256:`-prefixed). A `*_sha` field holding
+    // anything else is a fabrication — the model can't hash its inputs, so it emits SOME sentinel,
+    // and the exact wording varies run to run ("sha256:PLACEHOLDER-…", "UNSEALED:no-hash-tool-…").
+    // Trigger on "not a real hash" rather than matching a known sentinel, so the backfill is robust
+    // to whatever the model invents (a hardcoded-sentinel match silently no-ops on new wording).
+    const REAL_SHA = /^(sha256:)?[0-9a-f]{64}$/i;
     const shaByType = new Map<string, string>();
     for (const inp of inputs) if (!shaByType.has(inp.domain_type)) shaByType.set(inp.domain_type, inp.content_sha);
     // Hash the gig input lazily — only when a placeholder actually resolves to it (most outputs have
@@ -655,7 +660,7 @@ export async function runGig(
     };
     const backfillShas = (obj: Record<string, unknown>): void => {
       for (const [k, v] of Object.entries(obj)) {
-        if (/_sha$/i.test(k) && typeof v === "string" && PLACEHOLDER_SHA.test(v)) obj[k] = resolveSha(k) ?? "";
+        if (/_sha$/i.test(k) && typeof v === "string" && !REAL_SHA.test(v)) obj[k] = resolveSha(k) ?? "";
       }
     };
 

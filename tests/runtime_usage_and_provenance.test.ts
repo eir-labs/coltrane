@@ -80,11 +80,14 @@ describe("runGig stamps real provenance hashes (#196)", () => {
     const gigInput = { seed: "the disclosure bytes" };
     const invoke: AgentInvoker = (ctx) => {
       if (ctx.agent.slug === "producer") return { t: "raw note" };
-      // the linker fabricates placeholder hashes it can't compute — exactly the #196 failure
+      // the linker fabricates placeholder hashes it can't compute — exactly the #196 failure. The
+      // wording is DELIBERATELY not any sentinel the backfill code references (a real run emitted
+      // "UNSEALED:no-hash-tool-in-seat:…"), so this pins that backfill triggers on "not a real
+      // hash", not on a hardcoded sentinel string.
       return {
         summary: "linked",
-        note_sha: "sha256:PLACEHOLDER-note-deadbeef",
-        input_sha: "sha256:UNCOMPUTED-PLACEHOLDER-input-disclosure",
+        note_sha: "UNSEALED:no-hash-tool-in-seat:to-be-computed-over-the-note",
+        input_sha: "(pending) sha256 of the gig input",
       };
     };
     const { deps } = harness(invoke, std());

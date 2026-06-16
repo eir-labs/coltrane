@@ -1,7 +1,7 @@
 import type { Primitive } from "./core_types.js";
 import { PRIMITIVE_OUTPUT_TYPE } from "./core_types.js";
 import type { ModelTier, Depth } from "./pricing.js";
-import { AgentSchema, type AgentInput, type AgentOutput } from "./genome_schema.js";
+import { AgentSchema, type AgentInput, type AgentOutput, type StandardInput, type StandardOutput } from "./genome_schema.js";
 
 // The per-agent code-tool exposure gate (old AgentPermissions.code_tool_access). Scales
 // the agent's access to Claude Code's built-in file/exec tools, independent of MCP grant.
@@ -46,48 +46,26 @@ export interface PhaseDef {
   chairs: readonly Chair[];
 }
 
-export interface StandardDef {
-  slug: string;
-  domain: string;
+// StandardDef (compose input) + Standard (runtime output) DERIVE from the single source
+// (genome_schema.ts `StandardSchema`) — add a passthrough field there (eval_slugs, input_types,
+// output_types, max_examine_rounds, description, the #177 gig contract …) and it appears on both
+// types automatically, so composeStandard can't silently drop it again. Only the two authoring-time
+// agent fields are overridden: the schema's `agents` (unknown[] — slugs/objects) and `agent_slugs`
+// (the file shape) are replaced by the RESOLVED `Agent[]` the composer produces, and `phases` is the
+// runtime PhaseDef (chairs with a required agent_slug). That file→resolved transform is the only
+// reason these stay derived types here rather than `z.output<StandardSchema>` directly.
+export type StandardDef = Omit<StandardInput, "agents" | "agent_slugs" | "phases"> & {
   agents: readonly Agent[];
   phases: readonly PhaseDef[];
-  // 5th-class evals: judge-shapes evaluated against the gig's produced outputs.
-  // Names declared here are looked up in the loaded genome's evals registry at
-  // runGig time; their scores land in run_fingerprint.eval_scores.
-  eval_slugs?: readonly string[];
-  // The gig contract (#177): types that enter the standard from OUTSIDE — gig input or
-  // produced by another standard in a cross-standard DAG. The agent-level primitive-graph
-  // gates treat these as "available upstream": a faithful agent that consumes a type produced
-  // elsewhere composes, and a standalone-CREATE agent whose reasoner arrives this way is
-  // admitted. The chair contracts (input_contract/depends_on) remain the authoritative
-  // per-role dataflow; this only stops the coarse agent-level gate from rejecting real inputs.
-  input_types?: readonly string[];
-  // Declared on the standard file + preserved on the runtime Standard (#genome-schema): the
-  // standard's declared output contract, a caller-driven loop K-cap, and a human description. The
-  // engine doesn't yet ENFORCE max_examine_rounds (separate phantom-contract task) but it must not
-  // silently drop a field the genome declares + the seal covers.
-  output_types?: readonly string[];
-  max_examine_rounds?: number;
-  description?: string;
-}
+};
 
 // Standard.phases is canonical PhaseDef (chairs). Legacy {name, agent} form is
 // rejected at the composeStandard / loader / MCP boundary; it never reaches the
 // runtime.
-export interface Standard {
-  slug: string;
-  domain: string;
+export type Standard = Omit<StandardOutput, "agents" | "agent_slugs" | "phases"> & {
   agents: readonly Agent[];
   phases: readonly PhaseDef[];
-  eval_slugs?: readonly string[];
-  // the gig contract (#177) — types entering from outside the standard. Optional on the type so
-  // hand-built Standard literals stay valid; composeStandard always populates it ([] when absent).
-  input_types?: readonly string[];
-  // Preserved from the file, not dropped (#genome-schema). See StandardDef.
-  output_types?: readonly string[];
-  max_examine_rounds?: number;
-  description?: string;
-}
+};
 
 export class CompositionError extends Error {}
 

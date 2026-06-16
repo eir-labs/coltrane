@@ -71,12 +71,14 @@ export const StandardSchema = z.object({
   agents: z.array(z.unknown()).optional(),       // compose input (agent slugs/objects)
   agent_slugs: z.array(z.string()).optional(),   // the file shape (resolved to agents on load)
   phases: z.array(PhaseSchema),
-  eval_slugs: z.array(z.string()).optional(),
-  input_types: z.array(z.string()).optional(),
-  output_types: z.array(z.string()).optional(),
+  eval_slugs: z.array(z.string()).readonly().optional(),
+  input_types: z.array(z.string()).readonly().optional(),
+  output_types: z.array(z.string()).readonly().optional(),
   max_examine_rounds: z.number().optional(),
   description: z.string().optional(),
 });
+export type StandardInput = z.input<typeof StandardSchema>;
+export type StandardOutput = z.output<typeof StandardSchema>;
 
 // ── Skill — the package shape. Reconciles the two current shapes (SkillMeta typed + SkillRecord
 //    {slug;[k]:unknown} bag) into one. SHAPE-aligned only: determinism_ratio + fixtures are
@@ -144,10 +146,13 @@ export type DomainTypeOutput = z.output<typeof DomainTypeSchema>;
 type JsonType = "string" | "number" | "boolean" | "array" | "object";
 function jsonTypeOf(schema: z.ZodTypeAny): JsonType {
   let s: z.ZodTypeAny = schema;
-  // unwrap optional/default/nullable/readonly/effects to the inner type
+  // Unwrap the WRAPPER types (optional/default/nullable/readonly via `innerType`, effects via
+  // `schema`) to the inner type. Deliberately NOT `_def.type`: on a ZodArray that key holds the
+  // ELEMENT schema, so following it would descend into the array and report the element's scalar
+  // type — the bug that advertised `primitives: z.array(enum)` as "string" and broke agent_define.
   for (let i = 0; i < 10; i++) {
-    const def = (s as { _def?: { innerType?: z.ZodTypeAny; schema?: z.ZodTypeAny; type?: z.ZodTypeAny } })._def;
-    const inner = def?.innerType ?? def?.schema ?? def?.type;
+    const def = (s as { _def?: { innerType?: z.ZodTypeAny; schema?: z.ZodTypeAny } })._def;
+    const inner = def?.innerType ?? def?.schema;
     if (inner && inner instanceof z.ZodType) { s = inner; continue; }
     break;
   }

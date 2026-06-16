@@ -8,12 +8,20 @@ import { fileURLToPath } from "node:url";
 import { MCP_TOOLS } from "../src/mcp.js";
 import { loadGenome } from "../src/loader.js";
 import { defineAgent, type AgentDef } from "../src/composition.js";
+import { AgentSchema, StandardSchema, SkillSchema, zodToMcpProps } from "../src/genome_schema.js";
 
 const REPO = fileURLToPath(new URL("..", import.meta.url));
 const schemaProps = (slug: string): string[] => {
   const t = MCP_TOOLS.find((x) => x.slug === slug);
   const props = (t?.input_schema as { properties?: Record<string, unknown> })?.properties ?? {};
   return Object.keys(props);
+};
+// the advertised JSON type for one MCP field (e.g. "array"/"string") — used to pin that an array
+// schema field is advertised AS an array, not as its element's scalar type.
+const schemaPropType = (slug: string, field: string): string | undefined => {
+  const t = MCP_TOOLS.find((x) => x.slug === slug);
+  const props = (t?.input_schema as { properties?: Record<string, { type?: string }> })?.properties ?? {};
+  return props[field]?.type;
 };
 
 // ── Standard — composeStandard drops fields the genome declares ──────────────────
@@ -77,4 +85,31 @@ describe("drift · litmus — defineAgent is loss-free", () => {
       expect(agent[k], `defineAgent dropped "${k}" — a lossy projection of the sealed def`).not.toBe(undefined);
     }
   });
+});
+
+// ── The standing litmus — every migrated class's MCP write-surface IS generated from its schema ──
+// Once a class derives from one Zod source, its MCP input_schema is `obj(zodToMcpProps(Schema))`, so
+// it CANNOT drift — unless someone re-hand-writes the surface. This pins that: the advertised fields
+// must equal the schema's fields. A regression (replacing the generated surface with a hand-rolled
+// obj({...}) that omits or renames a field) fails here. Cheap because the surfaces are generated.
+describe("drift · litmus — MCP write-surfaces stay generated from the schema", () => {
+  for (const [tool, schema] of [
+    ["agent_define", AgentSchema],
+    ["standard_compose", StandardSchema],
+    ["skill_define", SkillSchema],
+  ] as const) {
+    it(`${tool} advertises exactly ${"" /* keep label short */}its schema's fields`, () => {
+      expect(schemaProps(tool).sort()).toEqual(Object.keys(zodToMcpProps(schema)).sort());
+    });
+  }
+
+  // Regression: an array-typed schema field must advertise AS "array", not its element's scalar
+  // type. zodToMcpProps once unwrapped a ZodArray to its element (following _def.type) and reported
+  // `primitives: z.array(enum)` as "string" — so the MCP client serialized the value as a string and
+  // agent_define rejected it ("primitives must be an array"). This pins the array fields.
+  for (const f of ["primitives", "allowed_tools", "input_types", "behavioral_primitives"]) {
+    it(`agent_define advertises "${f}" as an array`, () => {
+      expect(schemaPropType("agent_define", f), `${f} must advertise as array, not its element type`).toBe("array");
+    });
+  }
 });

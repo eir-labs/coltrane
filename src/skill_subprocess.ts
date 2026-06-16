@@ -20,7 +20,14 @@ export interface SkillMeta {
   input_type?: string;
   output_type?: string;
   determinism_ratio?: number;
-  permission?: { tier?: number };
+  // permission.tier flags fs/child-process (Node's permission model). network is NOT covered by
+  // Node's model (there is no --allow-net), so it's an explicit, allowlisted grant the skill_runner
+  // enforces in-process: deny-by-default, only `allow` hosts, only `methods` (GET default), capped
+  // at `max_requests`. The grant is part of the package's content hash (tamper-evident).
+  permission?: {
+    tier?: number;
+    network?: { allow?: string[]; methods?: string[]; max_requests?: number; max_bytes?: number };
+  };
   /** Per-skill execution ceiling. Caps the caller-supplied timeout (whichever is smaller). */
   timeout_ms?: number;
 }

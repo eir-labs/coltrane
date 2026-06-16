@@ -27,14 +27,8 @@ describe.skipIf(!LIVE)("patent-fetch live — a real corpus fetch yields a verif
     expect(Array.isArray(rec["cpc_codes"]) && (rec["cpc_codes"] as unknown[]).length, "must extract CPC classes").toBeTruthy();
     expect(Array.isArray(rec["backward_citations"]), "must extract citations").toBe(true);
   }, 60_000);
-
-  it("the network cage DENIES a host outside the allowlist (deny-by-default)", () => {
-    // the grant allows patent corpora only; a fetch the skill is asked to make off-allowlist must
-    // be refused by the cage, not silently performed.
-    const r = executeSkill(PATENT_FETCH, { patent_number: "US9652599B2", __probe_offlist_url: "https://example.com/" });
-    // the skill completes its real work; the off-allowlist probe must NOT have succeeded
-    expect(r.ok).toBe(true);
-    const rec = r.output as Record<string, unknown>;
-    expect(rec["__probe_offlist_status"], "an off-allowlist fetch must be blocked by the cage").not.toBe(200);
-  }, 60_000);
+  // The cage's DENY behavior (no grant → blocked, off-allowlist host → blocked, non-GET → blocked)
+  // is proven deterministically + without network in tests/skill_network_cage.test.ts. This live
+  // spec proves only the ALLOW path — that a real Google Patents fetch actually clears the cage and
+  // grounds — which is the half that needs real egress.
 });

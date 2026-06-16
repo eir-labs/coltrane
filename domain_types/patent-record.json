@@ -1,0 +1,42 @@
+{
+  "slug": "patent-record",
+  "version": 1,
+  "extends": "Signal",
+  "domain": "patent-triage",
+  "status": "active",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "patent_number": { "type": "string" },
+      "source": { "type": "string" },
+      "url": { "type": "string" },
+      "title": { "type": "string" },
+      "abstract": { "type": "string" },
+      "inventors": { "type": "array" },
+      "assignee": { "type": "string" },
+      "priority_date": { "type": "string" },
+      "filing_date": { "type": "string" },
+      "grant_date": { "type": "string" },
+      "cpc_codes": { "type": "array" },
+      "claims": { "type": "array" },
+      "claim_count": { "type": "number" },
+      "backward_citations": { "type": "array" },
+      "verification_method": {
+        "type": "string",
+        "enum": ["fetch", "api", "snippet"]
+      },
+      "verified": { "type": "boolean" },
+      "fetched_at": { "type": "string" },
+      "content_sha": { "type": "string" },
+      "caveat": { "type": "string" }
+    }
+  },
+  "required_fields": [
+    "patent_number",
+    "source",
+    "title",
+    "verified",
+    "verification_method",
+    "content_sha"
+  ]
+}

@@ -1,11 +1,19 @@
 {
   "slug": "patent-fetch",
-  "version": 1,
+  "version": 2,
   "skill_type": "extraction",
   "input_type": "patent-query",
-  "output_type": "patent-hits",
-  "corpus": "patentsview",
+  "output_type": "patent-record",
+  "corpus": "Google Patents",
   "determinism_ratio": 1.0,
-  "permission": { "tier": 0 },
-  "description": "Query the USPTO PatentsView corpus for prior art. Deterministic core is the parser (mock_response -> structured hits); the live path fetches when given a query. corpus is always 'patentsview' so coverage-report can attest which corpus was searched."
+  "permission": {
+    "tier": 0,
+    "network": {
+      "allow": ["patents.google.com"],
+      "methods": ["GET"],
+      "max_requests": 40,
+      "max_bytes": 33554432
+    }
+  },
+  "description": "Fetch a patent from Google Patents (server-rendered bibliography — no browser, no API key) and extract a verified, hash-pinned patent-record (title/abstract/inventors/dates/CPC/claims/citations + content_sha). Deterministic: given the page bytes the record is a pure function (offline path replays a recorded page; live path fetches patents.google.com, the only host the cage permits). corpus 'Google Patents' is what coverage-report attests."
 }

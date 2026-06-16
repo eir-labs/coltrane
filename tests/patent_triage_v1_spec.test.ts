@@ -74,8 +74,8 @@ describe("patent-triage v1 · Slice 1 — patent search + coverage gate", () => 
     expect(skillPkg("patent-fetch")).toBe(true);
     expect(existsSync(join(REPO, "skills", "patent-fetch", "fixtures")), "patent-fetch needs fixtures").toBe(true);
   });
-  it("patent-fetch names its corpus (resolved: USPTO PatentsView for slice 1)", () => {
-    expect(String(skillMeta("patent-fetch")?.["corpus"] ?? "")).toMatch(/patentsview/i);
+  it("patent-fetch names a real, fetchable corpus (Google Patents — the HTTP tier proved out)", () => {
+    expect(String(skillMeta("patent-fetch")?.["corpus"] ?? "")).toMatch(/google patents|patentsview|uspto|epo/i);
   });
   it("the query-expand and citation-verify skills exist", () => {
     expect(skillPkg("query-expand")).toBe(true);
@@ -85,10 +85,15 @@ describe("patent-triage v1 · Slice 1 — patent search + coverage gate", () => 
     const slugs = (agent("prior-art-scout")?.["skill_slugs"] as string[]) ?? [];
     for (const s of ["patent-fetch", "query-expand", "citation-verify"]) expect(slugs, `missing skill ${s}`).toContain(s);
   });
-  it("prior-art-scout has a real corpus tool grant AND a turn cap", () => {
+  it("prior-art-scout grounds via the network-caged patent-fetch skill, not a dead agent tool", () => {
+    // The corpus grant is the patent-fetch skill's network cage (deny-by-default allowlist), not
+    // an agent allowed_tool — WebSearch/WebFetch were dead names that never reached the corpus.
     const a = agent("prior-art-scout");
-    expect(((a?.["allowed_tools"] as string[]) ?? []).length, "empty cage can't search").toBeGreaterThan(0);
-    expect(typeof a?.["max_tool_calls"], "a tool-bearing agent must cap its turns").toBe("number");
+    const tools = (a?.["allowed_tools"] as string[]) ?? [];
+    expect(tools, "the dead web tools are dropped").not.toContain("WebSearch");
+    expect(tools, "the dead web tools are dropped").not.toContain("WebFetch");
+    const net = (skillMeta("patent-fetch")?.["permission"] as { network?: { allow?: string[] } })?.["network"];
+    expect((net?.["allow"] ?? []).length, "patent-fetch must carry the corpus network grant").toBeGreaterThan(0);
   });
   it("a coverage-report domain type records which corpora were searched", () => {
     const t = domainType("coverage-report");

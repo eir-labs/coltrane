@@ -1,0 +1,63 @@
+{
+  "id": "google-patents-us9652599b2",
+  "description": "Recorded Google Patents markup for US9652599B2 → verified, hash-pinned patent-record (deterministic replay of the HTTP tier).",
+  "input": {
+    "patent_number": "US9652599B2",
+    "html": "<!doctype html><html><head>\n<meta name=\"DC.title\" content=\"Restricted code signing\"/>\n<meta name=\"description\" content=\"A method and system is provided for signing data such as code images. In one embodiment, the method comprises receiving, from a requestor, a request to sign the data according to a requested configuration.\"/>\n</head><body>\n<dd itemprop=\"assigneeOriginal\">Arris Enterprises LLC</dd>\n<dd itemprop=\"inventor\">Alexander Medvinsky</dd>\n<dd itemprop=\"inventor\">Ali Negahdar</dd>\n<dd itemprop=\"inventor\">Xin Qiu</dd>\n<time itemprop=\"priorityDate\">2014-06-11</time>\n<time itemprop=\"filingDate\">2015-06-11</time>\n<time itemprop=\"publicationDate\">2017-05-16</time>\n<span itemprop=\"Code\">G06F21/10</span>\n<span itemprop=\"Code\">H04L9/3247</span>\n<span itemprop=\"Code\">H04L63/123</span>\n<section itemprop=\"abstract\"><div class=\"abstract\">A method and system is provided for signing data.</div></section>\n<section itemprop=\"claims\">\n<div class=\"claim\"><div class=\"claim-text\">1. A method of signing data, comprising: receiving, from a requester, a request to sign the data according to a requested configuration.</div></div>\n<div class=\"claim\"><div class=\"claim-text\">2. The method of claim 1, further comprising modifying the data according to the requested configuration.</div></div>\n</section>\n<div itemprop=\"backwardReferences\"><table><tbody>\n<tr><td><span itemprop=\"publicationNumber\">US20050246523A1</span></td></tr>\n<tr><td><span itemprop=\"publicationNumber\">US9141150B1</span></td></tr>\n<tr><td><span itemprop=\"publicationNumber\">US8572368B1</span></td></tr>\n</tbody></table></div>\n</body></html>"
+  },
+  "expected_output": {
+    "patent_number": "US9652599B2",
+    "source": "Google Patents",
+    "url": "https://patents.google.com/patent/US9652599B2/en",
+    "title": "Restricted code signing",
+    "abstract": "A method and system is provided for signing data such as code images. In one embodiment, the method comprises receiving, from a requestor, a request to sign the data according to a requested configuration.",
+    "inventors": [
+      "Alexander Medvinsky",
+      "Ali Negahdar",
+      "Xin Qiu"
+    ],
+    "assignee": "Arris Enterprises LLC",
+    "priority_date": "2014-06-11",
+    "filing_date": "2015-06-11",
+    "grant_date": "2017-05-16",
+    "cpc_codes": [
+      "G06F21/10",
+      "H04L9/3247",
+      "H04L63/123"
+    ],
+    "claims": [
+      "1. A method of signing data, comprising: receiving, from a requester, a request to sign the data according to a requested configuration.",
+      "2. The method of claim 1, further comprising modifying the data according to the requested configuration."
+    ],
+    "claim_count": 2,
+    "backward_citations": [
+      "US20050246523A1",
+      "US9141150B1",
+      "US8572368B1"
+    ],
+    "verification_method": "fetch",
+    "verified": true,
+    "content_sha": "1b215baae6f71ef7d37f14492627c0684b887c92e0518fc5238c65c55abf557d"
+  },
+  "assertions": [
+    {
+      "path": "verified",
+      "op": "equals",
+      "value": true
+    },
+    {
+      "path": "verification_method",
+      "op": "equals",
+      "value": "fetch"
+    },
+    {
+      "path": "content_sha",
+      "op": "is_string"
+    },
+    {
+      "path": "source",
+      "op": "equals",
+      "value": "Google Patents"
+    }
+  ]
+}

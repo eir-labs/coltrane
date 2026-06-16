@@ -123,3 +123,44 @@ describe("patent-fetch · Slice 3 — prior-art-scout is wired to the grounded c
     expect(inputs, "prior-art-scout must consume patent-record").toContain("patent-record");
   });
 });
+
+// ── Slice 4 — the browser tier: patent-search as a caged Playwright skill ─────────
+// The JS-walled SEARCH surfaces need a browser. It is a deterministic SKILL (the model picks the
+// query; the code drives the browser) — so it sidesteps #185's dead-tool problem the same way the
+// HTTP tier does, and its grant resolves through the same tool→provider machinery. The cage adds a
+// browser block on top of the network grant: navigation allowlist, read-only, ephemeral isolation,
+// vetted (hashed) extraction scripts, a page budget, and the trace sealed as provenance.
+describe("patent-fetch · Slice 4 — browser tier (patent-search, caged Playwright)", () => {
+  it("a patent-search skill exists and declares a browser permission grant", () => {
+    const perm = (skillMeta("patent-search")?.["permission"] as Record<string, unknown>) ?? {};
+    expect(perm["browser"], "patent-search must declare permission.browser").toBeTruthy();
+  });
+  it("the browser grant is a deny-by-default navigation allowlist, read-only + isolated", () => {
+    const b = ((skillMeta("patent-search")?.["permission"] as Record<string, unknown>)?.["browser"] as Record<string, unknown>) ?? {};
+    expect(((b["allow"] as string[]) ?? []).length, "browser.allow must be a non-empty navigation allowlist").toBeGreaterThan(0);
+    expect(b["read_only"], "browser must be read_only (no downloads / off-path POST)").toBe(true);
+    expect(b["isolate"], "browser must isolate (ephemeral context per gig)").toBe(true);
+  });
+  it("only vetted, content-hashed extraction scripts run (no model-authored runtime JS)", () => {
+    const b = ((skillMeta("patent-search")?.["permission"] as Record<string, unknown>)?.["browser"] as Record<string, unknown>) ?? {};
+    const scripts = (b["eval_scripts_sha"] as string[]) ?? [];
+    expect(scripts.length, "browser.eval_scripts_sha must pin the extraction code by hash").toBeGreaterThan(0);
+    expect(scripts.every((s) => /^[0-9a-f]{64}$/.test(s)), "each pinned script must be a sha256").toBe(true);
+  });
+  it("the browser grant carries a page budget (max_pages) — a finitude bound on crawling", () => {
+    const b = ((skillMeta("patent-search")?.["permission"] as Record<string, unknown>)?.["browser"] as Record<string, unknown>) ?? {};
+    expect(typeof b["max_pages"], "browser.max_pages must bound the crawl").toBe("number");
+  });
+  it("the search seals its browser trace as provenance — coverage-report carries a trace_sha", () => {
+    // "the search actually hit USPTO" must be a hashed artifact, not a claim.
+    expect(props(domainType("coverage-report"))["trace_sha"], "coverage-report must record the search trace's content_sha").toBeTruthy();
+  });
+  it("the cage enforces the browser navigation allowlist (route abort off-list)", () => {
+    const runner = existsSync(join(REPO, "src/skill_subprocess.ts")) ? readFileSync(join(REPO, "src/skill_subprocess.ts"), "utf8") : "";
+    const cage = existsSync(join(REPO, "src/skill_runner.mjs")) ? readFileSync(join(REPO, "src/skill_runner.mjs"), "utf8") : "";
+    expect(
+      /browserAllow|navigationGuard|routeAllow|isNavAllowed|page\.route/.test(runner + cage),
+      "the cage must implement browser navigation allowlist enforcement",
+    ).toBe(true);
+  });
+});

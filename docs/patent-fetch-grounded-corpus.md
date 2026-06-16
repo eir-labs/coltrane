@@ -100,14 +100,53 @@ The verified full patent document, extends `Signal`, domain `patent-triage`:
 A `patent-record` without `verified` + `content_sha` is **not admissible** — the honesty boundary:
 a citation is grounded only when its real text was fetched and pinned.
 
-## Cage+ upgrades (carried forward to the browser tier)
+## Browser tier — `patent-search` as a caged Playwright skill
 
-The browser tier inherits the network cage above and adds: ephemeral isolated context per gig
-(formalize `BROWSER_SESSION_KEY`); per-domain rate-limit + jitter; **only vetted, content-hashed
-extraction scripts** run via `page.evaluate` (never model-authored JS at runtime — the model picks
-*which* patent, the deterministic code does the *how*); and the Playwright **trace sealed to the
-ledger** as evidence-of-work behind the `coverage-report` ("the search actually hit USPTO" becomes a
-hashed artifact, not a claim).
+The JS-walled **search** surfaces (Google Patents search, USPTO Patent Public Search) need a real
+browser. The design choice that matters: **make it a deterministic skill, not a model-driven browser
+tool.** A skill runs deterministic code in the cage — the model picks the *query* (via `query-expand`),
+the skill *executes* the search and returns candidate patent numbers, which `patent-fetch` then
+verifies. The model never drives the browser turn-by-turn.
+
+This is not just tidier — it sidesteps the dead-tool problem in **#185**: an agent that grants
+`browser_navigate` lists it in its prompt and `--allowedTools`, but the spawn wires no provider
+(`mcp_servers: []`), so the tool is a dead name and the agent confabulates. A caged skill has no such
+gap: its capability *is* its code plus a content-hashed grant. (#185 remains the backbone for the
+*general* model-driven grounding case — agents that browse to ground — and the browser tier's grant
+shape below is designed to resolve through the same tool-grant→provider machinery #185 introduces.)
+
+`patent-search`'s grant extends the network cage with a browser block:
+
+```jsonc
+"permission": {
+  "tier": 2,                                  // browser needs child-process (spawn the engine)
+  "network": { "allow": [...], "methods": ["GET"], "max_requests": 40 },
+  "browser": {
+    "allow": ["patents.google.com", "ppubs.uspto.gov"], // navigation allowlist — route() aborts off-list
+    "read_only": true,                        // no downloads, no POST/form-submit off the search path
+    "isolate": true,                          // ephemeral context per gig (no cookie/storage bleed)
+    "max_pages": 25,                          // page budget — a runaway can't crawl the open web
+    "eval_scripts_sha": ["<sha256>"]          // ONLY these vetted extraction scripts run via evaluate;
+                                              // never model-authored JS at runtime (code-first, hashed)
+  }
+}
+```
+
+Enforcement points (the cage upgrades, made concrete):
+- **navigation allowlist** — `page.route("**/*", r => allowed(host) ? r.continue() : r.abort())`; a
+  nav off the allowlist is refused, not silently performed.
+- **read-only** — block downloads, non-GET, and form-submits to anything but the search endpoint.
+- **ephemeral isolation** — a fresh browser context per gig (formalizes `BROWSER_SESSION_KEY`).
+- **vetted scripts only** — `page.evaluate` runs only the `eval_scripts_sha` extraction code; the
+  model picks *which* patent, the hashed code does the *how*.
+- **trace = provenance** — the Playwright trace (every nav + request + DOM snapshot) is hashed and its
+  `content_sha` recorded on the `coverage-report`, so "the search actually hit USPTO" is a sealed
+  artifact, not a claim.
+- **politeness** — per-domain rate-limit + jitter so the corpus doesn't IP-ban the search.
+
+**OPENs** (decide at implementation): (a) bundle Playwright as an engine dependency vs. resolve the
+browser via #185's registrable MCP server and add the allowlist guard around it; (b) exact
+`eval_scripts_sha` packaging (inline in the skill vs. a `scripts/` dir in the package, hashed with it).
 
 ## RED → green
 

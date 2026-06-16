@@ -17,7 +17,7 @@ import {
 } from "./mcp.js";
 import { createRegistry, loadRegistry, type Registry, type DomainType } from "./registry.js";
 import { loadGenome, resolveGenome, type SkillRecord, type EvalRecord, type LoadError } from "./loader.js";
-import { SkillSchema } from "./genome_schema.js";
+import { SkillSchema, AgentSchema } from "./genome_schema.js";
 import { sealAgentDefinition, sealDefinition, recordIdentity } from "./genome_writer.js";
 import { createOutputStore, defaultOutputsPersistDir, type OutputStore } from "./outputs.js";
 import { MemoryLedger, type Ledger } from "./ledger.js";
@@ -786,28 +786,20 @@ export async function dispatchTool(slug: string, args: Record<string, unknown>, 
         return { ok: true, requires_approval: approval, data: { status, aborted: status === "running", cleanup_result: { reason: String(args["reason"] ?? "") } } };
       }
       case "agent_define": {
-        // Read the FULL advertised contract (mcp.ts): behavioral representation + cage.
-        // identity/method/constraints/behavioral_primitives are required — defineAgent
-        // rejects the def loudly if they're missing, so they can't be silently dropped.
-        const def: AgentDef = {
-          slug: String(args["slug"] ?? ""),
-          primitives: ((args["primitives"] as Primitive[]) ?? []),
-          input_types: arr(args["input_types"]),
-          output_types: arr(args["output_types"]),
-          identity: String(args["identity"] ?? ""),
-          method: String(args["method"] ?? ""),
-          constraints: arr(args["constraints"]),
-          behavioral_primitives: (args["behavioral_primitives"] as AgentDef["behavioral_primitives"]) ?? [],
-        };
-        if (args["domain"]) def.domain = String(args["domain"]);
-        if (args["allowed_tools"]) def.allowed_tools = arr(args["allowed_tools"]);
-        if (args["disallowed_tools"]) def.disallowed_tools = arr(args["disallowed_tools"]);
-        const perms = args["permissions"] && typeof args["permissions"] === "object" ? (args["permissions"] as Record<string, unknown>) : undefined;
-        if (perms?.["model_tier"]) def.model_tier = perms["model_tier"] as NonNullable<AgentDef["model_tier"]>;
-        if (perms?.["code_tool_access"]) def.code_tool_access = perms["code_tool_access"] as NonNullable<AgentDef["code_tool_access"]>;
-        if (typeof perms?.["max_tool_calls"] === "number") def.max_tool_calls = perms["max_tool_calls"];
-        if (typeof perms?.["max_token_budget"] === "number") def.max_token_budget = perms["max_token_budget"];
-        if (args["depth_profile"]) def.depth_profile = args["depth_profile"] as NonNullable<AgentDef["depth_profile"]>;
+        // Build the def by the SCHEMA's own field list (genome_schema.ts AgentSchema): copy exactly
+        // the fields the schema declares from args. This handler was one of the restatements that
+        // DRIFTED — it read a RETIRED nested `permissions` object for the tuning fields (the generated
+        // surface advertises them flat) and never read `browser_grant` at all, silently dropping the
+        // cage grant on every MCP-authored agent. Iterating the schema keys keeps the write-path from
+        // re-drifting (add a field to AgentSchema and it's copied automatically; none is invented). We
+        // deliberately do NOT parse here: defineAgent (inside sealAgentDefinition) runs the structural
+        // + composition checks and surfaces their precise typed errors — pre-parsing would mask a
+        // composition error (e.g. CREATE with no upstream reasoning) behind a generic schema error.
+        const built: Record<string, unknown> = {};
+        for (const key of Object.keys(AgentSchema.shape)) {
+          if (args[key] !== undefined) built[key] = args[key];
+        }
+        const def = built as unknown as AgentDef;
         // Governance gate: each allowed_tools slug must be registered. tool_propose
         // alone does NOT register; tool_register lands the slug. Unknown slugs are
         // rejected so the cage cannot grant scope to a tool the registry doesn't know.

@@ -51,6 +51,10 @@ export interface OutputRecord {
   // whose content_sha pins exactly what was consumed. Deterministic over identical content.
   content_sha: string;
   input_refs: string[];
+  // The content_sha of each input_ref, in the same order — the real, engine-computed predecessor
+  // hashes (#196). Stamped at write() so the audit chain is byte-reproducible WITHOUT any agent
+  // hashing: walk input_refs → input_shas to recompute provenance. Empty for root chairs.
+  input_shas: string[];
   created_at: string;
   cost_usd?: number | undefined;
   tokens_used?: number | undefined;
@@ -76,6 +80,9 @@ export interface OutputWrite {
   primitive: string;
   data: Record<string, unknown>;
   input_refs?: string[] | undefined;
+  /** content_sha of each input_ref (same order) — the real predecessor hashes (#196). When omitted,
+   *  write() resolves them from the store by input_refs id. */
+  input_shas?: string[] | undefined;
   cost_usd?: number | undefined;
   tokens_used?: number | undefined;
   duration_ms?: number | undefined;
@@ -270,6 +277,9 @@ export function createOutputStore(registry: Registry, options?: OutputStoreOptio
           data: o.data,
         }),
         input_refs: o.input_refs ?? [],
+        // Real predecessor hashes (#196): prefer caller-supplied, else resolve each input_ref's
+        // content_sha from the store. The chain is then walkable input_refs[i] ↔ input_shas[i].
+        input_shas: o.input_shas ?? (o.input_refs ?? []).map((id) => outputs.get(id)?.content_sha ?? ""),
         created_at: new Date().toISOString(),
         cost_usd: o.cost_usd,
         tokens_used: o.tokens_used,

@@ -1,6 +1,18 @@
 import { appendFileSync, readFileSync, existsSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 
+// Actual model spend for a gig, captured from each agent invocation's stream-json `result`
+// event (input/output tokens + total_cost_usd + per-model breakdown). This is SETTLED spend —
+// distinct from pricing.ts, which ESTIMATES pre-flight. Optional: skill-only gigs (no model
+// invocation) and the unit suites that stub the invoker carry no usage.
+export interface GigUsage {
+  input_tokens: number;
+  output_tokens: number;
+  total_cost_usd: number;
+  /** actual model id → its spend (the model that ran, not just the configured tier). */
+  by_model: Record<string, { input_tokens: number; output_tokens: number; cost_usd: number }>;
+}
+
 export interface LedgerEntry {
   gig_id: string;
   standard_slug: string;
@@ -9,6 +21,9 @@ export interface LedgerEntry {
   output_hashes: readonly string[];
   started_at: string;
   finished_at: string;
+  // Settled model spend (#195). Present for gigs with ≥1 real model invocation; the result
+  // events carry it (usage + total_cost_usd) and it used to be forwarded-but-dropped.
+  usage?: GigUsage;
 }
 
 export interface LedgerQuery {

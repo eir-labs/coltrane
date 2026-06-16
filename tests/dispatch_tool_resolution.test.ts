@@ -97,4 +97,17 @@ describe("#185 — the invoker fails closed at dispatch on a dead-name grant (be
     await invoke(ctxFor(["Read", "WebFetch"]));
     expect(spawned, "builtin-only grants must resolve and reach the spawn").toBe(true);
   });
+
+  it("a browser grant resolves the caged playwright server; granting it WITHOUT a grant fails closed", async () => {
+    let spawned = false;
+    const invoke = makeClaudeInvoker({ mcpServerConfigs: {}, run: () => { spawned = true; return JSON.stringify({ v: "sig" }); } });
+    // declares browser_grant → coltrane builds the cage → the playwright grant resolves
+    const withGrant = ctxFor(["mcp__playwright__browser_navigate"]);
+    (withGrant.agent as { browser_grant?: unknown }).browser_grant = { allowed_origins: ["ppubs.uspto.gov"] };
+    await invoke(withGrant);
+    expect(spawned, "a declared browser grant must resolve the caged browser").toBe(true);
+    // same grant, NO browser_grant declared → no caged server → unresolvable → fail closed
+    await expect(invoke(ctxFor(["mcp__playwright__browser_navigate"])))
+      .rejects.toThrow(/playwright.*no provider|unresolvable|browser_navigate/i);
+  });
 });

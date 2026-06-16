@@ -1,6 +1,7 @@
 import type { Primitive } from "./core_types.js";
 import { PRIMITIVE_OUTPUT_TYPE } from "./core_types.js";
 import type { ModelTier, Depth } from "./pricing.js";
+import type { BrowserGrant } from "./playwright_cage.js";
 
 // The per-agent code-tool exposure gate (old AgentPermissions.code_tool_access). Scales
 // the agent's access to Claude Code's built-in file/exec tools, independent of MCP grant.
@@ -77,6 +78,11 @@ export interface Agent {
   max_token_budget?: number;       // per-agent spend ceiling
   code_tool_access?: CodeToolAccess; // gates Claude Code built-in Read/Write/Edit/Bash
   depth_profile?: Depth;           // per-agent depth/tuning (skim/quick/standard/deep)
+  // The caged-browser grant: the origins this agent may navigate. When an agent grants
+  // mcp__playwright__* tools, coltrane builds a deny-by-default Playwright server scoped to exactly
+  // these origins (--allowed-origins) — the browser physically cannot reach anything else. Granting
+  // the browser tools WITHOUT declaring this fails closed (no caged server → unresolvable grant).
+  browser_grant?: BrowserGrant;
 }
 
 // A chair is one named seat in a phase. It binds a role-name within the standard

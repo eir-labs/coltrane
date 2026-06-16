@@ -12,6 +12,7 @@ import type { Registry } from "./registry.js";
 import type { ModelTier } from "./pricing.js";
 import type { CodeToolAccess } from "./composition.js";
 import { resolveToolGrants, type ToolProviderRegistry } from "./tool_providers.js";
+import { playwrightServerFor } from "./playwright_cage.js";
 
 const EMPTY_TOOL_REGISTRY: ToolProviderRegistry = new Map();
 
@@ -253,10 +254,18 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
     // that advertises a tool it can't call.
     let resolvedMcpServers: Record<string, unknown> = {};
     if (resolutionEnabled) {
+      // The caged browser: if this agent declares a browser_grant, coltrane builds a deny-by-default
+      // Playwright server scoped to exactly its allowed origins and offers it as the "playwright"
+      // provider. An agent that grants mcp__playwright__* tools but declares NO browser_grant has no
+      // playwright config → its grant is unresolvable → fails closed (no uncaged browser, ever).
+      const browserCage = playwrightServerFor(ctx.agent.browser_grant);
+      const effectiveConfigs = browserCage
+        ? { ...(opts.mcpServerConfigs ?? {}), playwright: browserCage }
+        : (opts.mcpServerConfigs ?? {});
       const resolved = resolveToolGrants(
         ctx.agent.allowed_tools ?? [],
         opts.toolProviders ?? EMPTY_TOOL_REGISTRY,
-        opts.mcpServerConfigs ?? {},
+        effectiveConfigs,
       );
       if (resolved.unknown.length > 0) {
         throw new Error(

@@ -43,10 +43,10 @@ Every gig seals a `genome_hash` + `run_fingerprint` into an append-only ledger, 
 The same genome replays byte-for-byte. The fingerprint distinguishes an honest replay from a tamper, so "it worked" becomes a checkable claim instead of a vibe.
 
 **Blast radius — when an agent is compromised, how wrong can it go?**
-You can't stop a model from being prompt-injected. You *can* use mathematics to bound the scope of what it's able to do when it is — and prove that bound in tests. Optimize for the blast radius, not the fantasy of perfect prevention.
+You can't stop a model from being prompt-injected. You *can* use mathematics to bound the scope of what it's able to do when it is — and prove that bound in tests. Optimize for the blast radius, not the fantasy of perfect prevention. That bound isn't aspirational: an agent's tool grants resolve to real providers or the dispatch fails closed, and a browser runs only inside a deny-by-default origin cage.
 
 **Cost optimization — spend inference on what matters.**
-Don't burn tokens on plumbing, or on work you've already done once. The system learns where to stop paying for inference, and we keep adding encoding tricks that lower the effective cost of the work. This is a pillar, not a footnote — it compounds, and it's where much of the near-, mid-, and long-term roadmap lives.
+Don't burn tokens on plumbing, or on work you've already done once. The system learns where to stop paying for inference, and we keep adding encoding tricks that lower the effective cost of the work. Every run now records what it actually spent — per model — so "spend on what matters" is something you measure, not just hope. This is a pillar, not a footnote — it compounds, and it's where much of the near-, mid-, and long-term roadmap lives.
 
 ## How to think in standards
 

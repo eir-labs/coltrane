@@ -264,7 +264,22 @@ export function composeStandard(def: {
       );
     }
   }
-  const phases: PhaseDef[] = def.phases.map((p) => ({ name: p.name, chairs: p.chairs }));
+  // #187 — optional chair array fields default to [] (the loader already tolerates omitted
+  // fields; composeStandard must not be stricter than the loader it feeds). A chair that omits
+  // required_skills / depends_on / input_contract / output_contract is treated as empty, not a
+  // raw "ch.<field> is not iterable" TypeError.
+  const phases: PhaseDef[] = def.phases.map((p) => ({
+    name: p.name,
+    chairs: (p.chairs as readonly Partial<Chair>[]).map((ch) => ({
+      ...ch,
+      role: ch.role ?? "",
+      agent_slug: ch.agent_slug ?? "",
+      depends_on: ch.depends_on ?? [],
+      input_contract: ch.input_contract ?? [],
+      output_contract: ch.output_contract ?? [],
+      required_skills: ch.required_skills ?? [],
+    })) as Chair[],
+  }));
 
   // ── Chair-level validation ─────────────────────────────────────────────────
   // (a) every phase has at least one chair
@@ -386,9 +401,10 @@ export function composeStandard(def: {
 
   // ── input_contract satisfaction ───────────────────────────────────────────
   // Each chair's declared input_contract must be covered by the union of its
-  // depends_on chairs' output_contracts. (Phase-order alone isn't enough — a
-  // chair only sees outputs from the roles it explicitly depends on.) When a
-  // chair has no depends_on, an empty input_contract is required.
+  // depends_on chairs' output_contracts — OR by the standard's declared gig inputs
+  // (#156: an ENTRY chair, depends_on [], reads its typed input_contract from gigInput;
+  // that contract IS the typed gig seed, validated against gigInput at start-of-run by runGig).
+  const gigInputs = new Set<string>(def.input_types ?? []);
   const chairByRole = new Map<string, Chair>();
   for (const ph of phases) {
     for (const ch of ph.chairs) chairByRole.set(ch.role, ch);
@@ -396,7 +412,7 @@ export function composeStandard(def: {
   for (const ph of phases) {
     for (const ch of ph.chairs) {
       if (ch.input_contract.length === 0) continue;
-      const produced = new Set<string>();
+      const produced = new Set<string>(gigInputs); // gig inputs are available to any chair
       for (const dep of ch.depends_on) {
         const upstream = chairByRole.get(dep);
         if (!upstream) continue; // already reported above

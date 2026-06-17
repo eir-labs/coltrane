@@ -56,6 +56,51 @@ describe("T2: output validates against domain type schema", () => {
   });
 });
 
+// #200 — a type may opt into open extension. When its schema declares
+// additionalProperties:true, the seal must accept agent-added contextual fields
+// (e.g. opportunity_id) instead of aborting the terminal chair. The default
+// stays closed: an undeclared additionalProperties still rejects extras.
+const openType: DomainType = {
+  slug: "submission-verdict",
+  extends: "Verdict",
+  domain: "eirtests",
+  schema: {
+    additionalProperties: true,
+    properties: {
+      title: { type: "string" },
+    },
+  },
+  required_fields: ["title"],
+};
+
+describe("#200: type-declared additionalProperties is honored at seal", () => {
+  it("accepts an agent-added field when the type declares additionalProperties:true", () => {
+    const reg = createRegistry();
+    reg.registerType(openType);
+    const store = createOutputStore(reg);
+    const rec = store.write({
+      core_type: "Verdict",
+      domain_type: "submission-verdict",
+      domain: "eirtests",
+      gig_id: "g1",
+      agent_slug: "submission-judge",
+      primitive: "VERIFY",
+      data: { title: "go", opportunity_id: "opp-42" }, // extra contextual id
+    });
+    expect(rec.id).toBeTruthy();
+    expect((rec.data as Record<string, unknown>).opportunity_id).toBe("opp-42");
+  });
+
+  it("still rejects an extra field when additionalProperties is not declared (default closed)", () => {
+    const store = createOutputStore(populatedRegistry());
+    const bad = baseWrite({
+      data: { pattern_key: "x", severity: "high", title: "t", opportunity_id: "opp-42" },
+    });
+    expect(() => store.write(bad)).toThrow(OutputStoreError);
+    expect(store.all().length).toBe(0);
+  });
+});
+
 describe("T3: bad-schema output is rejected at write", () => {
   it("throws when a required domain field is missing — not silently written", () => {
     const store = createOutputStore(populatedRegistry());

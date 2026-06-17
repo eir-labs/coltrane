@@ -149,11 +149,17 @@ export function createRegistry(initial: DomainType[] = []): Registry {
       // forced) so existing instances that don't carry base fields still validate.
       const baseProps = CORE_SCHEMA_PROPS[dt.extends] ?? {};
       const ownProps = (dt.schema as { properties?: Record<string, unknown> }).properties ?? {};
+      // #200 — honor the type's declared additionalProperties. Closed-by-default
+      // stays the discipline (undeclared → false), but a type that opts into open
+      // extension with `additionalProperties: true` accepts agent-added contextual
+      // fields at seal instead of aborting the terminal chair.
+      const additionalProperties =
+        (dt.schema as { additionalProperties?: boolean }).additionalProperties ?? false;
       const schema = {
         type: "object",
         properties: { ...baseProps, ...ownProps },
         required: dt.required_fields,
-        additionalProperties: false,
+        additionalProperties,
       };
       const validateFn = ajv.compile(schema);
       const ok = validateFn(output.data);

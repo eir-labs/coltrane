@@ -253,6 +253,10 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
     // provider is a dead name, so fail the chair closed before we build a prompt or spawn a child
     // that advertises a tool it can't call.
     let resolvedMcpServers: Record<string, unknown> = {};
+    // The grants as the SPAWN must see them in --allowedTools. Default to the raw grant list (the
+    // legacy pass-through invoker); when resolution is on, use the resolved names — an in-house engine
+    // tool granted by bare slug becomes mcp__<server>__<tool>, the name its server advertises (#204).
+    let effectiveAllowed: readonly string[] | undefined = ctx.agent.allowed_tools;
     if (resolutionEnabled) {
       // The caged browser: if this agent declares a browser_grant, coltrane builds a deny-by-default
       // Playwright server scoped to exactly its allowed origins and offers it as the "playwright"
@@ -271,6 +275,7 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
         effectiveConfigs,
       );
       resolvedMcpServers = resolved.mcpServers;
+      effectiveAllowed = resolved.effectiveAllowed;
     }
     const types = opts.registry?.listTypes() ?? [];
     const schemaOf = (slug: string | undefined) =>
@@ -306,7 +311,7 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
       const a = ctx.agent;
       const baseArgs = buildInvokerArgs(prompt, cfgPath, {
         model: resolveModel(a.model_tier, opts.model),
-        allowed_tools: a.allowed_tools,
+        allowed_tools: effectiveAllowed,
         disallowed_tools: [...(a.disallowed_tools ?? []), ...codeToolDenials(a.code_tool_access)],
         max_tool_calls: a.max_tool_calls,
       });

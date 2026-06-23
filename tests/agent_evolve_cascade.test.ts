@@ -78,3 +78,47 @@ describe("agent_evolve (slug, changes) cascade", () => {
     expect(embedded.input_types).toEqual(["raw-note"]);
   });
 });
+
+// #204 — the cascade re-composes each binding standard to type-check it, but it threaded only
+// eval_slugs, silently dropping the standard's input_types (the gig contract, #156/#177). An ENTRY
+// chair reads its input_contract from those gig inputs, NOT from an upstream chair — so the cascade
+// wrongly rejected a valid entry chair as "input not produced by any upstream chair" and blocked the
+// evolve. The re-compose must carry the same passthrough fields the FILE path does.
+describe("agent_evolve cascade — entry-chair gig-input contract (#204)", () => {
+  // genome-author is the entry chair: it consumes the external gig input "genome-brief"
+  // (the standard's input_types) and produces "agent-draft". depends_on is empty.
+  const author: Agent = { ...TEST_BEHAVIOR, slug: "genome-author", primitives: ["INTERPRET"], input_types: ["genome-brief"], output_types: ["agent-draft"], domain: "demo" };
+  const genomeBuild: Standard = {
+    slug: "genome-build",
+    domain: "demo",
+    agents: [author],
+    input_types: ["genome-brief"], // the gig contract — what enters from outside the standard
+    phases: [{ name: "author", chairs: [{ role: "author", agent_slug: "genome-author", depends_on: [], input_contract: ["genome-brief"], output_contract: ["agent-draft"], required_skills: [] }] }],
+  };
+
+  function makeEntryDeps(): { deps: ServerDeps; dir: string } {
+    const dir = mkdtempSync(join(tmpdir(), "coltrane-evolve-entry-"));
+    mkdirSync(join(dir, "agents"), { recursive: true });
+    writeFileSync(join(dir, "agents", "genome-author.json"), JSON.stringify(author, null, 2) + "\n");
+    const registry = createRegistry();
+    const standards = new Map<string, Standard>([["genome-build", structuredClone(genomeBuild)]]);
+    const deps: ServerDeps = { registry, outputs: createOutputStore(registry), ledger: new MemoryLedger(), standards, genome_dir: dir };
+    return { deps, dir };
+  }
+
+  it("accepts an evolve of the entry chair — the gig input is not 'produced upstream', and that's legal", async () => {
+    const { deps, dir } = makeEntryDeps();
+    // Widen outputs (an unconsumed extra output is legal). The change is harmless; the cascade
+    // must NOT fail the entry chair just because its input comes from the gig, not an upstream chair.
+    const r = await dispatchTool("agent_evolve", { slug: "genome-author", changes: { output_types: ["agent-draft", "notes"] } }, deps);
+    expect(r.ok, "a valid entry-chair evolve must not be blocked").toBe(true);
+    const cc = (r.data as { cascade_check: CascadeCheck }).cascade_check;
+    const aff = cc.standards_affected.find((s) => s.slug === "genome-build");
+    expect(aff, "the binding standard must be in the cascade").toBeTruthy();
+    expect(aff!.errors).toEqual([]);
+    expect(aff!.type_check_passed, "the entry chair reads its contract from the gig input").toBe(true);
+    // persisted, since the cascade passed
+    const onDisk = JSON.parse(readFileSync(join(dir, "agents", "genome-author.json"), "utf8"));
+    expect(onDisk.output_types).toEqual(["agent-draft", "notes"]);
+  });
+});

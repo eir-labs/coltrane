@@ -8,6 +8,7 @@ import { describe, it, expect } from "vitest";
 import { resolveToolGrants, assertToolGrantsResolvable, type ToolProvider } from "../src/tool_providers.js";
 import { makeClaudeInvoker } from "../src/claude_invoker.js";
 import type { AgentInvocationContext } from "../src/runtime.js";
+import { readFileSync } from "node:fs";
 
 const ctxFor = (allowed: string[]): AgentInvocationContext => ({
   agent: {
@@ -121,7 +122,7 @@ describe("#185 — bootstrap wires a populated provider registry (the genome→p
     const deps = bootstrapServerDeps();
     expect(deps.toolProviders, "bootstrap must wire a populated provider registry, not the empty default").toBeTruthy();
     expect(deps.toolProviders!.size, "the bridge must cover the engine's tool surface").toBeGreaterThan(0);
-    expect(deps.toolProviders!.get("output_write"), "a real engine tool must resolve as in_house").toEqual({ tool: "output_write", kind: "in_house" });
+    expect(deps.toolProviders!.get("output_write"), "a real engine tool must resolve as in_house, bridged through the engine server").toEqual({ tool: "output_write", kind: "in_house", server: "coltrane" });
   });
 
   it("a grant of a registered engine tool resolves; a typo is still a dead name (fail closed)", async () => {
@@ -129,5 +130,52 @@ describe("#185 — bootstrap wires a populated provider registry (the genome→p
     const reg = bootstrapServerDeps().toolProviders!;
     expect(resolveToolGrants(["output_write"], reg, {}).unknown, "a registered in-house grant must resolve").toEqual([]);
     expect(resolveToolGrants(["not_a_real_tool"], reg, {}).unknown, "an unregistered grant must remain a dead name").toEqual(["not_a_real_tool"]);
+  });
+});
+
+// #204 — an in-house engine tool (output_write, …) is bridged through the engine's OWN MCP server.
+// A bare slug grant only RESOLVES; it never made the tool CALLABLE: the spawn needs the engine
+// server wired into its --mcp-config AND --allowedTools must name the tool the way the server
+// advertises it (mcp__coltrane__output_write), not the bare slug. Before this, an MCP-authored agent
+// granted bare `output_write`, the engine server never reached the spawn, the bare name matched
+// nothing, and the agent emitted drafts as text — sealing nothing.
+describe("#204 — in-house grants are wired + namespaced so the spawn can actually call them", () => {
+  const engineConfig = { coltrane: { command: "node", args: ["dist/src/server_entry.js"] } };
+  const reg = new Map<string, ToolProvider>([
+    ["output_write", { tool: "output_write", kind: "in_house", server: "coltrane" }],
+  ]);
+
+  it("resolveToolGrants wires the engine server and advertises mcp__coltrane__output_write", () => {
+    const r = resolveToolGrants(["output_write"], reg, engineConfig);
+    expect(r.unknown).toEqual([]);
+    expect(r.inHouse).toEqual(["output_write"]); // still classified in-house
+    expect(Object.keys(r.mcpServers), "the engine server must reach the spawn").toEqual(["coltrane"]);
+    expect(r.mcpServers["coltrane"]).toEqual(engineConfig.coltrane);
+    expect(r.effectiveAllowed, "--allowedTools must name the tool the server exposes").toEqual(["mcp__coltrane__output_write"]);
+  });
+
+  it("an in-house provider with no engine-server config falls back to the bare name (no regression)", () => {
+    const r = resolveToolGrants(["output_write"], reg, {});
+    expect(r.unknown).toEqual([]); // still resolves, never a dead name
+    expect(r.effectiveAllowed).toEqual(["output_write"]);
+  });
+
+  it("the invoker wires the engine server AND passes the namespaced name to the spawn", async () => {
+    let sawArgs: string[] = [];
+    let sawConfig: { mcpServers: Record<string, unknown> } | null = null;
+    const invoke = makeClaudeInvoker({
+      toolProviders: reg,
+      mcpServerConfigs: engineConfig,
+      run: (_bin, args) => {
+        sawArgs = args;
+        const i = args.indexOf("--mcp-config");
+        sawConfig = JSON.parse(readFileSync(args[i + 1]!, "utf8"));
+        return JSON.stringify({ v: "sig" });
+      },
+    });
+    await invoke(ctxFor(["output_write"]));
+    const a = sawArgs.indexOf("--allowedTools");
+    expect(sawArgs[a + 1], "the spawn must be told the name the engine server exposes").toBe("mcp__coltrane__output_write");
+    expect(Object.keys(sawConfig!.mcpServers), "the engine server must be in the spawn's mcp-config").toContain("coltrane");
   });
 });

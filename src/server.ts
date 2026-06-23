@@ -25,6 +25,7 @@ import { standardSimulate } from "./simulate.js";
 import { runGig, BudgetExhausted, type AgentInvoker } from "./runtime.js";
 import { makeClaudeInvoker } from "./claude_invoker.js";
 import type { ToolProvider } from "./tool_providers.js";
+import { ENGINE_MCP_SERVER } from "./tool_providers.js";
 import { composeStandard, defineAgent, CompositionError, type Standard, type Agent, type AgentDef, type PhaseDef } from "./composition.js";
 import { PRIMITIVE_OUTPUT_TYPE, type Primitive } from "./core_types.js";
 import { proposeTypeChange, type DomainTypeDef } from "./type_versioning.js";
@@ -38,6 +39,16 @@ import { newGigRun, applyGigProgress, gigEventLogLine, type GigRunState } from "
 import { SubthreadRecorder, ApiVersionMismatchError } from "./subthread_recorder.js";
 import { canonJson, runFingerprint, CANONICAL_FORM_VERSION } from "./canonical_form.js";
 import type { LoadedGenome } from "./loader.js";
+
+// Every StandardSchema field that is NOT structural (slug/domain/agents/agent_slugs/phases) is a
+// passthrough that composeStandard must receive — eval_slugs, input_types (the gig contract),
+// output_types, max_examine_rounds, description, … Derived from the schema's own key list so adding
+// a field can't re-drift. Shared by standard_compose AND the agent_evolve cascade re-compose: both
+// must thread the SAME fields, or one rejects a standard the other accepts (#204 — the cascade
+// dropped input_types and wrongly failed entry chairs that read their contract from the gig input).
+const STD_PASSTHROUGH = Object.keys(StandardSchema.shape).filter(
+  (k) => !["slug", "domain", "agents", "agent_slugs", "phases"].includes(k),
+);
 
 export interface ServerDeps {
   registry: Registry;
@@ -493,10 +504,8 @@ export async function dispatchTool(slug: string, args: Record<string, unknown>, 
           // handler used to thread only eval_slugs, silently dropping input_types/output_types/
           // max_examine_rounds/description on both the compose call AND the persisted file — so a
           // standard authored via the TOOL lost exactly the fields composeStandard preserves on the
-          // FILE path (audit finding D). Copy by the schema's own key list so it can't re-drift.
-          const STD_PASSTHROUGH = Object.keys(StandardSchema.shape).filter(
-            (k) => !["slug", "domain", "agents", "agent_slugs", "phases"].includes(k),
-          );
+          // FILE path (audit finding D). Copy by the schema's own key list (STD_PASSTHROUGH) so it
+          // can't re-drift.
           const extras: Record<string, unknown> = {};
           for (const k of STD_PASSTHROUGH) if (args[k] !== undefined) extras[k] = args[k];
           const std = composeStandard({ slug: sSlug, domain: sDomain, agents: sAgents, phases: sPhases, ...extras });
@@ -924,8 +933,15 @@ export async function dispatchTool(slug: string, args: Record<string, unknown>, 
           for (const std of deps.standards?.values() ?? []) {
             if (!std.agents.some((a) => a.slug === evolveSlug)) continue;
             const rebound = std.agents.map((a) => (a.slug === evolveSlug ? ({ ...a, ...changes } as Agent) : a));
+            // Carry the SAME passthrough fields the compose/file path carries — above all input_types,
+            // the gig contract an entry chair reads its input_contract from. Threading only eval_slugs
+            // dropped input_types, so the re-compose saw no gig inputs and wrongly rejected a valid
+            // entry chair as "input not produced by any upstream chair" (#204), failing the cascade.
+            const stdRec = std as unknown as Record<string, unknown>;
+            const stdExtras: Record<string, unknown> = {};
+            for (const k of STD_PASSTHROUGH) if (stdRec[k] !== undefined) stdExtras[k] = stdRec[k];
             try {
-              composeStandard({ slug: std.slug, domain: std.domain, agents: rebound, phases: std.phases, ...(std.eval_slugs ? { eval_slugs: std.eval_slugs } : {}) });
+              composeStandard({ slug: std.slug, domain: std.domain, agents: rebound, phases: std.phases, ...stdExtras });
               standards_affected.push({ slug: std.slug, type_check_passed: true, errors: [] });
             } catch (e) {
               if (e instanceof CompositionError) standards_affected.push({ slug: std.slug, type_check_passed: false, errors: [e.message] });
@@ -1194,7 +1210,7 @@ function readMcpServerConfigs(root: string): Record<string, unknown> {
       if (parsed.mcpServers && typeof parsed.mcpServers === "object") return parsed.mcpServers;
     } catch { /* fall through to the default */ }
   }
-  return { coltrane: { command: "node", args: ["dist/src/server_entry.js"] } };
+  return { [ENGINE_MCP_SERVER]: { command: "node", args: ["dist/src/server_entry.js"] } };
 }
 
 export function bootstrapServerDeps(genomeRoot?: string): ServerDeps {
@@ -1207,8 +1223,12 @@ export function bootstrapServerDeps(genomeRoot?: string): ServerDeps {
   // in_house provider, so an agent that grants a real engine tool resolves instead of failing closed.
   // Without this the resolver only ever saw the browser cage, so any non-playwright grant was a dead
   // name. Shared by reference with the invoker so tool_register stays live (no restart needed).
+  // #204 — tag each in-house tool with the engine's own MCP server ("coltrane", the slug the
+  // repo's .mcp.json ships). An in-house grant then wires that server into the spawn AND advertises
+  // the tool as mcp__coltrane__<slug> — the name the server exposes — so a bare-slug grant (the form
+  // agent_define accepts) is actually callable instead of a silent dead name that seals nothing.
   const toolProviders = new Map<string, ToolProvider>(
-    [...REGISTERED_TOOL_SLUGS].map((slug) => [slug, { tool: slug, kind: "in_house" as const }]),
+    [...REGISTERED_TOOL_SLUGS].map((slug) => [slug, { tool: slug, kind: "in_house" as const, server: ENGINE_MCP_SERVER }]),
   );
   return {
     registry,

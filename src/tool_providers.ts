@@ -14,7 +14,9 @@
 export interface ToolProvider {
   tool: string;
   kind: "mcp" | "in_house";
-  /** for kind "mcp": the MCP server slug (multiple tools may share one server). */
+  /** the MCP server slug that hosts this tool (multiple tools may share one server). For kind "mcp"
+   *  it's the external server; for kind "in_house" it's the engine's own server (#204), through which
+   *  the tool is bridged and under whose mcp__<server>__ prefix it is advertised. */
   server?: string;
   /** for kind "mcp": the server's --mcp-config entry (command/args/env/url). */
   config?: Record<string, unknown>;
@@ -32,6 +34,11 @@ const HOST_BUILTINS: ReadonlySet<string> = new Set([
   "Task", "TodoWrite",
 ]);
 
+/** The engine's own MCP server slug — the key the repo's .mcp.json ships it under, and the prefix
+ *  its tools are advertised behind (mcp__coltrane__<tool>). In-house engine tools are bridged through
+ *  this server, so an in-house grant resolves to it (#204). */
+export const ENGINE_MCP_SERVER = "coltrane";
+
 /** A scoped grant like `Bash(npx vitest run:*)` resolves on its base tool name (`Bash`). */
 export function toolBaseName(grant: string): string {
   const paren = grant.indexOf("(");
@@ -45,6 +52,13 @@ export interface ResolvedGrants {
   inHouse: string[];
   /** grants with no resolvable provider — dead names. Dispatch must refuse these. */
   unknown: string[];
+  /** the grants as the SPAWN will see them, to feed --allowedTools (NOT the raw allowed_tools).
+   *  Host-builtins and `mcp__<server>__*` grants pass through unchanged; a registry tool that
+   *  resolves to an MCP server — INCLUDING an in-house engine tool bridged through the engine's own
+   *  server — is namespaced to `mcp__<server>__<tool>`, because that is the name the server actually
+   *  advertises. A bare slug (e.g. `output_write`) in --allowedTools matches nothing and the agent
+   *  can't seal — #204. An in-house tool with no engine-server config keeps its bare name (no regression). */
+  effectiveAllowed: string[];
 }
 
 /** Claude Code MCP tools follow the `mcp__<server>__<tool>` naming convention. Extract the server
@@ -66,15 +80,33 @@ export function resolveToolGrants(
   const mcpServers: Record<string, unknown> = {};
   const inHouse: string[] = [];
   const unknown: string[] = [];
+  const effectiveAllowed: string[] = [];
   for (const grant of allowed) {
     const base = toolBaseName(grant);
-    if (HOST_BUILTINS.has(base)) continue;
+    if (HOST_BUILTINS.has(base)) {
+      effectiveAllowed.push(grant); // builtins pass through with their scoping intact
+      continue;
+    }
     const prov = registry.get(base);
     if (prov) {
       if (prov.kind === "mcp" && prov.server) {
         if (prov.config !== undefined) mcpServers[prov.server] = prov.config;
+        effectiveAllowed.push(`mcp__${prov.server}__${base}`); // the name the server advertises
       } else if (prov.kind === "in_house") {
         inHouse.push(base);
+        // #204 — an in-house engine tool is bridged through the engine's OWN MCP server. Resolving
+        // it as a "runtime primitive" left the server out of the spawn's mcp-config AND advertised
+        // the bare slug, which the server's namespaced surface never matched — so the agent could
+        // never call it (drafts emitted as text, nothing sealed). Wire the engine server in and name
+        // the tool the way the server exposes it. No engine-server config → keep the bare name.
+        if (prov.server && Object.prototype.hasOwnProperty.call(mcpServerConfigs, prov.server)) {
+          mcpServers[prov.server] = mcpServerConfigs[prov.server];
+          effectiveAllowed.push(`mcp__${prov.server}__${base}`);
+        } else {
+          effectiveAllowed.push(base);
+        }
+      } else {
+        effectiveAllowed.push(grant);
       }
       continue;
     }
@@ -82,6 +114,7 @@ export function resolveToolGrants(
     if (server) {
       if (Object.prototype.hasOwnProperty.call(mcpServerConfigs, server)) {
         mcpServers[server] = mcpServerConfigs[server];
+        effectiveAllowed.push(grant); // already in mcp__<server>__<tool> form
       } else {
         unknown.push(grant); // an MCP tool whose server has no registered config — a dead name
       }
@@ -89,7 +122,7 @@ export function resolveToolGrants(
     }
     unknown.push(grant);
   }
-  return { mcpServers, inHouse, unknown };
+  return { mcpServers, inHouse, unknown, effectiveAllowed };
 }
 
 /** Fail closed: an agent that grants an unresolvable tool must not be dispatched — a granted tool

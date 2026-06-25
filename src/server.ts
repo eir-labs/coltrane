@@ -26,6 +26,7 @@ import { runGig, BudgetExhausted, type AgentInvoker } from "./runtime.js";
 import { makeClaudeInvoker } from "./claude_invoker.js";
 import type { ToolProvider } from "./tool_providers.js";
 import { ENGINE_MCP_SERVER } from "./tool_providers.js";
+import type { ToolHook, ToolCallContext, PreOutcome } from "./hooks.js";
 import { composeStandard, defineAgent, CompositionError, type Standard, type Agent, type AgentDef, type PhaseDef } from "./composition.js";
 import { PRIMITIVE_OUTPUT_TYPE, type Primitive } from "./core_types.js";
 import { proposeTypeChange, type DomainTypeDef } from "./type_versioning.js";
@@ -98,6 +99,10 @@ export interface ServerDeps {
   // by bootstrap from REGISTERED_TOOL_SLUGS, passed to the invoker, and kept live by tool_register.
   // Shared by reference with the invoker, so a mid-session register reaches resolution immediately.
   toolProviders?: Map<string, ToolProvider> | undefined;
+  // #206 — the interception seam. A wrapping layer (control plane) injects pre/post hooks that
+  // gate/observe/rewrite tool calls in-process. The engine ships ZERO hooks and ZERO policy; it only
+  // CALLS whatever is injected here. Absent/empty → dispatch is byte-identical to no seam.
+  hooks?: readonly ToolHook[] | undefined;
 }
 
 export interface ToolResult {
@@ -213,6 +218,44 @@ export async function dispatchTool(slug: string, args: Record<string, unknown>, 
     return { ok: false, not_implemented: true, requires_approval: approval, error: `"${slug}" awaits src/runtime / context stores` };
   }
 
+  // #206 — the interception seam. The engine ships ZERO hooks; it only CALLS whatever the wrapping
+  // layer injected. No hooks → this loop is a no-op and dispatch is byte-identical to no seam. Hooks
+  // wrap ONLY known, implemented calls (we are past the guards above). A hook that throws fails the
+  // call CLOSED — a gate that errors must never let the call through.
+  const hooks = deps.hooks ?? [];
+  let workArgs = args;
+  const hookCtx = (): ToolCallContext => ({ slug, args: workArgs, deps, requires_approval: approval });
+  // before: array order; first halt wins (impl + remaining before-hooks + ALL after-hooks skipped).
+  for (const h of hooks) {
+    if (!h.before) continue;
+    let out: PreOutcome;
+    try {
+      out = await h.before(hookCtx());
+    } catch (e) {
+      return { ok: false, error: `hook "${h.name}" before() failed: ${e instanceof Error ? e.message : String(e)}` };
+    }
+    if (out.action === "halt") return out.result;
+    if (out.args) workArgs = out.args; // threaded to the next hook + the impl
+  }
+
+  let result = await runImpl(slug, workArgs, deps, approval);
+
+  // after: array order; folds over the result (each hook sees the prior's output).
+  for (const h of hooks) {
+    if (!h.after) continue;
+    try {
+      result = await h.after(hookCtx(), result);
+    } catch (e) {
+      return { ok: false, error: `hook "${h.name}" after() failed: ${e instanceof Error ? e.message : String(e)}` };
+    }
+  }
+  return result;
+}
+
+// The engine's actual tool implementations — the big switch, extracted from dispatchTool (#206) so
+// the hook loop can wrap it. The body is UNCHANGED: it reads `args` (which the caller threads as the
+// possibly-rewritten workArgs) and `approval` (computed once by the wrapper). No logic change.
+async function runImpl(slug: string, args: Record<string, unknown>, deps: ServerDeps, approval: boolean): Promise<ToolResult> {
   try {
     switch (slug) {
       case "type_resolve": {

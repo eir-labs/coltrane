@@ -73,6 +73,27 @@ export type AgentInvoker = (
   ctx: AgentInvocationContext,
 ) => Record<string, unknown> | Promise<Record<string, unknown>>;
 
+// What a chair-selection policy sees when it narrows a dispatch batch: the ready
+// frontier (depends_on satisfied), everything sealed so far, the live budget, and
+// the standard itself. Read-only by contract — the policy decides, it never plays.
+export interface ChairSelectionView {
+  phase: string;
+  ready: readonly Chair[];
+  produced: readonly OutputRecord[];
+  budget: Readonly<BudgetState> | null;
+  standard: Standard;
+}
+
+// The routing-policy seam (the Étude/conductor hole). Given the ready frontier,
+// return the non-empty subset to dispatch THIS iteration; unselected chairs stay
+// in `remaining` and re-enter the next frontier — which is how the default
+// parallel batch becomes a conducted sequence. The runtime rejects an empty or
+// non-subset return (RuntimeError): a buggy policy must fail loudly, not fall
+// back to the default routing and masquerade as a decision.
+export type ChairSelector = (
+  view: ChairSelectionView,
+) => readonly Chair[] | Promise<readonly Chair[]>;
+
 export interface RunDeps {
   outputs: OutputStore;
   ledger: Ledger;
@@ -112,6 +133,11 @@ export interface RunDeps {
   // state entry + return it immediately) and passes it in so state and result share one id.
   // Absent = the runtime mints one (the synchronous path).
   gig_id?: string | undefined;
+  // Chair-selection policy (the adaptive-router seam). When present, each dispatch
+  // iteration narrows the ready frontier to the policy's chosen subset instead of
+  // running every ready chair in parallel. Absent = the v0 topological-parallel
+  // routing, byte-identical to before this seam existed.
+  selectChairs?: ChairSelector | undefined;
 }
 
 /**
@@ -380,7 +406,7 @@ export async function runGig(
 
     while (remaining.size > 0) {
       // Topological level: every chair whose depends_on ⊂ already-produced roles.
-      const ready: Chair[] = [];
+      let ready: Chair[] = [];
       for (const ch of remaining.values()) {
         if (ch.depends_on.every((dep) => producedByRole.has(dep))) ready.push(ch);
       }
@@ -391,6 +417,30 @@ export async function runGig(
         // hand-rolled Standard literal can't wedge the runtime silently.
         const stuck = [...remaining.values()].map((c) => c.role).join(", ");
         throw new RuntimeError(`phase "${phase.name}" cannot advance — chairs [${stuck}] have unresolved depends_on`);
+      }
+
+      // Routing policy: when a selector is injected, it narrows the frontier to the
+      // chairs to dispatch THIS iteration; the rest stay in `remaining` and re-enter
+      // the next frontier. The return is validated strictly — empty or containing a
+      // chair outside the frontier is a policy bug and must not pass silently.
+      if (deps.selectChairs) {
+        const chosen = await deps.selectChairs({
+          phase: phase.name, ready, produced, budget, standard,
+        });
+        const readyRoles = new Set(ready.map((c) => c.role));
+        if (chosen.length === 0) {
+          throw new RuntimeError(`phase "${phase.name}" selectChairs returned no chairs from ready frontier [${[...readyRoles].join(", ")}]`);
+        }
+        const outside = chosen.filter((c) => !readyRoles.has(c.role));
+        if (outside.length > 0) {
+          throw new RuntimeError(
+            `phase "${phase.name}" selectChairs returned chair(s) outside the ready frontier: [${outside.map((c) => c.role).join(", ")}] (ready: [${[...readyRoles].join(", ")}])`,
+          );
+        }
+        // Dispatch the frontier's own Chair objects for the chosen roles (dedup by
+        // role) — a selector echoing copies can't smuggle in a mutated chair.
+        const chosenRoles = new Set(chosen.map((c) => c.role));
+        ready = ready.filter((c) => chosenRoles.has(c.role));
       }
 
       // Per-chair work happens in two stages so non-invocation failures

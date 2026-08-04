@@ -155,10 +155,30 @@ export function createRegistry(initial: DomainType[] = []): Registry {
       // fields at seal instead of aborting the terminal chair.
       const additionalProperties =
         (dt.schema as { additionalProperties?: boolean }).additionalProperties ?? false;
+      // #229 — a type's required fields may be declared in EITHER place, and both are
+      // honored. Two authoring conventions exist in the genome and nothing reconciles
+      // them: most types populate `required_fields` and leave `schema.required` empty;
+      // the hand-authored seeding/bootstrap types do the reverse. Reading only
+      // `required_fields` (as this did) silently discarded the declaration of every type
+      // in the second group, so `{}` sealed as a well-formed instance of a type declaring
+      // 3-6 required fields.
+      //
+      // UNION, not precedence. `type_extend` (src/server.ts:609) resolves the same
+      // ambiguity as `schema.required ?? required_fields`, but precedence is the wrong
+      // rule at seal time: it makes one declaration silently void the other. No type in
+      // the genome populates both today, so the two rules are indistinguishable on
+      // current data — which is exactly why the safer rule should be the one that gets
+      // frozen in. Everything an author wrote down is enforced.
+      const declaredRequired = [
+        ...new Set([
+          ...(((dt.schema as { required?: string[] }).required) ?? []),
+          ...dt.required_fields,
+        ]),
+      ];
       const schema = {
         type: "object",
         properties: { ...baseProps, ...ownProps },
-        required: dt.required_fields,
+        required: declaredRequired,
         additionalProperties,
       };
       const validateFn = ajv.compile(schema);

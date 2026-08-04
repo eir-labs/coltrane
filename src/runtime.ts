@@ -38,6 +38,11 @@ export interface AgentInvocationContext {
   // hand-rolled ctx) → the invoker falls back to the agent's full output_types.
   output_types?: readonly string[];
   skills?: readonly SkillRecord[];
+  // #241 — the skill slugs this agent DECLARES that resolved to no package at all. Present
+  // (possibly empty) whenever the runtime actually attempted resolution; ABSENT means no
+  // resolution was attempted (no skills map supplied), which is not the same claim. The
+  // Claude invoker reads it so the prompt never names a skill the agent does not hold.
+  missing_skills?: readonly string[];
   // Agent-layer observability: the invoker calls this for each event the child emits
   // (stream-json: tool_use, tool_result, assistant text, result). The runtime forwards
   // them to RunDeps.onProgress tagged with phase+role so a live monitor can show what a
@@ -63,6 +68,11 @@ export type GigProgressEvent =
   | { type: "chair_start"; phase: string; role: string; producer: string }
   | { type: "chair_complete"; phase: string; role: string; producer: string; output_types: string[]; duration_ms: number }
   | { type: "chair_failed"; phase: string; role: string; error: string }
+  // #241 — one or more of the agent's declared skill_slugs resolved to no package. Not fatal
+  // (the chair did not declare them REQUIRED), but never silent again: an unskilled run used
+  // to be cryptographically identical to a skilled one — same genome_hash, run_fingerprint
+  // AND content_sha — so this channel is the only place the difference is observable live.
+  | { type: "skills_unresolved"; phase: string; role: string; agent: string; missing: string[] }
   | { type: "agent_event"; phase: string; role: string; event: AgentStreamEvent }
   | { type: "gig_complete"; outputs: number }
   | { type: "gig_failed"; error: string };
@@ -251,21 +261,34 @@ export function computeAppendCost(
 // Deterministic hash over the definitions a gig touches: the standard + its agents,
 // in a canonical (sorted, JCS) form. This is the reproducibility key — same defs,
 // same genome_hash, regardless of model or run.
-// Resolve a list of skill slugs against the genome's skills map. Missing slugs
-// are silently dropped — the diagnostic surface is the resulting empty Skills
-// layer in the prompt (the model receives no skill content). Returns [] when
-// either the slugs list or the map is absent.
+/**
+ * Resolve a list of skill slugs against the genome's skills map. REPORTS, never decides:
+ * it returns both what resolved and what did not, and `prepareChair` decides what a miss
+ * means (fatal when the chair declared the skill REQUIRED, reported otherwise).
+ *
+ * The boundary (#241): a skill package that LOADS is a legitimate degradation candidate —
+ * it has an identity, a version, a code_hash, and its degradation is already surfaced and
+ * sealed via `degraded_reason` (src/skills.ts resolveSkill). A slug that resolves to NO
+ * PACKAGE AT ALL has nothing to degrade; it is a dangling reference, exactly the shape
+ * `assertToolGrantsResolvable` already fails closed on ("a granted tool with no provider
+ * is a dead name") and exactly the shape `Chair.skill_slug` already hard-throws on.
+ *
+ * An ABSENT map means resolution was never configured (the documented v0 back-compat path)
+ * — that is not evidence of a dangling binding, so `missing` stays empty.
+ */
 function resolveSkills(
   slugs: readonly string[] | undefined,
   map: ReadonlyMap<string, SkillRecord> | undefined,
-): readonly SkillRecord[] {
-  if (!slugs || slugs.length === 0 || !map) return [];
-  const out: SkillRecord[] = [];
+): { skills: readonly SkillRecord[]; missing: readonly string[] } {
+  if (!slugs || slugs.length === 0 || !map) return { skills: [], missing: [] };
+  const skills: SkillRecord[] = [];
+  const missing: string[] = [];
   for (const slug of slugs) {
     const rec = map.get(slug);
-    if (rec) out.push(rec);
+    if (rec) skills.push(rec);
+    else missing.push(slug);
   }
-  return out;
+  return { skills, missing };
 }
 
 function genomeHash(standard: Standard): string {
@@ -342,22 +365,95 @@ export async function runGig(
     }
   };
 
-  // #156 — the standard's declared gig inputs. An entry chair (first phase, depends_on []) reads
-  // its typed input_contract from gigInput; those types are satisfied by the gig payload, not an
-  // upstream record. Validate the payload against every entry chair's contract BEFORE any chair
-  // fires — a missing gig input is a hard stop, so no model tokens are spent on bad input.
+  // #156 — the standard's declared gig inputs. A chair reads a declared gig-input type from
+  // gigInput rather than from an upstream record (composition.ts: "gig inputs are available to
+  // any chair"). The payload is validated BEFORE any chair fires — a missing gig input is a
+  // hard stop, so no model tokens are spent on bad input.
   const standardInputs = new Set<string>(standard.input_types ?? []);
-  const firstPhase = standard.phases[0];
-  if (firstPhase) {
-    for (const ch of firstPhase.chairs) {
-      if (ch.depends_on.length > 0) continue;
-      for (const need of ch.input_contract) {
-        if (standardInputs.has(need) && gigInput[need] === undefined) {
-          throw new RuntimeError(
-            `gig input missing "${need}" required by entry chair "${ch.role}" (MissingGigInput)`,
-          );
-        }
+
+  // Keys are the HYPHENATED type slug. `grant_requirements` vs `grant-requirements` is the
+  // single most common dispatch mistake, and the caller's own keys are in scope here.
+  const normalizeKey = (k: string): string => k.toLowerCase().replace(/[_\-\s]/g, "");
+
+  /**
+   * #244 — the error must blame the layer that is actually wrong. "upstream outputs only
+   * provide [...]" sent the operator to inspect a pipeline that is correctly wired when the
+   * real cause is a missing key in their own dispatch payload. The `fromGig` disjunction
+   * knows which branch failed; this carries that knowledge into the message.
+   */
+  function missingGigInput(need: string, role: string, upstreamProvided?: string): RuntimeError {
+    const provided = Object.keys(gigInput);
+    const target = normalizeKey(need);
+    const nearMiss = provided.filter((k) => k !== need && normalizeKey(k) === target);
+    const unknown = provided.filter((k) => !standardInputs.has(k));
+    const quoted = (ks: string[]): string => ks.map((k) => `"${k}"`).join(", ");
+    const hint =
+      nearMiss.length > 0
+        ? ` The payload carries ${quoted(nearMiss)} — gig input keys are the hyphenated type slug, so did you mean "${need}"?`
+        : provided.length === 0
+          ? ` The dispatch payload is empty.`
+          : ` The payload's keys are [${quoted(provided)}]${unknown.length > 0 ? `; not declared by this standard: [${quoted(unknown)}]` : ""}.`;
+    const upstream =
+      upstreamProvided !== undefined
+        ? ` (upstream provided [${upstreamProvided}], but "${need}" is a declared gig input and must come from the dispatch payload)`
+        : ` (no upstream chair produces "${need}", so it can only come from the dispatch payload)`;
+    return new RuntimeError(
+      `gig input missing "${need}" required by chair "${role}" (MissingGigInput)${upstream}.${hint}`,
+    );
+  }
+
+  // What each role will seal — known statically from the composed standard, which is what
+  // makes the pre-flight below possible at t=0.
+  const sealedByRole = new Map<string, readonly string[]>();
+  for (const ph of standard.phases) {
+    for (const ch of ph.chairs) {
+      if (ch.skill_slug && (ch.agent_slug ?? "") === "") {
+        sealedByRole.set(ch.role, [ch.output_contract[0] ?? "Signal"]);
+        continue;
       }
+      const ag = standard.agents.find((a) => a.slug === ch.agent_slug);
+      if (!ag) continue; // prepareChair reports an unknown agent_slug precisely; don't pre-empt it
+      sealedByRole.set(
+        ch.role,
+        ch.output_contract.length ? ag.output_types.filter((t) => ch.output_contract.includes(t)) : ag.output_types,
+      );
+    }
+  }
+
+  // Type-name mirror of outputSatisfiesType (no record exists yet at t=0). Deliberately
+  // PERMISSIVE: an unresolvable core is treated as "might satisfy", so the pre-flight can
+  // only ever fire on a PROVABLE miss and can never reject a runnable gig.
+  const mightSatisfy = (producedType: string, need: string): boolean => {
+    if (producedType === need) return true;
+    if (!CORE_TYPE_SET.has(need)) return false;
+    const core = deps.outputs.coreTypeOf(producedType);
+    return core === null || core === need;
+  };
+
+  // The pre-flight itself. v0 checked ONLY phase 0, and within it only `depends_on: []`
+  // chairs — while its own comment promised "every entry chair" and "no model tokens are
+  // spent". Both exclusions are reachable with a validly composed standard, so a real chair
+  // fired and burned real money before a failure that was knowable before the gig started.
+  {
+    const producedByEarlierPhases: string[] = [];
+    for (const ph of standard.phases) {
+      const sealedThisPhase: string[] = [];
+      for (const ch of ph.chairs) {
+        // Mirrors prepareChair's input gathering: declared deps, else everything sealed by a
+        // strictly-earlier phase (a superset of the legacy input_types filter — permissive).
+        const reachable =
+          ch.depends_on.length > 0
+            ? ch.depends_on.flatMap((d) => sealedByRole.get(d) ?? [])
+            : producedByEarlierPhases;
+        for (const need of ch.input_contract) {
+          if (!standardInputs.has(need)) continue;      // not a gig input — upstream's job
+          if (gigInput[need] !== undefined) continue;   // supplied
+          if (reachable.some((t) => mightSatisfy(t, need))) continue; // an upstream can cover it
+          throw missingGigInput(need, ch.role);
+        }
+        sealedThisPhase.push(...(sealedByRole.get(ch.role) ?? []));
+      }
+      producedByEarlierPhases.push(...sealedThisPhase);
     }
   }
 
@@ -500,6 +596,9 @@ export async function runGig(
     output_specs: Array<{ domain_type: string; core_type: string; primitive: Agent["primitives"][number] }>;
     inputs: OutputRecord[];
     skills: readonly SkillRecord[];
+    // #241 — declared skill slugs that resolved to no package. Threaded to the invocation
+    // context so the prompt can never name a skill the agent does not actually hold.
+    missing_skills: readonly string[];
   }
 
   // Resolve a chair's declared output types into seal-specs (type → core → primitive).
@@ -532,13 +631,17 @@ export async function runGig(
           // #156: a type satisfied by an upstream record OR by the gig payload (entry-chair seed).
           const fromGig = standardInputs.has(need) && gigInput[need] !== undefined;
           if (!fromGig && !inputs.some((o) => outputSatisfiesType(o, need))) {
-            throw new RuntimeError(`chair "${chair.role}" input_contract requires "${need}" but upstream outputs only provide [${inputs.map((o) => o.domain_type).join(",")}]`);
+            const provided = inputs.map((o) => o.domain_type).join(",");
+            // #244 — this disjunction knows WHICH branch failed; don't discard that.
+            throw standardInputs.has(need)
+              ? missingGigInput(need, chair.role, provided)
+              : new RuntimeError(`chair "${chair.role}" input_contract requires "${need}" but upstream outputs only provide [${provided}]`);
           }
         }
       }
       // A skill-backed chair seals exactly one output (its deterministic code returns one blob).
       const output_specs = [{ domain_type, core_type: core, primitive }];
-      return { chair, phaseName, skill_dir: dir, primitive, domain_type, output_specs, inputs, skills: [] };
+      return { chair, phaseName, skill_dir: dir, primitive, domain_type, output_specs, inputs, skills: [], missing_skills: [] };
     }
 
     const agent = standard.agents.find((a) => a.slug === chair.agent_slug);
@@ -577,16 +680,41 @@ export async function runGig(
         const fromGig = standardInputs.has(need) && gigInput[need] !== undefined;
         if (!fromGig && !inputs.some((o) => outputSatisfiesType(o, need))) {
           const provided = inputs.map((o) => o.domain_type).join(",");
-          throw new RuntimeError(
-            `chair "${chair.role}" input_contract requires "${need}" but upstream outputs only provide [${provided}]`,
-          );
+          // #244 — when `need` is a DECLARED gig input, the cause is a missing key in the
+          // caller's payload, not a mis-wired pipeline. Blaming "upstream outputs" sent the
+          // operator to inspect files that are perfectly correct.
+          throw standardInputs.has(need)
+            ? missingGigInput(need, chair.role, provided)
+            : new RuntimeError(
+                `chair "${chair.role}" input_contract requires "${need}" but upstream outputs only provide [${provided}]`,
+              );
         }
       }
     }
 
-    // Resolve this agent's skill bindings (slugs) against the genome's skills
-    // map. Unknown slugs surface as a missing Skills layer in the prompt.
-    const skills = resolveSkills(agent.skill_slugs, deps.skills);
+    // Resolve this agent's skill bindings (slugs) against the genome's skills map.
+    // resolveSkills REPORTS; this is where the engine DECIDES — and it decides BEFORE the
+    // budget deduction below, so a dangling binding costs nothing.
+    const { skills, missing } = resolveSkills(agent.skill_slugs, deps.skills);
+    if (missing.length > 0) {
+      // #242 — `Chair.required_skills` was validated exactly once, at compose time, as a
+      // string-subset check against the agent's own declaration. A chair could declare a
+      // skill REQUIRED, pass composition because the agent lists the same string, and then
+      // run unskilled while sealing normally: the standard's strongest available assertion
+      // about a chair's competence was enforced by nobody. There is no graceful-degradation
+      // tension here — "required" means required.
+      const requiredMissing = missing.filter((s) => (chair.required_skills ?? []).includes(s));
+      if (requiredMissing.length > 0) {
+        throw new RuntimeError(
+          `phase "${phaseName}" chair "${chair.role}" requires skill(s) [${requiredMissing.join(", ")}] which resolve to no skill package — ` +
+            `agent "${agent.slug}" declares the slug but nothing supplies it (a required skill with no package is a dead name; ` +
+            `define the skill package or drop it from the chair's required_skills)`,
+        );
+      }
+      // #241 — not required, so the gig lives. But it is never silent again: an unskilled run
+      // used to be indistinguishable from a skilled one in the artifact, the ledger AND the diff.
+      emit({ type: "skills_unresolved", phase: phaseName, role: chair.role, agent: agent.slug, missing: [...missing] });
+    }
 
     // BUDGET CHECK — pre-invocation. Synchronous so BudgetExhausted (and a
     // TypeError thrown from JSON.stringify on a circular gig_input) propagate
@@ -612,7 +740,7 @@ export async function runGig(
       ? agent.output_types.filter((t) => chair.output_contract.includes(t))
       : agent.output_types;
     const output_specs = outputSpecsFor(wanted, primitive);
-    return { chair, phaseName, agent, primitive, domain_type, output_specs, inputs, skills };
+    return { chair, phaseName, agent, primitive, domain_type, output_specs, inputs, skills, missing_skills: missing };
   }
 
   // Stage 2 — actual invocation + post-invocation output_contract check + write.
@@ -652,6 +780,7 @@ export async function runGig(
       const agent = p.agent!;
       data = await deps.invoke({
         agent, phase: phaseName, inputs, gig_input: gigInput, skills,
+        missing_skills: p.missing_skills, // #241 — what did NOT resolve, so the prompt can't assert it
         output_types: output_specs.map((s) => s.domain_type), // #174 — the chair's promised subset
         onEvent: (ev) => { captureUsage(ev); emit({ type: "agent_event", phase: phaseName, role: chair.role, event: ev }); },
       });

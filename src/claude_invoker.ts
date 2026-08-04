@@ -100,8 +100,14 @@ export function buildPrompt(
         return `## ${s.slug}${text ? `\n${text}` : ""}`;
       })
     // No resolved content this gig — still name the bound skills so the model knows it has
-    // them (matches the old runtime's skills index).
-    : (a.skill_slugs ?? []).map((slug) => `## ${slug}`);
+    // them (matches the old runtime's skills index). #241: NEVER name a slug the runtime
+    // resolved to no package. An all-dangling agent used to render `# Skills` / `## <slug>`
+    // with zero content — the prompt ASSERTING to the model that it holds a discipline that
+    // does not exist. An ABSENT `missing_skills` means resolution was never attempted (no
+    // skills map), so nothing is known-unresolved and the legacy index behaviour stands.
+    : (a.skill_slugs ?? [])
+        .filter((slug) => !(ctx.missing_skills ?? []).includes(slug))
+        .map((slug) => `## ${slug}`);
   if (skillBlocks.length > 0) {
     layers.push(`# Skills\n${skillBlocks.join("\n\n")}`);
   }

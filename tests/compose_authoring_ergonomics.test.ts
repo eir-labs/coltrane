@@ -7,6 +7,9 @@
 import { describe, it, expect } from "vitest";
 import { composeStandard, runGig, createRegistry, createOutputStore, MemoryLedger, type PhaseDef, type DomainType, type AgentInvoker } from "../src";
 import { testAgent } from "./_support/agents.js";
+// NOTE: the widened #244 block below seeds types through createRegistry's constructor rather
+// than registerType — the latter enforces type REUSE (a same-shape type scores >=80), which is
+// a genome-authoring policy these scaffolds have no business satisfying.
 
 describe("#187 — optional chair fields default to [] (no 'is not iterable' crash)", () => {
   it("a chair omitting optional array fields composes (treated as [], no TypeError)", () => {
@@ -52,6 +55,81 @@ describe("#156 — entry chairs may declare a typed input_contract sourced from 
       runGig(std(), {}, { outputs: createOutputStore(registry), ledger: new MemoryLedger(), invoke }),
     ).rejects.toThrow(/applicant-profile|gig input|MissingGigInput/i);
     expect(fired, "no chair should fire on bad gig input").toBe(false);
+  });
+
+  // ── CONSCIOUSLY REWRITTEN (#244) ───────────────────────────────────────────
+  // The test above names the right invariant — "no chair should fire on bad gig input" — but
+  // only ever demonstrated it on a SINGLE-PHASE standard with one `depends_on: []` chair,
+  // which is precisely the one shape the v0 pre-flight covered. One phase later the invariant
+  // it asserts was false: the pre-flight read `standard.phases[0]` and skipped any chair with
+  // a non-empty `depends_on`, while its own comment promised "every entry chair" and "no model
+  // tokens are spent on bad input". Both exclusions are reachable with a VALIDLY COMPOSED
+  // standard, because composeStandard treats gig inputs as available to any chair.
+  //
+  // So the invariant is kept and the coverage is widened to the two shapes that violated it.
+  // In production each `fired` entry below is a real `claude` spawn and real dollars.
+  describe("the same invariant, one phase later — the shapes the v0 pre-flight skipped", () => {
+    const seeder = testAgent({ slug: "seeder", primitives: ["SENSE"], input_types: [], output_types: ["seed-sig"] });
+    const onboarder = testAgent({ slug: "onboarder", primitives: ["INTERPRET"], input_types: ["applicant-profile", "seed-sig"], output_types: ["onboarding-note"] });
+    const reg = (): ReturnType<typeof createRegistry> =>
+      createRegistry([
+        { slug: "applicant-profile", extends: "Signal", domain: "demo", schema: { properties: { name: { type: "string" } } }, required_fields: [] },
+        { slug: "seed-sig", extends: "Signal", domain: "demo", schema: { properties: { s: { type: "string" } } }, required_fields: [] },
+        { slug: "onboarding-note", extends: "Interpretation", domain: "demo", schema: { properties: { note: { type: "string" } } }, required_fields: [] },
+      ]);
+
+    it("a LATER-PHASE entry chair: nothing fires, including the phase before it", async () => {
+      const std = composeStandard({
+        slug: "later-entry", domain: "demo", agents: [seeder, onboarder], input_types: ["applicant-profile"],
+        phases: [
+          { name: "seed", chairs: [{ role: "seed", agent_slug: "seeder", depends_on: [], input_contract: [], output_contract: ["seed-sig"], required_skills: [] }] },
+          { name: "onboard", chairs: [{ role: "onboard", agent_slug: "onboarder", depends_on: [], input_contract: ["applicant-profile"], output_contract: ["onboarding-note"], required_skills: [] }] },
+        ] as PhaseDef[],
+      });
+      const fired: string[] = [];
+      const invoke: AgentInvoker = (ctx) => { fired.push(ctx.agent.slug); return { note: "x" }; };
+      await expect(
+        runGig(std, {}, { outputs: createOutputStore(reg()), ledger: new MemoryLedger(), invoke }),
+      ).rejects.toThrow(/applicant-profile|MissingGigInput/i);
+      expect(fired, "no chair should fire on bad gig input — including phase 0").toEqual([]);
+    });
+
+    it("a DEPENDENT chair in phase 0: nothing fires, including its already-ready sibling", async () => {
+      const std = composeStandard({
+        slug: "dependent-entry", domain: "demo", agents: [seeder, onboarder], input_types: ["applicant-profile"],
+        phases: [
+          { name: "seed", chairs: [
+            { role: "seed", agent_slug: "seeder", depends_on: [], input_contract: [], output_contract: ["seed-sig"], required_skills: [] },
+            { role: "onboard", agent_slug: "onboarder", depends_on: ["seed"], input_contract: ["applicant-profile", "seed-sig"], output_contract: ["onboarding-note"], required_skills: [] },
+          ] },
+        ] as PhaseDef[],
+      });
+      const fired: string[] = [];
+      const invoke: AgentInvoker = (ctx) => { fired.push(ctx.agent.slug); return { note: "x" }; };
+      await expect(
+        runGig(std, {}, { outputs: createOutputStore(reg()), ledger: new MemoryLedger(), invoke }),
+      ).rejects.toThrow(/applicant-profile|MissingGigInput/i);
+      expect(fired).toEqual([]);
+    });
+
+    it("the message blames the dispatch payload, not a correctly-wired pipeline", async () => {
+      const std = composeStandard({
+        slug: "blame", domain: "demo", agents: [seeder, onboarder], input_types: ["applicant-profile"],
+        phases: [
+          { name: "seed", chairs: [{ role: "seed", agent_slug: "seeder", depends_on: [], input_contract: [], output_contract: ["seed-sig"], required_skills: [] }] },
+          { name: "onboard", chairs: [{ role: "onboard", agent_slug: "onboarder", depends_on: ["seed"], input_contract: ["applicant-profile"], output_contract: ["onboarding-note"], required_skills: [] }] },
+        ] as PhaseDef[],
+      });
+      const invoke: AgentInvoker = () => ({ note: "x" });
+      const err = await runGig(std, { applicant_profile: { name: "Ada" } }, {
+        outputs: createOutputStore(reg()), ledger: new MemoryLedger(), invoke,
+      }).catch((e: unknown) => e) as Error;
+      expect(err.message).toMatch(/MissingGigInput/);
+      // The operator's actual mistake: an underscore where the type slug is hyphenated.
+      expect(err.message).toContain("applicant_profile");
+      expect(err.message).toMatch(/did you mean|hyphen/i);
+      expect(err.message).not.toMatch(/upstream outputs only provide/);
+    });
   });
 
   it("runGig runs when the gig input satisfies the entry contract", async () => {

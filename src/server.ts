@@ -1142,6 +1142,51 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
           }
           throw e;
         }
+        // #254 — VALIDITY, not just transition legality. v1 checked only that the status move
+        // was forward-legal and never looked at the definition at all: `targetSlug` was used
+        // solely as a ledger subject, so a slug naming NOTHING promoted to `active` happily.
+        //
+        // Promotion is the transition that grants a definition production status. A definition
+        // that could not be CREATED must not be able to become ACTIVE — otherwise the write-path
+        // gate is a fiction, because anything already sitting at `draft` walks straight past it.
+        // The check run here is deliberately the LOADER'S OWN check, not a parallel one: a
+        // promote that validates differently from the loader is exactly the drift that produced
+        // #254. (The loader's hard-fail stays too — hand-edited JSON is a deliberately open path
+        // per CLAUDE.md, so the write path makes a malformed definition hard to create and the
+        // load path makes it impossible to use.)
+        //
+        // An ABSENT genome map means the server was never bootstrapped from a genome, so absence
+        // is not evidence that the slug names nothing — same discipline the runtime applies to an
+        // absent skills map. bootstrapServerDeps always populates all three.
+        const notFound = (kind: string): ToolResult => ({
+          ok: false, requires_approval: approval,
+          error: `${slug}: no ${kind} "${targetSlug}" in the genome — a promotion names a definition that must already exist (define it first, or fix the slug)`,
+        });
+        if (slug === "agent_promote" && deps.agents) {
+          const ag = deps.agents.get(targetSlug);
+          if (!ag) return notFound("agent");
+          try {
+            defineAgent(ag as unknown as AgentDef); // the loader's own gate
+          } catch (e) {
+            return {
+              ok: false, requires_approval: approval,
+              error: `${slug}: agent "${targetSlug}" does not pass validation and must not become "${target}" — ${e instanceof Error ? e.message : String(e)}`,
+            };
+          }
+        } else if (slug === "standard_promote" && deps.standards) {
+          if (!deps.standards.get(targetSlug)) return notFound("standard");
+        } else if (slug === "skill_promote" && deps.skills) {
+          const sk = deps.skills.get(targetSlug);
+          if (!sk) return notFound("skill");
+          const check = SkillSchema.safeParse(sk); // the loader's own gate
+          if (!check.success) {
+            const why = check.error.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`).join("; ");
+            return {
+              ok: false, requires_approval: approval,
+              error: `${slug}: skill "${targetSlug}" does not pass validation and must not become "${target}" — ${why}`,
+            };
+          }
+        }
         const promotion_id = randomUUID();
         // v1 recorded neither WHICH entity was promoted nor the transition — standard_slug held
         // the TOOL name. A lifecycle transition is exactly the event an audit trail exists for.

@@ -4,17 +4,27 @@ import { join } from "node:path";
 import { mkdtempSync, existsSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 
+// Identity values are 64 lowercase hex — the shape sha256Hex/effectiveHash/runFingerprint
+// actually produce (src/canonical_form.ts:29-31, :93-113, :130-132) and the shape the
+// shared validator enforces once #212 lands. The previous "gh1"/"rf1" placeholders were
+// the same blind spot that let 7 call sites write "n/a".
+const HEX = (seed: string): string => seed.repeat(64).slice(0, 64);
+
 function entry(overrides: Partial<LedgerEntry> = {}): LedgerEntry {
-  return {
+  const row: Record<string, unknown> = {
+    kind: "gig",
+    schema_version: 2,
     gig_id: "g1",
     standard_slug: "readiness-scan",
-    genome_hash: "gh1",
-    run_fingerprint: "rf1",
+    genome_hash: HEX("a"),
+    run_fingerprint: HEX("b"),
     output_hashes: ["oh1"],
-    started_at: "2026-05-25T20:00:00Z",
-    finished_at: "2026-05-25T20:01:00Z",
+    started_at: "2026-05-25T20:00:00.000Z",
+    finished_at: "2026-05-25T20:01:00.000Z",
     ...overrides,
   };
+  row["entry_id"] ??= row["gig_id"];
+  return row as unknown as LedgerEntry;
 }
 
 describe("ledger: append-only", () => {
@@ -63,10 +73,10 @@ describe("MemoryLedger: append + query", () => {
 
   it("queries by standard_slug + genome_hash", () => {
     const l = new MemoryLedger();
-    l.append(entry({ standard_slug: "scan", genome_hash: "g1" }));
-    l.append(entry({ standard_slug: "fix",  genome_hash: "g2" }));
+    l.append(entry({ standard_slug: "scan", genome_hash: HEX("1") }));
+    l.append(entry({ standard_slug: "fix",  genome_hash: HEX("2") }));
     expect(l.query({ standard_slug: "scan" }).length).toBe(1);
-    expect(l.query({ genome_hash: "g2" }).length).toBe(1);
+    expect(l.query({ genome_hash: HEX("2") }).length).toBe(1);
   });
 
   it("queries by time range", () => {

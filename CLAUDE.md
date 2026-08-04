@@ -155,9 +155,19 @@ This repo gives you:
 - a way to **evolve agents** under typed invariants — change goes through `agent_evolve`,
   not free-form prompt drift
 - a way to **read the chain** — every run produces a `genome_hash` + `run_fingerprint`
-  in the append-only ledger, byte-reproducible across implementations; every output carries
-  its `content_sha` plus the `input_shas` of exactly what it consumed (the provenance chain is
-  engine-stamped, no agent hashing), and a run records its actual model spend (`usage`)
+  in the append-only ledger; every output carries its `content_sha` plus the `input_shas` of
+  exactly what it consumed (the provenance chain is engine-stamped, no agent hashing), and a
+  run records its actual model spend (`usage`)
+  - **What the run hashes cover.** `genome_hash` is deterministic and stable across machines
+    and implementations *for a given structure*: the standard's phase graph plus each agent's
+    slug, primitives, `input_types`, `output_types`, domain. It does **not** cover `identity`,
+    `method`, `constraints`, `behavioral_primitives`, `allowed_tools`, model tier, or
+    `skill_slugs` — so an `agent_evolve` that rewrites an agent's method and widens its tools
+    leaves `genome_hash` unmoved, and a skilled run can be indistinguishable from an unskilled
+    one in the chain. This is a deliberate structural hash (see #220), not an oversight. When
+    you need to compare *behavior*, use the authoring-time `content_hash`/`effective_hash`
+    that `agent_define` / `agent_evolve` seal as `kind:"genome_mutation"` ledger rows — those
+    hash the full canonical definition.
 
 It is NOT:
 - a prompt manager

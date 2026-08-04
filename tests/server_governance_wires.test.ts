@@ -150,7 +150,12 @@ describe("system_audit / system_health / health_check (derived over the stores)"
 describe("gig_abort (honest v0 semantics — synchronous gigs)", () => {
   it("reports already_complete for a gig with a ledger entry", async () => {
     const d = makeDeps();
-    d.ledger.append({ gig_id: "g1", standard_slug: "scan", genome_hash: "h", run_fingerprint: "f", output_hashes: [], started_at: "t0", finished_at: "t1" });
+    // Gig row in the settled #212 shape (64-hex identity, ISO timestamps, kind discriminator).
+    d.ledger.append({
+      kind: "gig", schema_version: 2, entry_id: "g1", gig_id: "g1", standard_slug: "scan",
+      genome_hash: "a".repeat(64), run_fingerprint: "b".repeat(64), output_hashes: [],
+      started_at: "2026-05-25T20:00:00.000Z", finished_at: "2026-05-25T20:01:00.000Z",
+    } as never);
     const r = await dispatchTool("gig_abort", { gig_id: "g1" }, d);
     expect(r.ok).toBe(true);
     expect(r.not_implemented).toBeFalsy();

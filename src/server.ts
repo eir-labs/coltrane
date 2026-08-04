@@ -20,7 +20,10 @@ import { loadGenome, resolveGenome, type SkillRecord, type EvalRecord, type Load
 import { SkillSchema, AgentSchema, StandardSchema } from "./genome_schema.js";
 import { sealAgentDefinition, sealDefinition, sealSkillPackage, recordIdentity } from "./genome_writer.js";
 import { createOutputStore, defaultOutputsPersistDir, type OutputStore } from "./outputs.js";
-import { MemoryLedger, type Ledger } from "./ledger.js";
+import {
+  FileLedger, LedgerError, LEDGER_SCHEMA_VERSION, defaultLedgerPath,
+  type Ledger, type GovernanceLedgerEntry,
+} from "./ledger.js";
 import { standardSimulate } from "./simulate.js";
 import { runGig, BudgetExhausted, type AgentInvoker } from "./runtime.js";
 import { makeClaudeInvoker } from "./claude_invoker.js";
@@ -113,6 +116,33 @@ export interface ToolResult {
   requires_approval?: boolean;
   // marks the honest gap: tool exists in the surface but its impl awaits another lane.
   not_implemented?: boolean;
+  // #218 — "recording the work failed" is not "the work failed". A LedgerError means the
+  // audit row did not land; the caller must be able to tell that from an ordinary rejection,
+  // because the two demand opposite responses (retry vs. don't).
+  audit_write_failed?: boolean;
+}
+
+/** Build a governance row. Every governance act names WHAT it was about (`subject_slug`) and
+ *  carries its payload (`detail`) — v1 recorded a bare UUID and "n/a" identity (#212). */
+function governanceRow(
+  event: string,
+  subject_slug: string,
+  detail: Record<string, unknown>,
+  subject_gig_id?: string,
+): GovernanceLedgerEntry {
+  const now = new Date().toISOString();
+  return {
+    kind: "governance",
+    schema_version: LEDGER_SCHEMA_VERSION,
+    entry_id: `${event}:${randomUUID()}`,
+    event,
+    subject_slug,
+    ...(subject_gig_id ? { subject_gig_id } : {}),
+    detail,
+    output_hashes: [],
+    started_at: now,
+    finished_at: now,
+  };
 }
 
 const KNOWN_SLUGS = new Set(MCP_TOOLS.map((t) => t.slug));
@@ -471,7 +501,7 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
           };
         }
         const outs = deps.outputs.all().filter((o) => o.gig_id === gid);
-        const entry = deps.ledger.query({ gig_id: gid })[0];
+        const entry = deps.ledger.query({ kind: "gig", gig_id: gid })[0];
         return {
           ok: true, requires_approval: approval,
           data: {
@@ -479,7 +509,8 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
             phases_complete: outs.length,
             current_agent: outs.length ? outs[outs.length - 1]!.agent_slug : null,
             outputs_so_far: outs,
-            ...(entry?.usage ? { usage: entry.usage } : {}), // #195 — settled spend from the ledger (post-restart path)
+            // #195 — settled spend from the ledger (post-restart path). Only a gig row carries usage.
+            ...(entry?.kind === "gig" && entry.usage ? { usage: entry.usage } : {}),
           },
         };
       }
@@ -636,21 +667,25 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         }
       }
       case "charter_suggest_update": {
+        // Validate BEFORE appending. The append-first shape let `charter_suggest_update({})`
+        // pump a permanent, content-free row into a store with no compaction and no retention.
+        // session_review_write was already the correct pattern in this file.
+        const field = String(args["field"] ?? "");
+        if (!field) {
+          return { ok: false, requires_approval: approval, error: "charter_suggest_update requires field" };
+        }
         const proposal_id = randomUUID();
-        deps.ledger.append({
-          gig_id: `proposal:${proposal_id}`,
-          standard_slug: "charter_suggest_update",
-          genome_hash: "n/a",
-          run_fingerprint: "n/a",
-          output_hashes: [],
-          started_at: new Date().toISOString(),
-          finished_at: new Date().toISOString(),
-        });
+        deps.ledger.append(governanceRow("charter_suggest_update", field, {
+          proposal_id,
+          current_value: args["current_value"] ?? null,
+          suggested_value: args["suggested_value"] ?? null,
+          evidence: args["evidence"] ?? null,
+        }));
         return {
           ok: true, requires_approval: true,
           data: {
             proposal_id,
-            field: String(args["field"] ?? ""),
+            field,
             current_value: args["current_value"] ?? null,
             suggested_value: args["suggested_value"] ?? null,
             evidence: args["evidence"] ?? null,
@@ -658,7 +693,14 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         };
       }
       case "system_health": {
-        const gigs_run = deps.ledger.count();
+        // #216 — GIG rows, not every row. `count()` used to be the raw row total, so every
+        // agent_define, promotion, proposal, review, tool_register and abort inflated the
+        // reported gig count AND the derived cost AND the reported budget spend.
+        const gigs_run = deps.ledger.count({ kind: "gig" });
+        // Settled spend where we have it (#195) — a real number now that gig rows are
+        // separable, instead of a row-count proxy standing in for dollars.
+        const cost = deps.ledger.query({ kind: "gig" })
+          .reduce((sum, e) => sum + (e.kind === "gig" ? e.usage?.total_cost_usd ?? 0 : 0), 0);
         const outs = deps.outputs.all();
         const type_stats: Record<string, number> = {};
         const agent_stats: Record<string, number> = {};
@@ -669,9 +711,9 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         return {
           ok: true, requires_approval: approval,
           data: {
-            gigs_run, cost: gigs_run, type_stats, agent_stats,
+            gigs_run, cost, type_stats, agent_stats,
             types: deps.registry.listTypes().length, outputs: outs.length, refs: deps.outputs.refs().length,
-            tool_stats: {}, bottlenecks: [], budget: { spent: gigs_run, remaining: null },
+            tool_stats: {}, bottlenecks: [], budget: { spent: cost, remaining: null },
             // Rob #129 — surface what was skipped at load so operators see broken files
             load_errors: deps.load_errors ?? [],
             // genome extension — per-slug layer provenance, queryable at runtime (e.g.
@@ -774,7 +816,9 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         const targetKind = String(args["kind"] ?? args["entity_type"] ?? "");
         const all = deps.outputs.all();
         // standards live in the ledger (executions); agents/types in the outputs store.
-        const execution_count = targetKind === "standard" ? deps.ledger.query({ standard_slug: targetSlug }).length : 0;
+        const execution_count = targetKind === "standard"
+          ? deps.ledger.count({ kind: "gig", standard_slug: targetSlug })
+          : 0;
         const filtered = targetKind === "agent"
           ? all.filter((o) => o.agent_slug === targetSlug)
           : targetKind === "standard"
@@ -808,16 +852,16 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         return { ok: true, requires_approval: true, data: { proposal_id, affected_agents: [] } };
       }
       case "proposal_create": {
+        const change_type = String(args["change_type"] ?? "");
+        const target = String(args["target"] ?? "");
+        if (!change_type || !target) {
+          return { ok: false, requires_approval: approval, error: "proposal_create requires change_type and target" };
+        }
         const proposal_id = randomUUID();
-        deps.ledger.append({
-          gig_id: `proposal:${proposal_id}`,
-          standard_slug: "proposal_create",
-          genome_hash: "n/a",
-          run_fingerprint: "n/a",
-          output_hashes: [],
-          started_at: new Date().toISOString(),
-          finished_at: new Date().toISOString(),
-        });
+        deps.ledger.append(governanceRow("proposal_create", target, {
+          proposal_id, change_type, reason: args["reason"] ?? null,
+          target_kind: args["target_kind"] ?? null,
+        }));
         return {
           ok: true, requires_approval: approval,
           data: { proposal_id, cascade_impact: { agents_affected: [], standards_affected: [] } },
@@ -838,22 +882,23 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
       }
       case "gig_abort": {
         const gid = String(args["gig_id"] ?? "");
+        const reason = String(args["reason"] ?? "");
         // v0 gigs run synchronously (runGig completes inside gig_dispatch) — there
         // is no in-flight gig to cancel. Honest status from what the stores know:
         // a ledger entry => already finished; outputs only => was running; else unknown.
-        const completed = deps.ledger.query({ gig_id: gid }).length > 0;
-        const hasOutputs = deps.outputs.all().some((o) => o.gig_id === gid);
+        // An empty gig_id must not be probed: query({gig_id: ""}) drops the filter entirely
+        // and would match every row, reporting a phantom "already_complete".
+        const completed = gid.length > 0 && deps.ledger.query({ gig_id: gid }).length > 0;
+        const hasOutputs = gid.length > 0 && deps.outputs.all().some((o) => o.gig_id === gid);
         const status = completed ? "already_complete" : hasOutputs ? "running" : "not_found";
-        deps.ledger.append({
-          gig_id: `abort:${gid}`,
-          standard_slug: "gig_abort",
-          genome_hash: "n/a",
-          run_fingerprint: "n/a",
-          output_hashes: [],
-          started_at: new Date().toISOString(),
-          finished_at: new Date().toISOString(),
-        });
-        return { ok: true, requires_approval: approval, data: { status, aborted: status === "running", cleanup_result: { reason: String(args["reason"] ?? "") } } };
+        // Record only a real abort. v1 appended REGARDLESS — including on not_found — so an
+        // immutable row claimed a cancellation for a gig that never existed. `subject_gig_id`
+        // is first-class so the abort surfaces in the aborted gig's own history; the v1
+        // `abort:<gid>` namespace hid it from the only query that would look (#213).
+        if (status !== "not_found") {
+          deps.ledger.append(governanceRow("gig_abort", gid, { reason, status }, gid));
+        }
+        return { ok: true, requires_approval: approval, data: { status, aborted: status === "running", cleanup_result: { reason } } };
       }
       case "agent_define": {
         // Build the def by the SCHEMA's own field list (genome_schema.ts AgentSchema): copy exactly
@@ -906,20 +951,17 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         if (!targetSlug) {
           return { ok: false, requires_approval: approval, error: "tool_register requires slug" };
         }
+        // #218 — SEAL BEFORE GRANTING. REGISTERED_TOOL_SLUGS is the capability gate that
+        // decides whether agent_define may grant this slug. v1 mutated it (and toolProviders)
+        // and only then appended, so a failed append left the tool registered and grantable,
+        // the caller told the call failed, and no audit row at all — the audit trail could not
+        // answer "who granted this capability, and when".
+        const registration_id = randomUUID();
+        deps.ledger.append(governanceRow("tool_register", targetSlug, { registration_id }));
         REGISTERED_TOOL_SLUGS.add(targetSlug);
         // Keep the #185 provider bridge live: a freshly-registered tool must resolve for a same-
         // session agent_define→dispatch (the registry and provider map share lifecycle).
         deps.toolProviders?.set(targetSlug, { tool: targetSlug, kind: "in_house" });
-        const registration_id = randomUUID();
-        deps.ledger.append({
-          gig_id: `tool_register:${registration_id}`,
-          standard_slug: "tool_register",
-          genome_hash: "n/a",
-          run_fingerprint: "n/a",
-          output_hashes: [],
-          started_at: new Date().toISOString(),
-          finished_at: new Date().toISOString(),
-        });
         return {
           ok: true,
           requires_approval: approval,
@@ -1101,15 +1143,11 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
           throw e;
         }
         const promotion_id = randomUUID();
-        deps.ledger.append({
-          gig_id: `promote:${promotion_id}`,
-          standard_slug: slug,
-          genome_hash: "n/a",
-          run_fingerprint: "n/a",
-          output_hashes: [],
-          started_at: new Date().toISOString(),
-          finished_at: new Date().toISOString(),
-        });
+        // v1 recorded neither WHICH entity was promoted nor the transition — standard_slug held
+        // the TOOL name. A lifecycle transition is exactly the event an audit trail exists for.
+        deps.ledger.append(governanceRow(slug, targetSlug, {
+          promotion_id, from_status: current, to_status: target,
+        }));
         return {
           ok: true, requires_approval: approval,
           data: { slug: targetSlug, status: target, promoted: true, promotion_id },
@@ -1127,15 +1165,12 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
           return { ok: false, requires_approval: approval, error: "session_review_write requires gig_id, output_id, agent_slug, quality_scores" };
         }
         const review_id = randomUUID();
-        deps.ledger.append({
-          gig_id: `review:${review_id}`,
-          standard_slug: "session_review_write",
-          genome_hash: "n/a",
-          run_fingerprint: "n/a",
-          output_hashes: [],
-          started_at: new Date().toISOString(),
-          finished_at: new Date().toISOString(),
-        });
+        // agent_slug / output_id / quality_scores were validated above and then thrown away,
+        // because v1 LedgerEntry had nowhere to put them. That discard is the root cause of the
+        // cross-agent evidence bug in learning_synthesize (#215).
+        deps.ledger.append(governanceRow("session_review_write", agent_slug, {
+          review_id, output_id, quality_scores,
+        }, gig_id));
         return { ok: true, requires_approval: approval, data: { review_id, recorded: true, agent_slug, gig_id } };
       }
       case "learning_synthesize": {
@@ -1149,22 +1184,21 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         }
         const min_reviews = typeof args["min_reviews"] === "number" ? (args["min_reviews"] as number) : 5;
         const auto_propose = args["auto_propose"] === true;
-        const reviews = deps.ledger.query({ standard_slug: "session_review_write" })
-          .filter((e) => e.gig_id.startsWith("review:"));
+        // Scoped to the named agent. v1 queried EVERY review row in the ledger and only
+        // echoed agent_slug back, so five reviews of five different agents opened the
+        // evolution gate for a sixth with none (#215). The typed discriminators replace a
+        // load-bearing String.startsWith on a synthetic gig_id.
+        const reviews = deps.ledger.query({
+          kind: "governance", event: "session_review_write", subject_slug: agent_slug,
+        });
         const review_count = reviews.length;
         const evidence_sufficient = review_count >= min_reviews;
         let proposal_id: string | null = null;
         if (evidence_sufficient && auto_propose) {
           proposal_id = randomUUID();
-          deps.ledger.append({
-            gig_id: `proposal:${proposal_id}`,
-            standard_slug: "learning_synthesize",
-            genome_hash: "n/a",
-            run_fingerprint: "n/a",
-            output_hashes: [],
-            started_at: new Date().toISOString(),
-            finished_at: new Date().toISOString(),
-          });
+          deps.ledger.append(governanceRow("learning_synthesize", agent_slug, {
+            proposal_id, review_count, min_reviews,
+          }));
         }
         return {
           ok: true, requires_approval: approval,
@@ -1179,6 +1213,17 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         return { ok: false, not_implemented: true, requires_approval: approval, error: `"${slug}" has no v0 handler` };
     }
   } catch (e) {
+    if (e instanceof LedgerError) {
+      // #218 — the audit row did not land. Collapsing this into a generic {ok:false} told the
+      // caller nothing happened, when in fact the side effect may have been applied. Callers
+      // (and operators) need to distinguish a rejected request from an unrecorded one.
+      return {
+        ok: false,
+        requires_approval: approval,
+        audit_write_failed: true,
+        error: `audit write failed — "${slug}" was NOT sealed: ${e.message}`,
+      };
+    }
     return { ok: false, requires_approval: approval, error: e instanceof Error ? e.message : String(e) };
   }
 }
@@ -1280,7 +1325,14 @@ export function bootstrapServerDeps(genomeRoot?: string): ServerDeps {
     // MCP session close (Rob cold-trial requirement). COLTRANE_OUTPUTS_DIR
     // overrides the default ~/.eir/coltrane_outputs path (tests + sandboxes).
     outputs: createOutputStore(registry, { persistDir: defaultOutputsPersistDir() }),
-    ledger: new MemoryLedger(),
+    // #209 — the audit spine is durable by default. The line above gives OUTPUTS a persistDir
+    // under an explicit "the audit chain must survive an MCP session close" requirement
+    // (PR #78); the ledger sat in RAM directly beneath it, which made absence-of-row mean
+    // "we forgot" instead of "the run did not finish" — inverting the invariant
+    // tests/e2e/recorder_durability_mid_crash.spec.ts deliberately pins.
+    // FileLedger creates nothing until the first append (#210), so merely bootstrapping deps
+    // — as tests/dispatch_tool_resolution.test.ts does with no root — leaves no trace.
+    ledger: new FileLedger(defaultLedgerPath(root)),
     standards: genome.standards, // ← gig_dispatch can now resolve file-defined standards
     invoke: makeClaudeInvoker({
       registry,

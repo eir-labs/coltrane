@@ -19,10 +19,16 @@ export interface GigChairState {
   error?: string;
 }
 
+/** The outcomes a tracked gig can reach. `aborted` is first-class (#251): without it a
+ *  cancelled run could only surface as `failed` carrying a kill-shaped error string —
+ *  indistinguishable from a genuine crash, which is the opposite of what an operator who
+ *  just cancelled it needs to see. */
+export type GigStatus = "running" | "complete" | "failed" | "aborted";
+
 export interface GigRunState {
   gig_id: string;
   standard_slug: string;
-  status: "running" | "complete" | "failed";
+  status: GigStatus;
   started_at: string;
   finished_at?: string;
   phases_total: number;
@@ -33,9 +39,20 @@ export interface GigRunState {
   run_fingerprint?: string;
   genome_hash?: string;
   error?: string;
-  // Settled model spend (#195), set when the run completes. Surfaced by gig_monitor so a
-  // gig's actual cost/tokens are queryable by gig_id, not just persisted on the ledger.
+  // Settled model spend (#195), set when the run completes — and, since #249, when it is
+  // ABORTED. An abort that kills children without capturing accrued usage would convert a
+  // recorded cost into an unrecorded one: better cost control, worse accounting.
   usage?: GigUsage;
+  // ── cancellation (#249/#250) ──────────────────────────────────────────────
+  // The live handle. gig_abort aborts it; runGig's checkpoints read it and the invoker wires
+  // it to the chair's child process. This is the ONLY object that makes a gig cancellable —
+  // before it existed, gig_abort mutated state the runtime never read. Cleared on settle so a
+  // retained run doesn't pin a controller (and its listeners) for the server's lifetime.
+  controller?: AbortController | undefined;
+  /** An operator asked for this run to stop (set even when no controller could be reached). */
+  abort_requested?: boolean;
+  /** Why. Surfaced by gig_monitor so `aborted` reads as a decision, not a mystery. */
+  abort_reason?: string;
 }
 
 export function newGigRun(gig_id: string, standard_slug: string, phases_total: number, now: string): GigRunState {
@@ -85,7 +102,36 @@ export function applyGigProgress(state: GigRunState, ev: GigProgressEvent): void
     case "gig_failed":
       state.error = ev.error;
       break;
+    case "gig_aborted":
+      // A cancelled run is not a crashed run. Recording it as its own terminal status is what
+      // lets gig_monitor answer "did my abort land?" instead of showing a kill-shaped error.
+      state.status = "aborted";
+      state.abort_reason = ev.reason;
+      state.finished_at ??= new Date().toISOString();
+      break;
   }
+}
+
+/**
+ * Retention bound for the live-run map (#253). `gig_runs` had three call sites and no
+ * `delete` — every dispatch added an entry retained for the server's lifetime, including
+ * per-chair `tool_calls` arrays that grow per call.
+ *
+ * Only SETTLED runs are eligible: a running gig's entry holds the AbortController, so
+ * pruning one would silently make that gig uncancellable — trading a memory leak for the
+ * very bug #249 is about. Oldest-settled-first, so the runs an operator is most likely to
+ * ask about survive. Returns how many were dropped.
+ */
+export const DEFAULT_GIG_RUN_RETENTION = 200;
+
+export function pruneGigRuns(runs: Map<string, GigRunState>, max = DEFAULT_GIG_RUN_RETENTION): number {
+  const settled = [...runs.values()].filter((s) => s.status !== "running");
+  if (settled.length <= max) return 0;
+  const at = (s: GigRunState): string => s.finished_at ?? s.started_at;
+  settled.sort((a, b) => (at(a) < at(b) ? -1 : at(a) > at(b) ? 1 : 0));
+  const drop = settled.slice(0, settled.length - max);
+  for (const s of drop) runs.delete(s.gig_id);
+  return drop.length;
 }
 
 // A compact one-line summary of an event for the stderr/MCP log (skips per-token noise).
@@ -98,6 +144,7 @@ export function gigEventLogLine(gig_id: string, ev: GigProgressEvent): string | 
     case "chair_failed": return JSON.stringify({ ...base, ev: "chair_failed", role: ev.role, error: ev.error });
     case "gig_complete": return JSON.stringify({ ...base, ev: "gig_complete", outputs: ev.outputs });
     case "gig_failed": return JSON.stringify({ ...base, ev: "gig_failed", error: ev.error });
+    case "gig_aborted": return JSON.stringify({ ...base, ev: "gig_aborted", reason: ev.reason });
     case "agent_event":
       // only surface tool calls live, not every assistant token
       return ev.event.type === "tool_use"

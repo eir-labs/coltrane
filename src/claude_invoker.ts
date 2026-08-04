@@ -2,14 +2,14 @@
 // `claude` CLI (Claude Code IS the cognition — the prime directive's "depend on
 // nothing but Claude Code"). buildPrompt is pure + testable; runClaude is the one
 // non-deterministic seam (spawns the CLI, parses structured output).
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { writeFileSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
-import type { AgentInvocationContext, AgentInvoker, AgentStreamEvent } from "./runtime.js";
+import { abortReasonText, type AgentInvocationContext, type AgentInvoker, type AgentStreamEvent } from "./runtime.js";
 import type { Registry } from "./registry.js";
-import type { ModelTier } from "./pricing.js";
+import type { Depth, ModelTier } from "./pricing.js";
 import type { CodeToolAccess } from "./composition.js";
 import { assertToolGrantsResolvable, type ToolProviderRegistry } from "./tool_providers.js";
 import { playwrightServerFor } from "./playwright_cage.js";
@@ -52,6 +52,20 @@ export const BELBIN_DESCRIPTIONS: Record<string, string> = {
   executor: "Produces concrete artifacts, writes code, builds deliverables.",
   audience_modeler: "Understands user perspectives, models personas, anticipates needs.",
 };
+
+// #237 — what a dispatch-time depth actually ASKS FOR. The prompt half of the lever.
+export const DEPTH_GUIDANCE: Record<Depth, string> = {
+  skim: " — this is a cheap iteration pass. Do the minimum that produces a well-formed, valid output. Do not explore, do not use tools you do not strictly need, do not elaborate.",
+  quick: " — favour speed over exhaustiveness. Cover the obvious ground and stop.",
+  standard: "",
+  deep: " — be exhaustive. Chase the non-obvious and justify every claim.",
+};
+
+// #237 — the SPEND half of the lever. `--max-turns` is the only hard per-chair cost bound the
+// cage has, so a shallow depth caps it: a skim run that can still take 100 tool turns is a full
+// run wearing a label. Only ever TIGHTENS an agent's own declared cap, never widens it. Depths
+// with no entry leave the agent's cap exactly as declared.
+export const DEPTH_MAX_TOOL_CALLS: Partial<Record<Depth, number>> = { skim: 8, quick: 16 };
 
 // The 5-layer prompt hierarchy: Disposition → Identity → Skills → Context → Task.
 // Pure: same context in, same prompt out. Hashable, reviewable, testable.
@@ -123,7 +137,13 @@ export function buildPrompt(
   const inputsBlock = ctx.inputs.length
     ? ctx.inputs.map((o) => `- ${o.domain_type} (from ${o.agent_slug}): ${JSON.stringify(o.data)}`).join("\n")
     : "(none — you are a root agent)";
-  const depthLine = a.depth_profile ? `Depth: ${a.depth_profile}\n` : "";
+  // #237 — a dispatch-time depth OVERRIDES the agent's static depth_profile, and carries an
+  // instruction with it. A depth that only gets recorded is not a cost lever; the model has to
+  // be told to do less, or "skim first" stays a slogan and every iteration pays full price.
+  const runDepth = ctx.depth ?? a.depth_profile;
+  const depthLine = runDepth
+    ? `Depth: ${runDepth}${ctx.depth ? DEPTH_GUIDANCE[ctx.depth] : ""}\n`
+    : "";
   layers.push(`# Context\n${depthLine}Gig input: ${JSON.stringify(ctx.gig_input)}\nUpstream outputs:\n${inputsBlock}`);
 
   // 5. Task — produce the types THIS CHAIR promises as JSON. #174: the chair's output_contract
@@ -182,6 +202,45 @@ export function extractJson(text: string): Record<string, unknown> {
 // (a capped search agent runs minutes), far below an operator-visible hang.
 export const DEFAULT_CHAIR_TIMEOUT_MS = 10 * 60_000;
 
+// How long a cancelled chair child gets to shut down politely before it is killed outright.
+// SIGTERM first (a `claude` child spawns its own MCP servers; a cooperative exit gives it a
+// chance to take them with it), SIGKILL after. Deliberately NOT `detached: true` +
+// process.kill(-pid): that is the only airtight answer to grandchild orphaning, but it takes
+// children OUT of the server's process group, so an operator's Ctrl-C stops reaching them —
+// which makes #252 worse, not better. Process-group kill is a separate decision.
+export const DEFAULT_ABORT_GRACE_MS = 2_000;
+
+// #250/#252 — every chair child the invoker spawns, so something can reach them.
+// Before this, `child` was a const inside spawnStreaming's promise executor: never returned,
+// never registered, never exposed, and the ONLY path to child.kill was the timeout closure.
+// A server told to shut down could not stop its own grandchildren, which kept running,
+// orphaned, still billing — with gig tracking dropped, so nothing recorded they existed.
+const LIVE_CHAIR_CHILDREN = new Set<ChildProcess>();
+
+/** How many chair children are alive right now (observability for the shutdown path). */
+export function liveChairChildCount(): number {
+  return LIVE_CHAIR_CHILDREN.size;
+}
+
+/** SIGTERM every live chair child, escalating to SIGKILL after `graceMs`. Returns the count
+ *  signalled. Called on server shutdown so a restart is not an orphaning. */
+export function killLiveChairChildren(graceMs = DEFAULT_ABORT_GRACE_MS): number {
+  const victims = [...LIVE_CHAIR_CHILDREN];
+  for (const c of victims) terminateChild(c, graceMs);
+  return victims.length;
+}
+
+function terminateChild(child: ChildProcess, graceMs: number): void {
+  const hardKill = (): void => { try { child.kill("SIGKILL"); } catch { /* already gone */ } };
+  try { child.kill("SIGTERM"); } catch { /* already gone */ }
+  if (graceMs <= 0) { hardKill(); return; }
+  const t = setTimeout(() => {
+    if (child.exitCode === null && child.signalCode === null) hardKill();
+  }, graceMs);
+  // never hold the event loop open just to escalate a kill
+  t.unref?.();
+}
+
 // Spawn bounds passed to the run seam (execFileSync options in the default runner).
 export interface SpawnBounds {
   timeout: number;
@@ -206,6 +265,8 @@ export interface ClaudeInvokerOptions {
   run?: ((bin: string, args: string[], spawn: SpawnBounds) => string | Promise<string>) | undefined; // injectable spawn (tests)
   // Per-deployment override of the per-chair wall-clock bound.
   timeout_ms?: number | undefined;
+  // Grace between SIGTERM and SIGKILL when a chair is cancelled. Override in tests.
+  abort_grace_ms?: number | undefined;
   // When set, the spawned child receives COLTRANE_PARENT_SESSION_ID so its first
   // recorded turn seals the lineage edge to its parent.
   parent_session_id?: string | undefined;
@@ -248,7 +309,13 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
   // a bare/test invoker is unaffected. bootstrapServerDeps always supplies mcpServerConfigs, so the
   // running engine always resolves + fails closed.
   const resolutionEnabled = opts.toolProviders !== undefined || opts.mcpServerConfigs !== undefined;
+  const abortGraceMs = opts.abort_grace_ms ?? DEFAULT_ABORT_GRACE_MS;
   return async (ctx) => {
+    // #250 — a chair whose gig is already cancelled spends nothing: no prompt, no mcp-config,
+    // no spawn. This is the cheapest point on the whole cancellation chain.
+    if (ctx.signal?.aborted) {
+      throw new Error(`chair "${ctx.agent.slug}" not started — gig aborted (${abortReasonText(ctx.signal)})`);
+    }
     // Resolve THIS agent's grants → the MCP servers it needs, FIRST: a grant with no resolvable
     // provider is a dead name, so fail the chair closed before we build a prompt or spawn a child
     // that advertises a tool it can't call.
@@ -309,11 +376,16 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
     writeFileSync(cfgPath, JSON.stringify({ mcpServers: enriched }));
     try {
       const a = ctx.agent;
+      // #237 — a shallow run depth tightens the turn cap; it never widens the agent's own.
+      const depthCap = ctx.depth ? DEPTH_MAX_TOOL_CALLS[ctx.depth] : undefined;
+      const maxToolCalls = depthCap === undefined
+        ? a.max_tool_calls
+        : Math.min(depthCap, a.max_tool_calls ?? depthCap);
       const baseArgs = buildInvokerArgs(prompt, cfgPath, {
         model: resolveModel(a.model_tier, opts.model),
         allowed_tools: effectiveAllowed,
         disallowed_tools: [...(a.disallowed_tools ?? []), ...codeToolDenials(a.code_tool_access)],
-        max_tool_calls: a.max_tool_calls,
+        max_tool_calls: maxToolCalls,
       });
       // Custom run (tests): plain mode, the returned string IS the JSON blob — no streaming.
       if (customRun) return extractJson(await customRun(bin, baseArgs, spawnBounds));
@@ -321,7 +393,7 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
       // event is forwarded to ctx.onEvent (the runtime tees it to the gig's per-chair log);
       // the final result text is extracted from the stream and parsed into the typed output.
       const args = [...baseArgs, "--output-format", "stream-json", "--verbose"];
-      const stdout = await spawnStreaming(bin, args, spawnBounds, ctx.onEvent);
+      const stdout = await spawnStreaming(bin, args, spawnBounds, ctx.onEvent, ctx.signal, abortGraceMs);
       return extractJson(finalText(stdout));
     } finally {
       try { unlinkSync(cfgPath); } catch { /* best-effort cleanup */ }
@@ -332,21 +404,49 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
 // Spawn a child and stream its stdout line-by-line. Each complete line is parsed as a
 // stream-json event and forwarded (granularly) to onEvent as it arrives — this is the
 // agent-layer observability seam. Returns the full stdout on clean exit; rejects on
-// non-zero exit (with stderr) or timeout (SIGKILL, so a signal-trapping child can't survive).
+// non-zero exit (with stderr), timeout (SIGKILL, so a signal-trapping child can't survive),
+// or cancellation via `signal` (SIGTERM → grace → SIGKILL).
+//
+// The child is REGISTERED in LIVE_CHAIR_CHILDREN for its whole lifetime (#250/#252): a handle
+// nothing holds is a process nothing can stop.
 function spawnStreaming(
   bin: string,
   args: readonly string[],
   bounds: SpawnBounds,
   onEvent?: (ev: AgentStreamEvent) => void,
+  signal?: AbortSignal | undefined,
+  abortGraceMs: number = DEFAULT_ABORT_GRACE_MS,
 ): Promise<string> {
   return new Promise<string>((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new Error(`chair child not spawned — gig aborted (${abortReasonText(signal)})`));
+      return;
+    }
     const child = spawn(bin, [...args], { stdio: ["ignore", "pipe", "pipe"] });
+    LIVE_CHAIR_CHILDREN.add(child);
     let stdout = "";
     let stderr = "";
     let buf = "";
-    const timer = setTimeout(() => {
-      child.kill("SIGKILL");
-      reject(new Error(`chair child timed out after ${bounds.timeout}ms (SIGKILL)`));
+    let timer: NodeJS.Timeout | undefined;
+    let onAbort: (() => void) | undefined;
+    const release = (): void => {
+      if (timer) clearTimeout(timer);
+      LIVE_CHAIR_CHILDREN.delete(child);
+      if (onAbort && signal) signal.removeEventListener("abort", onAbort);
+    };
+    if (signal) {
+      onAbort = () => {
+        const reason = abortReasonText(signal);
+        terminateChild(child, abortGraceMs);
+        release();
+        reject(new Error(`chair child aborted: ${reason}`));
+      };
+      signal.addEventListener("abort", onAbort, { once: true });
+    }
+    timer = setTimeout(() => {
+      child.kill(bounds.killSignal);
+      release();
+      reject(new Error(`chair child timed out after ${bounds.timeout}ms (${bounds.killSignal})`));
     }, bounds.timeout);
     child.stdout.on("data", (chunk: Buffer) => {
       const s = chunk.toString();
@@ -361,9 +461,9 @@ function spawnStreaming(
       }
     });
     child.stderr.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
-    child.on("error", (e) => { clearTimeout(timer); reject(e); });
+    child.on("error", (e) => { release(); reject(e); });
     child.on("close", (code) => {
-      clearTimeout(timer);
+      release();
       if (code !== 0) reject(new Error(`claude exited ${code}: ${stderr.slice(0, 500)}`));
       else resolve(stdout);
     });

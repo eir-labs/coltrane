@@ -25,8 +25,9 @@ import {
   type Ledger, type GovernanceLedgerEntry,
 } from "./ledger.js";
 import { standardSimulate } from "./simulate.js";
-import { runGig, BudgetExhausted, type AgentInvoker } from "./runtime.js";
-import { makeClaudeInvoker } from "./claude_invoker.js";
+import { runGig, BudgetExhausted, GigAborted, type AgentInvoker } from "./runtime.js";
+import { makeClaudeInvoker, killLiveChairChildren } from "./claude_invoker.js";
+import { isDepth, DEPTHS, type Depth } from "./pricing.js";
 import type { ToolProvider } from "./tool_providers.js";
 import { ENGINE_MCP_SERVER } from "./tool_providers.js";
 import type { ToolHook, ToolCallContext, PreOutcome } from "./hooks.js";
@@ -39,7 +40,8 @@ import { loadCharter, CharterError } from "./charter.js";
 import { readFileSync, existsSync, mkdirSync, appendFileSync, readdirSync } from "node:fs";
 import { randomUUID, createHash } from "node:crypto";
 import { join } from "node:path";
-import { newGigRun, applyGigProgress, gigEventLogLine, type GigRunState } from "./gig_tracker.js";
+import { newGigRun, applyGigProgress, gigEventLogLine, pruneGigRuns, type GigRunState } from "./gig_tracker.js";
+import { isGig } from "./ledger.js";
 import { SubthreadRecorder, ApiVersionMismatchError } from "./subthread_recorder.js";
 import { canonJson, runFingerprint, CANONICAL_FORM_VERSION } from "./canonical_form.js";
 import type { LoadedGenome } from "./loader.js";
@@ -165,6 +167,18 @@ const CORE_TYPE_TO_PRIMITIVE: Readonly<Record<string, Primitive>> = Object.fromE
 
 function arr(v: unknown): string[] {
   return Array.isArray(v) ? (v as string[]) : [];
+}
+
+/**
+ * Read an optional `depth` argument (#237). Absent/empty → no depth (each agent's own
+ * `depth_profile` stands). Present but not a real depth → an ERROR, never a silent discard:
+ * the whole point of the parameter is cost control, and "we ignored your depth and ran the
+ * expensive one" is the failure it exists to prevent.
+ */
+function readDepth(v: unknown): { depth?: Depth; error?: string } {
+  if (v === undefined || v === null || v === "") return {};
+  if (!isDepth(v)) return { error: `unknown depth "${String(v)}" — expected one of: ${DEPTHS.join(", ")}` };
+  return { depth: v };
 }
 
 /**
@@ -322,10 +336,25 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         return { ok: true, requires_approval: approval, data: { ...(res as object), content_hash: sealed.content_hash, dependency_hash: sealed.dependency_hash, effective_hash: sealed.effective_hash } };
       }
       case "standard_simulate": {
+        const simSlug = String(args["standard_slug"] ?? "");
+        const simDepth = readDepth(args["depth"]);
+        if (simDepth.error) return { ok: false, requires_approval: approval, error: simDepth.error };
+        // #239 — hand the simulator the standard it is simulating. It only ever received a
+        // SLUG, so a 6-phase pipeline came back as three invented phases and a cost with no
+        // connection to it. And hand it the REAL settled spend of prior runs (#195): a measured
+        // mean of this pipeline beats any formula for the "validate before you spend" check.
+        const std = deps.standards?.get(simSlug);
+        const observed = deps.ledger
+          .query({ kind: "gig", standard_slug: simSlug })
+          .filter(isGig)
+          .map((e) => e.usage?.total_cost_usd)
+          .filter((n): n is number => typeof n === "number" && n > 0);
         const res = standardSimulate({
-          standard_slug: String(args["standard_slug"] ?? ""),
+          standard_slug: simSlug,
           mock_input: (args["mock_input"] as Record<string, unknown>) ?? {},
-          depth: (args["depth"] as never) ?? "standard",
+          depth: simDepth.depth ?? "standard",
+          ...(std ? { standard: { slug: std.slug, phases: std.phases.map((p) => ({ name: p.name, chairs: p.chairs.length })) } } : {}),
+          ...(observed.length > 0 ? { observed_costs_usd: observed } : {}),
         });
         return { ok: true, requires_approval: approval, data: res };
       }
@@ -409,6 +438,11 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
           if (typeof budgetArg["k"] === "number") budget.k = budgetArg["k"] as number;
         }
         const gigInput = (args["input"] as Record<string, unknown>) ?? {};
+        // #237 — `depth` was advertised here and never read. Every dispatch ran at full depth,
+        // so the documented "skim first while iterating" practice had no mechanism behind it.
+        const depthArg = readDepth(args["depth"]);
+        if (depthArg.error) return { ok: false, requires_approval: approval, error: depthArg.error };
+        const depth = depthArg.depth;
         // Synchronous mode (opt-in via wait:true) — block, return the manifest. The
         // deterministic test path and any caller that wants the answer in one call.
         const wait = args["wait"] === true;
@@ -417,11 +451,13 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
             const res = await runGig(standard, gigInput, {
               outputs: deps.outputs, ledger: deps.ledger, invoke: deps.invoke,
               model_version: deps.model_version, skills: deps.skills, skill_dirs: deps.skill_dirs, evals: deps.evals, budget,
+              ...(depth ? { depth } : {}),
             });
             return {
               ok: true, requires_approval: approval,
               data: {
                 gig_id: res.gig_id,
+                ...(depth ? { depth } : {}),
                 manifest: {
                   genome_hash: res.genome_hash, run_fingerprint: res.run_fingerprint, output_count: res.outputs.length,
                   ...(res.usage ? { usage: res.usage } : {}), // #195 — settled model spend
@@ -443,7 +479,14 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         const gigId = randomUUID();
         const runs = deps.gig_runs ?? (deps.gig_runs = new Map());
         const state = newGigRun(gigId, slug2, standard.phases.length, new Date().toISOString());
+        // #249/#250 — the cancellation handle, held for as long as the run is live. This is the
+        // object gig_abort reaches; before it existed there was nothing to reach.
+        const controller = new AbortController();
+        state.controller = controller;
         runs.set(gigId, state);
+        // #253 — bound the live-run map. Only settled entries are dropped, so a running gig's
+        // controller is never pruned out from under gig_abort.
+        pruneGigRuns(runs);
         const logDir = deps.gig_log_base ? join(deps.gig_log_base, "gigs", gigId) : undefined;
         const onProgress = (ev: Parameters<typeof applyGigProgress>[1]): void => {
           applyGigProgress(state, ev);
@@ -458,7 +501,7 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         void runGig(standard, gigInput, {
           outputs: deps.outputs, ledger: deps.ledger, invoke: deps.invoke,
           model_version: deps.model_version, skills: deps.skills, skill_dirs: deps.skill_dirs, evals: deps.evals, budget,
-          gig_id: gigId, onProgress,
+          gig_id: gigId, onProgress, signal: controller.signal, ...(depth ? { depth } : {}),
         })
           .then((res) => {
             state.status = "complete"; state.finished_at = new Date().toISOString();
@@ -466,13 +509,25 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
             if (res.usage) state.usage = res.usage; // #195 — surface settled spend to gig_monitor
           })
           .catch((e: unknown) => {
-            state.status = "failed"; state.finished_at = new Date().toISOString();
+            state.finished_at = new Date().toISOString();
+            if (e instanceof GigAborted) {
+              // A cancelled run is not a crashed run (#251). And the spend it already accrued
+              // still has to land: killing children without recording accrued usage would turn
+              // a recorded cost into an unrecorded one.
+              state.status = "aborted";
+              state.abort_reason = e.reason;
+              state.outputs_count = e.outputs.length;
+              if (e.usage) state.usage = e.usage;
+              return;
+            }
+            state.status = "failed";
             state.error = e instanceof Error ? e.message : String(e);
             onProgress({ type: "gig_failed", error: state.error });
-          });
+          })
+          .finally(() => { state.controller = undefined; }); // don't pin a controller past settle
         return {
           ok: true, requires_approval: approval,
-          data: { gig_id: gigId, status: "running", ...(logDir ? { log_dir: logDir } : {}) },
+          data: { gig_id: gigId, status: "running", ...(depth ? { depth } : {}), ...(logDir ? { log_dir: logDir } : {}) },
         };
       }
       case "gig_monitor": {
@@ -495,6 +550,7 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
               outputs_so_far: outs,
               ...(live.run_fingerprint ? { run_fingerprint: live.run_fingerprint } : {}),
               ...(live.usage ? { usage: live.usage } : {}), // #195 — settled model spend, queryable by gig_id
+              ...(live.abort_reason ? { abort_reason: live.abort_reason } : {}), // why it stopped (#251)
               ...(live.error ? { error: live.error } : {}),
               ...(live.finished_at ? { finished_at: live.finished_at } : {}),
             },
@@ -816,21 +872,43 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         const targetKind = String(args["kind"] ?? args["entity_type"] ?? "");
         const all = deps.outputs.all();
         // standards live in the ledger (executions); agents/types in the outputs store.
-        const execution_count = targetKind === "standard"
-          ? deps.ledger.count({ kind: "gig", standard_slug: targetSlug })
-          : 0;
+        const gigRows = targetKind === "standard"
+          ? deps.ledger.query({ kind: "gig", standard_slug: targetSlug }).filter(isGig)
+          : [];
+        const execution_count = gigRows.length;
         const filtered = targetKind === "agent"
           ? all.filter((o) => o.agent_slug === targetSlug)
           : targetKind === "standard"
             ? []
             : all.filter((o) => o.domain_type === targetSlug);
         const output_count = targetKind === "standard" ? execution_count : filtered.length;
+        // #238 — REAL dollars. `cost: output_count` reported "2" for $1.25 of spend; the engine
+        // has carried settled model spend on the gig row since #195, so the proxy is now simply
+        // a wrong number where a right one is available.
+        const cost_usd = targetKind === "standard"
+          ? gigRows.reduce((s, e) => s + (e.usage?.total_cost_usd ?? 0), 0)
+          : filtered.reduce((s, o) => s + (o.cost_usd ?? 0), 0);
         return {
           ok: true, requires_approval: approval,
           data: {
             entity: targetSlug, kind: targetKind, output_count, execution_count,
-            usage: output_count, success_rate: 1.0,
-            cost: output_count, trend: "stable", recommendations: [],
+            usage: output_count,
+            cost: cost_usd, cost_usd,
+            cost_basis: targetKind === "standard"
+              ? "settled model spend summed over this standard's gig rows (#195)"
+              : "sum of per-output cost_usd; unset on model-invoked outputs today, so 0 can mean 'not recorded'",
+            // #238 — these were the literal constants 1.0 and "stable" for ANY entity. An agent
+            // that failed every dispatch it ever ran reported a 100% success rate, and it COULD
+            // NOT report otherwise: a failed gig writes no ledger row, so the denominator does
+            // not exist. A fabricated measurement presented as a measurement is worse than a
+            // missing one, because the missing one gets investigated. null + a stated reason.
+            success_rate: null,
+            success_rate_basis:
+              "unavailable — a failed gig writes no ledger row, so the denominator does not exist; " +
+              "any rate computed from what IS recorded would be 1.0 by construction (#236)",
+            trend: null,
+            trend_basis: "unavailable — no time-windowed execution history is retained to compare against",
+            recommendations: [],
           },
         };
       }
@@ -883,22 +961,54 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
       case "gig_abort": {
         const gid = String(args["gig_id"] ?? "");
         const reason = String(args["reason"] ?? "");
-        // v0 gigs run synchronously (runGig completes inside gig_dispatch) — there
-        // is no in-flight gig to cancel. Honest status from what the stores know:
-        // a ledger entry => already finished; outputs only => was running; else unknown.
-        // An empty gig_id must not be probed: query({gig_id: ""}) drops the filter entirely
-        // and would match every row, reporting a phantom "already_complete".
-        const completed = gid.length > 0 && deps.ledger.query({ gig_id: gid }).length > 0;
-        const hasOutputs = gid.length > 0 && deps.outputs.all().some((o) => o.gig_id === gid);
-        const status = completed ? "already_complete" : hasOutputs ? "running" : "not_found";
+        // #249/#251 — the LIVE run map is the authority, consulted first. The old handler read
+        // only the ledger + output store, which got the answer wrong in both directions: a gig
+        // in its FIRST phase has sealed nothing, so it reported `not_found` for precisely the
+        // window abort exists to serve; and post-restart every historical gig reported
+        // `running`/`aborted:true` forever. gig_monitor already read this map, so the two tools
+        // disagreed about the same gig_id in the same millisecond.
+        const live = gid.length > 0 ? deps.gig_runs?.get(gid) : undefined;
+        let status: string;
+        let aborted = false;
+        if (live) {
+          if (live.status === "running") {
+            live.abort_requested = true;
+            live.abort_reason = reason || "aborted by operator";
+            // THE actual cancellation. runGig stops at its next checkpoint (between phases /
+            // between dispatch batches) and the invoker kills the chair's in-flight child.
+            const controller = live.controller;
+            if (controller) {
+              try { controller.abort(live.abort_reason); } catch { /* an already-aborted signal is fine */ }
+              aborted = true;
+            }
+            // A run registered without a controller (dispatched by an older code path) can be
+            // MARKED but not stopped — say so rather than claiming a cancellation.
+            status = aborted ? "aborting" : "running";
+          } else {
+            status = live.status === "aborted" ? "already_aborted"
+              : live.status === "failed" ? "already_failed"
+                : "already_complete";
+          }
+        } else {
+          // No live run in THIS process. The stores can testify that a gig existed; they cannot
+          // make it cancellable — so `aborted` stays false. An empty gig_id must not be probed:
+          // query({gig_id: ""}) drops the filter entirely and would match every row, reporting a
+          // phantom "already_complete".
+          const completed = gid.length > 0 && deps.ledger.query({ gig_id: gid }).length > 0;
+          const hasOutputs = gid.length > 0 && deps.outputs.all().some((o) => o.gig_id === gid);
+          status = completed ? "already_complete" : hasOutputs ? "running" : "not_found";
+        }
         // Record only a real abort. v1 appended REGARDLESS — including on not_found — so an
         // immutable row claimed a cancellation for a gig that never existed. `subject_gig_id`
         // is first-class so the abort surfaces in the aborted gig's own history; the v1
         // `abort:<gid>` namespace hid it from the only query that would look (#213).
         if (status !== "not_found") {
-          deps.ledger.append(governanceRow("gig_abort", gid, { reason, status }, gid));
+          deps.ledger.append(governanceRow("gig_abort", gid, { reason, status, cancelled: aborted }, gid));
         }
-        return { ok: true, requires_approval: approval, data: { status, aborted: status === "running", cleanup_result: { reason } } };
+        return {
+          ok: true, requires_approval: approval,
+          data: { status, aborted, cancellable: aborted, cleanup_result: { reason } },
+        };
       }
       case "agent_define": {
         // Build the def by the SCHEMA's own field list (genome_schema.ts AgentSchema): copy exactly
@@ -1358,18 +1468,61 @@ export function bootstrapServerDeps(genomeRoot?: string): ServerDeps {
   };
 }
 
+/** The slice of `process` the shutdown path uses. Injected in tests — signal handling is
+ *  otherwise untestable without spawning a server. */
+export interface ShutdownProcess {
+  on(event: string, listener: () => void): unknown;
+  exit(code?: number): void;
+}
+
+const SHUTDOWN_SIGNALS = ["SIGTERM", "SIGINT"] as const;
+// 128 + signal number, the shell convention.
+const SIGNAL_EXIT_CODE: Readonly<Record<string, number>> = { SIGTERM: 143, SIGINT: 130 };
+
+/**
+ * Install the server's shutdown path (#252).
+ *
+ * The bug this closes: the old wiring was `process.on("SIGTERM", flush)` where `flush()` sets
+ * a flag and returns. In Node, installing a SIGINT/SIGTERM listener REPLACES the default
+ * terminate behaviour — so a recorder-enabled server survived SIGTERM indefinitely. The relay's
+ * 2s SIGKILL escalation masked it; a direct `kill <pid>` did not terminate the server at all.
+ *
+ * The second half: the server's own `claude` grandchildren are spawned WITHOUT `detached`, so
+ * they are not in a separate process group and POSIX delivers them nothing when the server is
+ * signalled. They keep running, orphaned, still billing — and gig tracking is dropped by the
+ * restart, so nothing records that the orphans exist. So the server kills them itself on the
+ * way out. (Killing the process GROUP would be airtight but takes children out of the server's
+ * group, so an operator Ctrl-C would stop reaching them — deliberately not taken.)
+ */
+export function installShutdownHandlers(
+  opts: { flush?: (() => void) | undefined; killChildren?: (() => void) | undefined },
+  proc: ShutdownProcess = process as unknown as ShutdownProcess,
+): void {
+  let shuttingDown = false;
+  const shutdown = (signal: string): void => {
+    if (shuttingDown) return; // an impatient double Ctrl-C must not re-enter the flush
+    shuttingDown = true;
+    try { opts.flush?.(); } catch { /* a failed flush must not block the exit */ }
+    try { opts.killChildren?.(); } catch { /* nor must a failed kill */ }
+    proc.exit(SIGNAL_EXIT_CODE[signal] ?? 0);
+  };
+  for (const sig of SHUTDOWN_SIGNALS) proc.on(sig, () => shutdown(sig));
+  // Normal-exit paths still flush; they do not need (or want) an explicit exit call.
+  const flushOnly = (): void => { try { opts.flush?.(); } catch { /* best-effort */ } };
+  proc.on("beforeExit", flushOnly);
+  proc.on("exit", flushOnly);
+}
+
 export async function runStdioServer(deps?: ServerDeps): Promise<void> {
   // Tests inject deps; a bare prod start bootstraps the genome from files.
   const resolved = deps ?? bootstrapServerDeps();
   const recorder = openSubthreadRecorderFromEnv(resolved);
   const server = createColtraneServer(resolved, recorder ?? undefined);
-  if (recorder) {
-    const flush = () => recorder.flush();
-    process.on("SIGTERM", flush);
-    process.on("SIGINT", flush);
-    process.on("beforeExit", flush);
-    process.on("exit", flush);
-  }
+  installShutdownHandlers({
+    ...(recorder ? { flush: (): void => { recorder.flush(); } } : {}),
+    // unconditional: the orphan half has nothing to do with the recorder
+    killChildren: (): void => { killLiveChairChildren(); },
+  });
   await server.connect(new StdioServerTransport());
 }
 

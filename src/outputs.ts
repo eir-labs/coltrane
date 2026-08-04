@@ -13,7 +13,8 @@ import { randomUUID } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { Registry } from "./registry.js";
-import { CORE_TYPES } from "./core_types.js";
+import { CORE_TYPES, type CoreType } from "./core_types.js";
+import { validateOutput } from "./output_validation.js";
 import { outputContentHash } from "./canonical_form.js";
 
 // §6 output_refs.relation CHECK constraint, as a closed set.
@@ -253,6 +254,28 @@ export function createOutputStore(registry: Registry, options?: OutputStoreOptio
       if (!result.valid) {
         throw new OutputStoreError(
           `output rejected: ${o.domain_type} failed schema validation — ${result.errors.join("; ")}`,
+        );
+      }
+      // #227/#228 — the CORE-type invariant, checked on every write regardless of whether
+      // a domain schema applied. registry.validate above returns {valid:true} without
+      // looking at the data for a bare core type and for an absent domain_type, and a
+      // subtype can overload away an inherited floor (#230) — so the substance floor an
+      // Artifact/Verdict carries by definition has to be enforced here, at the one seal
+      // boundary, not delegated to the domain schema that may not exist.
+      //
+      // validateOutput was already written and already tested; it was simply never called
+      // (#228). Path (b) per the #228 ruling: an ABSENT validation_criteria/checks key is
+      // rejected, not just an empty one — an Artifact nobody can check is not an artifact,
+      // and a Verdict with no evidence is not a verification. Non-Artifact/Verdict cores
+      // are untouched; the four floorless cores are a separate open question (#227).
+      const core = validateOutput({
+        core_type: o.core_type as CoreType,
+        domain_type: o.domain_type,
+        data: o.data,
+      });
+      if (!core.valid) {
+        throw new OutputStoreError(
+          `output rejected: ${o.domain_type || o.core_type} failed core-type invariant — ${core.reason}`,
         );
       }
       const domain_type_version = o.domain_type_version ?? 1;

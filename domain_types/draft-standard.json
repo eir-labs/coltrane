@@ -40,7 +40,7 @@
         "default": "pending"
       }
     },
-    "required": ["input_refs", "slug", "domain", "phases", "user_acceptance"]
+    "required": ["input_refs", "slug", "domain", "phases", "user_acceptance", "validation_criteria"]
   },
   "required_fields": []
 }

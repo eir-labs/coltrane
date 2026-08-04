@@ -49,7 +49,10 @@ function finding(data: Record<string, unknown>, overrides: Partial<OutputWrite> 
     gig_id: "g1",
     agent_slug: "site-analyst",
     primitive: "VERIFY",
-    data,
+    // A Verdict carries the evidence it verified. `outputs.write` enforces that core
+    // invariant on every seal (#227/#228), so the builder supplies it for every fixture —
+    // a caller that cares can still override it through `data`.
+    data: { checks: [{ method: "site-scan", target_ref: "eirtests", result: "pass" }], ...data },
     ...overrides,
   };
 }

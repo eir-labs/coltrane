@@ -23,10 +23,12 @@ const standard: Standard = {
   phases: [{ name: "sense", chairs: [{ role: "sense", agent_slug: "site-scout", depends_on: [], input_contract: [], output_contract: ["page-model"], required_skills: [] }] }, { name: "interpret", chairs: [{ role: "interpret", agent_slug: "site-analyst", depends_on: [], input_contract: [], output_contract: ["finding"], required_skills: [] }] }, { name: "create", chairs: [{ role: "create", agent_slug: "fix-writer", depends_on: [], input_contract: [], output_contract: ["fix-patch"], required_skills: [] }] }],
 };
 
+// fix-patch is Artifact-cored, so it declares how it can be checked — outputs.write
+// enforces that core invariant on every seal (#227/#228).
 const invoke: AgentInvoker = ({ agent }) =>
   agent.slug === "site-scout" ? { url: "/products" }
   : agent.slug === "site-analyst" ? { title: "missing alt text" }
-  : { summary: "added alt attributes to 12 images" };
+  : { summary: "added alt attributes to 12 images", validation_criteria: ["every <img> has a non-empty alt"] };
 
 function wired(): ServerDeps {
   const registry = createRegistry();

@@ -31,7 +31,8 @@ function wired(): ServerDeps {
   const invoke: AgentInvoker = ({ agent, gig_input }) =>
     agent.slug === "site-scout"
       ? { url: `/page-${(gig_input as { n?: number }).n ?? 0}` }
-      : { pattern_key: `pat-${(gig_input as { n?: number }).n ?? 0}`, severity: "high", title: `finding ${(gig_input as { n?: number }).n ?? 0}` };
+      // `finding` is Verdict-cored, so it carries the evidence it verified (#227/#228).
+      : { pattern_key: `pat-${(gig_input as { n?: number }).n ?? 0}`, severity: "high", title: `finding ${(gig_input as { n?: number }).n ?? 0}`, checks: [{ method: "readiness-scan", target_ref: "page-model", result: "pass" }] };
   return { registry, outputs: createOutputStore(registry), ledger: new MemoryLedger(), standards: new Map([[scan.slug, scan]]), invoke, model_version: "m" };
 }
 

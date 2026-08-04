@@ -56,6 +56,35 @@ export interface MaterializedGenome {
 // types are derived from the types its depends_on upstream produce.
 const typeFor = (p: string): string => `gen-${(CORE[p] ?? "Signal").toLowerCase()}`;
 
+// Reverse of typeFor: `gen-artifact` → `Artifact`. Derived from CORE so it cannot drift.
+const CORE_OF_GEN_TYPE: Record<string, string> = Object.fromEntries(
+  Object.values(CORE).map((c) => [`gen-${c.toLowerCase()}`, c]),
+);
+
+/** The substance an output carries by virtue of its CORE type, independent of any domain
+ *  schema (#227/#228). An Artifact declares how it can be checked; a Verdict carries the
+ *  evidence it verified. `outputs.write` enforces both on every seal, so a fixture that
+ *  omits them is not a valid instance of that core and never was — the seal path simply
+ *  did not look.
+ *
+ *  Keyed by CORE, deliberately: a generated VERIFY node is covered by the same edit as a
+ *  CREATE node, so fixing the Artifact case cannot leave a Verdict case hiding behind it
+ *  (runs abort at the first failing chair). Cores with no declared floor return {}. */
+export function coreInvariantFields(core: string | undefined): Record<string, unknown> {
+  if (core === "Artifact") {
+    return { validation_criteria: ["deterministic fixture: output shape matches its declared type"] };
+  }
+  if (core === "Verdict") {
+    return { checks: [{ method: "deterministic-invoker", target_ref: "gen", result: "pass" }] };
+  }
+  return {};
+}
+
+/** A schema-valid payload for a generated domain type, including its core's substance. */
+export function genOutputFor(outputTypeSlug: string, value: string): Record<string, unknown> {
+  return { value, ...coreInvariantFields(CORE_OF_GEN_TYPE[outputTypeSlug]) };
+}
+
 /** Turn a TopologySpec into real coltrane artifacts. Throws (via composeStandard) for an
  *  invalid topology — that throw IS the integration "fail-closed" assertion. */
 export function materialize(topo: TopologySpec): MaterializedGenome {

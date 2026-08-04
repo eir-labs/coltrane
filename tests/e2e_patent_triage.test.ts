@@ -87,6 +87,12 @@ describe("patent-triage-v0 end-to-end via deterministic invoker", () => {
               rationale: "Independent claim is defensible but one dependent claim could be tightened to clarify the verified-anchor requirement.",
               tests_passed: ["claim-form", "novelty-distance", "boundary-named"],
               tests_failed: [],
+              // Verdict-cored: the evidence the verification rests on (#227/#228).
+              checks: [
+                { method: "claim-form", target_ref: "claim-elements", result: "pass" },
+                { method: "novelty-distance", target_ref: "novelty-verdict", result: "pass" },
+                { method: "boundary-named", target_ref: "disclosure-input", result: "pass" },
+              ],
               next_step: "Refine dependent claim 1 to specify the verification mechanism for the anchor corpus.",
             },
           };
@@ -145,7 +151,8 @@ describe("patent-triage-v0 end-to-end via deterministic invoker", () => {
       if (ctx.agent.slug === "diamond-cutter") return { "claim-draft": { independent_claims: ["x"] }, "failure-modes": { named_failure_modes: ["tie"] } };
       if (ctx.agent.slug === "novelty-searcher") return { "prior-art-hit": { source: "X", title: "Y", url: "Z" }, "novelty-verdict": { verdict: "PASS", rationale: "—" } };
       if (ctx.agent.slug === "claim-rewriter") return { independent_claims: ["x refined"] };
-      if (ctx.agent.slug === "verdict-judger") return { "triage-verdict": { recommended: "REFINE-FIRST", rationale: "—" } };
+      // Verdict-cored: the evidence the verification rests on (#227/#228).
+      if (ctx.agent.slug === "verdict-judger") return { "triage-verdict": { recommended: "REFINE-FIRST", rationale: "—", checks: [{ method: "claim-form", target_ref: "claim-draft", result: "pass" }] } };
       throw new Error(`bad slug: ${ctx.agent.slug}`);
     };
 

@@ -31,10 +31,12 @@ const STUB: Record<string, unknown> = {
     // the judge now emits its honest CANDIDATE — here an (over-stated) FILEABLE that the
     // deterministic gate chair must downgrade, since the stub coverage is literature-only and
     // the examine-round-record did not survive.
-    "triage-verdict": { recommended: "FILEABLE", rationale: "candidate: claim 1 reads novel on the cited art" },
-    "verdict-record": { disclosure_input_sha: "d", coverage_report_sha: "c", examine_round_record_sha: "e" },
+    // Verdict-cored outputs carry the evidence they verified (#227/#228).
+    "triage-verdict": { recommended: "FILEABLE", rationale: "candidate: claim 1 reads novel on the cited art", checks: [{ method: "claim-novelty-read", target_ref: "novelty-verdict", result: "pass" }] },
+    "verdict-record": { disclosure_input_sha: "d", coverage_report_sha: "c", examine_round_record_sha: "e", checks: [{ method: "sha-chain-record", target_ref: "disclosure-input", result: "pass" }] },
   },
-  "spec-drafter": { markdown_text: "" },
+  // provisional-draft is Artifact-cored — it declares how it can be checked (#227/#228).
+  "spec-drafter": { markdown_text: "", validation_criteria: ["every independent claim appears in the spec body"] },
 };
 
 describe("patent-triage-v1 — faithful chair contracts route inputs via depends_on (deterministic)", () => {

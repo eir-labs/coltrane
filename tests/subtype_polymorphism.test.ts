@@ -99,7 +99,8 @@ describe("subtype polymorphism: a core-type contract accepts any domain subtype"
       eval_slugs: ["v-check"],
     };
     const evals = new Map([["v-check", { slug: "v-check", on_type: "Verdict", non_empty_fields: ["decided"] }]]);
-    const invoke: AgentInvoker = () => ({ decided: true });
+    // domain-verdict is Verdict-cored, so it carries the evidence it verified (#227/#228).
+    const invoke: AgentInvoker = () => ({ decided: true, checks: [{ method: "polymorphic-eval", target_ref: "x", result: "pass" }] });
     const res = await runGig(std, {}, { outputs, ledger, invoke, evals });
     // the eval is declared on core `Verdict`; the produced `domain-verdict` subtype is judged
     // (was 0.0 under exact on_type matching)

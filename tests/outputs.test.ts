@@ -8,6 +8,11 @@ import { createRegistry, createOutputStore, type DomainType, type OutputStore } 
 const sig: DomainType = { slug: "page-model", extends: "Signal", domain: "eirtests", schema: { properties: { url: { type: "string" } } }, required_fields: ["url"] };
 const finding: DomainType = { slug: "finding", extends: "Verdict", domain: "eirtests", schema: { properties: { title: { type: "string" } } }, required_fields: ["title"] };
 
+// A Verdict carries the evidence it verified — `outputs.write` enforces the core invariant
+// on every seal (#227/#228), so a Verdict-cored fixture must declare its checks. These
+// fixtures always were incomplete instances of Verdict; the seal path just never looked.
+const CHECKS = { checks: [{ method: "fixture-assertion", target_ref: "eirtests", result: "pass" }] };
+
 function store(): OutputStore {
   const reg = createRegistry();
   reg.registerType(sig);
@@ -29,7 +34,7 @@ describe("O5: provenance graph walks correctly", () => {
   it("addRef links a derived_from edge; trace returns the ancestor", () => {
     const s = store();
     const a = s.write({ core_type: "Signal", domain_type: "page-model", domain: "eirtests", gig_id: "g1", agent_slug: "scout", primitive: "SENSE", data: { url: "/" } });
-    const b = s.write({ core_type: "Verdict", domain_type: "finding", domain: "eirtests", gig_id: "g1", agent_slug: "verifier", primitive: "VERIFY", data: { title: "x" }, input_refs: [a.id] });
+    const b = s.write({ core_type: "Verdict", domain_type: "finding", domain: "eirtests", gig_id: "g1", agent_slug: "verifier", primitive: "VERIFY", data: { title: "x", ...CHECKS }, input_refs: [a.id] });
     s.addRef(b.id, a.id, "derived_from", "VERIFY");
     expect(s.refs().length).toBe(1);
     const ids = s.trace(b.id).map((o) => o.id);
@@ -55,7 +60,7 @@ describe("O5: validation AT WRITE (no unvalidated persistence)", () => {
 describe("O5: findings view", () => {
   it("projects eirtests findings; agent_slug → agent_role", () => {
     const s = store();
-    s.write({ core_type: "Verdict", domain_type: "finding", domain: "eirtests", gig_id: "g1", agent_slug: "verifier", primitive: "VERIFY", data: { title: "t" } });
+    s.write({ core_type: "Verdict", domain_type: "finding", domain: "eirtests", gig_id: "g1", agent_slug: "verifier", primitive: "VERIFY", data: { title: "t", ...CHECKS } });
     const rows = s.findings();
     expect(rows.length).toBe(1);
     expect(rows[0]!.agent_role).toBe("verifier");
@@ -66,7 +71,7 @@ describe("O5: trace is cycle-safe (no infinite loop)", () => {
   it("a derived_from cycle terminates", () => {
     const s = store();
     const a = s.write({ core_type: "Signal", domain_type: "page-model", domain: "eirtests", gig_id: "g1", agent_slug: "scout", primitive: "SENSE", data: { url: "/a" } });
-    const b = s.write({ core_type: "Verdict", domain_type: "finding", domain: "eirtests", gig_id: "g1", agent_slug: "v", primitive: "VERIFY", data: { title: "b" } });
+    const b = s.write({ core_type: "Verdict", domain_type: "finding", domain: "eirtests", gig_id: "g1", agent_slug: "v", primitive: "VERIFY", data: { title: "b", ...CHECKS } });
     // deliberately create a cycle a → b → a
     s.addRef(a.id, b.id, "derived_from", "SENSE");
     s.addRef(b.id, a.id, "derived_from", "VERIFY");

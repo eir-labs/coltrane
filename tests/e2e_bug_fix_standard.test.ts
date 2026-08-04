@@ -35,9 +35,14 @@ const bugFix: Standard = {
   ],
 };
 
+// Artifact/Verdict outputs also carry their core's substance — an Artifact declares how
+// it can be checked, a Verdict carries the evidence it verified. outputs.write enforces
+// that on every seal (#227/#228), so `fixer` and `reviewer` supply it here.
 const invoke: AgentInvoker = ({ agent }) => ({
   detector: { symptom: "500 on /checkout" }, triager: { severity: "critical" },
-  planner: { steps: "null-check the cart" }, fixer: { diff: "+ if (!cart) return" }, reviewer: { verdict: "pass" },
+  planner: { steps: "null-check the cart" },
+  fixer: { diff: "+ if (!cart) return", validation_criteria: ["checkout returns 200 for an empty cart"] },
+  reviewer: { verdict: "pass", checks: [{ method: "regression-suite", target_ref: "patch", result: "pass" }] },
 }[agent.slug]!);
 
 function wired(): ServerDeps {

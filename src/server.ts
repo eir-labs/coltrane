@@ -36,6 +36,7 @@ import { proposeTypeChange, type DomainTypeDef } from "./type_versioning.js";
 import { proposeAgentChange, evolveProfile, type AgentProfile } from "./agent_profile.js";
 import { checkGrantTTL, validatePlanAgainstGrant, type AccessGrant, type PlanCheck } from "./access_grant.js";
 import { loadCharter, CharterError } from "./charter.js";
+import { COLTRANE_VERSION } from "./version.js";
 import { readFileSync, existsSync, mkdirSync, appendFileSync, readdirSync } from "node:fs";
 import { randomUUID, createHash } from "node:crypto";
 import { join } from "node:path";
@@ -1276,7 +1277,7 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
 /** Build the low-level MCP Server with ListTools + CallTool wired to the dispatcher. */
 export function createColtraneServer(deps: ServerDeps, recorder?: SubthreadRecorder): Server {
   const server = new Server(
-    { name: "coltrane", version: "0.1.0" },
+    { name: "coltrane", version: COLTRANE_VERSION },
     { capabilities: { tools: {} } },
   );
 

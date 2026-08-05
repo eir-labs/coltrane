@@ -51,6 +51,14 @@ function harness(types: DomainType[]) {
   return { outputs: createOutputStore(createRegistry(types)), ledger: new MemoryLedger() };
 }
 
+// The substance every sealed output carries by virtue of its CORE type. `outputs.write`
+// enforces one floor per core on every seal — bare core or domain subtype (#227 ruling) — so
+// a stub payload that omits it aborts the CHAIR, and the gig never reaches the resolution
+// question the test is actually about. `note` is Interpretation-cored throughout this file;
+// `sig` and `gig-req` are Signal-cored.
+const CLAIMS = { claims: ["fixture: the note carries one claim"] };
+const SIGNAL = { source: "fixture://demo/seeder" };
+
 const skillMap = (...slugs: string[]): ReadonlyMap<string, SkillRecord> =>
   new Map(slugs.map((s) => [s, { slug: s, version: 1, md: `# ${s}` } as unknown as SkillRecord]));
 
@@ -76,7 +84,7 @@ describe("#242 — a chair's required_skills must be enforced at runtime, not ju
   it("a REQUIRED skill that resolves to no package fails the chair closed — before the model is invoked", async () => {
     const { outputs, ledger } = harness([T("note", "Interpretation")]);
     let fired = false;
-    const invoke: AgentInvoker = () => { fired = true; return { v: "x" }; };
+    const invoke: AgentInvoker = () => { fired = true; return { v: "x", ...CLAIMS }; };
 
     await expect(
       // skills map is supplied and simply does NOT contain the required slug — a dangling binding.
@@ -88,7 +96,7 @@ describe("#242 — a chair's required_skills must be enforced at runtime, not ju
 
   it("the dangling REQUIRED binding costs nothing — it is rejected before the budget deduction", async () => {
     const { outputs, ledger } = harness([T("note", "Interpretation")]);
-    const invoke: AgentInvoker = () => ({ v: "x" });
+    const invoke: AgentInvoker = () => ({ v: "x", ...CLAIMS });
     const err = await runGig(std(), {}, {
       outputs, ledger, invoke, skills: skillMap(), budget: { opening: 1_000 },
     }).catch((e: unknown) => e);
@@ -101,7 +109,7 @@ describe("#242 — a chair's required_skills must be enforced at runtime, not ju
 
   it("positive control: the same standard runs when the required skill resolves", async () => {
     const { outputs, ledger } = harness([T("note", "Interpretation")]);
-    const invoke: AgentInvoker = () => ({ v: "x" });
+    const invoke: AgentInvoker = () => ({ v: "x", ...CLAIMS });
     const res = await runGig(std(), {}, { outputs, ledger, invoke, skills: skillMap(REQUIRED) });
     expect(res.status).toBe("complete");
   });
@@ -111,7 +119,7 @@ describe("#242 — a chair's required_skills must be enforced at runtime, not ju
     // supply skills). Absence of a map is not evidence of a dangling binding, so the
     // runtime must not manufacture one.
     const { outputs, ledger } = harness([T("note", "Interpretation")]);
-    const invoke: AgentInvoker = () => ({ v: "x" });
+    const invoke: AgentInvoker = () => ({ v: "x", ...CLAIMS });
     const res = await runGig(std(), {}, { outputs, ledger, invoke });
     expect(res.status).toBe("complete");
   });
@@ -137,7 +145,7 @@ describe("#241 — a dangling (non-required) skill binding is reported, never si
   it("the gig survives (it is not required) but the miss reaches the invocation context", async () => {
     const { outputs, ledger } = harness([T("note", "Interpretation")]);
     const seen: AgentInvocationContext[] = [];
-    const invoke: AgentInvoker = (ctx) => { seen.push(ctx); return { v: "x" }; };
+    const invoke: AgentInvoker = (ctx) => { seen.push(ctx); return { v: "x", ...CLAIMS }; };
 
     const res = await runGig(std(), {}, { outputs, ledger, invoke, skills: skillMap(REAL) });
     expect(res.status).toBe("complete");
@@ -151,7 +159,7 @@ describe("#241 — a dangling (non-required) skill binding is reported, never si
   it("the miss is emitted as a progress event so a live monitor sees it", async () => {
     const { outputs, ledger } = harness([T("note", "Interpretation")]);
     const events: GigProgressEvent[] = [];
-    const invoke: AgentInvoker = () => ({ v: "x" });
+    const invoke: AgentInvoker = () => ({ v: "x", ...CLAIMS });
 
     await runGig(std(), {}, {
       outputs, ledger, invoke, skills: skillMap(REAL),
@@ -311,7 +319,7 @@ describe("#248 — a torn line in the persisted output store is skipped AND repo
   it("integrity() reports the corrupt line while all() keeps serving the intact rows", () => {
     const { dir, store } = persisted();
     try {
-      const rec = store.write({ core_type: "Interpretation", domain_type: "note", domain: "demo", gig_id: "g1", agent_slug: "a", primitive: "INTERPRET", data: { v: "kept" } });
+      const rec = store.write({ core_type: "Interpretation", domain_type: "note", domain: "demo", gig_id: "g1", agent_slug: "a", primitive: "INTERPRET", data: { v: "kept", ...CLAIMS } });
       // Simulate a torn append (crash mid-write / disk full) on the SAME gig file.
       appendFileSync(join(dir, "outputs", "g1.jsonl"), '{"id":"torn","core_type":"Inter\n', "utf8");
 
@@ -332,7 +340,7 @@ describe("#248 — a torn line in the persisted output store is skipped AND repo
   it("a clean store reports ok:true with no corruption", () => {
     const { dir, store } = persisted();
     try {
-      store.write({ core_type: "Interpretation", domain_type: "note", domain: "demo", gig_id: "g1", agent_slug: "a", primitive: "INTERPRET", data: { v: "x" } });
+      store.write({ core_type: "Interpretation", domain_type: "note", domain: "demo", gig_id: "g1", agent_slug: "a", primitive: "INTERPRET", data: { v: "x", ...CLAIMS } });
       const report = store.integrity();
       expect(report).toMatchObject({ ok: true, corrupt: [] });
     } finally { rmGenome(dir); }
@@ -345,8 +353,8 @@ describe("#248 — a torn line in the persisted output store is skipped AND repo
   it("a corrupt REFS line is reported too — provenance edges are part of the chain", () => {
     const { dir, store } = persisted();
     try {
-      const a = store.write({ core_type: "Interpretation", domain_type: "note", domain: "demo", gig_id: "g1", agent_slug: "a", primitive: "INTERPRET", data: { v: "a" } });
-      const b = store.write({ core_type: "Interpretation", domain_type: "note", domain: "demo", gig_id: "g1", agent_slug: "a", primitive: "INTERPRET", data: { v: "b" } });
+      const a = store.write({ core_type: "Interpretation", domain_type: "note", domain: "demo", gig_id: "g1", agent_slug: "a", primitive: "INTERPRET", data: { v: "a", ...CLAIMS } });
+      const b = store.write({ core_type: "Interpretation", domain_type: "note", domain: "demo", gig_id: "g1", agent_slug: "a", primitive: "INTERPRET", data: { v: "b", ...CLAIMS } });
       store.addRef(b.id, a.id, "derived_from", "INTERPRET");
       appendFileSync(join(dir, "refs", "g1.jsonl"), "{oops\n", "utf8");
 
@@ -368,6 +376,11 @@ describe("#244 — the gig-input pre-flight must cover every statically-knowable
   const seed = testAgent({ slug: "seeder", primitives: ["SENSE"], input_types: [], output_types: ["sig"] });
   const needer = testAgent({ slug: "needer", primitives: ["INTERPRET"], input_types: ["gig-req", "sig"], output_types: ["note"] });
   const types = [T("sig", "Signal"), T("gig-req", "Signal"), T("note", "Interpretation")];
+
+  // `seeder` fills a Signal-cored chair and `needer` an Interpretation-cored one, so the stub
+  // answers per chair rather than carrying both cores' floors on one payload.
+  const byChair = (slug: string): Record<string, unknown> =>
+    slug === "seeder" ? { v: "x", ...SIGNAL } : { v: "x", ...CLAIMS };
 
   // (a) The dependent chair sits in phase 1 with depends_on: [] — the pre-flight skipped it
   //     because it only looked at phase 0.
@@ -396,7 +409,7 @@ describe("#244 — the gig-input pre-flight must cover every statically-knowable
   it("(a) a later-phase entry chair's missing gig input stops the run BEFORE phase 0 spends a token", async () => {
     const { outputs, ledger } = harness(types);
     const fired: string[] = [];
-    const invoke: AgentInvoker = (ctx) => { fired.push(ctx.agent.slug); return { v: "x" }; };
+    const invoke: AgentInvoker = (ctx) => { fired.push(ctx.agent.slug); return byChair(ctx.agent.slug); };
     await expect(runGig(laterPhase(), {}, { outputs, ledger, invoke })).rejects.toThrow(/gig-req/);
     expect(fired, "in production this is a real claude spawn and real dollars").toEqual([]);
   });
@@ -404,14 +417,14 @@ describe("#244 — the gig-input pre-flight must cover every statically-knowable
   it("(b) a dependent chair's missing gig input stops the run BEFORE its phase-0 sibling fires", async () => {
     const { outputs, ledger } = harness(types);
     const fired: string[] = [];
-    const invoke: AgentInvoker = (ctx) => { fired.push(ctx.agent.slug); return { v: "x" }; };
+    const invoke: AgentInvoker = (ctx) => { fired.push(ctx.agent.slug); return byChair(ctx.agent.slug); };
     await expect(runGig(samePhaseDependent(), {}, { outputs, ledger, invoke })).rejects.toThrow(/gig-req/);
     expect(fired).toEqual([]);
   });
 
   it("the error blames the DISPATCH PAYLOAD, not the upstream pipeline", async () => {
     const { outputs, ledger } = harness(types);
-    const invoke: AgentInvoker = () => ({ v: "x" });
+    const invoke: AgentInvoker = (ctx) => byChair(ctx.agent.slug);
     const err = await runGig(laterPhase(), {}, { outputs, ledger, invoke }).catch((e: unknown) => e) as Error;
     expect(err.message).toMatch(/MissingGigInput/);
     expect(err.message).toMatch(/gig input|payload|dispatch/i);
@@ -430,14 +443,14 @@ describe("#244 — the gig-input pre-flight must cover every statically-knowable
       ] as PhaseDef[],
     });
     const { outputs, ledger } = harness(types);
-    const invoke: AgentInvoker = () => ({ v: "x" });
+    const invoke: AgentInvoker = (ctx) => byChair(ctx.agent.slug);
     const res = await runGig(std, {}, { outputs, ledger, invoke });
     expect(res.status).toBe("complete");
   });
 
   it("NO false positives: supplying the gig input runs the whole standard", async () => {
     const { outputs, ledger } = harness(types);
-    const invoke: AgentInvoker = () => ({ v: "x" });
+    const invoke: AgentInvoker = (ctx) => byChair(ctx.agent.slug);
     const res = await runGig(laterPhase(), { "gig-req": { v: "here" } }, { outputs, ledger, invoke });
     expect(res.status).toBe("complete");
   });
@@ -453,7 +466,7 @@ describe("#244 (neighbourhood) — unknown-key diagnostics: gigInput's keys are 
 
   it("an underscored near-miss of a hyphenated type slug is named as the likely cause", async () => {
     const { outputs, ledger } = harness([T("grant-requirements", "Interpretation"), T("note", "Interpretation")]);
-    const invoke: AgentInvoker = () => ({ v: "x" });
+    const invoke: AgentInvoker = () => ({ v: "x", ...CLAIMS });
     const err = await runGig(std(), { grant_requirements: { v: "oops" } }, { outputs, ledger, invoke }).catch((e: unknown) => e) as Error;
     expect(err.message).toContain("grant_requirements");
     expect(err.message).toMatch(/did you mean|hyphen/i);
@@ -461,7 +474,7 @@ describe("#244 (neighbourhood) — unknown-key diagnostics: gigInput's keys are 
 
   it("unrecognized payload keys are listed so the operator can see what they actually sent", async () => {
     const { outputs, ledger } = harness([T("grant-requirements", "Interpretation"), T("note", "Interpretation")]);
-    const invoke: AgentInvoker = () => ({ v: "x" });
+    const invoke: AgentInvoker = () => ({ v: "x", ...CLAIMS });
     const err = await runGig(std(), { totally_unrelated: 1 }, { outputs, ledger, invoke }).catch((e: unknown) => e) as Error;
     expect(err.message).toContain("totally_unrelated");
   });

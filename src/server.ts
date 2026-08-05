@@ -345,6 +345,31 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         // connection to it. And hand it the REAL settled spend of prior runs (#195): a measured
         // mean of this pipeline beats any formula for the "validate before you spend" check.
         const std = deps.standards?.get(simSlug);
+        // #267 — refuse a standard we cannot find, rather than estimating one we invented.
+        // This tool is documented as the cheap pre-dispatch gate ("validate before you
+        // spend"), and a gate that cannot fail is worse than no gate: callers stop looking.
+        // A typo'd slug is the single most likely thing an operator wants caught here.
+        //
+        // The gate lives at the MCP boundary, NOT in standardSimulate(). That function's
+        // fallback path is deliberate, tested, and used elsewhere; it is the TOOL that has
+        // to refuse. `basis: "fallback"` labels an invented number honestly, but it is a
+        // field inside a SUCCESS payload — it stops nobody.
+        //
+        // "I looked and it is absent" is a different answer from "I have no way to look":
+        // a host that wired no standards map has not told us the slug is wrong, so it keeps
+        // the fallback rather than being handed a rejection we cannot justify.
+        if (!simSlug) {
+          return { ok: false, requires_approval: approval, error: "standard_simulate requires a standard_slug" };
+        }
+        if (deps.standards && !std) {
+          return {
+            ok: false,
+            requires_approval: approval,
+            error:
+              `unknown standard "${simSlug}" — nothing to simulate. Check the slug, and if the ` +
+              `standard is newly authored run genome_reload and confirm load_errors is empty.`,
+          };
+        }
         const observed = deps.ledger
           .query({ kind: "gig", standard_slug: simSlug })
           .filter(isGig)

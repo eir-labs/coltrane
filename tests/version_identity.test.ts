@@ -50,4 +50,16 @@ describe("engine version identity", () => {
       else process.env["COLTRANE_BUILD_COMMIT"] = prev;
     }
   });
+
+  // The MCP `initialize` handshake is the version every client actually SEES.
+  // It was hardcoded to "0.1.0" while package.json said 0.3.0 — two disagreeing
+  // versions in one process, which is exactly the drift this file exists to end.
+  // Pin them together so they cannot separate again.
+  it("the MCP handshake reports COLTRANE_VERSION, not a hardcoded literal", () => {
+    const src = readFileSync(new URL("../src/server.ts", import.meta.url), "utf-8");
+    const handshake = /new Server\(\s*\{\s*name:\s*"coltrane",\s*version:\s*([\w$]+|"[^"]*")/.exec(src);
+    expect(handshake, "could not find the createColtraneServer handshake").not.toBeNull();
+    expect(handshake?.[1]).toBe("COLTRANE_VERSION");
+  });
+
 });

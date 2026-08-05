@@ -175,6 +175,19 @@ export interface Ledger {
   append(entry: LedgerEntry): void;
   query(filter?: LedgerQuery): LedgerEntry[];
   count(filter?: LedgerQuery): number;
+  /**
+   * #255 — is this audit trail whole, and if not, where is the damage.
+   *
+   * On the INTERFACE deliberately. `FileLedger` had it as a class method only, so a
+   * consumer holding a `Ledger` could not ask the question without narrowing — which is
+   * why tests/ledger_integrity.test.ts had to cast through `Record<string, unknown>` to
+   * reach it, and why `system_health` surfaced nothing. An audit trail that cannot be
+   * asked whether it is intact is not an audit trail.
+   *
+   * Every implementation answers, including one that cannot tear: "in-memory, so there is
+   * nothing to corrupt" is an ANSWER. A missing method is a gap, and gaps get assumed away.
+   */
+  integrity(): LedgerIntegrityReport;
 }
 
 export class LedgerError extends Error {}
@@ -466,6 +479,10 @@ export class MemoryLedger implements Ledger {
     this.append = this.append.bind(this);
     this.query = this.query.bind(this) as typeof this.query;
     this.count = this.count.bind(this);
+    // #255 — bound like its siblings. The class comment promises BOTH implementations expose
+    // bound methods so a detached `const { integrity } = ledger` cannot throw; FileLedger
+    // binds it and this did not, so destructuring it here died on `this.entries`.
+    this.integrity = this.integrity.bind(this);
   }
 
   append(entry: LedgerEntry): void {
@@ -488,5 +505,11 @@ export class MemoryLedger implements Ledger {
 
   count(filter: LedgerQuery = {}): number {
     return this.entries.filter((e) => matches(e, filter)).length;
+  }
+
+  /** Nothing is parsed from bytes here, so there is no torn-line failure mode to report.
+   *  `path` is empty because there is no file — not because we failed to find one. */
+  integrity(): LedgerIntegrityReport {
+    return { ok: true, path: "", entries: this.entries.length, corrupt: [] };
   }
 }

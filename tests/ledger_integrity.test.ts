@@ -193,14 +193,20 @@ describe("#211 — corruption is REPORTED, never silently swallowed", () => {
   // "skip and report — surface the corrupt-line count/offsets" but does not name the
   // surface. `integrity()` is this test's choice. If the implementer picks a different
   // surface the NAME here may change; the assertion must not.
+  // The casts these two tests used to carry (`as unknown as Record<string, unknown>`, and an
+  // inline structural type with `integrity?`) existed because `integrity()` was a FileLedger
+  // class method that the `Ledger` interface did not declare — so the only way to reach it was
+  // to lie to the compiler about the type. #255 put it on the interface; the casts came off
+  // with it. They are not cosmetic: a cast here is what let the engine ship a damage report
+  // no interface-typed consumer could ask for.
   it("FileLedger exposes an integrity report", async () => {
     const dir = freshDir();
     try {
       const path = join(dir, "ledger.jsonl");
       seedWithTornTail(path, 3);
-      const l = new FileLedger(path) as unknown as Record<string, unknown>;
+      const l: Ledger = new FileLedger(path);
       expect(
-        typeof l["integrity"],
+        typeof l.integrity,
         "no way to learn that the ledger is damaged. A silent skip (the outputs.ts:180-184 " +
           "shape) is the WRONG fix for an audit trail: it lets a single corrupted byte " +
           "delete a row with no trace. Skip-and-report is the contract.",
@@ -215,11 +221,8 @@ describe("#211 — corruption is REPORTED, never silently swallowed", () => {
     try {
       const path = join(dir, "ledger.jsonl");
       seedWithTornTail(path, 3);
-      const l = new FileLedger(path) as unknown as {
-        integrity?: () => { ok: boolean; corrupt: Array<{ line_no: number }> };
-      };
-      expect(typeof l.integrity, "integrity() not implemented — see preceding test").toBe("function");
-      const report = l.integrity!();
+      const l: Ledger = new FileLedger(path);
+      const report = l.integrity();
       expect(report.ok, "a ledger with a torn line must not report ok:true").toBe(false);
       expect(report.corrupt.length, "the one torn line must be reported").toBe(1);
       expect(

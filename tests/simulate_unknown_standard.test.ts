@@ -88,9 +88,13 @@ describe("#267 — standard_simulate refuses a standard it cannot find", () => {
     expect(r.error ?? "", "point the operator at the thing that loads standards").toMatch(/genome_reload/);
   });
 
+  // Both branches, deliberately. With a standards map an empty slug is refused by the
+  // unknown-standard branch anyway, so asserting only that case leaves the dedicated guard
+  // untested — a mutation deleting it kept the whole suite green. The no-map case is the one
+  // where the guard has a unique effect.
   it("refuses an empty slug rather than estimating the empty string", async () => {
-    const r = await dispatchTool("standard_simulate", { mock_input: {}, depth: "standard" }, makeDeps());
-    expect(r.ok).toBe(false);
+    const withMap = await dispatchTool("standard_simulate", { mock_input: {}, depth: "standard" }, makeDeps());
+    expect(withMap.ok).toBe(false);
   });
 
   // Positive control — without this, "refuse everything" passes the tests above.
@@ -106,21 +110,36 @@ describe("#267 — standard_simulate refuses a standard it cannot find", () => {
     expect(d.basis).toBe("structural");
   });
 
-  // "I looked and it is absent" is a different answer from "I have no way to look".
-  // A host that wired no standards map has not told us the slug is wrong, so turning
-  // that into a rejection would be a fabrication in the other direction.
-  it("leaves a host with no standards map on the fallback path", async () => {
-    const r = await dispatchTool(
+  // "I looked and it is absent" is a different answer from "I have no way to look" — and
+  // the second one is `not_implemented`, matching what `gig_dispatch` reports on the very
+  // same host. Quoting a price on a host that cannot run the gig is worse than useless.
+  it("reports not_implemented on a host with no standards map, as gig_dispatch does", async () => {
+    const bare = makeDeps(false);
+    const sim = await dispatchTool(
       "standard_simulate",
       { standard_slug: "anything-at-all", mock_input: {}, depth: "standard" },
-      makeDeps(false),
+      bare,
     );
-    expect(r.ok).toBe(true);
-    expect((r.data as { basis: string }).basis).toBe("fallback");
+    expect(sim.ok).toBe(false);
+    expect(sim.not_implemented).toBe(true);
+
+    // Pinned side by side, because the whole point is that the two agree. If a later change
+    // makes the estimator answer where the dispatcher refuses, this is what catches it.
+    const dispatch = await dispatchTool("gig_dispatch", { standard_slug: "anything-at-all" }, bare);
+    expect(dispatch.not_implemented).toBe(true);
   });
 
-  // The pure function keeps its fallback. The gate is the tool's job, and putting it in
-  // `standardSimulate` would break its other callers and its own tests.
+  // The dedicated empty-slug guard's ONLY unique effect: no map AND no slug. With a map the
+  // unknown-standard branch would have covered it.
+  it("refuses an empty slug on a no-map host too, without pretending to estimate", async () => {
+    const r = await dispatchTool("standard_simulate", { mock_input: {}, depth: "standard" }, makeDeps(false));
+    expect(r.ok).toBe(false);
+  });
+
+  // The pure function keeps its fallback. `standardSimulate` has exactly ONE non-test caller
+  // — the tool above — so this is not protecting other callers; it is pinning a deliberate
+  // separation. An estimator that refuses is a different kind of thing from an estimator,
+  // and the refusal belongs at the boundary that owes callers a verdict.
   it("does not move the gate into standardSimulate()", () => {
     const guess = standardSimulate({ standard_slug: "unknown-thing", mock_input: {}, depth: "standard" });
     expect(guess.basis).toBe("fallback");

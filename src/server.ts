@@ -350,18 +350,31 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         // spend"), and a gate that cannot fail is worse than no gate: callers stop looking.
         // A typo'd slug is the single most likely thing an operator wants caught here.
         //
-        // The gate lives at the MCP boundary, NOT in standardSimulate(). That function's
-        // fallback path is deliberate, tested, and used elsewhere; it is the TOOL that has
-        // to refuse. `basis: "fallback"` labels an invented number honestly, but it is a
-        // field inside a SUCCESS payload — it stops nobody.
+        // The gate lives at the MCP boundary, NOT in standardSimulate(). Keeping the pure
+        // function permissive is a deliberate separation — an estimator that refuses is a
+        // different kind of thing from an estimator — and it is the TOOL that owes callers a
+        // verdict. (`standardSimulate` has exactly one non-test caller: this line. So this is
+        // a design choice about where refusal belongs, not a constraint imposed by other
+        // callers.) `basis: "fallback"` labels an invented number honestly, but it is a field
+        // inside a SUCCESS payload — it stops nobody.
         //
-        // "I looked and it is absent" is a different answer from "I have no way to look":
-        // a host that wired no standards map has not told us the slug is wrong, so it keeps
-        // the fallback rather than being handed a rejection we cannot justify.
+        // "I looked and it is absent" is a different answer from "I have no way to look", and
+        // the two get different answers. A host that wired no standards map cannot resolve
+        // ANY slug, so it reports `not_implemented` exactly as `gig_dispatch` does on the same
+        // host. Returning a $1.00 estimate there would be worse than useless: it would quote a
+        // price for a run that `gig_dispatch` is about to refuse outright.
+        if (!deps.standards) {
+          return {
+            ok: false,
+            not_implemented: true,
+            requires_approval: approval,
+            error: "standard_simulate needs standards wired into the server",
+          };
+        }
         if (!simSlug) {
           return { ok: false, requires_approval: approval, error: "standard_simulate requires a standard_slug" };
         }
-        if (deps.standards && !std) {
+        if (!std) {
           return {
             ok: false,
             requires_approval: approval,

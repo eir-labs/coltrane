@@ -117,8 +117,8 @@ describe("content-axis — package identity", () => {
     return JSON.parse(readFileSync(join(REPO_ROOT, "package.json"), "utf-8"));
   }
 
-  it("name is scoped under @eir-dev", () => {
-    expect(String(readPkg().name)).toMatch(/^@eir-dev\//);
+  it("name is scoped under @eir-labs", () => {
+    expect(String(readPkg().name)).toMatch(/^@eir-labs\//);
   });
 
   it("declares a bin entry", () => {

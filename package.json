@@ -1,5 +1,5 @@
 {
-  "name": "@eir-dev/coltrane",
+  "name": "@eir-labs/coltrane",
   "version": "0.4.0",
   "description": "A methodology engine — a typed substrate for defining agents, composing multi-phase standards, dispatching gigs, and sealing every output to a content-addressed ledger. Ships as an MCP server.",
   "type": "module",

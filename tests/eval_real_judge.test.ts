@@ -66,7 +66,7 @@ describe("#74 — scoreEval is a real judge", () => {
 
   it("a genuinely-failing eval reports nothing unresolved (#246 — the two are distinguishable)", async () => {
     const { outputs, ledger } = setup();
-    const res = await runGig(standard, {}, { outputs, ledger, invoke: () => ({ gist: "" }), evals });
+    const res = await runGig(standard, {}, { outputs, ledger, invoke: () => ({ gist: "", claims: ["the note is about X"] }), evals });
     expect(res.eval_scores["gist-present"]).toBe(0.0);
     expect(
       (res as unknown as { unresolved_evals?: string[] }).unresolved_evals,

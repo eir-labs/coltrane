@@ -39,7 +39,9 @@ const burnThenDie: AgentInvoker = (ctx) => {
       type: "result", total_cost_usd: 0.42, usage: { input_tokens: 9000, output_tokens: 1500 },
       modelUsage: { "claude-opus-4-8": { inputTokens: 9000, outputTokens: 1500, costUSD: 0.42 } },
     } });
-    return { t: "expensive" };
+    // note is Signal-cored: it names where it was acquired (#227 ruling — the floor binds
+    // every core, bare or subtyped, so a fixture that omits it aborts the chair).
+    return { t: "expensive", source: "fixture://demo/spender" };
   }
   throw new Error("the scout hung and the phase died");
 };
@@ -108,7 +110,9 @@ describe("#236 — a failed gig still reports what it actually spent", () => {
     const std = standard();
     const spendOnly: AgentInvoker = (ctx) => {
       ctx.onEvent?.({ type: "result", raw: { type: "result", total_cost_usd: 0.11, usage: { input_tokens: 10, output_tokens: 2 } } });
-      return ctx.agent.slug === "spender" ? { t: "x" } : { summary: "y" };
+      return ctx.agent.slug === "spender"
+        ? { t: "x", source: "fixture://demo/spender" }
+        : { summary: "y", claims: ["the note was read"] };
     };
     let caught: BudgetExhausted | null = null;
     try {
@@ -154,7 +158,10 @@ describe("#236 — a failed gig still reports what it actually spent", () => {
 
   it("a SUCCESSFUL async gig surfaces its budget_state too (the same gap, success side)", async () => {
     const d = deps(
-      (ctx) => (ctx.agent.slug === "spender" ? { t: "ok" } : { summary: "ok" }),
+      (ctx) =>
+        ctx.agent.slug === "spender"
+          ? { t: "ok", source: "fixture://demo/spender" }
+          : { summary: "ok", claims: ["the note was read"] },
       standard(),
     );
     const r = await dispatchTool(

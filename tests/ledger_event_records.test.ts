@@ -401,7 +401,8 @@ describe("#213 — gig_abort", () => {
     const deps = makeDeps();
     const w = await dispatchTool("output_write", {
       core_type: "Judgment", domain_type: "finding", domain: "eirtests",
-      gig_id: "live-gig", agent_slug: "a", data: { title: "x" },
+      // finding is Judgment-cored: it names the criteria it evaluated against (#227 ruling).
+      gig_id: "live-gig", agent_slug: "a", data: { title: "x", criteria: ["image accessibility"] },
     }, deps);
     expect(w.ok, `output_write failed: ${w.error}`).toBe(true);
 

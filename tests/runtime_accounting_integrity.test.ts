@@ -31,6 +31,17 @@ const T = {
   read: { slug: "read", extends: "Interpretation", domain: "demo", schema: { properties: { summary: { type: "string" } } }, required_fields: ["summary"] } as DomainType,
 };
 
+// The substance every sealed output carries by virtue of its CORE type. `outputs.write`
+// enforces one floor per core on every seal — bare core or domain subtype (#227 ruling) — so
+// a stub payload that omits it aborts the CHAIR, and the gig never reaches the phase the test
+// is actually about. Held as named constants so a run that fails here fails loudly on the
+// fixture, not silently in whatever the assertion happened to be measuring.
+const SIGNAL = { source: "fixture://demo/deterministic-invoker" };
+const CLAIMS = { claims: ["fixture: the deterministic invoker produced this reading"] };
+const CRITERIA = { criteria: ["fixture: the deterministic invoker evaluated this"] };
+const VALIDATION = { validation_criteria: ["fixture: the artifact matches its declared type"] };
+const CHECKS = { checks: [{ method: "deterministic-invoker", target_ref: "fixture", result: "pass" }] };
+
 // ═══════════════════════════════════════════════════════════════════════════════════════════
 // #232 — budget is deducted at chair-PREP, before the model runs. `.map` is eager, so in a
 // batch of N ready chairs one tripping BudgetExhausted leaves chairs 1..N-1 CHARGED and never
@@ -55,7 +66,7 @@ describe("#232 — budget charges only work that actually ran", () => {
   it("a chair that is never invoked is never charged (the phantom-charge case)", async () => {
     const { outputs, ledger } = store([T.note]);
     let invocations = 0;
-    const invoke: AgentInvoker = () => { invocations++; return { t: "hi" }; };
+    const invoke: AgentInvoker = () => { invocations++; return { t: "hi", ...SIGNAL }; };
 
     let caught: BudgetExhausted | null = null;
     try {
@@ -89,7 +100,7 @@ describe("#232 — budget charges only work that actually ran", () => {
     const { outputs, ledger } = store([T.note, T.read]);
     const invoke: AgentInvoker = ({ agent }) => {
       if (agent.slug === "cons") throw new Error("invoker exploded");
-      return { t: "hi" };
+      return { t: "hi", ...SIGNAL };
     };
 
     let err: unknown;
@@ -130,7 +141,7 @@ describe("#233 — cost basis measures consumed CONTENT, not identifiers", () =>
   const spendFor = async (payloadBytes: number): Promise<number> => {
     const { outputs, ledger } = store([T.bulk, T.read]);
     const invoke: AgentInvoker = ({ agent }) =>
-      agent.slug === "bulker" ? { payload: "x".repeat(payloadBytes) } : { summary: "read it" };
+      agent.slug === "bulker" ? { payload: "x".repeat(payloadBytes), ...SIGNAL } : { summary: "read it", ...CLAIMS };
     const res = await runGig(std(), {}, { outputs, ledger, invoke, budget: { opening: 1e9, base_cost: 0, k: 1 } });
     return (res.budget_state as BudgetState).spent;
   };
@@ -165,7 +176,7 @@ describe("#235 — usage distinguishes 'not captured' from '$0.00 spent'", () =>
       // A real `result` event whose payload carries no usage at all — the Bifrost
       // no-cost reply and any CLI result whose usage block is missing.
       ctx.onEvent?.({ type: "result", raw: { type: "result", subtype: "success" } });
-      return { t: "hi" };
+      return { t: "hi", ...SIGNAL };
     };
     const r = await runGig(solo(), {}, { outputs, ledger, invoke });
     // THE DEFECT: sawUsage flips unconditionally on any result event, so the gig reports
@@ -192,10 +203,10 @@ describe("#235 — usage distinguishes 'not captured' from '$0.00 spent'", () =>
     const invoke: AgentInvoker = (ctx) => {
       if (ctx.agent.slug === "reporter") {
         ctx.onEvent?.({ type: "result", raw: { type: "result", total_cost_usd: 0.05, usage: { input_tokens: 100, output_tokens: 20 } } });
-        return { t: "hi" };
+        return { t: "hi", ...SIGNAL };
       }
       // the SIGKILLed-on-the-10-minute-bound chair: it produced work, it reported nothing
-      return { summary: "read it" };
+      return { summary: "read it", ...CLAIMS };
     };
     const r = await runGig(std, {}, { outputs, ledger, invoke });
 
@@ -216,7 +227,7 @@ describe("#235 — usage distinguishes 'not captured' from '$0.00 spent'", () =>
         type: "result", total_cost_usd: 0.01, usage: { input_tokens: 10, output_tokens: 5 },
         modelUsage: { "claude-x": { inputTokens: 10, outputTokens: 5, costUSD: 0.01 } },
       } });
-      return { t: "hi" };
+      return { t: "hi", ...SIGNAL };
     };
     const r = await runGig(solo(), {}, { outputs, ledger, invoke });
     const u = r.usage as unknown as Record<string, unknown>;
@@ -230,7 +241,7 @@ describe("#235 — usage distinguishes 'not captured' from '$0.00 spent'", () =>
     const { outputs, ledger } = store([T.note]);
     const invoke: AgentInvoker = (ctx) => {
       ctx.onEvent?.({ type: "result", raw: { type: "result", total_cost_usd: 0.09, usage: { input_tokens: 10, output_tokens: 5 } } });
-      return { t: "hi" };
+      return { t: "hi", ...SIGNAL };
     };
     const r = await runGig(solo(), {}, { outputs, ledger, invoke });
     const u = r.usage as unknown as Record<string, unknown>;
@@ -250,9 +261,11 @@ describe("#240 — provenance backfill never attaches a hash it cannot prove", (
   const TYPES: DomainType[] = [
     { slug: "grant-draft", extends: "Artifact", domain: "demo", schema: { properties: { body: { type: "string" } } }, required_fields: ["body"] },
     { slug: "draft-review", extends: "Judgment", domain: "demo", schema: { properties: { verdict: { type: "string" } } }, required_fields: ["verdict"] },
+    // `checks` is inherited from the Verdict core (CORE_SCHEMA_PROPS) and must not be
+    // redeclared here — redeclaring would overload the core's own constraint away (#230).
     { slug: "submission-verdict", extends: "Verdict", domain: "demo", schema: {
       properties: { decision: { type: "string" }, draft_sha: { type: "string" }, grant_draft_sha: { type: "string" }, review_sha: { type: "string" } },
-    }, required_fields: ["decision"] },
+    }, required_fields: ["decision", "checks"] },
   ];
 
   const std = (depends_on: string[]): Standard => ({
@@ -274,8 +287,8 @@ describe("#240 — provenance backfill never attaches a hash it cannot prove", (
   > => {
     const { outputs, ledger } = store(TYPES);
     const invoke: AgentInvoker = ({ agent }) => {
-      if (agent.slug === "drafter") return { body: "the draft" };
-      if (agent.slug === "reviewer") return { verdict: "needs work" };
+      if (agent.slug === "drafter") return { body: "the draft", ...VALIDATION };
+      if (agent.slug === "reviewer") return { verdict: "needs work", ...CRITERIA };
       return verdictData;
     };
     try {
@@ -287,24 +300,53 @@ describe("#240 — provenance backfill never attaches a hash it cannot prove", (
   };
 
   it("a cosmetic depends_on reorder cannot change the sealed audit trail", async () => {
-    const fabricated = { decision: "submit", draft_sha: "sha256:PLACEHOLDER-the-draft-i-consumed" };
+    // THE DEFECT: first-fuzzy-hit-wins over depends_on order means flipping a JSON array
+    // rewrites which real content_sha gets sealed as the predecessor. Both values look
+    // completely authentic, so nothing downstream can tell the audit trail was rewritten.
+    //
+    // The field is `grant_draft_sha`, which resolves UNAMBIGUOUSLY (exact type-slug match for
+    // `grant-draft`). That is load-bearing, not cosmetic: with the ambiguous `draft_sha` this
+    // test used to carry, BOTH orders abort on the ambiguity guard, `shaOf` collapses both to
+    // the same `ERROR:` string, and `ERROR:x === ERROR:x` reads green while asserting nothing
+    // whatsoever about provenance. Refusing to guess is the SIBLING test's contract; this one
+    // has to reach the resolved path or it is measuring nothing. Two guards keep it honest:
+    // an aborted run FAILS here rather than being folded into the comparison, and the sealed
+    // value is compared against the drafter's actual content_sha rather than merely to itself
+    // — so a backfill that silently leaves the placeholder in place, or attaches the reviewer's
+    // hash, is caught in BOTH orders instead of agreeing with itself.
+    const fabricated = {
+      decision: "submit",
+      grant_draft_sha: "sha256:PLACEHOLDER-the-draft-i-consumed",
+      ...CHECKS,
+    };
     const forward = await runWith(["r0", "r1"], { ...fabricated });
     const reversed = await runWith(["r1", "r0"], { ...fabricated });
 
-    const shaOf = (r: Awaited<ReturnType<typeof runWith>>): string =>
-      r.ok ? String((r.outputs.find((o) => o.domain_type === "submission-verdict")!.data as Record<string, unknown>)["draft_sha"]) : `ERROR:${r.error}`;
+    // FAIL ON AN ERROR — never compare two error strings and call the agreement a pass.
+    expect(forward.ok, `forward run aborted: ${forward.ok ? "" : forward.error}`).toBe(true);
+    expect(reversed.ok, `reversed run aborted: ${reversed.ok ? "" : reversed.error}`).toBe(true);
+    if (!forward.ok || !reversed.ok) return; // narrowing only; the expects above already failed
 
-    // THE DEFECT: `draft_sha` shares a name token with BOTH `grant-draft` and `draft-review`.
-    // First-fuzzy-hit-wins over depends_on order means flipping a JSON array rewrites which
-    // real content_sha gets sealed as the predecessor. Both values look completely authentic.
+    const sealedSha = (r: { outputs: readonly OutputRecord[] }): string =>
+      String((r.outputs.find((o) => o.domain_type === "submission-verdict")!.data as Record<string, unknown>)["grant_draft_sha"]);
+    const draftSha = (r: { outputs: readonly OutputRecord[] }): string =>
+      r.outputs.find((o) => o.domain_type === "grant-draft")!.content_sha;
+
+    // the placeholder must have been REPLACED, in each order independently, by the real hash
+    // of the grant-draft that chair actually consumed
+    expect(sealedSha(forward), "forward: the sealed predecessor must be the drafter's content_sha").toBe(draftSha(forward));
+    expect(sealedSha(reversed), "reversed: the sealed predecessor must be the drafter's content_sha").toBe(draftSha(reversed));
+    expect(sealedSha(forward), "a placeholder that survives backfill is not provenance").toMatch(/^[0-9a-f]{64}$/);
+
+    // ...and the two orders agree, which is #240 itself.
     expect(
-      shaOf(reversed),
+      sealedSha(reversed),
       "the provenance a chair seals must not depend on the order of its depends_on array",
-    ).toBe(shaOf(forward));
+    ).toBe(sealedSha(forward));
   });
 
   it("an ambiguous *_sha field fails loudly rather than guessing a real-but-wrong hash", async () => {
-    const r = await runWith(["r1", "r0"], { decision: "submit", draft_sha: "sha256:PLACEHOLDER-the-draft-i-consumed" });
+    const r = await runWith(["r1", "r0"], { decision: "submit", draft_sha: "sha256:PLACEHOLDER-the-draft-i-consumed", ...CHECKS });
     expect(r.ok, "an unprovable provenance hash must abort the chair, not be invented").toBe(false);
     if (!r.ok) {
       expect(r.error).toMatch(/ambiguous/i);
@@ -319,6 +361,7 @@ describe("#240 — provenance backfill never attaches a hash it cannot prove", (
       decision: "submit",
       grant_draft_sha: "UNSEALED:no-hash-tool-in-seat",
       review_sha: "UNSEALED:no-hash-tool-in-seat",
+      ...CHECKS,
     });
     expect(r.ok, "unambiguous fields must keep working").toBe(true);
     if (r.ok) {
@@ -351,7 +394,7 @@ describe("#243 — an under-delivered output_contract is recorded, not silent", 
     const { outputs, ledger } = store(types);
     const events: GigProgressEvent[] = [];
     // The invoker honours only half the promise.
-    const invoke: AgentInvoker = () => ({ "sig-a": { a: "made it" } });
+    const invoke: AgentInvoker = () => ({ "sig-a": { a: "made it", ...SIGNAL } });
     const res = await runGig(std, {}, { outputs, ledger, invoke, onProgress: (e) => events.push(e) });
 
     expect(res.status, "conditional outputs are legal — this must not become a hard failure").toBe("complete");
@@ -374,7 +417,7 @@ describe("#243 — an under-delivered output_contract is recorded, not silent", 
       agents: [testAgent({ slug: "solo", primitives: ["SENSE"], input_types: [], output_types: ["note"], domain: "demo" })],
       phases: [{ name: "p", chairs: [{ role: "r", agent_slug: "solo", depends_on: [], input_contract: [], output_contract: ["note"], required_skills: [] }] }],
     };
-    const res = await runGig(std, {}, { outputs, ledger, invoke: () => ({ t: "hi" }) });
+    const res = await runGig(std, {}, { outputs, ledger, invoke: () => ({ t: "hi", ...SIGNAL }) });
     expect((res as unknown as Record<string, unknown>)["unfulfilled_outputs"]).toBeUndefined();
   });
 });
@@ -393,7 +436,7 @@ describe("#245 — a chair whose agent declares inputs must actually receive the
     };
     const { outputs, ledger } = store([T.note, T.read]);
     let observed = -1;
-    const invoke: AgentInvoker = ({ inputs }) => { observed = inputs.length; return { summary: "hallucinated" }; };
+    const invoke: AgentInvoker = ({ inputs }) => { observed = inputs.length; return { summary: "hallucinated", ...CLAIMS }; };
 
     // THE DEFECT (the issue's own reproduction — chair contract emptied, gig input entirely
     // empty): status=complete, ctx.inputs=[], one sealed record with full provenance.
@@ -416,7 +459,7 @@ describe("#245 — a chair whose agent declares inputs must actually receive the
       ],
     };
     const { outputs, ledger } = store([T.note, T.bulk, T.read]);
-    const invoke: AgentInvoker = ({ agent }) => (agent.slug === "producer" ? { payload: "x" } : { summary: "hallucinated" });
+    const invoke: AgentInvoker = ({ agent }) => (agent.slug === "producer" ? { payload: "x", ...SIGNAL } : { summary: "hallucinated", ...CLAIMS });
     // Upstream RAN and produced `bulk`; the consumer declared `note`. Handing it [] and letting
     // it answer anyway is the hallucination — and here there is no ambiguity about intent.
     await expect(
@@ -439,7 +482,7 @@ describe("#245 — a chair whose agent declares inputs must actually receive the
     const { outputs, ledger } = store([T.note, T.read]);
     let observed = -1;
     const res = await runGig(std, { description: "an untyped v0 seed" }, {
-      outputs, ledger, invoke: ({ inputs }) => { observed = inputs.length; return { summary: "from the seed" }; },
+      outputs, ledger, invoke: ({ inputs }) => { observed = inputs.length; return { summary: "from the seed", ...CLAIMS }; },
     });
     expect(res.status).toBe("complete");
     expect(observed, "still invoked with empty inputs — this is the open half").toBe(0);
@@ -452,7 +495,7 @@ describe("#245 — a chair whose agent declares inputs must actually receive the
       agents: [testAgent({ slug: "solo", primitives: ["SENSE"], input_types: [], output_types: ["note"], domain: "demo" })],
       phases: [{ name: "p", chairs: [{ role: "r", agent_slug: "solo", depends_on: [], input_contract: [], output_contract: ["note"], required_skills: [] }] }],
     };
-    const res = await runGig(std, {}, { outputs, ledger, invoke: () => ({ t: "hi" }) });
+    const res = await runGig(std, {}, { outputs, ledger, invoke: () => ({ t: "hi", ...SIGNAL }) });
     expect(res.status).toBe("complete");
   });
 
@@ -463,7 +506,7 @@ describe("#245 — a chair whose agent declares inputs must actually receive the
       agents: [testAgent({ slug: "seeded", primitives: ["INTERPRET"], input_types: ["note"], output_types: ["read"], domain: "demo" })],
       phases: [{ name: "p", chairs: [{ role: "r", agent_slug: "seeded", depends_on: [], input_contract: [], output_contract: ["read"], required_skills: [] }] }],
     } as unknown as Standard;
-    const res = await runGig(std, { note: { t: "seeded from the gig payload" } }, { outputs, ledger, invoke: () => ({ summary: "read it" }) });
+    const res = await runGig(std, { note: { t: "seeded from the gig payload", ...SIGNAL } }, { outputs, ledger, invoke: () => ({ summary: "read it", ...CLAIMS }) });
     expect(res.status).toBe("complete");
   });
 });
@@ -485,7 +528,7 @@ describe("#246 — an unresolvable eval slug is not a failing eval", () => {
 
   it("a dangling slug is reported as unresolved, distinct from a 0.0 score", async () => {
     const { outputs, ledger } = store([readType]);
-    const res = await runGig(std(["summry-presnt"]), {}, { outputs, ledger, invoke: () => ({ summary: "ok" }), evals });
+    const res = await runGig(std(["summry-presnt"]), {}, { outputs, ledger, invoke: () => ({ summary: "ok", ...CLAIMS }), evals });
     // THE DEFECT: eval_scores = {"summry-presnt": 0} — byte-identical to a real eval that ran
     // and failed. Nothing distinguishes a typo from a judgement.
     expect(
@@ -497,7 +540,7 @@ describe("#246 — an unresolvable eval slug is not a failing eval", () => {
   it("a genuine 0.0 and a dangling slug do not produce the same run_fingerprint", async () => {
     const { outputs, ledger } = store([readType]);
     const dangling = std(["summry-presnt"]);
-    const res = await runGig(dangling, {}, { outputs, ledger, invoke: () => ({ summary: "ok" }), evals });
+    const res = await runGig(dangling, {}, { outputs, ledger, invoke: () => ({ summary: "ok", ...CLAIMS }), evals });
 
     // Reconstruct the fingerprint the runtime WOULD produce if "summry-presnt" had been a real
     // eval that ran and scored 0.0. Today the two are identical — the typo is baked into the
@@ -520,12 +563,12 @@ describe("#246 — an unresolvable eval slug is not a failing eval", () => {
 
   it("a resolvable eval still scores normally and reports nothing unresolved", async () => {
     const { outputs, ledger } = store([readType]);
-    const pass = await runGig(std(["summary-present"]), {}, { outputs, ledger, invoke: () => ({ summary: "ok" }), evals });
+    const pass = await runGig(std(["summary-present"]), {}, { outputs, ledger, invoke: () => ({ summary: "ok", ...CLAIMS }), evals });
     expect(pass.eval_scores["summary-present"]).toBe(1.0);
     expect((pass as unknown as Record<string, unknown>)["unresolved_evals"]).toBeUndefined();
 
     const { outputs: o2, ledger: l2 } = store([readType]);
-    const fail = await runGig(std(["summary-present"]), {}, { outputs: o2, ledger: l2, invoke: () => ({ summary: "" }), evals });
+    const fail = await runGig(std(["summary-present"]), {}, { outputs: o2, ledger: l2, invoke: () => ({ summary: "", ...CLAIMS }), evals });
     expect(fail.eval_scores["summary-present"]).toBe(0.0);
     expect((fail as unknown as Record<string, unknown>)["unresolved_evals"]).toBeUndefined();
   });

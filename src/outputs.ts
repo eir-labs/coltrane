@@ -308,6 +308,49 @@ export function createOutputStore(registry: Registry, options?: OutputStoreOptio
 
   return {
     write(o) {
+      // #263 — the asserted core must agree with the registry's answer.
+      //
+      // #227/#228 made `core_type` load-bearing: it selects which substance floor is
+      // enforced. So a caller asserting the wrong core does not merely mislabel the record —
+      // it gets the WRONG core's floor applied, and can satisfy `Verdict.checks[]` while
+      // sealing something the registry says is an Interpretation that owed `claims[]`.
+      //
+      // ORDER: this runs FIRST, ahead of the schema validation below, and that placement is
+      // load-bearing in a way the first draft of this fix got wrong. The agreement check is
+      // pure METADATA — it compares two declarations and never looks at the payload — so it
+      // does not need the schema to have passed. Running it second meant that for a CLOSED
+      // schema (the default, and what every shipped domain type uses) a payload carrying the
+      // wrong core's substance field died on Ajv first, telling the operator to delete
+      // `checks` when the actual repair is to fix the declared core. The diagnosis for a
+      // contradicted core has to come from the check that understands cores.
+      //
+      // Unresolvable slugs still fall through untouched: an unregistered domain_type is the
+      // registry's `unknown domain_type` rejection below, and this must not become a second,
+      // competing owner of that error.
+      if (o.domain_type) {
+        const registered = resolveCoreType(o.domain_type);
+        if (registered !== null && registered !== o.core_type) {
+          throw new OutputStoreError(
+            `output rejected: ${o.domain_type} was sealed as core_type "${o.core_type}" but the ` +
+              `registry defines it as "${registered}" — one of the two is wrong, and the core ` +
+              `decides which substance invariant applies`,
+          );
+        }
+      }
+      // #263 follow-on — a `core_type` that is not a core type at all.
+      //
+      // The check above only fires when a domain_type RESOLVES. With no domain_type (the
+      // freeform path, Rob #133) any string sailed through: `core_type: "Nonsense"` sealed,
+      // and so did `core_type: ""`. `validateOutput` returns valid for an unrecognised core,
+      // so those records carried NO substance floor whatsoever — the purest form of the very
+      // defect #263 describes, reachable without a registry entry at all.
+      if (!(CORE_TYPES as readonly string[]).includes(o.core_type)) {
+        throw new OutputStoreError(
+          `output rejected: "${o.core_type}" is not a core type — expected one of ` +
+            `[${CORE_TYPES.join(", ")}]. The core selects which substance invariant applies, ` +
+            `so an unrecognised one silently means "no floor at all".`,
+        );
+      }
       // T2/T3: reject bad-schema output AT WRITE by wiring the registry validator.
       const result = registry.validate({
         core_type: o.core_type,
@@ -318,27 +361,6 @@ export function createOutputStore(registry: Registry, options?: OutputStoreOptio
         throw new OutputStoreError(
           `output rejected: ${o.domain_type} failed schema validation — ${result.errors.join("; ")}`,
         );
-      }
-      // #263 — the asserted core must agree with the registry's answer, and this has to be
-      // settled BEFORE validateOutput runs. #227/#228 made `core_type` load-bearing: it
-      // selects which substance floor is enforced. So a caller asserting the wrong core does
-      // not merely mislabel the record — it gets the WRONG core's floor applied, and can
-      // satisfy `Verdict.checks[]` while sealing something the registry says is an
-      // Interpretation that owed `claims[]`. Checking after would mean judging the payload
-      // against a floor we already know is the wrong one.
-      //
-      // Unresolvable slugs are left alone: an unregistered domain_type is already the
-      // registry's rejection above (`unknown domain_type`), and this check must not become a
-      // second, competing owner of that error.
-      if (o.domain_type) {
-        const registered = resolveCoreType(o.domain_type);
-        if (registered !== null && registered !== o.core_type) {
-          throw new OutputStoreError(
-            `output rejected: ${o.domain_type} was sealed as core_type "${o.core_type}" but the ` +
-              `registry defines it as "${registered}" — one of the two is wrong, and the core ` +
-              `decides which substance invariant applies`,
-          );
-        }
       }
       // #227/#228 — the CORE-type invariant, checked on every write regardless of whether
       // a domain schema applied. registry.validate above returns {valid:true} without

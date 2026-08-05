@@ -56,7 +56,13 @@ describe("#263 — a record's core_type must agree with its domain_type's extend
     ).toThrow(OutputStoreError);
   });
 
-  it("the rejection names the type and both cores, so the author can see which is wrong", () => {
+  // The message has to say WHICH core came from where. An earlier version of this test
+  // asserted only that all three names appeared somewhere in the string — set membership,
+  // not role — and a mutation that SWAPPED the two interpolations (so the message claimed
+  // the record was sealed as Interpretation and the registry says Verdict, the exact
+  // opposite of the truth) left it green. An error that confidently states the inverse of
+  // what happened is worse than no error. Anchor each name to its role.
+  it("the rejection says which core was ASSERTED and which the registry defines", () => {
     const s = store();
     let msg = "";
     try {
@@ -65,8 +71,8 @@ describe("#263 — a record's core_type must agree with its domain_type's extend
       msg = (e as Error).message;
     }
     expect(msg).toMatch(/soft-verdict/);
-    expect(msg).toMatch(/Verdict/);
-    expect(msg).toMatch(/Interpretation/);
+    expect(msg, "the ASSERTED core, attributed to the caller").toMatch(/sealed as core_type "Verdict"/);
+    expect(msg, "the REGISTERED core, attributed to the registry").toMatch(/registry defines it as "Interpretation"/);
   });
 
   // Positive control — the check must not reject a correct record. Without this,
@@ -86,11 +92,52 @@ describe("#263 — a record's core_type must agree with its domain_type's extend
     expect(rec.core_type).toBe("Interpretation");
   });
 
-  // A bare core asserts nothing to contradict, and its floor is already enforced.
-  it("leaves a bare core type alone", () => {
+  it("a bare core that MATCHES the asserted core still seals", () => {
     const s = store();
     const rec = s.write({ ...base, core_type: "Interpretation", domain_type: "Interpretation", data: { note: "x", ...CLAIMS } });
     expect(rec.core_type).toBe("Interpretation");
+  });
+
+  // The matching case above is indistinguishable from the check being skipped entirely for
+  // bare cores — a mutation that excluded them passed the whole suite. This is the case that
+  // actually pins the behaviour. `domain_type: "Interpretation"` with `core_type: "Verdict"`
+  // is the same contradiction as the headline case with the subtype spelled out longhand,
+  // and it gets the same answer.
+  it("rejects a bare core that CONTRADICTS the asserted core", () => {
+    const s = store();
+    expect(() =>
+      s.write({ ...base, core_type: "Verdict", domain_type: "Interpretation", data: { note: "x", ...CHECKS } }),
+    ).toThrow(OutputStoreError);
+  });
+
+  // #263's own thesis is that the core is caller-asserted and never verified. With no
+  // domain_type there is nothing to disagree WITH, so the agreement check cannot fire — and
+  // an unrecognised core means `validateOutput` applies NO floor at all. That is the defect
+  // in its purest form, reachable with no registry entry whatsoever.
+  it("rejects a core_type that is not a core type at all", () => {
+    const s = store();
+    expect(() => s.write({ ...base, core_type: "Nonsense", domain_type: "", data: { note: "x" } })).toThrow(
+      OutputStoreError,
+    );
+    expect(() => s.write({ ...base, core_type: "", domain_type: "", data: { note: "x" } })).toThrow(OutputStoreError);
+  });
+
+  // A contradicted core must be diagnosed BY the core check, even when the schema would
+  // also have something to say. Every shipped domain type has a closed schema, so the stray
+  // substance field trips Ajv's additionalProperties too — and being told to delete `checks`
+  // sends the operator to repair the payload when the real fault is the declared core.
+  it("diagnoses a contradicted core ahead of the closed-schema complaint about the same field", () => {
+    const reg = createRegistry();
+    reg.registerType({ ...softVerdict, slug: "closed-verdict", schema: { properties: { title: { type: "string" } } } });
+    const s = createOutputStore(reg);
+    let msg = "";
+    try {
+      s.write({ ...base, core_type: "Verdict", domain_type: "closed-verdict", data: { title: "x", ...CHECKS } });
+    } catch (e) {
+      msg = (e as Error).message;
+    }
+    expect(msg, "the core check owns this diagnosis, not additionalProperties").toMatch(/registry defines it as/);
+    expect(msg).not.toMatch(/additionalProperties/);
   });
 
   // Not the agreement check's job, and pinned here so a future "resolve, and

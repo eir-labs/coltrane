@@ -77,7 +77,10 @@ export const MCP_TOOLS: readonly MCPToolDef[] = [
   // 1.0 is a fabricated measurement presented as a measurement. The `*_basis` strings say why.
   // `cost_usd` is real settled spend off the gig rows (#195), not an output count.
   { slug: "health_check",                  category: "improve", input_schema: obj({ entity_type: "string", kind: "string", slug: "string", window: "string" }), output_schema: obj({ entity: "string", kind: "string", output_count: "number", execution_count: "number", usage: "number", success_rate: nullable("number"), success_rate_basis: "string", cost: "number", cost_usd: "number", cost_basis: "string", trend: nullable("string"), trend_basis: "string", recommendations: "array" }) },
-  { slug: "system_health",                 category: "improve", input_schema: obj({ window: "string" }), output_schema: obj({ gigs_run: "number", cost: "number", type_stats: "object", agent_stats: "object", tool_stats: "object", bottlenecks: "array", budget: "object", load_errors: "array" }) },
+  // #255 — the integrity fields are ADVERTISED, not just returned. This tool's whole purpose
+  // is that an operator can ask whether the system is healthy; a damage report they cannot
+  // discover from the schema is only marginally better than one that is never computed.
+  { slug: "system_health",                 category: "improve", input_schema: obj({ window: "string" }), output_schema: obj({ gigs_run: "number", cost: "number", type_stats: "object", agent_stats: "object", tool_stats: "object", bottlenecks: "array", budget: "object", load_errors: "array", ledger_integrity: "object", outputs_integrity: "object", counts_complete: "boolean", counts_complete_basis: "string" }) },
   // genome_reload — Rob #130. Re-reads agents/standards/types/skills/evals from
   // disk and updates the live deps in place (no MCP server restart needed).
   // Returns the diff vs the prior state, plus any load_errors from the new genome.

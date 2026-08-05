@@ -813,17 +813,37 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         // #216 — GIG rows, not every row. `count()` used to be the raw row total, so every
         // agent_define, promotion, proposal, review, tool_register and abort inflated the
         // reported gig count AND the derived cost AND the reported budget spend.
-        const gigs_run = deps.ledger.count({ kind: "gig" });
+        // ONE read, two derivations. These were a `count()` and a separate `query()`, each a
+        // full file read for FileLedger — so an append landing between them made `gigs_run`
+        // and `cost` describe different ledgers IN THE SAME RESPONSE. `read()`'s own docstring
+        // promises "a single read pass shared by query / count / integrity, so the three can
+        // never disagree"; the call site was undoing that.
+        const gigRows = deps.ledger.query({ kind: "gig" });
+        const gigs_run = gigRows.length;
         // Settled spend where we have it (#195) — a real number now that gig rows are
         // separable, instead of a row-count proxy standing in for dollars.
-        const cost = deps.ledger.query({ kind: "gig" })
-          .reduce((sum, e) => sum + (e.kind === "gig" ? e.usage?.total_cost_usd ?? 0 : 0), 0);
+        const cost = gigRows.reduce((sum, e) => sum + (e.kind === "gig" ? e.usage?.total_cost_usd ?? 0 : 0), 0);
         // #255 — both audit surfaces compute an honest damage report and nothing ever asked
         // for it: `integrity` had ZERO call sites in this file. `load_errors` below is the
         // precedent — a soft-failure channel surfaced here because CLAUDE.md sends operators
         // to system_health first. Corruption belongs in the same place and reads as loudly.
         const ledger_integrity = deps.ledger.integrity();
         const outputs_integrity = deps.outputs.integrity();
+        // What we can actually justify saying about the totals below. `countsShort` is only
+        // ever set from damage we FOUND; nothing here infers completeness from its absence.
+        const countsShort = !ledger_integrity.ok || !outputs_integrity.ok;
+        const damaged = [
+          ...(ledger_integrity.ok ? [] : [`ledger (${ledger_integrity.corrupt.length} unreadable line(s))`]),
+          ...(outputs_integrity.ok ? [] : [`output store (${outputs_integrity.corrupt.length} unreadable line(s))`]),
+        ];
+        const countsBasis = countsShort
+          ? `counts are SHORT: ${damaged.join(" and ")} — every total below is computed over the rows that parsed. ` +
+            `Note the output store's report also covers the refs graph, which feeds only \`refs\`; if the damage is ` +
+            `confined there the other totals may in fact be whole.`
+          : `no unreadable line was found (ledger: ${ledger_integrity.entries} entries; output store: ` +
+            `${outputs_integrity.scanned} file(s) scanned). That is NOT proof the counts are complete — a jsonl ` +
+            `truncated at a line boundary loses whole rows without leaving a parse error, and an in-memory ledger ` +
+            `or a store with no persistDir has nothing to scan at all.`;
         const outs = deps.outputs.all();
         const type_stats: Record<string, number> = {};
         const agent_stats: Record<string, number> = {};
@@ -843,12 +863,27 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
             ledger_integrity,
             outputs_integrity,
             // gigs_run / cost / outputs / type_stats / agent_stats are all computed over the
-            // rows that PARSED. With a corrupt line present those totals are SHORT, and a
-            // short total presented as a whole one is a fabricated measurement — the same
-            // finding as #238 and #248. Say so rather than letting the number speak for
-            // itself: a number that is wrong but looks right is worse than a missing one,
-            // because the missing one gets investigated.
-            counts_complete: ledger_integrity.ok && outputs_integrity.ok,
+            // rows that PARSED, so a corrupt line makes every one of them SHORT.
+            //
+            // ROUND 2 — this is `false` or `null` and NEVER `true`, deliberately.
+            //
+            // The first version was `ledger_integrity.ok && outputs_integrity.ok`, which
+            // claimed completeness from the absence of a parse error. That does not follow.
+            // A jsonl truncated at a LINE BOUNDARY — the likeliest way an append-only file
+            // gets damaged, and what an interrupted write usually leaves — loses whole rows
+            // without leaving anything unparseable behind. Both reports come back clean and
+            // the counts are still short. Worse, the predicate was structurally constant in
+            // real deployments: `MemoryLedger.integrity()` is unconditionally ok, and a store
+            // with no persistDir has nothing to scan, so a server wired that way could never
+            // report anything but `true`.
+            //
+            // That is precisely the #238 pattern this surface exists to oppose — a hardcoded
+            // affirmative dressed as a measurement. Corruption we FOUND is provable;
+            // completeness is not. So the field states only what can be known, and the basis
+            // says why, following #238's own remedy: a labelled null is an answer, a
+            // fabricated attestation is not.
+            counts_complete: countsShort ? false : null,
+            counts_complete_basis: countsBasis,
             // genome extension — per-slug layer provenance, queryable at runtime (e.g.
             // a consumer checking "is this player coming from where I expect" before composing)
             provenance: deps.provenance ? Object.fromEntries(deps.provenance) : {},

@@ -249,15 +249,56 @@ export function createOutputStore(registry: Registry, options?: OutputStoreOptio
   const hydratedGigs = new Set<string>();
   let fullyHydrated = false;
 
-  // #248 — corruption accumulated across every hydrate. Keyed by file so the defensive
+  // #248 — corruption accumulated across every hydrate, keyed by file so the defensive
   // orphan-refs re-read in hydrateAll can't double-report the same damaged line.
-  const scannedFiles = new Set<string>();
-  const corruption: OutputStoreCorruption[] = [];
+  //
+  // #255 — keyed by file AND BY ITS BYTES. A bare "already scanned" set answered the wrong
+  // question: it recorded that we once looked, not that what we saw is still what is there.
+  // Two things then slipped past it — a file this process WROTE (write() marks the gig
+  // hydrated, so it is never read back) and any damage that landed after the first read.
+  // Recording (size, mtime) alongside the corruption found lets `integrity()` re-read exactly
+  // the files whose bytes moved and stat the rest, which is what makes a fresh damage report
+  // affordable enough to compute on demand.
+  //
+  // Caveat, stated rather than hidden: two writes in the same millisecond that leave the size
+  // unchanged are indistinguishable here. For an append-only jsonl the size effectively always
+  // moves, so this is a narrow gap, not a general one.
+  interface FileScan { size: number; mtimeMs: number; corrupt: OutputStoreCorruption[] }
+  const fileScans = new Map<string, FileScan>();
+
+  const unmoved = (file: string, st: fs.Stats): FileScan | undefined => {
+    const prev = fileScans.get(file);
+    return prev && prev.size === st.size && prev.mtimeMs === st.mtimeMs ? prev : undefined;
+  };
+
+  /**
+   * Bring the damage record for one file up to date, WITHOUT parsing out its rows.
+   *
+   * This is the whole reason `integrity()` can afford to be honest. A file whose bytes have
+   * not moved keeps its recorded verdict for the price of a `stat`; only a file that changed
+   * — or one we have never actually read, which is precisely the file this process wrote —
+   * costs a read.
+   */
+  function ensureScan(file: string): FileScan | undefined {
+    if (!fs.existsSync(file)) return undefined;
+    const st = fs.statSync(file);
+    const cached = unmoved(file, st);
+    if (cached) return cached;
+    const corrupt: OutputStoreCorruption[] = [];
+    readJsonl<unknown>(file, corrupt);
+    const scan: FileScan = { size: st.size, mtimeMs: st.mtimeMs, corrupt };
+    fileScans.set(file, scan);
+    return scan;
+  }
+
   function readRows<T>(file: string): T[] {
     if (!fs.existsSync(file)) return [];
-    if (scannedFiles.has(file)) return readJsonl<T>(file, []); // already accounted for
-    scannedFiles.add(file);
-    return readJsonl<T>(file, corruption);
+    const st = fs.statSync(file);
+    if (unmoved(file, st)) return readJsonl<T>(file, []); // damage already recorded for these bytes
+    const corrupt: OutputStoreCorruption[] = [];
+    const rows = readJsonl<T>(file, corrupt);
+    fileScans.set(file, { size: st.size, mtimeMs: st.mtimeMs, corrupt });
+    return rows;
   }
 
   function asStr(v: unknown): string | undefined {
@@ -542,10 +583,49 @@ export function createOutputStore(registry: Registry, options?: OutputStoreOptio
     },
 
     integrity() {
-      // Force the full scan first — an integrity report over a partially-hydrated store
-      // would itself be the "shorter chain reported as the whole chain" failure (#248).
+      // Force the full hydrate first, so reads stay consistent with what we are about to
+      // report — an integrity report over a partially-hydrated store would itself be the
+      // "shorter chain reported as the whole chain" failure (#248).
       hydrateAll();
-      return { ok: corruption.length === 0, scanned: scannedFiles.size, corrupt: [...corruption] };
+
+      // #255 round 2 — then RE-SCAN FROM DISK, every call, ignoring every hydration memo.
+      //
+      // Reporting `corruption` / `scannedFiles` was answering a different question than the
+      // one asked. Those accumulate as a side effect of READS, and two memos suppress them
+      // in exactly the cases that matter:
+      //
+      //   • `write()` adds the gig to `hydratedGigs`, so a file this process WROTE is never
+      //     read back. In production the MCP server is long-lived with a persistDir, so every
+      //     gig a process ran was exempt from the corruption scan for that process's life —
+      //     precisely the torn-append-from-a-crash case #248 exists to catch. The old code
+      //     answered `{ok:true, scanned:0}` for a directory full of its own output.
+      //   • `hydrateAll` short-circuits on `fullyHydrated`, so the SECOND system_health
+      //     re-asserted the first one's answer no matter what had happened on disk since.
+      //     CLAUDE.md tells operators to run system_health first thing in a session, which
+      //     pins that snapshot at the earliest possible moment.
+      //
+      // A damage report has to describe the bytes now, not the bytes we happened to have
+      // cached. `scanFile` re-reads a file whose (size, mtime) has moved since we last looked
+      // and stats the rest, so this is a fresh answer without being a blind full re-read.
+      //
+      // That distinction is load-bearing, not an optimisation. `system_health` is the first
+      // thing CLAUDE.md tells an operator to run, and it goes through the MCP relay — which
+      // has a known handoff race after `server_restart` (#170). Measured against the real
+      // outputs dir (4,595 files / 5.6 MB), an unconditional re-read added ~110 ms to every
+      // call and made that race fire in 1 run of 4 where clean main passed 6 of 6. A guard
+      // that destabilises the transport it reports through is not a guard worth having.
+      const corrupt: OutputStoreCorruption[] = [];
+      let scanned = 0;
+      for (const dir of [outputsDir, refsDir]) {
+        if (!dir) continue;
+        for (const file of listJsonl(dir)) {
+          const scan = ensureScan(file);
+          if (!scan) continue;
+          scanned++;
+          corrupt.push(...scan.corrupt);
+        }
+      }
+      return { ok: corrupt.length === 0, scanned, corrupt };
     },
   };
 }

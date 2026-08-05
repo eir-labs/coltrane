@@ -20,7 +20,7 @@
 // on `system_health`, which CLAUDE.md tells operators to run first thing in a session.
 // Corruption belongs in exactly that spot and should read exactly as loudly.
 import { describe, it, expect } from "vitest";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, appendFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { FileLedger, MemoryLedger, type Ledger } from "../src/ledger.js";
@@ -93,33 +93,107 @@ describe("#255 — ledger corruption reaches the operator", () => {
       const path = join(dir, "ledger.jsonl");
       seedWithTornTail(path, 3);
       const r = await dispatchTool("system_health", {}, deps(new FileLedger(path)));
-      const d = r.data as { gigs_run: number; counts_complete?: boolean };
+      const d = r.data as { gigs_run: number; counts_complete?: boolean | null; counts_complete_basis?: string };
       expect(d.gigs_run, "three rows survived the torn tail").toBe(3);
       expect(
         d.counts_complete,
         "gigs_run/cost are computed over the rows that PARSED. With a corrupt line present " +
           "the total is short, and an unmarked short total is a fabricated measurement.",
       ).toBe(false);
+      expect(d.counts_complete_basis, "say WHICH surface is damaged, not just that something is").toMatch(/ledger/);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
   });
 
   // Positive control — a healthy system must not cry wolf, or operators learn to ignore it.
-  it("an intact ledger reports ok with no corruption and complete counts", async () => {
+  it("an intact ledger reports ok with no corruption, and does NOT claim the counts are whole", async () => {
     const dir = freshDir();
     try {
       const path = join(dir, "ledger.jsonl");
       writeFileSync(path, [gigLine("g1"), gigLine("g2")].join("\n") + "\n", "utf8");
       const r = await dispatchTool("system_health", {}, deps(new FileLedger(path)));
       const d = r.data as {
-        gigs_run: number; counts_complete?: boolean;
+        gigs_run: number; counts_complete?: boolean | null; counts_complete_basis?: string;
         ledger_integrity?: { ok: boolean; corrupt: unknown[] };
       };
       expect(d.ledger_integrity!.ok).toBe(true);
       expect(d.ledger_integrity!.corrupt).toEqual([]);
-      expect(d.counts_complete).toBe(true);
       expect(d.gigs_run).toBe(2);
+      // The heart of the round-2 correction. `true` here would be inferring completeness from
+      // the absence of a parse error, which does not follow — see the next test.
+      expect(
+        d.counts_complete,
+        "no corruption found is not proof nothing is missing; a labelled null is the answer",
+      ).toBeNull();
+      expect(d.counts_complete_basis).toMatch(/NOT proof/i);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  // The case that makes `counts_complete: true` indefensible, and the reason it can never be
+  // returned. Truncating at a LINE BOUNDARY is the likeliest way an append-only file gets
+  // damaged — an interrupted write, a truncated copy — and it destroys whole rows while
+  // leaving every surviving line perfectly parseable.
+  it("a ledger truncated at a line boundary loses rows while reporting no corruption", async () => {
+    const dir = freshDir();
+    try {
+      const path = join(dir, "ledger.jsonl");
+      writeFileSync(path, [gigLine("g1"), gigLine("g2"), gigLine("g3")].join("\n") + "\n", "utf8");
+      // Keep only the first row, cut cleanly after its newline.
+      writeFileSync(path, gigLine("g1") + "\n", "utf8");
+      const r = await dispatchTool("system_health", {}, deps(new FileLedger(path)));
+      const d = r.data as { gigs_run: number; counts_complete?: boolean | null };
+      expect(d.gigs_run, "two rows are simply gone").toBe(1);
+      expect(
+        d.counts_complete,
+        "nothing detectable is wrong, and the count is still short. This is exactly why the " +
+          "field must never say `true` — it would be the #238 fabricated attestation again.",
+      ).toBeNull();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  // #248's whole scenario is a torn append — which means the file the RUNNING process just
+  // wrote. `write()` marks that gig hydrated, so the store never read it back and reported
+  // `{ok:true, scanned:0}` for a directory full of its own output.
+  it("scans files this process itself wrote, not just ones it hydrated for reading", async () => {
+    const dir = freshDir();
+    try {
+      const registry = createRegistry();
+      registry.registerType(note);
+      const store = createOutputStore(registry, { persistDir: dir });
+      store.write({
+        core_type: "Signal", domain_type: "note", domain: "demo", gig_id: "g1",
+        agent_slug: "a", primitive: "SENSE", data: { t: "x", source: "fixture://demo" },
+      });
+      // A torn append lands after ours — the crash residue #248 is about.
+      appendFileSync(join(dir, "outputs", "g1.jsonl"), '{"id":"o2","gig_id":"g1"\n', "utf8");
+      const report = store.integrity();
+      expect(report.ok, "the store must read the file it just wrote").toBe(false);
+      expect(report.scanned, "scanned:0 over a populated dir is a report about nothing").toBeGreaterThan(0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  // CLAUDE.md sends operators to system_health FIRST, which pins the snapshot at the earliest
+  // possible moment. Memoizing meant every later call re-asserted that t=0 answer.
+  it("re-scans on every call rather than repeating its first answer", async () => {
+    const dir = freshDir();
+    try {
+      const registry = createRegistry();
+      registry.registerType(note);
+      const store = createOutputStore(registry, { persistDir: dir });
+      store.write({
+        core_type: "Signal", domain_type: "note", domain: "demo", gig_id: "g1",
+        agent_slug: "a", primitive: "SENSE", data: { t: "x", source: "fixture://demo" },
+      });
+      expect(store.integrity().ok, "clean to begin with").toBe(true);
+      appendFileSync(join(dir, "outputs", "g1.jsonl"), "{not json\n", "utf8");
+      expect(store.integrity().ok, "damage that arrived after the first call must still be seen").toBe(false);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -130,7 +204,7 @@ describe("#255 — ledger corruption reaches the operator", () => {
     try {
       const outDir = join(dir, "outputs-root");
       const gigFile = join(outDir, "outputs", "g1.jsonl");
-      require("node:fs").mkdirSync(join(outDir, "outputs"), { recursive: true });
+      mkdirSync(join(outDir, "outputs"), { recursive: true });
       writeFileSync(gigFile, '{"id":"o1","gig_id":"g1"\n', "utf8"); // torn
       const r = await dispatchTool("system_health", {}, deps(new MemoryLedger(), outDir));
       const d = r.data as { outputs_integrity?: { ok: boolean; corrupt: unknown[] } };
@@ -177,5 +251,10 @@ describe("#255 — integrity() is reachable without narrowing", () => {
     const report = l.integrity();
     expect(report.ok).toBe(true);
     expect(report.corrupt).toEqual([]);
+    // Mutating either of these left the whole suite green. `path` in particular is argued for
+    // at length in the PR description and was asserted nowhere — and it lands in an MCP
+    // response, so a wrong value is something an operator reads.
+    expect(report.path, "there is no file; an empty string says so without naming a fake one").toBe("");
+    expect(report.entries, "in-memory rows are still entries this report covers").toBe(0);
   });
 });

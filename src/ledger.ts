@@ -479,6 +479,10 @@ export class MemoryLedger implements Ledger {
     this.append = this.append.bind(this);
     this.query = this.query.bind(this) as typeof this.query;
     this.count = this.count.bind(this);
+    // #255 — bound like its siblings. The class comment promises BOTH implementations expose
+    // bound methods so a detached `const { integrity } = ledger` cannot throw; FileLedger
+    // binds it and this did not, so destructuring it here died on `this.entries`.
+    this.integrity = this.integrity.bind(this);
   }
 
   append(entry: LedgerEntry): void {

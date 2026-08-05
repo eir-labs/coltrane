@@ -29,6 +29,7 @@ import {
   runGig,
   type AgentInvocationContext,
   type AgentInvoker,
+  type GigProgressEvent,
 } from "../../src/index.js";
 
 import { setupTempdirColtrane, type TempdirColtrane } from "./_harness.js";
@@ -37,9 +38,47 @@ const SKILL_SLUG = "summarize-tight";
 const SKILL_FINGERPRINT = "FIRE_SKILL_b3f1c1";
 const SKILL_MD = `${SKILL_FINGERPRINT}: Compose the gist in one tight clause. No filler.`;
 const SKILL_DOMAIN = "demo";
+const PHANTOM = "phantom-skill-that-does-not-exist";
+
+// FIXTURE REPAIR (landed with #241). This spec had rotted where nothing could see it:
+// `tests/e2e/` is executed by no npm script (#219), so two contract changes drifted past it —
+// agents gained REQUIRED behavioral fields (identity/method/constraints/behavioral_primitives),
+// and the flat `skills/<slug>.json` format was retired in favour of package DIRECTORIES. Every
+// assertion below threw `GenomeIncompleteError` before reaching its subject. Repaired rather
+// than skipped: an unrunnable spec proves nothing, and the rewrite below needs to be verifiable.
+const BEHAVIOR = {
+  identity: "a test agent in the skills-wiring band",
+  method: "do the one thing the phase asks for and return typed JSON",
+  constraints: [],
+  behavioral_primitives: ["analyst", "synthesizer"],
+};
+
+// Every sealed output carries its CORE's substance floor, enforced by outputs.write on every
+// write, subtype or not (#227 ruling): `raw-note` is Signal-cored and names where it was
+// acquired, `summary` is Interpretation-cored and states its claims. These stubs were never
+// valid instances of their own core — the seal path simply did not look, so every gig below
+// died at its first chair and none of the skill-wiring assertions were reached.
+const NOTE = (body: string): Record<string, unknown> => ({ body, source: "fixture://demo/sensor" });
+const SUMMARY = (gist: string): Record<string, unknown> => ({ gist, claims: [gist] });
 
 let env: TempdirColtrane;
 let genomeDir: string;
+
+/** Author `summarizer` with an explicit skill_slugs list. */
+function writeSummarizer(slugs: string[]): void {
+  writeFileSync(
+    join(genomeDir, "agents", "summarizer.json"),
+    JSON.stringify({
+      slug: "summarizer",
+      primitives: ["INTERPRET"],
+      input_types: ["raw-note"],
+      output_types: ["summary"],
+      domain: SKILL_DOMAIN,
+      skill_slugs: slugs,
+      ...BEHAVIOR,
+    }),
+  );
+}
 
 describe("skills_now_fire — the post-wire contract", () => {
   beforeAll(async () => {
@@ -85,19 +124,10 @@ describe("skills_now_fire — the post-wire contract", () => {
         input_types: [],
         output_types: ["raw-note"],
         domain: SKILL_DOMAIN,
+        ...BEHAVIOR,
       }),
     );
-    writeFileSync(
-      join(genomeDir, "agents", "summarizer.json"),
-      JSON.stringify({
-        slug: "summarizer",
-        primitives: ["INTERPRET"],
-        input_types: ["raw-note"],
-        output_types: ["summary"],
-        domain: SKILL_DOMAIN,
-        skill_slugs: [SKILL_SLUG],
-      }),
-    );
+    writeSummarizer([SKILL_SLUG]);
 
     writeFileSync(
       join(genomeDir, "standards", "summarize.json"),
@@ -112,10 +142,14 @@ describe("skills_now_fire — the post-wire contract", () => {
       }),
     );
 
-    writeFileSync(
-      join(genomeDir, "skills", `${SKILL_SLUG}.json`),
-      JSON.stringify({ slug: SKILL_SLUG, domain: SKILL_DOMAIN, md: SKILL_MD }),
-    );
+    // A skill PACKAGE directory — meta + a reasoning half + its pre-registered contract.
+    // (The flat `skills/<slug>.json` this spec used to write is silently ignored by the
+    // loader, which reads package dirs only: `g.skills` came back empty.)
+    const pkgDir = join(genomeDir, "skills", SKILL_SLUG);
+    mkdirSync(join(pkgDir, "fixtures"), { recursive: true });
+    writeFileSync(join(pkgDir, "meta.json"), JSON.stringify({ slug: SKILL_SLUG, version: 1, domain: SKILL_DOMAIN, permission: { tier: 0 } }));
+    writeFileSync(join(pkgDir, "skill.md"), SKILL_MD);
+    writeFileSync(join(pkgDir, "fixtures", "basic.json"), JSON.stringify({ id: "basic", input: {}, assertions: [] }));
   }, 600_000);
 
   afterAll(() => {
@@ -140,8 +174,8 @@ describe("skills_now_fire — the post-wire contract", () => {
     const seen: AgentInvocationContext[] = [];
     const invoker: AgentInvoker = (ctx) => {
       seen.push(ctx);
-      if (ctx.agent.slug === "sensor") return { body: "raw input" };
-      if (ctx.agent.slug === "summarizer") return { gist: "tight" };
+      if (ctx.agent.slug === "sensor") return NOTE("raw input");
+      if (ctx.agent.slug === "summarizer") return SUMMARY("tight");
       throw new Error(`unexpected agent ${ctx.agent.slug}`);
     };
 
@@ -158,55 +192,113 @@ describe("skills_now_fire — the post-wire contract", () => {
     expect(sensorCtx.skills).toEqual([]);
   });
 
-  it("(1) runtime: unknown skill_slugs are silently dropped (honest no-op, not a gig-kill)", async () => {
-    // Re-author summarizer with a phantom slug appended so we can prove the
-    // runtime resolves only what exists. This is the kill-condition for the
-    // failure-mode where a typo in a genome file crashes the whole gig.
-    writeFileSync(
-      join(genomeDir, "agents", "summarizer.json"),
-      JSON.stringify({
-        slug: "summarizer",
-        primitives: ["INTERPRET"],
-        input_types: ["raw-note"],
-        output_types: ["summary"],
-        domain: SKILL_DOMAIN,
-        skill_slugs: [SKILL_SLUG, "phantom-skill-that-does-not-exist"],
-      }),
-    );
+  // ── CONSCIOUSLY REWRITTEN (#241) ───────────────────────────────────────────
+  // This test was titled "unknown skill_slugs are silently dropped (honest no-op, not a
+  // gig-kill)" and asserted the drop as CORRECT. Half of that is right and is kept: a
+  // dangling binding the chair did not declare REQUIRED must not kill the gig — a typo in a
+  // genome file crashing a whole run is a real failure mode and this spec still pins it shut.
+  //
+  // The other half was wrong. "Silent" was never the honest part, and the diagnostic surface
+  // the old comment claimed ("the resulting empty Skills layer in the prompt") did not exist:
+  // there is no empty Skills layer, ever. With ALL slugs dangling the prompt rendered
+  // `# Skills` / `## phantom-…` with zero content — telling the model, in its own prompt, that
+  // it holds a discipline that does not exist. With one dangling (the realistic case) the
+  // prompt was byte-identical to an agent that never declared it. And the old test asserted
+  // only on `ctx.skills`, never on the prompt, so it could not have caught either.
+  //
+  // The boundary this now pins: a skill package that LOADS is a legitimate degradation
+  // candidate (see tests/skill_graceful_degradation.test.ts, entirely green). A slug that
+  // resolves to NO PACKAGE has nothing to degrade — not fatal here, but never invisible.
+  it("(1) runtime: an unknown skill_slug is NOT a gig-kill, but it is never silent either", async () => {
+    writeSummarizer([SKILL_SLUG, PHANTOM]);
 
     const g = loadGenome(genomeDir);
+
+    // (i) LOAD TIME — `load_errors: []` is the pass signal operators are instructed to trust.
+    // A binding to a skill that does not exist has to break it. Soft: the agent still loads.
+    const loadErr = g.load_errors.find((e) => e.slug === "summarizer" && e.error.includes(PHANTOM));
+    expect(loadErr, "a dangling skill binding must surface in load_errors").toBeDefined();
+    expect(loadErr!.kind).toBe("agent");
+    expect(g.agents.get("summarizer"), "…but softly — the agent still loads").toBeDefined();
+
     const standard = g.standards.get("summarize")!;
     const registry = loadRegistry(g);
     const outputs = createOutputStore(registry);
     const ledger = new MemoryLedger();
 
     const seen: AgentInvocationContext[] = [];
+    const events: GigProgressEvent[] = [];
     const invoker: AgentInvoker = (ctx) => {
       seen.push(ctx);
-      if (ctx.agent.slug === "sensor") return { body: "raw" };
-      return { gist: "ok" };
+      if (ctx.agent.slug === "sensor") return NOTE("raw");
+      return SUMMARY("ok");
     };
 
-    const res = await runGig(standard, {}, { outputs, ledger, invoke: invoker, skills: g.skills });
+    const res = await runGig(standard, {}, {
+      outputs, ledger, invoke: invoker, skills: g.skills, onProgress: (ev) => events.push(ev),
+    });
+
+    // (ii) NOT A GIG-KILL — the original contract, preserved verbatim in spirit.
     expect(res.status).toBe("complete");
 
     const sCtx = seen.find((c) => c.agent.slug === "summarizer")!;
-    // Only the known skill resolves; phantom drops.
     expect(sCtx.skills).toHaveLength(1);
     expect(sCtx.skills![0]!.slug).toBe(SKILL_SLUG);
 
-    // Restore the canonical authoring for the prompt assertion below.
+    // (iii) NOT SILENT — the drop reaches the invocation context and the progress channel.
+    expect(sCtx.missing_skills).toEqual([PHANTOM]);
+    expect(
+      events.find((e) => e.type === "skills_unresolved"),
+      "an unskilled run is otherwise identical to a skilled one — same genome_hash, run_fingerprint AND content_sha",
+    ).toMatchObject({ type: "skills_unresolved", agent: "summarizer", missing: [PHANTOM] });
+
+    // (iv) NEVER ASSERTED TO THE MODEL — the prompt names the resolved skill and not the ghost.
+    const prompt = buildPrompt(sCtx);
+    expect(prompt).toContain(SKILL_SLUG);
+    expect(prompt).toContain(SKILL_FINGERPRINT);
+    expect(prompt, "the prompt must not claim a discipline the agent does not hold").not.toContain(PHANTOM);
+
+    // Restore the canonical authoring for the prompt assertions below.
+    writeSummarizer([SKILL_SLUG]);
+  });
+
+  it("(1) runtime: a chair's REQUIRED skill that resolves to no package fails CLOSED (#242)", async () => {
+    // The other side of the same boundary. `required_skills` was validated exactly once, at
+    // compose time, as a string-subset check against the agent's own declaration — so a chair
+    // could declare a skill required, pass composition, and run unskilled. "Required" means
+    // required; there is no degradation tension in this direction at all.
+    writeSummarizer([SKILL_SLUG, PHANTOM]);
     writeFileSync(
-      join(genomeDir, "agents", "summarizer.json"),
+      join(genomeDir, "standards", "summarize-strict.json"),
       JSON.stringify({
-        slug: "summarizer",
-        primitives: ["INTERPRET"],
-        input_types: ["raw-note"],
-        output_types: ["summary"],
+        slug: "summarize-strict",
         domain: SKILL_DOMAIN,
-        skill_slugs: [SKILL_SLUG],
+        agent_slugs: ["sensor", "summarizer"],
+        phases: [
+          { name: "sense", chairs: [{ role: "sense", agent_slug: "sensor", depends_on: [], input_contract: [], output_contract: ["raw-note"], required_skills: [] }] },
+          { name: "interpret", chairs: [{ role: "interpret", agent_slug: "summarizer", depends_on: [], input_contract: [], output_contract: ["summary"], required_skills: [PHANTOM] }] },
+        ],
       }),
     );
+
+    const g = loadGenome(genomeDir);
+    const standard = g.standards.get("summarize-strict")!;
+    const registry = loadRegistry(g);
+
+    const fired: string[] = [];
+    const invoker: AgentInvoker = (ctx) => {
+      fired.push(ctx.agent.slug);
+      return ctx.agent.slug === "sensor" ? NOTE("raw") : SUMMARY("ok");
+    };
+
+    await expect(
+      runGig(standard, {}, { outputs: createOutputStore(registry), ledger: new MemoryLedger(), invoke: invoker, skills: g.skills }),
+    ).rejects.toThrow(new RegExp(PHANTOM));
+
+    expect(fired, "the sensor may run; the chair missing its REQUIRED skill must not").not.toContain("summarizer");
+
+    rmSync(join(genomeDir, "standards", "summarize-strict.json"), { force: true });
+    writeSummarizer([SKILL_SLUG]);
   });
 
   it("(2) invoker: buildPrompt renders the resolved skill content into the Layer-3 Skills section", () => {
@@ -258,9 +350,9 @@ describe("skills_now_fire — the post-wire contract", () => {
       // upstream-input rendering, which doesn't fire here for sensor).
       // We dispatch on whether the agent identified in Layer 2 is the sensor.
       if (prompt.includes('agent "sensor"')) {
-        return JSON.stringify({ body: "raw" });
+        return JSON.stringify(NOTE("raw"));
       }
-      return JSON.stringify({ gist: "ok" });
+      return JSON.stringify(SUMMARY("ok"));
     };
 
     const invoke = makeClaudeInvoker({ registry, run: runSpy });

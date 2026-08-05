@@ -124,9 +124,49 @@ const REQUIRED_CORE_SLUGS = new Set([
   "Verdict",
 ]);
 
+/**
+ * #241 — an `agent.skill_slugs` entry that resolves to NO skill package is a dangling
+ * reference. `loadGenome` never cross-referenced the two maps, so `load_errors` stayed `[]`
+ * — the pass signal operators are explicitly instructed to trust — while the agent ran
+ * without the discipline it claims to hold.
+ *
+ * SOFT by design: the agent still loads. A non-required dangling binding degrades the prompt,
+ * it does not invalidate the definition; the RUNTIME decides whether it kills a chair, via
+ * `Chair.required_skills`. This only has to break the silence.
+ *
+ * Runs as a POST-PASS, after BOTH maps exist — and again in `loadLayeredGenome` after the
+ * fold, because a base-layer agent may legitimately bind a skill a higher layer supplies.
+ */
+function danglingSkillBindingErrors(
+  agents: ReadonlyMap<string, Agent>,
+  skills: ReadonlyMap<string, unknown>,
+  pathOf: (agentSlug: string) => string,
+): LoadError[] {
+  const out: LoadError[] = [];
+  for (const [slug, agent] of agents) {
+    const missing = (agent.skill_slugs ?? []).filter((s) => !skills.has(s));
+    if (missing.length === 0) continue;
+    out.push({
+      kind: "agent",
+      path: pathOf(slug),
+      slug,
+      error:
+        `dangling skill binding: skill_slugs [${missing.join(", ")}] resolve to no skill package ` +
+        `(define the package under skills/<slug>/ or drop the binding — a bound skill with no package ` +
+        `contributes nothing to the prompt and is invisible in the sealed output)`,
+    });
+  }
+  return out;
+}
+
 export function loadGenome(
   root: string,
-  opts?: { inheritedAgents?: ReadonlyMap<string, Agent> },
+  opts?: {
+    inheritedAgents?: ReadonlyMap<string, Agent>;
+    /** Set by loadLayeredGenome: defer the dangling-skill-binding post-pass to after the
+     *  fold, so a base agent binding a skill the consumer layer supplies isn't false-flagged. */
+    deferSkillBindingCheck?: boolean;
+  },
 ): LoadedGenome {
   const load_errors: LoadError[] = [];
 
@@ -373,6 +413,13 @@ export function loadGenome(
     }
   }
 
+  // #241 — post-pass, now that BOTH the agents and skills maps exist.
+  if (!opts?.deferSkillBindingCheck) {
+    load_errors.push(
+      ...danglingSkillBindingErrors(agents, skills, (slug) => agent_paths.get(slug) ?? join(root, "agents")),
+    );
+  }
+
   return { core_types, domain_types, agents, standards, skills, evals, load_errors };
 }
 
@@ -408,7 +455,10 @@ export function loadLayeredGenome(roots: readonly string[]): LoadedGenome {
   for (const root of roots) {
     // Each layer loaded normally (core types seeded), with the agents accumulated
     // from lower layers passed in — so this layer's standards can compose them.
-    const layer = loadGenome(root, { inheritedAgents: agents });
+    // #241 — the skill-binding check is deferred to the post-fold pass below: a BASE agent
+    // may legitimately bind a skill a HIGHER layer supplies, so per-layer it would report a
+    // dangle that the resolved genome does not have.
+    const layer = loadGenome(root, { inheritedAgents: agents, deferSkillBindingCheck: true });
     core_types = layer.core_types; // immutable 6 — top layer's (all identical)
     fold(domain_types, layer.domain_types, root, "domain_type");
     fold(agents, layer.agents, root, "agent");
@@ -417,6 +467,14 @@ export function loadLayeredGenome(roots: readonly string[]): LoadedGenome {
     fold(evals, layer.evals, root, "eval");
     for (const e of layer.load_errors) load_errors.push(e);
   }
+
+  // #241 — the post-fold pass. Reported once, against the resolved genome, not once per layer.
+  load_errors.push(
+    ...danglingSkillBindingErrors(agents, skills, (slug) => {
+      const layerRoot = provenance.get(`agent:${slug}`);
+      return layerRoot ? join(layerRoot, "agents") : "";
+    }),
+  );
 
   return { core_types, domain_types, agents, standards, skills, evals, load_errors, provenance };
 }
@@ -468,14 +526,37 @@ export function genomeCascadeCheck(consumerRoot: string, fromBase: string, toBas
   };
 }
 
-function readGenomeManifest(root: string): readonly string[] {
+function readGenomeManifest(root: string, manifestErrors: LoadError[]): readonly string[] {
   const p = join(root, "genome.json");
   if (!existsSync(p)) return [];
+  let raw: string;
   try {
-    const data = JSON.parse(readFileSync(p, "utf-8")) as { extends?: unknown };
+    raw = readFileSync(p, "utf-8");
+  } catch (e) {
+    manifestErrors.push({
+      kind: "manifest", path: p, slug: null,
+      error: `cannot read genome manifest: ${e instanceof Error ? e.message : String(e)} (the declared base(s) are NOT loaded)`,
+    });
+    return [];
+  }
+  try {
+    const data = JSON.parse(raw) as { extends?: unknown };
     return Array.isArray(data.extends) ? data.extends.filter((e): e is string => typeof e === "string") : [];
-  } catch {
-    return []; // malformed manifest → treat as no base (don't crash the load)
+  } catch (e) {
+    // #247 — this used to `return []` silently, which UN-EXTENDS the genome: every inherited
+    // agent, standard, skill and type vanishes. The operator then gets a cascade of
+    // `references unknown agent "…"` errors pointing at files that are perfectly correct —
+    // the root cause destroyed and the symptom relocated. The manifest LoadError channel for
+    // exactly this class already existed (resolveExtendsEntry uses it for pin errors); this
+    // branch simply didn't use it. Still SOFT — one bad manifest is not a crash.
+    manifestErrors.push({
+      kind: "manifest", path: p, slug: null,
+      error:
+        `malformed genome manifest — ${e instanceof Error ? e.message : String(e)} ` +
+        `(the declared base(s) are NOT loaded; every inherited definition is missing until this file parses, ` +
+        `so treat any "references unknown …" errors below as downstream of this one)`,
+    });
+    return [];
   }
 }
 
@@ -489,7 +570,7 @@ function resolveExtendsChain(root: string): { roots: string[]; pinErrors: LoadEr
     if (done.has(real)) return;
     if (onStack.has(real)) throw new GenomeLoadError(`genome extends cycle detected at ${real}`);
     onStack.add(real);
-    for (const spec of readGenomeManifest(real)) {
+    for (const spec of readGenomeManifest(real, pinErrors)) {
       const resolved = resolveExtendsEntry(spec, real, pinErrors);
       if (resolved) visit(resolved);
     }

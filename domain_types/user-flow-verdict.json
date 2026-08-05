@@ -54,6 +54,7 @@
   },
   "required_fields": [
     "criteria",
-    "overall_pass"
+    "overall_pass",
+    "claims"
   ]
 }

@@ -18,6 +18,7 @@ const CORE_TO_PRIMITIVE: Record<string, Agent["primitives"][number]> = Object.fr
 import { sha256Hex, canonJson, runFingerprint, outputContentHash, CANONICAL_FORM_VERSION } from "./canonical_form.js";
 import type { OutputStore, OutputRecord } from "./outputs.js";
 import { LEDGER_SCHEMA_VERSION, type Ledger, type GigUsage } from "./ledger.js";
+import type { Depth } from "./pricing.js";
 import type { SkillRecord, EvalRecord } from "./loader.js";
 
 // What an agent invocation sees. The invoker returns the output `data` (validated
@@ -38,11 +39,26 @@ export interface AgentInvocationContext {
   // hand-rolled ctx) → the invoker falls back to the agent's full output_types.
   output_types?: readonly string[];
   skills?: readonly SkillRecord[];
+  // #241 — the skill slugs this agent DECLARES that resolved to no package at all. Present
+  // (possibly empty) whenever the runtime actually attempted resolution; ABSENT means no
+  // resolution was attempted (no skills map supplied), which is not the same claim. The
+  // Claude invoker reads it so the prompt never names a skill the agent does not hold.
+  missing_skills?: readonly string[];
   // Agent-layer observability: the invoker calls this for each event the child emits
   // (stream-json: tool_use, tool_result, assistant text, result). The runtime forwards
   // them to RunDeps.onProgress tagged with phase+role so a live monitor can show what a
   // chair's child is doing without hunting its session transcript by mtime.
   onEvent?: (ev: AgentStreamEvent) => void;
+  // #250 — level 2 of the cancellation chain: the gig's signal, handed to the invocation so
+  // the invoker can wire it to whatever it spawns. Without this the chair→child link has
+  // nowhere to attach and a live `claude` child can only be stopped by its 10-minute wall
+  // clock. Absent = an uncancellable invocation (unchanged legacy behaviour).
+  signal?: AbortSignal | undefined;
+  // #237 — the depth the GIG was dispatched at. Overrides the agent's static `depth_profile`
+  // for this run: `depth` was advertised on gig_dispatch and silently discarded, so the
+  // documented "skim first" cost practice had no mechanism behind it. Absent = the agent's
+  // own profile stands.
+  depth?: Depth | undefined;
 }
 
 // One parsed event from a chair's child process (a stream-json line). `type` is the
@@ -61,11 +77,30 @@ export interface AgentStreamEvent {
 export type GigProgressEvent =
   | { type: "phase_start"; phase: string; roles: string[] }
   | { type: "chair_start"; phase: string; role: string; producer: string }
-  | { type: "chair_complete"; phase: string; role: string; producer: string; output_types: string[]; duration_ms: number }
+  | {
+      type: "chair_complete"; phase: string; role: string; producer: string;
+      /** types actually SEALED */
+      output_types: string[];
+      duration_ms: number;
+      /** #243 — types the chair's output_contract PROMISED. Equal to output_types when the
+       *  chair delivered everything; the difference is what `missing_output_types` names. */
+      promised_output_types?: string[];
+      /** #243 — promised but not sealed. Legal (conditional outputs) but never silent. */
+      missing_output_types?: string[];
+      /** #240 — `*_sha` fields the engine could not tie to any consumed input or the gig
+       *  payload. Sealed as "" rather than guessed; listed here so the gap is visible. */
+      unresolved_sha_fields?: string[];
+    }
   | { type: "chair_failed"; phase: string; role: string; error: string }
+  // #241 — one or more of the agent's declared skill_slugs resolved to no package. Not fatal
+  // (the chair did not declare them REQUIRED), but never silent again: an unskilled run used
+  // to be cryptographically identical to a skilled one — same genome_hash, run_fingerprint
+  // AND content_sha — so this channel is the only place the difference is observable live.
+  | { type: "skills_unresolved"; phase: string; role: string; agent: string; missing: string[] }
   | { type: "agent_event"; phase: string; role: string; event: AgentStreamEvent }
   | { type: "gig_complete"; outputs: number }
-  | { type: "gig_failed"; error: string };
+  | { type: "gig_failed"; error: string }
+  | { type: "gig_aborted"; reason: string };
 
 // The one non-deterministic seam. Inject a deterministic fn in tests; the real
 // Claude subprocess call in the stdio entry. The runtime around it is deterministic.
@@ -118,10 +153,20 @@ export interface RunDeps {
    * Optional cost-budget input. When omitted (default), no budget enforcement
    * runs — preserving v0 back-compat. When present, the runtime tracks
    * per-gig BudgetState matching budget-state.json schema: balance =
-   * opening - spent + credit. Before every agent invocation, computes
-   * cost-of-append (base + k*size(input)) and throws BudgetExhausted if
-   * balance < cost. After success, deducts cost from balance. The final
-   * BudgetState is returned in GigResult.budget_state.
+   * opening - spent + credit.
+   *
+   * The cycle is RESERVE → SETTLE (#232). At chair-prep the runtime computes
+   * cost-of-append (base + k*size(input)) and compares it against
+   * `balance - reserved`; short → BudgetExhausted. Passing chairs RESERVE the
+   * cost. `spent` moves only when a chair's invocation SUCCEEDS, which is what
+   * the contract always claimed and what the code did not do: prep runs
+   * eagerly for the whole ready batch, so a batch member tripping the gate
+   * used to leave every earlier member of that batch charged for work no
+   * invoker ever started.
+   *
+   * The final BudgetState is returned in GigResult.budget_state, and is also
+   * attached to a BudgetExhausted / mid-gig error so a FAILED gig can still
+   * report what it cost.
    */
   budget?: BudgetInput | undefined;
   // Live progress sink. Fired at each gig milestone (phase/chair/agent-event/complete) so an
@@ -138,6 +183,23 @@ export interface RunDeps {
   // running every ready chair in parallel. Absent = the v0 topological-parallel
   // routing, byte-identical to before this seam existed.
   selectChairs?: ChairSelector | undefined;
+  /**
+   * #249/#250 — the cancellation seam. Abort it and the run stops at its next checkpoint
+   * (between phases and between dispatch batches) and rejects with `GigAborted`. The same
+   * signal is threaded into every AgentInvocationContext, so an invoker that wires it to its
+   * subprocess also stops the in-flight chair. Absent = an uncancellable run (the v0 shape).
+   *
+   * Known bound: a SKILL-backed chair runs `spawnSync` (src/skill_subprocess.ts), which
+   * blocks the event loop, so an abort delivered while one is executing is not even RECEIVED
+   * until it returns. Skill chairs are therefore a hard uncancellable window of up to their
+   * declared `meta.timeout_ms` (default 120s). Deliberate for now — see #253.
+   */
+  signal?: AbortSignal | undefined;
+  /**
+   * #237 — the depth this gig was dispatched at, threaded to every invocation so it reaches
+   * the thing that actually spends. Absent = each agent's own `depth_profile` stands.
+   */
+  depth?: Depth | undefined;
 }
 
 /**
@@ -149,12 +211,28 @@ export interface RunDeps {
  *   defaults: base_cost = 1, k = 0.1
  *
  * Where size_bytes(input) = JSON.stringify(canonical context).length.
+ *
+ * WHAT THIS IS AND IS NOT (#233). `opening`/`spent`/`balance` are SYNTHETIC APPEND UNITS —
+ * see `BudgetState.unit`. They are not dollars and were never converted to dollars; an
+ * `opening: 1000` that reads like a dollar figure to an operator is a coincidence of scale.
+ * The real, settled figure is `BudgetState.settled_usd`, reconciled from the model's own
+ * `result` events at each batch boundary. Two honest limits on the synthetic gate:
+ *
+ *   1. It is a proxy for prompt size, not a price. It has no model tier, no output side, no
+ *      skills/charter/schema bytes — only the agent slug, phase, consumed input CONTENT and
+ *      the gig payload. It is a rate limiter on context growth, nothing more.
+ *   2. A USD figure cannot gate a chair before that chair runs, because `prepareChair` runs
+ *      for the WHOLE ready batch before any invocation — a chair cannot see its batch
+ *      siblings' settled cost. So reconciliation happens at BATCH BOUNDARIES, and any dollar
+ *      bound built on it would be a cap plus one batch of slack, never a hard stop. No such
+ *      bound is wired: there is no per-chair dollar estimator, and inventing one would be
+ *      guessing. `settled_usd` reports; it does not enforce.
  */
 export interface BudgetInput {
   opening: number;
-  /** base cost per agent invocation. Default 1. */
+  /** base cost per agent invocation, in append units. Default 1. */
   base_cost?: number;
-  /** per-byte multiplier on input size. Default 0.1. */
+  /** per-byte multiplier on consumed-input size, in append units. Default 0.1. */
   k?: number;
 }
 
@@ -171,6 +249,7 @@ export interface BudgetInput {
  */
 export interface BudgetState {
   opening: number;
+  /** Cost of chairs that ACTUALLY RAN AND SUCCEEDED. Reserved-but-unsettled cost is not here. */
   spent: number;
   credit: number;
   balance: number;
@@ -181,6 +260,20 @@ export interface BudgetState {
   depleted_at: string | null;
   base_cost: number;
   k: number;
+  /**
+   * #233 — the denomination of opening/spent/balance/base_cost/k, stated rather than assumed.
+   * These are a synthetic proxy for consumed context bytes. They are NOT dollars, and nothing
+   * converts between the two. Read `settled_usd` for money.
+   */
+  unit: "append-units";
+  /**
+   * #233 — REAL settled model spend for this gig so far, in USD, reconciled from the invokers'
+   * own `result` events at each dispatch-batch boundary. This is the number `src/ledger.ts`
+   * calls settled spend; the budget gate above never used it, even though it was live and
+   * in-scope. Reporting only — see the BudgetInput docstring for why it cannot gate.
+   * 0 when no invoker reported cost (stubbed invokers, skill-only gigs).
+   */
+  settled_usd: number;
 }
 
 export interface GigResult {
@@ -193,6 +286,23 @@ export interface GigResult {
   // no eval_slugs. Populated by scanning the produced outputs against each
   // declared eval at gig-completion time.
   eval_scores: Record<string, number>;
+  /**
+   * #246 — declared eval_slugs that resolved to NO eval definition. They still appear in
+   * `eval_scores` at 0.0 (back-compat: callers key off presence), but a 0.0 that means
+   * "no such eval" is not the same claim as a 0.0 that means "the contract did not hold",
+   * and the two used to be indistinguishable — including inside `run_fingerprint`.
+   * Present only when non-empty.
+   */
+  unresolved_evals?: readonly string[];
+  /**
+   * #243 — chairs that sealed FEWER types than their output_contract promised. The runtime
+   * treats output_contract as a selector, not a floor, because a keyed output can legitimately
+   * be conditional. For a chair with a downstream consumer the shortfall surfaces as an
+   * input_contract failure; for a TERMINAL chair nothing consumes it and the promise used to
+   * evaporate into `status: "complete"`. Recording it is not enforcement — see the note at the
+   * seal loop. Present only when non-empty.
+   */
+  unfulfilled_outputs?: ReadonlyArray<{ role: string; phase: string; missing: readonly string[] }>;
   status: "complete";
   /** Final budget snapshot. Present only when a budget was supplied. */
   budget_state?: BudgetState;
@@ -200,7 +310,59 @@ export interface GigResult {
   usage?: GigUsage;
 }
 
+/**
+ * #236 — settled spend used to be discarded on every failed gig: `usage` was written only on
+ * the success path, and the async dispatcher's `.catch` set status/error and nothing else. A
+ * gig that burned $6 across four chairs and died on the fifth reported zero dollars, everywhere
+ * — and failed gigs are exactly the ones whose cost an operator most needs. runGig now attaches
+ * the partial accounting to whatever it throws; these read it back safely.
+ */
+export function partialGigUsage(e: unknown): GigUsage | undefined {
+  if (!e || typeof e !== "object") return undefined;
+  const u = (e as Record<string, unknown>)["usage"];
+  return u && typeof u === "object" ? (u as GigUsage) : undefined;
+}
+export function partialBudgetState(e: unknown): BudgetState | undefined {
+  if (!e || typeof e !== "object") return undefined;
+  const b = (e as Record<string, unknown>)["budget_state"];
+  return b && typeof b === "object" ? (b as BudgetState) : undefined;
+}
+
 export class RuntimeError extends Error {}
+
+/**
+ * Raised when a gig is cancelled through `RunDeps.signal` (#249). Distinct from RuntimeError
+ * so a caller can tell "an operator stopped this" from "this crashed" — #251's point that a
+ * killed gig surfacing as `failed` with a kill-shaped error is indistinguishable from a
+ * genuine crash.
+ *
+ * Carries the spend accrued BEFORE the cancellation. Today abort does nothing, so the gig
+ * completes and its cost IS recorded; a fix that kills children without capturing accrued
+ * usage would improve cost control while regressing accounting. The dispatcher folds this
+ * onto the run state so `gig_monitor` still answers "what did this cost me".
+ */
+export class GigAborted extends Error {
+  public readonly gig_id: string;
+  public readonly reason: string;
+  public readonly usage: GigUsage | undefined;
+  public readonly outputs: readonly OutputRecord[];
+  constructor(gig_id: string, reason: string, usage: GigUsage | undefined, outputs: readonly OutputRecord[]) {
+    super(`GigAborted: gig "${gig_id}" was aborted — ${reason}`);
+    this.name = "GigAborted";
+    this.gig_id = gig_id;
+    this.reason = reason;
+    this.usage = usage;
+    this.outputs = outputs;
+  }
+}
+
+/** The human-readable cause behind an AbortSignal, whatever shape the aborter used. */
+export function abortReasonText(signal: AbortSignal): string {
+  const r = signal.reason as unknown;
+  if (typeof r === "string" && r.trim().length > 0) return r;
+  if (r instanceof Error && r.message) return r.message;
+  return "cancelled";
+}
 
 /**
  * Raised when a gig's budget cannot cover the next agent's cost-of-append.
@@ -226,10 +388,19 @@ export class BudgetExhausted extends Error {
 }
 
 /**
- * Cost-of-append for an agent invocation. Deterministic function of the
- * input context size — same input → same cost. Keeps cost calculation
- * inside the runtime (not the invoker) so budget enforcement cannot be
- * spoofed by a misbehaving invoker.
+ * Cost-of-append for an agent invocation, in synthetic append units (see BudgetState.unit).
+ * Deterministic function of the input context size — same input → same cost. Keeps cost
+ * calculation inside the runtime (not the invoker) so budget enforcement cannot be spoofed by
+ * a misbehaving invoker.
+ *
+ * #233 — this used to serialize `input_ids`: the UUIDs of the upstream outputs a chair
+ * consumes, not their data. An upstream output contributed exactly 36 bytes whether it was a
+ * one-line signal or a 40-page draft, so the proxy was not even monotonic in the thing that
+ * drives real cost. It now measures the CONTENT the invoker actually receives.
+ *
+ * Still excluded, honestly: resolved skills, the agent charter, type schemas, model tier,
+ * max_tool_calls, and the entire output side. This is a rate limiter on consumed context, not
+ * a price. Money is `BudgetState.settled_usd`.
  */
 export function computeAppendCost(
   ctx: { agent: Agent; phase: string; inputs: readonly OutputRecord[]; gig_input: Record<string, unknown> },
@@ -242,7 +413,7 @@ export function computeAppendCost(
   const size_bytes = JSON.stringify({
     agent_slug: ctx.agent.slug,
     phase: ctx.phase,
-    input_ids: ctx.inputs.map((i) => i.id),
+    inputs: ctx.inputs.map((i) => i.data),
     gig_input: ctx.gig_input,
   }).length;
   return base_cost + k * size_bytes;
@@ -251,21 +422,34 @@ export function computeAppendCost(
 // Deterministic hash over the definitions a gig touches: the standard + its agents,
 // in a canonical (sorted, JCS) form. This is the reproducibility key — same defs,
 // same genome_hash, regardless of model or run.
-// Resolve a list of skill slugs against the genome's skills map. Missing slugs
-// are silently dropped — the diagnostic surface is the resulting empty Skills
-// layer in the prompt (the model receives no skill content). Returns [] when
-// either the slugs list or the map is absent.
+/**
+ * Resolve a list of skill slugs against the genome's skills map. REPORTS, never decides:
+ * it returns both what resolved and what did not, and `prepareChair` decides what a miss
+ * means (fatal when the chair declared the skill REQUIRED, reported otherwise).
+ *
+ * The boundary (#241): a skill package that LOADS is a legitimate degradation candidate —
+ * it has an identity, a version, a code_hash, and its degradation is already surfaced and
+ * sealed via `degraded_reason` (src/skills.ts resolveSkill). A slug that resolves to NO
+ * PACKAGE AT ALL has nothing to degrade; it is a dangling reference, exactly the shape
+ * `assertToolGrantsResolvable` already fails closed on ("a granted tool with no provider
+ * is a dead name") and exactly the shape `Chair.skill_slug` already hard-throws on.
+ *
+ * An ABSENT map means resolution was never configured (the documented v0 back-compat path)
+ * — that is not evidence of a dangling binding, so `missing` stays empty.
+ */
 function resolveSkills(
   slugs: readonly string[] | undefined,
   map: ReadonlyMap<string, SkillRecord> | undefined,
-): readonly SkillRecord[] {
-  if (!slugs || slugs.length === 0 || !map) return [];
-  const out: SkillRecord[] = [];
+): { skills: readonly SkillRecord[]; missing: readonly string[] } {
+  if (!slugs || slugs.length === 0 || !map) return { skills: [], missing: [] };
+  const skills: SkillRecord[] = [];
+  const missing: string[] = [];
   for (const slug of slugs) {
     const rec = map.get(slug);
-    if (rec) out.push(rec);
+    if (rec) skills.push(rec);
+    else missing.push(slug);
   }
-  return out;
+  return { skills, missing };
 }
 
 function genomeHash(standard: Standard): string {
@@ -315,55 +499,186 @@ export async function runGig(
   // stream-json result carries usage + total_cost_usd + a per-model breakdown). These were
   // forwarded to onEvent but dropped; we fold them here and persist on the ledger entry. JS is
   // single-threaded, so += from the concurrent chair callbacks is race-free.
+  //
+  // #235 — capture is now ATTRIBUTED. The old gate was one gig-wide boolean flipped by the
+  // first `result` event, which could not express three real states: (1) N chairs ran and one
+  // reported, (2) a `result` event carrying no usage payload at all — whose implicit zeros
+  // were folded in and reported as "$0.00 spent" where the truth is "unknown", and (3) a cost
+  // with no per-model breakdown. Every invocation is now counted, and an invocation that
+  // reports nothing is counted as UNATTRIBUTED rather than as free.
   const usage: GigUsage = { input_tokens: 0, output_tokens: 0, total_cost_usd: 0, by_model: {} };
-  let sawUsage = false;
-  const captureUsage = (ev: AgentStreamEvent): void => {
-    if (ev.type !== "result") return;
-    const raw = ev.raw as Record<string, unknown> | undefined;
-    if (!raw) return;
-    const u = raw["usage"] as Record<string, unknown> | undefined;
-    const cost = typeof raw["total_cost_usd"] === "number" ? (raw["total_cost_usd"] as number) : 0;
-    const inTok = u && typeof u["input_tokens"] === "number" ? (u["input_tokens"] as number) : 0;
-    const outTok = u && typeof u["output_tokens"] === "number" ? (u["output_tokens"] as number) : 0;
-    usage.input_tokens += inTok;
-    usage.output_tokens += outTok;
-    usage.total_cost_usd += cost;
-    sawUsage = true;
-    // Per-model breakdown keyed by the ACTUAL model id that ran (not the configured tier).
-    const mu = raw["modelUsage"] as Record<string, Record<string, unknown>> | undefined;
-    if (mu) {
-      for (const [model, m] of Object.entries(mu)) {
-        const slot = usage.by_model[model] ?? { input_tokens: 0, output_tokens: 0, cost_usd: 0 };
-        slot.input_tokens += typeof m["inputTokens"] === "number" ? (m["inputTokens"] as number) : 0;
-        slot.output_tokens += typeof m["outputTokens"] === "number" ? (m["outputTokens"] as number) : 0;
-        slot.cost_usd += typeof m["costUSD"] === "number" ? (m["costUSD"] as number) : 0;
-        usage.by_model[model] = slot;
-      }
-    }
+  let startedInvocations = 0;
+  let attributedInvocations = 0;
+  let byModelPartial = false;
+
+  // One sink per chair — `onEvent` is already per-chair, so attribution is expressible at the
+  // only granularity that means anything. Returns whether THIS chair ever reported usage.
+  const makeUsageSink = (): { fold: (ev: AgentStreamEvent) => void; attributed: () => boolean } => {
+    let saw = false;
+    return {
+      attributed: () => saw,
+      fold(ev: AgentStreamEvent): void {
+        if (ev.type !== "result") return;
+        const raw = ev.raw as Record<string, unknown> | undefined;
+        if (!raw) return;
+        const u = raw["usage"] as Record<string, unknown> | undefined;
+        const mu = raw["modelUsage"] as Record<string, Record<string, unknown>> | undefined;
+        const costRaw = raw["total_cost_usd"];
+        const inRaw = u?.["input_tokens"];
+        const outRaw = u?.["output_tokens"];
+        const hasCost = typeof costRaw === "number";
+        const hasTokens = typeof inRaw === "number" || typeof outRaw === "number";
+        const hasBreakdown = !!mu && Object.keys(mu).length > 0;
+        // A `result` event with no usage payload at all tells us NOTHING. Folding its implicit
+        // zeros in is how "not captured" became "$0.00 spent" — the single most misleading
+        // number this engine could produce about money.
+        if (!hasCost && !hasTokens && !hasBreakdown) return;
+
+        usage.input_tokens += typeof inRaw === "number" ? inRaw : 0;
+        usage.output_tokens += typeof outRaw === "number" ? outRaw : 0;
+        usage.total_cost_usd += hasCost ? (costRaw as number) : 0;
+        // Per-model breakdown keyed by the ACTUAL model id that ran (not the configured tier).
+        if (hasBreakdown) {
+          for (const [model, m] of Object.entries(mu)) {
+            const slot = usage.by_model[model] ?? { input_tokens: 0, output_tokens: 0, cost_usd: 0 };
+            slot.input_tokens += typeof m["inputTokens"] === "number" ? (m["inputTokens"] as number) : 0;
+            slot.output_tokens += typeof m["outputTokens"] === "number" ? (m["outputTokens"] as number) : 0;
+            slot.cost_usd += typeof m["costUSD"] === "number" ? (m["costUSD"] as number) : 0;
+            usage.by_model[model] = slot;
+          }
+        } else {
+          // The scalars moved but `by_model` did not — the breakdown cannot sum to the total.
+          byModelPartial = true;
+        }
+        saw = true;
+      },
+    };
   };
 
-  // #156 — the standard's declared gig inputs. An entry chair (first phase, depends_on []) reads
-  // its typed input_contract from gigInput; those types are satisfied by the gig payload, not an
-  // upstream record. Validate the payload against every entry chair's contract BEFORE any chair
-  // fires — a missing gig input is a hard stop, so no model tokens are spent on bad input.
+  // Stamp the coverage counters and return the usage IFF anything was genuinely captured.
+  // Idempotent: called on the success path and again from the failure path (#236).
+  const finalizeUsage = (): GigUsage | undefined => {
+    if (attributedInvocations === 0) return undefined;
+    usage.invocations = startedInvocations;
+    usage.unattributed_invocations = startedInvocations - attributedInvocations;
+    if (usage.unattributed_invocations > 0) usage.partial = true;
+    else delete usage.partial;
+    if (byModelPartial) usage.by_model_partial = true;
+    else delete usage.by_model_partial;
+    return usage;
+  };
+
+  // #156 — the standard's declared gig inputs. A chair reads a declared gig-input type from
+  // gigInput rather than from an upstream record (composition.ts: "gig inputs are available to
+  // any chair"). The payload is validated BEFORE any chair fires — a missing gig input is a
+  // hard stop, so no model tokens are spent on bad input.
   const standardInputs = new Set<string>(standard.input_types ?? []);
-  const firstPhase = standard.phases[0];
-  if (firstPhase) {
-    for (const ch of firstPhase.chairs) {
-      if (ch.depends_on.length > 0) continue;
-      for (const need of ch.input_contract) {
-        if (standardInputs.has(need) && gigInput[need] === undefined) {
-          throw new RuntimeError(
-            `gig input missing "${need}" required by entry chair "${ch.role}" (MissingGigInput)`,
-          );
-        }
+
+  // Keys are the HYPHENATED type slug. `grant_requirements` vs `grant-requirements` is the
+  // single most common dispatch mistake, and the caller's own keys are in scope here.
+  const normalizeKey = (k: string): string => k.toLowerCase().replace(/[_\-\s]/g, "");
+
+  /**
+   * #244 — the error must blame the layer that is actually wrong. "upstream outputs only
+   * provide [...]" sent the operator to inspect a pipeline that is correctly wired when the
+   * real cause is a missing key in their own dispatch payload. The `fromGig` disjunction
+   * knows which branch failed; this carries that knowledge into the message.
+   */
+  function missingGigInput(need: string, role: string, upstreamProvided?: string): RuntimeError {
+    const provided = Object.keys(gigInput);
+    const target = normalizeKey(need);
+    const nearMiss = provided.filter((k) => k !== need && normalizeKey(k) === target);
+    const unknown = provided.filter((k) => !standardInputs.has(k));
+    const quoted = (ks: string[]): string => ks.map((k) => `"${k}"`).join(", ");
+    const hint =
+      nearMiss.length > 0
+        ? ` The payload carries ${quoted(nearMiss)} — gig input keys are the hyphenated type slug, so did you mean "${need}"?`
+        : provided.length === 0
+          ? ` The dispatch payload is empty.`
+          : ` The payload's keys are [${quoted(provided)}]${unknown.length > 0 ? `; not declared by this standard: [${quoted(unknown)}]` : ""}.`;
+    const upstream =
+      upstreamProvided !== undefined
+        ? ` (upstream provided [${upstreamProvided}], but "${need}" is a declared gig input and must come from the dispatch payload)`
+        : ` (no upstream chair produces "${need}", so it can only come from the dispatch payload)`;
+    return new RuntimeError(
+      `gig input missing "${need}" required by chair "${role}" (MissingGigInput)${upstream}.${hint}`,
+    );
+  }
+
+  // What each role will seal — known statically from the composed standard, which is what
+  // makes the pre-flight below possible at t=0.
+  const sealedByRole = new Map<string, readonly string[]>();
+  for (const ph of standard.phases) {
+    for (const ch of ph.chairs) {
+      if (ch.skill_slug && (ch.agent_slug ?? "") === "") {
+        sealedByRole.set(ch.role, [ch.output_contract[0] ?? "Signal"]);
+        continue;
       }
+      const ag = standard.agents.find((a) => a.slug === ch.agent_slug);
+      if (!ag) continue; // prepareChair reports an unknown agent_slug precisely; don't pre-empt it
+      sealedByRole.set(
+        ch.role,
+        ch.output_contract.length ? ag.output_types.filter((t) => ch.output_contract.includes(t)) : ag.output_types,
+      );
+    }
+  }
+
+  // Type-name mirror of outputSatisfiesType (no record exists yet at t=0). Deliberately
+  // PERMISSIVE: an unresolvable core is treated as "might satisfy", so the pre-flight can
+  // only ever fire on a PROVABLE miss and can never reject a runnable gig.
+  const mightSatisfy = (producedType: string, need: string): boolean => {
+    if (producedType === need) return true;
+    if (!CORE_TYPE_SET.has(need)) return false;
+    const core = deps.outputs.coreTypeOf(producedType);
+    return core === null || core === need;
+  };
+
+  // The pre-flight itself. v0 checked ONLY phase 0, and within it only `depends_on: []`
+  // chairs — while its own comment promised "every entry chair" and "no model tokens are
+  // spent". Both exclusions are reachable with a validly composed standard, so a real chair
+  // fired and burned real money before a failure that was knowable before the gig started.
+  {
+    const producedByEarlierPhases: string[] = [];
+    for (const ph of standard.phases) {
+      const sealedThisPhase: string[] = [];
+      for (const ch of ph.chairs) {
+        // Mirrors prepareChair's input gathering: declared deps, else everything sealed by a
+        // strictly-earlier phase (a superset of the legacy input_types filter — permissive).
+        const reachable =
+          ch.depends_on.length > 0
+            ? ch.depends_on.flatMap((d) => sealedByRole.get(d) ?? [])
+            : producedByEarlierPhases;
+        for (const need of ch.input_contract) {
+          if (!standardInputs.has(need)) continue;      // not a gig input — upstream's job
+          if (gigInput[need] !== undefined) continue;   // supplied
+          if (reachable.some((t) => mightSatisfy(t, need))) continue; // an upstream can cover it
+          throw missingGigInput(need, ch.role);
+        }
+        sealedThisPhase.push(...(sealedByRole.get(ch.role) ?? []));
+      }
+      producedByEarlierPhases.push(...sealedThisPhase);
     }
   }
 
   // Best-effort progress sink — a logging/monitor sink must never break the run.
   const emit = (ev: GigProgressEvent): void => {
     try { deps.onProgress?.(ev); } catch { /* observability must not fail the gig */ }
+  };
+
+  // #249/#250 — the cancellation checkpoint. Level 1 of the abort chain: cheap, deterministic,
+  // and where MOST of the post-abort spend was going. A standard with P sequential phases could
+  // burn P x DEFAULT_CHAIR_TIMEOUT_MS after gig_abort returned, because nothing between phases
+  // (or between dispatch batches) ever asked whether it should still be running.
+  const checkpoint = (): void => {
+    if (!deps.signal?.aborted) return;
+    const reason = abortReasonText(deps.signal);
+    emit({ type: "gig_aborted", reason });
+    // NOTE (integration): #251 reads the gig-wide `sawUsage` boolean that #235 removed in
+    // favour of per-chair attribution. finalizeUsage() is its exact replacement — undefined
+    // when nothing was genuinely captured — and it additionally stamps the coverage counters,
+    // so an aborted gig reports "N started, M unattributed" rather than a bare total. It is
+    // idempotent, which is what makes it safe on this path. No merge conflict; tsc caught it.
+    throw new GigAborted(gig_id, reason, finalizeUsage(), produced);
   };
 
   // Budget state. When deps.budget is undefined, enforcement is OFF (back-compat).
@@ -379,8 +694,16 @@ export async function runGig(
         depleted_at: null,
         base_cost: deps.budget.base_cost ?? 1,
         k: deps.budget.k ?? 0.1,
+        unit: "append-units",
+        settled_usd: 0,
       }
     : null;
+  // #232 — cost RESERVED by chairs that passed the gate but have not settled. `prepareChair`
+  // runs eagerly for the whole ready batch, so the gate must see its batch siblings' holds;
+  // but a hold is not spend. It converts to `spent` only when the invocation succeeds, and is
+  // released (never charged) when it fails or when a later sibling trips the gate and the
+  // batch is abandoned before a single invoker is called.
+  let reserved = 0;
 
   // Resolve agent-by-slug once.
   const agentBySlug = new Map(standard.agents.map((a) => [a.slug, a]));
@@ -393,7 +716,14 @@ export async function runGig(
   // dependent receives all of a role's records and picks the type its contract needs.
   const producedByRole = new Map<string, OutputRecord[]>();
 
+  // #243 — chairs that sealed fewer types than their output_contract promised, collected for
+  // the manifest. Recording, not enforcement: see the seal loop.
+  const unfulfilledOutputs: Array<{ role: string; phase: string; missing: readonly string[] }> = [];
+
+  try {
+
   for (const phase of standard.phases) {
+    checkpoint(); // between phases — the cheapest place to stop, and the biggest saving
     emit({ type: "phase_start", phase: phase.name, roles: phase.chairs.map((c) => c.role) });
 
     // Per-phase DAG executor. Chairs whose `depends_on` is fully covered by
@@ -405,6 +735,7 @@ export async function runGig(
     for (const ch of phase.chairs) remaining.set(ch.role, ch);
 
     while (remaining.size > 0) {
+      checkpoint(); // between dispatch batches — stops the NEXT topological level from firing
       // Topological level: every chair whose depends_on ⊂ already-produced roles.
       let ready: Chair[] = [];
       for (const ch of remaining.values()) {
@@ -470,7 +801,16 @@ export async function runGig(
           produced.push(...r.value);
         }
       }
+      // #233 — BATCH BOUNDARY is the only point at which real settled dollars can be
+      // reconciled into the budget: prepareChair ran for every chair in this batch before any
+      // of them was invoked, so no chair could have seen its siblings' cost. Reporting only.
+      if (budget) budget.settled_usd = usage.total_cost_usd;
+
       if (failures.length > 0) {
+        // A cancellation that reached the chair's child (level 3) surfaces here as a rejected
+        // chair. Report it as the cancellation it is — not as "chair(s) failed", which is the
+        // exact confusion #251 flags: a killed gig indistinguishable from a genuine crash.
+        checkpoint();
         throw new RuntimeError(
           `phase "${phase.name}" aborted — chair(s) failed: ${failures.join(", ")} (${failureErrors.join(" | ")})`,
         );
@@ -500,6 +840,12 @@ export async function runGig(
     output_specs: Array<{ domain_type: string; core_type: string; primitive: Agent["primitives"][number] }>;
     inputs: OutputRecord[];
     skills: readonly SkillRecord[];
+    // #241 — declared skill slugs that resolved to no package. Threaded to the invocation
+    // context so the prompt can never name a skill the agent does not actually hold.
+    missing_skills: readonly string[];
+    /** #232 — append-unit cost RESERVED for this chair at prep. Settled to `spent` only on
+     *  success; released without charge otherwise. Absent when no budget is enforced. */
+    cost?: number;
   }
 
   // Resolve a chair's declared output types into seal-specs (type → core → primitive).
@@ -532,13 +878,17 @@ export async function runGig(
           // #156: a type satisfied by an upstream record OR by the gig payload (entry-chair seed).
           const fromGig = standardInputs.has(need) && gigInput[need] !== undefined;
           if (!fromGig && !inputs.some((o) => outputSatisfiesType(o, need))) {
-            throw new RuntimeError(`chair "${chair.role}" input_contract requires "${need}" but upstream outputs only provide [${inputs.map((o) => o.domain_type).join(",")}]`);
+            const provided = inputs.map((o) => o.domain_type).join(",");
+            // #244 — this disjunction knows WHICH branch failed; don't discard that.
+            throw standardInputs.has(need)
+              ? missingGigInput(need, chair.role, provided)
+              : new RuntimeError(`chair "${chair.role}" input_contract requires "${need}" but upstream outputs only provide [${provided}]`);
           }
         }
       }
       // A skill-backed chair seals exactly one output (its deterministic code returns one blob).
       const output_specs = [{ domain_type, core_type: core, primitive }];
-      return { chair, phaseName, skill_dir: dir, primitive, domain_type, output_specs, inputs, skills: [] };
+      return { chair, phaseName, skill_dir: dir, primitive, domain_type, output_specs, inputs, skills: [], missing_skills: [] };
     }
 
     const agent = standard.agents.find((a) => a.slug === chair.agent_slug);
@@ -577,30 +927,99 @@ export async function runGig(
         const fromGig = standardInputs.has(need) && gigInput[need] !== undefined;
         if (!fromGig && !inputs.some((o) => outputSatisfiesType(o, need))) {
           const provided = inputs.map((o) => o.domain_type).join(",");
-          throw new RuntimeError(
-            `chair "${chair.role}" input_contract requires "${need}" but upstream outputs only provide [${provided}]`,
-          );
+          // #244 — when `need` is a DECLARED gig input, the cause is a missing key in the
+          // caller's payload, not a mis-wired pipeline. Blaming "upstream outputs" sent the
+          // operator to inspect files that are perfectly correct.
+          throw standardInputs.has(need)
+            ? missingGigInput(need, chair.role, provided)
+            : new RuntimeError(
+                `chair "${chair.role}" input_contract requires "${need}" but upstream outputs only provide [${provided}]`,
+              );
         }
+      }
+    } else if (agent.input_types.length > 0) {
+      // #245 — an EMPTY input_contract used to skip every input check, so a chair bound to an
+      // agent that declares it consumes typed inputs could be invoked with `inputs: []`. The
+      // agent, given nothing, invents an answer; the answer then seals with full provenance,
+      // real predecessor links and `status: "complete"`. Composition cannot catch this: its
+      // upstream-producer check gates on `i > 0`, and a hand-rolled Standard bypasses it
+      // entirely — so the runtime is the last line of defence.
+      //
+      // The floor is the weakest one that still bites: AT LEAST ONE declared input_type must be
+      // satisfied, by an upstream record or by the typed gig payload (#156). An agent that
+      // consumes one of several alternatives is not forced to receive all of them, and an agent
+      // declaring no input_types is untouched.
+      const satisfied = agent.input_types.some(
+        (t) => (standardInputs.has(t) && gigInput[t] !== undefined) || inputs.some((o) => outputSatisfiesType(o, t)),
+      );
+      // The ENTRY-CHAIR exemption, and its cost. A first-phase chair with no depends_on reads
+      // from the gig payload, and a v0 standard may seed it UNTYPED — `patent-triage-v0`'s
+      // `cleave` chair binds an agent declaring `invention-spec` and is fed
+      // `{description: "…"}`. The runtime cannot tell that legitimate seed apart from a
+      // mis-wired entry chair: both are "declared type, nothing upstream, some payload". So the
+      // floor only fires for an entry chair when the payload is EMPTY — the one case where
+      // nothing could have supplied the declared type by any route. Closing the rest is a
+      // DEFINITION fix, not a runtime one: the standard must declare `input_types` so the seed
+      // is typed (#156's mechanism, which patent-triage-v0 predates). Recorded, not guessed.
+      // NOTE (integration): #245 reads a gig-level `firstPhase` binding that #244 removed
+      // along with the phase-0-only pre-flight it served. Neither lane is broken alone and
+      // git merges both without a conflict, so only tsc catches it. Re-derived at the use site.
+      const entryChair = phaseName === standard.phases[0]?.name && chair.depends_on.length === 0;
+      const seeded = entryChair && Object.keys(gigInput).length > 0;
+      if (!satisfied && !seeded) {
+        const provided = inputs.map((o) => o.domain_type).join(",");
+        throw new RuntimeError(
+          `chair "${chair.role}" agent "${agent.slug}" declares input_types [${agent.input_types.join(",")}] but received none of them — upstream provided [${provided}] and the gig payload supplies no matching type; refusing to invoke on an empty frontier`,
+        );
       }
     }
 
-    // Resolve this agent's skill bindings (slugs) against the genome's skills
-    // map. Unknown slugs surface as a missing Skills layer in the prompt.
-    const skills = resolveSkills(agent.skill_slugs, deps.skills);
+    // Resolve this agent's skill bindings (slugs) against the genome's skills map.
+    // resolveSkills REPORTS; this is where the engine DECIDES — and it decides BEFORE the
+    // budget deduction below, so a dangling binding costs nothing.
+    const { skills, missing } = resolveSkills(agent.skill_slugs, deps.skills);
+    if (missing.length > 0) {
+      // #242 — `Chair.required_skills` was validated exactly once, at compose time, as a
+      // string-subset check against the agent's own declaration. A chair could declare a
+      // skill REQUIRED, pass composition because the agent lists the same string, and then
+      // run unskilled while sealing normally: the standard's strongest available assertion
+      // about a chair's competence was enforced by nobody. There is no graceful-degradation
+      // tension here — "required" means required.
+      const requiredMissing = missing.filter((s) => (chair.required_skills ?? []).includes(s));
+      if (requiredMissing.length > 0) {
+        throw new RuntimeError(
+          `phase "${phaseName}" chair "${chair.role}" requires skill(s) [${requiredMissing.join(", ")}] which resolve to no skill package — ` +
+            `agent "${agent.slug}" declares the slug but nothing supplies it (a required skill with no package is a dead name; ` +
+            `define the skill package or drop it from the chair's required_skills)`,
+        );
+      }
+      // #241 — not required, so the gig lives. But it is never silent again: an unskilled run
+      // used to be indistinguishable from a skilled one in the artifact, the ledger AND the diff.
+      emit({ type: "skills_unresolved", phase: phaseName, role: chair.role, agent: agent.slug, missing: [...missing] });
+    }
 
-    // BUDGET CHECK — pre-invocation. Synchronous so BudgetExhausted (and a
-    // TypeError thrown from JSON.stringify on a circular gig_input) propagate
-    // unwrapped to the caller rather than being aggregated as a chair failure.
+    // BUDGET GATE — pre-invocation, and a RESERVATION only (#232). Synchronous so
+    // BudgetExhausted (and a TypeError thrown from JSON.stringify on a circular gig_input)
+    // propagate unwrapped to the caller rather than being aggregated as a chair failure.
+    //
+    // The gate compares against `balance - reserved` so a batch of parallel chairs cannot each
+    // spend the same balance; the hold converts to `spent` only in settleChairCost, after the
+    // invoker actually returns. Before this, `spent += cost` happened HERE — so when a later
+    // member of an eagerly-prepared batch tripped the gate, every earlier member was already
+    // charged and `invokeAndWriteChair` then ran for nobody. The operator saw spend for work
+    // that never started, and that inflated figure is what BudgetExhausted.state reported.
+    let reservedCost: number | undefined;
     if (budget) {
       const cost = computeAppendCost({ agent, phase: phaseName, inputs, gig_input: gigInput }, budget.base_cost, budget.k);
-      if (budget.balance < cost) {
+      const available = budget.balance - reserved;
+      if (available < cost) {
         budget.agent_state = "depleted";
         budget.depleted_agent = agent.slug;
         budget.depleted_at = new Date().toISOString();
-        throw new BudgetExhausted(agent.slug, budget.balance, cost, budget);
+        throw new BudgetExhausted(agent.slug, available, cost, budget);
       }
-      budget.spent += cost;
-      budget.balance = budget.opening - budget.spent + budget.credit;
+      reserved += cost;
+      reservedCost = cost;
     }
 
     // Seal one record per type THIS CHAIR promises (#174): the output_contract is the SELECTOR,
@@ -612,13 +1031,40 @@ export async function runGig(
       ? agent.output_types.filter((t) => chair.output_contract.includes(t))
       : agent.output_types;
     const output_specs = outputSpecsFor(wanted, primitive);
-    return { chair, phaseName, agent, primitive, domain_type, output_specs, inputs, skills };
+    return { chair, phaseName, agent, primitive, domain_type, output_specs, inputs, skills, missing_skills: missing, ...(reservedCost !== undefined ? { cost: reservedCost } : {}) };
+  }
+
+  // #232 — convert a chair's reservation into settled spend, or release it. `spent` moves ONLY
+  // for a chair whose invocation actually returned, which is what the budget contract always
+  // claimed. A chair that was prepared and then never invoked (its batch sibling tripped the
+  // gate) never reaches here at all — so it is never charged, which is the point.
+  function settleChairCost(p: PreparedChair, succeeded: boolean): void {
+    if (!budget || p.cost === undefined) return;
+    reserved -= p.cost;
+    if (!succeeded) return;
+    budget.spent += p.cost;
+    budget.balance = budget.opening - budget.spent + budget.credit;
   }
 
   // Stage 2 — actual invocation + post-invocation output_contract check + write.
   // Errors here ARE aggregated by Promise.allSettled and surfaced as a phase-
   // level RuntimeError naming every failing chair role.
+  //
+  // The thin wrapper is where a chair's budget RESERVATION settles (#232): a hold becomes
+  // `spent` on success and is released on failure. Both paths must run, so the accounting
+  // cannot drift no matter how the chair ends.
   async function invokeAndWriteChair(p: PreparedChair): Promise<OutputRecord[]> {
+    try {
+      const written = await executeChair(p);
+      settleChairCost(p, true);
+      return written;
+    } catch (e) {
+      settleChairCost(p, false);
+      throw e;
+    }
+  }
+
+  async function executeChair(p: PreparedChair): Promise<OutputRecord[]> {
     const { chair, phaseName, inputs, skills, output_specs } = p;
     const t0 = Date.now();
     const producerHint = chair.skill_slug || p.agent?.slug || chair.agent_slug || chair.role;
@@ -650,11 +1096,26 @@ export async function runGig(
       };
     } else {
       const agent = p.agent!;
-      data = await deps.invoke({
-        agent, phase: phaseName, inputs, gig_input: gigInput, skills,
-        output_types: output_specs.map((s) => s.domain_type), // #174 — the chair's promised subset
-        onEvent: (ev) => { captureUsage(ev); emit({ type: "agent_event", phase: phaseName, role: chair.role, event: ev }); },
-      });
+      // #235 — count the invocation BEFORE it runs. An invocation that dies without emitting a
+      // usable `result` (the 10-minute SIGKILL bound) still happened and still cost money; the
+      // honest record is "started, unattributed", not silence. The counter sits OUTSIDE the
+      // try for the same reason: a chair killed by #250's abort still started, and still cost.
+      const sink = makeUsageSink();
+      startedInvocations++;
+      try {
+        data = await deps.invoke({
+          agent, phase: phaseName, inputs, gig_input: gigInput, skills,
+          missing_skills: p.missing_skills, // #241 — what did NOT resolve, so the prompt can't assert it
+          output_types: output_specs.map((s) => s.domain_type), // #174 — the chair's promised subset
+          // #250 level 2 + #237 — the cancellation signal and the run's depth reach the invocation
+          // itself, so an invoker can kill its child and shape what it asks the model for.
+          ...(deps.signal ? { signal: deps.signal } : {}),
+          ...(deps.depth ? { depth: deps.depth } : {}),
+          onEvent: (ev) => { sink.fold(ev); emit({ type: "agent_event", phase: phaseName, role: chair.role, event: ev }); },
+        });
+      } finally {
+        if (sink.attributed()) attributedInvocations++;
+      }
       // Runtime output_contract check: every type the chair promised must be covered by the
       // bound agent's declared output_types (compose-time mirror; a hand-rolled literal could
       // still ship a mismatch).
@@ -692,25 +1153,73 @@ export async function runGig(
     // and the exact wording varies run to run ("sha256:PLACEHOLDER-…", "UNSEALED:no-hash-tool-…").
     // Trigger on "not a real hash" rather than matching a known sentinel, so the backfill is robust
     // to whatever the model invents (a hardcoded-sentinel match silently no-ops on new wording).
+    //
+    // #240 — the resolution rule used to be "shares ANY name token, first hit wins", iterated in
+    // `depends_on` order. With inputs `grant-draft` and `draft-review`, the field `draft_sha`
+    // matched whichever the chair happened to name first, so a COSMETIC REORDER of a JSON array
+    // silently rewrote the audit trail. The mis-attributed value is a real 64-hex content_sha of
+    // a real output in the same gig: it passes REAL_SHA, passes schema validation, and looks
+    // authentic to output_trace. There is no signal of any kind. That is worse than the
+    // admitted fabrication it replaced — a visibly fake `sha256:PLACEHOLDER-…` at least says
+    // "unknown"; this says "known" and is wrong. In a system whose value IS a byte-reproducible
+    // provenance chain, the engine must not guess. It now resolves only what it can PROVE:
+    // an exact type-slug match, or a single token-overlap candidate. Anything else aborts.
     const REAL_SHA = /^(sha256:)?[0-9a-f]{64}$/i;
-    const shaByType = new Map<string, string>();
-    for (const inp of inputs) if (!shaByType.has(inp.domain_type)) shaByType.set(inp.domain_type, inp.content_sha);
+    const norm = (s: string): string => s.replace(/[_-]+/g, "-").toLowerCase();
+    // A type consumed twice with DIFFERENT content is ambiguous for the same reason a token
+    // collision is — the old dedup silently kept the first, which is another first-hit-wins guess.
+    const shasByType = new Map<string, Set<string>>();
+    for (const inp of inputs) {
+      const set = shasByType.get(inp.domain_type) ?? new Set<string>();
+      set.add(inp.content_sha);
+      shasByType.set(inp.domain_type, set);
+    }
     // Hash the gig input lazily — only when a placeholder actually resolves to it (most outputs have
     // no *_sha fields, and a hostile/circular gig input shouldn't be canonicalized unless needed).
     let gigInputShaCache: string | undefined;
     const gigInputSha = (): string => (gigInputShaCache ??= sha256Hex(canonJson(gigInput)));
-    const resolveSha = (field: string): string | undefined => {
-      const tokens = field.replace(/_sha$/i, "").split(/[_-]/).filter(Boolean);
-      for (const [type, sha] of shaByType) {
-        const ttok = type.split(/[-_]/);
-        if (tokens.some((t) => ttok.includes(t))) return sha;
+    type ShaResolution = { sha: string } | { ambiguous: string[] } | undefined;
+    const resolveSha = (field: string): ShaResolution => {
+      const bare = field.replace(/_sha$/i, "");
+      const only = (type: string): ShaResolution => {
+        const set = shasByType.get(type)!;
+        // same type consumed twice with different bytes — which predecessor is meant is unknowable
+        if (set.size > 1) return { ambiguous: [`${type} (×${set.size} distinct)`] };
+        return { sha: [...set][0]! };
+      };
+      // 1. EXACT type-slug match — `grant_draft_sha` ↔ `grant-draft`. Unambiguous by construction,
+      //    and it beats a partial token collision (`draft-review` also contains `draft`).
+      for (const type of shasByType.keys()) if (norm(type) === norm(bare)) return only(type);
+      // 2. Token overlap — accepted ONLY when exactly one consumed type matches.
+      const tokens = bare.split(/[_-]/).filter(Boolean).map((t) => t.toLowerCase());
+      const candidates: string[] = [];
+      for (const type of shasByType.keys()) {
+        const ttok = type.split(/[-_]/).map((t) => t.toLowerCase());
+        if (tokens.some((t) => ttok.includes(t))) candidates.push(type);
       }
-      if (tokens.includes("disclosure") || tokens.includes("input")) return gigInputSha();
+      if (candidates.length === 1) return only(candidates[0]!);
+      // Sorted, not depends_on-ordered: the whole point of #240 is that nothing an operator
+      // sees may depend on the order of a JSON array — including the diagnostic.
+      if (candidates.length > 1) return { ambiguous: candidates.sort() };
+      // 3. The gig payload — a disclosure/input field refers to the seed, not a predecessor.
+      if (tokens.includes("disclosure") || tokens.includes("input")) return { sha: gigInputSha() };
       return undefined;
     };
+    // The unresolved case (`?? ""`) is the same defect's benign twin: honest about having no
+    // predecessor, but silent about it. It stays "" (a non-hash, so nothing downstream mistakes
+    // it for provenance) and is now REPORTED on chair_complete instead of vanishing.
+    const unresolvedShaFields: string[] = [];
     const backfillShas = (obj: Record<string, unknown>): void => {
       for (const [k, v] of Object.entries(obj)) {
-        if (/_sha$/i.test(k) && typeof v === "string" && !REAL_SHA.test(v)) obj[k] = resolveSha(k) ?? "";
+        if (!/_sha$/i.test(k) || typeof v !== "string" || REAL_SHA.test(v)) continue;
+        const r = resolveSha(k);
+        if (r && "ambiguous" in r) {
+          throw new RuntimeError(
+            `chair "${chair.role}" cannot stamp provenance field "${k}": it is ambiguous across the inputs this chair consumed [${r.ambiguous.join(", ")}]. The engine refuses to guess which predecessor it refers to — a wrong content_sha is indistinguishable from a right one. Name the field after exactly one consumed type (e.g. "${r.ambiguous[0]!.split(" ")[0]!.replace(/-/g, "_")}_sha").`,
+          );
+        }
+        obj[k] = r ? r.sha : "";
+        if (!r) unresolvedShaFields.push(k);
       }
     };
 
@@ -748,9 +1257,25 @@ export async function runGig(
         `chair "${chair.role}" produced no recognized output — expected one of [${output_specs.map((s) => s.domain_type).join(", ")}]`,
       );
     }
+    // #243 — the output_contract is honored as a SELECTOR but not as a FLOOR: the guard above
+    // is `written.length === 0`, not `written.length === output_specs.length`. A chair that
+    // promised two types and sealed one completes silently. The in-code justification (a keyed
+    // type may be conditional, and a downstream input_contract check fails loudly if a consumer
+    // actually needed it) holds only WHERE A CONSUMER EXISTS — for a terminal chair, the gate
+    // phase that emits the verdict, nothing consumes it and the promise evaporates into
+    // `status: "complete"`. Enforcing a blanket floor would be wrong (conditional outputs are
+    // intentional and there is no optionality marker on Chair to distinguish them), so this
+    // RECORDS the shortfall rather than failing on it. See the report on #243 for why the
+    // enforcement half needs a schema decision, not a guard.
+    const sealedTypes = new Set(written.map((w) => w.domain_type));
+    const missing = output_specs.map((s) => s.domain_type).filter((t) => !sealedTypes.has(t));
+    if (missing.length > 0) unfulfilledOutputs.push({ role: chair.role, phase: phaseName, missing });
     emit({
       type: "chair_complete", phase: phaseName, role: chair.role, producer: producer_slug,
       output_types: written.map((w) => w.domain_type), duration_ms: Date.now() - t0,
+      promised_output_types: output_specs.map((s) => s.domain_type),
+      missing_output_types: missing,
+      ...(unresolvedShaFields.length > 0 ? { unresolved_sha_fields: unresolvedShaFields } : {}),
     });
     return written;
   }
@@ -765,8 +1290,20 @@ export async function runGig(
   // the produced outputs and collect the scores. A score of 1.0 means the
   // eval's contract holds; 0.0 means it doesn't. v0 wire is intentionally
   // narrow — score is keyed presence; richer eval engines can subclass.
+  //
+  // #246 — nothing validated eval_slugs against the loaded evals map, and scoreEval returned
+  // 0.0 both for "this eval ran and its contract did not hold" and for "no eval by that name
+  // exists". The two were byte-identical, INCLUDING inside run_fingerprint — so a typo'd slug
+  // was baked into the reproducibility key as though a real contract had been evaluated and
+  // found wanting. Same defect family as a dangling skill ref: a broken reference silently
+  // degrading into a plausible-looking value instead of a named one. The score stays 0.0
+  // (callers key off presence, and "can't attest a contract that isn't defined" is fair), but
+  // the run now says WHICH slugs were never resolvable, and the fingerprint carries that
+  // separately so the two cases cannot collide.
   const eval_scores: Record<string, number> = {};
+  const unresolved_evals: string[] = [];
   for (const slug of standard.eval_slugs ?? []) {
+    if (!deps.evals?.has(slug)) unresolved_evals.push(slug);
     eval_scores[slug] = scoreEval(slug, produced, deps.evals);
   }
 
@@ -776,8 +1313,10 @@ export async function runGig(
     canonical_form_version: CANONICAL_FORM_VERSION,
     eval_scores,
     output_hashes,
+    ...(unresolved_evals.length > 0 ? { unresolved_evals } : {}),
   });
 
+  const settledUsage = finalizeUsage();
   deps.ledger.append({
     kind: "gig",
     schema_version: LEDGER_SCHEMA_VERSION,
@@ -789,8 +1328,10 @@ export async function runGig(
     output_hashes,
     started_at,
     finished_at: new Date().toISOString(),
-    // settled model spend (#195) — omitted when no model ran (skill-only gigs / stubbed invokers).
-    ...(sawUsage ? { usage } : {}),
+    // settled model spend (#195) — omitted when nothing was CAPTURED (skill-only gigs, stubbed
+    // invokers, or a run whose every invocation reported no usage payload). #235: an absent
+    // usage block means "not captured", never "$0.00".
+    ...(settledUsage ? { usage: settledUsage } : {}),
   });
 
   // Cycle complete — when a budget was supplied, mark it `settled` and
@@ -798,13 +1339,33 @@ export async function runGig(
   // budget-state.json cycle terminal-state semantics for a closed cycle.
   if (budget) {
     budget.agent_state = "settled";
+    budget.settled_usd = usage.total_cost_usd; // #233 — final reconciliation of REAL dollars
   }
 
   const result: GigResult = { gig_id, standard_slug: standard.slug, genome_hash, run_fingerprint, outputs: produced, eval_scores, status: "complete" };
-  if (sawUsage) result.usage = usage;
+  if (settledUsage) result.usage = settledUsage;
   if (budget) result.budget_state = budget;
+  if (unresolved_evals.length > 0) result.unresolved_evals = unresolved_evals;
+  if (unfulfilledOutputs.length > 0) result.unfulfilled_outputs = unfulfilledOutputs;
   emit({ type: "gig_complete", outputs: produced.length });
   return result;
+
+  } catch (e) {
+    // #236 — real dollars were spent, captured, and then thrown away on every failed gig.
+    // `usage` was written only on the success path, and the async dispatcher's `.catch` set
+    // status/finished_at/error and never state.usage — so a gig that burned $6 across four
+    // chairs and died on the fifth reported zero dollars, everywhere, while the OUTPUTS from
+    // the completed chairs persisted. The artifact survived; the record of what it cost did
+    // not. Attaching the partial accounting to the error is what lets gig_monitor and a
+    // synchronous caller report it. This does NOT write a ledger row — absence-of-row remains
+    // the honest "un-sealed gig" signal (recorder_durability_mid_crash.spec.ts).
+    if (e && typeof e === "object") {
+      const partial = finalizeUsage();
+      if (partial) (e as Record<string, unknown>)["usage"] = partial;
+      if (budget) (e as Record<string, unknown>)["budget_state"] = budget;
+    }
+    throw e;
+  }
 }
 
 // v0 eval-scorer: a minimal scan over the produced outputs. The named eval is

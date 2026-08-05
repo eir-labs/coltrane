@@ -100,8 +100,8 @@ function setup() {
 }
 
 const happyInvoke: AgentInvoker = ({ agent, inputs }) => {
-  if (agent.slug === "site-scout") return { url: "/products" };
-  return { title: `finding from ${inputs.length} input(s)` };
+  if (agent.slug === "site-scout") return { url: "/products", source: "https://example.com/products" };
+  return { title: `finding from ${inputs.length} input(s)`, claims: [`derived from ${inputs.length} input(s)`] };
 };
 
 // ── ADVERSARIAL PROBES ─────────────────────────────────────────────────────
@@ -230,7 +230,7 @@ describe("PR #99 adversarial review — cost-budget enforcement", () => {
     const { outputs, ledger } = setup();
     const throwingInvoker: AgentInvoker = ({ agent }) => {
       if (agent.slug === "site-analyst") throw new Error("invoker exploded");
-      return { url: "/products" };
+      return { url: "/products", source: "https://example.com/products" };
     };
 
     await expect(
@@ -251,17 +251,20 @@ describe("PR #99 adversarial review — cost-budget enforcement", () => {
   });
 
   it("HOLE [CRITICAL] — BudgetExhausted mid-gig: prior outputs orphaned + spent already inflated PRE-invocation", async () => {
-    // PR body claims "post-success: spent += cost" but runtime.ts:219 deducts
-    // PRE-invocation. With a budget that allows phase 1 but not phase 2:
-    //  - phase 1 invokes, cost-deducted, output written
+    // With a budget that allows phase 1 but not phase 2:
+    //  - phase 1 invokes, cost settles, output written
     //  - phase 2 cost-check fails → BudgetExhausted
     //  - state shows ONLY phase-1 spent (correct), BUT the phase-1 output
     //    sits in the store with NO ledger record.
     const { outputs, ledger } = setup();
     let caught: BudgetExhausted | null = null;
     try {
-      // opening=20 → phase 1 costs ~8.3, succeeds; phase 2 needs ~10+, BudgetExhausted.
-      await runGig(standard, {}, { outputs, ledger, invoke: happyInvoke, budget: { opening: 20 } });
+      // FIXTURE THRESHOLD, updated for #233: cost-of-append now measures the CONTENT a chair
+      // consumes rather than its inputs' UUIDs, so this standard's costs moved from
+      // 8.3 / 12.7 to 8.0 / 10.5. opening=15 restores the intended shape — phase 1 settles at
+      // 8.0, phase 2 needs 10.5 against a balance of 7.0 → BudgetExhausted at site-analyst.
+      // Every assertion below is unchanged; only the number that puts the gig in this state is.
+      await runGig(standard, {}, { outputs, ledger, invoke: happyInvoke, budget: { opening: 15 } });
     } catch (e) {
       if (e instanceof BudgetExhausted) caught = e;
       else throw e;
@@ -287,7 +290,7 @@ describe("PR #99 adversarial review — cost-budget enforcement", () => {
     // inflated by that phase's pre-deducted cost.
     const { outputs, ledger } = setup();
     const phase1Invoker: AgentInvoker = ({ agent }) => {
-      if (agent.slug === "site-scout") return { url: "/p" };
+      if (agent.slug === "site-scout") return { url: "/p", source: "https://example.com/p" };
       throw new Error("phase 2 invoker threw");
     };
     try {

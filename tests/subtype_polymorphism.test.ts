@@ -73,7 +73,9 @@ describe("subtype polymorphism: a core-type contract accepts any domain subtype"
     const seen: Record<string, string[]> = {};
     const invoke: AgentInvoker = ({ agent, inputs }) => {
       seen[agent.slug] = inputs.map((i) => i.domain_type);
-      return agent.slug === "finder" ? { note: "found" } : { verdict: "ok" };
+      return agent.slug === "finder"
+        ? { note: "found", claims: ["the widget is present"] }
+        : { verdict: "ok", criteria: ["widget presence"] };
     };
 
     const res = await runGig(standard, {}, { outputs, ledger, invoke });
@@ -99,7 +101,8 @@ describe("subtype polymorphism: a core-type contract accepts any domain subtype"
       eval_slugs: ["v-check"],
     };
     const evals = new Map([["v-check", { slug: "v-check", on_type: "Verdict", non_empty_fields: ["decided"] }]]);
-    const invoke: AgentInvoker = () => ({ decided: true });
+    // domain-verdict is Verdict-cored, so it carries the evidence it verified (#227/#228).
+    const invoke: AgentInvoker = () => ({ decided: true, checks: [{ method: "polymorphic-eval", target_ref: "x", result: "pass" }] });
     const res = await runGig(std, {}, { outputs, ledger, invoke, evals });
     // the eval is declared on core `Verdict`; the produced `domain-verdict` subtype is judged
     // (was 0.0 under exact on_type matching)
@@ -110,20 +113,37 @@ describe("subtype polymorphism: a core-type contract accepts any domain subtype"
     const { outputs, ledger } = setup();
     // base-analyst variant that declares a DOMAIN input — must NOT accept widget-finding
     const exactAnalyst: Agent = { ...TEST_BEHAVIOR, ...baseAnalyst, slug: "exact-analyst", input_types: ["assessment"] };
+    // FIXTURE, updated for #245. Phase 0 now also produces the `assessment` the analyst
+    // declares it consumes. Before the runtime grew a floor on empty inputs, this chair was
+    // invoked with `inputs: []` and the exclusion below held VACUOUSLY — an empty array
+    // contains nothing. With a real `assessment` on the frontier the analyst receives
+    // exactly one input and the assertion becomes load-bearing: `widget-finding` (a
+    // Interpretation subtype) is still not pulled in by a DOMAIN-type declaration, which is
+    // the claim this test exists to make. The assertion itself is unchanged.
+    const rater: Agent = { ...TEST_BEHAVIOR, slug: "rater", primitives: ["JUDGE"], input_types: [], output_types: ["assessment"], domain: "base" };
     const exactStandard: Standard = {
       ...standard,
-      agents: [finder, exactAnalyst],
+      agents: [finder, rater, exactAnalyst],
       phases: [
-        standard.phases[0]!,
+        {
+          name: "find",
+          chairs: [
+            ...standard.phases[0]!.chairs,
+            { role: "rate", agent_slug: "rater", depends_on: [], input_contract: [], output_contract: ["assessment"], required_skills: [] },
+          ],
+        },
         { name: "assess", chairs: [{ role: "assess", agent_slug: "exact-analyst", depends_on: [], input_contract: [], output_contract: ["assessment"], required_skills: [] }] },
       ],
     };
     const seen: Record<string, string[]> = {};
     const invoke: AgentInvoker = ({ agent, inputs }) => {
       seen[agent.slug] = inputs.map((i) => i.domain_type);
-      return agent.slug === "finder" ? { note: "found" } : { verdict: "ok" };
+      return agent.slug === "finder"
+        ? { note: "found", claims: ["the widget is present"] }
+        : { verdict: "ok", criteria: ["widget presence"] };
     };
     await runGig(exactStandard, {}, { outputs, ledger, invoke });
+    expect(seen["exact-analyst"], "the exact-typed input IS delivered").toEqual(["assessment"]);
     expect(seen["exact-analyst"], "a domain-type input must not pull an unrelated subtype").not.toContain(
       "widget-finding",
     );

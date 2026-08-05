@@ -34,6 +34,7 @@
     "round_n",
     "claim_state_sha",
     "rejection_state_sha",
-    "predecessor_sha"
+    "predecessor_sha",
+    "claims"
   ]
 }

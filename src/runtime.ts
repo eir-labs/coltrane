@@ -1140,8 +1140,11 @@ export async function runGig(
     // This keeps narrowing correct even when an over-eager invoker returns extra keys (#174) —
     // the chair seals only its promised types and reads each from its own key.
     // A keyed type may be CONDITIONAL (e.g. a verdict's provisional-draft only on FILEABLE), so a
-    // missing key is skipped, not an error — the downstream input_contract check fails loudly if a
-    // consumer actually needed a type that wasn't produced. Tag each with `from_role`.
+    // missing key is skipped HERE and adjudicated below: #243 made the output_contract a floor,
+    // so an absent type is an error unless the chair declares it in `optional_outputs`. (This
+    // comment used to end "the downstream input_contract check fails loudly if a consumer
+    // actually needed it" — that reasoning is what #243 reversed, because it holds only where a
+    // consumer exists, and a terminal chair has none.) Tag each with `from_role`.
     // #196 — fill placeholder provenance hashes with the REAL content_sha. Agents are asked to emit
     // *_sha fields but have no hashing tool, so they fabricate sentinels (sha256:PLACEHOLDER-…); the
     // sealed record then carries fake hashes and the "byte-reproducible survival chain" is hollow.
@@ -1224,7 +1227,19 @@ export async function runGig(
     };
 
     const single = output_specs.length === 1;
-    const written: OutputRecord[] = [];
+    const promised = output_specs.map((s) => s.domain_type);
+
+    // #243 — DECIDE BEFORE SEALING. Every check that can throw now runs against resolved
+    // slices while nothing has been written yet.
+    //
+    // The floor check used to sit AFTER the write loop, which created a failure class that did
+    // not previously exist: a chair delivering part of its contract sealed those records,
+    // append-flushed them to `outputs/<gig_id>.jsonl`, and only THEN threw — so the gig failed
+    // with no ledger row while its partial outputs persisted. `output_query`, `output_trace`
+    // and `system_health.outputs` all surface those orphans, so the two audit surfaces
+    // disagree by construction and any completeness signal computed over them is describing a
+    // state that cannot be reconciled. Deciding first makes a chair all-or-nothing.
+    const resolved: Array<{ spec: (typeof output_specs)[number]; slice: Record<string, unknown> }> = [];
     for (const spec of output_specs) {
       const keyed = data[spec.domain_type] as Record<string, unknown> | undefined;
       const slice = keyed !== undefined && keyed !== null ? keyed : single ? data : undefined;
@@ -1234,7 +1249,52 @@ export async function runGig(
           `chair "${chair.role}" output "${spec.domain_type}" must be a JSON object, got ${typeof slice}`,
         );
       }
-      backfillShas(slice as Record<string, unknown>);
+      resolved.push({ spec, slice: slice as Record<string, unknown> });
+    }
+    // backfillShas refuses an ambiguous provenance field. Run it over EVERY slice up front so
+    // that throw also lands before the first write, rather than midway through them.
+    for (const { slice } of resolved) backfillShas(slice);
+
+    // The output_contract is a FLOOR, not merely a selector. `written.length === 0` alone let a
+    // chair that promised two types and sealed one complete silently. The old in-code
+    // justification — a keyed type may be conditional, and a downstream input_contract check
+    // fails loudly if a consumer actually needed it — holds only WHERE A CONSUMER EXISTS. For a
+    // TERMINAL chair (the gate phase, the one that emits the verdict) nothing consumes it, so
+    // the promise evaporated into `status: "complete"`. The one chair whose output an operator
+    // acts on was the one with no backstop.
+    //
+    // Conditional outputs are still legal — they now have to SAY SO, via `optional_outputs`
+    // (deny-by-default: promised means required unless declared). An undeclared conditional
+    // output is indistinguishable from a chair that simply failed to deliver.
+    const present = new Set(resolved.map((r) => r.spec.domain_type));
+    const missing = promised.filter((t) => !present.has(t));
+    const optional = new Set(chair.optional_outputs ?? []);
+    const missingRequired = missing.filter((t) => !optional.has(t));
+
+    // Producing NOTHING is a different failure from dropping one promised type — "the invoker
+    // returned junk" vs "one type is absent" — and collapsing them loses that distinction. But
+    // it is only a FAILURE when something was actually required. A chair whose every promised
+    // type is declared optional is entitled to seal nothing, and the old `written.length === 0`
+    // guard fired ABOVE the floor check, which made that unexpressable. Not hypothetical:
+    // patent-triage-v1's `draft` chair promises exactly one type and its intent reads "Only on
+    // a FILEABLE verdict … On any other verdict, nothing." Single-output and conditional, so
+    // `optional_outputs` was a no-op there until this ordering changed.
+    if (resolved.length === 0 && missingRequired.length > 0) {
+      throw new RuntimeError(
+        `chair "${chair.role}" produced no recognized output — expected one of [${promised.join(", ")}]`,
+      );
+    }
+    if (missingRequired.length > 0) {
+      throw new RuntimeError(
+        `chair "${chair.role}" did not deliver its output_contract — missing [${missingRequired.join(", ")}] ` +
+          `of promised [${promised.join(", ")}]. ` +
+          `If a type is legitimately conditional, declare it in the chair's optional_outputs.`,
+      );
+    }
+
+    // Contract satisfied. Only now does anything become durable.
+    const written: OutputRecord[] = [];
+    for (const { spec, slice } of resolved) {
       const rec = deps.outputs.write({
         core_type: spec.core_type,
         domain_type: spec.domain_type,
@@ -1244,42 +1304,13 @@ export async function runGig(
         from_role: chair.role,
         phase: phaseName,
         primitive: spec.primitive,
-        data: slice as Record<string, unknown>,
+        data: slice,
         input_refs: inputs.map((i) => i.id),
         input_shas: inputs.map((i) => i.content_sha), // #196 — real predecessor hashes, engine-stamped
         skill_provenance,
       });
       for (const i of inputs) deps.outputs.addRef(rec.id, i.id, "derived_from", spec.primitive);
       written.push(rec);
-    }
-    if (written.length === 0) {
-      throw new RuntimeError(
-        `chair "${chair.role}" produced no recognized output — expected one of [${output_specs.map((s) => s.domain_type).join(", ")}]`,
-      );
-    }
-    // #243 — the output_contract is a FLOOR, not merely a selector. The guard above is
-    // `written.length === 0`; on its own it let a chair that promised two types and sealed
-    // one complete silently. The old in-code justification — a keyed type may be conditional,
-    // and a downstream input_contract check fails loudly if a consumer actually needed it —
-    // holds only WHERE A CONSUMER EXISTS. For a TERMINAL chair (the gate phase, the one that
-    // emits the verdict) nothing consumes it, so the promise evaporated into
-    // `status: "complete"`. The one chair whose output an operator acts on was the one with
-    // no backstop.
-    //
-    // Conditional outputs are still legal — they now have to SAY SO, via the chair's
-    // `optional_outputs` (deny-by-default: promised means required unless declared). An
-    // undeclared conditional output is indistinguishable from a chair that simply failed to
-    // deliver, and the engine cannot tell the operator apart from the bug.
-    const sealedTypes = new Set(written.map((w) => w.domain_type));
-    const missing = output_specs.map((s) => s.domain_type).filter((t) => !sealedTypes.has(t));
-    const optional = new Set(chair.optional_outputs ?? []);
-    const missingRequired = missing.filter((t) => !optional.has(t));
-    if (missingRequired.length > 0) {
-      throw new RuntimeError(
-        `chair "${chair.role}" did not deliver its output_contract — missing [${missingRequired.join(", ")}] ` +
-          `of promised [${output_specs.map((s) => s.domain_type).join(", ")}]. ` +
-          `If a type is legitimately conditional, declare it in the chair's optional_outputs.`,
-      );
     }
     // A DECLARED-optional absence is still a fact about this run. Legitimising a shortfall is
     // not the same as hiding it, so it keeps its row in the manifest.

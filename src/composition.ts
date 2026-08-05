@@ -299,6 +299,20 @@ export function composeStandard(def: {
           );
         }
       }
+      // #243 — a skill-backed chair seals exactly ONE output: its deterministic code half
+      // returns a single blob, and `prepareChair` takes `output_contract[0]` and discards the
+      // rest. So a multi-entry contract on a skill chair is a promise the runtime structurally
+      // cannot keep — and, worse, cannot even REPORT breaking, because the floor is computed
+      // over the one spec that was built. Silent since the skill path was added. Reject it
+      // here, where the author can see it, rather than letting entries 2..N evaporate.
+      if (ch.skill_slug && (ch.agent_slug ?? "") === "" && ch.output_contract.length > 1) {
+        throw new CompositionError(
+          `standard ${def.slug}: skill-backed chair "${ch.role}" promises ${ch.output_contract.length} output types ` +
+            `[${ch.output_contract.join(", ")}] but a skill seals exactly one. Only "${ch.output_contract[0]}" would ` +
+            `ever be produced and the rest would be silently dropped — split the work across chairs, or back this ` +
+            `chair with an agent.`,
+        );
+      }
     }
   }
 

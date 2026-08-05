@@ -134,6 +134,88 @@ describe("#243 — an undeclared missing output fails the run", () => {
   });
 });
 
+// ── Round 2. Adversarial review found the floor correct where it fired, and three places
+// where it did not fire, could not be expressed, or fired too late. ────────────────────────
+describe("#243 — a failed chair leaves nothing sealed", () => {
+  // The floor check originally ran AFTER the write loop, so a chair delivering part of its
+  // contract sealed those records, persisted them, and only then threw. The gig failed with
+  // no ledger row while its partial outputs survived — visible to output_query, output_trace
+  // and system_health.outputs. That is a NEW failure class the old `written.length === 0`
+  // guard could not create, because it had nothing to orphan.
+  it("seals no output at all when a required type is missing", async () => {
+    const { outputs, ledger } = store();
+    await expect(runGig(standard(), {}, { outputs, ledger, invoke: halfInvoker })).rejects.toThrow(RuntimeError);
+    expect(
+      outputs.all().map((o) => o.domain_type),
+      "sig-a arrived and was valid — but its chair did not satisfy the contract, so it must not " +
+        "persist. A sealed record with no ledger row is an orphan the audit surfaces disagree about.",
+    ).toEqual([]);
+  });
+
+  it("writes nothing when the failure is a later slice's shape, not the contract", async () => {
+    const { outputs, ledger } = store();
+    const bad: AgentInvoker = () => ({ "sig-a": { a: "ok", ...SIGNAL }, "judg-b": "not-an-object" });
+    await expect(runGig(standard(), {}, { outputs, ledger, invoke: bad })).rejects.toThrow(/must be a JSON object/);
+    expect(outputs.all(), "every throwing check runs before the first write, not among them").toEqual([]);
+  });
+});
+
+describe("#243 — an all-optional chair may legitimately seal nothing", () => {
+  // `written.length === 0` fired ABOVE the floor check, so a chair whose every promised type
+  // was optional still died on "produced no recognized output" — which made optional_outputs
+  // a no-op for exactly the shape that needs it most. patent-triage-v1's `draft` chair is
+  // single-output and its intent reads "Only on a FILEABLE verdict … On any other verdict,
+  // nothing." Declaring it optional has to actually work.
+  it("completes when every promised type is optional and none arrived", async () => {
+    const { outputs, ledger } = store();
+    const res = await runGig(standard(["sig-a", "judg-b"]), {}, { outputs, ledger, invoke: () => ({}) });
+    expect(res.status).toBe("complete");
+    expect(res.outputs).toEqual([]);
+  });
+
+  it("still fails when NOTHING arrived and something was required", async () => {
+    const { outputs, ledger } = store();
+    await expect(
+      runGig(standard(["judg-b"]), {}, { outputs, ledger, invoke: () => ({}) }),
+    ).rejects.toThrow(/produced no recognized output/);
+  });
+});
+
+describe("#243 — a skill-backed chair cannot promise what it structurally cannot seal", () => {
+  // `prepareChair` takes `output_contract[0]` and discards the rest, and the floor is computed
+  // over the one spec it built — so entries 2..N could never be reported missing and the throw
+  // could never fire. The floor was silently inoperative for this whole chair kind.
+  it("rejects a multi-output skill chair at compose time", () => {
+    expect(() =>
+      composeStandard({
+        slug: "skillmulti", domain: "demo", agents: [dual],
+        phases: [{
+          name: "p",
+          chairs: [{
+            role: "r", agent_slug: "", skill_slug: "some-skill", depends_on: [], input_contract: [],
+            output_contract: ["sig-a", "judg-b"], required_skills: [],
+          }],
+        } as unknown as PhaseDef],
+      }),
+    ).toThrow(/seals exactly one/);
+  });
+
+  it("still accepts a single-output skill chair", () => {
+    expect(() =>
+      composeStandard({
+        slug: "skillone", domain: "demo", agents: [dual],
+        phases: [{
+          name: "p",
+          chairs: [{
+            role: "r", agent_slug: "", skill_slug: "some-skill", depends_on: [], input_contract: [],
+            output_contract: ["sig-a"], required_skills: [],
+          }],
+        } as unknown as PhaseDef],
+      }),
+    ).not.toThrow();
+  });
+});
+
 describe("#243 — optional_outputs is validated at compose time", () => {
   // A typo here silently WIDENS the floor — the exact class of bug this whole change
   // exists to close. It has to be caught where the genome is authored, not at 3am in a run.

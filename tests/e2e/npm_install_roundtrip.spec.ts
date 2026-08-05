@@ -1,4 +1,4 @@
-// e2e: the install-and-boot roundtrip — proves @eir-dev/coltrane works when
+// e2e: the install-and-boot roundtrip — proves @eir-labs/coltrane works when
 // imported downstream the way a real consumer installs it (issue #144 / #147 axis).
 //
 // The unit gates (tests/pack_*_audit, tests/npm_publish_metadata) assert the

@@ -37,7 +37,7 @@ function readPkg(): PackageJson {
   return JSON.parse(readFileSync(PKG_PATH, "utf-8")) as PackageJson;
 }
 
-describe("npm-publish metadata — library import surface (downstream `import from \"@eir-dev/coltrane\"`)", () => {
+describe("npm-publish metadata — library import surface (downstream `import from \"@eir-labs/coltrane\"`)", () => {
   it("declares main → dist/src/index.js", () => {
     expect(readPkg().main).toBe("./dist/src/index.js");
   });
@@ -55,11 +55,11 @@ describe("npm-publish metadata — library import surface (downstream `import fr
 });
 
 describe("npm-publish metadata — name + scope", () => {
-  it("name is scoped under @eir-dev", () => {
-    expect(readPkg().name).toMatch(/^@eir-dev\//);
+  it("name is scoped under @eir-labs", () => {
+    expect(readPkg().name).toMatch(/^@eir-labs\//);
   });
-  it("name matches @eir-dev/coltrane", () => {
-    expect(readPkg().name).toBe("@eir-dev/coltrane");
+  it("name matches @eir-labs/coltrane", () => {
+    expect(readPkg().name).toBe("@eir-labs/coltrane");
   });
 });
 

@@ -491,6 +491,6 @@ describe("the shipped coltrane genome has no dangling skill bindings", () => {
     const dangling = g.load_errors.filter((e) => /dangling skill|skill binding/i.test(e.error));
     expect(dangling, `dangling: ${JSON.stringify(dangling)}`).toEqual([]);
     // Sanity: the fixture we lean on above is real.
-    expect(readFileSync(join(root, "package.json"), "utf-8")).toContain("@eir-dev/coltrane");
+    expect(readFileSync(join(root, "package.json"), "utf-8")).toContain("@eir-labs/coltrane");
   });
 });

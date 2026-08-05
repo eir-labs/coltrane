@@ -16,6 +16,7 @@ import type { Registry } from "./registry.js";
 import { CORE_TYPES, type CoreType } from "./core_types.js";
 import { validateOutput } from "./output_validation.js";
 import { outputContentHash } from "./canonical_form.js";
+import { typeShapeFingerprint } from "./reuse.js";
 
 // §6 output_refs.relation CHECK constraint, as a closed set.
 export const REF_RELATIONS = [
@@ -67,6 +68,23 @@ export interface OutputRecord {
   // It closes the chair→skill provenance gap: an audit can trace the ledger entry back to the
   // exact SkillChainEvent. Absent for model-backed (agent) chairs; agent_slug carries those.
   skill_provenance?: { slug: string; version: number; code_hash: string; tier: number } | undefined;
+  /**
+   * Set when this record was RECALLED rather than DERIVED — the reuse cache served a prior
+   * gig's sealed output instead of invoking the producer, and this record is that output
+   * re-sealed into the current gig.
+   *
+   * It is an annotation, not a shortcut: the record went through the same `write` gate as a
+   * fresh one, its `input_refs`/`input_shas` name the inputs THIS gig actually fed the chair,
+   * and its `content_sha` was recomputed (and matches the source's, which is the property
+   * that makes the substitution legitimate). What this field adds is the one fact the record
+   * would otherwise not carry — that no model was invoked to produce it. An auditor reading
+   * a run has to be able to tell recall from derivation.
+   *
+   * Deliberately NOT folded into `content_sha`: two byte-identical outputs must hash
+   * identically whether one was recalled and the other derived, or the whole reuse story
+   * ("a reused output is indistinguishable in substance from a fresh one") would be false.
+   */
+  reused_from?: { output_id: string; gig_id: string; cache_key: string } | undefined;
 }
 
 // What a caller supplies to write(). id + created_at are assigned by the store;
@@ -90,6 +108,8 @@ export interface OutputWrite {
   tokens_used?: number | undefined;
   duration_ms?: number | undefined;
   skill_provenance?: { slug: string; version: number; code_hash: string; tier: number } | undefined;
+  /** See OutputRecord.reused_from — recall, not derivation. */
+  reused_from?: { output_id: string; gig_id: string; cache_key: string } | undefined;
 }
 
 // §6 `output_refs` row — one typed edge of the provenance graph.
@@ -173,6 +193,32 @@ export interface OutputStore {
   // under the right core (a type's core comes from its OWN extends, since an agent's
   // primitives and output_types are not 1:1).
   coreTypeOf(typeSlug: string): string | null;
+  /**
+   * A hash of the type's CURRENT shape — its core, its required list, its whole schema.
+   *
+   * Lives here for the same reason `coreTypeOf` does: this store is the single owner of
+   * "what does the registry say about this type" at the seal boundary, and #263 was
+   * precisely two layers disagreeing about that question. A second owner reading the
+   * registry directly would be that bug again.
+   *
+   * Returns "" for a type the registry cannot describe (unregistered, or absent). A caller
+   * deciding whether a stored object still satisfies its type must treat "" as "cannot
+   * check" — and a cache that cannot check its entries must not serve them.
+   */
+  typeFingerprint(typeSlug: string): string;
+  /**
+   * Would `write` accept this? Runs EXACTLY the gates `write` runs — core agreement (#263),
+   * the registry schema, and the core substance floor (#227/#228) — and persists nothing.
+   *
+   * The reuse path needs this because a chair is all-or-nothing (#243): a multi-output entry
+   * whose second record fails validation must not leave the first one durable. `write` itself
+   * cannot offer that guarantee mid-loop, so the check has to be separable from the effect.
+   * One implementation backs both, so the two answers cannot drift.
+   */
+  validateWrite(o: { core_type: string; domain_type: string; data: Record<string, unknown> }): {
+    valid: boolean;
+    reason?: string;
+  };
   // #248: what was skipped while hydrating from disk. `ok: false` means at least one
   // persisted row could not be read, so any chain this store reports may be short.
   integrity(): OutputStoreIntegrityReport;
@@ -315,6 +361,101 @@ export function createOutputStore(registry: Registry, options?: OutputStoreOptio
     return dt ? dt.extends : null;
   }
 
+  function resolveTypeFingerprint(typeSlug: string): string {
+    if (!typeSlug) return "";
+    // A bare core type is immutable by construction (the six cores are canonical and frozen),
+    // so its fingerprint is a constant naming which core it is. Nothing to read.
+    if ((CORE_TYPES as readonly string[]).includes(typeSlug)) {
+      return typeShapeFingerprint({ extends: typeSlug, required_fields: [], schema: null });
+    }
+    const dt = registry.listTypes().find((t) => t.slug === typeSlug);
+    if (!dt) return ""; // unregistered — unfingerprintable, therefore uncheckable
+    return typeShapeFingerprint({ extends: dt.extends, required_fields: dt.required_fields, schema: dt.schema });
+  }
+
+  /**
+   * The one owner of "would a seal accept this". `write` calls it for effect;
+   * `validateWrite` exposes it as a question. Returns the full rejection message so the two
+   * paths cannot diverge in what they tell an operator, only in whether they throw.
+   */
+  function checkWritable(o: { core_type: string; domain_type: string; data: Record<string, unknown> }): {
+    valid: boolean;
+    reason?: string;
+  } {
+    // #263 — the asserted core must agree with the registry's answer.
+    //
+    // #227/#228 made `core_type` load-bearing: it selects which substance floor is
+    // enforced. So a caller asserting the wrong core does not merely mislabel the record —
+    // it gets the WRONG core's floor applied, and can satisfy `Verdict.checks[]` while
+    // sealing something the registry says is an Interpretation that owed `claims[]`.
+    //
+    // ORDER: this runs FIRST, ahead of the schema validation below, and that placement is
+    // load-bearing in a way the first draft of this fix got wrong. The agreement check is
+    // pure METADATA — it compares two declarations and never looks at the payload — so it
+    // does not need the schema to have passed. Running it second meant that for a CLOSED
+    // schema (the default, and what every shipped domain type uses) a payload carrying the
+    // wrong core's substance field died on Ajv first, telling the operator to delete
+    // `checks` when the actual repair is to fix the declared core. The diagnosis for a
+    // contradicted core has to come from the check that understands cores.
+    //
+    // Unresolvable slugs still fall through untouched: an unregistered domain_type is the
+    // registry's `unknown domain_type` rejection below, and this must not become a second,
+    // competing owner of that error.
+    if (o.domain_type) {
+      const registered = resolveCoreType(o.domain_type);
+      if (registered !== null && registered !== o.core_type) {
+        return {
+          valid: false,
+          reason:
+            `output rejected: ${o.domain_type} was sealed as core_type "${o.core_type}" but the ` +
+            `registry defines it as "${registered}" — one of the two is wrong, and the core ` +
+            `decides which substance invariant applies`,
+        };
+      }
+    }
+    // #263 follow-on — a `core_type` that is not a core type at all.
+    //
+    // The check above only fires when a domain_type RESOLVES. With no domain_type (the
+    // freeform path, Rob #133) any string sailed through: `core_type: "Nonsense"` sealed,
+    // and so did `core_type: ""`. `validateOutput` returns valid for an unrecognised core,
+    // so those records carried NO substance floor whatsoever — the purest form of the very
+    // defect #263 describes, reachable without a registry entry at all.
+    if (!(CORE_TYPES as readonly string[]).includes(o.core_type)) {
+      return {
+        valid: false,
+        reason:
+          `output rejected: "${o.core_type}" is not a core type — expected one of ` +
+          `[${CORE_TYPES.join(", ")}]. The core selects which substance invariant applies, ` +
+          `so an unrecognised one silently means "no floor at all".`,
+      };
+    }
+    // T2/T3: reject bad-schema output AT WRITE by wiring the registry validator.
+    const result = registry.validate({ core_type: o.core_type, domain_type: o.domain_type, data: o.data });
+    if (!result.valid) {
+      return { valid: false, reason: `output rejected: ${o.domain_type} failed schema validation — ${result.errors.join("; ")}` };
+    }
+    // #227/#228 — the CORE-type invariant, checked on every write regardless of whether
+    // a domain schema applied. registry.validate above returns {valid:true} without
+    // looking at the data for a bare core type and for an absent domain_type, and a
+    // subtype can overload away an inherited floor (#230) — so the substance floor an
+    // Artifact/Verdict carries by definition has to be enforced here, at the one seal
+    // boundary, not delegated to the domain schema that may not exist.
+    //
+    // validateOutput was already written and already tested; it was simply never called
+    // (#228). Path (b) per the #228 ruling: an ABSENT substance key is rejected, not just
+    // an empty one — an Artifact nobody can check is not an artifact, and a Verdict with
+    // no evidence is not a verification.
+    //
+    // Per the #227 ruling ("there's no subtype thing — it's all the way top to bottom")
+    // ALL SIX cores now carry a floor, not just Artifact and Verdict, and it applies to
+    // bare cores and domain subtypes alike. src/output_validation.ts holds the table.
+    const core = validateOutput({ core_type: o.core_type as CoreType, domain_type: o.domain_type, data: o.data });
+    if (!core.valid) {
+      return { valid: false, reason: `output rejected: ${o.domain_type || o.core_type} failed core-type invariant — ${core.reason}` };
+    }
+    return { valid: true };
+  }
+
   function hydrateGig(gig_id: string): void {
     if (!outputsDir || hydratedGigs.has(gig_id)) return;
     hydratedGigs.add(gig_id);
@@ -349,85 +490,11 @@ export function createOutputStore(registry: Registry, options?: OutputStoreOptio
 
   return {
     write(o) {
-      // #263 — the asserted core must agree with the registry's answer.
-      //
-      // #227/#228 made `core_type` load-bearing: it selects which substance floor is
-      // enforced. So a caller asserting the wrong core does not merely mislabel the record —
-      // it gets the WRONG core's floor applied, and can satisfy `Verdict.checks[]` while
-      // sealing something the registry says is an Interpretation that owed `claims[]`.
-      //
-      // ORDER: this runs FIRST, ahead of the schema validation below, and that placement is
-      // load-bearing in a way the first draft of this fix got wrong. The agreement check is
-      // pure METADATA — it compares two declarations and never looks at the payload — so it
-      // does not need the schema to have passed. Running it second meant that for a CLOSED
-      // schema (the default, and what every shipped domain type uses) a payload carrying the
-      // wrong core's substance field died on Ajv first, telling the operator to delete
-      // `checks` when the actual repair is to fix the declared core. The diagnosis for a
-      // contradicted core has to come from the check that understands cores.
-      //
-      // Unresolvable slugs still fall through untouched: an unregistered domain_type is the
-      // registry's `unknown domain_type` rejection below, and this must not become a second,
-      // competing owner of that error.
-      if (o.domain_type) {
-        const registered = resolveCoreType(o.domain_type);
-        if (registered !== null && registered !== o.core_type) {
-          throw new OutputStoreError(
-            `output rejected: ${o.domain_type} was sealed as core_type "${o.core_type}" but the ` +
-              `registry defines it as "${registered}" — one of the two is wrong, and the core ` +
-              `decides which substance invariant applies`,
-          );
-        }
-      }
-      // #263 follow-on — a `core_type` that is not a core type at all.
-      //
-      // The check above only fires when a domain_type RESOLVES. With no domain_type (the
-      // freeform path, Rob #133) any string sailed through: `core_type: "Nonsense"` sealed,
-      // and so did `core_type: ""`. `validateOutput` returns valid for an unrecognised core,
-      // so those records carried NO substance floor whatsoever — the purest form of the very
-      // defect #263 describes, reachable without a registry entry at all.
-      if (!(CORE_TYPES as readonly string[]).includes(o.core_type)) {
-        throw new OutputStoreError(
-          `output rejected: "${o.core_type}" is not a core type — expected one of ` +
-            `[${CORE_TYPES.join(", ")}]. The core selects which substance invariant applies, ` +
-            `so an unrecognised one silently means "no floor at all".`,
-        );
-      }
-      // T2/T3: reject bad-schema output AT WRITE by wiring the registry validator.
-      const result = registry.validate({
-        core_type: o.core_type,
-        domain_type: o.domain_type,
-        data: o.data,
-      });
-      if (!result.valid) {
-        throw new OutputStoreError(
-          `output rejected: ${o.domain_type} failed schema validation — ${result.errors.join("; ")}`,
-        );
-      }
-      // #227/#228 — the CORE-type invariant, checked on every write regardless of whether
-      // a domain schema applied. registry.validate above returns {valid:true} without
-      // looking at the data for a bare core type and for an absent domain_type, and a
-      // subtype can overload away an inherited floor (#230) — so the substance floor an
-      // Artifact/Verdict carries by definition has to be enforced here, at the one seal
-      // boundary, not delegated to the domain schema that may not exist.
-      //
-      // validateOutput was already written and already tested; it was simply never called
-      // (#228). Path (b) per the #228 ruling: an ABSENT substance key is rejected, not just
-      // an empty one — an Artifact nobody can check is not an artifact, and a Verdict with
-      // no evidence is not a verification.
-      //
-      // Per the #227 ruling ("there's no subtype thing — it's all the way top to bottom")
-      // ALL SIX cores now carry a floor, not just Artifact and Verdict, and it applies to
-      // bare cores and domain subtypes alike. src/output_validation.ts holds the table.
-      const core = validateOutput({
-        core_type: o.core_type as CoreType,
-        domain_type: o.domain_type,
-        data: o.data,
-      });
-      if (!core.valid) {
-        throw new OutputStoreError(
-          `output rejected: ${o.domain_type || o.core_type} failed core-type invariant — ${core.reason}`,
-        );
-      }
+      // Every gate lives in checkWritable — one owner, so `validateWrite` (which the reuse
+      // path uses to decide before it injects anything) cannot answer a different question
+      // than the one this boundary actually asks.
+      const gate = checkWritable({ core_type: o.core_type, domain_type: o.domain_type, data: o.data });
+      if (!gate.valid) throw new OutputStoreError(gate.reason ?? "output rejected");
       const domain_type_version = o.domain_type_version ?? 1;
       const rec: OutputRecord = {
         id: randomUUID(),
@@ -460,6 +527,7 @@ export function createOutputStore(registry: Registry, options?: OutputStoreOptio
         tokens_used: o.tokens_used,
         duration_ms: o.duration_ms,
         skill_provenance: o.skill_provenance,
+        reused_from: o.reused_from,
       };
       outputs.set(rec.id, rec);
       if (outputsDir) {
@@ -580,6 +648,14 @@ export function createOutputStore(registry: Registry, options?: OutputStoreOptio
     },
     coreTypeOf(typeSlug) {
       return resolveCoreType(typeSlug);
+    },
+
+    typeFingerprint(typeSlug) {
+      return resolveTypeFingerprint(typeSlug);
+    },
+
+    validateWrite(o) {
+      return checkWritable(o);
     },
 
     integrity() {

@@ -222,18 +222,40 @@ describe("#228 — positive controls (must stay green after the fix)", () => {
     }).id).toBeTruthy();
   });
 
-  it("a non-Artifact, non-Verdict output is untouched by the core invariant", () => {
+  it("a non-Artifact, non-Verdict output meets ITS OWN core's floor and no more", () => {
     // Blocks the hollow "make write() stricter for everything" fix.
+    //
+    // THE ONE ASSERTION THE #227 RULING INVERTED. This control was written when Artifact and
+    // Verdict were the only cores with a floor, so "a Signal is untouched" was the way to
+    // prove the fix had not degenerated into blanket strictness. The ruling — "there's no
+    // subtype thing, it's all the way top to bottom" — makes Signal carry a floor too
+    // (`source`), so "untouched" is no longer the right control and asserting it would
+    // forbid the ruling rather than guard the fix.
+    //
+    // The PURPOSE is preserved and the test is strictly stronger: it now pins BOTH halves
+    // of "per-core floor, not blanket strictness". A Signal missing its own floor is
+    // rejected (the ruling), and a Signal that meets it seals carrying NONE of the other
+    // cores' floor fields — no validation_criteria, no checks, no claims. A degenerate
+    // "reject everything" implementation fails the second half; a "reject nothing but
+    // Artifact/Verdict" implementation fails the first.
     const reg = createRegistry();
     reg.registerType({
       slug: "loose-signal",
       extends: "Signal",
       domain: "wiretests",
-      schema: { properties: { raw: { type: "string" } } },
+      schema: { properties: { raw: { type: "string" }, source: { type: "string" } } },
       required_fields: ["raw"],
     });
     const store = createOutputStore(reg);
-    expect(validateOutput({ core_type: "Signal", domain_type: "loose-signal", data: { raw: "x" } }).valid).toBe(true);
+
+    // half 1 — Signal's own floor binds it, exactly as Artifact's binds an Artifact.
+    const floorless = validateOutput({ core_type: "Signal", domain_type: "loose-signal", data: { raw: "x" } });
+    expect(floorless.valid).toBe(false);
+    expect(floorless.reason).toMatch(/source/i);
+
+    // half 2 — meeting Signal's floor is ENOUGH. No other core's floor is imposed on it.
+    const data = { raw: "x", source: "sensor://wiretests/probe-3" };
+    expect(validateOutput({ core_type: "Signal", domain_type: "loose-signal", data }).valid).toBe(true);
     expect(store.write({
       core_type: "Signal",
       domain_type: "loose-signal",
@@ -241,7 +263,7 @@ describe("#228 — positive controls (must stay green after the fix)", () => {
       gig_id: "gig-ok-3",
       agent_slug: "sensor",
       primitive: "SENSE",
-      data: { raw: "x" },
+      data,
     }).id).toBeTruthy();
   });
 });

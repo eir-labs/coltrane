@@ -50,7 +50,7 @@ async function pollDone(d: ServerDeps, gid: string, ms = 3000): Promise<Record<s
 
 describe("async gig_dispatch + live monitor", () => {
   it("wait:true returns the manifest synchronously (the opt-in sync path)", async () => {
-    const d = deps(() => ({ t: "hi" }), standard());
+    const d = deps(() => ({ t: "hi", source: "fixture://demo/note" }), standard());
     const r = await dispatchTool("gig_dispatch", { standard_slug: "async-demo", input: {}, wait: true }, d);
     expect(r.ok).toBe(true);
     const data = r.data as { gig_id: string; manifest: { output_count: number; run_fingerprint: string } };
@@ -60,7 +60,7 @@ describe("async gig_dispatch + live monitor", () => {
   });
 
   it("async (default) returns a gig_id + running immediately, then monitor shows completion", async () => {
-    const d = deps(() => ({ t: "hi" }), standard());
+    const d = deps(() => ({ t: "hi", source: "fixture://demo/note" }), standard());
     const r = await dispatchTool("gig_dispatch", { standard_slug: "async-demo", input: {} }, d);
     const data = r.data as { gig_id: string; status: string; manifest?: unknown };
     expect(data.status).toBe("running");
@@ -79,7 +79,7 @@ describe("async gig_dispatch + live monitor", () => {
     const invoke: AgentInvoker = (ctx) => {
       ctx.onEvent?.({ type: "tool_use", tool: "WebSearch" });
       ctx.onEvent?.({ type: "tool_use", tool: "WebFetch" });
-      return { t: "searched" };
+      return { t: "searched", source: "fixture://demo/note" };
     };
     const d = deps(invoke, standard());
     const r = await dispatchTool("gig_dispatch", { standard_slug: "async-demo", input: {} }, d);
@@ -94,7 +94,7 @@ describe("async gig_dispatch + live monitor", () => {
       ctx.onEvent?.({ type: "tool_use", tool: "WebSearch" });
       ctx.onEvent?.({ type: "assistant", text: "thinking about prior art" });
       ctx.onEvent?.({ type: "tool_use", tool: "WebFetch" });
-      return { t: "searched" };
+      return { t: "searched", source: "fixture://demo/note" };
     };
     const base = mkdtempSync(join(tmpdir(), "coltrane-giglogs-"));
     const d = deps(invoke, standard(), base);

@@ -49,6 +49,7 @@
   },
   "required_fields": [
     "criteria",
-    "overall_verdict_shade"
+    "overall_verdict_shade",
+    "claims"
   ]
 }

@@ -242,7 +242,9 @@ describe("#227 — positive controls for the declared-required fix (must stay gr
       gig_id: "gig-ok",
       agent_slug: "source-walker",
       primitive: "SENSE",
-      data: { repo_path: "/Users/x/repo", repo_name: "repo", survey_completeness: "complete" },
+      // `source` joined repo-survey's schema.required under the #227 ruling (Signal's
+      // substance floor), so "every field its schema.required names" now includes it.
+      data: { repo_path: "/Users/x/repo", repo_name: "repo", survey_completeness: "complete", source: "file:///Users/x/repo" },
     });
     expect(rec.domain_type).toBe("repo-survey");
     expect(rec.content_sha).toMatch(/^[0-9a-f]{64}$/);
@@ -257,7 +259,9 @@ describe("#227 — positive controls for the declared-required fix (must stay gr
       gig_id: "gig-ok-2",
       agent_slug: "problem-definer",
       primitive: "PLAN",
-      data: { id: "ch-1", name: "A charter", use_case: "code-changes", scope: "do the thing" },
+      // `steps` joined project-charter's schema.required under the #227 ruling (Plan's
+      // substance floor) — a charter that sequences nothing is not a plan.
+      data: { id: "ch-1", name: "A charter", use_case: "code-changes", scope: "do the thing", steps: ["scaffold the project", "run the first gig"] },
     });
     expect(rec.domain_type).toBe("project-charter");
   });

@@ -26,7 +26,10 @@ const gist: DomainType = {
 const sensor2: Agent = { ...TEST_BEHAVIOR, slug: "sensor2", primitives: ["SENSE"], input_types: [], output_types: ["note"], domain: "demo" };
 const summarizer2: Agent = { ...TEST_BEHAVIOR, slug: "summarizer2", primitives: ["INTERPRET"], input_types: ["note"], output_types: ["gist"], domain: "demo" };
 
-const mockInvoke: AgentInvoker = ({ agent }) => (agent.slug === "sensor2" ? { text: "sensed" } : { text: "summarized" });
+const mockInvoke: AgentInvoker = ({ agent }) =>
+  agent.slug === "sensor2"
+    ? { text: "sensed", source: "fixture://demo/sensor2" }
+    : { text: "summarized", claims: ["the note was sensed"] };
 
 function makeDeps(): ServerDeps {
   const registry = createRegistry();

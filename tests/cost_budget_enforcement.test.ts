@@ -79,8 +79,8 @@ function setup() {
 }
 
 const invoke: AgentInvoker = ({ agent, inputs }) => {
-  if (agent.slug === "site-scout") return { url: "/products" };
-  return { title: `finding from ${inputs.length} input(s)` };
+  if (agent.slug === "site-scout") return { url: "/products", source: "https://example.com/products" };
+  return { title: `finding from ${inputs.length} input(s)`, claims: [`derived from ${inputs.length} input(s)`] };
 };
 
 // ── tests ────────────────────────────────────────────────────────────────────

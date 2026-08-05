@@ -122,7 +122,7 @@ describe("proposal tools (ledger-backed)", () => {
 describe("system_audit / system_health / health_check (derived over the stores)", () => {
   it("system_health reports live counts", async () => {
     const d = makeDeps();
-    await dispatchTool("output_write", { core_type: "Judgment", domain_type: "finding", domain: "eirtests", gig_id: "g1", agent_slug: "a", data: { title: "x" } }, d);
+    await dispatchTool("output_write", { core_type: "Judgment", domain_type: "finding", domain: "eirtests", gig_id: "g1", agent_slug: "a", data: { title: "x", criteria: ["image accessibility"] } }, d);
     const r = await dispatchTool("system_health", {}, d);
     expect(r.ok).toBe(true);
     expect(r.not_implemented).toBeFalsy();
@@ -140,7 +140,7 @@ describe("system_audit / system_health / health_check (derived over the stores)"
 
   it("health_check counts an agent's outputs", async () => {
     const d = makeDeps();
-    await dispatchTool("output_write", { core_type: "Judgment", domain_type: "finding", domain: "eirtests", gig_id: "g1", agent_slug: "analyst", data: { title: "x" } }, d);
+    await dispatchTool("output_write", { core_type: "Judgment", domain_type: "finding", domain: "eirtests", gig_id: "g1", agent_slug: "analyst", data: { title: "x", criteria: ["image accessibility"] } }, d);
     const r = await dispatchTool("health_check", { slug: "analyst", kind: "agent" }, d);
     expect(r.ok).toBe(true);
     expect((r.data as { output_count: number }).output_count).toBe(1);

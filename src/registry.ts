@@ -141,12 +141,32 @@ export function createRegistry(initial: DomainType[] = []): Registry {
       // A bare CORE type as the domain_type is a freeform output of that core (e.g. a
       // skill-backed chair that produces a plain Signal, no domain subtype). The core_type
       // discipline still holds; there's just no domain schema to enforce — same as above.
+      // "Still holds" is now a fact rather than a claim: outputs.write runs validateOutput
+      // on every seal, so a bare core meets the same substance floor as its subtypes (#227).
       if (isCoreType(output.domain_type)) return { valid: true, errors: [] };
       const dt = types.get(output.domain_type);
       if (!dt) return { valid: false, errors: [`unknown domain_type "${output.domain_type}"`] };
-      // Inherit the base core type's properties, then let the subtype overload +
-      // extend. required stays the subtype's own (base fields are available, not
-      // forced) so existing instances that don't carry base fields still validate.
+      // Inherit the base core type's properties, then let the subtype overload + extend.
+      //
+      // MAINTAINER RULING (#227) — "There's no subtype thing. It's all the way top to
+      // bottom." This REPLACES the stance that used to be documented here: that a core's
+      // base fields are "available, not forced" on a subtype, so `required` stays the
+      // subtype's own and existing instances that carry no base field still validate.
+      //
+      // That stance is wrong. Every core carries ONE substance floor — the declared field
+      // that makes its output answerable to someone else (Signal.source, Interpretation.claims,
+      // Plan.steps, Judgment.criteria, Artifact.validation_criteria, Verdict.checks) — and
+      // that floor is FORCED on every sealed output of that core, bare core or domain
+      // subtype alike. See src/output_validation.ts for the table and the per-core reasoning.
+      //
+      // The forcing lives at the seal boundary (outputs.write → validateOutput), not here,
+      // for a reason: it must hold on the paths this function deliberately does not reach —
+      // an absent domain_type (line 140), a bare core type as the domain_type (line 144),
+      // and a subtype that overloads an inherited floor away (#230). Enforcing it here as
+      // well would leave those three holes open. What this function still owns is the
+      // subtype's OWN declared contract; `required` below stays the subtype's own because
+      // the core's floor is already enforced unconditionally one layer out — not because
+      // base fields are optional.
       const baseProps = CORE_SCHEMA_PROPS[dt.extends] ?? {};
       const ownProps = (dt.schema as { properties?: Record<string, unknown> }).properties ?? {};
       // #200 — honor the type's declared additionalProperties. Closed-by-default

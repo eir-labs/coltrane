@@ -26,6 +26,7 @@
   },
   "required_fields": [
     "target",
-    "exit_code"
+    "exit_code",
+    "source"
   ]
 }

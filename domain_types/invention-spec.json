@@ -28,6 +28,7 @@
     }
   },
   "required_fields": [
-    "description"
+    "description",
+    "source"
   ]
 }

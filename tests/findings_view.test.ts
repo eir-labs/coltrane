@@ -98,7 +98,7 @@ describe("T8: backward-compat findings view", () => {
       gig_id: "g2",
       agent_slug: "code-scout",
       primitive: "INTERPRET",
-      data: { body: "a note, not a finding" },
+      data: { body: "a note, not a finding", claims: ["this is a note"] },
     });
     const rows = store.findings();
     expect(rows.length).toBe(1);

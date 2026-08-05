@@ -13,7 +13,10 @@ import { TEST_BEHAVIOR } from "./_support/agents.js";
 const types: DomainType[] = [
   { slug: "defect", extends: "Signal", domain: "codechange", schema: { properties: { symptom: { type: "string" } } }, required_fields: ["symptom"] },
   { slug: "triage", extends: "Interpretation", domain: "codechange", schema: { properties: { severity: { type: "string" } } }, required_fields: ["severity"] },
-  { slug: "fix-plan", extends: "Plan", domain: "codechange", schema: { properties: { steps: { type: "string" } } }, required_fields: ["steps"] },
+  // `steps` is Plan's own substance field, so this subtype may NOT overload it to a string:
+  // the core floor demands a non-empty array and the seal would be unsatisfiable either way
+  // (#230, the same conflict seeding-verdict hit with `checks`). Declared as the array it is.
+  { slug: "fix-plan", extends: "Plan", domain: "codechange", schema: { properties: { steps: { type: "array" } } }, required_fields: ["steps"] },
   { slug: "patch", extends: "Artifact", domain: "codechange", schema: { properties: { diff: { type: "string" } } }, required_fields: ["diff"] },
   { slug: "fix-review", extends: "Verdict", domain: "codechange", schema: { properties: { verdict: { type: "string" } } }, required_fields: ["verdict"] },
 ];
@@ -35,12 +38,14 @@ const bugFix: Standard = {
   ],
 };
 
-// Artifact/Verdict outputs also carry their core's substance — an Artifact declares how
-// it can be checked, a Verdict carries the evidence it verified. outputs.write enforces
-// that on every seal (#227/#228), so `fixer` and `reviewer` supply it here.
+// EVERY output carries its core's substance — a Signal names its source, an Interpretation
+// states its claims, a Plan lists its steps, an Artifact declares how it can be checked, a
+// Verdict carries the evidence it verified. outputs.write enforces all six on every seal
+// (#227/#228 and the #227 ruling), so every chair in this five-phase standard supplies it.
 const invoke: AgentInvoker = ({ agent }) => ({
-  detector: { symptom: "500 on /checkout" }, triager: { severity: "critical" },
-  planner: { steps: "null-check the cart" },
+  detector: { symptom: "500 on /checkout", source: "sentry://checkout/500" },
+  triager: { severity: "critical", claims: ["the empty-cart path 500s"] },
+  planner: { steps: ["null-check the cart"] },
   fixer: { diff: "+ if (!cart) return", validation_criteria: ["checkout returns 200 for an empty cart"] },
   reviewer: { verdict: "pass", checks: [{ method: "regression-suite", target_ref: "patch", result: "pass" }] },
 }[agent.slug]!);

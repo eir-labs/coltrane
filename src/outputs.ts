@@ -264,10 +264,13 @@ export function createOutputStore(registry: Registry, options?: OutputStoreOptio
       // boundary, not delegated to the domain schema that may not exist.
       //
       // validateOutput was already written and already tested; it was simply never called
-      // (#228). Path (b) per the #228 ruling: an ABSENT validation_criteria/checks key is
-      // rejected, not just an empty one — an Artifact nobody can check is not an artifact,
-      // and a Verdict with no evidence is not a verification. Non-Artifact/Verdict cores
-      // are untouched; the four floorless cores are a separate open question (#227).
+      // (#228). Path (b) per the #228 ruling: an ABSENT substance key is rejected, not just
+      // an empty one — an Artifact nobody can check is not an artifact, and a Verdict with
+      // no evidence is not a verification.
+      //
+      // Per the #227 ruling ("there's no subtype thing — it's all the way top to bottom")
+      // ALL SIX cores now carry a floor, not just Artifact and Verdict, and it applies to
+      // bare cores and domain subtypes alike. src/output_validation.ts holds the table.
       const core = validateOutput({
         core_type: o.core_type as CoreType,
         domain_type: o.domain_type,

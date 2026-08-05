@@ -73,7 +73,9 @@ describe("subtype polymorphism: a core-type contract accepts any domain subtype"
     const seen: Record<string, string[]> = {};
     const invoke: AgentInvoker = ({ agent, inputs }) => {
       seen[agent.slug] = inputs.map((i) => i.domain_type);
-      return agent.slug === "finder" ? { note: "found" } : { verdict: "ok" };
+      return agent.slug === "finder"
+        ? { note: "found", claims: ["the widget is present"] }
+        : { verdict: "ok", criteria: ["widget presence"] };
     };
 
     const res = await runGig(standard, {}, { outputs, ledger, invoke });
@@ -122,7 +124,9 @@ describe("subtype polymorphism: a core-type contract accepts any domain subtype"
     const seen: Record<string, string[]> = {};
     const invoke: AgentInvoker = ({ agent, inputs }) => {
       seen[agent.slug] = inputs.map((i) => i.domain_type);
-      return agent.slug === "finder" ? { note: "found" } : { verdict: "ok" };
+      return agent.slug === "finder"
+        ? { note: "found", claims: ["the widget is present"] }
+        : { verdict: "ok", criteria: ["widget presence"] };
     };
     await runGig(exactStandard, {}, { outputs, ledger, invoke });
     expect(seen["exact-analyst"], "a domain-type input must not pull an unrelated subtype").not.toContain(

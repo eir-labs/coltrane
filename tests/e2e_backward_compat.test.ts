@@ -30,7 +30,7 @@ function wired(): ServerDeps {
   [pageModel, finding, note].forEach((t) => registry.registerType(t));
   const invoke: AgentInvoker = ({ agent, gig_input }) =>
     agent.slug === "site-scout"
-      ? { url: `/page-${(gig_input as { n?: number }).n ?? 0}` }
+      ? { url: `/page-${(gig_input as { n?: number }).n ?? 0}`, source: "https://eirtests.example" }
       // `finding` is Verdict-cored, so it carries the evidence it verified (#227/#228).
       : { pattern_key: `pat-${(gig_input as { n?: number }).n ?? 0}`, severity: "high", title: `finding ${(gig_input as { n?: number }).n ?? 0}`, checks: [{ method: "readiness-scan", target_ref: "page-model", result: "pass" }] };
   return { registry, outputs: createOutputStore(registry), ledger: new MemoryLedger(), standards: new Map([[scan.slug, scan]]), invoke, model_version: "m" };
@@ -56,7 +56,7 @@ describe("E2: backward-compat findings view at scale", () => {
     const deps = wired();
     await dispatchTool("gig_dispatch", { wait: true, standard_slug: "readiness-scan", input: { n: 0 } }, deps);
     // a codechange note written straight to the store must NOT appear in findings()
-    deps.outputs.write({ core_type: "Interpretation", domain_type: "note", domain: "codechange", gig_id: "g-note", agent_slug: "code-scout", primitive: "INTERPRET", data: { body: "not a finding" } });
+    deps.outputs.write({ core_type: "Interpretation", domain_type: "note", domain: "codechange", gig_id: "g-note", agent_slug: "code-scout", primitive: "INTERPRET", data: { body: "not a finding", claims: ["this is a note"] } });
     const rows = deps.outputs.findings();
     expect(rows.length).toBe(1);
     expect(rows.every((r) => r.title?.startsWith("finding "))).toBe(true);

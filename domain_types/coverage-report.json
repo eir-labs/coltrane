@@ -25,6 +25,7 @@
     }
   },
   "required_fields": [
-    "corpora_searched"
+    "corpora_searched",
+    "source"
   ]
 }

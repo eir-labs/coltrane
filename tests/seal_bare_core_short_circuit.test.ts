@@ -19,6 +19,11 @@
 // cannot dismiss these as "we never intended to check that": the engine demonstrably
 // does check it, just not where it matters most.
 //
+// RULING (received after this file landed RED): "There's no subtype thing. It's all the way
+// top to bottom." Every core carries a substance floor and it binds bare cores and domain
+// subtypes alike — so the PENDING block that used to close this file is gone, and its case
+// (event-clusterer / bare Interpretation) is now an ordinary member of the enforced set.
+//
 // Contract pinned here:
 //   - a bare-core Artifact carrying `validation_criteria: []` must NOT seal
 //   - a bare-core Verdict carrying `checks: []` must NOT seal
@@ -34,6 +39,7 @@
 // issue's "4 of 28" is exact.
 import { describe, it, expect } from "vitest";
 import { fileURLToPath } from "node:url";
+import { CORE_SUBSTANCE } from "../src/output_validation.js";
 import {
   createRegistry,
   createOutputStore,
@@ -188,16 +194,28 @@ describe("#227 — the real genome's bare-core agents", () => {
     )
     .sort((x, y) => x.slug.localeCompare(y.slug));
 
-  // Artifact and Verdict are the two cores with a declared, already-enforced substance
-  // floor (`minItems: 1` in core_types/artifact.json and core_types/verdict.json, restated
-  // in src/output_validation.ts). The other four have no such floor — see the PENDING block.
-  const CORE_WITH_DECLARED_FLOOR = ["Artifact", "Verdict"];
+  // RULING (#227): "There's no subtype thing. It's all the way top to bottom." ALL SIX
+  // cores carry a declared, enforced substance floor — `minItems: 1` / `minLength: 1` in
+  // core_types/<core>.json, restated as the CORE_SUBSTANCE table in
+  // src/output_validation.ts. The set is derived from that table rather than restated here,
+  // so a core that loses its floor cannot quietly drop out of the enforced bucket below.
+  const CORE_WITH_DECLARED_FLOOR = Object.keys(CORE_SUBSTANCE);
   const PRIMITIVE_FOR: Record<string, string> = {
     Signal: "SENSE", Interpretation: "INTERPRET", Judgment: "JUDGE",
     Plan: "PLAN", Artifact: "CREATE", Verdict: "VERIFY",
   };
   const withFloor = bareCoreAgents.filter((a) => CORE_WITH_DECLARED_FLOOR.includes(a.core));
   const withoutFloor = bareCoreAgents.filter((a) => !CORE_WITH_DECLARED_FLOOR.includes(a.core));
+
+  it("every core type has a substance floor — no core is exempt (the #227 ruling)", () => {
+    expect(
+      [...CORE].sort(),
+      "a core with no entry in CORE_SUBSTANCE is a core that can seal a shell. The ruling " +
+        "is 'all the way top to bottom' — adding a seventh core means deciding what makes " +
+        "it substantive, not leaving it floorless.",
+    ).toEqual(Object.keys(CORE_SUBSTANCE).sort());
+    expect(withoutFloor, "no bare-core agent may bind a floorless core").toEqual([]);
+  });
 
   it("census tripwire: exactly these agents bind a bare core type", () => {
     expect(
@@ -257,45 +275,28 @@ describe("#227 — the real genome's bare-core agents", () => {
   }
 
   // ───────────────────────────────────────────────────────────────────────────────────
-  // STILL PENDING A MAINTAINER RULING. The #228 ruling (path (b)) settled the ABSENT-KEY
-  // question for Artifact and Verdict. It did NOT settle this: whether the other four
-  // cores have any substance floor at all.
+  // RULING RECEIVED — this block used to hold a single PENDING test asking whether the
+  // four floorless cores (Signal, Interpretation, Plan, Judgment) have any substance floor
+  // at all, with event-clusterer's bare `Interpretation` as the live case.
   //
-  // event-clusterer declares a bare `Interpretation`:
-  //   - src/output_validation.ts has no Interpretation rule at all;
-  //   - core_types/interpretation.json DOES declare
-  //       required: ["id","input_refs","frame","claims","confidence"]
-  //     but registry.ts:154-156 documents a deliberate stance that base fields are
-  //     "available, not forced" on subtypes, so forcing them on bare cores would be
-  //     inconsistent with that decision — and would immediately reject every existing
-  //     Interpretation instance in the repo.
+  // The maintainer answered: "There's no subtype thing. It's all the way top to bottom."
+  // An empty Interpretation is not an interpretation, exactly as an empty Artifact is not
+  // an artifact. The question is settled, so the case is no longer asked as a question —
+  // event-clusterer now flows through the `withFloor` loop above with every other bare-core
+  // agent, and gets the STRONGER pair of requirements (empty `{}` AND a plausible payload
+  // missing its substance key), not the single one it carried as a PENDING probe.
   //
-  // Measured: this test stays RED under a correct path-(b) implementation, because (b)
-  // only reaches Artifact and Verdict. It is a genuine open question, not collateral.
+  // The two contested points in the old note, and how the ruling resolved them:
+  //   - "registry.ts documents base fields as available, not forced" — that stance was
+  //     overturned by this same ruling; see the replacement comment at its old site.
+  //   - "would immediately reject every existing Interpretation instance in the repo" —
+  //     true, and accepted. Those instances were never valid instances of their own core;
+  //     the seal path simply never looked. The floor is now declared in
+  //     core_types/interpretation.json and carried by every Interpretation subtype.
   //
-  // The ruling needed: does a bare-core output have to satisfy its core's declared
-  // `required`, a narrower substance subset, or nothing? This test asserts the strictest
-  // reading (an empty Interpretation is not an interpretation). If the maintainers rule
-  // that bare Interpretation/Signal/Plan/Judgment stay unconstrained, DELETE this test —
-  // do not weaken it to green.
+  // `withoutFloor` is kept, and asserted EMPTY in the ruling test above, so a future core
+  // added without a floor fails loudly instead of silently re-opening this question.
   // ───────────────────────────────────────────────────────────────────────────────────
-  for (const { slug, core } of withoutFloor) {
-    it(`PENDING RULING: ${slug} (bare ${core}) seals {} today — should it?`, () => {
-      const store = createOutputStore(loadRegistry(genome));
-      expect(() =>
-        store.write({
-          core_type: core,
-          domain_type: core,
-          domain: "introspection",
-          gig_id: `gig-${slug}`,
-          agent_slug: slug,
-          primitive: PRIMITIVE_FOR[core]!,
-          data: {},
-        }),
-      ).toThrow(OutputStoreError);
-      expect(store.all()).toHaveLength(0);
-    });
-  }
 });
 
 describe("#227 — end-to-end: a shipped standard completes over sealed garbage", () => {

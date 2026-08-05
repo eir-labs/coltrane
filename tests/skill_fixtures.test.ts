@@ -30,7 +30,7 @@ describe("skills phase 1: package + subprocess executor + fixture/determinism ru
   it("the executor runs the skill in a subprocess and returns its output", () => {
     const r = executeSkill(NUMBER_ADDER, { a: 10, b: 7 });
     expect(r.ok, r.error).toBe(true);
-    expect(r.output).toEqual({ sum: 17 });
+    expect(r.output).toEqual({ sum: 17, source: "skill://number-adder@1" });
   });
 
   it("the tier-0 permission cage denies a side effect (fs-write) — the tier is real enforcement", () => {

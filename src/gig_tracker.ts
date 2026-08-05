@@ -5,7 +5,7 @@
 // a GigRunState that gig_monitor reads. State is in-memory (per server lifetime): a restart
 // drops in-flight tracking — acceptable for v0, and a restart mid-gig is its own problem.
 
-import type { GigProgressEvent } from "./runtime.js";
+import type { GigProgressEvent, BudgetState } from "./runtime.js";
 import type { GigUsage } from "./ledger.js";
 
 export interface GigChairState {
@@ -43,6 +43,12 @@ export interface GigRunState {
   // ABORTED. An abort that kills children without capturing accrued usage would convert a
   // recorded cost into an unrecorded one: better cost control, worse accounting.
   usage?: GigUsage;
+  // #236 — the budget snapshot, set on BOTH terminal paths. The synchronous dispatch reply
+  // has carried this since the budget existed (server.ts), but the async path — which is the
+  // DEFAULT — dropped it either way: a completed gig never reported what it consumed, and a
+  // failed one lost the reservation/settlement record along with everything else. Absent while
+  // running, and absent entirely when no budget was supplied.
+  budget_state?: BudgetState;
   // ── cancellation (#249/#250) ──────────────────────────────────────────────
   // The live handle. gig_abort aborts it; runGig's checkpoints read it and the invoker wires
   // it to the chair's child process. This is the ONLY object that makes a gig cancellable —
@@ -142,6 +148,10 @@ export function gigEventLogLine(gig_id: string, ev: GigProgressEvent): string | 
     case "chair_start": return JSON.stringify({ ...base, ev: "chair_start", phase: ev.phase, role: ev.role, producer: ev.producer });
     case "chair_complete": return JSON.stringify({ ...base, ev: "chair_complete", role: ev.role, sealed: ev.output_types, ms: ev.duration_ms });
     case "chair_failed": return JSON.stringify({ ...base, ev: "chair_failed", role: ev.role, error: ev.error });
+    // #241 — a dangling (non-required) skill binding. Surfaced live because an unskilled run
+    // is otherwise indistinguishable from a skilled one: same genome_hash, run_fingerprint,
+    // content_sha. This log line is the only place the difference shows up while it happens.
+    case "skills_unresolved": return JSON.stringify({ ...base, ev: "skills_unresolved", phase: ev.phase, role: ev.role, agent: ev.agent, missing: ev.missing });
     case "gig_complete": return JSON.stringify({ ...base, ev: "gig_complete", outputs: ev.outputs });
     case "gig_failed": return JSON.stringify({ ...base, ev: "gig_failed", error: ev.error });
     case "gig_aborted": return JSON.stringify({ ...base, ev: "gig_aborted", reason: ev.reason });

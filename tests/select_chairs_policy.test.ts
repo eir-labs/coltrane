@@ -52,7 +52,7 @@ function setup() {
 }
 
 // Deterministic invoker; records dispatch order via the batch boundary below.
-const invoke: AgentInvoker = ({ agent }) => ({ axis: agent.slug, value: 0.5 });
+const invoke: AgentInvoker = ({ agent }) => ({ axis: agent.slug, value: 0.5, source: `probe://etude/${agent.slug}` });
 
 // Observe dispatch batches through onProgress chair_start events.
 function batchRecorder() {

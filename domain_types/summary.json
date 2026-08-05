@@ -13,6 +13,7 @@
     }
   },
   "required_fields": [
-    "gist"
+    "gist",
+    "claims"
   ]
 }

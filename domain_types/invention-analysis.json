@@ -28,6 +28,7 @@
     }
   },
   "required_fields": [
-    "real_contribution"
+    "real_contribution",
+    "claims"
   ]
 }

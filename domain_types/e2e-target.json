@@ -20,6 +20,7 @@
   },
   "required_fields": [
     "spec_path",
-    "kind"
+    "kind",
+    "source"
   ]
 }

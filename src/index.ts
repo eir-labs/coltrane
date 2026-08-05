@@ -1,3 +1,4 @@
+export * from "./version.js";
 export * from "./core_types.js";
 export * from "./type_versioning.js";
 export * from "./composition.js";

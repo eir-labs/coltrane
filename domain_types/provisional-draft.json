@@ -28,6 +28,7 @@
     }
   },
   "required_fields": [
-    "markdown_text"
+    "markdown_text",
+    "validation_criteria"
   ]
 }

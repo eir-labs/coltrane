@@ -106,6 +106,17 @@ describe("extractJson: tolerant parse of model output", () => {
     expect(extractJson(out)).toEqual({ title: "missing alt", severity: "high" });
   });
 
+  // RED (#221). The test above passes only because its prose happens to be brace-free —
+  // the scanner lands on the fenced object by luck, not by preferring the fence. Add one
+  // brace token to that prose and the same fenced output is mis-extracted: `start` is
+  // anchored to the FIRST `{` in the text and never re-anchors. This is the cheapest
+  // honest red available, and it sits next to the assertion that should have caught it.
+  // Full policy coverage lives in tests/invoker_json_extraction.test.ts.
+  it("extracts JSON from a code fence even when the prose contains a brace", () => {
+    const out = 'Here is the finding {see below}:\n```json\n{"title":"missing alt","severity":"high"}\n```\nDone.';
+    expect(extractJson(out)).toEqual({ title: "missing alt", severity: "high" });
+  });
+
   it("handles nested braces", () => {
     expect(extractJson('prefix {"a":{"b":1},"c":2} suffix')).toEqual({ a: { b: 1 }, c: 2 });
   });

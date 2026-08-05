@@ -39,6 +39,13 @@ const finding: DomainType = {
   required_fields: ["title"],
 };
 
+// Every sealed output carries its CORE's substance floor, enforced by outputs.write on every
+// write, subtype or not (#227 ruling): a Signal names where it was acquired, a Verdict carries
+// the evidence it verified. These fixtures were never valid instances of their own core — the
+// seal path simply did not look until #227/#228 wired the check in.
+const SOURCE = { source: "https://eirtests.example" };
+const CHECKS = { checks: [{ method: "cold-trial-scan", target_ref: "page-model", result: "fail" }] };
+
 function freshRegistry() {
   const r = createRegistry();
   r.registerType(pageModel);
@@ -72,7 +79,7 @@ describe("e2e: outputs persist across MCP sessions (PR #78 follow-up)", () => {
         gig_id: "gig-rob-cold-trial",
         agent_slug: "scout",
         primitive: "SENSE",
-        data: { url: "/landing" },
+        data: { url: "/landing", ...SOURCE },
       });
       parentId = parent.id;
 
@@ -83,7 +90,7 @@ describe("e2e: outputs persist across MCP sessions (PR #78 follow-up)", () => {
         gig_id: "gig-rob-cold-trial",
         agent_slug: "verifier",
         primitive: "VERIFY",
-        data: { title: "landing-broke" },
+        data: { title: "landing-broke", ...CHECKS },
         input_refs: [parent.id],
       });
       childId = child.id;
@@ -98,7 +105,7 @@ describe("e2e: outputs persist across MCP sessions (PR #78 follow-up)", () => {
         gig_id: "gig-second",
         agent_slug: "scout",
         primitive: "SENSE",
-        data: { url: "/about" },
+        data: { url: "/about", ...SOURCE },
       });
 
       // Sanity: session A sees its own writes.
@@ -166,7 +173,7 @@ describe("e2e: outputs persist across MCP sessions (PR #78 follow-up)", () => {
         gig_id: "gig-accumulate",
         agent_slug: "scout",
         primitive: "SENSE",
-        data: { url: "/a" },
+        data: { url: "/a", ...SOURCE },
       });
     }
 
@@ -182,7 +189,7 @@ describe("e2e: outputs persist across MCP sessions (PR #78 follow-up)", () => {
         gig_id: "gig-accumulate",
         agent_slug: "scout",
         primitive: "SENSE",
-        data: { url: "/b" },
+        data: { url: "/b", ...SOURCE },
       });
       expect(sessionB.all().length).toBe(2);
     }
@@ -204,7 +211,7 @@ describe("e2e: outputs persist across MCP sessions (PR #78 follow-up)", () => {
       gig_id: "gig-x",
       agent_slug: "scout",
       primitive: "SENSE",
-      data: { url: "/" },
+      data: { url: "/", ...SOURCE },
     });
     const s2 = createOutputStore(freshRegistry());
     // Two unrelated in-memory stores; s2 sees nothing.

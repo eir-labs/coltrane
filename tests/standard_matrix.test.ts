@@ -9,13 +9,16 @@
 import { describe, it, expect } from "vitest";
 import { buildPrompt, runGig, BELBIN_DESCRIPTIONS } from "../src";
 import type { Agent, AgentInvocationContext, AgentInvoker } from "../src";
-import { materialize, TOPOLOGIES } from "./_support/specs.js";
+import { materialize, TOPOLOGIES, genOutputFor } from "./_support/specs.js";
 
 const VALID = TOPOLOGIES.filter((t) => t.valid);
 const INVALID = TOPOLOGIES.filter((t) => !t.valid);
 
-// deterministic invoker: every agent emits schema-valid {value} for its output type.
-const invoke: AgentInvoker = ({ agent }) => ({ value: `${agent.slug}-v` });
+// deterministic invoker: every agent emits a schema-valid payload for its output type —
+// {value} plus whatever its CORE type requires as substance (an Artifact's
+// validation_criteria, a Verdict's checks). Core-agnostic via genOutputFor, so CREATE and
+// VERIFY nodes are both covered.
+const invoke: AgentInvoker = ({ agent }) => genOutputFor(agent.output_types[0]!, `${agent.slug}-v`);
 
 // ── UNIT layer: the generated agents are valid unit cases ────────────────────────
 const unitCases = VALID.flatMap((t) =>

@@ -22,7 +22,7 @@
       "top_directories":    { "type": "array", "items": { "type": "string" }, "description": "Top-level subdirectory names (e.g. src/, tests/, docs/) — structural hint." },
       "survey_completeness": { "type": "string", "enum": ["complete", "partial", "shallow"], "description": "Honest signal-bound: did we hit the scan limits or get clean reads on every channel?" }
     },
-    "required": ["repo_path", "repo_name", "survey_completeness"]
+    "required": ["repo_path", "repo_name", "survey_completeness", "source"]
   },
   "required_fields": []
 }

@@ -100,7 +100,9 @@ describe("makeBifrostInvoker", () => {
   it("runs end-to-end under runGig: output sealed, Bifrost usd folded into GigResult.usage", async () => {
     const registry = createRegistry();
     registry.registerType(probe);
-    const { fn } = fakeFetch({ body: '{"axis":"north","value":0.7}', cost: 0.002 });
+        // axis-probe is Signal-cored, so the model's reply must name where the reading came
+    // from — outputs.write enforces that on every seal (#227 ruling).
+    const { fn } = fakeFetch({ body: '{"axis":"north","value":0.7,"source":"bifrost://etude/axis-prober"}', cost: 0.002 });
     const standard: Standard = {
       slug: "one-probe", domain: "etude", agents: [prober],
       phases: [{ name: "probe", chairs: [{ role: "p", agent_slug: "axis-prober", depends_on: [], input_contract: [], output_contract: ["axis-probe"], required_skills: [] }] }],
@@ -111,7 +113,32 @@ describe("makeBifrostInvoker", () => {
       invoke: makeBifrostInvoker({ url: "https://bifrost.test", deviceToken: "x", registry, fetchFn: fn }),
     });
     expect(res.outputs).toHaveLength(1);
-    expect(res.outputs[0]!.data).toEqual({ axis: "north", value: 0.7 });
+    expect(res.outputs[0]!.data).toEqual({ axis: "north", value: 0.7, source: "bifrost://etude/axis-prober" });
     expect(res.usage?.total_cost_usd).toBeCloseTo(0.002);
+  });
+
+  // ── #235 — the synthesized result event must not fabricate what Bifrost never said ────────
+  it("#235 — does NOT fold hardcoded zero token counts into settled usage", async () => {
+    const { fn } = fakeFetch({ body: '{"axis":"b","value":0.4}', cost: { usd: 0.0123 } });
+    const events: AgentStreamEvent[] = [];
+    const invoke = makeBifrostInvoker({ url: "https://bifrost.test", deviceToken: "x", fetchFn: fn });
+    await invoke({ ...ctxFor(prober), onEvent: (ev) => events.push(ev) });
+    const raw = events.find((e) => e.type === "result")?.raw as Record<string, unknown>;
+    expect(raw["total_cost_usd"], "the cost Bifrost DID report is still forwarded").toBe(0.0123);
+    // THE DEFECT: `usage: { input_tokens: 0, output_tokens: 0 }` was hardcoded, so every
+    // Bifrost invocation asserted "zero tokens" as fact into the field documented as settled
+    // spend. Bifrost's /v1/generate reply carries no token counts — the honest value is absent.
+    expect(raw["usage"], "Bifrost reports no token counts — none may be invented").toBeUndefined();
+  });
+
+  it("#235 — a reply with no cost at all reports NOTHING, not $0.00", async () => {
+    const { fn } = fakeFetch({ body: '{"axis":"b","value":0.4}' }); // no `cost` key
+    const events: AgentStreamEvent[] = [];
+    const invoke = makeBifrostInvoker({ url: "https://bifrost.test", deviceToken: "x", fetchFn: fn });
+    await invoke({ ...ctxFor(prober), onEvent: (ev) => events.push(ev) });
+    const raw = events.find((e) => e.type === "result")?.raw as Record<string, unknown> | undefined;
+    // `usd` fell back to 0 and sawUsage flipped anyway — "$0.00 spent" asserted where
+    // "not reported" is the truth.
+    expect(raw?.["total_cost_usd"], "an absent cost is unknown, not zero").toBeUndefined();
   });
 });

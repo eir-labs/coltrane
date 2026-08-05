@@ -11,17 +11,21 @@ function store() {
   return createOutputStore(r);
 }
 const base = { core_type: "Signal", domain_type: "note", domain: "demo", gig_id: "g", agent_slug: "a", phase: "p", primitive: "SENSE" } as const;
+// A Signal names where it was acquired from — `outputs.write` enforces the core invariant on
+// every seal (#227). Held constant across these fixtures so it is the `v` field, and only the
+// `v` field, that varies when the test asserts on content_sha equality/inequality.
+const SOURCE = { source: "fixture://demo/note" };
 
 describe("every sealed output carries a runtime-computed content_sha", () => {
   it("write stamps a 64-hex content_sha", () => {
-    const rec = store().write({ ...base, data: { v: "x" } });
+    const rec = store().write({ ...base, data: { v: "x", ...SOURCE } });
     expect(rec.content_sha).toMatch(/^[0-9a-f]{64}$/);
   });
   it("identical content → identical content_sha; different content → different", () => {
     const s = store();
-    const a = s.write({ ...base, data: { v: "same" } });
-    const b = s.write({ ...base, data: { v: "same" } });
-    const c = s.write({ ...base, data: { v: "different" } });
+    const a = s.write({ ...base, data: { v: "same", ...SOURCE } });
+    const b = s.write({ ...base, data: { v: "same", ...SOURCE } });
+    const c = s.write({ ...base, data: { v: "different", ...SOURCE } });
     expect(b.content_sha).toBe(a.content_sha);
     expect(c.content_sha).not.toBe(a.content_sha);
   });
@@ -30,8 +34,8 @@ describe("every sealed output carries a runtime-computed content_sha", () => {
     // record's input_refs point at upstream records, and each upstream record's runtime-
     // stamped content_sha IS the real predecessor SHA — no hashing tool in any agent.
     const s = store();
-    const pred = s.write({ ...base, data: { v: "upstream" } });
-    const succ = s.write({ ...base, data: { v: "downstream" }, input_refs: [pred.id] });
+    const pred = s.write({ ...base, data: { v: "upstream", ...SOURCE } });
+    const succ = s.write({ ...base, data: { v: "downstream", ...SOURCE }, input_refs: [pred.id] });
     const predecessorShas = succ.input_refs.map((id) => s.get(id)!.content_sha);
     expect(predecessorShas).toEqual([pred.content_sha]);
     expect(predecessorShas[0]).toMatch(/^[0-9a-f]{64}$/);

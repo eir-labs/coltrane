@@ -25,7 +25,7 @@ import {
   type Ledger, type GovernanceLedgerEntry,
 } from "./ledger.js";
 import { standardSimulate } from "./simulate.js";
-import { runGig, BudgetExhausted, GigAborted, type AgentInvoker } from "./runtime.js";
+import { runGig, BudgetExhausted, GigAborted, partialGigUsage, partialBudgetState, type AgentInvoker } from "./runtime.js";
 import { makeClaudeInvoker, killLiveChairChildren } from "./claude_invoker.js";
 import { isDepth, DEPTHS, type Depth } from "./pricing.js";
 import type { ToolProvider } from "./tool_providers.js";
@@ -37,6 +37,7 @@ import { proposeTypeChange, type DomainTypeDef } from "./type_versioning.js";
 import { proposeAgentChange, evolveProfile, type AgentProfile } from "./agent_profile.js";
 import { checkGrantTTL, validatePlanAgainstGrant, type AccessGrant, type PlanCheck } from "./access_grant.js";
 import { loadCharter, CharterError } from "./charter.js";
+import { COLTRANE_VERSION } from "./version.js";
 import { readFileSync, existsSync, mkdirSync, appendFileSync, readdirSync } from "node:fs";
 import { randomUUID, createHash } from "node:crypto";
 import { join } from "node:path";
@@ -467,8 +468,12 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
             };
           } catch (e) {
             if (e instanceof BudgetExhausted) {
+              // #236 — the synchronous half: a depleted gig also burned real dollars before it
+              // stopped, and the operator needs them in the same reply as the depletion notice.
+              const partial = partialGigUsage(e);
               return { ok: false, requires_approval: approval, error: e.message,
-                data: { budget_exhausted: true, agent_slug: e.agent_slug, balance: e.balance, cost: e.cost, budget_state: e.state } };
+                data: { budget_exhausted: true, agent_slug: e.agent_slug, balance: e.balance, cost: e.cost, budget_state: e.state,
+                  ...(partial ? { usage: partial } : {}) } };
             }
             throw e;
           }
@@ -507,6 +512,10 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
             state.status = "complete"; state.finished_at = new Date().toISOString();
             state.run_fingerprint = res.run_fingerprint; state.genome_hash = res.genome_hash; state.outputs_count = res.outputs.length;
             if (res.usage) state.usage = res.usage; // #195 — surface settled spend to gig_monitor
+            // #236 — the synchronous reply has carried budget_state since the budget existed;
+            // the async path never did, so the DEFAULT dispatch mode could not answer "what did
+            // this consume?" even on success.
+            if (res.budget_state) state.budget_state = res.budget_state;
           })
           .catch((e: unknown) => {
             state.finished_at = new Date().toISOString();
@@ -522,6 +531,16 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
             }
             state.status = "failed";
             state.error = e instanceof Error ? e.message : String(e);
+            // #236 — settled spend used to die here. Async is the DEFAULT dispatch mode, so
+            // every failed or aborted gig reported zero dollars while its completed chairs'
+            // outputs persisted on disk. Failed runs are the ones whose cost matters most.
+            const partial = partialGigUsage(e);
+            if (partial) state.usage = partial;
+            // ...and the budget half of the same loss: the runtime attaches the snapshot to
+            // whatever it throws, but nothing read it back here. A depleted or crashed gig
+            // could not say how much of its allowance it had already burned.
+            const bs = partialBudgetState(e);
+            if (bs) state.budget_state = bs;
             onProgress({ type: "gig_failed", error: state.error });
           })
           .finally(() => { state.controller = undefined; }); // don't pin a controller past settle
@@ -550,6 +569,10 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
               outputs_so_far: outs,
               ...(live.run_fingerprint ? { run_fingerprint: live.run_fingerprint } : {}),
               ...(live.usage ? { usage: live.usage } : {}), // #195 — settled model spend, queryable by gig_id
+              // #236 — what the gig consumed of its allowance, on BOTH terminal paths. Carries
+              // `unit: "append-units"` and the real `settled_usd` alongside (#233), so nothing
+              // reads the synthetic proxy as dollars.
+              ...(live.budget_state ? { budget_state: live.budget_state } : {}),
               ...(live.abort_reason ? { abort_reason: live.abort_reason } : {}), // why it stopped (#251)
               ...(live.error ? { error: live.error } : {}),
               ...(live.finished_at ? { finished_at: live.finished_at } : {}),
@@ -1252,6 +1275,51 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
           }
           throw e;
         }
+        // #254 — VALIDITY, not just transition legality. v1 checked only that the status move
+        // was forward-legal and never looked at the definition at all: `targetSlug` was used
+        // solely as a ledger subject, so a slug naming NOTHING promoted to `active` happily.
+        //
+        // Promotion is the transition that grants a definition production status. A definition
+        // that could not be CREATED must not be able to become ACTIVE — otherwise the write-path
+        // gate is a fiction, because anything already sitting at `draft` walks straight past it.
+        // The check run here is deliberately the LOADER'S OWN check, not a parallel one: a
+        // promote that validates differently from the loader is exactly the drift that produced
+        // #254. (The loader's hard-fail stays too — hand-edited JSON is a deliberately open path
+        // per CLAUDE.md, so the write path makes a malformed definition hard to create and the
+        // load path makes it impossible to use.)
+        //
+        // An ABSENT genome map means the server was never bootstrapped from a genome, so absence
+        // is not evidence that the slug names nothing — same discipline the runtime applies to an
+        // absent skills map. bootstrapServerDeps always populates all three.
+        const notFound = (kind: string): ToolResult => ({
+          ok: false, requires_approval: approval,
+          error: `${slug}: no ${kind} "${targetSlug}" in the genome — a promotion names a definition that must already exist (define it first, or fix the slug)`,
+        });
+        if (slug === "agent_promote" && deps.agents) {
+          const ag = deps.agents.get(targetSlug);
+          if (!ag) return notFound("agent");
+          try {
+            defineAgent(ag as unknown as AgentDef); // the loader's own gate
+          } catch (e) {
+            return {
+              ok: false, requires_approval: approval,
+              error: `${slug}: agent "${targetSlug}" does not pass validation and must not become "${target}" — ${e instanceof Error ? e.message : String(e)}`,
+            };
+          }
+        } else if (slug === "standard_promote" && deps.standards) {
+          if (!deps.standards.get(targetSlug)) return notFound("standard");
+        } else if (slug === "skill_promote" && deps.skills) {
+          const sk = deps.skills.get(targetSlug);
+          if (!sk) return notFound("skill");
+          const check = SkillSchema.safeParse(sk); // the loader's own gate
+          if (!check.success) {
+            const why = check.error.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`).join("; ");
+            return {
+              ok: false, requires_approval: approval,
+              error: `${slug}: skill "${targetSlug}" does not pass validation and must not become "${target}" — ${why}`,
+            };
+          }
+        }
         const promotion_id = randomUUID();
         // v1 recorded neither WHICH entity was promoted nor the transition — standard_slug held
         // the TOOL name. A lifecycle transition is exactly the event an audit trail exists for.
@@ -1341,7 +1409,7 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
 /** Build the low-level MCP Server with ListTools + CallTool wired to the dispatcher. */
 export function createColtraneServer(deps: ServerDeps, recorder?: SubthreadRecorder): Server {
   const server = new Server(
-    { name: "coltrane", version: "0.1.0" },
+    { name: "coltrane", version: COLTRANE_VERSION },
     { capabilities: { tools: {} } },
   );
 

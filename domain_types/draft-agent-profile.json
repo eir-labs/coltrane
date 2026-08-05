@@ -25,7 +25,7 @@
         "description": "User's verdict at the seam: pending = not yet reviewed; accepted = adopt to active fleet; rejected = discard; refined = user edited fields, re-propose."
       }
     },
-    "required": ["input_refs", "slug", "description", "behavioral_primitives", "system_prompt_draft", "user_acceptance"]
+    "required": ["input_refs", "slug", "description", "behavioral_primitives", "system_prompt_draft", "user_acceptance", "validation_criteria"]
   },
   "required_fields": []
 }

@@ -33,7 +33,7 @@ import { describe, it, expect } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, appendFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { FileLedger, MemoryLedger } from "../src/ledger.js";
+import { FileLedger, MemoryLedger, type Ledger } from "../src/ledger.js";
 
 const HEX64 = /^[0-9a-f]{64}$/;
 
@@ -493,5 +493,72 @@ describe("#212 — v1 files upgrade on READ, are never rewritten, and are marked
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// principal — WHO asked. Provenance, not policy.
+//
+// The ledger already answers "what produced this, and from what" (content_sha, input_shas,
+// skill_provenance, genome_hash, run_fingerprint). It answered "who initiated it" nowhere.
+// `principal` closes that, on the BASE so all three arms carry it — a run, a genome mutation
+// and a governance act can each have an initiator.
+//
+// It is recorded and never read: deliberately absent from LedgerQuery, consulted by no read
+// handler, filtered on by nothing. Tenancy enforcement belongs in the wrapper
+// (src/hooks.ts:1-9 — "ZERO built-in hooks… Everything opinionated lives in the wrapper"),
+// so these tests pin ROUND-TRIP ONLY. If a future change makes the engine filter on
+// principal, that is a policy decision that needs its own issue, not a quiet extension here.
+// ────────────────────────────────────────────────────────────────────────────
+describe("#212 — principal round-trips as provenance on every arm", () => {
+  const IMPLS: Array<[string, (dir: string) => Ledger]> = [
+    ["MemoryLedger", () => new MemoryLedger()],
+    ["FileLedger", (dir: string) => new FileLedger(join(dir, "ledger.jsonl"))],
+  ];
+
+  const ARMS: Array<[string, (over?: Row) => Row]> = [
+    ["gig", gigRow],
+    ["genome_mutation", mutationRow],
+    ["governance", governanceRow],
+  ];
+
+  describe.each(IMPLS)("%s", (implName, make) => {
+    it.each(ARMS)("carries principal verbatim on a %s row", (arm, build) => {
+      const dir = freshDir();
+      try {
+        const l = make(dir);
+        appendOrExplain(l, build({ principal: "user:governor@example.com" }), `${implName} ${arm} principal`);
+
+        const [row] = l.query() as unknown as Row[];
+        expect(row, `${implName}: ${arm} row did not round-trip`).toBeDefined();
+        expect(
+          row!["principal"],
+          `${implName} dropped principal on a ${arm} row. It is provenance — the same ` +
+            "category of fact as genome_hash and input_shas — and must survive the round trip " +
+            "on every arm, which is why it lives on LedgerEntryBase.",
+        ).toBe("user:governor@example.com");
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it("accepts a row with NO principal and does not materialise the key", () => {
+      const dir = freshDir();
+      try {
+        const l = make(dir);
+        appendOrExplain(l, gigRow(), `${implName} principal-absent`);
+
+        const [row] = l.query() as unknown as Row[];
+        expect(row, `${implName}: row did not round-trip`).toBeDefined();
+        expect(
+          "principal" in row!,
+          `${implName} materialised a principal key on a row that never had one. The field is ` +
+            "OPTIONAL and every current call site leaves it unset; absent must mean absent, " +
+            "never an invented or empty-string initiator.",
+        ).toBe(false);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
   });
 });

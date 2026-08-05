@@ -65,7 +65,7 @@
         "format": "date-time"
       }
     },
-    "required": ["id", "name", "use_case", "scope"]
+    "required": ["id", "name", "use_case", "scope", "steps"]
   },
   "required_fields": []
 }

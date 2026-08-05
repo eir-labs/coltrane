@@ -65,7 +65,9 @@ export function runHelloBand(): Promise<GigResult> {
 
   // 4. the one non-deterministic seam, made deterministic for this demo.
   const invoke: AgentInvoker = (ctx) =>
-    ctx.agent.slug === "sensor" ? { text: "the room is loud" } : { gist: "loud room" };
+    ctx.agent.slug === "sensor"
+      ? { text: "the room is loud", source: "microphone://demo/room-1" }
+      : { gist: "loud room", claims: ["the room is loud"] };
 
   // 5. run the gig — each output is typed, validated, stored, and provenance-linked.
   return runGig(

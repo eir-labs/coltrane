@@ -33,6 +33,7 @@
   "required_fields": [
     "disclosure_input_sha",
     "coverage_report_sha",
-    "examine_round_record_sha"
+    "examine_round_record_sha",
+    "checks"
   ]
 }

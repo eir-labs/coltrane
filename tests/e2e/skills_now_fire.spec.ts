@@ -53,6 +53,14 @@ const BEHAVIOR = {
   behavioral_primitives: ["analyst", "synthesizer"],
 };
 
+// Every sealed output carries its CORE's substance floor, enforced by outputs.write on every
+// write, subtype or not (#227 ruling): `raw-note` is Signal-cored and names where it was
+// acquired, `summary` is Interpretation-cored and states its claims. These stubs were never
+// valid instances of their own core — the seal path simply did not look, so every gig below
+// died at its first chair and none of the skill-wiring assertions were reached.
+const NOTE = (body: string): Record<string, unknown> => ({ body, source: "fixture://demo/sensor" });
+const SUMMARY = (gist: string): Record<string, unknown> => ({ gist, claims: [gist] });
+
 let env: TempdirColtrane;
 let genomeDir: string;
 
@@ -166,8 +174,8 @@ describe("skills_now_fire — the post-wire contract", () => {
     const seen: AgentInvocationContext[] = [];
     const invoker: AgentInvoker = (ctx) => {
       seen.push(ctx);
-      if (ctx.agent.slug === "sensor") return { body: "raw input" };
-      if (ctx.agent.slug === "summarizer") return { gist: "tight" };
+      if (ctx.agent.slug === "sensor") return NOTE("raw input");
+      if (ctx.agent.slug === "summarizer") return SUMMARY("tight");
       throw new Error(`unexpected agent ${ctx.agent.slug}`);
     };
 
@@ -222,8 +230,8 @@ describe("skills_now_fire — the post-wire contract", () => {
     const events: GigProgressEvent[] = [];
     const invoker: AgentInvoker = (ctx) => {
       seen.push(ctx);
-      if (ctx.agent.slug === "sensor") return { body: "raw" };
-      return { gist: "ok" };
+      if (ctx.agent.slug === "sensor") return NOTE("raw");
+      return SUMMARY("ok");
     };
 
     const res = await runGig(standard, {}, {
@@ -280,7 +288,7 @@ describe("skills_now_fire — the post-wire contract", () => {
     const fired: string[] = [];
     const invoker: AgentInvoker = (ctx) => {
       fired.push(ctx.agent.slug);
-      return ctx.agent.slug === "sensor" ? { body: "raw" } : { gist: "ok" };
+      return ctx.agent.slug === "sensor" ? NOTE("raw") : SUMMARY("ok");
     };
 
     await expect(
@@ -342,9 +350,9 @@ describe("skills_now_fire — the post-wire contract", () => {
       // upstream-input rendering, which doesn't fire here for sensor).
       // We dispatch on whether the agent identified in Layer 2 is the sensor.
       if (prompt.includes('agent "sensor"')) {
-        return JSON.stringify({ body: "raw" });
+        return JSON.stringify(NOTE("raw"));
       }
-      return JSON.stringify({ gist: "ok" });
+      return JSON.stringify(SUMMARY("ok"));
     };
 
     const invoke = makeClaudeInvoker({ registry, run: runSpy });

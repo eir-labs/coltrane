@@ -1,14 +1,16 @@
-// Allowlist guard test. Proves that the project's import-hygiene eslint
-// config actually rejects a forbidden import shape (absolute path).
+// Allowlist guard test. Proves the project's import-hygiene eslint config actually rejects
+// a forbidden import shape.
 //
 // Strategy:
-//   1. Write a temp .ts source file under a temp dir with a forbidden import.
-//   2. Invoke `npx eslint --no-eslintrc --config .eslintrc.json <tempfile>`.
+//   1. Write a temp .ts fixture with a forbidden import.
+//   2. Invoke `npx eslint --config eslint.config.js <fixture>` in a subprocess.
 //   3. Assert: non-zero exit AND the violation is named in the output.
 //
-// If eslint is not available locally (the project does not ship eslint as
-// a devDependency by design), the test logs a skip notice and exits early.
-// CI installs eslint workflow-locally and runs this test for full coverage.
+// The toolchain is deliberately NOT a devDependency (see eslint.config.js), so the guard
+// can only run where eslint AND @typescript-eslint/parser are installed — CI installs both
+// (.github/workflows/lint-imports.yml). Everywhere else each case no-ops with a message
+// naming what is missing. See `runGuard` for why "did it run" has to be answered explicitly
+// rather than inferred from the exit code.
 
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from "node:fs";
@@ -23,13 +25,32 @@ const CONFIG = join(REPO_ROOT, "eslint.config.js");
 const SCRATCH_ROOT = join(REPO_ROOT, "tests", "lint_guard", ".scratch");
 mkdirSync(SCRATCH_ROOT, { recursive: true });
 
+// Cached: this spawns `npx`, which costs 1-3s under full-band load, and it was being paid
+// once per case ON TOP of the eslint run itself — two subprocesses per test. The answer
+// cannot change during a run, so it is resolved at most once.
+let eslintAvailableCache: boolean | undefined;
 function eslintAvailable(): boolean {
-  const probe = spawnSync("npx", ["--no-install", "eslint", "--version"], {
-    cwd: REPO_ROOT,
-    encoding: "utf8",
-  });
-  return probe.status === 0;
+  if (eslintAvailableCache === undefined) {
+    const probe = spawnSync("npx", ["--no-install", "eslint", "--version"], {
+      cwd: REPO_ROOT,
+      encoding: "utf8",
+    });
+    eslintAvailableCache = probe.status === 0;
+  }
+  return eslintAvailableCache;
 }
+
+/**
+ * vitest's default 5s is not a realistic budget for a test that shells out. Each case runs
+ * `npx eslint` in a subprocess while ~150 other test files run in parallel workers, and the
+ * observed cost is 1-3s per spawn — 5-10s when the machine is loaded.
+ *
+ * This was the second half of what looked like flakiness. Before the outcome-classification
+ * fix the cases failed an ASSERTION (exit 0 where non-zero was expected); after it they were
+ * correctly skipping but TIMING OUT while doing so. Two different symptoms, one shared cause:
+ * the test was measured against a budget that never accounted for subprocess spawn.
+ */
+const SPAWN_TIMEOUT_MS = 30_000;
 
 /**
  * Run the guard against a fixture and say WHICH of three things happened.
@@ -92,14 +113,14 @@ describe("import allowlist", () => {
     if (!r.ran) return explainSkip(r.why);
     expect(r.status, "eslint exits non-zero when violations exist").not.toBe(0);
     expect(r.out).toMatch(/no-restricted-imports|Imports must be relative/);
-  });
+  }, SPAWN_TIMEOUT_MS);
 
   it("rejects a deep parent-traversal import", () => {
     const r = runGuard('import { x } from "../../../external";\nexport const y = x;\n');
     if (!r.ran) return explainSkip(r.why);
     expect(r.status).not.toBe(0);
     expect(r.out).toMatch(/no-restricted-imports|Imports must be relative/);
-  });
+  }, SPAWN_TIMEOUT_MS);
 
   it("accepts an in-tree relative import and a package-name import", () => {
     const r = runGuard(
@@ -110,7 +131,7 @@ describe("import allowlist", () => {
     // where the guard was doing nothing.
     if (!r.ran) return explainSkip(r.why);
     expect(r.out).not.toMatch(/no-restricted-imports/);
-  });
+  }, SPAWN_TIMEOUT_MS);
 
   // Guards the guard. The three cases above all no-op when the toolchain is absent, which is
   // the honest thing to do locally — but it means a permanently-skipped guard looks identical
@@ -124,5 +145,5 @@ describe("import allowlist", () => {
       explainSkip(r.why);
     }
     expect(typeof r.ran).toBe("boolean");
-  });
+  }, SPAWN_TIMEOUT_MS);
 });

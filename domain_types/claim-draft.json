@@ -28,6 +28,7 @@
     }
   },
   "required_fields": [
-    "independent_claims"
+    "independent_claims",
+    "steps"
   ]
 }

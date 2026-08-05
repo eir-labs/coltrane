@@ -17,7 +17,9 @@ import {
   type Registry,
   type OutputStore,
   type Ledger,
+  type CoreType,
 } from "../../src/index.js";
+import { CORE_SUBSTANCE } from "../../src/output_validation.js";
 import { testAgent } from "./agents.js";
 
 // process primitive → the core type it outputs, and a Belbin disposition (for unit variety)
@@ -55,6 +57,43 @@ export interface MaterializedGenome {
 // produce the same type, so the registry's type-reuse gate is satisfied. A node's input
 // types are derived from the types its depends_on upstream produce.
 const typeFor = (p: string): string => `gen-${(CORE[p] ?? "Signal").toLowerCase()}`;
+
+// Reverse of typeFor: `gen-artifact` → `Artifact`. Derived from CORE so it cannot drift.
+const CORE_OF_GEN_TYPE: Record<string, string> = Object.fromEntries(
+  Object.values(CORE).map((c) => [`gen-${c.toLowerCase()}`, c]),
+);
+
+/** The substance an output carries by virtue of its CORE type, independent of any domain
+ *  schema (#227/#228). An Artifact declares how it can be checked; a Verdict carries the
+ *  evidence it verified; a Signal names where it came from; an Interpretation states its
+ *  claims; a Plan lists its steps; a Judgment names its criteria. `outputs.write` enforces
+ *  every one of them on every seal, so a fixture that omits them is not a valid instance of
+ *  that core and never was — the seal path simply did not look.
+ *
+ *  Keyed by CORE, deliberately: a generated VERIFY node is covered by the same edit as a
+ *  CREATE node, so fixing the Artifact case cannot leave a Verdict case hiding behind it
+ *  (runs abort at the first failing chair).
+ *
+ *  DERIVED from the CORE_SUBSTANCE table rather than restating it, so this helper cannot
+ *  drift from the rule it is meant to satisfy: a core whose floor is retargeted, or a
+ *  seventh core, is covered here the moment it lands in the table (#227 ruling — the floor
+ *  binds all six cores, bare or subtyped). */
+export function coreInvariantFields(core: string | undefined): Record<string, unknown> {
+  const rule = core ? CORE_SUBSTANCE[core as CoreType] : undefined;
+  if (!rule) return {};
+  if (rule.shape === "string") {
+    return { [rule.field]: `deterministic-fixture://${core!.toLowerCase()}` };
+  }
+  if (rule.item_requires) {
+    return { [rule.field]: [{ [rule.item_requires]: "deterministic-invoker", target_ref: "gen", result: "pass" }] };
+  }
+  return { [rule.field]: [`deterministic fixture: ${core} output shape matches its declared type`] };
+}
+
+/** A schema-valid payload for a generated domain type, including its core's substance. */
+export function genOutputFor(outputTypeSlug: string, value: string): Record<string, unknown> {
+  return { value, ...coreInvariantFields(CORE_OF_GEN_TYPE[outputTypeSlug]) };
+}
 
 /** Turn a TopologySpec into real coltrane artifacts. Throws (via composeStandard) for an
  *  invalid topology — that throw IS the integration "fail-closed" assertion. */

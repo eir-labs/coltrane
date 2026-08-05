@@ -35,11 +35,16 @@ process.on("SIGTERM", () => {
 let i = 0;
 while (!stop) {
   const now = new Date().toISOString();
+  // Settled #212 gig-row shape: kind discriminator + 64-hex identity.
+  const id = \`stream:\${i}:\${randomUUID()}\`;
   ledger.append({
-    gig_id: \`stream:\${i}:\${randomUUID()}\`,
+    kind: "gig",
+    schema_version: 2,
+    entry_id: id,
+    gig_id: id,
     standard_slug: "stream_test",
-    genome_hash: "h" + i,
-    run_fingerprint: "r" + i,
+    genome_hash: i.toString(16).padStart(64, "0"),
+    run_fingerprint: (i + 1).toString(16).padStart(64, "0"),
     output_hashes: ["o" + i],
     started_at: now,
     finished_at: now,

@@ -53,15 +53,19 @@ describe("failure mode: recorder under sustained append load (10K entries)", () 
 
       for (let i = 0; i < N; i++) {
         const now = new Date().toISOString();
+        // Settled #212 gig-row shape: kind discriminator + 64-hex identity.
         ledger.append({
+          kind: "gig",
+          schema_version: 2,
+          entry_id: `load:${i}`,
           gig_id: `load:${i}`,
           standard_slug: "load_test",
-          genome_hash: `h${i}`,
-          run_fingerprint: `r${i}`,
+          genome_hash: i.toString(16).padStart(64, "0"),
+          run_fingerprint: (i + 1).toString(16).padStart(64, "0"),
           output_hashes: [`o${i}`],
           started_at: now,
           finished_at: now,
-        });
+        } as never);
         if (i > 0 && i % checkpointEvery === 0) {
           sizeCheckpoints.push(statSync(ledgerPath).size);
         }

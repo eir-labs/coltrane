@@ -37,7 +37,12 @@ export const MCP_TOOLS: readonly MCPToolDef[] = [
   { slug: "output_query",                  category: "understand", input_schema: obj({ domain_type: "string", gig_id: "string", agent_slug: "string", data_filter: "object" }), output_schema: obj({ outputs: "array", total_count: "number" }) },
   { slug: "output_trace",                  category: "understand", input_schema: obj({ output_id: "string", direction: "string", max_depth: "number" }), output_schema: obj({ graph: "object", root_signals: "array", terminal_outputs: "array" }) },
   { slug: "charter_read",          category: "understand", input_schema: obj({ company_id: "string" }), output_schema: obj({ products: "array", goals: "array", pain_points: "array", tech_stack: "array", access_grants: "array" }) },
-  { slug: "execution_history_read",        category: "understand", input_schema: obj({ company_id: "string", domain: "string" }), output_schema: obj({ gigs: "array", performance_summary: "object" }) },
+  // #217 — advertised contract == handler. The five filters src/server.ts actually reads, and
+  // the two keys it actually returns. The old {company_id, domain} in / {gigs,
+  // performance_summary} out overlapped the handler in neither direction, so a client
+  // following the surface got an UNFILTERED DUMP of the audit trail and then looked for a key
+  // that was never returned.
+  { slug: "execution_history_read",        category: "understand", input_schema: obj({ gig_id: "string", standard_slug: "string", genome_hash: "string", after: "string", before: "string" }), output_schema: obj({ executions: "array", count: "number" }) },
   { slug: "access_grant_check",            category: "understand", input_schema: obj({ company_id: "string", resource_uri: "string", required_permissions: "array" }), output_schema: obj({ granted: "boolean", missing_permissions: "array", expires_in: "number" }) },
 
   { slug: "type_register",                 category: "build", input_schema: obj({ ...DT_AUTHORED, reason: "string" }), output_schema: obj({ registered: "boolean", domain_type_id: "string", version: "number" }) },

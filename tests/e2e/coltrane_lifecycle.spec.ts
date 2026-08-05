@@ -11,6 +11,7 @@
 // concrete value or specific error class — no toBeDefined-only padding.
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { isGenomeMutation } from "../../src/ledger.js";
 import { TEST_BEHAVIOR } from "../_support/agents.js";
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -210,11 +211,15 @@ describe("coltrane lifecycle: bootstrap → define → reload → run → evolve
     expect(persisted.primitives).toEqual(["SENSE"]);
     expect(persisted.output_types).toEqual(["raw-note"]);
 
-    // Ledger seal: agent_define recorded with genome_hash === effective_hash returned to the caller.
-    const ledgerSeals = deps.ledger.query({ standard_slug: "agent_define" });
-    const sensorSeal = ledgerSeals.find((e) => e.gig_id.startsWith("define:sensor"));
+    // #212 MIGRATION — a seal is kind:"genome_mutation" with the identity in `effective_hash`,
+    // not a gig-shaped row keyed standard_slug="agent_define" with the effective hash stuffed
+    // into `genome_hash` (v1 also copied it into run_fingerprint — an effective hash is not a
+    // run fingerprint). The ASSERTION is unchanged: "the ledger holds an agent_define seal for
+    // this slug whose identity matches what the tool returned." Only the fields it reads move.
+    const ledgerSeals = deps.ledger.query({ kind: "genome_mutation", event: "agent_define" }).filter(isGenomeMutation);
+    const sensorSeal = ledgerSeals.find((e) => e.subject_slug === "sensor");
     expect(sensorSeal).toBeTruthy();
-    expect(sensorSeal!.genome_hash).toBe(sensorEffectiveHash);
+    expect(sensorSeal!.effective_hash).toBe(sensorEffectiveHash);
 
     // Round-trip: load the genome from disk again and assert the writes are visible.
     const reloaded = loadGenome(genomeDir);

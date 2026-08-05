@@ -37,7 +37,9 @@ The bet underneath it: the reason jazz works is that music theory is well-define
 ## The four North Stars (first release)
 
 **Traceability — what ran, what changed, how it ran, why this result.**
-Every gig seals a `genome_hash` + `run_fingerprint` into an append-only ledger, and every output knows its parents. You can walk any result back to the raw input and the exact methodology that produced it.
+Every gig seals a `genome_hash` + `run_fingerprint` into an append-only ledger, and every output knows its parents. You can walk any result back to the raw input and the wiring that produced it — which standard ran, which agents filled which chairs, and which outputs fed which.
+
+`genome_hash` is a **structural** hash: it covers the standard's phase graph and each agent's slug, primitives, `input_types`, `output_types`, and domain. It deliberately does **not** cover an agent's `identity`, `method`, `constraints`, `behavioral_primitives`, `allowed_tools`, model tier, or `skill_slugs`. Two genomes that differ only in those fields produce the same `genome_hash` — and therefore the same `run_fingerprint` when their outputs coincide. So the chain answers *"was the wiring the same?"*, not *"was the prompt the same?"*. Authoring-time `content_hash`/`effective_hash` (sealed by `agent_define` and friends) *do* cover the full definition bytes; those are the hashes to compare when you need behavioral identity.
 
 **Reproducibility — can I run it reliably? Is it correct? Is it true?**
 The same genome replays byte-for-byte. The fingerprint distinguishes an honest replay from a tamper, so "it worked" becomes a checkable claim instead of a vibe.

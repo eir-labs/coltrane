@@ -7,7 +7,7 @@
 // retry on miss). No call carries the whole document except the final smoothing.
 import { readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
-import { extractJson } from "./claude_invoker.js";
+import { extractJson, DEFAULT_CHAIR_TIMEOUT_MS } from "./claude_invoker.js";
 
 // ---- the formal contract (governs every inference call) ----
 
@@ -81,6 +81,12 @@ export function buildInfererPrompt(req: InferenceRequest): string {
 export interface ClaudeInfererOptions {
   bin?: string | undefined; // default "claude"
   model?: string | undefined; // passed to --model if set
+  /**
+   * #225 — wall-clock bound on the inference spawn. This call is SYNCHRONOUS, so an
+   * unbounded child wedges the whole process; a tool-granted child has no inherent
+   * terminus. Defaults to the same bound the chair invoker uses.
+   */
+  timeout_ms?: number | undefined;
   run?: ((bin: string, args: string[]) => string) | undefined; // injectable spawn (tests)
 }
 
@@ -89,12 +95,31 @@ export interface ClaudeInfererOptions {
  *  one non-deterministic seam; inject `run` to test the prompt-build + parse path. */
 export function makeClaudeInferer(opts: ClaudeInfererOptions = {}): Inferer {
   const bin = opts.bin ?? "claude";
+  const timeout = opts.timeout_ms ?? DEFAULT_CHAIR_TIMEOUT_MS;
   const run =
-    opts.run ?? ((b: string, args: string[]) => execFileSync(b, args, { encoding: "utf-8", maxBuffer: 64 * 1024 * 1024 }));
+    opts.run ??
+    ((b: string, args: string[]) =>
+      execFileSync(b, args, {
+        encoding: "utf-8",
+        maxBuffer: 64 * 1024 * 1024,
+        // #225 — this spawn had NEITHER, the exact wedge invoker_timeout.test.ts closed for
+        // the chair invoker. SIGKILL, not the default SIGTERM: a signal-trapping child
+        // outlives a SIGTERM budget (measured — 2063ms vs 305ms against a trapping child),
+        // so `timeout` alone throws while still letting the child run to completion.
+        timeout,
+        killSignal: "SIGKILL",
+      }));
   return (req) => {
     const args = ["-p", buildInfererPrompt(req)];
     if (opts.model) args.push("--model", opts.model);
-    return extractJson(run(bin, args));
+    // #221 policy 5 — the response shape's field names ARE the expected key set, right here
+    // at the call site. Behaviour propagates through the shared extractor; the key signal
+    // does not unless each call site passes it.
+    const fields = Object.keys(req.response_type.fields);
+    return extractJson(
+      run(bin, args),
+      fields.length > 0 ? { expectKeys: fields } : { requireUnambiguous: true },
+    );
   };
 }
 

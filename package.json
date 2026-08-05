@@ -56,8 +56,9 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "verify": "tsc --noEmit && vitest run",
+    "verify": "tsc --noEmit && vitest run && npm run test:failure-modes",
     "e2e": "vitest run --config tests/e2e/vitest.config.ts",
+    "test:failure-modes": "vitest run --config tests/failure_modes/vitest.config.ts",
     "lint:imports": "git ls-files 'src/**/*.ts' 'src/**/*.tsx' 'src/**/*.js' 'src/**/*.mjs' 'src/**/*.cjs' 'tests/**/*.ts' 'tests/**/*.tsx' 'tests/**/*.js' 'tests/**/*.mjs' 'tests/**/*.cjs' | bash scripts/check_imports.sh"
   },
   "dependencies": {

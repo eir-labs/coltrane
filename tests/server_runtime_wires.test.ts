@@ -29,7 +29,7 @@ describe("output_write", () => {
     const d = makeDeps();
     const r = await dispatchTool(
       "output_write",
-      { core_type: "Judgment", domain_type: "finding", domain: "eirtests", gig_id: "g1", agent_slug: "analyst", data: { title: "missing alt" } },
+      { core_type: "Judgment", domain_type: "finding", domain: "eirtests", gig_id: "g1", agent_slug: "analyst", data: { title: "missing alt", criteria: ["image accessibility"] } },
       d,
     );
     expect(r.ok).toBe(true);
@@ -56,11 +56,11 @@ describe("output_write", () => {
 
   it("links provenance edges when refs are supplied", async () => {
     const d = makeDeps();
-    const a = await dispatchTool("output_write", { core_type: "Judgment", domain_type: "finding", domain: "eirtests", gig_id: "g1", agent_slug: "scout", data: { title: "a" } }, d);
+    const a = await dispatchTool("output_write", { core_type: "Judgment", domain_type: "finding", domain: "eirtests", gig_id: "g1", agent_slug: "scout", data: { title: "a", criteria: ["image accessibility"] } }, d);
     const aId = (a.data as { output_id: string }).output_id;
     const b = await dispatchTool(
       "output_write",
-      { core_type: "Judgment", domain_type: "finding", domain: "eirtests", gig_id: "g1", agent_slug: "analyst", data: { title: "b" }, refs: [{ to: aId, relation: "derived_from" }] },
+      { core_type: "Judgment", domain_type: "finding", domain: "eirtests", gig_id: "g1", agent_slug: "analyst", data: { title: "b", criteria: ["image accessibility"] }, refs: [{ to: aId, relation: "derived_from" }] },
       d,
     );
     expect(b.ok).toBe(true);
@@ -79,11 +79,27 @@ describe("output_write", () => {
   });
 });
 
+// Gig-row fixture in the settled #212 shape: 64-hex identity + ISO-8601 timestamps, which
+// the shared validator enforces. "h1"/"t0" placeholders passed only because the old guard
+// (src/ledger.ts:56-58) checked non-emptiness and nothing else.
+const gigEntry = (over: Record<string, unknown>): never => ({
+  kind: "gig",
+  schema_version: 2,
+  standard_slug: "scan",
+  genome_hash: "a".repeat(64),
+  run_fingerprint: "b".repeat(64),
+  output_hashes: [],
+  started_at: "2026-05-25T20:00:00.000Z",
+  finished_at: "2026-05-25T20:01:00.000Z",
+  entry_id: String(over["gig_id"] ?? ""),
+  ...over,
+}) as never;
+
 describe("execution_history_read", () => {
   it("returns ledger entries, filterable by gig_id", async () => {
     const d = makeDeps();
-    d.ledger.append({ gig_id: "g1", standard_slug: "scan", genome_hash: "h1", run_fingerprint: "f1", output_hashes: [], started_at: "t0", finished_at: "t1" });
-    d.ledger.append({ gig_id: "g2", standard_slug: "scan", genome_hash: "h2", run_fingerprint: "f2", output_hashes: [], started_at: "t0", finished_at: "t1" });
+    d.ledger.append(gigEntry({ gig_id: "g1", genome_hash: "1".repeat(64) }));
+    d.ledger.append(gigEntry({ gig_id: "g2", genome_hash: "2".repeat(64) }));
     const all = await dispatchTool("execution_history_read", {}, d);
     expect(all.ok).toBe(true);
     expect(all.not_implemented).toBeFalsy();
@@ -96,8 +112,8 @@ describe("execution_history_read", () => {
 
   it("filters by standard_slug", async () => {
     const d = makeDeps();
-    d.ledger.append({ gig_id: "g1", standard_slug: "scan", genome_hash: "h1", run_fingerprint: "f1", output_hashes: [], started_at: "t0", finished_at: "t1" });
-    d.ledger.append({ gig_id: "g2", standard_slug: "audit", genome_hash: "h2", run_fingerprint: "f2", output_hashes: [], started_at: "t0", finished_at: "t1" });
+    d.ledger.append(gigEntry({ gig_id: "g1", standard_slug: "scan",  genome_hash: "1".repeat(64) }));
+    d.ledger.append(gigEntry({ gig_id: "g2", standard_slug: "audit", genome_hash: "2".repeat(64) }));
     const r = await dispatchTool("execution_history_read", { standard_slug: "audit" }, d);
     expect((r.data as { executions: unknown[] }).executions.length).toBe(1);
   });

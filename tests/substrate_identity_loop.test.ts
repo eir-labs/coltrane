@@ -30,6 +30,20 @@ function freshDeps(): { deps: ServerDeps; dir: string; ledgerPath: string } {
   return { deps, dir, ledgerPath };
 }
 
+
+// #212 MIGRATION — a genome-mutation seal is `kind:"genome_mutation"` with the identity in
+// `effective_hash`, NOT a gig-shaped row with the effective hash stuffed into `genome_hash`
+// (src/genome_writer.ts:77-78 also copies it into run_fingerprint, which is a small lie: an
+// effective hash is not a run fingerprint). `genome_hash`/`run_fingerprint` are gig-only under
+// the settled schema, so the three predicates below are RED until #212 lands. The ASSERTION is
+// unchanged — "the ledger holds an agent_define seal whose identity matches what the tool
+// returned"; only the field it reads changes.
+/** Does this row seal `slug` as a genome mutation with the given identity? */
+function isMutationSeal(e: unknown, event: string, identity: string): boolean {
+  const r = e as Record<string, unknown>;
+  return r["kind"] === "genome_mutation" && r["event"] === event && r["effective_hash"] === identity;
+}
+
 const agentDef = {
   slug: "loop-scout",
   primitives: ["SENSE"],
@@ -74,8 +88,13 @@ describe("substrate identity loop — MCP-or-not-at-all", () => {
     const r = await dispatchTool("agent_define", agentDef, deps);
     const hash = (r.data as { effective_hash: string }).effective_hash;
     const entries = deps.ledger.query({});
-    const def = entries.find((e) => e.standard_slug === "agent_define" && e.genome_hash === hash);
-    expect(def, `ledger must hold an agent_define entry with effective_hash=${hash}`).toBeDefined();
+    const def = entries.find((e) => isMutationSeal(e, "agent_define", hash));
+    expect(
+      def,
+      `ledger must hold a kind:"genome_mutation" agent_define seal with effective_hash=${hash}. ` +
+        "Today src/genome_writer.ts:127-135 writes it as a gig-shaped row keyed " +
+        'standard_slug="agent_define" with the identity in genome_hash (#212).',
+    ).toBeDefined();
   });
 
   it("agent_define persists across a process boundary — re-load reproduces the same hash", async () => {
@@ -91,8 +110,11 @@ describe("substrate identity loop — MCP-or-not-at-all", () => {
     } as ServerDeps & { genome_dir: string };
 
     const entries = reborn.ledger.query({});
-    const def = entries.find((e) => e.standard_slug === "agent_define" && e.genome_hash === first.effective_hash);
-    expect(def, "ledger entry must survive process restart").toBeDefined();
+    const def = entries.find((e) => isMutationSeal(e, "agent_define", first.effective_hash));
+    expect(
+      def,
+      "ledger entry must survive process restart AND carry the genome_mutation shape (#212)",
+    ).toBeDefined();
   });
 
   it("rehashing the on-disk file with canonical_form reproduces the registered effective_hash", async () => {
@@ -125,7 +147,13 @@ describe("substrate identity loop — orphan rejection", () => {
       join(dir, "agents", "orphan.json"),
       JSON.stringify({ slug: "orphan", primitives: ["SENSE"], output_types: ["raw-note"], domain: "x" }),
     );
-    const orphanEntries = deps.ledger.query({}).filter((e) => e.standard_slug === "agent_define");
+    // NOTE: vacuous in the interim — until #212 lands no row carries `event`, so this filter
+    // matches nothing regardless of the orphan. It is keyed to the target shape so it becomes
+    // load-bearing again the moment the mutation rows are migrated, rather than silently
+    // rotting into a permanent tautology on the old key.
+    const orphanEntries = deps.ledger
+      .query({})
+      .filter((e) => (e as unknown as Record<string, unknown>)["event"] === "agent_define");
     expect(orphanEntries.length, "ledger must NOT auto-record hand-edited files").toBe(0);
     // (Bonus: loadGenome SHOULD refuse to admit this agent. That check lands in the
     // loader path — flagged here so the test is the receipt the loader honors it.)

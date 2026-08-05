@@ -31,21 +31,21 @@ function setup() {
 describe("#74 — scoreEval is a real judge", () => {
   it("scores 1.0 when the eval's on_type is produced with the required field non-empty", async () => {
     const { outputs, ledger } = setup();
-    const invoke: AgentInvoker = () => ({ gist: "a tight summary" });
+    const invoke: AgentInvoker = () => ({ gist: "a tight summary", claims: ["the note is about X"] });
     const res = await runGig(standard, {}, { outputs, ledger, invoke, evals });
     expect(res.eval_scores["gist-present"]).toBe(1.0);
   });
 
   it("scores 0.0 when the required field is empty (stub wrongly returned 1.0)", async () => {
     const { outputs, ledger } = setup();
-    const invoke: AgentInvoker = () => ({ gist: "" }); // schema-valid but fails the eval
+    const invoke: AgentInvoker = () => ({ gist: "", claims: ["the note is about X"] }); // schema-valid but fails the eval
     const res = await runGig(standard, {}, { outputs, ledger, invoke, evals });
     expect(res.eval_scores["gist-present"]).toBe(0.0);
   });
 
   it("scores 0.0 for an unresolvable eval slug (stub wrongly returned 1.0)", async () => {
     const { outputs, ledger } = setup();
-    const invoke: AgentInvoker = () => ({ gist: "anything" });
+    const invoke: AgentInvoker = () => ({ gist: "anything", claims: ["the note is about X"] });
     const ghostStandard: Standard = { ...standard, eval_slugs: ["no-such-eval"] };
     const res = await runGig(ghostStandard, {}, { outputs, ledger, invoke, evals });
     expect(res.eval_scores["no-such-eval"]).toBe(0.0);

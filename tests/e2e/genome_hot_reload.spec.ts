@@ -19,6 +19,7 @@
 // the diagnosis Eugene asked for — captured, not papered over.
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { isGenomeMutation } from "../../src/ledger.js";
 import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 
@@ -214,10 +215,15 @@ describe("T14: genome hot-reload — agent_define mid-gig, next gig sees the new
     expect(existsSync(join(genomeDir, "standards", "hot-standard.json"))).toBe(true);
 
     // Ledger seal recorded — the substrate-of-truth identity claim is in place.
-    const defineSeals = deps.ledger.query({ standard_slug: "agent_define" });
-    const hotSeal = defineSeals.find((e) => e.gig_id.startsWith("define:hot-summarizer"));
+    // #212 MIGRATION — a seal is kind:"genome_mutation" with the identity in `effective_hash`,
+    // not a gig-shaped row keyed standard_slug="agent_define" with the effective hash stuffed
+    // into `genome_hash` (v1 also copied it into run_fingerprint — an effective hash is not a
+    // run fingerprint). The ASSERTION is unchanged: "the ledger holds an agent_define seal for
+    // this slug whose identity matches what the tool returned." Only the fields it reads move.
+    const defineSeals = deps.ledger.query({ kind: "genome_mutation", event: "agent_define" }).filter(isGenomeMutation);
+    const hotSeal = defineSeals.find((e) => e.subject_slug === "hot-summarizer");
     expect(hotSeal).toBeTruthy();
-    expect(hotSeal!.genome_hash).toBe(a3Data.effective_hash);
+    expect(hotSeal!.effective_hash).toBe(a3Data.effective_hash);
 
     // The persisted agent file round-trips through loadGenome (substrate is consistent).
     const reloadedGenome = loadGenome(genomeDir);

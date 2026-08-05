@@ -65,6 +65,16 @@ async function writeOutput(
   return res.data.output_id;
 }
 
+// Every sealed output carries its CORE's substance floor (#227 ruling), enforced on every
+// write regardless of domain type. The core each fixture declares is the one its domain type
+// actually extends on disk: `soft-verdict` and `summary` are Interpretation-cored, `raw-note`
+// is Signal-cored. This spec used to declare "Verdict" for soft-verdict and "Artifact" for
+// summary — neither matched domain_types/*.json, and nothing checked until the seal did.
+// The v3.3 mapping the file documents is unchanged: `verdict.failed` is still read off
+// `overall_verdict_shade`, which is the field soft-verdict actually declares.
+const NOTE = (text: string): Record<string, unknown> => ({ text, source: `fixture://demo/${text}` });
+const SUMMARY = (gist: string): Record<string, unknown> => ({ gist, claims: [gist] });
+
 describe("chain_query primitives (T7) — failure_rate + cycle_lineage", () => {
   let env: TempdirColtrane;
   let deps: ServerDeps;
@@ -124,12 +134,13 @@ describe("chain_query primitives (T7) — failure_rate + cycle_lineage", () => {
     for (const v of verdicts) {
       await writeOutput(deps, {
         gig_id: gig,
-        core_type: "Verdict",
+        core_type: "Interpretation",
         domain_type: "soft-verdict",
         agent_slug: voice,
         data: {
           criteria: {},
           overall_verdict_shade: v.pass ? "pass" : "fail",
+          claims: [v.pass ? "the candidate ripened" : "the candidate was killed"],
         },
       });
     }
@@ -160,22 +171,22 @@ describe("chain_query primitives (T7) — failure_rate + cycle_lineage", () => {
       core_type: "Signal",
       domain_type: "raw-note",
       agent_slug: "sensor-1",
-      data: { text: "root signal" },
+      data: NOTE("root signal"),
     });
     const b = await writeOutput(deps, {
       gig_id: gig,
       core_type: "Signal",
       domain_type: "raw-note",
       agent_slug: "refiner-1",
-      data: { text: "intermediate" },
+      data: NOTE("intermediate"),
       derived_from: [a],
     });
     const c = await writeOutput(deps, {
       gig_id: gig,
-      core_type: "Artifact",
+      core_type: "Interpretation",
       domain_type: "summary",
       agent_slug: "summarizer-1",
-      data: { gist: "summary leaf" },
+      data: SUMMARY("summary leaf"),
       derived_from: [b],
     });
 
@@ -211,14 +222,14 @@ describe("chain_query primitives (T7) — failure_rate + cycle_lineage", () => {
       core_type: "Signal",
       domain_type: "raw-note",
       agent_slug: "sensor-2",
-      data: { text: "from an earlier gig" },
+      data: NOTE("from an earlier gig"),
     });
     const laterLeaf = await writeOutput(deps, {
       gig_id: gigLater,
-      core_type: "Artifact",
+      core_type: "Interpretation",
       domain_type: "summary",
       agent_slug: "summarizer-2",
-      data: { gist: "later gig pulls in earlier evidence" },
+      data: SUMMARY("later gig pulls in earlier evidence"),
       derived_from: [earlyRoot],
     });
 

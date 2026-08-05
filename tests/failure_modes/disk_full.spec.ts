@@ -2,39 +2,38 @@
 // EACCES / mounted-RO scenarios). Asserts the failure surfaces as a TYPED
 // RecorderWriteError (or LedgerError subclass) — NOT a raw ENOENT/EACCES bubble.
 //
-// REQUIRES (for GREEN): coltrane has no RecorderWriteError type today. FileLedger.append
-// calls appendFileSync which throws a raw NodeJS.SystemError with code "EACCES" / "EPERM"
-// / "EROFS". The MCP server path that wraps recorder writes does NOT currently catch +
-// wrap these into a structured error response — a crash in the writer would propagate
-// up to the JSON-RPC handler.
-//
-// To make this spec GREEN, coltrane needs:
-//   1) A RecorderWriteError class (or LedgerError variant) thrown by FileLedger.append
-//      that wraps the underlying SystemError and is tagged with .cause + .code.
-//   2) MCP server tool handlers that catch RecorderWriteError and return a structured
-//      tool-error response without crashing the process.
-//   3) Idempotent retry semantics: once the dir becomes writable again, the next
-//      append must succeed without process restart.
+// STATUS: green. All three requirements this header used to list as missing are implemented:
+//   1) src/ledger.ts FileLedger.append wraps EACCES/EPERM/EROFS/ENOSPC in a typed LedgerError
+//      tagged with .cause + .code.
+//   2) src/server.ts dispatchTool catches LedgerError and returns a structured tool error
+//      carrying audit_write_failed:true — "recording the work failed" is reported distinctly
+//      from "the work failed" (#218).
+//   3) The append is stateless (no cached fd), so a retry on the same instance succeeds once
+//      the path is writable again — contract 3 below.
 
 import { describe, it, expect } from "vitest";
 import { writeFileSync, mkdirSync, chmodSync, existsSync, rmSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { setupTempdirColtrane, type TempdirColtrane } from "../e2e/_harness.js";
-import { FileLedger } from "../../src/ledger.js";
+import { FileLedger, type GigLedgerEntry } from "../../src/ledger.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 void __dirname;
 
-const SAMPLE_ENTRY = {
+// Settled #212 gig-row shape: kind discriminator + 64-hex identity + ISO-8601 timestamps.
+const SAMPLE_ENTRY: GigLedgerEntry = {
+  kind: "gig",
+  schema_version: 2,
+  entry_id: "ro:1",
   gig_id: "ro:1",
   standard_slug: "ro_test",
-  genome_hash: "h",
-  run_fingerprint: "r",
+  genome_hash: "a".repeat(64),
+  run_fingerprint: "b".repeat(64),
   output_hashes: ["o"],
-  started_at: "2026-01-01T00:00:00Z",
-  finished_at: "2026-01-01T00:00:00Z",
+  started_at: "2026-01-01T00:00:00.000Z",
+  finished_at: "2026-01-01T00:00:00.000Z",
 };
 
 describe("failure mode: recorder write to read-only directory", () => {

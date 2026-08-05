@@ -63,8 +63,8 @@ const standard: Standard = {
 
 const invoke: AgentInvoker = ({ agent }) =>
   agent.slug === "finder"
-    ? { description: "missing alt text" }
-    : { description: "missing alt text", severity_score: 0.7 };
+    ? { description: "missing alt text", claims: ["an image has no alt text"] }
+    : { description: "missing alt text", severity_score: 0.7, criteria: ["accessibility severity"] };
 
 function wireDeps(): ServerDeps {
   const registry = createRegistry();

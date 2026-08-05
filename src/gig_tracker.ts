@@ -96,6 +96,10 @@ export function gigEventLogLine(gig_id: string, ev: GigProgressEvent): string | 
     case "chair_start": return JSON.stringify({ ...base, ev: "chair_start", phase: ev.phase, role: ev.role, producer: ev.producer });
     case "chair_complete": return JSON.stringify({ ...base, ev: "chair_complete", role: ev.role, sealed: ev.output_types, ms: ev.duration_ms });
     case "chair_failed": return JSON.stringify({ ...base, ev: "chair_failed", role: ev.role, error: ev.error });
+    // #241 — a dangling (non-required) skill binding. Surfaced live because an unskilled run
+    // is otherwise indistinguishable from a skilled one: same genome_hash, run_fingerprint,
+    // content_sha. This log line is the only place the difference shows up while it happens.
+    case "skills_unresolved": return JSON.stringify({ ...base, ev: "skills_unresolved", phase: ev.phase, role: ev.role, agent: ev.agent, missing: ev.missing });
     case "gig_complete": return JSON.stringify({ ...base, ev: "gig_complete", outputs: ev.outputs });
     case "gig_failed": return JSON.stringify({ ...base, ev: "gig_failed", error: ev.error });
     case "agent_event":

@@ -14,21 +14,23 @@ import type { AgentInvoker } from "../src/runtime.js";
 const REPO = process.cwd();
 
 const STUB: Record<string, unknown> = {
-  "disclosure-analyst": { real_contribution: "the integrity-gated dual-resolution switch" },
-  "claim-architect": { independent_claims: [{ number: 1, text: "A method comprising: a; b; c." }] },
+  "disclosure-analyst": { real_contribution: "the integrity-gated dual-resolution switch", claims: ["the switch resolves both halves under one integrity gate"] },
+  "claim-architect": { independent_claims: [{ number: 1, text: "A method comprising: a; b; c." }], steps: ["draft claim 1", "cut it to the minimum viable text"] },
   "prior-art-scout": {
     "prior-art-hit": { source: "USPTO PatentsView", title: "Some prior patent", verified: true, verification_method: "fetch" },
-    "novelty-verdict": { verdict: "NOVEL-ON-INDEPENDENT", rationale: "1b un-anticipated", coverage_fraction: 0.33 },
-    "coverage-report": { corpora_searched: [{ corpus: "USPTO PatentsView", status: "searched" }], patent_hit_count: 1 },
+    "novelty-verdict": { verdict: "NOVEL-ON-INDEPENDENT", rationale: "1b un-anticipated", coverage_fraction: 0.33, criteria: ["anticipation of the independent claim"] },
+    "coverage-report": { corpora_searched: [{ corpus: "USPTO PatentsView", status: "searched" }], patent_hit_count: 1, source: "USPTO PatentsView" },
   },
-  "anticipation-mapper": { matrix: [{ element_id: "1a", status: "present" }], coverage_fraction: 0.33 },
-  "patent-examiner": { rejections: [{ statute: "§112(a)", cleared: false }], all_cleared: false },
-  "claim-amender": { round_n: 1, amended_claim: "A method ...", claim_state_sha: "h1", rejection_state_sha: "h2", predecessor_sha: "h0", survived: false },
+  "anticipation-mapper": { matrix: [{ element_id: "1a", status: "present" }], coverage_fraction: 0.33, claims: ["element 1a is present in the cited art"] },
+  "patent-examiner": { rejections: [{ statute: "§112(a)", cleared: false }], all_cleared: false, criteria: ["§112(a) enablement"] },
+  "claim-amender": { round_n: 1, amended_claim: "A method ...", claim_state_sha: "h1", rejection_state_sha: "h2", predecessor_sha: "h0", survived: false, claims: ["the amended claim does not survive round 1"] },
   "triage-judge": {
-    "triage-verdict": { recommended: "FILEABLE", rationale: "candidate" },
-    "verdict-record": { disclosure_input_sha: "d", coverage_report_sha: "c", examine_round_record_sha: "e" },
+    // Verdict-cored outputs carry the evidence they verified (#227/#228).
+    "triage-verdict": { recommended: "FILEABLE", rationale: "candidate", checks: [{ method: "claim-novelty-read", target_ref: "novelty-verdict", result: "pass" }] },
+    "verdict-record": { disclosure_input_sha: "d", coverage_report_sha: "c", examine_round_record_sha: "e", checks: [{ method: "sha-chain-record", target_ref: "disclosure-input", result: "pass" }] },
   },
-  "spec-drafter": { markdown_text: "" },
+  // provisional-draft is Artifact-cored — it declares how it can be checked (#227/#228).
+  "spec-drafter": { markdown_text: "", validation_criteria: ["every independent claim appears in the spec body"] },
 };
 
 describe("the server threads skill_dirs into dispatch — the gate chair runs end-to-end", () => {

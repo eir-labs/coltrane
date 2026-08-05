@@ -62,5 +62,21 @@ export default function run(input) {
     gate_reasons,
     has_patent_coverage: hasPatentCoverage,
     survival_count: survival,
+    // The evidence this verification rests on, as the Verdict core requires (#227/#228).
+    // Not decoration: these are the two gates above, restated as the auditable record of
+    // what was actually checked. The gate already computed both — it simply never wrote
+    // them down, so a sealed triage-verdict named its conclusion but not its grounds.
+    checks: [
+      {
+        method: "coverage-gate",
+        target_ref: "coverage-report.corpora_searched",
+        result: hasPatentCoverage ? "pass" : "fail",
+      },
+      {
+        method: "survival-gate",
+        target_ref: "examine-round-record.survived",
+        result: survival >= 1 ? "pass" : "fail",
+      },
+    ],
   };
 }

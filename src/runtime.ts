@@ -18,6 +18,7 @@ const CORE_TO_PRIMITIVE: Record<string, Agent["primitives"][number]> = Object.fr
 import { sha256Hex, canonJson, runFingerprint, outputContentHash, CANONICAL_FORM_VERSION } from "./canonical_form.js";
 import type { OutputStore, OutputRecord } from "./outputs.js";
 import { LEDGER_SCHEMA_VERSION, type Ledger, type GigUsage } from "./ledger.js";
+import type { Depth } from "./pricing.js";
 import type { SkillRecord, EvalRecord } from "./loader.js";
 
 // What an agent invocation sees. The invoker returns the output `data` (validated
@@ -48,6 +49,16 @@ export interface AgentInvocationContext {
   // them to RunDeps.onProgress tagged with phase+role so a live monitor can show what a
   // chair's child is doing without hunting its session transcript by mtime.
   onEvent?: (ev: AgentStreamEvent) => void;
+  // #250 — level 2 of the cancellation chain: the gig's signal, handed to the invocation so
+  // the invoker can wire it to whatever it spawns. Without this the chair→child link has
+  // nowhere to attach and a live `claude` child can only be stopped by its 10-minute wall
+  // clock. Absent = an uncancellable invocation (unchanged legacy behaviour).
+  signal?: AbortSignal | undefined;
+  // #237 — the depth the GIG was dispatched at. Overrides the agent's static `depth_profile`
+  // for this run: `depth` was advertised on gig_dispatch and silently discarded, so the
+  // documented "skim first" cost practice had no mechanism behind it. Absent = the agent's
+  // own profile stands.
+  depth?: Depth | undefined;
 }
 
 // One parsed event from a chair's child process (a stream-json line). `type` is the
@@ -88,7 +99,8 @@ export type GigProgressEvent =
   | { type: "skills_unresolved"; phase: string; role: string; agent: string; missing: string[] }
   | { type: "agent_event"; phase: string; role: string; event: AgentStreamEvent }
   | { type: "gig_complete"; outputs: number }
-  | { type: "gig_failed"; error: string };
+  | { type: "gig_failed"; error: string }
+  | { type: "gig_aborted"; reason: string };
 
 // The one non-deterministic seam. Inject a deterministic fn in tests; the real
 // Claude subprocess call in the stdio entry. The runtime around it is deterministic.
@@ -171,6 +183,23 @@ export interface RunDeps {
   // running every ready chair in parallel. Absent = the v0 topological-parallel
   // routing, byte-identical to before this seam existed.
   selectChairs?: ChairSelector | undefined;
+  /**
+   * #249/#250 — the cancellation seam. Abort it and the run stops at its next checkpoint
+   * (between phases and between dispatch batches) and rejects with `GigAborted`. The same
+   * signal is threaded into every AgentInvocationContext, so an invoker that wires it to its
+   * subprocess also stops the in-flight chair. Absent = an uncancellable run (the v0 shape).
+   *
+   * Known bound: a SKILL-backed chair runs `spawnSync` (src/skill_subprocess.ts), which
+   * blocks the event loop, so an abort delivered while one is executing is not even RECEIVED
+   * until it returns. Skill chairs are therefore a hard uncancellable window of up to their
+   * declared `meta.timeout_ms` (default 120s). Deliberate for now — see #253.
+   */
+  signal?: AbortSignal | undefined;
+  /**
+   * #237 — the depth this gig was dispatched at, threaded to every invocation so it reaches
+   * the thing that actually spends. Absent = each agent's own `depth_profile` stands.
+   */
+  depth?: Depth | undefined;
 }
 
 /**
@@ -300,6 +329,40 @@ export function partialBudgetState(e: unknown): BudgetState | undefined {
 }
 
 export class RuntimeError extends Error {}
+
+/**
+ * Raised when a gig is cancelled through `RunDeps.signal` (#249). Distinct from RuntimeError
+ * so a caller can tell "an operator stopped this" from "this crashed" — #251's point that a
+ * killed gig surfacing as `failed` with a kill-shaped error is indistinguishable from a
+ * genuine crash.
+ *
+ * Carries the spend accrued BEFORE the cancellation. Today abort does nothing, so the gig
+ * completes and its cost IS recorded; a fix that kills children without capturing accrued
+ * usage would improve cost control while regressing accounting. The dispatcher folds this
+ * onto the run state so `gig_monitor` still answers "what did this cost me".
+ */
+export class GigAborted extends Error {
+  public readonly gig_id: string;
+  public readonly reason: string;
+  public readonly usage: GigUsage | undefined;
+  public readonly outputs: readonly OutputRecord[];
+  constructor(gig_id: string, reason: string, usage: GigUsage | undefined, outputs: readonly OutputRecord[]) {
+    super(`GigAborted: gig "${gig_id}" was aborted — ${reason}`);
+    this.name = "GigAborted";
+    this.gig_id = gig_id;
+    this.reason = reason;
+    this.usage = usage;
+    this.outputs = outputs;
+  }
+}
+
+/** The human-readable cause behind an AbortSignal, whatever shape the aborter used. */
+export function abortReasonText(signal: AbortSignal): string {
+  const r = signal.reason as unknown;
+  if (typeof r === "string" && r.trim().length > 0) return r;
+  if (r instanceof Error && r.message) return r.message;
+  return "cancelled";
+}
 
 /**
  * Raised when a gig's budget cannot cover the next agent's cost-of-append.
@@ -602,6 +665,22 @@ export async function runGig(
     try { deps.onProgress?.(ev); } catch { /* observability must not fail the gig */ }
   };
 
+  // #249/#250 — the cancellation checkpoint. Level 1 of the abort chain: cheap, deterministic,
+  // and where MOST of the post-abort spend was going. A standard with P sequential phases could
+  // burn P x DEFAULT_CHAIR_TIMEOUT_MS after gig_abort returned, because nothing between phases
+  // (or between dispatch batches) ever asked whether it should still be running.
+  const checkpoint = (): void => {
+    if (!deps.signal?.aborted) return;
+    const reason = abortReasonText(deps.signal);
+    emit({ type: "gig_aborted", reason });
+    // NOTE (integration): #251 reads the gig-wide `sawUsage` boolean that #235 removed in
+    // favour of per-chair attribution. finalizeUsage() is its exact replacement — undefined
+    // when nothing was genuinely captured — and it additionally stamps the coverage counters,
+    // so an aborted gig reports "N started, M unattributed" rather than a bare total. It is
+    // idempotent, which is what makes it safe on this path. No merge conflict; tsc caught it.
+    throw new GigAborted(gig_id, reason, finalizeUsage(), produced);
+  };
+
   // Budget state. When deps.budget is undefined, enforcement is OFF (back-compat).
   // When present, we track an in-memory BudgetState mirroring budget-state.json.
   const budget: BudgetState | null = deps.budget
@@ -644,6 +723,7 @@ export async function runGig(
   try {
 
   for (const phase of standard.phases) {
+    checkpoint(); // between phases — the cheapest place to stop, and the biggest saving
     emit({ type: "phase_start", phase: phase.name, roles: phase.chairs.map((c) => c.role) });
 
     // Per-phase DAG executor. Chairs whose `depends_on` is fully covered by
@@ -655,6 +735,7 @@ export async function runGig(
     for (const ch of phase.chairs) remaining.set(ch.role, ch);
 
     while (remaining.size > 0) {
+      checkpoint(); // between dispatch batches — stops the NEXT topological level from firing
       // Topological level: every chair whose depends_on ⊂ already-produced roles.
       let ready: Chair[] = [];
       for (const ch of remaining.values()) {
@@ -726,6 +807,10 @@ export async function runGig(
       if (budget) budget.settled_usd = usage.total_cost_usd;
 
       if (failures.length > 0) {
+        // A cancellation that reached the chair's child (level 3) surfaces here as a rejected
+        // chair. Report it as the cancellation it is — not as "chair(s) failed", which is the
+        // exact confusion #251 flags: a killed gig indistinguishable from a genuine crash.
+        checkpoint();
         throw new RuntimeError(
           `phase "${phase.name}" aborted — chair(s) failed: ${failures.join(", ")} (${failureErrors.join(" | ")})`,
         );
@@ -755,12 +840,12 @@ export async function runGig(
     output_specs: Array<{ domain_type: string; core_type: string; primitive: Agent["primitives"][number] }>;
     inputs: OutputRecord[];
     skills: readonly SkillRecord[];
-    /** #232 — append-unit cost RESERVED for this chair at prep. Settled to `spent` only on
-     *  success; released without charge otherwise. Absent when no budget is enforced. */
-    cost?: number;
     // #241 — declared skill slugs that resolved to no package. Threaded to the invocation
     // context so the prompt can never name a skill the agent does not actually hold.
     missing_skills: readonly string[];
+    /** #232 — append-unit cost RESERVED for this chair at prep. Settled to `spent` only on
+     *  success; released without charge otherwise. Absent when no budget is enforced. */
+    cost?: number;
   }
 
   // Resolve a chair's declared output types into seal-specs (type → core → primitive).
@@ -876,8 +961,9 @@ export async function runGig(
       // nothing could have supplied the declared type by any route. Closing the rest is a
       // DEFINITION fix, not a runtime one: the standard must declare `input_types` so the seed
       // is typed (#156's mechanism, which patent-triage-v0 predates). Recorded, not guessed.
-      // #245 read a gig-level `firstPhase` binding that #244 removed along with the
-      // phase-0-only pre-flight it served. Re-derived at the use site.
+      // NOTE (integration): #245 reads a gig-level `firstPhase` binding that #244 removed
+      // along with the phase-0-only pre-flight it served. Neither lane is broken alone and
+      // git merges both without a conflict, so only tsc catches it. Re-derived at the use site.
       const entryChair = phaseName === standard.phases[0]?.name && chair.depends_on.length === 0;
       const seeded = entryChair && Object.keys(gigInput).length > 0;
       if (!satisfied && !seeded) {
@@ -1012,7 +1098,8 @@ export async function runGig(
       const agent = p.agent!;
       // #235 — count the invocation BEFORE it runs. An invocation that dies without emitting a
       // usable `result` (the 10-minute SIGKILL bound) still happened and still cost money; the
-      // honest record is "started, unattributed", not silence.
+      // honest record is "started, unattributed", not silence. The counter sits OUTSIDE the
+      // try for the same reason: a chair killed by #250's abort still started, and still cost.
       const sink = makeUsageSink();
       startedInvocations++;
       try {
@@ -1020,6 +1107,10 @@ export async function runGig(
           agent, phase: phaseName, inputs, gig_input: gigInput, skills,
           missing_skills: p.missing_skills, // #241 — what did NOT resolve, so the prompt can't assert it
           output_types: output_specs.map((s) => s.domain_type), // #174 — the chair's promised subset
+          // #250 level 2 + #237 — the cancellation signal and the run's depth reach the invocation
+          // itself, so an invoker can kill its child and shape what it asks the model for.
+          ...(deps.signal ? { signal: deps.signal } : {}),
+          ...(deps.depth ? { depth: deps.depth } : {}),
           onEvent: (ev) => { sink.fold(ev); emit({ type: "agent_event", phase: phaseName, role: chair.role, event: ev }); },
         });
       } finally {

@@ -15,10 +15,16 @@ export interface MCPToolDef {
   output_schema: object;
 }
 
-const obj = (props: Record<string, string>) => ({
+// A property value is either a bare JSON-schema type name (the common case) or a full schema
+// fragment — needed for fields that are honestly nullable, e.g. a measurement the engine has no
+// data to compute (#238). Declaring those as plain "number" is the same lie as returning 1.0.
+const obj = (props: Record<string, string | object>) => ({
   type: "object" as const,
-  properties: Object.fromEntries(Object.entries(props).map(([k, v]) => [k, { type: v }])),
+  properties: Object.fromEntries(
+    Object.entries(props).map(([k, v]) => [k, typeof v === "string" ? { type: v } : v]),
+  ),
 });
+const nullable = (type: string) => ({ type: [type, "null"] });
 
 // Select named fields from a generated prop map (preserving their derived JSON types).
 const pickProps = (src: Record<string, string>, keys: readonly string[]): Record<string, string> =>
@@ -50,15 +56,27 @@ export const MCP_TOOLS: readonly MCPToolDef[] = [
   { slug: "agent_define",                  category: "build", input_schema: obj(zodToMcpProps(AgentSchema)), output_schema: obj({ agent_profile_id: "string", validation_result: "object" }) },
   { slug: "agent_evolve",                  category: "build", input_schema: obj({ slug: "string", changes: "object", reason: "string", evidence: "object" }), output_schema: obj({ new_version: "number", cascade_check: "object" }) },
   { slug: "standard_compose",              category: "build", input_schema: obj(zodToMcpProps(StandardSchema)), output_schema: obj({ standard_id: "string", validation_result: "object" }) },
-  { slug: "standard_simulate",             category: "build", input_schema: obj({ standard_slug: "string", mock_input: "object", depth: "string" }), output_schema: obj({ phases: "array", estimated_cost: "number", estimated_duration: "number" }) },
-  { slug: "gig_dispatch",                  category: "run", input_schema: obj({ standard_slug: "string", input: "object", depth: "string", company_id: "string", wait: "boolean" }), output_schema: obj({ gig_id: "string", status: "string", manifest: "object" }) },
+  // #239 — `basis`/`sample_size` say WHERE the estimate came from (a measured mean of real runs,
+  // the standard's real structure, or a per-slug guess). estimated_duration_ms is the key the
+  // handler actually returns; the old `estimated_duration` was never present on a response.
+  { slug: "standard_simulate",             category: "build", input_schema: obj({ standard_slug: "string", mock_input: "object", depth: "string" }), output_schema: obj({ phases: "array", estimated_cost: "number", estimated_duration_ms: "number", basis: "string", sample_size: "number" }) },
+  // #237 — `depth` is read now (and rejected when unrecognized); the response echoes the depth
+  // the run actually took, so "I ran a cheap iteration" is verifiable rather than assumed.
+  { slug: "gig_dispatch",                  category: "run", input_schema: obj({ standard_slug: "string", input: "object", depth: "string", company_id: "string", wait: "boolean" }), output_schema: obj({ gig_id: "string", status: "string", depth: "string", manifest: "object" }) },
   { slug: "gig_monitor",                   category: "run", input_schema: obj({ gig_id: "string" }), output_schema: obj({ status: "string", phases_complete: "number", current_phase: "string", chairs: "array", outputs_so_far: "array" }) },
   { slug: "gig_logs",                       category: "understand", input_schema: obj({ gig_id: "string", role: "string", type: "string", tail: "number" }), output_schema: obj({ gig_id: "string", roles: "array", count: "number", events: "array" }) },
-  { slug: "gig_abort",                     category: "run", input_schema: obj({ gig_id: "string", reason: "string" }), output_schema: obj({ aborted: "boolean", cleanup_result: "object" }) },
+  // #251 — `status` is the field both existing tests actually assert and it was not advertised.
+  // `aborted` now means "this call delivered a cancellation to a live run", not "we looked at
+  // the stores and guessed"; `cancellable` says whether this server could reach the run at all.
+  { slug: "gig_abort",                     category: "run", input_schema: obj({ gig_id: "string", reason: "string" }), output_schema: obj({ status: "string", aborted: "boolean", cancellable: "boolean", cleanup_result: "object" }) },
   { slug: "output_write",                  category: "run", input_schema: obj({ core_type: "string", domain_type: "string", data: "object", input_refs: "array", refs: "array" }), output_schema: obj({ output_id: "string", validation_result: "object" }) },
 
   { slug: "agent_validate_pipeline",       category: "improve", input_schema: obj({ agents: "array", standard_slug: "string" }), output_schema: obj({ valid: "boolean", graph: "object", unsatisfied_inputs: "array", illegal_progressions: "array" }) },
-  { slug: "health_check",                  category: "improve", input_schema: obj({ entity_type: "string", slug: "string", window: "string" }), output_schema: obj({ usage: "number", success_rate: "number", cost: "number", trend: "string", recommendations: "array" }) },
+  // #238 — success_rate and trend are NULLABLE, because the engine genuinely cannot compute
+  // them (a failed gig writes no ledger row, so the denominator does not exist) and a hardcoded
+  // 1.0 is a fabricated measurement presented as a measurement. The `*_basis` strings say why.
+  // `cost_usd` is real settled spend off the gig rows (#195), not an output count.
+  { slug: "health_check",                  category: "improve", input_schema: obj({ entity_type: "string", kind: "string", slug: "string", window: "string" }), output_schema: obj({ entity: "string", kind: "string", output_count: "number", execution_count: "number", usage: "number", success_rate: nullable("number"), success_rate_basis: "string", cost: "number", cost_usd: "number", cost_basis: "string", trend: nullable("string"), trend_basis: "string", recommendations: "array" }) },
   { slug: "system_health",                 category: "improve", input_schema: obj({ window: "string" }), output_schema: obj({ gigs_run: "number", cost: "number", type_stats: "object", agent_stats: "object", tool_stats: "object", bottlenecks: "array", budget: "object", load_errors: "array" }) },
   // genome_reload — Rob #130. Re-reads agents/standards/types/skills/evals from
   // disk and updates the live deps in place (no MCP server restart needed).

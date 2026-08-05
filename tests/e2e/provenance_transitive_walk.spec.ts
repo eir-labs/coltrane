@@ -41,6 +41,14 @@ async function writeOutput(
   return res.data.output_id;
 }
 
+// Every sealed output carries its CORE's substance floor, enforced by outputs.write on every
+// write regardless of domain type (#227 ruling). `raw-note` is Signal-cored so it names its
+// source; `summary` is Interpretation-cored (domain_types/summary.json extends Interpretation)
+// so it states its claims — this spec used to pass core_type "Artifact" for it, which never
+// matched the type on disk and only went unnoticed because nothing checked the core at seal.
+const NOTE = (text: string): Record<string, unknown> => ({ text, source: `fixture://demo/${text}` });
+const SUMMARY = (gist: string): Record<string, unknown> => ({ gist, claims: [gist] });
+
 describe("provenance transitive walk via output_trace", () => {
   let env: TempdirColtrane;
   let deps: ServerDeps;
@@ -53,9 +61,9 @@ describe("provenance transitive walk via output_trace", () => {
   afterAll(() => env?.cleanup());
 
   it("walks A→B→C backward from C and surfaces both A and B", async () => {
-    const a = await writeOutput(deps, "raw-note", "Signal", { text: "root" });
-    const b = await writeOutput(deps, "raw-note", "Signal", { text: "middle" }, [a]);
-    const c = await writeOutput(deps, "summary", "Artifact", { gist: "leaf" }, [b]);
+    const a = await writeOutput(deps, "raw-note", "Signal", NOTE("root"));
+    const b = await writeOutput(deps, "raw-note", "Signal", NOTE("middle"), [a]);
+    const c = await writeOutput(deps, "summary", "Interpretation", SUMMARY("leaf"), [b]);
 
     const trace = await dispatchTool("output_trace", { output_id: c }, deps);
     expect(trace.ok).toBe(true);
@@ -69,9 +77,9 @@ describe("provenance transitive walk via output_trace", () => {
   });
 
   it("respects a max_depth cap when supplied", async () => {
-    const a = await writeOutput(deps, "raw-note", "Signal", { text: "deep-root" });
-    const b = await writeOutput(deps, "raw-note", "Signal", { text: "deep-mid" }, [a]);
-    const c = await writeOutput(deps, "summary", "Artifact", { gist: "deep-leaf" }, [b]);
+    const a = await writeOutput(deps, "raw-note", "Signal", NOTE("deep-root"));
+    const b = await writeOutput(deps, "raw-note", "Signal", NOTE("deep-mid"), [a]);
+    const c = await writeOutput(deps, "summary", "Interpretation", SUMMARY("deep-leaf"), [b]);
 
     const trace = await dispatchTool(
       "output_trace",
@@ -89,8 +97,8 @@ describe("provenance transitive walk via output_trace", () => {
     // Build A → B, then attempt to add a back-edge B → A. The outputs store may
     // refuse the second edge (acyclic by construction) or accept it; either way,
     // the trace must terminate.
-    const a = await writeOutput(deps, "raw-note", "Signal", { text: "cycle-root" });
-    const b = await writeOutput(deps, "summary", "Artifact", { gist: "cycle-leaf" }, [a]);
+    const a = await writeOutput(deps, "raw-note", "Signal", NOTE("cycle-root"));
+    const b = await writeOutput(deps, "summary", "Interpretation", SUMMARY("cycle-leaf"), [a]);
     // Try to add a reverse edge through output_write of a new output that
     // claims to derive A from B. Implementation may reject — that's the
     // healthy outcome.

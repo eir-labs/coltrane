@@ -73,7 +73,9 @@ describe("subtype polymorphism: a core-type contract accepts any domain subtype"
     const seen: Record<string, string[]> = {};
     const invoke: AgentInvoker = ({ agent, inputs }) => {
       seen[agent.slug] = inputs.map((i) => i.domain_type);
-      return agent.slug === "finder" ? { note: "found" } : { verdict: "ok" };
+      return agent.slug === "finder"
+        ? { note: "found", claims: ["the widget is present"] }
+        : { verdict: "ok", criteria: ["widget presence"] };
     };
 
     const res = await runGig(standard, {}, { outputs, ledger, invoke });
@@ -99,7 +101,8 @@ describe("subtype polymorphism: a core-type contract accepts any domain subtype"
       eval_slugs: ["v-check"],
     };
     const evals = new Map([["v-check", { slug: "v-check", on_type: "Verdict", non_empty_fields: ["decided"] }]]);
-    const invoke: AgentInvoker = () => ({ decided: true });
+    // domain-verdict is Verdict-cored, so it carries the evidence it verified (#227/#228).
+    const invoke: AgentInvoker = () => ({ decided: true, checks: [{ method: "polymorphic-eval", target_ref: "x", result: "pass" }] });
     const res = await runGig(std, {}, { outputs, ledger, invoke, evals });
     // the eval is declared on core `Verdict`; the produced `domain-verdict` subtype is judged
     // (was 0.0 under exact on_type matching)
@@ -135,7 +138,9 @@ describe("subtype polymorphism: a core-type contract accepts any domain subtype"
     const seen: Record<string, string[]> = {};
     const invoke: AgentInvoker = ({ agent, inputs }) => {
       seen[agent.slug] = inputs.map((i) => i.domain_type);
-      return agent.slug === "finder" ? { note: "found" } : { verdict: "ok" };
+      return agent.slug === "finder"
+        ? { note: "found", claims: ["the widget is present"] }
+        : { verdict: "ok", criteria: ["widget presence"] };
     };
     await runGig(exactStandard, {}, { outputs, ledger, invoke });
     expect(seen["exact-analyst"], "the exact-typed input IS delivered").toEqual(["assessment"]);

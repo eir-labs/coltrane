@@ -29,7 +29,7 @@ describe("output_write", () => {
     const d = makeDeps();
     const r = await dispatchTool(
       "output_write",
-      { core_type: "Judgment", domain_type: "finding", domain: "eirtests", gig_id: "g1", agent_slug: "analyst", data: { title: "missing alt" } },
+      { core_type: "Judgment", domain_type: "finding", domain: "eirtests", gig_id: "g1", agent_slug: "analyst", data: { title: "missing alt", criteria: ["image accessibility"] } },
       d,
     );
     expect(r.ok).toBe(true);
@@ -56,11 +56,11 @@ describe("output_write", () => {
 
   it("links provenance edges when refs are supplied", async () => {
     const d = makeDeps();
-    const a = await dispatchTool("output_write", { core_type: "Judgment", domain_type: "finding", domain: "eirtests", gig_id: "g1", agent_slug: "scout", data: { title: "a" } }, d);
+    const a = await dispatchTool("output_write", { core_type: "Judgment", domain_type: "finding", domain: "eirtests", gig_id: "g1", agent_slug: "scout", data: { title: "a", criteria: ["image accessibility"] } }, d);
     const aId = (a.data as { output_id: string }).output_id;
     const b = await dispatchTool(
       "output_write",
-      { core_type: "Judgment", domain_type: "finding", domain: "eirtests", gig_id: "g1", agent_slug: "analyst", data: { title: "b" }, refs: [{ to: aId, relation: "derived_from" }] },
+      { core_type: "Judgment", domain_type: "finding", domain: "eirtests", gig_id: "g1", agent_slug: "analyst", data: { title: "b", criteria: ["image accessibility"] }, refs: [{ to: aId, relation: "derived_from" }] },
       d,
     );
     expect(b.ok).toBe(true);

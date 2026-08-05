@@ -46,6 +46,13 @@ const searcher = () => testAgent({
   domain: "demo",
 });
 
+// Each per-type payload carries its own CORE's substance floor, enforced at seal on every
+// output regardless of domain type (#227 ruling). A multi-output chair is exactly where that
+// matters: `hit` is a Signal and `verdict` is a Judgment, so one blob has to satisfy two
+// different floors and a fixture that satisfies only one aborts the whole chair.
+const HIT = { who: "nix", source: "search://demo/prior-art" };
+const VERDICT = { call: "PASS", criteria: ["novelty over the cited hit"] };
+
 const oneChair: Chair = {
   role: "search", agent_slug: "searcher", depends_on: [],
   input_contract: [], output_contract: ["hit", "verdict"], required_skills: [],
@@ -59,7 +66,7 @@ describe("a chair seals every declared output type", () => {
       phases: [{ name: "search", chairs: [oneChair] } as PhaseDef],
     });
     // multi-output invoker: a blob keyed by output-type slug
-    const invoke: AgentInvoker = () => ({ hit: { who: "nix" }, verdict: { call: "PASS" } });
+    const invoke: AgentInvoker = () => ({ hit: HIT, verdict: VERDICT });
 
     const res = await runGig(std, { q: "x" }, { outputs, ledger, invoke });
     expect(res.status).toBe("complete");
@@ -70,8 +77,8 @@ describe("a chair seals every declared output type", () => {
     // core_type resolved from each type's extends — not from primitives[0]
     expect(byType["hit"]!.core_type).toBe("Signal");
     expect(byType["verdict"]!.core_type).toBe("Judgment");
-    expect(byType["hit"]!.data).toEqual({ who: "nix" });
-    expect(byType["verdict"]!.data).toEqual({ call: "PASS" });
+    expect(byType["hit"]!.data).toEqual(HIT);
+    expect(byType["verdict"]!.data).toEqual(VERDICT);
   });
 
   it("a downstream chair can depend on the SECOND output type (the judge-needs-verdict case)", async () => {
@@ -87,13 +94,13 @@ describe("a chair seals every declared output type", () => {
     });
     let seen: unknown = null;
     const invoke: AgentInvoker = (ctx) => {
-      if (ctx.agent.slug === "searcher") return { hit: { who: "nix" }, verdict: { call: "PASS" } };
+      if (ctx.agent.slug === "searcher") return { hit: HIT, verdict: VERDICT };
       seen = ctx.inputs.find((i) => i.domain_type === "verdict")?.data ?? null;
-      return { text: "filed on the verdict" };
+      return { text: "filed on the verdict", claims: ["the verdict is PASS"] };
     };
     await runGig(std, { q: "x" }, { outputs, ledger, invoke });
     // the judge must actually receive the novelty-verdict as a distinct upstream record
-    expect(seen).toEqual({ call: "PASS" });
+    expect(seen).toEqual(VERDICT);
   });
 
   it("a single-output chair is unchanged — the invoker blob IS the data (no keying)", async () => {
@@ -104,10 +111,10 @@ describe("a chair seals every declared output type", () => {
       slug: "solo-out", domain: "demo", agents: [solo],
       phases: [{ name: "sense", chairs: [{ role: "s", agent_slug: "solo", depends_on: [], input_contract: [], output_contract: ["note"], required_skills: [] }] } as PhaseDef],
     });
-    const invoke: AgentInvoker = () => ({ t: "hello" });
+    const invoke: AgentInvoker = () => ({ t: "hello", source: "fixture://demo/solo" });
     const res = await runGig(std, { q: "x" }, { outputs, ledger, invoke });
     const sealed = outputs.all().filter((o) => o.gig_id === res.gig_id);
     expect(sealed.length).toBe(1);
-    expect(sealed[0]!.data).toEqual({ t: "hello" });
+    expect(sealed[0]!.data).toEqual({ t: "hello", source: "fixture://demo/solo" });
   });
 });

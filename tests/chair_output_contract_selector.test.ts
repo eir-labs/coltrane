@@ -21,7 +21,10 @@ function setup() {
 // the invoker returns a blob keyed by EVERY agent output type (the over-eager shape) — proving
 // the runtime, not the invoker, is what narrows to the promised subset. Each value matches its
 // own type's schema.
-const dataFor = (t: string): Record<string, unknown> => (t === "type-a" ? { alpha: t } : { beta: 1, verdict: t });
+const dataFor = (t: string): Record<string, unknown> =>
+  t === "type-a"
+    ? { alpha: t, source: "fixture://demo/type-a" }
+    : { beta: 1, verdict: t, criteria: ["fixture: the value is well-formed"] };
 const invokeAll: AgentInvoker = (ctx) => Object.fromEntries(ctx.agent.output_types.map((t) => [t, dataFor(t)]));
 
 describe("#174 — output_contract selects which of a multi-output agent's types a chair seals", () => {
@@ -56,7 +59,7 @@ describe("#174 — output_contract selects which of a multi-output agent's types
     let seen: readonly string[] | undefined;
     const invoke: AgentInvoker = (ctx) => {
       seen = ctx.output_types;
-      return { beta: 2, verdict: "b" };
+      return { beta: 2, verdict: "b", criteria: ["fixture: the value is well-formed"] };
     };
     const r = await runGig(std, {}, { outputs, ledger, invoke });
     expect(seen, "ctx.output_types must carry the chair's promised subset").toEqual(["type-b"]);

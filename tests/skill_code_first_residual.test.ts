@@ -57,8 +57,8 @@ describe("code-first / model-residual resolution", () => {
       throw new Error("model invoked for a fully code-resolved skill — residual should be empty");
     };
     const r = await resolveSkill(NUMBER_ADDER, { a: 3, b: 5 }, invoke);
-    expect(r.output).toEqual({ sum: 8 });
+    expect(r.output).toEqual({ sum: 8, source: "skill://number-adder@1" });
     expect(r.residual).toEqual([]);
-    expect(r.field_origins).toEqual({ sum: "code" });
+    expect(r.field_origins).toEqual({ sum: "code", source: "code" });
   });
 });

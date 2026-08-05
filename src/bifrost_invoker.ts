@@ -7,7 +7,7 @@
 import type { AgentInvocationContext, AgentInvoker } from "./runtime.js";
 import type { Registry } from "./registry.js";
 import type { ModelTier } from "./pricing.js";
-import { buildPrompt, extractJson } from "./claude_invoker.js";
+import { buildPrompt, extractJson, extractOptionsForChair } from "./claude_invoker.js";
 
 // One model invocation's wall-clock bound. Far below the Claude invoker's 10min
 // chair bound: this path is a single completion, not a tool-using child.
@@ -120,6 +120,9 @@ export function makeBifrostInvoker(opts: BifrostInvokerOptions): AgentInvoker {
     ctx.onEvent?.({ type: "result", raw: { ...(usd !== undefined ? { total_cost_usd: usd } : {}) } });
 
     const text = typeof reply.body === "string" ? reply.body : JSON.stringify(reply.body ?? "");
-    return extractJson(text);
+    // #221 policy 5 — same key signal as the Claude invoker. The schema is already resolved
+    // above; without this the Bifrost port would share the fixed extractor's behaviour but
+    // none of its disambiguation.
+    return extractJson(text, extractOptionsForChair(sealTypes, schema));
   };
 }

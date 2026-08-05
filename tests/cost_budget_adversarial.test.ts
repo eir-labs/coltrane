@@ -100,8 +100,8 @@ function setup() {
 }
 
 const happyInvoke: AgentInvoker = ({ agent, inputs }) => {
-  if (agent.slug === "site-scout") return { url: "/products" };
-  return { title: `finding from ${inputs.length} input(s)` };
+  if (agent.slug === "site-scout") return { url: "/products", source: "https://example.com/products" };
+  return { title: `finding from ${inputs.length} input(s)`, claims: [`derived from ${inputs.length} input(s)`] };
 };
 
 // ── ADVERSARIAL PROBES ─────────────────────────────────────────────────────
@@ -230,7 +230,7 @@ describe("PR #99 adversarial review — cost-budget enforcement", () => {
     const { outputs, ledger } = setup();
     const throwingInvoker: AgentInvoker = ({ agent }) => {
       if (agent.slug === "site-analyst") throw new Error("invoker exploded");
-      return { url: "/products" };
+      return { url: "/products", source: "https://example.com/products" };
     };
 
     await expect(
@@ -290,7 +290,7 @@ describe("PR #99 adversarial review — cost-budget enforcement", () => {
     // inflated by that phase's pre-deducted cost.
     const { outputs, ledger } = setup();
     const phase1Invoker: AgentInvoker = ({ agent }) => {
-      if (agent.slug === "site-scout") return { url: "/p" };
+      if (agent.slug === "site-scout") return { url: "/p", source: "https://example.com/p" };
       throw new Error("phase 2 invoker threw");
     };
     try {

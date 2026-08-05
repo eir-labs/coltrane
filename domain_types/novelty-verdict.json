@@ -29,6 +29,7 @@
   },
   "required_fields": [
     "verdict",
-    "rationale"
+    "rationale",
+    "criteria"
   ]
 }

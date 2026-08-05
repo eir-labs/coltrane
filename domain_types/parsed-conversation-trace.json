@@ -32,6 +32,7 @@
   },
   "required_fields": [
     "transcript_present",
-    "turns"
+    "turns",
+    "source"
   ]
 }

@@ -100,8 +100,14 @@ export function buildPrompt(
         return `## ${s.slug}${text ? `\n${text}` : ""}`;
       })
     // No resolved content this gig — still name the bound skills so the model knows it has
-    // them (matches the old runtime's skills index).
-    : (a.skill_slugs ?? []).map((slug) => `## ${slug}`);
+    // them (matches the old runtime's skills index). #241: NEVER name a slug the runtime
+    // resolved to no package. An all-dangling agent used to render `# Skills` / `## <slug>`
+    // with zero content — the prompt ASSERTING to the model that it holds a discipline that
+    // does not exist. An ABSENT `missing_skills` means resolution was never attempted (no
+    // skills map), so nothing is known-unresolved and the legacy index behaviour stands.
+    : (a.skill_slugs ?? [])
+        .filter((slug) => !(ctx.missing_skills ?? []).includes(slug))
+        .map((slug) => `## ${slug}`);
   if (skillBlocks.length > 0) {
     layers.push(`# Skills\n${skillBlocks.join("\n\n")}`);
   }
@@ -157,22 +163,246 @@ export function buildPrompt(
   return layers.join("\n\n");
 }
 
-// Extract the first balanced JSON object from model output (tolerates fences/prose).
-export function extractJson(text: string): Record<string, unknown> {
-  const start = text.indexOf("{");
-  if (start === -1) throw new Error("no JSON object in model output");
+// ───────────────────────── JSON extraction (#221, #226) ─────────────────────────
+//
+// The old implementation took "the first balanced brace run" — string-blind, anchored on
+// the first `{` and never re-anchored, with exactly one candidate ever handed to
+// JSON.parse. It mis-sliced valid output (a `}` inside a string value truncated the slice)
+// and, worse, silently returned an illustrative preamble object in place of the answer.
+// That wrong object then sealed with a real content_sha and genuine provenance edges, so
+// `output_trace` reported an intact chain over garbage.
+//
+// This is now ONE implementation shared by all four production call sites (:319, :325,
+// bifrost_invoker.ts, document_factory.ts) — see #226; the judge's half-fixed duplicate is
+// gone.
+
+/** Bound on the raw-output excerpt a parse failure carries, so no blob lands in a log line. */
+const EXCERPT_MAX_CHARS = 500;
+
+/**
+ * A typed extraction failure. Carries the number of balanced JSON objects found and a
+ * bounded excerpt of the raw text — previously both throws were bare `Error`s with no
+ * sample, so the operator's entire diagnostic was a V8 offset into a string never
+ * surfaced. The type is also the prerequisite for any future retry policy: runtime.ts
+ * cannot currently tell a retryable parse failure from a non-retryable contract failure.
+ */
+export class ModelOutputParseError extends Error {
+  readonly candidateCount: number;
+  readonly excerpt: string;
+  constructor(message: string, candidateCount: number, raw: string) {
+    super(`${message} (candidates: ${candidateCount})`);
+    this.name = "ModelOutputParseError";
+    this.candidateCount = candidateCount;
+    this.excerpt =
+      raw.length > EXCERPT_MAX_CHARS ? `${raw.slice(0, EXCERPT_MAX_CHARS)}…` : raw;
+  }
+}
+
+export interface ExtractJsonOptions {
+  /**
+   * Keys the answer is expected to carry. A candidate matches only if it contains **all**
+   * of them — a partial match does not score, because "closest wins" is exactly the
+   * guess that produces silent corruption.
+   *
+   * NOTE on derivation (see `extractOptionsForChair`): the two prompt shapes are mutually
+   * exclusive, so schema property names and type slugs are chosen per-shape rather than
+   * merged into one set. A flat union is unsatisfiable under all-must-match semantics —
+   * a single-output answer `{"title":…}` can never also contain the key `finding`.
+   */
+  expectKeys?: readonly string[] | undefined;
+  /**
+   * Set by a caller that has NO key signal at all (a bare-core output type, or a domain
+   * type absent from the registry — the same short-circuit registry.ts:140-146 takes).
+   * One candidate is unambiguous and safe; multiple candidates with nothing to choose
+   * between them is precisely the situation that silently seals the wrong object, so it
+   * fails loudly instead of guessing.
+   */
+  requireUnambiguous?: boolean | undefined;
+}
+
+/** A balanced, parseable JSON object found in the text, with its span. */
+interface JsonCandidate {
+  start: number;
+  end: number;
+  value: Record<string, unknown>;
+}
+
+/**
+ * Walk forward from `start` (which must be a `{`) honouring JSON string literals and
+ * backslash escapes, so only STRUCTURAL braces move the depth counter. Returns the index
+ * of the matching `}`, or -1 if the object never closes.
+ *
+ * Escape handling is the half of this that is easiest to get wrong, and two guards pin
+ * it: `{"path":"C:\\","v":1}` (an escaped backslash immediately before the closing quote
+ * — a naive `inString = !inString` toggle breaks it) and `{"note":"use {slug} here"}`
+ * (balanced in-string braces, which worked by accident before and must keep working).
+ */
+function scanBalanced(text: string, start: number): number {
   let depth = 0;
+  let inString = false;
+  let escaped = false;
   for (let i = start; i < text.length; i++) {
-    if (text[i] === "{") depth++;
-    else if (text[i] === "}") {
+    const ch = text[i];
+    if (escaped) { escaped = false; continue; }
+    if (inString) {
+      if (ch === "\\") { escaped = true; continue; }
+      if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') { inString = true; continue; }
+    if (ch === "{") depth++;
+    else if (ch === "}") {
       depth--;
-      if (depth === 0) {
-        const slice = text.slice(start, i + 1);
-        return JSON.parse(slice) as Record<string, unknown>;
-      }
+      if (depth === 0) return i;
     }
   }
-  throw new Error("unbalanced JSON object in model output");
+  return -1;
+}
+
+/**
+ * Every balanced, parseable JSON object in the text, in document order.
+ *
+ * Enumerates at EVERY `{` start position — the old code fixed `start` at the first one,
+ * so a brace run in the prose (`The set {a,b} matters.`) sank the whole extraction. A
+ * start that fails to parse is skipped and the scan re-anchors on the next `{`.
+ *
+ * Starts INSIDE an accepted candidate are skipped, so `{"a":{"b":1},"c":2}` yields the
+ * outer object rather than also offering its own nested `{"b":1}` as a rival.
+ */
+function enumerateCandidates(text: string): JsonCandidate[] {
+  const found: JsonCandidate[] = [];
+  let i = 0;
+  while (i < text.length) {
+    if (text[i] !== "{") { i++; continue; }
+    const end = scanBalanced(text, i);
+    if (end === -1) { i++; continue; }
+    let parsed: unknown;
+    try { parsed = JSON.parse(text.slice(i, end + 1)); } catch { i++; continue; }
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      found.push({ start: i, end, value: parsed as Record<string, unknown> });
+      i = end + 1;
+      continue;
+    }
+    i++;
+  }
+  return found;
+}
+
+// A fenced block, tagged (```json) or bare (```). Non-greedy so consecutive fences are
+// separate spans rather than one span swallowing the prose between them.
+const FENCE_RE = /```[ \t]*[A-Za-z0-9_+-]*[ \t]*\r?\n([\s\S]*?)```/g;
+
+/** Character spans of every fenced block's BODY. */
+function fenceSpans(text: string): Array<{ start: number; end: number }> {
+  const spans: Array<{ start: number; end: number }> = [];
+  FENCE_RE.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = FENCE_RE.exec(text)) !== null) {
+    const body = m[1] ?? "";
+    const bodyStart = m.index + m[0].length - 3 - body.length;
+    spans.push({ start: bodyStart, end: bodyStart + body.length - 1 });
+  }
+  return spans;
+}
+
+/**
+ * Extract the model's answer object from its output.
+ *
+ * Selection policy (a deliberate contract change from "the first balanced object"):
+ *   1. A candidate inside a fenced block beats one outside; among fenced, prefer the last.
+ *   2. Then `expectKeys` — a candidate must contain ALL expected keys to qualify.
+ *   3. Then the LAST surviving candidate, not the first. The prompt demands a single
+ *      object (buildPrompt :146/:153), so an earlier object is evidence of scaffolding.
+ *
+ * A whole-text top-level array is handled explicitly: one element unwraps, more than one
+ * throws rather than silently discarding the array framing and every later element.
+ */
+export function extractJson(
+  text: string,
+  opts: ExtractJsonOptions = {},
+): Record<string, unknown> {
+  const trimmed = text.trim();
+  if (trimmed.startsWith("[")) {
+    let arr: unknown;
+    try { arr = JSON.parse(trimmed); } catch { /* not a clean array — fall through */ }
+    if (Array.isArray(arr)) {
+      const only = arr.length === 1 ? arr[0] : undefined;
+      if (only && typeof only === "object" && !Array.isArray(only)) {
+        return only as Record<string, unknown>;
+      }
+      throw new ModelOutputParseError(
+        `model output is a ${arr.length}-element JSON array where a single object was required`,
+        arr.length,
+        text,
+      );
+    }
+  }
+
+  const candidates = enumerateCandidates(text);
+  if (candidates.length === 0) {
+    throw new ModelOutputParseError(
+      "no JSON object in model output — the model produced no answer",
+      0,
+      text,
+    );
+  }
+
+  // 1. Fenced candidates win outright when any exist.
+  const spans = fenceSpans(text);
+  const fenced = candidates.filter((c) => spans.some((s) => c.start >= s.start && c.end <= s.end));
+  let pool = fenced.length > 0 ? fenced : candidates;
+
+  // 2. Expected keys — ALL must be present. If nothing matches, the signal simply does not
+  //    narrow (it never widens, and it never picks a partial match).
+  const keys = opts.expectKeys ?? [];
+  if (keys.length > 0) {
+    const matching = pool.filter((c) =>
+      keys.every((k) => Object.prototype.hasOwnProperty.call(c.value, k)),
+    );
+    if (matching.length > 0) pool = matching;
+  }
+
+  // 3. Refuse to guess when the caller had nothing to score against.
+  if (pool.length > 1 && opts.requireUnambiguous === true) {
+    throw new ModelOutputParseError(
+      "ambiguous model output — several JSON objects and no output schema to choose between them",
+      pool.length,
+      text,
+    );
+  }
+
+  return pool[pool.length - 1]!.value;
+}
+
+/** Property names declared by a resolved output schema (the single-output key signal). */
+function schemaPropertyNames(schema: Record<string, unknown> | undefined): string[] {
+  const props = schema?.["properties"];
+  return props && typeof props === "object" ? Object.keys(props as Record<string, unknown>) : [];
+}
+
+/**
+ * Build the extractor's options for a chair from what the invoker already resolved.
+ * Shared by the Claude and Bifrost invokers so the key signal reaches every call site —
+ * behaviour propagates through the shared import, but `expectKeys` does not unless each
+ * site passes it (#221 policy 5).
+ *
+ * The two prompt shapes are mutually exclusive, so the derivation is per-shape:
+ *  - MULTI-output chair — buildPrompt :138-147 asks for a blob keyed by type slug, so the
+ *    slugs are the expected keys.
+ *  - SINGLE-output chair — buildPrompt :148-155 asks for the bare data object, never
+ *    wrapped in {"<type-slug>": …}, so the resolved schema's property names are the
+ *    signal. Unioning the slug in here would make the set unsatisfiable under
+ *    all-must-match semantics and destroy the signal entirely.
+ *  - Neither available (bare core type, or a domain type absent from the registry) —
+ *    no signal, so refuse to guess between rival candidates.
+ */
+export function extractOptionsForChair(
+  sealTypes: readonly string[],
+  schema: Record<string, unknown> | undefined,
+): ExtractJsonOptions {
+  if (sealTypes.length > 1) return { expectKeys: [...sealTypes] };
+  const props = schemaPropertyNames(schema);
+  return props.length > 0 ? { expectKeys: props } : { requireUnambiguous: true };
 }
 
 // The wall-clock bound on one chair's spawn. A tool-granted child has no inherent
@@ -291,6 +521,10 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
       ? Object.fromEntries(sealTypes.map((t) => [t, schemaOf(t)]))
       : undefined;
     const prompt = buildPrompt(ctx, schema, outputSchemas);
+    // #221 — the key signal for candidate selection, derived from what we just resolved.
+    // Threaded into BOTH extract calls below; threading only the injected-run one would
+    // leave every real chair unscored.
+    const extractOpts = extractOptionsForChair(sealTypes, schema);
     // per-gig mcp-config: only the deployment-permitted servers (empty by default).
     const cfgPath = join(tmpdir(), `coltrane-mcp-${randomUUID()}.json`);
     // the base map (opts.mcpServers) + the per-agent servers its grants resolved to (#185).
@@ -316,13 +550,41 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
         max_tool_calls: a.max_tool_calls,
       });
       // Custom run (tests): plain mode, the returned string IS the JSON blob — no streaming.
-      if (customRun) return extractJson(await customRun(bin, baseArgs, spawnBounds));
+      if (customRun) return extractJson(await customRun(bin, baseArgs, spawnBounds), extractOpts);
       // Default: stream-json so the child's tool calls / reasoning are observable LIVE. Each
       // event is forwarded to ctx.onEvent (the runtime tees it to the gig's per-chair log);
       // the final result text is extracted from the stream and parsed into the typed output.
       const args = [...baseArgs, "--output-format", "stream-json", "--verbose"];
       const stdout = await spawnStreaming(bin, args, spawnBounds, ctx.onEvent);
-      return extractJson(finalText(stdout));
+      const outcome = finalText(stdout);
+      // #223 — the child reported an error result. Both discriminators are required, and
+      // both are verified against the CLI (see the note on StreamOutcome): `subtype` for a
+      // run that did not complete, `is_error` for an API-error payload riding subtype
+      // "success". Neither is a chair answer, and the CLI exits 0 for the subtype cases —
+      // so without this the partial reasoning seals as if it had succeeded.
+      if (outcome.errorSubtype !== undefined) {
+        throw new Error(
+          `claude ended with result subtype "${outcome.errorSubtype}" — the run did not ` +
+            `complete, so any text it emitted is partial reasoning, not an answer`,
+        );
+      }
+      if (outcome.apiErrorText !== undefined) {
+        throw new Error(
+          `claude flagged its result with is_error — the payload is an error message, not an ` +
+            `answer: ${outcome.apiErrorText.slice(0, 300)}`,
+        );
+      }
+      // #222 — the stream parsed but carried no answer at all (e.g. only a system/init
+      // event). Report THAT, with the raw stdout as evidence, instead of blaming the model
+      // for emitting no JSON.
+      if (outcome.text.trim() === "") {
+        throw new ModelOutputParseError(
+          "the model produced no answer — the stream carried no result text and no assistant text",
+          0,
+          stdout,
+        );
+      }
+      return extractJson(outcome.text, extractOpts);
     } finally {
       try { unlinkSync(cfgPath); } catch { /* best-effort cleanup */ }
     }
@@ -348,6 +610,10 @@ function spawnStreaming(
       child.kill("SIGKILL");
       reject(new Error(`chair child timed out after ${bounds.timeout}ms (SIGKILL)`));
     }, bounds.timeout);
+    const forwardLine = (line: string): void => {
+      if (!line || !onEvent) return;
+      try { forwardStreamEvent(JSON.parse(line), onEvent); } catch { /* non-json line */ }
+    };
     child.stdout.on("data", (chunk: Buffer) => {
       const s = chunk.toString();
       stdout += s;
@@ -356,14 +622,23 @@ function spawnStreaming(
       while ((nl = buf.indexOf("\n")) >= 0) {
         const line = buf.slice(0, nl).trim();
         buf = buf.slice(nl + 1);
-        if (!line || !onEvent) continue;
-        try { forwardStreamEvent(JSON.parse(line), onEvent); } catch { /* non-json line */ }
+        forwardLine(line);
       }
     });
     child.stderr.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
     child.on("error", (e) => { clearTimeout(timer); reject(e); });
     child.on("close", (code) => {
       clearTimeout(timer);
+      // #224 — the read loop only drains on "\n", so a final line with no trailing newline
+      // was never forwarded. captureUsage (runtime.ts:320-343) reads total_cost_usd ONLY
+      // from result events, so that chair's spend silently vanished from GigResult.usage
+      // and the per-chair jsonl lost its last event. finalText was unaffected (it re-splits
+      // the whole stdout), which is exactly why it was silent: the run succeeded and only
+      // the accounting was wrong. Flush before settling, on the failure path too — a chair
+      // that failed still spent money.
+      const tail = buf.trim();
+      buf = "";
+      forwardLine(tail);
       if (code !== 0) reject(new Error(`claude exited ${code}: ${stderr.slice(0, 500)}`));
       else resolve(stdout);
     });
@@ -391,24 +666,105 @@ function forwardStreamEvent(evt: Record<string, unknown>, onEvent: (ev: AgentStr
   onEvent({ type, raw: evt });
 }
 
-// Extract the final result text from a stream-json stdout: the `result` event's text, else
-// concatenated assistant text. Falls back to raw stdout when nothing parsed (plain -p mode).
-function finalText(stdout: string): string {
+// The `type` values the CLI's stream-json actually emits (SDKMessage, sdk.d.ts:370). A line
+// that merely PARSES as JSON is NOT a stream event — that conflation is #222: the model's own
+// answer parses and carries no `type`, which flipped the old `parsedAny` flag and made the
+// raw-stdout fallback unreachable for the very payload it existed to rescue.
+const STREAM_EVENT_TYPES: ReadonlySet<string> = new Set([
+  "assistant",
+  "user",
+  "result",
+  "system",
+  "stream_event",
+]);
+
+/**
+ * What a stream-json stdout actually carried.
+ *
+ * PROVENANCE for the error fields (#223) — read from `@anthropic-ai/claude-code@2.0.9`
+ * (`sdk.d.ts:313-339` for the SDKResultMessage union, plus the bundled emission sites in
+ * `cli.js`). NOTE the `claude` on PATH here is the NATIVE binary 2.1.221, a different
+ * build whose bundle was not read; re-verify against whichever build is actually spawned.
+ *
+ *  - `error_max_turns` / `error_during_execution` results carry **no `result` field** and
+ *    emit **`is_error: false`**. So `typeof e.result === "string"` never fired, `result`
+ *    stayed undefined, and the old `result ?? assistant.join("\n")` fell through to the
+ *    model's partial reasoning. `subtype` is the required discriminator — `is_error`
+ *    alone catches neither.
+ *  - `is_error: true` DOES occur, on `subtype: "success"`, set from `isApiErrorMessage`;
+ *    there `result` holds the API error text.
+ *  - Print mode sets the exit code as `is_error ? 1 : 0`, so both error subtypes exit **0**
+ *    and `spawnStreaming` resolves normally. The silent path is live, not dead risk.
+ */
+interface StreamOutcome {
+  /** The text the extractor should parse. Empty when the stream carried no answer. */
+  text: string;
+  /** A non-success result subtype — the run did not complete. */
+  errorSubtype?: string | undefined;
+  /** A result the CLI flagged with is_error (rides on subtype "success"). */
+  apiErrorText?: string | undefined;
+}
+
+/**
+ * Pick the assistant text block that IS the answer.
+ *
+ * Concatenating every block across the run (the old behaviour) glues intermediate
+ * reasoning in front of the answer, and the extractor then has to choose between the
+ * reasoning's objects and the real one. Prefer the LAST block that is nothing but a JSON
+ * object — that is precisely what buildPrompt asks for ("Respond with ONLY a single JSON
+ * object — no prose, no code fence", :153), so such a block is the model complying, while
+ * a block with chatter wrapped around an object is commentary. Falls back to the final
+ * block when no block is a bare object (then the extractor's own policy decides).
+ */
+function answerBlock(blocks: readonly string[]): string {
+  for (let i = blocks.length - 1; i >= 0; i--) {
+    const b = (blocks[i] ?? "").trim();
+    if (b.startsWith("{") && b.endsWith("}")) {
+      try {
+        const v: unknown = JSON.parse(b);
+        if (v && typeof v === "object" && !Array.isArray(v)) return b;
+      } catch { /* not a bare object — keep looking */ }
+    }
+  }
+  return blocks.length > 0 ? (blocks[blocks.length - 1] ?? "") : "";
+}
+
+/**
+ * Read a stream-json stdout into the answer text (plus any error the CLI reported).
+ * Falls back to the raw stdout when no recognized stream event appeared at all — the
+ * plain `-p` shape the old `parsedAny` check claimed to handle and did not.
+ */
+function finalText(stdout: string): StreamOutcome {
   const lines = stdout.split("\n").map((l) => l.trim()).filter(Boolean);
   let result: string | undefined;
+  let errorSubtype: string | undefined;
+  let apiErrorText: string | undefined;
   const assistant: string[] = [];
-  let parsedAny = false;
+  let sawStreamEvent = false;
   for (const l of lines) {
-    try {
-      const e = JSON.parse(l) as Record<string, unknown>;
-      parsedAny = true;
-      if (e["type"] === "result" && typeof e["result"] === "string") result = e["result"] as string;
-      else if (e["type"] === "assistant" && e["message"] && typeof e["message"] === "object") {
-        const content = (e["message"] as { content?: Array<Record<string, unknown>> }).content ?? [];
-        for (const b of content) if (b["type"] === "text") assistant.push(String(b["text"] ?? ""));
+    let e: Record<string, unknown>;
+    try { e = JSON.parse(l) as Record<string, unknown>; } catch { continue; /* non-json */ }
+    const type = typeof e["type"] === "string" ? (e["type"] as string) : "";
+    if (!STREAM_EVENT_TYPES.has(type)) continue;
+    sawStreamEvent = true;
+    if (type === "result") {
+      const subtype = typeof e["subtype"] === "string" ? (e["subtype"] as string) : "";
+      if (subtype !== "" && subtype !== "success") { errorSubtype = subtype; continue; }
+      if (e["is_error"] === true) {
+        apiErrorText = typeof e["result"] === "string" ? (e["result"] as string) : "";
+        continue;
       }
-    } catch { /* non-json */ }
+      if (typeof e["result"] === "string") result = e["result"] as string;
+    } else if (type === "assistant" && e["message"] && typeof e["message"] === "object") {
+      const content = (e["message"] as { content?: Array<Record<string, unknown>> }).content ?? [];
+      for (const b of content) if (b["type"] === "text") assistant.push(String(b["text"] ?? ""));
+    }
   }
-  if (!parsedAny) return stdout;
-  return result ?? assistant.join("\n");
+  if (errorSubtype !== undefined) return { text: "", errorSubtype };
+  if (apiErrorText !== undefined) return { text: "", apiErrorText };
+  if (!sawStreamEvent) return { text: stdout };
+  // #222 — `""` IS a string, so `result ?? assistant.join("\n")` returned the empty result
+  // and beat real assistant text. Nullish coalescing was the bug; emptiness is the test.
+  if (result !== undefined && result.trim() !== "") return { text: result };
+  return { text: answerBlock(assistant) };
 }

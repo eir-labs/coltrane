@@ -63,6 +63,28 @@ interface LedgerEntryBase {
   /** Set ONLY by the read-side v1 upgrade. Without this marker the upgrade would launder a
    *  known gap into apparent completeness — the same class of dishonesty as `"n/a"` itself. */
   legacy?: true;
+  /**
+   * WHO asked for this. Optional, caller-supplied, and **provenance only**.
+   *
+   * The ledger already answers *what produced this and from what* — `content_sha`,
+   * `input_shas`, `skill_provenance`, `genome_hash`, `run_fingerprint`. It answered *who
+   * initiated it* nowhere. `principal` is the same category of fact as the rest of that list,
+   * which is the whole reason it sits on the base rather than on one arm: a run, a genome
+   * mutation, and a governance act can each have an initiator.
+   *
+   * **This is NOT an access control, and must not be read as one.** The engine records it and
+   * never looks at it: it is deliberately absent from `LedgerQuery`, no read handler consults
+   * it, and nothing filters on it. That is the architecture, not an oversight —
+   * `src/hooks.ts:1-9` states the engine provides "ONLY these types + the loop… ZERO built-in
+   * hooks… Everything opinionated lives in the wrapper." Tenancy enforcement is the consumer's
+   * job. If you are here because you want rows scoped by principal, that scoping belongs in
+   * the wrapper reading the ledger, not in the engine writing it.
+   *
+   * Landed inside the v1→v2 bump precisely because it is free here: additive, unset by every
+   * current call site, and needing no new upgrade arm. Adding it after v2 shipped would have
+   * cost a `schema_version: 3` and a second arm in `upgradeV1` for a purely additive field.
+   */
+  principal?: string;
 }
 
 /** A run completed. The only class that carries reproducibility identity. */
@@ -287,6 +309,10 @@ function upgradeV1(row: Record<string, unknown>): LedgerEntry {
   const event = typeof row["standard_slug"] === "string" ? row["standard_slug"] : "";
   const gig_id = typeof row["gig_id"] === "string" ? row["gig_id"] : "";
   const started_at = typeof row["started_at"] === "string" ? row["started_at"] : "";
+  // NOTE: `principal` is deliberately left undefined here. A v1 row genuinely has no
+  // principal — the field did not exist when it was written — and inventing one (from a
+  // process owner, an env var, "unknown") would fabricate provenance, which is exactly the
+  // dishonesty `legacy: true` exists to prevent. Absent means absent.
   const base = {
     schema_version: LEDGER_SCHEMA_VERSION,
     entry_id: gig_id,

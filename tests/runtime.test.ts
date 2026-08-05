@@ -67,9 +67,9 @@ function setup() {
 
 // deterministic mock invoker: each agent returns schema-valid data for its output type.
 const mockInvoke: AgentInvoker = ({ agent, inputs }) => {
-  if (agent.slug === "site-scout") return { url: "/products" };
+  if (agent.slug === "site-scout") return { url: "/products", source: "https://example.com/products" };
   // analyst consumes the page-model and emits a finding referencing it
-  return { title: `finding from ${inputs.length} input(s)` };
+  return { title: `finding from ${inputs.length} input(s)`, claims: [`derived from ${inputs.length} input(s)`] };
 };
 
 describe("runtime: gig execution end-to-end", () => {
@@ -130,7 +130,9 @@ describe("runtime: gig execution end-to-end", () => {
     const a = setup();
     const r1 = await runGig(standard, {}, { ...a, invoke: mockInvoke, model_version: "m1" });
     const tamperInvoke: AgentInvoker = ({ agent, inputs }) =>
-      agent.slug === "site-scout" ? { url: "/TAMPERED" } : { title: `finding from ${inputs.length} input(s)` };
+      agent.slug === "site-scout"
+        ? { url: "/TAMPERED", source: "https://example.com/products" }
+        : { title: `finding from ${inputs.length} input(s)`, claims: [`derived from ${inputs.length} input(s)`] };
     const b = setup();
     const r2 = await runGig(standard, {}, { ...b, invoke: tamperInvoke, model_version: "m1" });
     expect(r2.run_fingerprint).not.toBe(r1.run_fingerprint); // different content → different fingerprint

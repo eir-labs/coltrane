@@ -106,7 +106,9 @@ describe("Rob #133 — output_write accepts no domain_type (freeform output)", (
       core_type: "Interpretation",
       gig_id: "rob-test",
       agent_slug: "discover-phase",
-      data: { theme: "elder-scam-domain-modeling", raw_notes: "..." },
+      // Interpretation-cored, so it states its claims — the core floor binds a FREEFORM
+      // output too, which is the whole point of #227 (no domain schema to hide behind).
+      data: { theme: "elder-scam-domain-modeling", raw_notes: "...", claims: ["elder scams cluster around phone contact"] },
     }, deps);
 
     expect(res.ok).toBe(true);

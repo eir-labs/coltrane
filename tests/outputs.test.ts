@@ -8,6 +8,14 @@ import { createRegistry, createOutputStore, type DomainType, type OutputStore } 
 const sig: DomainType = { slug: "page-model", extends: "Signal", domain: "eirtests", schema: { properties: { url: { type: "string" } } }, required_fields: ["url"] };
 const finding: DomainType = { slug: "finding", extends: "Verdict", domain: "eirtests", schema: { properties: { title: { type: "string" } } }, required_fields: ["title"] };
 
+// Every core carries the substance it is defined by — `outputs.write` enforces the core
+// invariant on every seal (#227/#228, and the #227 ruling that binds all six cores, bare or
+// subtyped). A Verdict declares the evidence it verified; a Signal declares where it was
+// acquired from. These fixtures always were incomplete instances of their own core; the seal
+// path just never looked.
+const CHECKS = { checks: [{ method: "fixture-assertion", target_ref: "eirtests", result: "pass" }] };
+const SOURCE = { source: "https://eirtests.example" };
+
 function store(): OutputStore {
   const reg = createRegistry();
   reg.registerType(sig);
@@ -18,7 +26,7 @@ function store(): OutputStore {
 describe("O5: outputs store — append + query", () => {
   it("write returns the row, get + all read it back", () => {
     const s = store();
-    const rec = s.write({ core_type: "Signal", domain_type: "page-model", domain: "eirtests", gig_id: "g1", agent_slug: "scout", primitive: "SENSE", data: { url: "/" } });
+    const rec = s.write({ core_type: "Signal", domain_type: "page-model", domain: "eirtests", gig_id: "g1", agent_slug: "scout", primitive: "SENSE", data: { url: "/", ...SOURCE } });
     expect(rec.id).toBeTruthy();
     expect(s.get(rec.id)?.domain_type).toBe("page-model");
     expect(s.all().length).toBe(1);
@@ -28,8 +36,8 @@ describe("O5: outputs store — append + query", () => {
 describe("O5: provenance graph walks correctly", () => {
   it("addRef links a derived_from edge; trace returns the ancestor", () => {
     const s = store();
-    const a = s.write({ core_type: "Signal", domain_type: "page-model", domain: "eirtests", gig_id: "g1", agent_slug: "scout", primitive: "SENSE", data: { url: "/" } });
-    const b = s.write({ core_type: "Verdict", domain_type: "finding", domain: "eirtests", gig_id: "g1", agent_slug: "verifier", primitive: "VERIFY", data: { title: "x" }, input_refs: [a.id] });
+    const a = s.write({ core_type: "Signal", domain_type: "page-model", domain: "eirtests", gig_id: "g1", agent_slug: "scout", primitive: "SENSE", data: { url: "/", ...SOURCE } });
+    const b = s.write({ core_type: "Verdict", domain_type: "finding", domain: "eirtests", gig_id: "g1", agent_slug: "verifier", primitive: "VERIFY", data: { title: "x", ...CHECKS }, input_refs: [a.id] });
     s.addRef(b.id, a.id, "derived_from", "VERIFY");
     expect(s.refs().length).toBe(1);
     const ids = s.trace(b.id).map((o) => o.id);
@@ -38,7 +46,7 @@ describe("O5: provenance graph walks correctly", () => {
 
   it("rejects an invalid relation and a dangling endpoint", () => {
     const s = store();
-    const a = s.write({ core_type: "Signal", domain_type: "page-model", domain: "eirtests", gig_id: "g1", agent_slug: "scout", primitive: "SENSE", data: { url: "/" } });
+    const a = s.write({ core_type: "Signal", domain_type: "page-model", domain: "eirtests", gig_id: "g1", agent_slug: "scout", primitive: "SENSE", data: { url: "/", ...SOURCE } });
     expect(() => s.addRef(a.id, a.id, "not_a_relation" as never, "SENSE")).toThrow();
     expect(() => s.addRef(a.id, "ghost-id", "derived_from", "SENSE")).toThrow();
   });
@@ -47,7 +55,7 @@ describe("O5: provenance graph walks correctly", () => {
 describe("O5: validation AT WRITE (no unvalidated persistence)", () => {
   it("rejects a bad-schema output and persists nothing", () => {
     const s = store();
-    expect(() => s.write({ core_type: "Signal", domain_type: "page-model", domain: "eirtests", gig_id: "g1", agent_slug: "scout", primitive: "SENSE", data: { wrong: "no url" } })).toThrow();
+    expect(() => s.write({ core_type: "Signal", domain_type: "page-model", domain: "eirtests", gig_id: "g1", agent_slug: "scout", primitive: "SENSE", data: { wrong: "no url", ...SOURCE } })).toThrow();
     expect(s.all().length).toBe(0);
   });
 });
@@ -55,7 +63,7 @@ describe("O5: validation AT WRITE (no unvalidated persistence)", () => {
 describe("O5: findings view", () => {
   it("projects eirtests findings; agent_slug → agent_role", () => {
     const s = store();
-    s.write({ core_type: "Verdict", domain_type: "finding", domain: "eirtests", gig_id: "g1", agent_slug: "verifier", primitive: "VERIFY", data: { title: "t" } });
+    s.write({ core_type: "Verdict", domain_type: "finding", domain: "eirtests", gig_id: "g1", agent_slug: "verifier", primitive: "VERIFY", data: { title: "t", ...CHECKS } });
     const rows = s.findings();
     expect(rows.length).toBe(1);
     expect(rows[0]!.agent_role).toBe("verifier");
@@ -65,8 +73,8 @@ describe("O5: findings view", () => {
 describe("O5: trace is cycle-safe (no infinite loop)", () => {
   it("a derived_from cycle terminates", () => {
     const s = store();
-    const a = s.write({ core_type: "Signal", domain_type: "page-model", domain: "eirtests", gig_id: "g1", agent_slug: "scout", primitive: "SENSE", data: { url: "/a" } });
-    const b = s.write({ core_type: "Verdict", domain_type: "finding", domain: "eirtests", gig_id: "g1", agent_slug: "v", primitive: "VERIFY", data: { title: "b" } });
+    const a = s.write({ core_type: "Signal", domain_type: "page-model", domain: "eirtests", gig_id: "g1", agent_slug: "scout", primitive: "SENSE", data: { url: "/a", ...SOURCE } });
+    const b = s.write({ core_type: "Verdict", domain_type: "finding", domain: "eirtests", gig_id: "g1", agent_slug: "v", primitive: "VERIFY", data: { title: "b", ...CHECKS } });
     // deliberately create a cycle a → b → a
     s.addRef(a.id, b.id, "derived_from", "SENSE");
     s.addRef(b.id, a.id, "derived_from", "VERIFY");

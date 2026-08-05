@@ -7,7 +7,7 @@
     "properties": {
       "id":               { "type": "string" },
       "input_refs":       { "type": "array", "items": { "type": "string" } },
-      "criteria":         { "type": "array" },
+      "criteria":         { "type": "array", "minItems": 1 },
       "verdicts":         { "type": "array" },
       "reasoning_chain":  { "type": "array" }
     },

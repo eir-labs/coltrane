@@ -188,7 +188,8 @@ describe("standard with cycle (adversarial unique-unknown)", () => {
       // Each agent's output_type has its own required field.
       const outType = agent.output_types[0]!;
       const field = typeFields[outType]!;
-      return { [field]: `value-from-${agent.slug}` };
+      // every one of these types is Interpretation-cored: it states its claims (#227 ruling)
+      return { [field]: `value-from-${agent.slug}`, claims: [`value-from-${agent.slug}`] };
     };
 
     const start = Date.now();
@@ -255,7 +256,7 @@ describe("standard with cycle (adversarial unique-unknown)", () => {
     const invoke: AgentInvoker = () => {
       invocations += 1;
       if (invocations > 10) throw new Error("self-cycle runtime looped");
-      return { v: "self" };
+      return { v: "self", claims: ["self"] };
     };
 
     // REWRITTEN for #245, deliberately. This test's own title states its contract as

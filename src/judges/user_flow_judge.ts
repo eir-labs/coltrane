@@ -19,56 +19,21 @@ import { writeFileSync, unlinkSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
-import { extractJson as extractJsonShared } from "../claude_invoker.js";
+import { extractJson } from "../claude_invoker.js";
 
 /**
- * String-aware JSON extractor. The shared `extractJson` counts `{`/`}` literally,
- * which breaks when rationale strings contain braces (e.g., '{slug: ...}' in a
- * quoted error message). Strategy:
- *   1. If output is fenced (```json...```), parse that block first.
- *   2. Walk the text honoring JSON string boundaries + backslash escapes so the
- *      brace count only advances on STRUCTURAL braces; return the FIRST balanced
- *      object that parses.
- *   3. Fall back to the shared extractor only as last resort.
+ * #226 — this module used to carry its OWN string-aware extractor, whose docstring named
+ * the shared one as broken. That fix was never back-ported, and the copy was itself only a
+ * half-fix: it enumerated candidate END positions from a FIXED start, so it still threw on
+ * `The set {a,b} matters.\n{"ok":true}` and still silently returned the illustrative
+ * preamble object for `For example {"foo":"bar"} … {"title":"REAL"}`. Its step-3 fallback
+ * then re-invoked the broken shared extractor.
+ *
+ * There is now ONE implementation (claude_invoker.ts), consumed by all four production
+ * call sites. Re-exported so existing importers of the judge's `extractJson` keep working
+ * — they now get the shared, fully-fixed function.
  */
-export function extractJson(text: string): Record<string, unknown> {
-  // 1. Try fenced ```json ... ``` blocks.
-  const fenceMatch = text.match(/```(?:json)?\s*\n([\s\S]*?)\n```/);
-  if (fenceMatch && fenceMatch[1]) {
-    try { return JSON.parse(fenceMatch[1].trim()) as Record<string, unknown>; }
-    catch { /* fall through */ }
-  }
-
-  // 2. String-aware brace walk: try every candidate balanced object until one parses.
-  const start = text.indexOf("{");
-  if (start !== -1) {
-    let depth = 0;
-    let inString = false;
-    let escaped = false;
-    for (let i = start; i < text.length; i++) {
-      const ch = text[i];
-      if (escaped) { escaped = false; continue; }
-      if (inString) {
-        if (ch === "\\") { escaped = true; continue; }
-        if (ch === '"') inString = false;
-        continue;
-      }
-      if (ch === '"') { inString = true; continue; }
-      if (ch === "{") depth++;
-      else if (ch === "}") {
-        depth--;
-        if (depth === 0) {
-          const slice = text.slice(start, i + 1);
-          try { return JSON.parse(slice) as Record<string, unknown>; }
-          catch { /* try next candidate */ }
-        }
-      }
-    }
-  }
-
-  // 3. Last resort: the shared (literal-count) extractor.
-  return extractJsonShared(text);
-}
+export { extractJson };
 
 // ───────────────────────────── shapes ─────────────────────────────
 

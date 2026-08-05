@@ -116,10 +116,14 @@ const standardB: Standard = {
   ],
 };
 
+// Each output carries its CORE's substance floor, enforced on every seal (#227 ruling):
+// page-model is Signal-cored so it names where it was acquired, finding is Interpretation-cored
+// so it states its claims. Both stay derived from the agent slug, so the outputs of gig A and
+// gig B remain distinguishable — which is the isolation this spec is actually measuring.
 const invoke: AgentInvoker = ({ agent }) =>
   agent.primitives.includes("SENSE")
-    ? { url: `/${agent.slug}/landing` }
-    : { title: `${agent.slug} found a thing` };
+    ? { url: `/${agent.slug}/landing`, source: `https://eirtests.example/${agent.slug}` }
+    : { title: `${agent.slug} found a thing`, claims: [`${agent.slug} found a thing`] };
 
 function wired(): ServerDeps {
   const registry = createRegistry();

@@ -11,6 +11,7 @@
 
 import { describe, it, expect } from "vitest";
 import { TEST_BEHAVIOR } from "./_support/agents.js";
+import { coreInvariantFields } from "./_support/specs.js";
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -377,9 +378,17 @@ describe("chairs — runtime dispatch", () => {
     return { registry, outputs, ledger };
   }
 
+  // The substance every sealed output carries by virtue of its CORE type (#227 ruling:
+  // the floor binds all six cores, bare or subtyped). The domain types in this block are
+  // deliberately named after the core they extend, so the agent's single output type IS
+  // the core name — one helper covers the Signal, Interpretation and Plan chairs alike.
+  const substance = (agent: { output_types: readonly string[] }): Record<string, unknown> =>
+    coreInvariantFields(agent.output_types[0]);
+
   // Deterministic stub invoker: echoes a marker derived from the agent slug
   // and the count of inputs received. Per-test specializations layer over this.
   const stubInvoke: AgentInvoker = ({ agent, inputs }) => ({
+    ...substance(agent),
     value: `${agent.slug}(${inputs.length})`,
   });
 
@@ -433,7 +442,7 @@ describe("chairs — runtime dispatch", () => {
       await allEntered;
       await new Promise<void>((r) => release.push(r));
       inFlight--;
-      return { value: agent.slug };
+      return { ...substance(agent), value: agent.slug };
     };
     const { outputs, ledger } = setup();
     const gig = runGig(std, {}, { outputs, ledger, invoke: trackingInvoke });
@@ -475,13 +484,13 @@ describe("chairs — runtime dispatch", () => {
       if (agent.slug === "a") {
         await new Promise((r) => setTimeout(r, 5));
         aFinishedAt.t = ++seq;
-        return { value: "from-a" };
+        return { ...substance(agent), value: "from-a" };
       }
       bStartedAt.t = ++seq;
       // B must see A's output as input
       expect(inputs.length).toBe(1);
       expect(inputs[0]!.data["value"]).toBe("from-a");
-      return { value: "from-b" };
+      return { ...substance(agent), value: "from-b" };
     };
     const { outputs, ledger } = setup();
     await runGig(std, {}, { outputs, ledger, invoke: orderedInvoke });
@@ -519,7 +528,7 @@ describe("chairs — runtime dispatch", () => {
     const sawInputs: number[] = [];
     const invoke: AgentInvoker = ({ agent, inputs }) => {
       if (agent.slug === "b") sawInputs.push(inputs.length);
-      return { value: agent.slug };
+      return { ...substance(agent), value: agent.slug };
     };
     const { outputs, ledger } = setup();
     const res = await runGig(std, {}, { outputs, ledger, invoke });
@@ -549,7 +558,7 @@ describe("chairs — runtime dispatch", () => {
       return ({ agent }) => {
         calls++;
         if (calls === 2) throw new Error("boom-from-chair");
-        return { value: agent.slug };
+        return { ...substance(agent), value: agent.slug };
       };
     }
     const { outputs, ledger } = setup();
@@ -669,10 +678,10 @@ describe("chairs — runtime dispatch", () => {
         // First two complete promptly; the third parks until externally released.
         if (myIdx === 2) await lateGate;
         upCompleted++;
-        return { value: `up-${myIdx}` };
+        return { ...substance(agent), value: `up-${myIdx}` };
       }
       sinkStarted = true;
-      return { value: "sink" };
+      return { ...substance(agent), value: "sink" };
     };
     const { outputs, ledger } = setup();
     const gig = runGig(std, {}, { outputs, ledger, invoke });
@@ -697,10 +706,10 @@ describe("chairs — runtime dispatch", () => {
         upCalls++;
         // u2 throws (deterministic across the parallel batch).
         if (upCalls === 2) throw new Error("upstream-explode");
-        return { value: `up-${upCalls}` };
+        return { ...substance(agent), value: `up-${upCalls}` };
       }
       sinkRan = true;
-      return { value: "sink" };
+      return { ...substance(agent), value: "sink" };
     };
     const { outputs, ledger } = setup();
     const err = await runGig(std, {}, { outputs, ledger, invoke }).catch((e) => e);
@@ -718,11 +727,11 @@ describe("chairs — runtime dispatch", () => {
     const invoke: AgentInvoker = ({ agent, inputs }) => {
       if (agent.slug === "up") {
         upCalls++;
-        return { value: `up-${upCalls}` };
+        return { ...substance(agent), value: `up-${upCalls}` };
       }
       sinkInputCount = inputs.length;
       for (const i of inputs) seenValues.push(i.data["value"] as string);
-      return { value: "sink" };
+      return { ...substance(agent), value: "sink" };
     };
     const { outputs, ledger } = setup();
     await runGig(std, {}, { outputs, ledger, invoke });
@@ -743,13 +752,13 @@ describe("chairs — runtime dispatch", () => {
         if (agent.slug === "up") {
           const myIdx = upCalls++;
           await new Promise((r) => setTimeout(r, sleeps[myIdx]!));
-          return { value: `value-${myIdx}` };
+          return { ...substance(agent), value: `value-${myIdx}` };
         }
         sinkSeen = inputs.map((i) => ({
           from_role: i.from_role,
           value: i.data["value"],
         }));
-        return { value: "sink" };
+        return { ...substance(agent), value: "sink" };
       };
       const { outputs, ledger } = setup();
       await runGig(std, {}, { outputs, ledger, invoke });
@@ -772,14 +781,14 @@ describe("chairs — runtime dispatch", () => {
     const invoke: AgentInvoker = ({ agent, inputs }) => {
       if (agent.slug === "up") {
         upCalls++;
-        return { value: `from-up-call-${upCalls}` };
+        return { ...substance(agent), value: `from-up-call-${upCalls}` };
       }
       // Per-role addressability: index inputs by from_role.
       for (const i of inputs) {
         if (i.from_role) byRole[i.from_role] = i.data["value"];
       }
       foundU2Value = byRole["u2"];
-      return { value: "sink" };
+      return { ...substance(agent), value: "sink" };
     };
     const { outputs, ledger } = setup();
     await runGig(std, {}, { outputs, ledger, invoke });
@@ -804,10 +813,10 @@ describe("chairs — runtime dispatch", () => {
         upCalls++;
         // Stagger so partial visibility would be a real bug if it existed.
         await new Promise((r) => setTimeout(r, upCalls * 5));
-        return { value: `up-${upCalls}` };
+        return { ...substance(agent), value: `up-${upCalls}` };
       }
       sinkInvocations.push(inputs.length);
-      return { value: "sink" };
+      return { ...substance(agent), value: "sink" };
     };
     const { outputs, ledger } = setup();
     await runGig(std, {}, { outputs, ledger, invoke });

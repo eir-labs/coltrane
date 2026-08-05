@@ -100,7 +100,9 @@ describe("makeBifrostInvoker", () => {
   it("runs end-to-end under runGig: output sealed, Bifrost usd folded into GigResult.usage", async () => {
     const registry = createRegistry();
     registry.registerType(probe);
-    const { fn } = fakeFetch({ body: '{"axis":"north","value":0.7}', cost: 0.002 });
+        // axis-probe is Signal-cored, so the model's reply must name where the reading came
+    // from — outputs.write enforces that on every seal (#227 ruling).
+    const { fn } = fakeFetch({ body: '{"axis":"north","value":0.7,"source":"bifrost://etude/axis-prober"}', cost: 0.002 });
     const standard: Standard = {
       slug: "one-probe", domain: "etude", agents: [prober],
       phases: [{ name: "probe", chairs: [{ role: "p", agent_slug: "axis-prober", depends_on: [], input_contract: [], output_contract: ["axis-probe"], required_skills: [] }] }],
@@ -111,7 +113,7 @@ describe("makeBifrostInvoker", () => {
       invoke: makeBifrostInvoker({ url: "https://bifrost.test", deviceToken: "x", registry, fetchFn: fn }),
     });
     expect(res.outputs).toHaveLength(1);
-    expect(res.outputs[0]!.data).toEqual({ axis: "north", value: 0.7 });
+    expect(res.outputs[0]!.data).toEqual({ axis: "north", value: 0.7, source: "bifrost://etude/axis-prober" });
     expect(res.usage?.total_cost_usd).toBeCloseTo(0.002);
   });
 });

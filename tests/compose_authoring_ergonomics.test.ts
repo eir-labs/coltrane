@@ -50,7 +50,7 @@ describe("#156 — entry chairs may declare a typed input_contract sourced from 
     const t: DomainType = { slug: "applicant-profile", extends: "Signal", domain: "demo", schema: { properties: { name: { type: "string" } } }, required_fields: [] };
     registry.registerType(t);
     let fired = false;
-    const invoke: AgentInvoker = () => { fired = true; return { note: "x" }; };
+    const invoke: AgentInvoker = () => { fired = true; return { note: "x", claims: ["x"] }; };
     await expect(
       runGig(std(), {}, { outputs: createOutputStore(registry), ledger: new MemoryLedger(), invoke }),
     ).rejects.toThrow(/applicant-profile|gig input|MissingGigInput/i);
@@ -138,7 +138,7 @@ describe("#156 — entry chairs may declare a typed input_contract sourced from 
     registry.registerType(t);
     const ob: DomainType = { slug: "onboarding-note", extends: "Interpretation", domain: "demo", schema: { properties: { note: { type: "string" } } }, required_fields: [] };
     registry.registerType(ob);
-    const invoke: AgentInvoker = () => ({ note: "welcome" });
+    const invoke: AgentInvoker = () => ({ note: "welcome", claims: ["welcome"] });
     const res = await runGig(std(), { "applicant-profile": { name: "Ada" } }, { outputs: createOutputStore(registry), ledger: new MemoryLedger(), invoke });
     expect(res.status).toBe("complete");
   });

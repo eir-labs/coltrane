@@ -53,6 +53,7 @@
   },
   "required_fields": [
     "recommended",
-    "rationale"
+    "rationale",
+    "checks"
   ]
 }

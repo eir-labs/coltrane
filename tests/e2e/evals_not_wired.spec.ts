@@ -112,7 +112,9 @@ describe("e2e: evals declared on a standard must populate eval_scores (RED — N
     } as unknown as Parameters<typeof composeStandard>[0]);
 
     const invoke: AgentInvoker = (ctx) =>
-      ctx.agent.slug === "sensor" ? { text: "the room is loud" } : { gist: "loud room" };
+      ctx.agent.slug === "sensor"
+        ? { text: "the room is loud", source: "microphone://demo/room-1" }
+        : { gist: "loud room", claims: ["the room is loud"] };
 
     const result = await runGig(
       standard,
@@ -198,7 +200,9 @@ describe("e2e: evals declared on a standard must populate eval_scores (RED — N
     });
 
     const invoke: AgentInvoker = (ctx) =>
-      ctx.agent.slug === "sensor" ? { text: "the room is loud" } : { gist: "loud room" };
+      ctx.agent.slug === "sensor"
+        ? { text: "the room is loud", source: "microphone://demo/room-1" }
+        : { gist: "loud room", claims: ["the room is loud"] };
 
     const ledgerA = new MemoryLedger();
     const ledgerB = new MemoryLedger();

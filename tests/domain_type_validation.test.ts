@@ -24,7 +24,12 @@ function populatedRegistry() {
   return reg;
 }
 
+// A Verdict carries the evidence it verified — `outputs.write` enforces that core
+// invariant on every seal (#227/#228).
+const CHECKS = [{ method: "site-scan", target_ref: "eirtests", result: "pass" }];
+
 function baseWrite(overrides: Partial<OutputWrite> = {}): OutputWrite {
+  const { data, ...rest } = overrides;
   return {
     core_type: "Verdict",
     domain_type: "finding",
@@ -32,8 +37,13 @@ function baseWrite(overrides: Partial<OutputWrite> = {}): OutputWrite {
     gig_id: "g1",
     agent_slug: "site-analyst",
     primitive: "VERIFY",
-    data: { pattern_key: "missing-alt-text", severity: "high", title: "Images lack alt text" },
-    ...overrides,
+    ...rest,
+    // `checks` is merged UNDER the caller's data, not applied as a whole-`data` default.
+    // The negative tests below override `data` to trip a specific rule (a missing required
+    // field, an undeclared extra); if overriding also dropped `checks` they would start
+    // throwing for the core invariant instead, and still pass — green for the wrong
+    // reason. Merging keeps each of those tests failing for the reason it names.
+    data: { checks: CHECKS, ...(data ?? { pattern_key: "missing-alt-text", severity: "high", title: "Images lack alt text" }) },
   };
 }
 
@@ -85,7 +95,7 @@ describe("#200: type-declared additionalProperties is honored at seal", () => {
       gig_id: "g1",
       agent_slug: "submission-judge",
       primitive: "VERIFY",
-      data: { title: "go", opportunity_id: "opp-42" }, // extra contextual id
+      data: { title: "go", opportunity_id: "opp-42", checks: CHECKS }, // extra contextual id
     });
     expect(rec.id).toBeTruthy();
     expect((rec.data as Record<string, unknown>).opportunity_id).toBe("opp-42");

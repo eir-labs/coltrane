@@ -80,7 +80,7 @@ describe("a chair backed by a skill runs deterministic code, not the model", () 
     expect(modelCalls, "the model was invoked for a deterministic skill chair").toBe(0);
     // the sealed output is the skill's deterministic result
     expect(res.outputs.length).toBe(1);
-    expect(res.outputs[0]!.data).toEqual({ sum: 8 });
+    expect(res.outputs[0]!.data).toEqual({ sum: 8, source: "skill://number-adder@1" });
     // and it's recorded in the ledger like any other output
     expect(ledger.count()).toBe(1);
     // the sealed entry carries the skill's identity (slug + version + verified code_hash + tier),
@@ -128,9 +128,9 @@ describe("a chair backed by a skill runs deterministic code, not the model", () 
     let seenInput: unknown = null;
     const invoke: AgentInvoker = ({ inputs }) => {
       seenInput = inputs[0]?.data;
-      return { note: "reported" };
+      return { note: "reported", claims: ["the sum was received from the skill chair"] };
     };
     await runGig(std, { a: 3, b: 5 }, { outputs, ledger, invoke, skill_dirs: new Map([["number-adder", NUMBER_ADDER]]) });
-    expect(seenInput).toEqual({ sum: 8 });
+    expect(seenInput).toEqual({ sum: 8, source: "skill://number-adder@1" });
   });
 });

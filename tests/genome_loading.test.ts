@@ -111,7 +111,9 @@ describe("the SHIPPED example genome loads from disk (clone → it's there → i
     const registry = loadRegistry(g);
     const standard = g.standards.get("summarize")!;
     const invoke: AgentInvoker = (ctx) =>
-      ctx.agent.slug === "sensor" ? { text: "the room is loud" } : { gist: "loud room" };
+      ctx.agent.slug === "sensor"
+        ? { text: "the room is loud", source: "microphone://demo/room-1" }
+        : { gist: "loud room", claims: ["the room is loud"] };
     const result = await runGig(standard, { topic: "noise" },
       { outputs: createOutputStore(registry), ledger: new MemoryLedger(), invoke, model_version: "deterministic-example" });
     expect(result.status).toBe("complete");

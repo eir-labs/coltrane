@@ -37,7 +37,7 @@ describe("runGig captures + persists actual model usage (#195)", () => {
         usage: { input_tokens: 1200, output_tokens: 350 },
         modelUsage: { "claude-opus-4-8": { inputTokens: 1200, outputTokens: 350, costUSD: 0.042 } },
       } });
-      return { t: "hi" };
+      return { t: "hi", source: "fixture://demo/note" };
     };
     const { deps, ledger } = harness(invoke, std());
     const r = await runGig(std(), {}, deps as never);
@@ -56,7 +56,7 @@ describe("runGig captures + persists actual model usage (#195)", () => {
   });
 
   it("omits usage when no model ran (no result event)", async () => {
-    const { deps } = harness(() => ({ t: "hi" }), std());
+    const { deps } = harness(() => ({ t: "hi", source: "fixture://demo/note" }), std());
     const r = await runGig(std(), {}, deps as never);
     expect(r.usage, "no model invocation → no settled usage").toBeUndefined();
   });
@@ -79,13 +79,14 @@ describe("runGig stamps real provenance hashes (#196)", () => {
   it("replaces agent-fabricated *_sha placeholders with the real input/gig content_sha, and stamps input_shas", async () => {
     const gigInput = { seed: "the disclosure bytes" };
     const invoke: AgentInvoker = (ctx) => {
-      if (ctx.agent.slug === "producer") return { t: "raw note" };
+      if (ctx.agent.slug === "producer") return { t: "raw note", source: "fixture://demo/note" };
       // the linker fabricates placeholder hashes it can't compute — exactly the #196 failure. The
       // wording is DELIBERATELY not any sentinel the backfill code references (a real run emitted
       // "UNSEALED:no-hash-tool-in-seat:…"), so this pins that backfill triggers on "not a real
       // hash", not on a hardcoded sentinel string.
       return {
         summary: "linked",
+        claims: ["the note was linked to the gig input"],
         note_sha: "UNSEALED:no-hash-tool-in-seat:to-be-computed-over-the-note",
         input_sha: "(pending) sha256 of the gig input",
       };

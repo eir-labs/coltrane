@@ -25,6 +25,7 @@
     }
   },
   "required_fields": [
-    "named_failure_modes"
+    "named_failure_modes",
+    "claims"
   ]
 }

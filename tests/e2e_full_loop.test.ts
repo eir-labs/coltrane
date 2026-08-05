@@ -44,7 +44,9 @@ const readinessScan: Standard = {
 };
 
 const invoke: AgentInvoker = ({ agent }) =>
-  agent.slug === "site-scout" ? { url: "/products" } : { title: "missing alt text" };
+  agent.slug === "site-scout"
+    ? { url: "/products", source: "https://example.com/products" }
+    : { title: "missing alt text", claims: ["an image has no alt text"] };
 
 function wiredServer(): ServerDeps {
   const registry = createRegistry();

@@ -6,7 +6,7 @@
 // load-bearing instrument: they are the skill's test suite, the determinism meter
 // (stable across repeated runs), AND the evolution gate (an improved skill.mjs is
 // accepted only if every fixture still passes).
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { join, extname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -92,6 +92,108 @@ export function executeSkill(skillDir: string, input: unknown, timeoutMs = 120_0
   } catch {
     return { ok: false, error: `unparseable skill output: ${(res.stdout || res.stderr || "").slice(0, 300)}`, duration_ms };
   }
+}
+
+/**
+ * #253 — the same execution, without blocking the event loop, and cancellable.
+ *
+ * `executeSkill` uses `spawnSync`, which blocks the thread until the child exits. The
+ * runtime's abort chain (#249/#250) is cooperative — `checkpoint()` reads the signal between
+ * phases and batches, and the invoker kills its child when the signal fires — and NONE of
+ * that can run while the loop is blocked. The abort event cannot even be *delivered*. So
+ * `gig_abort` during a skill chair was a promise the engine could not keep for up to the
+ * skill's timeout, which by default is 120 seconds.
+ *
+ * That is #249's shape again: a control the operator reaches for that reports success and
+ * does nothing. The difference is that #249 was a missing kill and this was a missing
+ * opportunity to kill.
+ *
+ * `executeSkill` is kept as-is rather than reimplemented on top of this. Its callers — the
+ * fixture runner and the determinism meter — are batch tools with no cancellation story, and
+ * making them async would ripple through the skill-authoring surface for no benefit. The
+ * RUNTIME is the caller that needed this.
+ */
+export async function executeSkillAsync(
+  skillDir: string,
+  input: unknown,
+  timeoutMs = 120_000,
+  opts: { signal?: AbortSignal | undefined; tierOverride?: number | undefined } = {},
+): Promise<ExecuteResult> {
+  const started = Date.now();
+  const abortResult = (): ExecuteResult => ({
+    ok: false,
+    error: `skill aborted: ${opts.signal ? abortReason(opts.signal) : "cancelled"}`,
+    duration_ms: Date.now() - started,
+  });
+
+  // Cheapest possible honouring of a cancellation: if it is already aborted, spawn nothing.
+  if (opts.signal?.aborted) return abortResult();
+
+  const meta = readSkillMeta(skillDir);
+  const tier = opts.tierOverride ?? (meta.permission?.tier ?? 0);
+  // As in executeSkill: the skill's own declared ceiling caps the caller's timeout, so a
+  // runaway code half cannot outlive its budget.
+  const timeout = typeof meta.timeout_ms === "number" ? Math.min(timeoutMs, meta.timeout_ms) : timeoutMs;
+
+  return await new Promise<ExecuteResult>((resolve) => {
+    const child = spawn("node", [...tierFlags(tier), RUNNER, skillDir], { stdio: ["pipe", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+    const done = (r: ExecuteResult): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      opts.signal?.removeEventListener("abort", onAbort);
+      resolve(r);
+    };
+    // SIGKILL, not the default SIGTERM — a SIGTERM-trapping child must not survive a stop.
+    const kill = (): void => {
+      try {
+        child.kill("SIGKILL");
+      } catch {
+        /* already gone */
+      }
+    };
+    const onAbort = (): void => {
+      kill();
+      done(abortResult());
+    };
+    const timer = setTimeout(() => {
+      kill();
+      done({ ok: false, error: `skill timed out after ${timeout}ms`, duration_ms: Date.now() - started });
+    }, timeout);
+
+    opts.signal?.addEventListener("abort", onAbort, { once: true });
+    child.stdout.on("data", (c: Buffer) => (stdout += c.toString()));
+    child.stderr.on("data", (c: Buffer) => (stderr += c.toString()));
+    child.on("error", (e: Error) => done({ ok: false, error: String(e.message), duration_ms: Date.now() - started }));
+    child.on("close", () => {
+      const duration_ms = Date.now() - started;
+      try {
+        const parsed = JSON.parse(stdout) as { ok: boolean; output?: unknown; error?: string };
+        done({ ...parsed, duration_ms });
+      } catch {
+        done({
+          ok: false,
+          error: `unparseable skill output: ${(stdout || stderr || "").slice(0, 300)}`,
+          duration_ms,
+        });
+      }
+    });
+    child.stdin.on("error", () => {
+      /* the child may exit before we finish writing; `close` reports the real outcome */
+    });
+    child.stdin.end(JSON.stringify(input));
+  });
+}
+
+/** The human-readable cause behind an abort, whatever shape the aborter used. */
+function abortReason(signal: AbortSignal): string {
+  const r = signal.reason as unknown;
+  if (r instanceof Error) return r.message;
+  if (typeof r === "string" && r) return r;
+  return "cancelled";
 }
 
 function getPath(obj: unknown, path: string): unknown {

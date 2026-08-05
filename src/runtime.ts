@@ -6,7 +6,7 @@
 import { randomUUID } from "node:crypto";
 import type { Standard, Agent, Chair } from "./composition.js";
 import { PRIMITIVE_OUTPUT_TYPE, CORE_TYPES } from "./core_types.js";
-import { executeSkill } from "./skill_subprocess.js";
+import { executeSkillAsync } from "./skill_subprocess.js";
 import { loadSkillPackage } from "./skills.js";
 
 // core type → the process primitive that produces it (reverse of PRIMITIVE_OUTPUT_TYPE).
@@ -1082,7 +1082,13 @@ export async function runGig(
       // when it's a root chair). This is the proper fix for "an LLM should not babysit a
       // deterministic command": the command IS the chair.
       const skillInput = inputs.length > 0 ? Object.assign({}, ...inputs.map((i) => i.data)) : gigInput;
-      const r = executeSkill(p.skill_dir, skillInput);
+      // #253 — the ASYNC path, threaded with the run's abort signal. `executeSkill` uses
+      // spawnSync, which blocks the event loop for the skill's whole timeout (120s by
+      // default), so the cooperative abort chain could not run and the abort event could not
+      // even be DELIVERED. `gig_abort` during a skill chair was a promise the engine could
+      // not keep — #249's shape again, but a missing opportunity to kill rather than a
+      // missing kill.
+      const r = await executeSkillAsync(p.skill_dir, skillInput, 120_000, { signal: deps.signal });
       if (!r.ok) throw new RuntimeError(`skill chair "${chair.role}" ("${chair.skill_slug}") failed: ${r.error}`);
       data = (r.output && typeof r.output === "object" ? r.output : {}) as Record<string, unknown>;
       producer_slug = chair.skill_slug!;

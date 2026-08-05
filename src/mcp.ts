@@ -62,7 +62,19 @@ export const MCP_TOOLS: readonly MCPToolDef[] = [
   { slug: "standard_simulate",             category: "build", input_schema: obj({ standard_slug: "string", mock_input: "object", depth: "string" }), output_schema: obj({ phases: "array", estimated_cost: "number", estimated_duration_ms: "number", basis: "string", sample_size: "number" }) },
   // #237 — `depth` is read now (and rejected when unrecognized); the response echoes the depth
   // the run actually took, so "I ran a cheap iteration" is verifiable rather than assumed.
-  { slug: "gig_dispatch",                  category: "run", input_schema: obj({ standard_slug: "string", input: "object", depth: "string", company_id: "string", wait: "boolean" }), output_schema: obj({ gig_id: "string", status: "string", depth: "string", manifest: "object" }) },
+  // #234 — `budget` is ADVERTISED, not just accepted. Enforcement existed and was
+  // undiscoverable: a caller reading the tool schema had no way to learn that a spend
+  // ceiling could be set, so the guardrail may as well not have been there.
+  //
+  // `company_id` is GONE from this tool, found by the guard added with the same change. It
+  // was advertised and never read — the #237 shape (advertised, silently discarded). It is
+  // worse than a merely dead argument because it is TENANCY-shaped: a caller passing it to
+  // scope a run to a company would reasonably believe the run was scoped, and nothing in
+  // the engine reads it. The engine deliberately does not do tenancy — `principal` on the
+  // ledger is documented as provenance and explicitly NOT an access control — so the honest
+  // move is to stop advertising a guarantee it does not make. It remains real on
+  // charter_read / access_grant_check / charter_suggest_update, which do read it.
+  { slug: "gig_dispatch",                  category: "run", input_schema: obj({ standard_slug: "string", input: "object", depth: "string", wait: "boolean", budget: "object" }), output_schema: obj({ gig_id: "string", status: "string", depth: "string", manifest: "object" }) },
   { slug: "gig_monitor",                   category: "run", input_schema: obj({ gig_id: "string" }), output_schema: obj({ status: "string", phases_complete: "number", current_phase: "string", chairs: "array", outputs_so_far: "array" }) },
   { slug: "gig_logs",                       category: "understand", input_schema: obj({ gig_id: "string", role: "string", type: "string", tail: "number" }), output_schema: obj({ gig_id: "string", roles: "array", count: "number", events: "array" }) },
   // #251 — `status` is the field both existing tests actually assert and it was not advertised.

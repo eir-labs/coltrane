@@ -26,6 +26,21 @@ interface PackResult {
 
 let manifest: string[] = [];
 
+// #231 — this hook was dying on "Hook timed out in 10000ms", vitest's DEFAULT hookTimeout,
+// and the failure was indistinguishable from a genuine packaging break.
+//
+// It is not a hang. `npm pack` fires the `prepare` lifecycle, which is `npm run build`, which
+// is a full `tsc`. Measured on this branch: 3.3s cold (no dist/), 3.1s warm, 5.6s with six
+// competing tsc processes — and 12.76s was measured standalone on the machine that filed
+// #231. The suite runs ~140 files across every core, so the loaded number is the one that
+// matters, and 10s is inside the noise band of a build that legitimately costs 3-13s.
+//
+// So the hook is given a budget far above the real cost. This does NOT slow a real break
+// down: a `tsc` error or a bad manifest makes execFileSync throw immediately: the only thing
+// a generous timeout buys is that "packaging is broken" stops being spelled the same way as
+// "the machine was busy".
+const PACK_HOOK_TIMEOUT_MS = 120_000;
+
 beforeAll(() => {
   // `npm pack --dry-run --json` enumerates the would-ship manifest without
   // writing a tarball or touching the registry. Deterministic + side-effect-free.
@@ -37,7 +52,7 @@ beforeAll(() => {
   const first = parsed[0];
   if (!first) throw new Error("npm pack --dry-run returned an empty manifest");
   manifest = first.files.map((f) => f.path.replace(/^\.\//, ""));
-});
+}, PACK_HOOK_TIMEOUT_MS);
 
 // Files that MUST be in the published tarball for the engine to function.
 const REQUIRED: RegExp[] = [

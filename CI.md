@@ -4,45 +4,69 @@ GitHub Actions workflows live in `.github/workflows/`. This doc covers what
 each workflow does, what's swept, what's deliberately excluded, and how to
 read a failure.
 
+## The band table (#262)
+
+Five vitest configs. Every one has a script; every script runs in CI or carries a written
+exemption. `tests/test_band_wiring.test.ts` asserts this table closes and goes red if a new
+test file matches no config, a config is run by no script, or a band script goes dark.
+
+| config | npm script | CI job | notes |
+| --- | --- | --- | --- |
+| `vitest.config.ts` | `npm test` (bare `vitest run`) | `ci.yml: verify`, `test.yml: unit` | the fast unit band |
+| `tests/failure_modes/vitest.config.ts` | `npm run test:failure-modes` | `ci.yml: verify`, `test.yml: bands` | |
+| `tests/honest_broker/vitest.config.ts` | `npm run test:honest-broker` | `ci.yml: verify`, `test.yml: bands` | excluded from the root config so it runs once, under the config written for it |
+| `tests/security/vitest.config.ts` | `npm run test:security` | `ci.yml: verify`, `test.yml: bands` | spend-gated: collects + skips unless `COLTRANE_LIVE=1` |
+| `tests/e2e/vitest.offline.config.ts` | `npm run e2e:offline` | `ci.yml: verify`, `test.yml: e2e-offline` | the e2e specs that need no model |
+| `tests/e2e/vitest.config.ts` | `npm run e2e` | **none — exempt** | needs the claude CLI + `ANTHROPIC_API_KEY`; see "e2e gate" |
+
+`npm run verify` chains every non-exempt script, so local-green and CI-green mean the same
+thing. Before this, `ci.yml` ran `npm run verify` while `test.yml` and `coverage.yml` ran
+`npx vitest run` directly — root-config only — so CI executed a strictly smaller set than the
+gate developers ran, and neither number matched the "481 tests" `ci.yml` claimed.
+
 ## Workflows
 
 ### `ci.yml` — single-environment verify
 
-The original gate. Runs `npm run verify` (= `tsc --noEmit && vitest run`) on
-`ubuntu-latest` + node 22 only. Fast, deterministic, covers the unit suite.
-Stays as the canonical pass/fail signal on every PR + push to main.
+The canonical gate. Runs `npm run verify` on `ubuntu-latest` + node 22 only — that is every
+deterministic band, not just the unit suite. Stays the pass/fail signal on every PR + push.
 
 ### `test.yml` — cross-environment matrix
 
-Sweeps the same `tsc --noEmit` and `vitest run` (unit only) across an
-(OS, node) matrix. The point: catch environment-specific regressions that
-`ci.yml` would miss because it runs on a single (ubuntu, node-22) cell.
+Sweeps typecheck + the bands across an (OS, node) matrix. The point: catch
+environment-specific regressions that `ci.yml` would miss because it runs on a single
+(ubuntu, node-22) cell.
 
-**Matrix cells (4 per job, 2 jobs = 8 cells total):**
+**Matrix cells (4 per job × 3 matrixed jobs, plus 1 single-cell job):**
 
-| OS             | Node  | typecheck | unit |
-| -------------- | ----- | --------- | ---- |
-| ubuntu-latest  | 20.x  | yes       | yes  |
-| ubuntu-latest  | 22.x  | yes       | yes  |
-| macos-latest   | 20.x  | yes       | yes  |
-| macos-latest   | 22.x  | yes       | yes  |
+| OS             | Node  | typecheck | unit | bands |
+| -------------- | ----- | --------- | ---- | ----- |
+| ubuntu-latest  | 20.x  | yes       | yes  | yes   |
+| ubuntu-latest  | 22.x  | yes       | yes  | yes   |
+| macos-latest   | 20.x  | yes       | yes  | yes   |
+| macos-latest   | 22.x  | yes       | yes  | yes   |
 
 `fail-fast: false` — one red cell does not cancel the others. You see the
 full failure surface, not just the first to fail.
 
 **Concurrency:** new pushes to the same ref cancel in-progress runs.
 
-**e2e-smoke job:** push-to-main only, single cell (ubuntu, node 22), runs
-the `eng_manager` spec — the fastest of the four sub-thread specs. **Currently
-documented-but-skipped** (see "e2e gate" below).
+**e2e-offline job:** single cell (ubuntu, node 22), on every PR and push. Builds, then runs
+`tests/e2e/vitest.offline.config.ts` — the e2e band minus the specs that spawn the real CLI.
+It replaces the old `e2e-smoke` stub, which echoed a warning, exited 0, and only ran on
+push-to-main, leaving all 36 e2e files executing nowhere.
 
 ### `coverage.yml` — PR coverage comment
 
 Tolerant of the absent coverage config. On every PR:
 
 1. Probes for a vitest `coverage:` block in any `vitest.config.*` file.
-2. If present: runs `npx vitest run --coverage`, posts the summary as a PR comment.
+2. If present: runs `npm test -- --coverage`, posts the summary as a PR comment.
 3. If absent: emits a workflow notice and exits clean. No red.
+
+Root band only, deliberately: it is the band that exercises `src/**` broadly, and the other
+bands drive subprocesses that v8 coverage cannot see. It goes through `npm test` rather than
+a bare `npx vitest run` so the workflow and package.json cannot drift apart.
 
 Depends on the sibling work in `tonight/miles/phase-15d-coverage-mutation`
 landing `@vitest/coverage-v8` + a `coverage:` block in `vitest.config.ts`.
@@ -53,17 +77,26 @@ landing `@vitest/coverage-v8` + a `coverage:` block in `vitest.config.ts`.
   on Windows is not yet validated for our use, and the band's local
   development is mac+linux. Reintroduce if/when a contributor needs it.
 - **claude CLI version sweep.** A future sweep across CLI versions (2.1.x
-  matrix) would be valuable for the e2e spec. Not in scope today — the
-  e2e job itself is skipped.
+  matrix) would be valuable for the live e2e specs. Not in scope today — the
+  live half of the band does not run in CI at all yet.
 - **Node 18.** Vitest 3 + ES2022 work fine on 18 in principle, but the
   `@types/node` devDep is pinned to ^22 and the band ships against ≥20.
 - **`write-all` permissions.** Both workflows declare minimal `permissions:`
   blocks. `coverage.yml` adds `pull-requests: write` only because it posts
   the report comment. No `contents: write`, no `id-token: write`, etc.
 
-## e2e gate (open)
+## e2e gate (open — the LIVE half only)
 
-The `e2e-smoke` job in `test.yml` is wired but skipped. To enable:
+The offline half of the e2e band runs on every PR (`test.yml: e2e-offline`). What remains open
+is the live half: the specs listed in `LIVE_CLAUDE_SPECS` in
+`tests/e2e/vitest.offline.config.ts`, which spawn the real `claude` CLI.
+
+That list is an **exclude**, not an allowlist, on purpose: a new e2e spec is in the CI job by
+default, and only lands on the list if someone puts it there deliberately. `npm run e2e` (the
+full band, live) is the one script `tests/test_band_wiring.test.ts` exempts from the
+CI-coverage assertion, and the exemption carries its reason inline.
+
+To close it:
 
 1. Add a step that installs the claude CLI in CI. Candidate install paths:
    - `npm i -g @anthropic-ai/claude-code` (if/when published this way)
@@ -71,16 +104,21 @@ The `e2e-smoke` job in `test.yml` is wired but skipped. To enable:
    - Bundled in a container image
 2. Add `ANTHROPIC_API_KEY` as a repo secret, exported as env to the spec.
 3. Pin a known-good CLI version (today: 2.1.160) and document it in this file.
-4. Replace the `skip (...)` step with:
+4. Add a job that runs the full band, and drop the `e2e` entry from `CI_EXEMPT` in
+   `tests/test_band_wiring.test.ts`:
 
    ```yaml
-   - run: npx vitest run --config tests/e2e/vitest.config.ts tests/e2e/sub_thread.eng_manager.spec.ts
+   - run: npm run e2e
      env:
        ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
    ```
 
-Until then: the warning surfaces on every push-to-main run so the gap stays
-visible.
+   The same key would let the security band run for real:
+   `COLTRANE_LIVE=1 npm run test:security`. Both spend money on every run — that is the
+   decision being deferred, and it is now the only thing being deferred.
+
+Until then the gap is visible in exactly one place — `CI_EXEMPT` — rather than in a job that
+echoes a warning and exits 0.
 
 ## Interpreting failures
 

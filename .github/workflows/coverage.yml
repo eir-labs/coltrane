@@ -4,7 +4,12 @@
 #
 # Dependency: tonight/miles/phase-15d-coverage-mutation (vitest coverage config).
 # Once that lands and vitest.config.ts (or a sibling) defines `coverage:`,
-# this workflow runs `npx vitest run --coverage` and posts the summary.
+# this workflow runs the unit band with `--coverage` and posts the summary.
+#
+# Scope note (#262): this measures the ROOT band only, deliberately — it is the band that
+# exercises src/** broadly, and the other bands spawn subprocesses whose coverage v8 cannot
+# see anyway. It invokes `npm test` rather than a bare `npx vitest run` so the workflow and
+# package.json cannot drift into meaning different things.
 
 name: coverage
 
@@ -46,7 +51,7 @@ jobs:
         run: |
           # @vitest/coverage-v8 must be present as a devDependency for this
           # to work — gap-5 is expected to add it.
-          npx vitest run --coverage --reporter=default | tee coverage_output.txt
+          npm test -- --coverage --reporter=default | tee coverage_output.txt
           {
             echo "summary<<EOF"
             tail -n 40 coverage_output.txt

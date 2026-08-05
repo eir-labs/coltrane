@@ -16,66 +16,87 @@ import { describe, it, expect } from "vitest";
 import { mkdtempSync, rmSync, appendFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { FileLedger, type LedgerEntry } from "../../src/ledger.js";
+import { FileLedger, type GigLedgerEntry, type LedgerEntry } from "../../src/ledger.js";
 import { compareHonestBroker } from "../../src/test_honest_broker.js";
 
 function freshDir(): string {
   return mkdtempSync(join(tmpdir(), "honest-broker-recorder-"));
 }
 
-// Five representative entry shapes covering the LedgerEntry surface.
-const battery: readonly LedgerEntry[] = [
+// #212 fixture migration. Three changes, none of which alter what this file asserts (the
+// append/read contract: one JSON object per line, no normalisation):
+//   1. `kind`/`schema_version`/`entry_id` added — the discriminated-union shape.
+//   2. Identity fields are now 64 lowercase hex, the shape sha256Hex/runFingerprint actually
+//      emit and the shared validator enforces. `gh-001`-style placeholders were only ever
+//      accepted because the old guard (src/ledger.ts:56-58) tested non-emptiness.
+//   3. Timestamps gained millisecond precision across all five entries ("…:00Z" → "…:00.000Z"),
+//      matching `new Date().toISOString()` — the form every real writer produces
+//      (src/runtime.ts:787, src/genome_writer.ts:73) and the form an ISO-8601 validator will
+//      round-trip. The honest-broker comparison is over parsed values, so precision is not
+//      itself under test; this only keeps the fixtures writable once validation lands.
+// Unicode round-trip safety (entry 4) is preserved on the fields that remain free-form:
+// gig_id, entry_id, standard_slug and output_hashes all still carry non-ASCII.
+const hex = (nibble: string): string => nibble.repeat(64);
+
+// Five representative entry shapes covering the gig-row surface. Typed as GigLedgerEntry
+// (not the LedgerEntry union) so `entry.gig_id` resolves — every row here is kind:"gig".
+const battery: readonly GigLedgerEntry[] = ([
   // 1. minimal — every required field, single output hash.
   {
+    kind: "gig", schema_version: 2, entry_id: "gig-001",
     gig_id: "gig-001",
     standard_slug: "scan",
-    genome_hash: "gh-001",
-    run_fingerprint: "rf-001",
+    genome_hash: hex("1"),
+    run_fingerprint: hex("a"),
     output_hashes: ["oh-001"],
-    started_at: "2026-01-01T00:00:00Z",
-    finished_at: "2026-01-01T00:00:05Z",
+    started_at: "2026-01-01T00:00:00.000Z",
+    finished_at: "2026-01-01T00:00:05.000Z",
   },
   // 2. multiple output hashes — typical multi-phase gig.
   {
+    kind: "gig", schema_version: 2, entry_id: "gig-002",
     gig_id: "gig-002",
     standard_slug: "scan-and-fix",
-    genome_hash: "gh-002",
-    run_fingerprint: "rf-002",
+    genome_hash: hex("2"),
+    run_fingerprint: hex("b"),
     output_hashes: ["oh-002-a", "oh-002-b", "oh-002-c"],
-    started_at: "2026-02-01T12:00:00Z",
-    finished_at: "2026-02-01T12:01:30Z",
+    started_at: "2026-02-01T12:00:00.000Z",
+    finished_at: "2026-02-01T12:01:30.000Z",
   },
   // 3. empty output_hashes — edge case, no outputs produced.
   {
+    kind: "gig", schema_version: 2, entry_id: "gig-003",
     gig_id: "gig-003",
     standard_slug: "noop",
-    genome_hash: "gh-003",
-    run_fingerprint: "rf-003",
+    genome_hash: hex("3"),
+    run_fingerprint: hex("c"),
     output_hashes: [],
-    started_at: "2026-03-01T00:00:00Z",
-    finished_at: "2026-03-01T00:00:00Z",
+    started_at: "2026-03-01T00:00:00.000Z",
+    finished_at: "2026-03-01T00:00:00.000Z",
   },
-  // 4. unicode + special chars in slugs/hashes — round-trip safety.
+  // 4. unicode + special chars in the free-form fields — round-trip safety.
   {
+    kind: "gig", schema_version: 2, entry_id: "gig-004-α",
     gig_id: "gig-004-α",
     standard_slug: "scan/with-slash",
-    genome_hash: "gh-004-β",
-    run_fingerprint: "rf-004-γ",
+    genome_hash: hex("4"),
+    run_fingerprint: hex("d"),
     output_hashes: ["oh-004:colon", "oh-004-emoji-🎷"],
-    started_at: "2026-04-01T00:00:00Z",
-    finished_at: "2026-04-01T00:00:01Z",
+    started_at: "2026-04-01T00:00:00.000Z",
+    finished_at: "2026-04-01T00:00:01.000Z",
   },
   // 5. long hash list — stress the line length.
   {
+    kind: "gig", schema_version: 2, entry_id: "gig-005",
     gig_id: "gig-005",
     standard_slug: "wide-fanout",
-    genome_hash: "gh-005",
-    run_fingerprint: "rf-005",
+    genome_hash: hex("5"),
+    run_fingerprint: hex("e"),
     output_hashes: Array.from({ length: 20 }, (_, i) => `oh-005-${i.toString().padStart(3, "0")}`),
-    started_at: "2026-05-01T00:00:00Z",
-    finished_at: "2026-05-01T00:00:10Z",
+    started_at: "2026-05-01T00:00:00.000Z",
+    finished_at: "2026-05-01T00:00:10.000Z",
   },
-];
+] as unknown) as readonly GigLedgerEntry[];
 
 describe("R7 honest-broker: FileLedger append contract", () => {
   for (const entry of battery) {

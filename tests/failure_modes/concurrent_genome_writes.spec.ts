@@ -28,7 +28,7 @@ const [, , genomeDir, slug, ledgerPath, primitive] = process.argv;
 try {
   const ledger = new FileLedger(ledgerPath);
   const result = sealAgentDefinition(
-    { slug, primitives: [primitive], domain: "concurrent_test" },
+    { slug, primitives: [primitive], domain: "concurrent_test", identity: "you race the same slug", method: "seal an agent definition concurrently", constraints: [], behavioral_primitives: ["explorer", "analyst"], output_types: ["raw-note"] },
     ledger,
     genomeDir,
   );

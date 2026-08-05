@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { defineAgent, type Agent, type AgentDef } from "./composition.js";
 import { canonJson, sha256Hex, effectiveHash, EMPTY_DEPENDENCY_HASH } from "./canonical_form.js";
-import type { Ledger } from "./ledger.js";
+import { LEDGER_SCHEMA_VERSION, type Ledger } from "./ledger.js";
 
 /**
  * Write a genome file, preserving any prior version's BYTES before a destructive
@@ -69,17 +69,27 @@ export function sealDefinition(
   const dependency_hash = EMPTY_DEPENDENCY_HASH;
   const effective_hash = effectiveHash(content_hash, dependency_hash);
   if (genome_dir) {
-    writeGenomeFileVersioned(genome_dir, subdir, slug, JSON.stringify(def, null, 2) + "\n");
+    // #218 — SEAL BEFORE WRITE. The reverse order manufactures the exact orphan this module's
+    // header calls "outside the substrate": if the append throws (ENOSPC/EACCES — the
+    // LedgerError path at src/ledger.ts), the definition is already on disk and loadable with
+    // no identity, while dispatchTool tells the caller nothing happened. Recording an identity
+    // whose file failed to materialise is the safe direction: the next write retries, and the
+    // ledger never claims less than reality.
     const now = new Date().toISOString();
     ledger.append({
-      gig_id: `${kind}:${slug}:${randomUUID()}`,
-      standard_slug: kind,
-      genome_hash: effective_hash,
-      run_fingerprint: effective_hash,
+      kind: "genome_mutation",
+      schema_version: LEDGER_SCHEMA_VERSION,
+      entry_id: `${kind}:${slug}:${randomUUID()}`,
+      event: kind,
+      subject_slug: slug,
+      content_hash,
+      dependency_hash,
+      effective_hash,
       output_hashes: [content_hash],
       started_at: now,
       finished_at: now,
     });
+    writeGenomeFileVersioned(genome_dir, subdir, slug, JSON.stringify(def, null, 2) + "\n");
   }
   return { content_hash, dependency_hash, effective_hash };
 }
@@ -94,10 +104,14 @@ export function recordIdentity(kind: string, slug: string, def: unknown, ledger:
   const effective_hash = effectiveHash(content_hash, dependency_hash);
   const now = new Date().toISOString();
   ledger.append({
-    gig_id: `${kind}:${slug}:${randomUUID()}`,
-    standard_slug: kind,
-    genome_hash: effective_hash,
-    run_fingerprint: effective_hash,
+    kind: "genome_mutation",
+    schema_version: LEDGER_SCHEMA_VERSION,
+    entry_id: `${kind}:${slug}:${randomUUID()}`,
+    event: kind,
+    subject_slug: slug,
+    content_hash,
+    dependency_hash,
+    effective_hash,
     output_hashes: [content_hash],
     started_at: now,
     finished_at: now,
@@ -122,17 +136,22 @@ export function sealAgentDefinition(def: AgentDef, ledger: Ledger, genome_dir?: 
   const agent = defineAgent(def); // composition-rule validation (throws on illegal pipeline)
   const { content_hash, dependency_hash, effective_hash } = agentIdentity(def);
   if (genome_dir) {
-    writeGenomeFileVersioned(genome_dir, "agents", def.slug, JSON.stringify(def, null, 2) + "\n");
+    // #218 — seal before write (see sealDefinition).
     const now = new Date().toISOString();
     ledger.append({
-      gig_id: `define:${def.slug}:${randomUUID()}`,
-      standard_slug: "agent_define",
-      genome_hash: effective_hash, // the agent's identity claim
-      run_fingerprint: effective_hash,
+      kind: "genome_mutation",
+      schema_version: LEDGER_SCHEMA_VERSION,
+      entry_id: `agent_define:${def.slug}:${randomUUID()}`,
+      event: "agent_define",
+      subject_slug: def.slug,
+      content_hash,
+      dependency_hash,
+      effective_hash, // the agent's identity claim
       output_hashes: [content_hash],
       started_at: now,
       finished_at: now,
     });
+    writeGenomeFileVersioned(genome_dir, "agents", def.slug, JSON.stringify(def, null, 2) + "\n");
   }
   return { agent, content_hash, dependency_hash, effective_hash };
 }
@@ -153,6 +172,23 @@ export function sealSkillPackage(
   const dependency_hash = EMPTY_DEPENDENCY_HASH;
   const effective_hash = effectiveHash(content_hash, dependency_hash);
   if (genome_dir) {
+    // #218 — seal before write. This helper is the worst offender in the reverse order: it
+    // materialises meta.json, skill.mjs, skill.md and every fixture before appending, so a
+    // failed append left a PARTIAL package plus no identity.
+    const sealedAt = new Date().toISOString();
+    ledger.append({
+      kind: "genome_mutation",
+      schema_version: LEDGER_SCHEMA_VERSION,
+      entry_id: `skill_define:${def.slug}:${randomUUID()}`,
+      event: "skill_define",
+      subject_slug: def.slug,
+      content_hash,
+      dependency_hash,
+      effective_hash,
+      output_hashes: [content_hash],
+      started_at: sealedAt,
+      finished_at: sealedAt,
+    });
     const pkgDir = join(genome_dir, "skills", def.slug);
     mkdirSync(pkgDir, { recursive: true });
     const { fixtures, code, md, ...meta } = def;
@@ -166,16 +202,6 @@ export function sealSkillPackage(
         writeFileSync(join(fxDir, `fixture-${String(i + 1).padStart(3, "0")}.json`), JSON.stringify(fx, null, 2) + "\n"),
       );
     }
-    const now = new Date().toISOString();
-    ledger.append({
-      gig_id: `skill_define:${def.slug}:${randomUUID()}`,
-      standard_slug: "skill_define",
-      genome_hash: effective_hash,
-      run_fingerprint: effective_hash,
-      output_hashes: [content_hash],
-      started_at: now,
-      finished_at: now,
-    });
   }
   return { content_hash, dependency_hash, effective_hash };
 }

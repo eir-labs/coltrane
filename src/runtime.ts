@@ -17,7 +17,7 @@ const CORE_TO_PRIMITIVE: Record<string, Agent["primitives"][number]> = Object.fr
 );
 import { sha256Hex, canonJson, runFingerprint, outputContentHash, CANONICAL_FORM_VERSION } from "./canonical_form.js";
 import type { OutputStore, OutputRecord } from "./outputs.js";
-import type { Ledger, GigUsage } from "./ledger.js";
+import { LEDGER_SCHEMA_VERSION, type Ledger, type GigUsage } from "./ledger.js";
 import type { SkillRecord, EvalRecord } from "./loader.js";
 
 // What an agent invocation sees. The invoker returns the output `data` (validated
@@ -779,6 +779,9 @@ export async function runGig(
   });
 
   deps.ledger.append({
+    kind: "gig",
+    schema_version: LEDGER_SCHEMA_VERSION,
+    entry_id: gig_id,
     gig_id,
     standard_slug: standard.slug,
     genome_hash,

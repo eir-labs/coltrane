@@ -122,6 +122,35 @@ export interface Finding {
 
 export class OutputStoreError extends Error {}
 
+/**
+ * One unreadable line in a persisted jsonl file. Same vocabulary as the ledger's
+ * `LedgerCorruption` (#211) — two stores in one engine should describe damage the same way.
+ */
+export interface OutputStoreCorruption {
+  path: string;
+  line_no: number;
+  reason: string;
+  preview: string;
+}
+
+/**
+ * #248 — skip-and-REPORT, the shape PR #256 established for the ledger.
+ *
+ * A silent skip let a torn append (crash mid-write, disk full) delete an output from `all()`,
+ * `trace()` and `output_query` with no signal at all, so the engine reported a SHORTER CHAIN
+ * as if it were the whole chain. That is the exact INVERSE of the ledger's old problem, where
+ * the same situation threw and took the entire audit surface offline. Two stores, opposite
+ * failure modes, neither correct: one hid corruption, the other was destroyed by it. Reads
+ * stay forgiving — the intact rows keep serving — and this is how an operator learns the
+ * store is damaged.
+ */
+export interface OutputStoreIntegrityReport {
+  ok: boolean;
+  /** jsonl files actually read this session. 0 for a purely in-memory store. */
+  scanned: number;
+  corrupt: OutputStoreCorruption[];
+}
+
 export interface OutputStore {
   // Validates against core+domain schema via registry; throws on invalid (T3). Returns the stored row.
   write(o: OutputWrite): OutputRecord;
@@ -143,6 +172,9 @@ export interface OutputStore {
   // under the right core (a type's core comes from its OWN extends, since an agent's
   // primitives and output_types are not 1:1).
   coreTypeOf(typeSlug: string): string | null;
+  // #248: what was skipped while hydrating from disk. `ok: false` means at least one
+  // persisted row could not be read, so any chain this store reports may be short.
+  integrity(): OutputStoreIntegrityReport;
 }
 
 export interface OutputStoreOptions {
@@ -170,17 +202,27 @@ function appendJsonl(file: string, row: unknown): void {
   fs.appendFileSync(file, JSON.stringify(row) + "\n", "utf8");
 }
 
-function readJsonl<T>(file: string): T[] {
+function readJsonl<T>(file: string, corrupt: OutputStoreCorruption[]): T[] {
   if (!fs.existsSync(file)) return [];
   const text = fs.readFileSync(file, "utf8");
   const rows: T[] = [];
-  for (const raw of text.split("\n")) {
-    const line = raw.trim();
+  const lines = text.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    // `.trim()`, not `.length > 0` — a lone `\r` from a CRLF file is length 1 and would
+    // otherwise reach JSON.parse (same reasoning as FileLedger.read).
+    const line = lines[i]!.trim();
     if (!line) continue;
     try {
       rows.push(JSON.parse(line) as T);
-    } catch {
-      // Skip malformed lines — chain_keeper.py uses the same forgiving shape.
+    } catch (e) {
+      // Still forgiving (chain_keeper.py's shape), but no longer silent (#248). Compatibility
+      // with a forgiving reader is an argument for skipping the line, never for hiding it.
+      corrupt.push({
+        path: file,
+        line_no: i + 1,
+        reason: `unparseable JSON: ${e instanceof Error ? e.message : String(e)}`,
+        preview: line.slice(0, 120),
+      });
     }
   }
   return rows;
@@ -206,6 +248,17 @@ export function createOutputStore(registry: Registry, options?: OutputStoreOptio
   const hydratedGigs = new Set<string>();
   let fullyHydrated = false;
 
+  // #248 — corruption accumulated across every hydrate. Keyed by file so the defensive
+  // orphan-refs re-read in hydrateAll can't double-report the same damaged line.
+  const scannedFiles = new Set<string>();
+  const corruption: OutputStoreCorruption[] = [];
+  function readRows<T>(file: string): T[] {
+    if (!fs.existsSync(file)) return [];
+    if (scannedFiles.has(file)) return readJsonl<T>(file, []); // already accounted for
+    scannedFiles.add(file);
+    return readJsonl<T>(file, corruption);
+  }
+
   function asStr(v: unknown): string | undefined {
     return typeof v === "string" ? v : undefined;
   }
@@ -214,12 +267,12 @@ export function createOutputStore(registry: Registry, options?: OutputStoreOptio
     if (!outputsDir || hydratedGigs.has(gig_id)) return;
     hydratedGigs.add(gig_id);
     const file = path.join(outputsDir, `${gig_id}.jsonl`);
-    for (const rec of readJsonl<OutputRecord>(file)) {
+    for (const rec of readRows<OutputRecord>(file)) {
       if (!outputs.has(rec.id)) outputs.set(rec.id, rec);
     }
     if (refsDir) {
       const refsFile = path.join(refsDir, `${gig_id}.jsonl`);
-      for (const ref of readJsonl<OutputRef>(refsFile)) {
+      for (const ref of readRows<OutputRef>(refsFile)) {
         if (!edges.some((e) => e.id === ref.id)) edges.push(ref);
       }
     }
@@ -235,7 +288,7 @@ export function createOutputStore(registry: Registry, options?: OutputStoreOptio
     // Also pull in any orphan refs files (defensive — addRef writes by from_gig_id).
     if (refsDir) {
       for (const file of listJsonl(refsDir)) {
-        for (const ref of readJsonl<OutputRef>(file)) {
+        for (const ref of readRows<OutputRef>(file)) {
           if (!edges.some((e) => e.id === ref.id)) edges.push(ref);
         }
       }
@@ -409,6 +462,13 @@ export function createOutputStore(registry: Registry, options?: OutputStoreOptio
       if ((CORE_TYPES as readonly string[]).includes(typeSlug)) return typeSlug;
       const dt = registry.listTypes().find((t) => t.slug === typeSlug);
       return dt ? dt.extends : null;
+    },
+
+    integrity() {
+      // Force the full scan first — an integrity report over a partially-hydrated store
+      // would itself be the "shorter chain reported as the whole chain" failure (#248).
+      hydrateAll();
+      return { ok: corruption.length === 0, scanned: scannedFiles.size, corrupt: [...corruption] };
     },
   };
 }

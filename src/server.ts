@@ -780,6 +780,12 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         // separable, instead of a row-count proxy standing in for dollars.
         const cost = deps.ledger.query({ kind: "gig" })
           .reduce((sum, e) => sum + (e.kind === "gig" ? e.usage?.total_cost_usd ?? 0 : 0), 0);
+        // #255 — both audit surfaces compute an honest damage report and nothing ever asked
+        // for it: `integrity` had ZERO call sites in this file. `load_errors` below is the
+        // precedent — a soft-failure channel surfaced here because CLAUDE.md sends operators
+        // to system_health first. Corruption belongs in the same place and reads as loudly.
+        const ledger_integrity = deps.ledger.integrity();
+        const outputs_integrity = deps.outputs.integrity();
         const outs = deps.outputs.all();
         const type_stats: Record<string, number> = {};
         const agent_stats: Record<string, number> = {};
@@ -795,6 +801,16 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
             tool_stats: {}, bottlenecks: [], budget: { spent: cost, remaining: null },
             // Rob #129 — surface what was skipped at load so operators see broken files
             load_errors: deps.load_errors ?? [],
+            // #255 — the damage reports, and an honest label on everything derived from them.
+            ledger_integrity,
+            outputs_integrity,
+            // gigs_run / cost / outputs / type_stats / agent_stats are all computed over the
+            // rows that PARSED. With a corrupt line present those totals are SHORT, and a
+            // short total presented as a whole one is a fabricated measurement — the same
+            // finding as #238 and #248. Say so rather than letting the number speak for
+            // itself: a number that is wrong but looks right is worse than a missing one,
+            // because the missing one gets investigated.
+            counts_complete: ledger_integrity.ok && outputs_integrity.ok,
             // genome extension — per-slug layer provenance, queryable at runtime (e.g.
             // a consumer checking "is this player coming from where I expect" before composing)
             provenance: deps.provenance ? Object.fromEntries(deps.provenance) : {},

@@ -16,7 +16,7 @@ import { join } from "node:path";
 import { dispatchTool, type ServerDeps } from "../src/server.js";
 import { createRegistry, type DomainType } from "../src/registry.js";
 import { createOutputStore } from "../src/outputs.js";
-import { MemoryLedger, LedgerError, type Ledger, type LedgerEntry, type LedgerQuery } from "../src/ledger.js";
+import { MemoryLedger, LedgerError, type Ledger, type LedgerEntry, type LedgerQuery, type LedgerIntegrityReport } from "../src/ledger.js";
 import { sealAgentDefinition, sealSkillPackage, sealDefinition } from "../src/genome_writer.js";
 
 type Row = Record<string, unknown>;
@@ -52,6 +52,10 @@ class ThrowingLedger implements Ledger {
   }
   query(_filter?: LedgerQuery): LedgerEntry[] { return []; }
   count(): number { return 0; }
+  // #255 put integrity() on the Ledger interface. This double models a ledger whose
+  // WRITES fail (ENOSPC); nothing it holds was ever parsed from bytes, so there is no
+  // torn line to report and `ok: true` is the honest answer for the surface it models.
+  integrity(): LedgerIntegrityReport { return { ok: true, path: "", entries: 0, corrupt: [] }; }
 }
 
 // ────────────────────────────────────────────────────────────────────────────

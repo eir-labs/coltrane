@@ -3,8 +3,9 @@
 // The relay's correctness reduces to: which inbound messages does it
 // intercept (server_restart), which outbound responses does it augment
 // (tools/list), and what does it forward verbatim (everything else). The
-// child-process spawn/kill loop is harder to test in-process; that's
-// covered by the e2e harness when the relay ships to a real client.
+// child-process spawn/kill loop is harder to test in-process; the FAILING
+// half of it (a swap whose new child never serves) is pinned by
+// tests/relay_restart_failure.test.ts, which drives the real relay over stdio.
 
 import { describe, it, expect } from "vitest";
 import {
@@ -12,6 +13,8 @@ import {
   isToolsListResponse,
   augmentToolsList,
   buildRestartResponse,
+  buildRestartError,
+  buildNoChildError,
   initRequestId,
 } from "../src/server_relay.js";
 
@@ -141,6 +144,44 @@ describe("server_relay — restart response shape", () => {
   it("preserves null id (matches the client's notification-shaped id)", () => {
     const resp = buildRestartResponse(null);
     expect(resp.id).toBe(null);
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// #260 — a restart that did not produce a serving child must SAY SO
+// ────────────────────────────────────────────────────────────────────────────
+describe("server_relay — a failed swap is reportable, not silent", () => {
+  it("buildRestartError carries the id and a JSON-RPC error, never a result", () => {
+    const resp = buildRestartError(2, "the new child exited (code=1, signal=null) before completing the MCP handshake");
+    expect(resp.id).toBe(2);
+    expect(resp.result, "a failed restart must not come back shaped like a success").toBeUndefined();
+    expect(resp.error).toBeDefined();
+    expect((resp.error as { code: number }).code).toBe(-32001);
+  });
+
+  it("its message says the restart FAILED and why", () => {
+    const msg = (buildRestartError(2, "the new child exited (code=1, signal=null)").error as { message: string }).message;
+    expect(msg).toMatch(/restart FAILED/i);
+    expect(
+      msg,
+      "buildRestartResponse's text is 'New child process is up and serving'. Emitting that " +
+        "over a dead child is what turned a boot failure into an unbounded client-side hang.",
+    ).toContain("code=1");
+    expect(msg).not.toMatch(/up and serving/i);
+  });
+
+  it("buildNoChildError names the method that could not be answered", () => {
+    const resp = buildNoChildError(3, "tools/call");
+    expect(resp.id).toBe(3);
+    expect(resp.result).toBeUndefined();
+    const msg = (resp.error as { message: string }).message;
+    expect(msg).toContain("tools/call");
+    expect(msg).toMatch(/no live server child/i);
+  });
+
+  it("both preserve a null id", () => {
+    expect(buildRestartError(null, "why").id).toBe(null);
+    expect(buildNoChildError(null, "tools/list").id).toBe(null);
   });
 });
 

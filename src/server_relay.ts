@@ -118,6 +118,58 @@ export function buildRestartResponse(id: string | number | null): JsonRpcMessage
   };
 }
 
+/** JSON-RPC implementation-defined server error (the -32000..-32099 reserved band). */
+const RELAY_ERROR_CODE = -32001;
+
+/**
+ * Build the JSON-RPC ERROR the relay returns when a restart did NOT produce a serving child.
+ *
+ * The bug this closes (#260): `restartChild` could not fail. Its handshake-replay safety
+ * timer resolved the SAME promise the real handshake did, so "the new child never answered"
+ * and "the new child is serving" both ended in `buildRestartResponse` — the relay told the
+ * client "New child process is up and serving" over a corpse. Every subsequent tools/call was
+ * then written into a dead pipe and never answered: an UNBOUNDED hang, surfacing as whatever
+ * client-side timeout ran out first. An error response is recoverable; a hang is not.
+ */
+export function buildRestartError(id: string | number | null, reason: string): JsonRpcMessage {
+  return {
+    jsonrpc: "2.0",
+    id,
+    error: {
+      code: RELAY_ERROR_CODE,
+      message:
+        `Coltrane MCP server restart FAILED — ${reason}. The previous child was already ` +
+        "stopped, so this server is now serving nothing. Check the relay's stderr, rebuild " +
+        "(`npm run build`), and restart the MCP client.",
+    },
+  };
+}
+
+/**
+ * Build the JSON-RPC ERROR for a request that arrived when no child is alive to answer it.
+ * Without this the relay writes the request into a dead child's stdin, where it is silently
+ * discarded and the caller waits forever.
+ */
+export function buildNoChildError(id: string | number | null, method: string): JsonRpcMessage {
+  return {
+    jsonrpc: "2.0",
+    id,
+    error: {
+      code: RELAY_ERROR_CODE,
+      message:
+        `Coltrane MCP relay has no live server child — "${method}" cannot be answered. ` +
+        "The child exited (see the relay's stderr for its exit code). Rebuild " +
+        "(`npm run build`) and restart the MCP client.",
+    },
+  };
+}
+
+/** How long a fresh child gets to answer the replayed `initialize` before the restart FAILS. */
+export const HANDSHAKE_REPLAY_TIMEOUT_MS = 10_000;
+
+/** The outcome of one child swap. `ok: false` must reach the client — see buildRestartError. */
+export type RestartOutcome = { ok: true } | { ok: false; reason: string };
+
 /** Parse the `initialize` request's id from a captured raw line (null if unparseable). */
 export function initRequestId(line: string | null): string | number | null | undefined {
   if (!line) return undefined;
@@ -134,6 +186,12 @@ export function initRequestId(line: string | null): string | number | null | und
  * call forever → the client hangs. So the relay CAPTURES the client's `initialize` request +
  * `notifications/initialized`, and REPLAYS them to every new child before un-gating it —
  * swallowing the replay's duplicate `initialize` response so the client never sees it twice.
+ *
+ * And a swap CAN fail — the new child is spawned from `dist/`, which the relay exists to let
+ * you rewrite underneath it, so "the fresh bytes don't boot" is a first-class outcome, not an
+ * impossibility. Every path out of this function answers the client: a failed swap returns a
+ * JSON-RPC error, and any later request that arrives with no live child is answered with one
+ * too. The relay never leaves a caller waiting on a process that is gone (#260).
  */
 export async function runRelay(opts: { entryPath: string }): Promise<void> {
   let child = spawnChild(opts.entryPath);
@@ -147,6 +205,11 @@ export async function runRelay(opts: { entryPath: string }): Promise<void> {
   let onInitReplayed: (() => void) | null = null;
 
   const forwardChildToParent = (c: RelayChild) => {
+    // A write into a child that has already exited raises EPIPE as an 'error' event; unhandled,
+    // that takes the whole relay down and severs the client pipe the relay exists to protect.
+    c.stdin.on("error", (e: Error) => {
+      process.stderr.write(`[coltrane-relay] child stdin error: ${e.message}\n`);
+    });
     const rl = createInterface({ input: c.stdout });
     rl.on("line", (line) => {
       let msg: JsonRpcMessage | null = null;
@@ -182,15 +245,15 @@ export async function runRelay(opts: { entryPath: string }): Promise<void> {
 
   forwardChildToParent(child);
 
-  const restartChild = async (): Promise<void> => {
-    if (child.exitCode === null) {
+  const restartChild = async (): Promise<RestartOutcome> => {
+    if (child.exitCode === null && child.signalCode === null) {
       child.kill("SIGTERM");
       // Give it 2s to exit cleanly; otherwise SIGKILL.
       await Promise.race([
         new Promise<void>((res) => child.once("exit", () => res())),
         new Promise<void>((res) =>
           setTimeout(() => {
-            if (child.exitCode === null) child.kill("SIGKILL");
+            if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
             res();
           }, 2000),
         ),
@@ -198,23 +261,71 @@ export async function runRelay(opts: { entryPath: string }): Promise<void> {
     }
     child = spawnChild(opts.entryPath);
     forwardChildToParent(child);
+    // The client never initialized, so there is no handshake to replay and nothing to wait on.
+    if (!storedInit) return { ok: true };
     // Replay the captured handshake so the new child reaches serving state BEFORE the relay
     // tells the client the restart is done. Without this the next tools/call hangs forever.
-    if (storedInit) {
-      await new Promise<void>((resolve) => {
-        onInitReplayed = resolve;
-        replayInitId = initRequestId(storedInit);
-        child.stdin.write(storedInit + "\n");
-        // Safety: if the new child never answers the handshake, don't wedge the relay forever.
-        setTimeout(() => {
-          if (onInitReplayed) {
-            replayInitId = undefined;
-            onInitReplayed = null;
-            resolve();
-          }
-        }, 10_000);
-      });
+    //
+    // #260 — and the three ways this can END are three DIFFERENT answers, not one. Previously
+    // the safety timer called the same `resolve()` the real handshake did, so a child that
+    // died on boot (stale/half-written `dist/`, a missing module, a bad genome) produced
+    // "restarted, up and serving" 10s later and then hung every call after it. Failure has to
+    // be reportable or it is indistinguishable from success.
+    const fresh = child;
+    return await new Promise<RestartOutcome>((resolve) => {
+      let settled = false;
+      const finish = (outcome: RestartOutcome): void => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        fresh.off("exit", onFreshExit);
+        replayInitId = undefined;
+        onInitReplayed = null;
+        resolve(outcome);
+      };
+      // Fail FAST on a dead child — waiting out the full safety timeout for a process we
+      // already know is gone only delays the diagnosis.
+      const onFreshExit = (code: number | null, signal: NodeJS.Signals | null): void => {
+        finish({
+          ok: false,
+          reason:
+            `the new child exited (code=${code ?? "null"}, signal=${signal ?? "null"}) ` +
+            "before completing the MCP handshake",
+        });
+      };
+      const timer = setTimeout(() => {
+        finish({
+          ok: false,
+          reason: `the new child did not answer the replayed MCP initialize within ${HANDSHAKE_REPLAY_TIMEOUT_MS}ms`,
+        });
+      }, HANDSHAKE_REPLAY_TIMEOUT_MS);
+      onInitReplayed = (): void => { finish({ ok: true }); };
+      replayInitId = initRequestId(storedInit);
+      fresh.once("exit", onFreshExit);
+      fresh.stdin.write(storedInit + "\n");
+    });
+  };
+
+  /** Is there a child that can actually receive a message right now? */
+  const childAlive = (): boolean =>
+    child.exitCode === null && child.signalCode === null && child.stdin.writable;
+
+  /**
+   * Forward one client line to the child — or, when no child is alive to receive it, ANSWER
+   * it. A request written into a dead pipe is silently discarded and the caller waits forever;
+   * that unbounded wait is the failure mode this converts into a visible JSON-RPC error.
+   */
+  const forwardToChild = (line: string, msg: JsonRpcMessage | null): void => {
+    if (childAlive()) {
+      child.stdin.write(line + "\n");
+      return;
     }
+    // A request carries an id (a notification does not) — only a request has a caller waiting.
+    if (msg?.method !== undefined && msg.id !== undefined) {
+      process.stdout.write(JSON.stringify(buildNoChildError(msg.id, msg.method)) + "\n");
+      return;
+    }
+    process.stderr.write("[coltrane-relay] dropped a message: no live server child\n");
   };
 
   const parentIn = createInterface({ input: process.stdin });
@@ -223,7 +334,7 @@ export async function runRelay(opts: { entryPath: string }): Promise<void> {
     try {
       msg = JSON.parse(line) as JsonRpcMessage;
     } catch {
-      child.stdin.write(line + "\n");
+      forwardToChild(line, null);
       return;
     }
     if (msg) {
@@ -234,14 +345,19 @@ export async function runRelay(opts: { entryPath: string }): Promise<void> {
       const restartId = matchServerRestart(msg);
       if (restartId !== undefined) {
         // Handle locally. Reply only after the new child is up AND re-initialized, so the
-        // client's next tool call lands on a serving child rather than hanging.
-        void restartChild().then(() => {
-          process.stdout.write(JSON.stringify(buildRestartResponse(restartId)) + "\n");
+        // client's next tool call lands on a serving child rather than hanging — and reply
+        // with an ERROR when it did not, so a failed swap is diagnosable instead of silent.
+        void restartChild().then((outcome) => {
+          const reply = outcome.ok
+            ? buildRestartResponse(restartId)
+            : buildRestartError(restartId, outcome.reason);
+          if (!outcome.ok) process.stderr.write(`[coltrane-relay] restart failed: ${outcome.reason}\n`);
+          process.stdout.write(JSON.stringify(reply) + "\n");
         });
         return;
       }
     }
-    child.stdin.write(line + "\n");
+    forwardToChild(line, msg);
   });
 
   // Keep the process alive while the child is up.

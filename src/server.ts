@@ -1494,6 +1494,23 @@ const SIGNAL_EXIT_CODE: Readonly<Record<string, number>> = { SIGTERM: 143, SIGIN
  * way out. (Killing the process GROUP would be airtight but takes children out of the server's
  * group, so an operator Ctrl-C would stop reaching them — deliberately not taken.)
  */
+/**
+ * The SIGTERM→SIGKILL grace the SHUTDOWN path passes to `killLiveChairChildren` — zero, on
+ * purpose (#260).
+ *
+ * `terminateChild` implements its grace as a `setTimeout(...).unref()`, and `shutdown()` below
+ * calls `proc.exit()` on the very next line. An unref'd timer in a process that is already
+ * leaving can never fire, so any POSITIVE grace here means the escalation is skipped entirely
+ * and a SIGTERM-trapping `claude` child survives exactly the shutdown that #252 added to take
+ * it with us — still running, still billing, and now with no parent tracking it. A zero grace
+ * escalates inline instead: SIGTERM then SIGKILL, both before we exit.
+ *
+ * The cooperative window is not lost, only relocated: the CANCELLATION path
+ * (`spawnStreaming`'s abort listener) keeps running afterwards, so it keeps
+ * `DEFAULT_ABORT_GRACE_MS` and its timer genuinely fires.
+ */
+export const SHUTDOWN_CHILD_GRACE_MS = 0;
+
 export function installShutdownHandlers(
   opts: { flush?: (() => void) | undefined; killChildren?: (() => void) | undefined },
   proc: ShutdownProcess = process as unknown as ShutdownProcess,
@@ -1520,8 +1537,10 @@ export async function runStdioServer(deps?: ServerDeps): Promise<void> {
   const server = createColtraneServer(resolved, recorder ?? undefined);
   installShutdownHandlers({
     ...(recorder ? { flush: (): void => { recorder.flush(); } } : {}),
-    // unconditional: the orphan half has nothing to do with the recorder
-    killChildren: (): void => { killLiveChairChildren(); },
+    // unconditional: the orphan half has nothing to do with the recorder.
+    // Zero grace — see SHUTDOWN_CHILD_GRACE_MS: the default grace is an unref'd timer that
+    // cannot fire in a process that exits on the next line.
+    killChildren: (): void => { killLiveChairChildren(SHUTDOWN_CHILD_GRACE_MS); },
   });
   await server.connect(new StdioServerTransport());
 }

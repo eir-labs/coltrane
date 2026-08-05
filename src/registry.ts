@@ -70,6 +70,92 @@ function isCoreType(slug: string): slug is CoreType {
   return (CORE_TYPES as readonly string[]).includes(slug);
 }
 
+/** Which property each core requires as its substance floor (#227/#228). */
+const CORE_SUBSTANCE_FIELD: Readonly<Record<string, string | undefined>> = {
+  Signal: "source",
+  Interpretation: "claims",
+  Plan: "steps",
+  Judgment: "criteria",
+  Artifact: "validation_criteria",
+  Verdict: "checks",
+};
+
+/**
+ * Describe how an overload makes a type UNSEALABLE, or null when it does not.
+ *
+ * Only a TYPE mismatch qualifies, and that is a deliberate narrowing after measurement. The
+ * other two overloads worth worrying about — a weakened `minItems`, a dropped per-item
+ * `required` — are already backstopped at runtime: `output_validation.ts` rejects an empty
+ * floor array outright and enforces `item_requires` per item, whatever the subtype's schema
+ * says. So they change nothing observable, and refusing them would reject types the engine's
+ * own suite builds ON PURPOSE (`seal_core_invariant_wiring.test.ts` constructs a loose
+ * `loose-doc` precisely to prove the floor catches what the schema permits).
+ *
+ * A type mismatch is different in kind: the floor wants an array and the schema wants a
+ * string, so NO payload satisfies both and the type is dead on arrival. That is #264's live
+ * example — `fix-plan` declaring `steps: { type: "string" }`.
+ */
+function overloadClash(base: Record<string, unknown> | undefined, own: Record<string, unknown>): string | null {
+  if (!base) return null;
+  if (typeof base["type"] === "string" && typeof own["type"] === "string" && base["type"] !== own["type"]) {
+    return `core declares type "${String(base["type"])}", subtype declares "${String(own["type"])}"`;
+  }
+  return null;
+}
+
+/**
+ * The rules a domain type must satisfy to be REPRESENTABLE at all — as distinct from the
+ * per-output checks in `validate()`.
+ *
+ * Exported because there are two doors into the type table — `registerType` here and the
+ * loader reading files off disk — and a rule enforced at only one of them is a rule with a
+ * way around it. Returns a reason, or null when the type is fine.
+ */
+export function domainTypeDefect(def: { slug: string; extends: string; schema?: unknown }): string | null {
+  // #272 — a domain type must not be NAMED after a core.
+  //
+  // `coreTypeOf` answers "what core is this really" by short-circuiting on CORE_TYPES before
+  // consulting the registry. So a type registered as `Signal` resolves to "Signal" on its
+  // NAME while the registry says it extends something else, and the core-agreement check
+  // (#263) inverts: the contradicted pair seals, the correct pair is refused, and the
+  // rejection asserts something about the registry that is not true.
+  //
+  // Refusing the name is cheaper and stronger than teaching every resolver to disambiguate —
+  // the ambiguity stops being representable.
+  // Narrowly: only when the slug names a core it does NOT extend. `{slug:"Signal",
+  // extends:"Signal"}` is a legitimate bare-core alias — both answers agree, so there is no
+  // ambiguity to resolve and several suites rely on it. The defect is a name that claims one
+  // core while `extends` says another, which is what makes the two resolutions disagree.
+  if (isCoreType(def.slug) && def.slug !== def.extends) {
+    return `slug "${def.slug}" names a core type but extends "${def.extends}" — "what core is this" would have two contradictory answers (the name says ${def.slug}, the registry says ${def.extends}), and resolution short-circuits on the NAME`;
+  }
+
+  // #264 — a floor field overloaded into something the core forbids.
+  //
+  // `{...baseProps, ...ownProps}` lets a subtype's declaration win silently, so redeclaring
+  // e.g. `steps` as a string yields a type NO payload can satisfy: the merged schema wants a
+  // string, the substance floor wants a non-empty array. The genome loads clean, load_errors
+  // is empty, and the first symptom is a seal abort at a terminal phase — the #1 documented
+  // footgun downstream.
+  //
+  // NARROWING stays legal, and is the common legitimate case (`grant-opportunity` narrows
+  // Signal's `source` to an enum, which strengthens the floor). Only contradiction is refused.
+  const floor = CORE_SUBSTANCE_FIELD[def.extends];
+  if (floor) {
+    const own = (def.schema as { properties?: Record<string, unknown> } | undefined)?.properties?.[floor];
+    if (own !== undefined) {
+      const clash = overloadClash(
+        CORE_SCHEMA_PROPS[def.extends]?.[floor] as Record<string, unknown> | undefined,
+        own as Record<string, unknown>,
+      );
+      if (clash) {
+        return `redeclares "${floor}", the substance floor inherited from ${def.extends}, with an incompatible type (${clash}) — the runtime floor and this schema cannot both be satisfied, so the type is unsealable under any input`;
+      }
+    }
+  }
+  return null;
+}
+
 export function createRegistry(initial: DomainType[] = []): Registry {
   const ajv = new Ajv({ allErrors: true, strict: false });
   const types = new Map<string, DomainType>();
@@ -102,6 +188,8 @@ export function createRegistry(initial: DomainType[] = []): Registry {
       if (!isCoreType(def.extends)) {
         throw new Error(`extends must be a core type, got "${def.extends}"`);
       }
+      const defect = domainTypeDefect(def);
+      if (defect) throw new Error(`domain type "${def.slug}" rejected: ${defect}`);
       const resolved = score({ extends: def.extends, domain: def.domain, required_fields: def.required_fields });
       if (resolved.score >= 80) {
         throw new Error(`reuse enforcement: an existing type scores ${resolved.score} (>=80)`);

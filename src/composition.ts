@@ -191,6 +191,8 @@ export function defineAgent(def: AgentDef): Agent {
 export function composeStandard(def: {
   slug: string;
   domain: string;
+  /** #203 — lifecycle, carried through so a composed standard cannot launder a deprecation. */
+  status?: "active" | "deprecated" | "retired";
   agents: readonly Agent[];
   phases: readonly PhaseDef[];
   eval_slugs?: readonly string[];

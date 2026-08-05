@@ -1,4 +1,5 @@
 import { readdirSync, readFileSync, existsSync, statSync, writeFileSync, mkdirSync } from "node:fs";
+import { domainTypeDefect } from "./registry.js";
 import { join, extname, resolve, isAbsolute, dirname } from "node:path";
 import { createRequire } from "node:module";
 import { defineAgent, composeStandard, CompositionError, GenomeIncompleteError, type Agent, type AgentDef, type Standard, type PhaseDef } from "./composition.js";
@@ -36,6 +37,8 @@ export interface StandardFileDef {
   output_types?: readonly string[];
   max_examine_rounds?: number;
   description?: string;
+  /** #203 — lifecycle. Read from the file so a deprecation survives the round trip. */
+  status?: "active" | "deprecated" | "retired";
 }
 // Skills and evals derive their shape from the single Zod source (genome_schema.ts) — the
 // {slug;[k]:unknown} bag is retired. The runtime SkillRecord is the validated meta PLUS the
@@ -234,6 +237,10 @@ export function loadGenome(
           `field "extends" references "${d.extends}" which is not a core type`,
         );
       }
+      // The same representability rules registerType applies (#272, #264) — one owner, so a
+      // type authored on disk cannot slip past a check a type registered via MCP would hit.
+      const defect = domainTypeDefect(d);
+      if (defect) throw new Error(defect);
       // Validate the file shape against the single Zod source (genome_schema.ts). Soft-fail per
       // the domain_types stance above — a malformed type file is a typed LoadError, not a genome kill.
       const typeCheck = DomainTypeSchema.safeParse(d);
@@ -332,6 +339,10 @@ export function loadGenome(
         ...(def.input_types ? { input_types: def.input_types } : {}),
         // #genome-schema: fields the file declares must reach the runtime Standard, not be dropped.
         ...(def.output_types ? { output_types: def.output_types } : {}),
+        // #203 — the LOADER applies the lifecycle default. `status` is optional on the schema
+        // so an in-memory Standard need not restate it, but anything read from disk carries
+        // one — which is what makes "is this standard retired?" a question with an answer.
+        status: def.status ?? "active",
         ...(def.max_examine_rounds !== undefined ? { max_examine_rounds: def.max_examine_rounds } : {}),
         ...(def.description ? { description: def.description } : {}),
       }));

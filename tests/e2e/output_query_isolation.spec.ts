@@ -81,13 +81,29 @@ const analystB: Agent = { ...TEST_BEHAVIOR,
   domain: "eirtests",
 };
 
+// FIXTURE, updated for #245. The `interpret` chairs used to declare `depends_on: []` and an
+// empty `input_contract` while their bound analysts declare `input_types: ["page-model"]` — so
+// the analyst was invoked with `inputs: []` and invented a finding out of nothing. That is
+// exactly the hallucination shape the runtime now refuses, and it was incidental to what this
+// spec measures (output_query's gig isolation), not part of it. The chairs are now wired to
+// their real upstream. Every assertion below is unchanged, and the spec gets STRONGER: each gig
+// now carries a genuine intra-gig `derived_from` edge, so the claim "output_query filters by
+// gig_id and does not walk edges" is tested against real provenance, not only the synthetic
+// cross-gig edges the tests add by hand.
+//
+// The dispatches below also gained `wait: true`. `gig_dispatch` is ASYNC by default, so every
+// test here was reading `output_query` against a gig still in flight and relying on the run
+// finishing within the same microtask drain — a latent race that happened to hold only because
+// the un-wired `interpret` chair resolved no dependencies. Wiring the chair added a turn and
+// the race started losing. `wait: true` is the spec's existing synchronous opt-in; it makes the
+// isolation claims deterministic instead of accidentally true.
 const standardA: Standard = {
   slug: "scan-A",
   domain: "eirtests",
   agents: [scoutA, analystA],
   phases: [
     { name: "sense", chairs: [{ role: "sense", agent_slug: "scout-A", depends_on: [], input_contract: [], output_contract: ["page-model"], required_skills: [] }] },
-    { name: "interpret", chairs: [{ role: "interpret", agent_slug: "analyst-A", depends_on: [], input_contract: [], output_contract: ["finding"], required_skills: [] }] },
+    { name: "interpret", chairs: [{ role: "interpret", agent_slug: "analyst-A", depends_on: ["sense"], input_contract: ["page-model"], output_contract: ["finding"], required_skills: [] }] },
   ],
 };
 const standardB: Standard = {
@@ -96,7 +112,7 @@ const standardB: Standard = {
   agents: [scoutB, analystB],
   phases: [
     { name: "sense", chairs: [{ role: "sense", agent_slug: "scout-B", depends_on: [], input_contract: [], output_contract: ["page-model"], required_skills: [] }] },
-    { name: "interpret", chairs: [{ role: "interpret", agent_slug: "analyst-B", depends_on: [], input_contract: [], output_contract: ["finding"], required_skills: [] }] },
+    { name: "interpret", chairs: [{ role: "interpret", agent_slug: "analyst-B", depends_on: ["sense"], input_contract: ["page-model"], output_contract: ["finding"], required_skills: [] }] },
   ],
 };
 
@@ -139,12 +155,12 @@ describe("output_query isolation across gigs (T7 follow-up)", () => {
 
     const da = await dispatchTool(
       "gig_dispatch",
-      { standard_slug: "scan-A", input: {} },
+      { standard_slug: "scan-A", input: {}, wait: true },
       deps,
     );
     const db = await dispatchTool(
       "gig_dispatch",
-      { standard_slug: "scan-B", input: {} },
+      { standard_slug: "scan-B", input: {}, wait: true },
       deps,
     );
     const gigA = (da.data as { gig_id: string }).gig_id;
@@ -178,12 +194,12 @@ describe("output_query isolation across gigs (T7 follow-up)", () => {
 
     const da = await dispatchTool(
       "gig_dispatch",
-      { standard_slug: "scan-A", input: {} },
+      { standard_slug: "scan-A", input: {}, wait: true },
       deps,
     );
     const db = await dispatchTool(
       "gig_dispatch",
-      { standard_slug: "scan-B", input: {} },
+      { standard_slug: "scan-B", input: {}, wait: true },
       deps,
     );
     const gigA = (da.data as { gig_id: string }).gig_id;
@@ -221,12 +237,12 @@ describe("output_query isolation across gigs (T7 follow-up)", () => {
 
     const da = await dispatchTool(
       "gig_dispatch",
-      { standard_slug: "scan-A", input: {} },
+      { standard_slug: "scan-A", input: {}, wait: true },
       deps,
     );
     const db = await dispatchTool(
       "gig_dispatch",
-      { standard_slug: "scan-B", input: {} },
+      { standard_slug: "scan-B", input: {}, wait: true },
       deps,
     );
     const gigA = (da.data as { gig_id: string }).gig_id;
@@ -252,12 +268,12 @@ describe("output_query isolation across gigs (T7 follow-up)", () => {
 
     const da = await dispatchTool(
       "gig_dispatch",
-      { standard_slug: "scan-A", input: {} },
+      { standard_slug: "scan-A", input: {}, wait: true },
       deps,
     );
     const db = await dispatchTool(
       "gig_dispatch",
-      { standard_slug: "scan-B", input: {} },
+      { standard_slug: "scan-B", input: {}, wait: true },
       deps,
     );
     const gigA = (da.data as { gig_id: string }).gig_id;

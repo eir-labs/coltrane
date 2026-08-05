@@ -11,6 +11,25 @@ export interface GigUsage {
   total_cost_usd: number;
   /** actual model id → its spend (the model that ran, not just the configured tier). */
   by_model: Record<string, { input_tokens: number; output_tokens: number; cost_usd: number }>;
+
+  // ── attribution (#235) ────────────────────────────────────────────────────────────────────
+  // The scalars above used to be reported with no indication of how much of the gig they
+  // covered. One boolean (`sawUsage`) gated persistence, flipped by the FIRST result event, so
+  // a six-phase gig where five children were SIGKILLed and one completed persisted one chair's
+  // cost as the gig's settled spend — and it read as complete. These four fields make the
+  // difference between "captured everything", "captured some", and "captured nothing"
+  // expressible. All four are absent on ledger rows written before this accounting existed;
+  // absence means "unknown coverage", not "complete".
+
+  /** Model invocations this gig STARTED (skill-backed chairs run no model and are not counted). */
+  invocations?: number;
+  /** Of those, how many produced no usable usage payload. Their spend is UNKNOWN, not zero. */
+  unattributed_invocations?: number;
+  /** Set ONLY when unattributed_invocations > 0: the scalars above are a LOWER BOUND. */
+  partial?: true;
+  /** Set ONLY when ≥1 attributed invocation carried no `modelUsage` breakdown: `by_model` does
+   *  not account for the whole of `total_cost_usd` and is itself a LOWER BOUND. */
+  by_model_partial?: true;
 }
 
 /**

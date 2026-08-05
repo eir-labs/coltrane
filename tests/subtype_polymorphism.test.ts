@@ -110,11 +110,25 @@ describe("subtype polymorphism: a core-type contract accepts any domain subtype"
     const { outputs, ledger } = setup();
     // base-analyst variant that declares a DOMAIN input — must NOT accept widget-finding
     const exactAnalyst: Agent = { ...TEST_BEHAVIOR, ...baseAnalyst, slug: "exact-analyst", input_types: ["assessment"] };
+    // FIXTURE, updated for #245. Phase 0 now also produces the `assessment` the analyst
+    // declares it consumes. Before the runtime grew a floor on empty inputs, this chair was
+    // invoked with `inputs: []` and the exclusion below held VACUOUSLY — an empty array
+    // contains nothing. With a real `assessment` on the frontier the analyst receives
+    // exactly one input and the assertion becomes load-bearing: `widget-finding` (a
+    // Interpretation subtype) is still not pulled in by a DOMAIN-type declaration, which is
+    // the claim this test exists to make. The assertion itself is unchanged.
+    const rater: Agent = { ...TEST_BEHAVIOR, slug: "rater", primitives: ["JUDGE"], input_types: [], output_types: ["assessment"], domain: "base" };
     const exactStandard: Standard = {
       ...standard,
-      agents: [finder, exactAnalyst],
+      agents: [finder, rater, exactAnalyst],
       phases: [
-        standard.phases[0]!,
+        {
+          name: "find",
+          chairs: [
+            ...standard.phases[0]!.chairs,
+            { role: "rate", agent_slug: "rater", depends_on: [], input_contract: [], output_contract: ["assessment"], required_skills: [] },
+          ],
+        },
         { name: "assess", chairs: [{ role: "assess", agent_slug: "exact-analyst", depends_on: [], input_contract: [], output_contract: ["assessment"], required_skills: [] }] },
       ],
     };
@@ -124,6 +138,7 @@ describe("subtype polymorphism: a core-type contract accepts any domain subtype"
       return agent.slug === "finder" ? { note: "found" } : { verdict: "ok" };
     };
     await runGig(exactStandard, {}, { outputs, ledger, invoke });
+    expect(seen["exact-analyst"], "the exact-typed input IS delivered").toEqual(["assessment"]);
     expect(seen["exact-analyst"], "a domain-type input must not pull an unrelated subtype").not.toContain(
       "widget-finding",
     );

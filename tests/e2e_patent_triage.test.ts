@@ -149,7 +149,15 @@ describe("patent-triage-v0 end-to-end via deterministic invoker", () => {
       throw new Error(`bad slug: ${ctx.agent.slug}`);
     };
 
-    const result = await runGig(standard, {}, {
+    // FIXTURE, updated for #245: this used to dispatch the real pipeline with an EMPTY gig
+    // payload, so the entry chair's agent — which declares `input_types: ["invention-spec"]` —
+    // was invoked with nothing to work from and the deterministic invoker fabricated a claim
+    // draft out of thin air. That is the hallucination shape the runtime now refuses when
+    // nothing could have supplied the declared type by any route. The pipeline gets the same
+    // seed its sibling test above uses; every assertion below is unchanged.
+    const result = await runGig(standard, {
+      description: "An ordered method for ranking input documents by their distance to a labeled reference set.",
+    }, {
       outputs, ledger: new MemoryLedger(), invoke, model_version: "trace-test",
     });
 

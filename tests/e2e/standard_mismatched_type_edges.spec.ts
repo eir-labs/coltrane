@@ -22,14 +22,26 @@
 //
 //          const inputs = produced.filter((o) => agent.input_types.includes(o.domain_type));
 //
-//      yields [] for the mismatched phase. Today the runtime does NOT fail loud
-//      on empty inputs — it invokes the agent with `inputs: []` and writes whatever
-//      data comes back. We assert that observed behavior so any future "strict
-//      input-edge runtime check" addition trips this test for the right reason.
+//      yields [] for the mismatched phase. The runtime USED to invoke the agent
+//      with `inputs: []` and seal whatever came back. #245 closed most of that gap:
+//      a chair whose bound agent declares input_types it cannot be given now fails
+//      loud. The two runtime probes below were written as pre-authorized REDs — the
+//      original header invited "any future strict input-edge runtime check" to trip
+//      them. It has, PARTIALLY, and the split is recorded honestly:
+//
+//        * probe 5 (a DOWNSTREAM consumer whose upstream produces the wrong type)
+//          now asserts REJECTION. Fully flipped.
+//        * probe 2 (a phase-0 ENTRY chair with a non-empty gig payload) still asserts
+//          the old behavior, because a runtime check cannot close it without breaking
+//          `standards/patent-triage-v0.json`, which ships that exact shape. Its
+//          empty-payload sibling IS closed and asserted alongside it. Closing the rest
+//          is a definition fix (#156 typed gig inputs), not a runtime one.
 //
 // Honest about scope: this is a fingerprint of TODAY's composer + runtime, with
-// the scope boundaries named in the assertions. The gaps recorded here are the bug-bash
-// findings — when they get closed, the test gets flipped to assert rejection.
+// the scope boundaries named in the assertions. The COMPOSITION gaps recorded here
+// (phase-0 unguarded, empty-string slug short-circuit) are still open — they are
+// composer-side, and the runtime check is what now stops most of them being
+// user-visible.
 //
 // Pattern lifted from standard_with_cycle.spec.ts (sequential it() blocks,
 // MemoryLedger + in-memory registry, no tempdir needed — pure
@@ -118,7 +130,7 @@ describe("standard with mismatched type-edges (adversarial unique-unknown)", () 
   //    Bug-bash finding: there is no surface that verifies phase-0 input_types
   //    against gig_input shape. Garbage in, garbage through.
   // ──────────────────────────────────────────────────────────────────────────
-  it("APOHA: phase-0 with declared input_types that no one produces is SILENTLY ACCEPTED + runtime runs with empty inputs", async () => {
+  it("APOHA: phase-0 with declared input_types that no one produces is SILENTLY ACCEPTED, and a SEEDED entry chair still runs on empty inputs (#245 — the half a runtime check cannot close)", async () => {
     const orphan = defineAgent({ ...TEST_BEHAVIOR,
       slug: "OrphanPhase0",
       primitives: ["INTERPRET"],
@@ -144,8 +156,19 @@ describe("standard with mismatched type-edges (adversarial unique-unknown)", () 
     // the orphan declaration into the "rejected" bucket.
     expect(composeErr).toBeNull();
 
-    // Runtime probe: runGig invokes the orphan with inputs=[] (no upstream, no
-    // gig_input → input_type matching). This is the user-visible cost of the gap.
+    // Runtime probe. #245 added a floor for chairs handed nothing they declared they consume,
+    // and it deliberately EXEMPTS a phase-0 entry chair with a non-empty gig payload — see
+    // src/runtime.ts. The reason is concrete, not caution: `standards/patent-triage-v0.json`
+    // ships exactly this shape. Its `cleave` chair binds `diamond-cutter`, which declares
+    // `input_types: ["invention-spec"]`, and the gig seeds it with an UNTYPED
+    // `{description: "…"}` payload. The runtime sees the same three facts here as it does
+    // there — declared type, nothing upstream, some payload — so any check that rejects this
+    // orphan also makes the repo's own shipped standard undispatchable.
+    //
+    // This therefore stays a fingerprint rather than becoming a rejection. Closing it is a
+    // DEFINITION fix: the standard must declare `input_types` (#156) so the entry-chair seed is
+    // typed, at which point the floor discriminates. The empty-payload variant below IS closed,
+    // because there nothing could have supplied the type by any route.
     const composed = composeStandard({
       slug: "phase0-mismatch-run",
       domain: "demo",
@@ -177,12 +200,26 @@ describe("standard with mismatched type-edges (adversarial unique-unknown)", () 
       model_version: "type-edge-test",
     });
 
-    // Bug-bash assertion: runtime ran with EMPTY inputs despite the agent declaring
-    // it consumes "nobody-makes-this". No error, no warning, status=complete.
+    // Bug-bash assertion (STILL OPEN, by the reasoning above): a SEEDED phase-0 chair runs with
+    // EMPTY inputs despite the agent declaring it consumes "nobody-makes-this".
     expect(result.status).toBe("complete");
     expect(observedInputsLength).toBe(0);
     expect(result.outputs.length).toBe(1);
     expect(result.outputs[0]!.domain_type).toBe("orphan-out");
+
+    // FLIPPED (#245): the same chair with NO gig payload at all IS now refused. Nothing could
+    // have supplied `nobody-makes-this` by any route, so invoking the agent means inventing an
+    // answer — and the runtime names the type it could not supply instead.
+    const outputs2 = createOutputStore(registry);
+    let secondInvokeInputs = -1;
+    await expect(
+      runGig(composed, {}, {
+        outputs: outputs2, ledger, model_version: "type-edge-test",
+        invoke: ({ inputs }) => { secondInvokeInputs = inputs.length; return { v: "would-have-been-invented" }; },
+      }),
+    ).rejects.toThrow(/nobody-makes-this/);
+    expect(secondInvokeInputs, "the agent must not be invoked at all").toBe(-1);
+    expect(outputs2.all().length, "nothing hallucinated is sealed").toBe(0);
   }, 15_000);
 
   // ──────────────────────────────────────────────────────────────────────────
@@ -262,11 +299,12 @@ describe("standard with mismatched type-edges (adversarial unique-unknown)", () 
 
   // ──────────────────────────────────────────────────────────────────────────
   // 5) APOHA — runtime garbage-through. If a mismatched-edge standard is built
-  //    via direct struct (bypassing composeStandard), runtime runs without
-  //    diagnosing the empty-inputs case. Today: silent garbage propagation.
-  //    This is the strongest bug-bash finding — the runtime has zero defense.
+  //    via direct struct (bypassing composeStandard), the runtime used to run it
+  //    without diagnosing the empty-inputs case: silent garbage propagation, and
+  //    the strongest bug-bash finding in this file. #245 closed it — the runtime
+  //    now has a defense, and this pre-authorized RED trips to assert it.
   // ──────────────────────────────────────────────────────────────────────────
-  it("APOHA: runtime runs broken standard with empty inputs + no warning when composition is bypassed", async () => {
+  it("APOHA: runtime REJECTS a broken standard whose consumer can never be given its declared input (#245)", async () => {
     const producer = defineAgent({ ...TEST_BEHAVIOR,
       slug: "RtProducer",
       primitives: ["INTERPRET"],
@@ -327,17 +365,14 @@ describe("standard with mismatched type-edges (adversarial unique-unknown)", () 
       return { v: "p2", w: "garbage-because-no-real-inputs", z: "still-no-warning" };
     };
 
-    const result = await runGig(brokenStandard, {}, {
-      outputs,
-      ledger,
-      invoke,
-      model_version: "rt-bypass",
-    });
+    // FLIPPED (#245): phase 2's agent declares it consumes `rt-y`; upstream only ever makes
+    // `rt-x`. The runtime names the type it cannot supply instead of invoking on [].
+    await expect(
+      runGig(brokenStandard, {}, { outputs, ledger, invoke, model_version: "rt-bypass" }),
+    ).rejects.toThrow(/rt-y/);
 
-    // Bug-bash assertion: phase 2 RAN with empty inputs (the type-edge mismatch
-    // was invisible to runtime). Final status is "complete" — no loud failure.
-    expect(result.status).toBe("complete");
-    expect(observedInputLengths).toEqual([0, 0]); // p1: nothing upstream; p2: mismatch → []
-    expect(result.outputs.length).toBe(2);
+    // p1 legitimately ran (it declares no inputs); p2 never reached the model.
+    expect(observedInputLengths, "only the entry chair is invoked").toEqual([0]);
+    expect(outputs.all().length, "p1's output exists; p2 sealed nothing").toBe(1);
   }, 15_000);
 });

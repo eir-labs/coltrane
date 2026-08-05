@@ -264,6 +264,16 @@ export function createOutputStore(registry: Registry, options?: OutputStoreOptio
     return typeof v === "string" ? v : undefined;
   }
 
+  // The registry's answer to "what core is this type, really". A bare core is itself;
+  // a registered domain type is its `extends`; anything unregistered is unresolvable.
+  // Exposed as `coreTypeOf` below AND consulted by `write` — deliberately one function,
+  // because #263 was precisely two layers disagreeing about the same question.
+  function resolveCoreType(typeSlug: string): string | null {
+    if ((CORE_TYPES as readonly string[]).includes(typeSlug)) return typeSlug;
+    const dt = registry.listTypes().find((t) => t.slug === typeSlug);
+    return dt ? dt.extends : null;
+  }
+
   function hydrateGig(gig_id: string): void {
     if (!outputsDir || hydratedGigs.has(gig_id)) return;
     hydratedGigs.add(gig_id);
@@ -308,6 +318,27 @@ export function createOutputStore(registry: Registry, options?: OutputStoreOptio
         throw new OutputStoreError(
           `output rejected: ${o.domain_type} failed schema validation — ${result.errors.join("; ")}`,
         );
+      }
+      // #263 — the asserted core must agree with the registry's answer, and this has to be
+      // settled BEFORE validateOutput runs. #227/#228 made `core_type` load-bearing: it
+      // selects which substance floor is enforced. So a caller asserting the wrong core does
+      // not merely mislabel the record — it gets the WRONG core's floor applied, and can
+      // satisfy `Verdict.checks[]` while sealing something the registry says is an
+      // Interpretation that owed `claims[]`. Checking after would mean judging the payload
+      // against a floor we already know is the wrong one.
+      //
+      // Unresolvable slugs are left alone: an unregistered domain_type is already the
+      // registry's rejection above (`unknown domain_type`), and this check must not become a
+      // second, competing owner of that error.
+      if (o.domain_type) {
+        const registered = resolveCoreType(o.domain_type);
+        if (registered !== null && registered !== o.core_type) {
+          throw new OutputStoreError(
+            `output rejected: ${o.domain_type} was sealed as core_type "${o.core_type}" but the ` +
+              `registry defines it as "${registered}" — one of the two is wrong, and the core ` +
+              `decides which substance invariant applies`,
+          );
+        }
       }
       // #227/#228 — the CORE-type invariant, checked on every write regardless of whether
       // a domain schema applied. registry.validate above returns {valid:true} without
@@ -485,9 +516,7 @@ export function createOutputStore(registry: Registry, options?: OutputStoreOptio
       return rows;
     },
     coreTypeOf(typeSlug) {
-      if ((CORE_TYPES as readonly string[]).includes(typeSlug)) return typeSlug;
-      const dt = registry.listTypes().find((t) => t.slug === typeSlug);
-      return dt ? dt.extends : null;
+      return resolveCoreType(typeSlug);
     },
 
     integrity() {

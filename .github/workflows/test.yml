@@ -1,9 +1,21 @@
-# Cross-environment test matrix. Sweeps typecheck + unit suite across
-# {ubuntu, macos} x {node 20, node 22}. e2e smoke is push-to-main only and
-# requires the claude CLI, which is currently documented-but-skipped (see CI.md).
+# Cross-environment test matrix. Sweeps typecheck + every deterministic band across
+# {ubuntu, macos} x {node 20, node 22}.
 #
 # Failure on a single matrix cell isolates the regression to (OS, node-version);
 # see CI.md "Interpreting failures" for triage notes.
+#
+# #262 — what this workflow used to run, and why it changed:
+#
+#   * `unit` called `npx vitest run`, which is ROOT-CONFIG ONLY. failure_modes, honest_broker,
+#     security and e2e were all invisible to it, so this workflow and `npm run verify`
+#     disagreed about what "the suite" is. Every job now calls a package.json script, so the
+#     thing CI runs is the thing a developer can run.
+#   * `e2e-smoke` was a documented stub that echoed a warning and exited 0 — and it was gated
+#     to push-to-main, so on a PR it did not even do that. The entire e2e band, 36 files,
+#     executed nowhere in automation. It is replaced by `e2e-offline`, which runs the real
+#     specs that need no model (tests/e2e/vitest.offline.config.ts). The live half still needs
+#     a scripted CLI install + ANTHROPIC_API_KEY and is still out — but it is now the only
+#     part that is, and it is one exclude list a reviewer can read.
 
 name: test
 
@@ -53,14 +65,34 @@ jobs:
           node-version: ${{ matrix.node }}
           cache: "npm"
       - run: npm ci
-      # Root vitest.config.ts already excludes tests/e2e/**, so this is the
-      # deterministic unit suite only — no claude CLI needed.
-      - run: npx vitest run
+      # The fast unit band (root vitest.config.ts). The other bands are separate jobs below —
+      # `npx vitest run` reaches none of them, which is how four configs went unexecuted.
+      - run: npm test
 
-  e2e-smoke:
-    name: e2e smoke (eng_manager, ubuntu, node 22)
-    # Only run on push to main — e2e is slow + needs the claude CLI.
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+  bands:
+    name: failure-modes + honest-broker + security (${{ matrix.os }}, node ${{ matrix.node }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        node: ["20.x", "22.x"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: "npm"
+      - run: npm ci
+      - run: npm run test:failure-modes
+      - run: npm run test:honest-broker
+      # COLTRANE_LIVE is deliberately NOT set: the prompt-injection scenarios collect and
+      # report as skipped, so the band is executed and visible on every PR at zero cost.
+      # Setting COLTRANE_LIVE=1 here would spawn the real CLI and bill on every run.
+      - run: npm run test:security
+
+  e2e-offline:
+    name: e2e (offline half, ubuntu, node 22)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -69,12 +101,12 @@ jobs:
           node-version: "22.x"
           cache: "npm"
       - run: npm ci
-      # claude CLI install path is not yet trivially scriptable in CI.
-      # The CLI ships via Anthropic's installer + auths against ANTHROPIC_API_KEY;
-      # the auth + install handshake is not yet wired here. See CI.md "e2e gate".
-      # When ready, replace this skip with the install + the targeted spec run:
-      #   npx vitest run --config tests/e2e/vitest.config.ts tests/e2e/sub_thread.eng_manager.spec.ts
-      - name: skip (claude CLI install not yet scripted)
-        run: |
-          echo "::warning::e2e-smoke job is documented-but-skipped. See CI.md."
-          echo "Required to enable: scripted claude CLI install + ANTHROPIC_API_KEY secret."
+      # Runs the e2e specs that need no model. The script builds first: this band drives
+      # dist/ (relay_restart_handshake.spec.ts spawns dist/src/server_entry.js), and a stale
+      # dist means testing bytes that are not this branch's.
+      #
+      # The live half (`npm run e2e`) still needs a scripted claude CLI install +
+      # ANTHROPIC_API_KEY and is not wired here — see CI.md "e2e gate" and the exclude list
+      # in tests/e2e/vitest.offline.config.ts. That exemption is asserted in writing by
+      # tests/test_band_wiring.test.ts so it cannot quietly become the norm again.
+      - run: npm run e2e:offline

@@ -1,7 +1,18 @@
-# CI — the green gate, public. Runs the same `npm run verify` (tsc --noEmit + vitest)
-# the band runs locally, on every push + PR. A contributor's PR proves green before merge.
-# Note: this covers the deterministic suite (481 tests). The live-Claude spawn is a
-# separate manual gate (needs the CLI + ANTHROPIC_API_KEY) — not run here by design.
+# CI — the green gate, public. Runs the same `npm run verify` a developer runs locally, on
+# every push + PR. A contributor's PR proves green before merge.
+#
+# `verify` is the whole deterministic suite, not the root config alone: unit + failure_modes +
+# honest_broker + security (collected, spend-gated on COLTRANE_LIVE) + the offline half of the
+# e2e band. That equivalence is the point. test.yml and coverage.yml used to call
+# `npx vitest run` directly, which is root-config-only, so CI ran a strictly smaller set than
+# `npm run verify` and "green" meant different things in different places (#262). Every
+# workflow now goes through a package.json script.
+#
+# The live-Claude half — `npm run e2e`, and this same security band under COLTRANE_LIVE=1 —
+# needs the CLI + ANTHROPIC_API_KEY and is not run here by design. See CI.md.
+#
+# No test count is asserted in this comment on purpose: the previous one claimed "481 tests"
+# against a suite of 1576 and had been wrong long enough that nobody noticed.
 name: CI
 
 on:

@@ -58,6 +58,17 @@ const SKIP_CONTENT = /\.(map)$/;
 
 let shipped: string[] = [];
 
+// #231 — same 10s default-hookTimeout death as pack_contents_audit.test.ts, same cause and
+// same budget; see that file's header for the measurements (3.1–5.6s here, 12.76s on the
+// machine that filed the issue) and for why a generous budget costs a real break nothing.
+//
+// These two files are near-duplicates and each pays its own `npm pack` → `prepare` → `tsc`.
+// They are deliberately NOT merged: they are two different gates (#149 asks which FILES ship,
+// #150 asks what is INSIDE them) with different failure meanings, and they are among the very
+// few things in this repo that type-check the test tree by building it. Both stay in the
+// default run. The duplicated build is ~2 x 4s and is the price of that.
+const PACK_HOOK_TIMEOUT_MS = 120_000;
+
 beforeAll(() => {
   const out = execFileSync("npm", ["pack", "--dry-run", "--json"], {
     cwd: REPO_ROOT,
@@ -67,7 +78,7 @@ beforeAll(() => {
   const first = parsed[0];
   if (!first) throw new Error("npm pack --dry-run returned an empty manifest");
   shipped = first.files.map((f) => f.path.replace(/^\.\//, ""));
-});
+}, PACK_HOOK_TIMEOUT_MS);
 
 describe("content-axis — shipped filenames", () => {
   it.each(FORBIDDEN_FILENAME.map((re) => [re.source, re] as const))(

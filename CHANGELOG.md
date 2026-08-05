@@ -7,6 +7,19 @@ signals a breaking change and a **patch** signals an additive or internal one.
 `package.json`'s `version` — `tests/version_identity.test.ts` enforces that, and also that
 the MCP handshake reports the constant rather than a hardcoded literal.
 
+## 0.4.1
+
+### Fixed
+
+- **The bare specifier was not resolvable.** `exports["."]` declared `types` and `import` but
+  no fallback condition, so `require.resolve("@eir-labs/coltrane")` failed with
+  `ERR_PACKAGE_PATH_NOT_EXPORTED` even though `import` worked. Path resolution is not module
+  loading — a consumer locating the package (to hand a path to a dynamic import, or to point
+  a tool at `dist/`) hit an error for something the package plainly ships. Adding `default`
+  makes it resolvable under any condition; the package remains ESM-only.
+
+  Found by installing 0.4.0 from the registry and using it, not by reading the manifest.
+
 ## 0.4.0
 
 ### Breaking

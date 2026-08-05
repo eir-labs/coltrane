@@ -68,14 +68,31 @@ describe("output_write", () => {
     expect(d.outputs.refs()[0]!.relation).toBe("derived_from");
   });
 
-  // Rob #133 (this branch): domain_type is OPTIONAL. A bare {} call no longer
-  // fails as "unknown domain_type" — it writes a freeform output keyed on
-  // core_type only. The honest-failure surface is preserved when a declared
-  // domain_type's schema is actually violated; see tests/rob_ergonomic_fixes.
-  it("is no longer not_implemented on a bare {} call (it succeeds as a freeform output post-#133)", async () => {
-    const r = await dispatchTool("output_write", {}, makeDeps());
+  // Rob #133 (this branch): domain_type is OPTIONAL. A call with no domain_type no longer
+  // fails as "unknown domain_type" — it writes a freeform output keyed on core_type only.
+  // The honest-failure surface is preserved when a declared domain_type's schema is
+  // actually violated; see tests/rob_ergonomic_fixes.
+  //
+  // NARROWED by #263. This asserted a bare `{}` — no core_type either — and passed, because
+  // nothing validated the core. That was never what #133 promised: its own wording is
+  // "keyed on core_type ONLY", which requires one. A record with no core is not freeform,
+  // it is unclassifiable, and `validateOutput` applies no substance floor to a core it does
+  // not recognise. The freeform contract under test is "domain_type is optional", and that
+  // is what this now exercises.
+  it("succeeds with no domain_type (the freeform output post-#133)", async () => {
+    const r = await dispatchTool(
+      "output_write",
+      { core_type: "Interpretation", domain: "eirtests", gig_id: "g1", agent_slug: "a", data: { note: "freeform", claims: ["one claim"] } },
+      makeDeps(),
+    );
     expect(r.not_implemented).toBeFalsy();
     expect(r.ok).toBe(true);
+  });
+
+  it("refuses a call with no core_type at all — the freeform path still needs a core", async () => {
+    const r = await dispatchTool("output_write", {}, makeDeps());
+    expect(r.not_implemented, "still wired — this is a refusal, not an unimplemented tool").toBeFalsy();
+    expect(r.ok).toBe(false);
   });
 });
 

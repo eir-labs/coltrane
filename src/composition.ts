@@ -32,6 +32,21 @@ export interface Chair {
   depends_on: readonly string[];
   input_contract: readonly string[];
   output_contract: readonly string[];
+  /**
+   * #243 — which promised outputs MAY legitimately be absent.
+   *
+   * The output_contract is a floor: a chair that seals fewer types than it promised fails
+   * the run. Conditional outputs are real — patent-triage's judge emits a provisional draft
+   * only when the verdict is FILEABLE — so they need a way to say so, and this is it.
+   *
+   * DENY-BY-DEFAULT: absent from this list means required. Opt-in enforcement would leave
+   * every existing silent under-producer silent, which is the bug. Opt-out makes the
+   * conditional case state itself in the genome, where a reader and an auditor can both see
+   * it — an undeclared conditional output is indistinguishable from a chair that failed.
+   *
+   * Must be a subset of output_contract; enforced at compose time.
+   */
+  optional_outputs?: readonly string[];
   required_skills: readonly string[];
   // Skills-as-first-class (docs/skills-as-first-class.md): a chair MAY be backed by a
   // skill package instead of an agent. Mutually exclusive with a non-empty agent_slug —
@@ -269,6 +284,33 @@ export function composeStandard(def: {
       if (ch.output_contract.length === 0) {
         throw new CompositionError(
           `standard ${def.slug}: chair "${ch.role}" has empty output_contract (every chair must declare ≥1 output type)`,
+        );
+      }
+      // #243 — an optional_outputs entry naming nothing in the contract silently WIDENS the
+      // floor it was meant to narrow: the typo'd name excuses nothing, and the type the author
+      // meant to mark optional stays required while they believe otherwise. That is the exact
+      // class of bug the floor exists to close, so it is caught where the genome is authored
+      // rather than mid-run.
+      for (const opt of ch.optional_outputs ?? []) {
+        if (!ch.output_contract.includes(opt)) {
+          throw new CompositionError(
+            `standard ${def.slug}: chair "${ch.role}" marks "${opt}" optional but does not promise it — ` +
+              `optional_outputs must be a subset of output_contract [${ch.output_contract.join(", ")}]`,
+          );
+        }
+      }
+      // #243 — a skill-backed chair seals exactly ONE output: its deterministic code half
+      // returns a single blob, and `prepareChair` takes `output_contract[0]` and discards the
+      // rest. So a multi-entry contract on a skill chair is a promise the runtime structurally
+      // cannot keep — and, worse, cannot even REPORT breaking, because the floor is computed
+      // over the one spec that was built. Silent since the skill path was added. Reject it
+      // here, where the author can see it, rather than letting entries 2..N evaporate.
+      if (ch.skill_slug && (ch.agent_slug ?? "") === "" && ch.output_contract.length > 1) {
+        throw new CompositionError(
+          `standard ${def.slug}: skill-backed chair "${ch.role}" promises ${ch.output_contract.length} output types ` +
+            `[${ch.output_contract.join(", ")}] but a skill seals exactly one. Only "${ch.output_contract[0]}" would ` +
+            `ever be produced and the rest would be silently dropped — split the work across chairs, or back this ` +
+            `chair with an agent.`,
         );
       }
     }

@@ -11,6 +11,7 @@ import {
   MCP_TOOLS,
   type ServerDeps,
   type DomainType,
+  type Standard,
 } from "../src";
 
 function deps(): ServerDeps {
@@ -67,8 +68,22 @@ describe("MCP dispatcher: context-free tools are wired", () => {
     expect((r.data as { types: unknown[] }).types.length).toBe(1);
   });
 
-  it("standard_simulate returns an estimate", async () => {
-    const r = await dispatchTool("standard_simulate", { standard_slug: "readiness-scan", mock_input: {}, depth: "standard" }, deps());
+  // #267 narrowed this. It used to pass a bare `deps()` — no standards map — and assert that
+  // an estimate came back. That estimate was invented: on such a host `gig_dispatch` returns
+  // not_implemented, so the tool was quoting a price for a run the same server would refuse.
+  // What this test is FOR is "the estimator works", so it now wires the standard it
+  // estimates. The unwired host is asserted as not_implemented, side by side with
+  // gig_dispatch, in tests/simulate_unknown_standard.test.ts.
+  it("standard_simulate returns an estimate for a wired standard", async () => {
+    const d = deps();
+    d.standards = new Map([[
+      "readiness-scan",
+      {
+        slug: "readiness-scan", domain: "eirtests", agents: [],
+        phases: [{ name: "sense", chairs: [{ role: "s", agent_slug: "scanner", depends_on: [], input_contract: [], output_contract: ["finding"], required_skills: [] }] }],
+      } as unknown as Standard,
+    ]]);
+    const r = await dispatchTool("standard_simulate", { standard_slug: "readiness-scan", mock_input: {}, depth: "standard" }, d);
     expect(r.ok).toBe(true);
   });
 });

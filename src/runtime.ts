@@ -1802,7 +1802,34 @@ export async function runGig(
       );
     }
 
-    // Contract satisfied. Only now does anything become durable.
+    // Contract satisfied — and now the SEAL gates, still before anything is durable.
+    //
+    // #243 moved the contract checks ahead of the writes, which stopped a chair that
+    // under-delivered from leaving orphans behind. It did not close the whole hole:
+    // `write()` also validates (core agreement #263, the registry schema, the #227/#228
+    // substance floor), so a chair whose SECOND output failed one of those had already
+    // flushed its first to `outputs/<gig_id>.jsonl`. Same outcome by a different door —
+    // sealed records belonging to a gig that failed, and two audit surfaces disagreeing by
+    // construction.
+    //
+    // `validateWrite` is the gate `write` runs, asked as a question instead. The reuse path
+    // already uses it to make a multi-output entry all-or-nothing; the derived path gets it
+    // for exactly the same reason.
+    for (const { spec, slice } of resolved) {
+      const check = deps.outputs.validateWrite({
+        core_type: spec.core_type,
+        domain_type: spec.domain_type,
+        data: slice,
+      });
+      if (!check.valid) {
+        throw new RuntimeError(
+          `chair "${chair.role}" cannot seal "${spec.domain_type}": ${check.reason}. ` +
+            `Nothing was written — a chair's outputs are all-or-nothing.`,
+        );
+      }
+    }
+
+    // Only now does anything become durable.
     const written: OutputRecord[] = [];
     for (const { spec, slice } of resolved) {
       const rec = deps.outputs.write({

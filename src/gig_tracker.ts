@@ -5,7 +5,7 @@
 // a GigRunState that gig_monitor reads. State is in-memory (per server lifetime): a restart
 // drops in-flight tracking — acceptable for v0, and a restart mid-gig is its own problem.
 
-import type { GigProgressEvent } from "./runtime.js";
+import type { GigProgressEvent, BudgetState } from "./runtime.js";
 import type { GigUsage } from "./ledger.js";
 
 export interface GigChairState {
@@ -36,6 +36,12 @@ export interface GigRunState {
   // Settled model spend (#195), set when the run completes. Surfaced by gig_monitor so a
   // gig's actual cost/tokens are queryable by gig_id, not just persisted on the ledger.
   usage?: GigUsage;
+  // #236 — the budget snapshot, set on BOTH terminal paths. The synchronous dispatch reply
+  // has carried this since the budget existed (server.ts), but the async path — which is the
+  // DEFAULT — dropped it either way: a completed gig never reported what it consumed, and a
+  // failed one lost the reservation/settlement record along with everything else. Absent while
+  // running, and absent entirely when no budget was supplied.
+  budget_state?: BudgetState;
 }
 
 export function newGigRun(gig_id: string, standard_slug: string, phases_total: number, now: string): GigRunState {

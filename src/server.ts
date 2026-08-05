@@ -25,7 +25,7 @@ import {
   type Ledger, type GovernanceLedgerEntry,
 } from "./ledger.js";
 import { standardSimulate } from "./simulate.js";
-import { runGig, BudgetExhausted, type AgentInvoker } from "./runtime.js";
+import { runGig, BudgetExhausted, partialGigUsage, partialBudgetState, type AgentInvoker } from "./runtime.js";
 import { makeClaudeInvoker } from "./claude_invoker.js";
 import type { ToolProvider } from "./tool_providers.js";
 import { ENGINE_MCP_SERVER } from "./tool_providers.js";
@@ -432,8 +432,12 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
             };
           } catch (e) {
             if (e instanceof BudgetExhausted) {
+              // #236 — the synchronous half: a depleted gig also burned real dollars before it
+              // stopped, and the operator needs them in the same reply as the depletion notice.
+              const partial = partialGigUsage(e);
               return { ok: false, requires_approval: approval, error: e.message,
-                data: { budget_exhausted: true, agent_slug: e.agent_slug, balance: e.balance, cost: e.cost, budget_state: e.state } };
+                data: { budget_exhausted: true, agent_slug: e.agent_slug, balance: e.balance, cost: e.cost, budget_state: e.state,
+                  ...(partial ? { usage: partial } : {}) } };
             }
             throw e;
           }
@@ -465,10 +469,24 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
             state.status = "complete"; state.finished_at = new Date().toISOString();
             state.run_fingerprint = res.run_fingerprint; state.genome_hash = res.genome_hash; state.outputs_count = res.outputs.length;
             if (res.usage) state.usage = res.usage; // #195 — surface settled spend to gig_monitor
+            // #236 — the synchronous reply has carried budget_state since the budget existed;
+            // the async path never did, so the DEFAULT dispatch mode could not answer "what did
+            // this consume?" even on success.
+            if (res.budget_state) state.budget_state = res.budget_state;
           })
           .catch((e: unknown) => {
             state.status = "failed"; state.finished_at = new Date().toISOString();
             state.error = e instanceof Error ? e.message : String(e);
+            // #236 — settled spend used to die here. Async is the DEFAULT dispatch mode, so
+            // every failed or aborted gig reported zero dollars while its completed chairs'
+            // outputs persisted on disk. Failed runs are the ones whose cost matters most.
+            const partial = partialGigUsage(e);
+            if (partial) state.usage = partial;
+            // ...and the budget half of the same loss: the runtime attaches the snapshot to
+            // whatever it throws, but nothing read it back here. A depleted or crashed gig
+            // could not say how much of its allowance it had already burned.
+            const bs = partialBudgetState(e);
+            if (bs) state.budget_state = bs;
             onProgress({ type: "gig_failed", error: state.error });
           });
         return {
@@ -496,6 +514,10 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
               outputs_so_far: outs,
               ...(live.run_fingerprint ? { run_fingerprint: live.run_fingerprint } : {}),
               ...(live.usage ? { usage: live.usage } : {}), // #195 — settled model spend, queryable by gig_id
+              // #236 — what the gig consumed of its allowance, on BOTH terminal paths. Carries
+              // `unit: "append-units"` and the real `settled_usd` alongside (#233), so nothing
+              // reads the synthetic proxy as dollars.
+              ...(live.budget_state ? { budget_state: live.budget_state } : {}),
               ...(live.error ? { error: live.error } : {}),
               ...(live.finished_at ? { finished_at: live.finished_at } : {}),
             },

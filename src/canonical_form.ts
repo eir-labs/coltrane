@@ -88,6 +88,14 @@ export interface RunFingerprintInput {
   canonical_form_version: string;
   eval_scores: Readonly<Record<string, number>>;
   output_hashes: readonly string[];
+  /**
+   * #246 — eval slugs that resolved to NO eval definition. An unresolvable slug scores 0.0 for
+   * back-compat, which is byte-identical to an eval that ran and genuinely failed; without this
+   * term a typo would bake into the reproducibility key as though a real contract had been
+   * evaluated and found wanting. Contributes a line ONLY when non-empty, so every fingerprint
+   * over a fully-resolved run stays byte-identical to what it was before this field existed.
+   */
+  unresolved_evals?: readonly string[];
 }
 
 export function runFingerprint(input: RunFingerprintInput): string {
@@ -102,6 +110,9 @@ export function runFingerprint(input: RunFingerprintInput): string {
     `eval_scores:${scoreLines.join(",")}`,
     `output_hashes:${outputLines.join(",")}`,
   ];
+  if (input.unresolved_evals?.length) {
+    lines.push(`unresolved_evals:${[...input.unresolved_evals].sort().join(",")}`);
+  }
   return sha256Hex(lines.join("\n") + "\n");
 }
 

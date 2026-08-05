@@ -259,12 +259,38 @@ describe("standard with cycle (adversarial unique-unknown)", () => {
       return { v: "self", claims: ["self"] };
     };
 
+    // REWRITTEN for #245, deliberately. This test's own title states its contract as
+    // "rejection OR runtime termination", and the claim it exists to make is that a self-cycle
+    // cannot spin — it must stop, one way or another. The body only ever expressed the
+    // compose-time half of that disjunction; the runtime half assumed a clean completion
+    // because, at the time, the runtime had no opinion about a chair being handed nothing.
+    //
+    // It does now. `Aself` declares `input_types: ["aself-out"]`, nothing upstream produces it
+    // (it IS the only chair), and the gig payload is empty — the purest form of the shape #245
+    // refuses, since the only way to answer is to invent one. So the runtime now takes the
+    // REJECTION branch, which the title already sanctioned.
+    //
+    // The anti-loop guarantee is not weakened by accepting either outcome — it is tightened.
+    // The invocation bound goes from "exactly 1" to "at most 1", a refusal is required to NAME
+    // the type it could not supply (so a future silent-skip cannot pass as a refusal), and the
+    // termination-time bound is unchanged.
     const start = Date.now();
-    const result = await runGig(composed!, {}, { outputs, ledger, invoke, model_version: "cycle-test" });
+    let status: string | null = null;
+    let refusal: Error | null = null;
+    try {
+      status = (await runGig(composed!, {}, { outputs, ledger, invoke, model_version: "cycle-test" })).status;
+    } catch (e) {
+      refusal = e as Error;
+    }
     const elapsedMs = Date.now() - start;
 
-    expect(result.status).toBe("complete");
-    expect(invocations).toBe(1);
+    if (refusal) {
+      expect(refusal.message, "a refusal must name the input it could not supply").toMatch(/aself-out/);
+      expect(outputs.all().length, "nothing self-derived is sealed").toBe(0);
+    } else {
+      expect(status).toBe("complete");
+    }
+    expect(invocations, "the self-cycle must not spin").toBeLessThanOrEqual(1);
     expect(elapsedMs).toBeLessThan(5_000);
   }, 15_000);
 });

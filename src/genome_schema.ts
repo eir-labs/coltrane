@@ -62,6 +62,9 @@ export const ChairSchema = z.object({
   depends_on: z.array(z.string()).default([]),
   input_contract: z.array(z.string()).default([]),
   output_contract: z.array(z.string()).default([]),
+  // #243 — which promised outputs may legitimately be absent. Deny-by-default: omitted
+  // means every promised type is required. Subset of output_contract, checked at compose.
+  optional_outputs: z.array(z.string()).default([]),
   required_skills: z.array(z.string()).default([]),
 });
 export const PhaseSchema = z.object({ name: z.string(), chairs: z.array(ChairSchema) });

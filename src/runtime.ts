@@ -1257,18 +1257,32 @@ export async function runGig(
         `chair "${chair.role}" produced no recognized output — expected one of [${output_specs.map((s) => s.domain_type).join(", ")}]`,
       );
     }
-    // #243 — the output_contract is honored as a SELECTOR but not as a FLOOR: the guard above
-    // is `written.length === 0`, not `written.length === output_specs.length`. A chair that
-    // promised two types and sealed one completes silently. The in-code justification (a keyed
-    // type may be conditional, and a downstream input_contract check fails loudly if a consumer
-    // actually needed it) holds only WHERE A CONSUMER EXISTS — for a terminal chair, the gate
-    // phase that emits the verdict, nothing consumes it and the promise evaporates into
-    // `status: "complete"`. Enforcing a blanket floor would be wrong (conditional outputs are
-    // intentional and there is no optionality marker on Chair to distinguish them), so this
-    // RECORDS the shortfall rather than failing on it. See the report on #243 for why the
-    // enforcement half needs a schema decision, not a guard.
+    // #243 — the output_contract is a FLOOR, not merely a selector. The guard above is
+    // `written.length === 0`; on its own it let a chair that promised two types and sealed
+    // one complete silently. The old in-code justification — a keyed type may be conditional,
+    // and a downstream input_contract check fails loudly if a consumer actually needed it —
+    // holds only WHERE A CONSUMER EXISTS. For a TERMINAL chair (the gate phase, the one that
+    // emits the verdict) nothing consumes it, so the promise evaporated into
+    // `status: "complete"`. The one chair whose output an operator acts on was the one with
+    // no backstop.
+    //
+    // Conditional outputs are still legal — they now have to SAY SO, via the chair's
+    // `optional_outputs` (deny-by-default: promised means required unless declared). An
+    // undeclared conditional output is indistinguishable from a chair that simply failed to
+    // deliver, and the engine cannot tell the operator apart from the bug.
     const sealedTypes = new Set(written.map((w) => w.domain_type));
     const missing = output_specs.map((s) => s.domain_type).filter((t) => !sealedTypes.has(t));
+    const optional = new Set(chair.optional_outputs ?? []);
+    const missingRequired = missing.filter((t) => !optional.has(t));
+    if (missingRequired.length > 0) {
+      throw new RuntimeError(
+        `chair "${chair.role}" did not deliver its output_contract — missing [${missingRequired.join(", ")}] ` +
+          `of promised [${output_specs.map((s) => s.domain_type).join(", ")}]. ` +
+          `If a type is legitimately conditional, declare it in the chair's optional_outputs.`,
+      );
+    }
+    // A DECLARED-optional absence is still a fact about this run. Legitimising a shortfall is
+    // not the same as hiding it, so it keeps its row in the manifest.
     if (missing.length > 0) unfulfilledOutputs.push({ role: chair.role, phase: phaseName, missing });
     emit({
       type: "chair_complete", phase: phaseName, role: chair.role, producer: producer_slug,

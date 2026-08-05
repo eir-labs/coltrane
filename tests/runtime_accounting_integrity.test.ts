@@ -377,8 +377,19 @@ describe("#240 — provenance backfill never attaches a hash it cannot prove", (
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════
-// #243 — a chair promising N output types and producing fewer completes silently. Conditional
-// outputs are intentional, so a blanket floor is wrong; the shortfall must at least be VISIBLE.
+// #243, recording half — the shortfall is VISIBLE on the event and in the gig manifest.
+//
+// UPDATED when the enforcement half landed. This block originally asserted
+// `status === "complete"` with the note "conditional outputs are legal — this must not become
+// a hard failure". That reasoning was right about conditional outputs and wrong about the
+// remedy: the chair had no way to DECLARE which of its promised types were conditional, so
+// "legal" had to mean "legal for everyone", including chairs that simply failed to deliver.
+//
+// `optional_outputs` (tests/chair_output_floor.test.ts) is that way to declare it, so the
+// contract is now a floor and the chair below — which declares nothing optional — fails.
+// The recording assertions are the point of this test and are UNCHANGED: legitimising a
+// shortfall must not stop reporting it, so the fixture simply declares its conditional type
+// and everything about visibility is asserted exactly as before.
 // ═══════════════════════════════════════════════════════════════════════════════════════════
 describe("#243 — an under-delivered output_contract is recorded, not silent", () => {
   it("a chair promising two types and sealing one reports the shortfall", async () => {
@@ -389,7 +400,7 @@ describe("#243 — an under-delivered output_contract is recorded, not silent", 
     const both: Agent = testAgent({ slug: "dual", primitives: ["SENSE", "JUDGE"], input_types: [], output_types: ["sig-a", "judg-b"], domain: "demo" });
     const std: Standard = {
       slug: "under-deliver", domain: "demo", agents: [both],
-      phases: [{ name: "p", chairs: [{ role: "r", agent_slug: "dual", depends_on: [], input_contract: [], output_contract: ["sig-a", "judg-b"], required_skills: [] }] }],
+      phases: [{ name: "p", chairs: [{ role: "r", agent_slug: "dual", depends_on: [], input_contract: [], output_contract: ["sig-a", "judg-b"], optional_outputs: ["judg-b"], required_skills: [] }] }],
     };
     const { outputs, ledger } = store(types);
     const events: GigProgressEvent[] = [];
@@ -397,11 +408,12 @@ describe("#243 — an under-delivered output_contract is recorded, not silent", 
     const invoke: AgentInvoker = () => ({ "sig-a": { a: "made it", ...SIGNAL } });
     const res = await runGig(std, {}, { outputs, ledger, invoke, onProgress: (e) => events.push(e) });
 
-    expect(res.status, "conditional outputs are legal — this must not become a hard failure").toBe("complete");
+    expect(res.status, "a DECLARED-optional absence is legal and must complete").toBe("complete");
     expect(res.outputs.map((o) => o.domain_type)).toEqual(["sig-a"]);
 
-    // THE DEFECT: status "complete", one sealed type, and nothing anywhere says the chair
-    // promised two. For a TERMINAL chair no downstream input_contract will ever catch it.
+    // The original finding: it is not enough that the run survives — a shortfall the operator
+    // cannot see is a shortfall that gets assumed away. For a TERMINAL chair no downstream
+    // input_contract will ever surface it, so these two channels are the only ones there are.
     const done = events.find((e) => e.type === "chair_complete") as unknown as Record<string, unknown>;
     expect(done["promised_output_types"], "the promise must be recorded alongside what was delivered").toEqual(["sig-a", "judg-b"]);
     expect(done["missing_output_types"]).toEqual(["judg-b"]);

@@ -32,6 +32,21 @@ export interface Chair {
   depends_on: readonly string[];
   input_contract: readonly string[];
   output_contract: readonly string[];
+  /**
+   * #243 — which promised outputs MAY legitimately be absent.
+   *
+   * The output_contract is a floor: a chair that seals fewer types than it promised fails
+   * the run. Conditional outputs are real — patent-triage's judge emits a provisional draft
+   * only when the verdict is FILEABLE — so they need a way to say so, and this is it.
+   *
+   * DENY-BY-DEFAULT: absent from this list means required. Opt-in enforcement would leave
+   * every existing silent under-producer silent, which is the bug. Opt-out makes the
+   * conditional case state itself in the genome, where a reader and an auditor can both see
+   * it — an undeclared conditional output is indistinguishable from a chair that failed.
+   *
+   * Must be a subset of output_contract; enforced at compose time.
+   */
+  optional_outputs?: readonly string[];
   required_skills: readonly string[];
   // Skills-as-first-class (docs/skills-as-first-class.md): a chair MAY be backed by a
   // skill package instead of an agent. Mutually exclusive with a non-empty agent_slug —
@@ -270,6 +285,19 @@ export function composeStandard(def: {
         throw new CompositionError(
           `standard ${def.slug}: chair "${ch.role}" has empty output_contract (every chair must declare ≥1 output type)`,
         );
+      }
+      // #243 — an optional_outputs entry naming nothing in the contract silently WIDENS the
+      // floor it was meant to narrow: the typo'd name excuses nothing, and the type the author
+      // meant to mark optional stays required while they believe otherwise. That is the exact
+      // class of bug the floor exists to close, so it is caught where the genome is authored
+      // rather than mid-run.
+      for (const opt of ch.optional_outputs ?? []) {
+        if (!ch.output_contract.includes(opt)) {
+          throw new CompositionError(
+            `standard ${def.slug}: chair "${ch.role}" marks "${opt}" optional but does not promise it — ` +
+              `optional_outputs must be a subset of output_contract [${ch.output_contract.join(", ")}]`,
+          );
+        }
       }
     }
   }

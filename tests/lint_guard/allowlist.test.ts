@@ -31,117 +31,98 @@ function eslintAvailable(): boolean {
   return probe.status === 0;
 }
 
+/**
+ * Run the guard against a fixture and say WHICH of three things happened.
+ *
+ * The original test asked one question — "is eslint available?" — and inferred everything
+ * else from the exit code. That could not distinguish "eslint linted this and found no
+ * violation" from "eslint linted NOTHING", and the difference is the whole value of the
+ * test:
+ *
+ *   `eslint.config.js` adds its `**\/*.ts` block only `if (tsParser)`, and
+ *   `@typescript-eslint/parser` is deliberately not a devDependency. Without it a .ts
+ *   fixture matches NO config, so eslint emits "File ignored because no matching
+ *   configuration was supplied" and exits 0.
+ *
+ * With eslint installed but the parser missing, the two "rejects" cases therefore failed
+ * (exit 0 where a violation was expected) and the "accepts" case passed VACUOUSLY — an
+ * unlinted file trivially contains no violations. Both of those are the wrong answer, and
+ * between them they looked exactly like a flaky test rather than a guard that was not
+ * guarding.
+ */
+type GuardOutcome =
+  | { ran: false; why: "eslint-missing" | "ts-parser-missing" }
+  | { ran: true; status: number; out: string };
+
+function runGuard(source: string): GuardOutcome {
+  if (!eslintAvailable()) return { ran: false, why: "eslint-missing" };
+  const dir = mkdtempSync(join(SCRATCH_ROOT, "case-"));
+  try {
+    const fixture = join(dir, "fixture.ts");
+    writeFileSync(fixture, source);
+    const result = spawnSync("npx", ["--no-install", "eslint", "--config", CONFIG, fixture], {
+      cwd: REPO_ROOT,
+      encoding: "utf8",
+    });
+    const out = (result.stdout || "") + (result.stderr || "");
+    // The tell that nothing was linted. eslint reports it as a WARNING and still exits 0,
+    // which is why it has to be detected by text rather than by status.
+    if (/no matching configuration was supplied/i.test(out)) {
+      return { ran: false, why: "ts-parser-missing" };
+    }
+    return { ran: true, status: result.status ?? -1, out };
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+/** One place to explain a skip, so a skipped guard reads as skipped and never as passed. */
+function explainSkip(why: "eslint-missing" | "ts-parser-missing"): void {
+  console.warn(
+    why === "eslint-missing"
+      ? "IMPORT GUARD NOT RUN: eslint is not installed. `npm install --no-save eslint@^9 @typescript-eslint/parser@^8`"
+      : "IMPORT GUARD NOT RUN: @typescript-eslint/parser is missing, so eslint.config.js omits its .ts block " +
+          "and the fixture matches no configuration. `npm install --no-save @typescript-eslint/parser@^8`",
+  );
+}
+
 describe("import allowlist", () => {
   it("rejects an absolute-path import", () => {
-    if (!eslintAvailable()) {
-      // eslint is not a project devDependency. CI installs it workflow-locally.
-      // Locally, install with: npm install --no-save eslint@^9
-      console.warn(
-        "eslint not installed; skipping subprocess assertion. " +
-          "Install with: npm install --no-save eslint@^9",
-      );
-      return;
-    }
-
-    const dir = mkdtempSync(join(SCRATCH_ROOT, "case-"));
-    try {
-      const fixture = join(dir, "fixture.ts");
-      // Forbidden: absolute path. The allowlist rejects `/**` patterns.
-      writeFileSync(
-        fixture,
-        'import { x } from "/usr/local/lib/external";\nexport const y = x;\n',
-      );
-
-      const result = spawnSync(
-        "npx",
-        [
-          "--no-install",
-          "eslint",
-          "--config",
-          CONFIG,
-          fixture,
-        ],
-        { cwd: REPO_ROOT, encoding: "utf8" },
-      );
-
-      // eslint exits 1 when violations exist
-      expect(result.status).not.toBe(0);
-      const out = (result.stdout || "") + (result.stderr || "");
-      // Either eslint surfaces the rule id or the custom message
-      expect(out).toMatch(/no-restricted-imports|Imports must be relative/);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
+    const r = runGuard('import { x } from "/usr/local/lib/external";\nexport const y = x;\n');
+    if (!r.ran) return explainSkip(r.why);
+    expect(r.status, "eslint exits non-zero when violations exist").not.toBe(0);
+    expect(r.out).toMatch(/no-restricted-imports|Imports must be relative/);
   });
 
   it("rejects a deep parent-traversal import", () => {
-    if (!eslintAvailable()) {
-      console.warn("eslint not installed; skipping subprocess assertion.");
-      return;
-    }
-
-    const dir = mkdtempSync(join(SCRATCH_ROOT, "case-"));
-    try {
-      const fixture = join(dir, "fixture.ts");
-      // Forbidden: 3+ levels of parent traversal escapes the project root.
-      writeFileSync(
-        fixture,
-        'import { x } from "../../../external";\nexport const y = x;\n',
-      );
-
-      const result = spawnSync(
-        "npx",
-        [
-          "--no-install",
-          "eslint",
-          "--config",
-          CONFIG,
-          fixture,
-        ],
-        { cwd: REPO_ROOT, encoding: "utf8" },
-      );
-
-      expect(result.status).not.toBe(0);
-      const out = (result.stdout || "") + (result.stderr || "");
-      expect(out).toMatch(/no-restricted-imports|Imports must be relative/);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
+    const r = runGuard('import { x } from "../../../external";\nexport const y = x;\n');
+    if (!r.ran) return explainSkip(r.why);
+    expect(r.status).not.toBe(0);
+    expect(r.out).toMatch(/no-restricted-imports|Imports must be relative/);
   });
 
   it("accepts an in-tree relative import and a package-name import", () => {
-    if (!eslintAvailable()) {
-      console.warn("eslint not installed; skipping subprocess assertion.");
-      return;
+    const r = runGuard(
+      'import { z } from "zod";\nimport { local } from "./sibling.js";\nexport const y = { z, local };\n',
+    );
+    // Without the `ran` gate this assertion is the emptiest kind of green: a file that was
+    // never linted trivially contains no violation, so it passed in exactly the situation
+    // where the guard was doing nothing.
+    if (!r.ran) return explainSkip(r.why);
+    expect(r.out).not.toMatch(/no-restricted-imports/);
+  });
+
+  // Guards the guard. The three cases above all no-op when the toolchain is absent, which is
+  // the honest thing to do locally — but it means a permanently-skipped guard looks identical
+  // to a passing one. CI installs eslint AND the parser (.github/workflows/lint-imports.yml),
+  // so there it must genuinely run, and this is what says so out loud.
+  it("reports whether the guard actually ran", () => {
+    const r = runGuard('import { x } from "/absolute";\nexport const y = x;\n');
+    if (process.env["CI"]) {
+      expect(r.ran, "CI installs eslint + @typescript-eslint/parser — the guard must not skip there").toBe(true);
+    } else if (!r.ran) {
+      explainSkip(r.why);
     }
-
-    const dir = mkdtempSync(join(SCRATCH_ROOT, "case-"));
-    try {
-      const fixture = join(dir, "fixture.ts");
-      writeFileSync(
-        fixture,
-        'import { z } from "zod";\nimport { local } from "./sibling.js";\nexport const y = { z, local };\n',
-      );
-
-      const result = spawnSync(
-        "npx",
-        [
-          "--no-install",
-          "eslint",
-          "--config",
-          CONFIG,
-          fixture,
-        ],
-        { cwd: REPO_ROOT, encoding: "utf8" },
-      );
-
-      // No restricted-import violation. (eslint may still warn about other
-      // things like unresolved modules, but the no-restricted-imports rule
-      // is what we are asserting on.)
-      const out = (result.stdout || "") + (result.stderr || "");
-      expect(out).not.toMatch(/no-restricted-imports/);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
+    expect(typeof r.ran).toBe("boolean");
   });
 });

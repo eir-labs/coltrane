@@ -25,6 +25,13 @@ import { testAgent } from "./_support/agents.js";
 const note: DomainType = { slug: "note", extends: "Signal", domain: "demo", schema: { properties: { t: { type: "string" } } }, required_fields: ["t"] };
 const reading: DomainType = { slug: "reading", extends: "Interpretation", domain: "demo", schema: { properties: { v: { type: "string" } } }, required_fields: ["v"] };
 
+// The substance every sealed output carries by virtue of its CORE type. `outputs.write`
+// enforces one floor per core on every seal — bare core or domain subtype (#227 ruling) — so
+// a payload that omits it aborts the CHAIR, and an abort test can no longer tell a real
+// cancellation from a chair that died of its own fixture.
+const SIGNAL = { source: "fixture://demo/sensor" };
+const CLAIMS = { claims: ["the note was read"] };
+
 const chairA: Chair = { role: "a", agent_slug: "sensor", depends_on: [], input_contract: [], output_contract: ["note"], required_skills: [] };
 const chairB: Chair = { role: "b", agent_slug: "reader", depends_on: ["a"], input_contract: ["note"], output_contract: ["reading"], required_skills: [] };
 
@@ -79,10 +86,10 @@ describe("#249 — gig_abort cancels the run instead of narrating one", () => {
       if (ctx.agent.slug === "sensor") {
         started.open();
         await released.promise;
-        return { t: "hi" };
+        return { t: "hi", ...SIGNAL };
       }
       bRan = true;
-      return { v: "read" };
+      return { v: "read", ...CLAIMS };
     };
     const d = deps(invoke, twoPhase());
     const disp = await dispatchTool("gig_dispatch", { standard_slug: "abort-demo", input: {} }, d);
@@ -109,8 +116,8 @@ describe("#249 — gig_abort cancels the run instead of narrating one", () => {
     const started = gate();
     const released = gate();
     const invoke: AgentInvoker = async (ctx) => {
-      if (ctx.agent.slug === "sensor") { started.open(); await released.promise; return { t: "hi" }; }
-      return { v: "read" };
+      if (ctx.agent.slug === "sensor") { started.open(); await released.promise; return { t: "hi", ...SIGNAL }; }
+      return { v: "read", ...CLAIMS };
     };
     const d = deps(invoke, twoPhase());
     const disp = await dispatchTool("gig_dispatch", { standard_slug: "abort-demo", input: {} }, d);
@@ -132,9 +139,9 @@ describe("#249 — gig_abort cancels the run instead of narrating one", () => {
         ctx.onEvent?.({ type: "result", raw: { usage: { input_tokens: 10, output_tokens: 5 }, total_cost_usd: 0.42 } });
         started.open();
         await released.promise;
-        return { t: "hi" };
+        return { t: "hi", ...SIGNAL };
       }
-      return { v: "read" };
+      return { v: "read", ...CLAIMS };
     };
     const d = deps(invoke, twoPhase());
     const disp = await dispatchTool("gig_dispatch", { standard_slug: "abort-demo", input: {} }, d);
@@ -165,7 +172,7 @@ describe("#250 — a cancellation signal exists, reaches runGig, and reaches the
     await expect(
       runGig(twoPhase(), {}, {
         outputs, ledger,
-        invoke: () => { invocations++; return { t: "hi" }; },
+        invoke: () => { invocations++; return { t: "hi", ...SIGNAL }; },
         signal: ac.signal,
       }),
     ).rejects.toThrow(/abort/i);
@@ -180,7 +187,7 @@ describe("#250 — a cancellation signal exists, reaches runGig, and reaches the
     let seen: AbortSignal | undefined;
     await runGig(twoPhase(), {}, {
       outputs: createOutputStore(registry), ledger: new MemoryLedger(),
-      invoke: (ctx) => { seen ??= ctx.signal; return ctx.agent.slug === "sensor" ? { t: "hi" } : { v: "read" }; },
+      invoke: (ctx) => { seen ??= ctx.signal; return ctx.agent.slug === "sensor" ? { t: "hi", ...SIGNAL } : { v: "read", ...CLAIMS }; },
       signal: ac.signal,
     });
     expect(seen, "AgentInvocationContext carries no signal — the chair -> child link has nowhere to attach").toBe(ac.signal);
@@ -193,8 +200,8 @@ describe("#251 — gig_abort reports the truth in both directions", () => {
     const started = gate();
     const released = gate();
     const invoke: AgentInvoker = async (ctx) => {
-      if (ctx.agent.slug === "sensor") { started.open(); await released.promise; return { t: "hi" }; }
-      return { v: "read" };
+      if (ctx.agent.slug === "sensor") { started.open(); await released.promise; return { t: "hi", ...SIGNAL }; }
+      return { v: "read", ...CLAIMS };
     };
     const d = deps(invoke, twoPhase());
     const disp = await dispatchTool("gig_dispatch", { standard_slug: "abort-demo", input: {} }, d);
@@ -222,7 +229,7 @@ describe("#251 — gig_abort reports the truth in both directions", () => {
     registry.registerType(note);
     const d: ServerDeps = { registry, outputs: createOutputStore(registry), ledger: new MemoryLedger(), gig_runs: new Map() };
     await dispatchTool("output_write", {
-      core_type: "Signal", domain_type: "note", domain: "demo", gig_id: "old-gig", agent_slug: "sensor", data: { t: "x" },
+      core_type: "Signal", domain_type: "note", domain: "demo", gig_id: "old-gig", agent_slug: "sensor", data: { t: "x", ...SIGNAL },
     }, d);
 
     const r = await dispatchTool("gig_abort", { gig_id: "old-gig", reason: "cleanup" }, d);

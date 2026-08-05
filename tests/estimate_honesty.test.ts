@@ -100,7 +100,10 @@ describe("#238 — health_check does not fabricate an attestation", () => {
 
   it("still counts an agent's outputs (the one honest number it already had)", async () => {
     const d = makeDeps();
-    await dispatchTool("output_write", { core_type: "Signal", domain_type: "note", domain: "demo", gig_id: "g1", agent_slug: "parser", data: { t: "x" } }, d);
+    // `note` is Signal-cored: it names where it was acquired. `outputs.write` enforces one
+    // substance floor per core on every seal (#227 ruling), so a payload that omits it is
+    // refused and there is no output left to count.
+    await dispatchTool("output_write", { core_type: "Signal", domain_type: "note", domain: "demo", gig_id: "g1", agent_slug: "parser", data: { t: "x", source: "fixture://demo/note" } }, d);
     const r = await dispatchTool("health_check", { slug: "parser", kind: "agent" }, d);
     expect((r.data as { output_count: number }).output_count).toBe(1);
   });

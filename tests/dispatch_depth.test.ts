@@ -25,6 +25,12 @@ const standard = (): Standard => composeStandard({
   phases: [{ name: "sense", chairs: [chair] } as PhaseDef],
 });
 
+// `note` is Signal-cored, so every payload sealed here names where it was acquired.
+// `outputs.write` enforces one substance floor per core on every seal — bare core or
+// domain subtype (#227 ruling) — so a fixture that omits it aborts the chair and the
+// gig never reaches the depth question these tests are about.
+const SIGNAL = { source: "fixture://demo/note" };
+
 function deps(invoke: AgentInvoker): ServerDeps {
   const registry = createRegistry();
   registry.registerType(note);
@@ -38,7 +44,7 @@ function deps(invoke: AgentInvoker): ServerDeps {
 describe("#237 — dispatch-time depth reaches the thing that spends", () => {
   it("gig_dispatch({depth:'skim'}) threads skim into the agent invocation", async () => {
     let seen: string | undefined;
-    const d = deps((ctx) => { seen = ctx.depth; return { t: "hi" }; });
+    const d = deps((ctx) => { seen = ctx.depth; return { t: "hi", ...SIGNAL }; });
     const r = await dispatchTool("gig_dispatch", { standard_slug: "depth-demo", input: {}, depth: "skim", wait: true }, d);
     expect(r.ok, r.error).toBe(true);
     expect(
@@ -50,7 +56,7 @@ describe("#237 — dispatch-time depth reaches the thing that spends", () => {
 
   it("the async path threads it too, and the response says what depth actually ran", async () => {
     let seen: string | undefined;
-    const d = deps((ctx) => { seen = ctx.depth; return { t: "hi" }; });
+    const d = deps((ctx) => { seen = ctx.depth; return { t: "hi", ...SIGNAL }; });
     const r = await dispatchTool("gig_dispatch", { standard_slug: "depth-demo", input: {}, depth: "skim" }, d);
     expect((r.data as { depth?: string }).depth, "the operator must be able to see the depth the run took").toBe("skim");
     // let the background run reach the chair
@@ -59,7 +65,7 @@ describe("#237 — dispatch-time depth reaches the thing that spends", () => {
   });
 
   it("an unrecognized depth is a loud error, not a silent discard", async () => {
-    const d = deps(() => ({ t: "hi" }));
+    const d = deps(() => ({ t: "hi", ...SIGNAL }));
     const r = await dispatchTool("gig_dispatch", { standard_slug: "depth-demo", input: {}, depth: "shallowish", wait: true }, d);
     expect(r.ok, "an unknown depth must not quietly run at full depth").toBe(false);
     expect(String(r.error)).toMatch(/depth/i);
@@ -67,7 +73,7 @@ describe("#237 — dispatch-time depth reaches the thing that spends", () => {
 
   it("omitting depth is unchanged behaviour (the agent's own depth_profile stands)", async () => {
     let seen: string | undefined = "unset";
-    const d = deps((ctx) => { seen = ctx.depth; return { t: "hi" }; });
+    const d = deps((ctx) => { seen = ctx.depth; return { t: "hi", ...SIGNAL }; });
     await dispatchTool("gig_dispatch", { standard_slug: "depth-demo", input: {}, wait: true }, d);
     expect(seen).toBeUndefined();
   });

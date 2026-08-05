@@ -167,7 +167,9 @@ describe("standard with mismatched type-edges (adversarial unique-unknown)", () 
     let observedInputsLength = -1;
     const invoke: AgentInvoker = ({ inputs }) => {
       observedInputsLength = inputs.length;
-      return { v: "garbage-because-no-real-inputs" };
+      // orphan-out is Interpretation-cored: it states its claims (#227 ruling). The claim
+      // is deliberately the finding itself — this chair produced an answer out of nothing.
+      return { v: "garbage-because-no-real-inputs", claims: ["invented with no inputs to interpret"] };
     };
 
     const result = await runGig(composed, { unrelated: "payload" }, {
@@ -323,8 +325,8 @@ describe("standard with mismatched type-edges (adversarial unique-unknown)", () 
     const invoke: AgentInvoker = ({ agent, inputs }) => {
       observedInputLengths.push(inputs.length);
       // each agent returns data matching its declared output's required_fields
-      if (agent.slug === "RtProducer") return { v: "p1" };
-      return { v: "p2", w: "garbage-because-no-real-inputs", z: "still-no-warning" };
+      if (agent.slug === "RtProducer") return { v: "p1", claims: ["p1"] };
+      return { v: "p2", w: "garbage-because-no-real-inputs", z: "still-no-warning", claims: ["invented with no inputs to interpret"] };
     };
 
     const result = await runGig(brokenStandard, {}, {

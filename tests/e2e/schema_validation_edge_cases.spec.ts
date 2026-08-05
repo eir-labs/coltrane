@@ -88,6 +88,13 @@ function basePayload(): Record<string, unknown> {
     count: 1,
     nested: { inner: "ok" },
     tags: ["a", "b"],
+    // edge-signal is Signal-cored, so every write carries Signal's substance floor (#227
+    // ruling). Held CONSTANT and valid across every case below so that the one field each
+    // test mutates (`name`, `flag`, `nested.inner`, `domain_type`) stays the only variable —
+    // the floor must never be what a case is accidentally measuring. `source` is inherited
+    // from the Signal core's properties, so the closed-world schema admits it without
+    // edge-signal redeclaring it.
+    source: "fixture://edgetests/edge-agent",
   };
 }
 

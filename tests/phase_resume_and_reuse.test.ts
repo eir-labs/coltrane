@@ -505,7 +505,7 @@ describe("the file-backed stores — what the server actually wires", () => {
     const store = createCheckpointStore(dir);
     const cp: GigCheckpoint = {
       schema_version: CHECKPOINT_SCHEMA_VERSION, gig_id: "g1",
-      identity: { standard_slug: "s", genome_hash: "h", gig_input_sha: "i", model_version: "m", depth: "", canonical_form_version: "1.1" },
+      identity: { standard_slug: "s", genome_hash: "h", producers_sha: "p", gig_input_sha: "i", model_version: "m", depth: "", canonical_form_version: "1.1" },
       started_at: "t0", updated_at: "t1",
       roles: [{ role: "r", phase: "p", output_ids: ["o"], content_shas: ["c"], domain_types: ["t"], type_fingerprints: ["f"], sealed_at: "t1" }],
     };
@@ -542,7 +542,7 @@ describe("the file-backed stores — what the server actually wires", () => {
     const store = createCheckpointStore(dir);
     const base: GigCheckpoint = {
       schema_version: CHECKPOINT_SCHEMA_VERSION, gig_id: "g1",
-      identity: { standard_slug: "s", genome_hash: "h", gig_input_sha: "i", model_version: "m", depth: "", canonical_form_version: "1.1" },
+      identity: { standard_slug: "s", genome_hash: "h", producers_sha: "p", gig_input_sha: "i", model_version: "m", depth: "", canonical_form_version: "1.1" },
       started_at: "t0", updated_at: "t1", roles: [],
     };
     store.write(base);

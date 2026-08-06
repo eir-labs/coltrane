@@ -16,7 +16,7 @@ const CORE_TO_PRIMITIVE: Record<string, Agent["primitives"][number]> = Object.fr
   Object.entries(PRIMITIVE_OUTPUT_TYPE).map(([prim, core]) => [String(core), prim as Agent["primitives"][number]]),
 );
 import { sha256Hex, canonJson, runFingerprint, outputContentHash, CANONICAL_FORM_VERSION } from "./canonical_form.js";
-import {
+import { producersSha,
   reuseCacheKey, checkReuseEntry, runIdentityMismatch,
   CHECKPOINT_SCHEMA_VERSION, REUSE_SCHEMA_VERSION,
   type CheckpointStore, type CheckpointRole, type GigCheckpoint,
@@ -899,9 +899,33 @@ export async function runGig(
    * What "the same run" means, computed once. See RunIdentity in src/reuse.ts for why each
    * field is here and why `run_fingerprint` is not.
    */
+  /**
+   * Every resolved skill's verified code_hash, slug-keyed. The code IS the producer for a
+   * skill chair, and `meta.version` can stay put across a rewrite — `loadSkillPackage`
+   * computes the hash from the bytes, which is what makes this honest.
+   */
+  const resolvedSkillHashes = (): Array<{ slug: string; code_hash: string }> => {
+    const out: Array<{ slug: string; code_hash: string }> = [];
+    for (const [slug, dir] of deps.skill_dirs ?? []) {
+      try {
+        const pkg = loadSkillPackage(dir);
+        out.push({ slug, code_hash: pkg.codeHash ?? "" });
+      } catch {
+        // Unreadable here means unusable at dispatch too; record the absence rather than
+        // silently folding nothing, so a skill that vanished moves the identity.
+        out.push({ slug, code_hash: "<unreadable>" });
+      }
+    }
+    return out;
+  };
+
   const identity = (): RunIdentity => ({
     standard_slug: standard.slug,
     genome_hash,
+    // #278 review — genome_hash does NOT see an agent's identity/method/constraints/tools,
+    // nor a skill's code. Those are the producer, and editing one under a stable slug is the
+    // ordinary response to a bad run. Without this the resume gate accepted exactly that.
+    producers_sha: producersSha({ agents: standard.agents, skills: resolvedSkillHashes() }),
     gig_input_sha: gigInputSha(),
     model_version: deps.model_version ?? "unknown",
     depth: deps.depth ?? "",
@@ -1573,6 +1597,16 @@ export async function runGig(
         written.push(rec);
       }
       const types = written.map((w) => w.domain_type);
+      // #278 review — a recalled chair owes the SAME manifest row a derived one does. The
+      // early return skipped the `unfulfilled_outputs` push below, so a declared-optional
+      // shortfall present in the cold run vanished on the reuse hit. The engine's own comment
+      // three lines from that push says a declared-optional absence "is still a fact about
+      // this run", and hiding it here made a reused run's manifest quietly better than the
+      // run it stands in for — while carrying an identical run_fingerprint.
+      const reusedMissing = output_specs.map((sp) => sp.domain_type).filter((t) => !types.includes(t));
+      if (reusedMissing.length > 0) {
+        unfulfilledOutputs.push({ role: chair.role, phase: phaseName, missing: reusedMissing });
+      }
       skipped.push({
         phase: phaseName, role: chair.role, reason: "reuse", source_gig_id: hit.source_gig_id,
         output_types: types, content_shas: written.map((w) => w.content_sha), cache_key: hit.cache_key,

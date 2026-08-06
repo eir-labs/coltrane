@@ -577,6 +577,11 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         // while it runs would be a lie the operator acts on.
         const gigId = resumeArg ?? randomUUID();
         const runs = deps.gig_runs ?? (deps.gig_runs = new Map());
+        // #278 review — keep the prior attempt's record so a REFUSED resume can put it back.
+        // Overwriting it is right when the resume proceeds (that gig is running again), and
+        // destructive when it does not: the operator loses the `failed` status and error they
+        // were resuming in response to, and is left with a gig stuck at `running` forever.
+        const priorState = runs.get(gigId);
         const state = newGigRun(gigId, slug2, standard.phases.length, new Date().toISOString());
         // #249/#250 — the cancellation handle, held for as long as the run is live. This is the
         // object gig_abort reaches; before it existed there was nothing to reach.
@@ -658,8 +663,12 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         if (resumeArg !== undefined) {
           await Promise.resolve(); // one turn — see the ordering note above
           if (resumeRefusal) {
-            // The gig never started, so it must not be left masquerading as a live run.
-            deps.gig_runs?.delete(gigId);
+            // The gig never started, so it must not be left masquerading as a live run — and
+            // RESTORING beats deleting. Deleting turned a `failed` gig into an unknown one and
+            // left any poller waiting on a run that no longer existed; the failure the operator
+            // was acting on is exactly what they still need to see.
+            if (priorState) deps.gig_runs?.set(gigId, priorState);
+            else deps.gig_runs?.delete(gigId);
             return { ok: false, requires_approval: approval, error: resumeRefusal.message,
               data: { resume_refused: true, gig_id: resumeRefusal.gig_id, drift: resumeRefusal.drift } };
           }

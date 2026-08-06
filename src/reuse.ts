@@ -27,6 +27,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { randomUUID } from "node:crypto";
 import { sha256Hex, canonJson } from "./canonical_form.js";
 
 /**
@@ -108,10 +109,47 @@ export function typeShapeFingerprint(def: {
 export interface RunIdentity {
   standard_slug: string;
   genome_hash: string;
+  /**
+   * The WHOLE definition of every bound agent, and every resolved skill's code_hash.
+   *
+   * `genome_hash` is NOT sufficient and this field exists because it is not. `genomeHash`
+   * projects each agent down to `{slug, primitives, input_types, output_types, domain}` —
+   * so `identity`, `method`, `constraints`, `behavioral_primitives`, `allowed_tools`,
+   * `code_tool_access`, the `max_*` limits and `skill_slugs` are all invisible to it. Those
+   * are the fields that BECOME THE PROMPT. Rewrite an agent's method under a stable slug
+   * after a bad run — the ordinary response to a bad run — and `genome_hash` does not move,
+   * so a resume would splice chairs from genome B onto sealed outputs from genome A and
+   * nothing in the manifest would record it. For a skill chair the code IS the producer, and
+   * a rewritten `skill.mjs` under an unchanged `meta.version` is the same defect.
+   *
+   * `reuseCacheKey` already folds exactly this (see `ReuseKeyInput.agent` and `.skills`)
+   * with the same reasoning. Two gates guarding one concern must not answer differently.
+   */
+  producers_sha: string;
   gig_input_sha: string;
   model_version: string;
   depth: string;
   canonical_form_version: string;
+}
+
+/**
+ * Fold every producer definition a run depends on into one hash.
+ *
+ * Whole agent definitions, plus each resolved skill's verified `code_hash` — not the slug,
+ * which is precisely what an edit-under-a-stable-slug leaves unchanged.
+ */
+export function producersSha(input: {
+  agents: readonly unknown[];
+  skills?: ReadonlyArray<{ slug: string; code_hash: string }>;
+}): string {
+  return sha256Hex(
+    canonJson({
+      agents: input.agents,
+      skills: [...(input.skills ?? [])]
+        .map((s) => ({ slug: s.slug, code_hash: s.code_hash }))
+        .sort((a, b) => (a.slug < b.slug ? -1 : a.slug > b.slug ? 1 : 0)),
+    }),
+  );
 }
 
 export function runIdentityMismatch(a: RunIdentity, b: RunIdentity): string[] {
@@ -351,7 +389,9 @@ function writeAtomic(file: string, text: string): void {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   // Write-then-rename. A torn checkpoint would be read as damage and refuse a resume that
   // was, in fact, resumable — the failure mode a partial `appendFileSync` would introduce.
-  const tmp = `${file}.${process.pid}.tmp`;
+  // randomUUID, not pid: two containers sharing a mounted persistDir routinely both have
+  // low pids, and a colliding tmp name lets one torn write get renamed over the real file.
+  const tmp = `${file}.${randomUUID()}.tmp`;
   fs.writeFileSync(tmp, text, "utf8");
   fs.renameSync(tmp, file);
 }

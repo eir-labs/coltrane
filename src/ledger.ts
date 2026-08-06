@@ -111,6 +111,9 @@ export interface GenomeMutationLedgerEntry extends LedgerEntryBase {
   content_hash: string;
   dependency_hash?: string;
   effective_hash: string;
+  /** Why the author made this change (#234). The authoring tools accepted a `reason` and
+   *  discarded it, so the audit trail recorded WHAT changed and never WHY. */
+  detail?: Record<string, unknown>;
 }
 
 /** A governance act: a promotion, a registration, a review, a proposal, an abort. */

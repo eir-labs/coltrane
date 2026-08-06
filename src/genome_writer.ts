@@ -64,6 +64,7 @@ export function sealDefinition(
   ledger: Ledger,
   genome_dir: string | undefined,
   subdir: string,
+  detail?: Record<string, unknown>,
 ): { content_hash: string; dependency_hash: string; effective_hash: string } {
   const content_hash = sha256Hex(canonJson(def));
   const dependency_hash = EMPTY_DEPENDENCY_HASH;
@@ -88,6 +89,8 @@ export function sealDefinition(
       output_hashes: [content_hash],
       started_at: now,
       finished_at: now,
+      // #234 — the authoring rationale, which the tools accepted and dropped.
+      ...(detail && Object.keys(detail).length ? { detail } : {}),
     });
     writeGenomeFileVersioned(genome_dir, subdir, slug, JSON.stringify(def, null, 2) + "\n");
   }
@@ -98,7 +101,7 @@ export function sealDefinition(
  *  whose new-version FILE materialization needs version-aware loader support (the one named
  *  boundary). The identity is still sealed in the append-only ledger, so the mutation is
  *  never a contract lie: its effective_hash is recorded even before the file lands. */
-export function recordIdentity(kind: string, slug: string, def: unknown, ledger: Ledger): { content_hash: string; dependency_hash: string; effective_hash: string } {
+export function recordIdentity(kind: string, slug: string, def: unknown, ledger: Ledger, detail?: Record<string, unknown>): { content_hash: string; dependency_hash: string; effective_hash: string } {
   const content_hash = sha256Hex(canonJson(def));
   const dependency_hash = EMPTY_DEPENDENCY_HASH;
   const effective_hash = effectiveHash(content_hash, dependency_hash);
@@ -115,6 +118,10 @@ export function recordIdentity(kind: string, slug: string, def: unknown, ledger:
     output_hashes: [content_hash],
     started_at: now,
     finished_at: now,
+    // #234 — the authoring tools advertised a `reason` and threw it away, so the seal recorded
+    // what changed and never why. Omitted entirely when there is nothing to say, so an entry
+    // with no rationale stays byte-identical to one written before the field existed.
+    ...(detail && Object.keys(detail).length ? { detail } : {}),
   });
   return { content_hash, dependency_hash, effective_hash };
 }

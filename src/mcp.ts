@@ -155,7 +155,19 @@ export const MCP_TOOLS: readonly MCPToolDef[] = [
   { slug: "agent_promote",                 category: "build", input_schema: obj({ slug: "string", status: "string", current: "string" }), output_schema: obj({ slug: "string", status: "string", promoted: "boolean" }) },
   { slug: "standard_promote",              category: "build", input_schema: obj({ slug: "string", status: "string", current: "string" }), output_schema: obj({ slug: "string", status: "string", promoted: "boolean" }) },
   { slug: "skill_define",                  category: "build", input_schema: obj(zodToMcpProps(SkillSchema)), output_schema: obj({ skill_id: "string", content_hash: "string" }) },
-  { slug: "skill_promote",                 category: "build", input_schema: obj({ slug: "string", status: "string", current: "string" }), output_schema: obj({ slug: "string", status: "string", promoted: "boolean" }) },
+  // The skill ITERATION loop. Until 0.5.0 the surface was define + promote: a skill could be
+  // created and given production status, and never run, tested, listed or revised through the
+  // engine. The fixture gate on promotion made the gap sharper — a skill could be refused for
+  // failing fixtures with no way to run them and see which.
+  { slug: "skill_browse",                  category: "understand", input_schema: obj({ domain: "string", status: "string", skill_type: "string", has_code: "boolean" }), output_schema: obj({ skills: "array", count: "number" }) },
+  { slug: "skill_inspect",                 category: "understand", input_schema: obj({ slug: "string" }), output_schema: obj({ slug: "string", version: "number", has_code: "boolean", code_hash: nullable("string"), fixture_count: "number", fixtures: "array", promotable: "boolean" }) },
+  // `mode:"test"` runs the skill's own fixtures instead of a caller's input, and reports the
+  // threshold it would be held to at promotion — so "why was I refused" is one call.
+  { slug: "skill_execute",                 category: "run", input_schema: obj({ slug: "string", input: "object", mode: "string", timeout_ms: "number" }), output_schema: obj({ slug: "string", ok: "boolean", output: "object", error: "string", duration_ms: "number" }) },
+  // A candidate is run against the CURRENT fixtures in a throwaway copy and lands only if it
+  // passes. A skill cannot regress through this door.
+  { slug: "skill_evolve",                  category: "build", input_schema: obj({ slug: "string", code: "string", reason: "string" }), output_schema: obj({ slug: "string", accepted: "boolean", new_version: "number", failing_fixtures: "array" }) },
+  { slug: "skill_promote",                 category: "build", input_schema: obj({ slug: "string", status: "string", current: "string" }), output_schema: obj({ slug: "string", status: "string", promoted: "boolean", fixture_report: "object" }) },
 
   { slug: "charter_suggest_update", category: "manage_context", input_schema: obj({ field: "string", current_value: "string", suggested_value: "string", evidence: "object" }), output_schema: obj({ proposal_id: "string" }) },
 ];

@@ -18,7 +18,8 @@ import {
 import { createRegistry, loadRegistry, domainTypeDefect, type Registry, type DomainType } from "./registry.js";
 import { loadGenome, resolveGenome, type SkillRecord, type EvalRecord, type LoadError } from "./loader.js";
 import { SkillSchema, AgentSchema, StandardSchema } from "./genome_schema.js";
-import { runSkillFixtures } from "./skill_subprocess.js";
+import { runSkillFixtures, executeSkill, loadFixtures } from "./skill_subprocess.js";
+import { evolveSkill } from "./skills.js";
 import { sealAgentDefinition, sealDefinition, sealSkillPackage, recordIdentity } from "./genome_writer.js";
 import { createOutputStore, defaultOutputsPersistDir, type OutputStore } from "./outputs.js";
 import {
@@ -40,9 +41,10 @@ import { proposeAgentChange, evolveProfile, type AgentProfile } from "./agent_pr
 import { checkGrantTTL, validatePlanAgainstGrant, type AccessGrant, type PlanCheck } from "./access_grant.js";
 import { loadCharter, CharterError } from "./charter.js";
 import { COLTRANE_VERSION } from "./version.js";
-import { readFileSync, existsSync, mkdirSync, appendFileSync, readdirSync } from "node:fs";
+import { readFileSync, existsSync, mkdirSync, appendFileSync, readdirSync, writeFileSync, mkdtempSync, rmSync } from "node:fs";
 import { randomUUID, createHash } from "node:crypto";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
+import { tmpdir } from "node:os";
 import { newGigRun, applyGigProgress, gigEventLogLine, pruneGigRuns, type GigRunState } from "./gig_tracker.js";
 import { isGig } from "./ledger.js";
 import { SubthreadRecorder, ApiVersionMismatchError } from "./subthread_recorder.js";
@@ -1659,6 +1661,147 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         deps.skills?.set(skSlug, def);
         return { ok: true, requires_approval: approval, data: { skill_id: skSlug, content_hash: sealed.content_hash, dependency_hash: sealed.dependency_hash, effective_hash: sealed.effective_hash } };
       }
+      // ── the skill iteration loop ─────────────────────────────────────────────────────
+      // Until now the surface was define + promote: a skill could be created and given
+      // production status, and never RUN, TESTED, LISTED or REVISED through the engine. The
+      // fixture gate on promotion made that gap sharper — you could be refused for failing
+      // fixtures with no way to run them and see why.
+      case "skill_browse": {
+        if (!deps.skills) return { ok: false, not_implemented: true, requires_approval: approval, error: "skill_browse needs a skills map (bootstrap from a genome)" };
+        let list = [...deps.skills.values()] as Array<Record<string, unknown>>;
+        if (args["domain"]) list = list.filter((k) => k["domain"] === args["domain"]);
+        if (args["status"]) list = list.filter((k) => (k["status"] ?? "draft") === args["status"]);
+        if (args["skill_type"]) list = list.filter((k) => k["skill_type"] === args["skill_type"]);
+        // `has_code` is the axis that matters for the promotion gate: only a code half can be
+        // held to fixtures, so it is the filter an operator actually reaches for.
+        if (args["has_code"] !== undefined) {
+          const want = args["has_code"] === true || args["has_code"] === "true";
+          list = list.filter((k) => (k["code_hash"] != null) === want);
+        }
+        const skills = list
+          .map((k) => ({
+            slug: k["slug"], version: k["version"], domain: k["domain"], status: k["status"] ?? null,
+            skill_type: k["skill_type"], input_type: k["input_type"], output_type: k["output_type"],
+            has_code: k["code_hash"] != null, code_hash: k["code_hash"] ?? null,
+            tier: (k["permission"] as { tier?: number } | undefined)?.tier ?? 0,
+          }))
+          .sort((a, b) => (String(a.slug) < String(b.slug) ? -1 : 1));
+        return { ok: true, requires_approval: approval, data: { skills, count: skills.length } };
+      }
+
+      case "skill_inspect": {
+        if (!deps.skills) return { ok: false, not_implemented: true, requires_approval: approval, error: "skill_inspect needs a skills map (bootstrap from a genome)" };
+        const target = String(args["slug"] ?? "");
+        if (!target) return { ok: false, requires_approval: approval, error: "skill_inspect requires slug" };
+        const sk = deps.skills.get(target) as Record<string, unknown> | undefined;
+        if (!sk) return { ok: false, requires_approval: approval, error: `unknown skill "${target}"` };
+        const dir = sk["package_dir"] as string | undefined;
+        // Fixtures are the skill's contract with the promotion gate, so they are what an
+        // operator most needs to see. Inputs only — an expected_output is an answer key.
+        const fixtures = dir ? loadFixtures(dir).map((f) => ({ id: f.id, input: f.input, has_expected: f.expected_output !== undefined, assertions: (f.assertions ?? []).length })) : [];
+        return {
+          ok: true, requires_approval: approval,
+          data: {
+            slug: sk["slug"], version: sk["version"], domain: sk["domain"], status: sk["status"] ?? null,
+            skill_type: sk["skill_type"], input_type: sk["input_type"], output_type: sk["output_type"],
+            description: sk["description"] ?? null,
+            permission: sk["permission"] ?? { tier: 0 },
+            has_code: sk["code_hash"] != null, code_hash: sk["code_hash"] ?? null,
+            has_md: sk["md"] !== undefined,
+            fixture_count: fixtures.length, fixtures,
+            package_dir: dir ?? null,
+            // Said plainly, because it is the difference between "will promote" and "cannot".
+            promotable: sk["code_hash"] == null ? true : fixtures.length > 0,
+          },
+        };
+      }
+
+      case "skill_execute": {
+        if (!deps.skills) return { ok: false, not_implemented: true, requires_approval: approval, error: "skill_execute needs a skills map (bootstrap from a genome)" };
+        const target = String(args["slug"] ?? "");
+        if (!target) return { ok: false, requires_approval: approval, error: "skill_execute requires slug" };
+        const sk = deps.skills.get(target) as Record<string, unknown> | undefined;
+        if (!sk) return { ok: false, requires_approval: approval, error: `unknown skill "${target}"` };
+        const dir = sk["package_dir"] as string | undefined;
+        if (!dir || sk["code_hash"] == null) {
+          return { ok: false, requires_approval: approval, error: `skill "${target}" has no code half — there is nothing to execute (it is a reasoning skill)` };
+        }
+        // mode:"test" runs the skill's own fixtures instead of a caller's input. This is the
+        // command that makes the promotion gate actionable: refused for failing fixtures, run
+        // this, see which and why.
+        if (args["mode"] === "test") {
+          const report = runSkillFixtures(dir);
+          const threshold = report.deterministic ? 1.0 : 0.8;
+          return {
+            ok: true, requires_approval: approval,
+            data: { ...report, threshold, would_promote: report.total > 0 && report.pass_rate >= threshold },
+          };
+        }
+        const started = Date.now();
+        const res = executeSkill(dir, args["input"] ?? {}, typeof args["timeout_ms"] === "number" ? (args["timeout_ms"] as number) : undefined);
+        // A skill that threw is not a tool that failed: the CALL succeeded and its answer is
+        // "the code errored". Collapsing those loses the distinction a caller needs.
+        return {
+          ok: true, requires_approval: approval,
+          data: { slug: target, ...res, duration_ms: res.duration_ms ?? Date.now() - started },
+        };
+      }
+
+      case "skill_evolve": {
+        if (!deps.skills) return { ok: false, not_implemented: true, requires_approval: approval, error: "skill_evolve needs a skills map (bootstrap from a genome)" };
+        const target = String(args["slug"] ?? "");
+        const code = args["code"];
+        if (!target || typeof code !== "string" || code.trim() === "") {
+          return { ok: false, requires_approval: approval, error: "skill_evolve requires slug and a non-empty code half" };
+        }
+        const sk = deps.skills.get(target) as Record<string, unknown> | undefined;
+        if (!sk) return { ok: false, requires_approval: approval, error: `unknown skill "${target}"` };
+        const dir = sk["package_dir"] as string | undefined;
+        if (!dir || sk["code_hash"] == null) {
+          return { ok: false, requires_approval: approval, error: `skill "${target}" has no code half to evolve` };
+        }
+        if (loadFixtures(dir).length === 0) {
+          return { ok: false, requires_approval: approval, error: `skill "${target}" has no fixtures, so there is nothing to hold a candidate to — add fixtures before evolving it` };
+        }
+        // The candidate runs against the CURRENT fixtures in a throwaway copy. Nothing is
+        // written unless it passes, which is the whole point: a skill cannot regress through
+        // this door. `evolveSkill` has implemented exactly this since before the open-source
+        // split and had no caller.
+        const tmpCode = join(mkdtempSync(join(tmpdir(), "coltrane-candidate-")), "skill.mjs");
+        let verdict: { accepted: boolean; failing_fixtures: string[] };
+        try {
+          writeFileSync(tmpCode, code, "utf8");
+          verdict = evolveSkill(dir, tmpCode);
+        } catch (e) {
+          return { ok: false, requires_approval: approval, error: `could not evaluate the candidate: ${e instanceof Error ? e.message : String(e)}` };
+        } finally {
+          try { rmSync(dirname(tmpCode), { recursive: true, force: true }); } catch { /* best-effort */ }
+        }
+        if (!verdict.accepted) {
+          return {
+            ok: false, requires_approval: approval,
+            error: `candidate for "${target}" is REJECTED — it fails fixture(s) the current code passes: ${verdict.failing_fixtures.join(", ")}`,
+            data: { accepted: false, failing_fixtures: verdict.failing_fixtures },
+          };
+        }
+        // Accepted: land the code and seal the new identity. Version bumps, because the bytes
+        // that run changed — an evolved skill under an unchanged version is the edit-under-a-
+        // stable-slug shape that `producers_sha` exists to catch.
+        const nextVersion = Number(sk["version"] ?? 1) + 1;
+        writeFileSync(join(dir, "skill.mjs"), code, "utf8");
+        const sealed = recordIdentity("skill_evolve", `${target}@v${nextVersion}`, { slug: target, version: nextVersion, code }, deps.ledger,
+          args["reason"] != null ? { reason: args["reason"] } : undefined);
+        (sk as Record<string, unknown>)["version"] = nextVersion;
+        return {
+          ok: true, requires_approval: approval,
+          data: {
+            slug: target, accepted: true, new_version: nextVersion,
+            content_hash: sealed.content_hash, effective_hash: sealed.effective_hash,
+            note: "the code half changed; re-promote to carry the new version to active",
+          },
+        };
+      }
+
       case "agent_promote":
       case "standard_promote":
       case "skill_promote": {

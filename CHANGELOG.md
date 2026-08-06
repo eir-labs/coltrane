@@ -97,6 +97,24 @@ learning to say "no" or "I don't know" where it used to return a plausible answe
     `chair_skipped` and `reuse_rejected` progress events, `gig_monitor.skipped_chairs`, a
     `skipped` chair status of its own, and `OutputRecord.reused_from` on the record itself.
 
+- **The skill iteration loop: `skill_browse`, `skill_inspect`, `skill_execute`, `skill_evolve`.**
+  The surface was define + promote — a skill could be created and given production status, and
+  never run, tested, listed or revised through the engine. Adding a fixture gate to promotion
+  made that gap sharper rather than better: a skill could be refused for failing fixtures with
+  no supported way to run them and see which.
+
+  `skill_execute` with `mode: "test"` runs the skill's own fixtures and reports the threshold
+  promotion would hold it to, so "why was I refused" is one call. `skill_inspect` reports
+  `promotable` before anyone tries, and deliberately does NOT return fixture `expected_output`
+  — an answer key is not inspection.
+
+  `skill_evolve` is the one with the guarantee: a candidate runs against the CURRENT fixtures
+  in a throwaway copy and lands only on a clean pass, so **a skill cannot regress through this
+  door**. On acceptance the version bumps, because the bytes that run changed and an evolved
+  skill under an unchanged version is the edit-under-a-stable-slug shape `producers_sha` exists
+  to catch. `evolveSkill` had implemented exactly this since before the open-source split and
+  had no caller anywhere — the fourth gate this release found built and unwired.
+
 - **A skill must pass its own fixtures to become `active`.** Promotion checked that a skill's
   METADATA parsed and nothing else, so a code half that failed every one of its fixtures
   promoted cleanly. `runSkillFixtures` — which runs each fixture repeatedly, checks expected

@@ -161,6 +161,30 @@ learning to say "no" or "I don't know" where it used to return a plausible answe
 - **`writeFileAtomic`** (`src/fs_atomic.ts`), shared by the genome writer and the checkpoint
   store.
 
+### Security
+
+- **A tier-0 skill could read any file, the whole parent environment, and reach the network** —
+  while the source asserted, in two places, that it "cannot write, spawn, or reach the network".
+  Probed through `executeSkill` on a real machine, a tier-0 skill read `/etc/passwd`, saw all 77
+  of the parent's environment variables, and completed an outbound HTTPS request.
+
+  `--allow-fs-read=*` is literally "read every file", so reads were never confined. The
+  environment inheritance is the one with teeth: `process.env` carries the provider credential,
+  so a skill could exfiltrate it in one line.
+
+  Now: tier 0 is confined to its own package directory (its inputs arrive on stdin; it never
+  needed more), tier 1+ still reads and writes broadly because that is what those tiers are
+  for, and **every** tier receives an explicit minimal environment instead of the parent's.
+
+  **What is still not gated: the network.** Node's permission model has no network flag, so the
+  original guarantee was unimplementable in this runtime rather than merely misconfigured. It is
+  now stated rather than denied. What changed is that there is no longer a credential in reach.
+
+  `tests/skill_sandbox_confinement.test.ts` probes the capability rather than the flag string —
+  asserting on flags is how the false claim survived. The `fs-read` threshold in the cage matrix
+  moves 0 → 1 accordingly; that matrix had been asserting what the implementation did rather
+  than what the tier promised.
+
 ### Fixed
 
 - **`output_write` read `gig_id` and advertised it nowhere.** A prompt written against the

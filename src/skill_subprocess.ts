@@ -7,8 +7,8 @@
 // (stable across repeated runs), AND the evolution gate (an improved skill.mjs is
 // accepted only if every fixture still passes).
 import { spawn, spawnSync } from "node:child_process";
-import { readFileSync, readdirSync, existsSync } from "node:fs";
-import { join, extname } from "node:path";
+import { readFileSync, readdirSync, existsSync, realpathSync } from "node:fs";
+import { join, extname, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const RUNNER = fileURLToPath(new URL("./skill_runner.mjs", import.meta.url));
@@ -41,16 +41,82 @@ export interface ExecuteResult {
 }
 
 /**
- * Permission tier → Node --permission flags. Tier 0 is read-only with no side effects
- * (can load its own code + read inputs, but cannot write, spawn, or reach the network).
- * Higher tiers add write, then child_process (needed by skills that shell out, e.g.
- * run-vitest-band). The grant IS the enforcement — a skill can do only what its tier allows.
+ * Permission tier → Node --permission flags, SCOPED TO THE SKILL.
+ *
+ * This used to be `--allow-fs-read=*` for every tier, with a comment asserting that tier 0
+ * "cannot write, spawn, or reach the network". Probed through `executeSkill` on a real
+ * machine, a tier-0 skill read `/etc/passwd`, read all 77 of the parent's environment
+ * variables, and completed an outbound HTTPS request. `--allow-fs-read=*` is literally
+ * "read every file", so the first was never confined at all.
+ *
+ * The reads are now scoped to the skill's own package directory plus the runner that has to
+ * import it. `tests/skill_sandbox_confinement.test.ts` probes the capability rather than the
+ * flag string, because asserting on flags is how the previous claim survived being false.
+ *
+ * WHAT THIS DOES NOT DO: Node's permission model has no network gate. There is no flag here
+ * that stops `fetch`, and there was never one — the old guarantee was unimplementable in this
+ * runtime, not merely misconfigured. A pre-open-source ancestor of this engine ran skills under
+ * Deno (`--allow-read=<dir>` plus a net allowlist), which is the runtime with the primitive
+ * this wants. Until that returns, an outbound request from a skill is possible and is stated
+ * rather than denied. What has changed is that the credential is no longer in reach: the child
+ * gets an explicit minimal environment (see `skillEnv`), so there is nothing worth exfiltrating.
  */
-export function tierFlags(tier: number): string[] {
-  const flags = ["--permission", "--allow-fs-read=*"];
-  if (tier >= 1) flags.push("--allow-fs-write=*");
+export function tierFlags(tier: number, skillDir?: string): string[] {
+  // `RUNNER` lives in this package's dist/; the child must be able to read it to start, and to
+  // read the skill it imports. Nothing else.
+  // One flag PER PATH: Node no longer accepts a comma-separated list here, and silently
+  // warns rather than failing, so a joined list degrades into "no readable paths" and every
+  // skill breaks at import time.
+  //
+  // REAL paths, not the caller's. Node's permission model matches on the resolved path, and on
+  // macOS the system temp dir is a symlink (`/var/folders/...` → `/private/var/folders/...`),
+  // so granting the symlinked path grants nothing and every skill under it fails at import.
+  const real = (pth: string): string => { try { return realpathSync(pth); } catch { return pth; } };
+  const own = [real(dirname(RUNNER)), ...(skillDir ? [real(skillDir)] : [])];
+  const flags = ["--permission"];
+
+  // TIER 0 is confined to its own package. The tier is documented as "read-only with no side
+  // effects — can load its own code + read inputs", and a tier-0 skill's inputs arrive on
+  // STDIN, not from the filesystem. It never had a reason to read elsewhere; `--allow-fs-read=*`
+  // simply granted it because that was the easiest flag to write.
+  //
+  // TIER 1+ reads broadly, because that is what those tiers are FOR — a skill that extracts
+  // text from a document at a path it was handed, or runs a test band over a repo, has to
+  // reach outside its own directory. Confining them would not be security, it would be
+  // removing the capability the tier exists to grant.
+  if (tier >= 1) flags.push("--allow-fs-read=*", "--allow-fs-write=*");
+  else flags.push(...own.map((p2) => `--allow-fs-read=${p2}`));
   if (tier >= 2) flags.push("--allow-child-process");
   return flags;
+}
+
+/**
+ * The environment a skill child receives.
+ *
+ * Deliberately NOT `process.env`. The parent's environment carries the provider credential —
+ * `ANTHROPIC_API_KEY` in any real deployment — and a skill that can read it plus reach the
+ * network can exfiltrate it in one line. Inheriting the whole environment made that a
+ * one-liner; this makes it impossible regardless of the network gap above.
+ *
+ * PATH is kept because a tier-2 skill that may spawn needs to resolve a binary at all, and
+ * HOME/TMPDIR because Node itself consults them during startup.
+ */
+export function skillEnv(): NodeJS.ProcessEnv {
+  const keep = ["PATH", "HOME", "TMPDIR", "LANG", "NODE_OPTIONS"] as const;
+  const env: NodeJS.ProcessEnv = {};
+  for (const k of keep) if (process.env[k] !== undefined) env[k] = process.env[k];
+  return env;
+}
+
+/**
+ * The skill directory as the permission model sees it.
+ *
+ * Grants are matched on RESOLVED paths, so the path handed to the child must be the same one
+ * that was granted. Granting `/private/var/...` while passing `/var/...` (the macOS temp-dir
+ * symlink) grants a path the child never asks for, and every read is denied.
+ */
+function realDir(skillDir: string): string {
+  try { return realpathSync(skillDir); } catch { return skillDir; }
 }
 
 export function readSkillMeta(skillDir: string): SkillMeta {
@@ -77,12 +143,14 @@ export function executeSkill(skillDir: string, input: unknown, timeoutMs = 120_0
   // SIGTERM-trapping child can't survive the timeout.
   const timeout = typeof meta.timeout_ms === "number" ? Math.min(timeoutMs, meta.timeout_ms) : timeoutMs;
   const started = Date.now();
-  const res = spawnSync("node", [...tierFlags(tier), RUNNER, skillDir], {
+  const dir = realDir(skillDir);
+  const res = spawnSync("node", [...tierFlags(tier, dir), RUNNER, dir], {
     input: JSON.stringify(input),
     encoding: "utf-8",
     maxBuffer: 64 * 1024 * 1024,
     timeout,
     killSignal: "SIGKILL",
+    env: skillEnv(),
   });
   const duration_ms = Date.now() - started;
   if (res.error) return { ok: false, error: String(res.error.message), duration_ms };
@@ -136,7 +204,10 @@ export async function executeSkillAsync(
   const timeout = typeof meta.timeout_ms === "number" ? Math.min(timeoutMs, meta.timeout_ms) : timeoutMs;
 
   return await new Promise<ExecuteResult>((resolve) => {
-    const child = spawn("node", [...tierFlags(tier), RUNNER, skillDir], { stdio: ["pipe", "pipe", "pipe"] });
+    const dir = realDir(skillDir);
+    const child = spawn("node", [...tierFlags(tier, dir), RUNNER, dir], {
+      stdio: ["pipe", "pipe", "pipe"], env: skillEnv(),
+    });
     // Mirror executeSkill's `maxBuffer: 64 MB`. Accumulating without a cap was a regression
     // against the function this replaces: tier 0 grants --allow-fs-read=*, so "print a large
     // file" is one line of skill code, and an unbounded read grows the LONG-LIVED MCP server's

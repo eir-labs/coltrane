@@ -18,9 +18,18 @@ const scratch = mkdtempSync(join(tmpdir(), "coltrane-cage-"));
 const readable = join(scratch, "readable.txt");
 writeFileSync(readable, "hello");
 
-// capability → the probe that attempts it + the tier at/above which it's granted
+// capability → the probe that attempts it + the tier at/above which it's granted.
+//
+// `fs-read`'s threshold moved 0 → 1. These probes read a path OUTSIDE the skill's own package,
+// and tier 0 no longer can. That is a deliberate contract change, not a test being bent to fit:
+// tier 0 is documented as "read-only with no side effects — can load its own code + read
+// inputs", and a tier-0 skill's inputs arrive on STDIN. It never had a reason to read arbitrary
+// paths; `--allow-fs-read=*` granted it anyway, and a probe on this machine confirmed a tier-0
+// skill reading /etc/passwd. This matrix was asserting what the implementation did rather than
+// what the tier promised. Tier 0 keeps read access to its own directory — see
+// skill_sandbox_confinement.test.ts, which probes both directions.
 const CAPABILITIES = [
-  { name: "fs-read", probe: "probe-fs-read", threshold: 0 },
+  { name: "fs-read", probe: "probe-fs-read", threshold: 1 },
   { name: "fs-write", probe: "probe-fs-write", threshold: 1 },
   { name: "child-process", probe: "probe-child", threshold: 2 },
 ] as const;

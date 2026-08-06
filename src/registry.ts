@@ -1,6 +1,7 @@
 import Ajv from "ajv";
 import { type DomainTypeOutput } from "./genome_schema.js";
 import { CORE_TYPES, type CoreType } from "./core_types.js";
+import { CORE_SUBSTANCE } from "./output_validation.js";
 import { CANONICAL_CORE_TYPES } from "./canonical_core_types.js";
 import type { LoadedGenome } from "./loader.js";
 
@@ -70,16 +71,6 @@ function isCoreType(slug: string): slug is CoreType {
   return (CORE_TYPES as readonly string[]).includes(slug);
 }
 
-/** Which property each core requires as its substance floor (#227/#228). */
-const CORE_SUBSTANCE_FIELD: Readonly<Record<string, string | undefined>> = {
-  Signal: "source",
-  Interpretation: "claims",
-  Plan: "steps",
-  Judgment: "criteria",
-  Artifact: "validation_criteria",
-  Verdict: "checks",
-};
-
 /**
  * Describe how an overload makes a type UNSEALABLE, or null when it does not.
  *
@@ -95,10 +86,52 @@ const CORE_SUBSTANCE_FIELD: Readonly<Record<string, string | undefined>> = {
  * string, so NO payload satisfies both and the type is dead on arrival. That is #264's live
  * example — `fix-plan` declaring `steps: { type: "string" }`.
  */
-function overloadClash(base: Record<string, unknown> | undefined, own: Record<string, unknown>): string | null {
+function overloadClash(
+  base: Record<string, unknown> | undefined,
+  own: Record<string, unknown>,
+  rule: { shape: string; item_requires?: string } | undefined,
+): string | null {
   if (!base) return null;
-  if (typeof base["type"] === "string" && typeof own["type"] === "string" && base["type"] !== own["type"]) {
-    return `core declares type "${String(base["type"])}", subtype declares "${String(own["type"])}"`;
+
+  // `type` may legally be a STRING or an ARRAY of strings. Reading only the string spelling
+  // let `type: ["string","null"]` through — which is #264's own example written the other
+  // legal way. Compare as sets: an overload that shares no type with the core is unsatisfiable.
+  const asSet = (v: unknown): Set<string> | null =>
+    typeof v === "string" ? new Set([v]) : Array.isArray(v) && v.every((x) => typeof x === "string") ? new Set(v as string[]) : null;
+  const b = asSet(base["type"]);
+  const o = asSet(own["type"]);
+  if (b && o && ![...o].some((t) => b.has(t))) {
+    return `core declares type ${JSON.stringify(base["type"])}, subtype declares ${JSON.stringify(own["type"])}`;
+  }
+
+  // A floor that can only ever be EMPTY is unsatisfiable, because the runtime floor rejects
+  // an empty array and an empty string. These are the "technically the right type" spellings
+  // of the same defect.
+  if (own["maxItems"] === 0) return `subtype caps "maxItems" at 0, and the floor rejects an empty array`;
+  if (own["maxLength"] === 0) return `subtype caps "maxLength" at 0, and the floor rejects an empty string`;
+
+  // `const` / `enum` pin the value to a closed set. If nothing in that set can satisfy the
+  // floor's shape, no payload can satisfy both.
+  const closed = own["const"] !== undefined ? [own["const"]] : Array.isArray(own["enum"]) ? (own["enum"] as unknown[]) : null;
+  if (closed && rule) {
+    const satisfies = (v: unknown): boolean =>
+      rule.shape === "array" ? Array.isArray(v) && v.length > 0 : typeof v === "string" && v.length > 0;
+    if (!closed.some(satisfies)) {
+      return `subtype pins the value to ${JSON.stringify(closed)}, none of which satisfies the ${rule.shape} floor`;
+    }
+  }
+
+  // The per-item field the core REQUIRES must remain satisfiable. Dropping it from `required`
+  // is harmless (the runtime enforces it anyway); declaring it as a type the runtime will
+  // never accept is not — the runtime wants a non-empty string.
+  if (rule?.item_requires) {
+    const itemProp = (own["items"] as { properties?: Record<string, unknown> } | undefined)?.properties?.[rule.item_requires] as
+      | Record<string, unknown>
+      | undefined;
+    const t = itemProp ? asSet(itemProp["type"]) : null;
+    if (t && !t.has("string")) {
+      return `subtype declares item field "${rule.item_requires}" as ${JSON.stringify(itemProp?.["type"])}, and the floor requires a non-empty string`;
+    }
   }
   return null;
 }
@@ -140,13 +173,19 @@ export function domainTypeDefect(def: { slug: string; extends: string; schema?: 
   //
   // NARROWING stays legal, and is the common legitimate case (`grant-opportunity` narrows
   // Signal's `source` to an enum, which strengthens the floor). Only contradiction is refused.
-  const floor = CORE_SUBSTANCE_FIELD[def.extends];
+  // The GUARDED table, not a second copy. A hand-rolled duplicate here would return
+  // `undefined` for a seventh core and skip this check silently — a silent genome drop
+  // reintroduced inside the fix named after silent genome drops. `CORE_SUBSTANCE` throws at
+  // import if a core has no floor, so the two cannot drift.
+  const rule = CORE_SUBSTANCE[def.extends as CoreType];
+  const floor = rule?.field;
   if (floor) {
     const own = (def.schema as { properties?: Record<string, unknown> } | undefined)?.properties?.[floor];
     if (own !== undefined) {
       const clash = overloadClash(
         CORE_SCHEMA_PROPS[def.extends]?.[floor] as Record<string, unknown> | undefined,
         own as Record<string, unknown>,
+        rule,
       );
       if (clash) {
         return `redeclares "${floor}", the substance floor inherited from ${def.extends}, with an incompatible type (${clash}) — the runtime floor and this schema cannot both be satisfied, so the type is unsealable under any input`;

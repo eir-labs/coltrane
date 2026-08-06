@@ -15,7 +15,7 @@ import {
   checkPromotion,
   PromotionError,
 } from "./mcp.js";
-import { createRegistry, loadRegistry, type Registry, type DomainType } from "./registry.js";
+import { createRegistry, loadRegistry, domainTypeDefect, type Registry, type DomainType } from "./registry.js";
 import { loadGenome, resolveGenome, type SkillRecord, type EvalRecord, type LoadError } from "./loader.js";
 import { SkillSchema, AgentSchema, StandardSchema } from "./genome_schema.js";
 import { sealAgentDefinition, sealDefinition, sealSkillPackage, recordIdentity } from "./genome_writer.js";
@@ -759,6 +759,21 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
           slug: baseDef.slug, version: 1, extends: baseDef.extends, domain: baseDef.domain,
           status: "active", schema: { type: "object", properties: baseProps }, required_fields: baseDef.required_fields,
         };
+        // THE THIRD DOOR. `{...baseProps, ...addProps}` above is the exact merge #264 is
+        // about, and this handler reached `recordIdentity` without ever consulting
+        // `registerType` or `domainTypeDefect` — so `type_extend` could persist and version a
+        // definition the engine had just declared illegal. #264 names this tool explicitly.
+        //
+        // The thesis of that fix was "there are two doors into the type table, and a rule
+        // enforced at one of them is a rule with a way around it." There were three.
+        const extendDefect = domainTypeDefect({
+          slug: baseDef.slug,
+          extends: baseDef.extends,
+          schema: { properties: nextProps },
+        });
+        if (extendDefect) {
+          return { ok: false, requires_approval: approval, error: `type_extend rejected: ${extendDefect}` };
+        }
         const next: DomainTypeDef = {
           ...base, schema: { type: "object", properties: nextProps }, required_fields: nextRequired,
         };

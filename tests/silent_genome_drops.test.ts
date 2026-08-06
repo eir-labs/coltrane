@@ -11,9 +11,13 @@
 import { describe, it, expect } from "vitest";
 import { createRegistry, CORE_TYPES, type DomainType } from "../src/index.js";
 import { loadGenome } from "../src/loader.js";
+import { domainTypeDefect } from "../src/registry.js";
+const REPO_SRC = join(dirname(fileURLToPath(import.meta.url)), "..", "src");
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+import { readFileSync } from "node:fs";
 import { TEST_BEHAVIOR } from "./_support/agents.js";
 
 /** A genome root on disk with the given files, so the LOADER is what is under test. */
@@ -235,5 +239,72 @@ describe("#203 — a deprecated standard is not silently dispatchable", () => {
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
+  });
+});
+
+// ── Review findings. Each of these was ALLOWED by the first version of the rule, and each
+// produces a type no payload can satisfy. They are the spellings the narrowing missed.
+describe("#264 — the unsealable shapes the first rule let through", () => {
+  const probe = (extendsCore: string, floor: string, decl: Record<string, unknown>): string | null =>
+    domainTypeDefect({ slug: "probe", extends: extendsCore, schema: { properties: { [floor]: decl } } });
+
+  it("refuses type as an ARRAY that shares nothing with the core — #264's own example, other spelling", () => {
+    // `type: ["string","null"]` is `fix-plan` written the other legal JSON Schema way. Reading
+    // only the string spelling let it straight through.
+    expect(probe("Plan", "steps", { type: ["string", "null"] })).toMatch(/steps/);
+  });
+
+  it("allows an array-valued type that still admits the core's type", () => {
+    expect(probe("Plan", "steps", { type: ["array", "null"] })).toBeNull();
+  });
+
+  it("refuses a floor that can only ever be empty", () => {
+    expect(probe("Plan", "steps", { type: "array", maxItems: 0 })).toMatch(/maxItems/);
+    expect(probe("Signal", "source", { type: "string", maxLength: 0 })).toMatch(/maxLength/);
+  });
+
+  it("refuses a const/enum pinning the floor to values that cannot satisfy it", () => {
+    expect(probe("Plan", "steps", { const: "none" })).toMatch(/pins the value/);
+    expect(probe("Interpretation", "claims", { enum: ["a", "b"] })).toMatch(/pins the value/);
+  });
+
+  it("allows an enum whose values DO satisfy the floor", () => {
+    expect(probe("Signal", "source", { enum: ["nih", "nsf"] })).toBeNull();
+  });
+
+  // The narrowing lumped two different things together: DROPPING the per-item required field
+  // is harmless (the runtime enforces it regardless), but CONTRADICTING its type is not.
+  it("refuses an item field declared as a type the floor can never accept", () => {
+    expect(
+      probe("Verdict", "checks", {
+        type: "array",
+        items: { type: "object", properties: { method: { type: "number" } }, required: ["method"] },
+      }),
+    ).toMatch(/method/);
+  });
+
+  it("still allows merely DROPPING the per-item required field — the runtime covers it", () => {
+    expect(
+      probe("Verdict", "checks", { type: "array", items: { type: "object", properties: {}, required: [] } }),
+    ).toBeNull();
+  });
+});
+
+describe("#264 — every door is gated, including the third one", () => {
+  it("the floor table is the guarded one, not a second copy", () => {
+    // A hand-rolled duplicate returns undefined for a seventh core and skips the check
+    // silently. CORE_SUBSTANCE throws at import if a core has no floor.
+    const src = readFileSync(join(REPO_SRC, "registry.ts"), "utf8");
+    expect(src, "must consult the guarded table").toMatch(/CORE_SUBSTANCE\[/);
+    expect(src, "and must not hand-roll a second one").not.toMatch(/CORE_SUBSTANCE_FIELD/);
+  });
+
+  it("type_extend consults the same validator that registerType and the loader do", () => {
+    // The PR's thesis was "two doors, and a rule at one is a rule with a way around it".
+    // There were three: type_extend merged {...baseProps, ...addProps} and persisted it.
+    const src = readFileSync(join(REPO_SRC, "server.ts"), "utf8");
+    const at = src.indexOf('case "type_extend"');
+    const next = src.indexOf('      case "', at + 10);
+    expect(src.slice(at, next === -1 ? undefined : next)).toMatch(/domainTypeDefect\(/);
   });
 });

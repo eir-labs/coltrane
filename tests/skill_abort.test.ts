@@ -121,3 +121,35 @@ describe("#253 — a skill chair is interruptible", () => {
     }
   });
 });
+
+// Review finding — an unbounded read was a regression against the function this replaces.
+describe("#253 — skill output is bounded, as the sync path always was", () => {
+  it("kills and NAMES an oversized read instead of buffering it into the server's heap", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "loud-skill-"));
+    try {
+      mkdirSync(join(dir, "fixtures"), { recursive: true });
+      writeFileSync(join(dir, "meta.json"), JSON.stringify({ slug: "loud", version: 1, permission: { tier: 0 } }));
+      // Tier 0 already grants --allow-fs-read=*, so "print something enormous" is one line.
+      writeFileSync(
+        join(dir, "skill.mjs"),
+        `export default async function () {
+           const chunk = "x".repeat(1024 * 1024);
+           for (let i = 0; i < 128; i++) process.stdout.write(chunk);
+           return { done: true };
+         }\n`,
+      );
+      const before = process.memoryUsage().rss;
+      const res = await executeSkillAsync(dir, {}, 30_000);
+      const grewMB = (process.memoryUsage().rss - before) / (1024 * 1024);
+
+      expect(res.ok).toBe(false);
+      expect(
+        String(res.error),
+        "'unparseable skill output' says nothing about what happened; the cap must name itself",
+      ).toMatch(/exceeded|bytes/i);
+      expect(grewMB, "the long-lived MCP server must not absorb whatever a skill prints").toBeLessThan(180);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 60_000);
+});

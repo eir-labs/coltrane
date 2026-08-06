@@ -189,10 +189,10 @@ export interface RunDeps {
    * signal is threaded into every AgentInvocationContext, so an invoker that wires it to its
    * subprocess also stops the in-flight chair. Absent = an uncancellable run (the v0 shape).
    *
-   * Known bound: a SKILL-backed chair runs `spawnSync` (src/skill_subprocess.ts), which
-   * blocks the event loop, so an abort delivered while one is executing is not even RECEIVED
-   * until it returns. Skill chairs are therefore a hard uncancellable window of up to their
-   * declared `meta.timeout_ms` (default 120s). Deliberate for now — see #253.
+   * Skill chairs are cancellable too (#253). They used to run `spawnSync`, which blocks the
+   * event loop, so an abort delivered during one was not even RECEIVED until it returned —
+   * a hard uncancellable window of up to the skill's `meta.timeout_ms`, 120s by default.
+   * `executeSkillAsync` spawns without blocking and SIGKILLs on the signal.
    */
   signal?: AbortSignal | undefined;
   /**

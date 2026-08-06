@@ -137,8 +137,15 @@ export async function executeSkillAsync(
 
   return await new Promise<ExecuteResult>((resolve) => {
     const child = spawn("node", [...tierFlags(tier), RUNNER, skillDir], { stdio: ["pipe", "pipe", "pipe"] });
+    // Mirror executeSkill's `maxBuffer: 64 MB`. Accumulating without a cap was a regression
+    // against the function this replaces: tier 0 grants --allow-fs-read=*, so "print a large
+    // file" is one line of skill code, and an unbounded read grows the LONG-LIVED MCP server's
+    // heap by the size of whatever it printed. Bounded, killed, and named — a truncated read
+    // must not surface as "unparseable skill output", which says nothing about what happened.
+    const MAX_OUTPUT_BYTES = 64 * 1024 * 1024;
     let stdout = "";
     let stderr = "";
+    let overflowed = false;
     let settled = false;
     const done = (r: ExecuteResult): void => {
       if (settled) return;
@@ -165,8 +172,24 @@ export async function executeSkillAsync(
     }, timeout);
 
     opts.signal?.addEventListener("abort", onAbort, { once: true });
-    child.stdout.on("data", (c: Buffer) => (stdout += c.toString()));
-    child.stderr.on("data", (c: Buffer) => (stderr += c.toString()));
+    const capture = (buf: Buffer, which: "out" | "err"): void => {
+      if (overflowed) return;
+      const next = (which === "out" ? stdout : stderr) + buf.toString();
+      if (next.length > MAX_OUTPUT_BYTES) {
+        overflowed = true;
+        kill();
+        done({
+          ok: false,
+          error: `skill output exceeded ${MAX_OUTPUT_BYTES} bytes and was killed`,
+          duration_ms: Date.now() - started,
+        });
+        return;
+      }
+      if (which === "out") stdout = next;
+      else stderr = next;
+    };
+    child.stdout.on("data", (c: Buffer) => capture(c, "out"));
+    child.stderr.on("data", (c: Buffer) => capture(c, "err"));
     child.on("error", (e: Error) => done({ ok: false, error: String(e.message), duration_ms: Date.now() - started }));
     child.on("close", () => {
       const duration_ms = Date.now() - started;

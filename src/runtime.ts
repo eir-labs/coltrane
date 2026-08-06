@@ -1992,6 +1992,12 @@ export async function runGig(
     budget.settled_usd = usage.total_cost_usd; // #233 — final reconciliation of REAL dollars
   }
 
+  // The gig finished, so there is nothing left to resume — drop its checkpoint. Without this
+  // every gig a deployment ever runs leaves a file behind forever. Only the SUCCESS path clears
+  // it: a failed or aborted run's checkpoint is exactly what a later resume reads, and this line
+  // is not reached on either.
+  try { deps.checkpoints?.remove(gig_id); } catch { /* reclaiming disk must not fail a run that succeeded */ }
+
   const result: GigResult = { gig_id, standard_slug: standard.slug, genome_hash, run_fingerprint, outputs: produced, eval_scores, status: "complete" };
   if (settledUsage) result.usage = settledUsage;
   if (budget) result.budget_state = budget;

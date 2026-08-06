@@ -28,6 +28,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { randomUUID } from "node:crypto";
+import { writeFileAtomic } from "./fs_atomic.js";
 import { sha256Hex, canonJson } from "./canonical_form.js";
 
 /**
@@ -200,6 +201,17 @@ export interface CheckpointStore {
   /** The checkpoint for this gig, or undefined if none was ever written. Throws on damage. */
   read(gig_id: string): GigCheckpoint | undefined;
   write(cp: GigCheckpoint): void;
+  /**
+   * Drop a gig's checkpoint. Called when a gig COMPLETES.
+   *
+   * A checkpoint exists to resume unfinished work, so a completed gig's is dead weight — and
+   * without this every gig a deployment ever runs leaves a file behind forever. A FAILED or
+   * aborted gig's checkpoint is kept, because that is precisely what resume reads.
+   *
+   * Best-effort: a checkpoint that cannot be removed is disk to reclaim, not a reason to fail
+   * a run that has already succeeded.
+   */
+  remove(gig_id: string): void;
 }
 
 // ───────────────────────────────────────────────────────────────────────────────
@@ -385,16 +397,13 @@ export function checkReuseEntry(entry: ReuseEntry, fingerprintOf: TypeFingerprin
 // File-backed stores
 // ───────────────────────────────────────────────────────────────────────────────
 
-function writeAtomic(file: string, text: string): void {
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  // Write-then-rename. A torn checkpoint would be read as damage and refuse a resume that
-  // was, in fact, resumable — the failure mode a partial `appendFileSync` would introduce.
-  // randomUUID, not pid: two containers sharing a mounted persistDir routinely both have
-  // low pids, and a colliding tmp name lets one torn write get renamed over the real file.
-  const tmp = `${file}.${randomUUID()}.tmp`;
-  fs.writeFileSync(tmp, text, "utf8");
-  fs.renameSync(tmp, file);
-}
+// Write-then-rename. A torn checkpoint would be read as damage and refuse a resume that was,
+// in fact, resumable — the failure mode a partial `appendFileSync` would introduce.
+//
+// Shared with the genome writer (src/fs_atomic.ts), which needed the same guarantee and did not
+// have it. Two implementations of one concern, one documented and one absent, is how the two
+// identity gates in this file came to disagree.
+const writeAtomic = writeFileAtomic;
 
 function readJsonFile<T>(file: string): T | undefined {
   if (!fs.existsSync(file)) return undefined;
@@ -417,6 +426,12 @@ export function createCheckpointStore(persistDir: string): CheckpointStore {
     },
     write(cp) {
       writeAtomic(path.join(dir, `${cp.gig_id}.json`), JSON.stringify(cp));
+    },
+    remove(gig_id) {
+      // Same path guard as read(): a gig id arrives from a caller's argument and must not be
+      // able to name a path. Doubly so here, where the operation DELETES.
+      if (!/^[A-Za-z0-9._-]+$/.test(gig_id)) return;
+      try { fs.rmSync(path.join(dir, `${gig_id}.json`), { force: true }); } catch { /* best-effort */ }
     },
   };
 }
@@ -444,6 +459,7 @@ export function createMemoryCheckpointStore(): CheckpointStore {
       return raw === undefined ? undefined : (JSON.parse(raw) as GigCheckpoint);
     },
     write: (cp) => void m.set(cp.gig_id, JSON.stringify(cp)),
+    remove: (id) => void m.delete(id),
   };
 }
 

@@ -245,6 +245,29 @@ describe("resume — a mid-run failure no longer discards the phases that succee
     expect(after.total()).toBe(0);
   });
 
+  it("a COMPLETED gig's checkpoint is reclaimed, so the store does not grow forever", async () => {
+    // The unit test for `remove()` proves the store can delete; this proves the RUNTIME calls
+    // it. A store method nobody invokes is the defect recorded in #279, and the checkpoint
+    // directory had no cleanup at all — every gig a deployment ran left a file behind.
+    const checkpoints = createMemoryCheckpointStore();
+    const res = await runGig(pipeline(), {}, run(bench(), counting().invoke, { checkpoints, gig_id: GIG }));
+    expect(res.status).toBe("complete");
+    expect(
+      checkpoints.read(GIG),
+      "the run finished, so there is nothing left to resume",
+    ).toBeUndefined();
+  });
+
+  it("but a FAILED gig keeps its checkpoint — that is what resume reads", async () => {
+    // The half that must NOT be cleaned. Clearing on failure would delete the only record a
+    // resume could act on, turning a recoverable run into a rerun-from-scratch.
+    const checkpoints = createMemoryCheckpointStore();
+    await expect(
+      runGig(pipeline(), {}, run(bench(), counting({ agent: "judge", times: 1 }).invoke, { checkpoints, gig_id: GIG })),
+    ).rejects.toThrow();
+    expect(checkpoints.read(GIG), "a failed run's checkpoint is the point of the feature").toBeTruthy();
+  });
+
   it("does nothing at all when no resume is requested — the default path is untouched", async () => {
     const b = bench();
     const first = counting();

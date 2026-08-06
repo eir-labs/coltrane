@@ -97,6 +97,21 @@ learning to say "no" or "I don't know" where it used to return a plausible answe
     `chair_skipped` and `reuse_rejected` progress events, `gig_monitor.skipped_chairs`, a
     `skipped` chair status of its own, and `OutputRecord.reused_from` on the record itself.
 
+- **The prompt is delivered on stdin when it is too large for the command line.** Windows caps
+  a command line at ~32,767 characters and the invoker put the whole chair prompt in argv, so a
+  strategize-phase prompt (blueprint + draft + review) died with `ENAMETOOLONG`. A consumer
+  reported it as "broken on Windows … local dev was practically unusable" and worked around it
+  by monkey-patching `child_process.spawn` — a patch coupled to this module's argv construction
+  through the package's built output, which would therefore break *silently* on any release
+  that touched it. `-p` is a boolean flag and the prompt is positional, so the fix keeps the
+  flag and moves the positional: no consumer needs to patch anything.
+
+  Threshold `COLTRANE_PROMPT_ARG_LIMIT` (default 16,000, deliberately well under the cap
+  because the mcp-config path and tool lists share the line); `COLTRANE_PROMPT_MODE=arg|stdin`
+  forces either route. An unrecognised value falls back to the size test rather than failing a
+  dispatch. Below the threshold nothing changes, and stdin is opened only when something is
+  going down it, so TTY detection is unaffected for existing callers.
+
 - **A skill-backed chair is interruptible.** It ran a blocking subprocess, so abort could not
   reach it — a "stopped" run kept burning. Now spawned non-blocking, SIGKILLed on abort, not
   spawned at all if already aborted, and capped at 64MB of output.

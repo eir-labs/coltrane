@@ -467,6 +467,29 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         const slug2 = String(args["standard_slug"] ?? "");
         const standard = deps.standards.get(slug2);
         if (!standard) return { ok: false, requires_approval: approval, error: `unknown standard "${slug2}"` };
+        // #203, the READ side. Preserving `status` through the loader was only half of it: the
+        // symptom recorded on the issue — "a retired standard stays dispatchable and nothing
+        // says otherwise" — survived the field being kept, because nothing consulted it. A
+        // declaration that round-trips and changes nothing is worse than one that is dropped;
+        // the round-trip is evidence it took effect.
+        //
+        // Placed ABOVE the wait/async split deliberately. Both modes have their own body below,
+        // and a guard sitting inside the synchronous branch would leave the DEFAULT path — the
+        // one the product dispatches through — open.
+        //
+        // deprecated ALLOWS and warns; retired REFUSES. Were both refused, `deprecated` would
+        // be a spelling of `retired` and there would be no way to say the softer thing.
+        const stdStatus = (standard as { status?: string }).status;
+        if (stdStatus === "retired") {
+          return {
+            ok: false, requires_approval: approval,
+            error: `standard "${slug2}" is retired and cannot be dispatched. ` +
+              `Promote it back to active (standard_promote) if it should run again.`,
+          };
+        }
+        const warnings: string[] = stdStatus === "deprecated"
+          ? [`standard "${slug2}" is deprecated — it still runs, but should not be built on.`]
+          : [];
         // Optional budget arg — when present, runtime enforces per-gig cost-budget
         // and raises BudgetExhausted on depletion (PR for T10 gap, see runtime.ts).
         const budgetArg = args["budget"] as Record<string, unknown> | undefined;
@@ -497,6 +520,7 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
               data: {
                 gig_id: res.gig_id,
                 ...(depth ? { depth } : {}),
+                warnings,
                 manifest: {
                   genome_hash: res.genome_hash, run_fingerprint: res.run_fingerprint, output_count: res.outputs.length,
                   ...(res.usage ? { usage: res.usage } : {}), // #195 — settled model spend
@@ -584,7 +608,7 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
           .finally(() => { state.controller = undefined; }); // don't pin a controller past settle
         return {
           ok: true, requires_approval: approval,
-          data: { gig_id: gigId, status: "running", ...(depth ? { depth } : {}), ...(logDir ? { log_dir: logDir } : {}) },
+          data: { gig_id: gigId, status: "running", ...(depth ? { depth } : {}), warnings, ...(logDir ? { log_dir: logDir } : {}) },
         };
       }
       case "gig_monitor": {

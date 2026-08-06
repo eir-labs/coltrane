@@ -58,6 +58,29 @@ const STD_PASSTHROUGH = Object.keys(StandardSchema.shape).filter(
   (k) => !["slug", "domain", "agents", "agent_slugs", "phases"].includes(k),
 );
 
+/**
+ * `window` → the ISO instant to filter from, for the health surfaces (#234).
+ *
+ * Both `system_health` and `health_check` advertised a `window` and neither read it, so every
+ * health reading was over ALL TIME while presenting as a windowed one. That is the failure mode
+ * this engine keeps finding: not a missing answer but a confident wrong one — "$412 of spend"
+ * is a very different sentence depending on whether it covers a week or a year, and the caller
+ * who asked for a week had no way to tell which they got.
+ *
+ * Returns `{}` for an absent window (all time — the prior behaviour, now the explicit default)
+ * and an `error` for one that cannot be parsed. Silently falling back to all-time on a typo is
+ * how the argument came to be ignored in the first place.
+ */
+export function parseWindow(raw: unknown, now: number): { after?: string; error?: string } {
+  if (raw === undefined || raw === null || raw === "") return {};
+  const m = /^(\d+)\s*([hdw])$/.exec(String(raw).trim().toLowerCase());
+  if (!m) return { error: `unrecognized window "${String(raw)}" — use e.g. "24h", "7d", "2w"` };
+  const n = Number(m[1]);
+  if (n <= 0) return { error: `window must be positive, got "${String(raw)}"` };
+  const ms = m[2] === "h" ? 3_600_000 : m[2] === "d" ? 86_400_000 : 604_800_000;
+  return { after: new Date(now - n * ms).toISOString() };
+}
+
 export interface ServerDeps {
   registry: Registry;
   outputs: OutputStore;
@@ -325,6 +348,25 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         let types = deps.registry.listTypes();
         if (args["domain"]) types = types.filter((t) => t.domain === args["domain"]);
         if (args["extends"]) types = types.filter((t) => t.extends === args["extends"]);
+        // #234/#203 — `status` was advertised here and never applied. The two issues compound:
+        // #203 gave domain types a lifecycle, and the tool for finding types offered to filter
+        // on it while returning retired ones anyway. An operator browsing for what they may
+        // build on got the retired definitions back with nothing marking them.
+        //
+        // The registry default is "active", so an undeclared type answers to `status:"active"`
+        // rather than being invisible to every filter.
+        if (args["status"]) {
+          const want = String(args["status"]);
+          types = types.filter((t) => ((t as { status?: string }).status ?? "active") === want);
+        }
+        // #234 — `min_usage` likewise advertised and ignored. Usage is the count of sealed
+        // outputs of that type, the same derivation system_audit uses to call a type unused.
+        if (typeof args["min_usage"] === "number") {
+          const min = args["min_usage"] as number;
+          const usage = new Map<string, number>();
+          for (const o of deps.outputs.all()) usage.set(o.domain_type, (usage.get(o.domain_type) ?? 0) + 1);
+          types = types.filter((t) => (usage.get(t.slug) ?? 0) >= min);
+        }
         return { ok: true, requires_approval: approval, data: { types, stats: { count: types.length } } };
       }
       case "type_register": {
@@ -343,7 +385,7 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         const res = deps.registry.registerType(def);
         // substrate seal: persist a loadable domain_types/<slug>.json (full record) + ledger.
         const fileDef = { slug: def.slug, version: 1, extends: def.extends, domain: def.domain, status: "active", schema: def.schema, required_fields: def.required_fields };
-        const sealed = sealDefinition("type_register", def.slug, fileDef, deps.ledger, deps.genome_dir, "domain_types");
+        const sealed = sealDefinition("type_register", def.slug, fileDef, deps.ledger, deps.genome_dir, "domain_types", args["reason"] != null ? { reason: args["reason"] } : undefined);
         return { ok: true, requires_approval: approval, data: { ...(res as object), content_hash: sealed.content_hash, dependency_hash: sealed.dependency_hash, effective_hash: sealed.effective_hash } };
       }
       case "standard_simulate": {
@@ -412,13 +454,62 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         if (args["domain_type"]) outs = outs.filter((o) => o.domain_type === args["domain_type"]);
         if (args["gig_id"]) outs = outs.filter((o) => o.gig_id === args["gig_id"]);
         if (args["agent_slug"]) outs = outs.filter((o) => o.agent_slug === args["agent_slug"]);
+        // #234 — `data_filter` was advertised and ignored, so a caller narrowing a query by
+        // payload got the UNFILTERED set back and a `total_count` describing it. Every key must
+        // match (AND), compared structurally so an object or array value filters as written.
+        const dataFilter = args["data_filter"];
+        if (dataFilter && typeof dataFilter === "object" && !Array.isArray(dataFilter)) {
+          const entries = Object.entries(dataFilter as Record<string, unknown>);
+          outs = outs.filter((o) => {
+            const data = (o.data ?? {}) as Record<string, unknown>;
+            return entries.every(([k, v]) => canonJson(data[k]) === canonJson(v));
+          });
+        }
         return { ok: true, requires_approval: approval, data: { outputs: outs, total_count: outs.length } };
       }
       case "output_trace": {
         const id = String(args["output_id"] ?? "");
         const maxDepth = typeof args["max_depth"] === "number" ? (args["max_depth"] as number) : undefined;
-        const chain = deps.outputs.trace(id, maxDepth !== undefined ? { max_depth: maxDepth } : undefined);
-        return { ok: true, requires_approval: approval, data: { graph: { nodes: chain }, root_signals: chain.filter((o) => o.input_refs.length === 0) } };
+        // #234 — `direction` was advertised and ignored: every trace walked UPSTREAM, so a
+        // caller asking "what was derived FROM this draft?" received its ancestors instead and
+        // nothing said the answer was to a different question. `outputs.trace` is inherently
+        // backward (it follows input_refs), so downstream is walked here over the same store.
+        const direction = String(args["direction"] ?? "upstream").toLowerCase();
+        if (!["upstream", "downstream", "both"].includes(direction)) {
+          return { ok: false, requires_approval: approval, error: `unrecognized direction "${direction}" — use "upstream", "downstream" or "both"` };
+        }
+        const upstream = direction === "downstream"
+          ? []
+          : deps.outputs.trace(id, maxDepth !== undefined ? { max_depth: maxDepth } : undefined);
+        // Forward walk: a node's children are the outputs naming it in their input_refs.
+        const downstream: typeof upstream = [];
+        if (direction !== "upstream") {
+          const all = deps.outputs.all();
+          const seen = new Set<string>([id]);
+          let frontier = [id];
+          for (let depth = 0; frontier.length && (maxDepth === undefined || depth < maxDepth); depth++) {
+            const next: string[] = [];
+            for (const o of all) {
+              if (seen.has(o.id)) continue;
+              if (o.input_refs.some((r) => frontier.includes(r))) {
+                seen.add(o.id); downstream.push(o); next.push(o.id);
+              }
+            }
+            frontier = next;
+          }
+        }
+        const nodes = direction === "upstream" ? upstream
+          : direction === "downstream" ? downstream
+          : [...upstream, ...downstream.filter((d) => !upstream.some((u) => u.id === d.id))];
+        return {
+          ok: true, requires_approval: approval,
+          data: {
+            graph: { nodes }, direction,
+            root_signals: nodes.filter((o) => o.input_refs.length === 0),
+            // The other end of the chain: outputs nothing else was derived from.
+            terminal_outputs: nodes.filter((o) => !deps.outputs.all().some((x) => x.input_refs.includes(o.id))),
+          },
+        };
       }
       case "output_write": {
         // §6 universal output write: validates against core+domain schema AT WRITE
@@ -870,7 +961,7 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         // substrate seal: the new version's identity is recorded in the ledger (file
         // materialization of versioned types follows the version-aware loader path).
         const versioned = { ...next, version: proposal.next_version };
-        const tx = deps.genome_dir ? recordIdentity("type_extend", `${base.slug}@v${proposal.next_version}`, versioned, deps.ledger) : undefined;
+        const tx = deps.genome_dir ? recordIdentity("type_extend", `${base.slug}@v${proposal.next_version}`, versioned, deps.ledger, args["reason"] != null ? { reason: args["reason"] } : undefined) : undefined;
         return { ok: true, requires_approval: proposal.approval_required, data: { new_version: proposal.next_version, changelog_entry: `${proposal.change_class}: +${newFields} field(s)`, change_class: proposal.change_class, effective_hash: tx?.effective_hash, content_hash: tx?.content_hash } };
       }
       case "charter_read": {
@@ -921,7 +1012,12 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         // and `cost` describe different ledgers IN THE SAME RESPONSE. `read()`'s own docstring
         // promises "a single read pass shared by query / count / integrity, so the three can
         // never disagree"; the call site was undoing that.
-        const gigRows = deps.ledger.query({ kind: "gig" });
+        // #234 — `window` was advertised and ignored, so every reading below silently covered
+        // all time. It is a filter on the SAME single read pass, so the totals still cannot
+        // disagree with each other.
+        const shWindow = parseWindow(args["window"], Date.now());
+        if (shWindow.error) return { ok: false, requires_approval: approval, error: shWindow.error };
+        const gigRows = deps.ledger.query({ kind: "gig", ...(shWindow.after ? { after: shWindow.after } : {}) });
         const gigs_run = gigRows.length;
         // Settled spend where we have it (#195) — a real number now that gig rows are
         // separable, instead of a row-count proxy standing in for dollars.
@@ -1085,10 +1181,17 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
       case "health_check": {
         const targetSlug = String(args["slug"] ?? "");
         const targetKind = String(args["kind"] ?? args["entity_type"] ?? "");
-        const all = deps.outputs.all();
+        // #234 — the advertised-and-ignored `window`, same as system_health.
+        const hcWindow = parseWindow(args["window"], Date.now());
+        if (hcWindow.error) return { ok: false, requires_approval: approval, error: hcWindow.error };
+        // The window has to reach BOTH stores. Applying it only to the ledger would make a
+        // windowed health_check on a standard mean one thing and on an agent mean another.
+        const all = hcWindow.after
+          ? deps.outputs.all().filter((o) => o.created_at >= hcWindow.after!)
+          : deps.outputs.all();
         // standards live in the ledger (executions); agents/types in the outputs store.
         const gigRows = targetKind === "standard"
-          ? deps.ledger.query({ kind: "gig", standard_slug: targetSlug }).filter(isGig)
+          ? deps.ledger.query({ kind: "gig", standard_slug: targetSlug, ...(hcWindow.after ? { after: hcWindow.after } : {}) }).filter(isGig)
           : [];
         const execution_count = gigRows.length;
         const filtered = targetKind === "agent"
@@ -1130,18 +1233,69 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
       case "system_audit": {
         // Real derivation over the genome: a registered domain type with zero
         // outputs is an unused type — the canonical audit finding in v0.
-        const types = deps.registry.listTypes();
-        const usedTypes = new Set(deps.outputs.all().map((o) => o.domain_type));
+        // #234 — `scope` and `check` were advertised and ignored, so a caller auditing one
+        // domain received findings for every domain and had no way to tell.
+        const auditScope = args["scope"] !== undefined ? String(args["scope"]) : undefined;
+        const auditCheck = args["check"] !== undefined ? String(args["check"]) : undefined;
+        const KNOWN_CHECKS = ["unused_type"];
+        if (auditCheck !== undefined && !KNOWN_CHECKS.includes(auditCheck)) {
+          return { ok: false, requires_approval: approval, error: `unknown check "${auditCheck}" — known checks: ${KNOWN_CHECKS.join(", ")}` };
+        }
+        // `scope` narrows to a domain; the counts reported must describe the SAME slice the
+        // findings do, or the response contradicts itself.
+        const allTypes = deps.registry.listTypes();
+        const types = auditScope ? allTypes.filter((t) => t.domain === auditScope) : allTypes;
+        const allOutputs = deps.outputs.all();
+        const scopedOutputs = auditScope
+          ? allOutputs.filter((o) => types.some((t) => t.slug === o.domain_type))
+          : allOutputs;
+        const usedTypes = new Set(allOutputs.map((o) => o.domain_type));
         const unused_types = types.filter((t) => !usedTypes.has(t.slug)).map((t) => t.slug);
-        const findings = unused_types.map((slug) => ({ kind: "unused_type", slug, severity: "info" }));
-        return { ok: true, requires_approval: approval, data: { findings, unused_types, type_count: types.length, output_count: deps.outputs.all().length } };
+        const findings = (auditCheck === undefined || auditCheck === "unused_type")
+          ? unused_types.map((slug) => ({ kind: "unused_type", slug, severity: "info" }))
+          : [];
+        return { ok: true, requires_approval: approval, data: { findings, unused_types, type_count: types.length, output_count: scopedOutputs.length, ...(auditScope ? { scope: auditScope } : {}), ...(auditCheck ? { check: auditCheck } : {}) } };
       }
+      // #234 — these two minted a UUID, discarded every argument, and reported success.
+      //
+      // Not a no-op: a fabricated `proposal_id` is a RECEIPT. A caller handed one has been told
+      // their proposal was recorded and can be looked up, and neither was true — the slug, spec
+      // and reason went nowhere, and nothing anywhere could be found under that id.
+      //
+      // Their own tests sat in a describe block named "proposal tools (LEDGER-BACKED)", where
+      // the `proposal_create` case asserts `ledger.query().length === 1` and these two assert
+      // only `typeof proposal_id === "string"` — which `randomUUID()` satisfies forever. A
+      // regression guard elsewhere states "all are wired against real in-repo impl now". The
+      // fabricated id is precisely what made both look true.
+      //
+      // So: record what the caller sent, through the same `governanceRow` path proposal_create
+      // uses. Deprecation is a governance act on the tool registry; a proposal to remove a tool
+      // that leaves no trace is worse than one that is refused, because the refusal is visible.
+      //
+      // Kept as two case blocks rather than one fallthrough: they take different arguments, and
+      // a shared body makes each tool appear to read the other's — which is exactly the
+      // schema/handler drift this issue is about, reintroduced in the fix for it.
       case "tool_propose": {
+        const toolSlug = String(args["slug"] ?? "");
+        if (!toolSlug) return { ok: false, requires_approval: approval, error: "tool_propose requires slug" };
         const proposal_id = randomUUID();
+        deps.ledger.append(governanceRow("tool_propose", toolSlug, {
+          proposal_id,
+          reason: args["reason"] ?? null,
+          tool_type: args["type"] ?? null,
+          spec: args["spec"] ?? null,
+        }));
         return { ok: true, requires_approval: true, data: { proposal_id } };
       }
       case "tool_deprecate_propose": {
+        const toolSlug = String(args["slug"] ?? "");
+        if (!toolSlug) return { ok: false, requires_approval: approval, error: "tool_deprecate_propose requires slug" };
         const proposal_id = randomUUID();
+        deps.ledger.append(governanceRow("tool_deprecate_propose", toolSlug, {
+          proposal_id,
+          reason: args["reason"] ?? null,
+          usage_stats: args["usage_stats"] ?? null,
+        }));
         return { ok: true, requires_approval: true, data: { proposal_id, affected_agents: [] } };
       }
       case "proposal_create": {
@@ -1163,14 +1317,31 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
       case "capability_research": {
         // Real local gap-search over the genome: does any existing tool or domain
         // type already cover the asked-for capability? If nothing matches, it's a gap.
-        const q = String(args["query"] ?? args["capability"] ?? "").toLowerCase();
-        const toolMatches = q ? MCP_TOOLS.filter((t) => t.slug.toLowerCase().includes(q)).map((t) => t.slug) : [];
-        const typeMatches = q ? deps.registry.listTypes().filter((t) => t.slug.toLowerCase().includes(q)).map((t) => t.slug) : [];
+        //
+        // #234 — this handler read `query`/`capability` while the tool advertised `need`/
+        // `context`. The two sets did not overlap, so EVERY caller following the schema
+        // searched for the empty string. That is not a no-op: an empty search matches nothing,
+        // nothing matched means `gap: true`, and the tool answered "no existing capability —
+        // propose a new tool/type" for every capability the engine has. The one tool whose job
+        // is to stop redundant definitions recommended a new one, unconditionally, to anyone
+        // who used it as documented — inverting this repo's "reuse and evolve, don't duplicate"
+        // rule at precisely the step that rule is meant to govern.
+        //
+        // `need` is now primary (it is the advertised name); `query`/`capability` stay as
+        // accepted aliases so existing callers keep working, and are advertised too.
+        const q = String(args["need"] ?? args["query"] ?? args["capability"] ?? "").trim().toLowerCase();
+        // An empty search is REFUSED rather than answered. Reporting `gap: true` for a question
+        // nobody asked is the specific failure above: a confident wrong answer, not a missing one.
+        if (!q) {
+          return { ok: false, requires_approval: approval, error: "capability_research needs a non-empty `need` (the capability to search for)" };
+        }
+        const toolMatches = MCP_TOOLS.filter((t) => t.slug.toLowerCase().includes(q)).map((t) => t.slug);
+        const typeMatches = deps.registry.listTypes().filter((t) => t.slug.toLowerCase().includes(q)).map((t) => t.slug);
         const existing_matches = [...toolMatches, ...typeMatches];
         const gap = existing_matches.length === 0;
         return {
           ok: true, requires_approval: approval,
-          data: { query: q, existing_matches, gap, approaches: [], mcp_options: toolMatches, recommendation: gap ? "no existing capability — propose a new tool/type" : "reuse existing" },
+          data: { need: q, query: q, existing_matches, gap, approaches: [], mcp_options: toolMatches, recommendation: gap ? "no existing capability — propose a new tool/type" : "reuse existing" },
         };
       }
       case "gig_abort": {
@@ -1282,7 +1453,15 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         // the caller told the call failed, and no audit row at all — the audit trail could not
         // answer "who granted this capability, and when".
         const registration_id = randomUUID();
-        deps.ledger.append(governanceRow("tool_register", targetSlug, { registration_id }));
+        // #234 — `type`, `spec` and `category` were advertised and discarded. This row IS the
+        // audit answer to "who granted this capability, and what did they grant?"; without the
+        // spec it could only answer the first half.
+        deps.ledger.append(governanceRow("tool_register", targetSlug, {
+          registration_id,
+          tool_type: args["type"] ?? null,
+          spec: args["spec"] ?? null,
+          category: args["category"] ?? null,
+        }));
         REGISTERED_TOOL_SLUGS.add(targetSlug);
         // Keep the #185 provider bridge live: a freshly-registered tool must resolve for a same-
         // session agent_define→dispatch (the registry and provider map share lifecycle).
@@ -1308,7 +1487,11 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
             : null;
           // substrate seal: the evolved version's identity (lineage claim) is recorded in
           // the ledger when persisting — never a contract lie, even before file materialization.
-          const ev = (evolved && deps.genome_dir) ? recordIdentity("agent_evolve", `${base.slug}@v${new_version}`, evolved, deps.ledger) : undefined;
+          const evolveDetail = {
+            ...(args["reason"] != null ? { reason: args["reason"] } : {}),
+            ...(args["evidence"] != null ? { evidence: args["evidence"] } : {}),
+          };
+          const ev = (evolved && deps.genome_dir) ? recordIdentity("agent_evolve", `${base.slug}@v${new_version}`, evolved, deps.ledger, evolveDetail) : undefined;
           return {
             ok: true, requires_approval: change.approval_required,
             data: { space: change.space, approval_required: change.approval_required, type_check_passed: change.type_check_passed ?? null, new_version, evolved_profile: evolved, parent_version: evolved?.parent_version ?? base.version, effective_hash: ev?.effective_hash, content_hash: ev?.content_hash, cascade_check: { agents_affected: [], standards_affected: [] } },
@@ -1538,8 +1721,16 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         // agent_slug / output_id / quality_scores were validated above and then thrown away,
         // because v1 LedgerEntry had nowhere to put them. That discard is the root cause of the
         // cross-agent evidence bug in learning_synthesize (#215).
+        // #234 — `agent_version`, `domain` and `notes` were advertised and dropped on the
+        // floor. `notes` is the reviewer's actual reasoning; discarding it while recording the
+        // scores keeps the number and loses the why, which is the half a later evolution
+        // decision needs. Recorded as null when absent rather than omitted, so a review with no
+        // note is distinguishable from one written before the field was kept.
         deps.ledger.append(governanceRow("session_review_write", agent_slug, {
           review_id, output_id, quality_scores,
+          agent_version: args["agent_version"] ?? null,
+          domain: args["domain"] ?? null,
+          notes: args["notes"] ?? null,
         }, gig_id));
         return { ok: true, requires_approval: approval, data: { review_id, recorded: true, agent_slug, gig_id } };
       }
@@ -1558,8 +1749,22 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         // echoed agent_slug back, so five reviews of five different agents opened the
         // evolution gate for a sixth with none (#215). The typed discriminators replace a
         // load-bearing String.startsWith on a synthetic gig_id.
+        // #234 — `since` was advertised and ignored, so "has this agent earned an evolution on
+        // RECENT evidence?" was always answered over its entire history. That is the wrong
+        // answer in the direction that matters: five poor reviews from a year ago kept counting
+        // toward a gate that exists to act on how the agent behaves now.
+        const sinceRaw = args["since"];
+        let since: string | undefined;
+        if (sinceRaw !== undefined && sinceRaw !== null && sinceRaw !== "") {
+          const parsed = new Date(String(sinceRaw));
+          if (Number.isNaN(parsed.getTime())) {
+            return { ok: false, requires_approval: approval, error: `unparseable since "${String(sinceRaw)}" — use an ISO timestamp` };
+          }
+          since = parsed.toISOString();
+        }
         const reviews = deps.ledger.query({
           kind: "governance", event: "session_review_write", subject_slug: agent_slug,
+          ...(since ? { after: since } : {}),
         });
         const review_count = reviews.length;
         const evidence_sufficient = review_count >= min_reviews;

@@ -117,8 +117,8 @@ const cases: ReadonlyArray<{ name: string; args: Record<string, unknown> }> = [
     args: { standard_slug: "summarize", input: { topic: "noise" } },
   },
   {
-    name: "optional fields — depth + company_id alongside the required pair",
-    args: { standard_slug: "summarize", input: { topic: "weather" }, depth: "shallow", company_id: "acme" },
+    name: "optional fields — depth + budget alongside the required pair",
+    args: { standard_slug: "summarize", input: { topic: "weather" }, depth: "shallow", budget: { opening: 10 } },
   },
   {
     name: "edge case — unknown standard returns a structured error, not a crash",

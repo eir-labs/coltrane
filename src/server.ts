@@ -15,7 +15,7 @@ import {
   checkPromotion,
   PromotionError,
 } from "./mcp.js";
-import { createRegistry, loadRegistry, type Registry, type DomainType } from "./registry.js";
+import { createRegistry, loadRegistry, domainTypeDefect, type Registry, type DomainType } from "./registry.js";
 import { loadGenome, resolveGenome, type SkillRecord, type EvalRecord, type LoadError } from "./loader.js";
 import { SkillSchema, AgentSchema, StandardSchema } from "./genome_schema.js";
 import { sealAgentDefinition, sealDefinition, sealSkillPackage, recordIdentity } from "./genome_writer.js";
@@ -568,6 +568,29 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         const slug2 = String(args["standard_slug"] ?? "");
         const standard = deps.standards.get(slug2);
         if (!standard) return { ok: false, requires_approval: approval, error: `unknown standard "${slug2}"` };
+        // #203, the READ side. Preserving `status` through the loader was only half of it: the
+        // symptom recorded on the issue — "a retired standard stays dispatchable and nothing
+        // says otherwise" — survived the field being kept, because nothing consulted it. A
+        // declaration that round-trips and changes nothing is worse than one that is dropped;
+        // the round-trip is evidence it took effect.
+        //
+        // Placed ABOVE the wait/async split deliberately. Both modes have their own body below,
+        // and a guard sitting inside the synchronous branch would leave the DEFAULT path — the
+        // one the product dispatches through — open.
+        //
+        // deprecated ALLOWS and warns; retired REFUSES. Were both refused, `deprecated` would
+        // be a spelling of `retired` and there would be no way to say the softer thing.
+        const stdStatus = (standard as { status?: string }).status;
+        if (stdStatus === "retired") {
+          return {
+            ok: false, requires_approval: approval,
+            error: `standard "${slug2}" is retired and cannot be dispatched. ` +
+              `Promote it back to active (standard_promote) if it should run again.`,
+          };
+        }
+        const warnings: string[] = stdStatus === "deprecated"
+          ? [`standard "${slug2}" is deprecated — it still runs, but should not be built on.`]
+          : [];
         // Optional budget arg — when present, runtime enforces per-gig cost-budget
         // and raises BudgetExhausted on depletion (PR for T10 gap, see runtime.ts).
         const budgetArg = args["budget"] as Record<string, unknown> | undefined;
@@ -633,6 +656,7 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
               data: {
                 gig_id: res.gig_id,
                 ...(depth ? { depth } : {}),
+                warnings,
                 manifest: {
                   genome_hash: res.genome_hash, run_fingerprint: res.run_fingerprint, output_count: res.outputs.length,
                   ...(res.usage ? { usage: res.usage } : {}), // #195 — settled model spend
@@ -767,7 +791,7 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         return {
           ok: true, requires_approval: approval,
           data: {
-            gig_id: gigId, status: "running", ...(depth ? { depth } : {}), ...(logDir ? { log_dir: logDir } : {}),
+            gig_id: gigId, status: "running", ...(depth ? { depth } : {}), warnings, ...(logDir ? { log_dir: logDir } : {}),
             // Echo the opt-ins back. A caller who typo'd `reuse` and paid full price for a run
             // they believed was cached has no other way to find out.
             ...(resumeArg !== undefined ? { resumed_from: resumeArg } : {}),
@@ -953,6 +977,21 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
           slug: baseDef.slug, version: 1, extends: baseDef.extends, domain: baseDef.domain,
           status: "active", schema: { type: "object", properties: baseProps }, required_fields: baseDef.required_fields,
         };
+        // THE THIRD DOOR. `{...baseProps, ...addProps}` above is the exact merge #264 is
+        // about, and this handler reached `recordIdentity` without ever consulting
+        // `registerType` or `domainTypeDefect` — so `type_extend` could persist and version a
+        // definition the engine had just declared illegal. #264 names this tool explicitly.
+        //
+        // The thesis of that fix was "there are two doors into the type table, and a rule
+        // enforced at one of them is a rule with a way around it." There were three.
+        const extendDefect = domainTypeDefect({
+          slug: baseDef.slug,
+          extends: baseDef.extends,
+          schema: { properties: nextProps },
+        });
+        if (extendDefect) {
+          return { ok: false, requires_approval: approval, error: `type_extend rejected: ${extendDefect}` };
+        }
         const next: DomainTypeDef = {
           ...base, schema: { type: "object", properties: nextProps }, required_fields: nextRequired,
         };

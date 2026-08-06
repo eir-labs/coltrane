@@ -68,9 +68,22 @@ export const ChairSchema = z.object({
   required_skills: z.array(z.string()).default([]),
 });
 export const PhaseSchema = z.object({ name: z.string(), chairs: z.array(ChairSchema) });
+/** Lifecycle status, shared by domain types and standards (#203). */
+export const DomainTypeStatusSchema = z.enum(["active", "deprecated", "retired"]);
+
 export const StandardSchema = z.object({
   slug: z.string(),
   domain: z.string(),
+  // #203 — a lifecycle field the loader used to STRIP. An author could mark a standard
+  // deprecated, see the edit accepted, and watch it stay dispatchable with nothing saying
+  // otherwise; the loader models what it models and silently discards the rest.
+  //
+  // OPTIONAL rather than defaulted, deliberately. A default here would make `status`
+  // required on the runtime `Standard` type, which every hand-rolled literal (34 of them in
+  // the suite alone) would then have to restate — noise that teaches nobody anything. The
+  // LOADER applies the default, so a standard read from disk always carries one and a
+  // standard built in memory need not care.
+  status: DomainTypeStatusSchema.optional(),
   agents: z.array(z.unknown()).optional(),       // compose input (agent slugs/objects)
   agent_slugs: z.array(z.string()).optional(),   // the file shape (resolved to agents on load)
   phases: z.array(PhaseSchema),
@@ -135,7 +148,6 @@ export const EvalSchema = z.object({
 //    and type_register's MCP surface is generated from it. version/status default (every on-disk
 //    file carries version:1 + status:"active"), so z.output has them present — the loader keys on
 //    `slug@version` and reads status — while z.input leaves them optional for the register op. ──
-export const DomainTypeStatusSchema = z.enum(["active", "deprecated", "retired"]);
 export const DomainTypeSchema = z.object({
   slug: z.string(),
   version: z.number().default(1),

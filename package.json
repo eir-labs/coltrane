@@ -25,6 +25,7 @@
     "node": ">=20"
   },
   "bin": {
+    "coltrane": "./dist/src/cli_entry.js",
     "coltrane-server": "./dist/src/server_entry.js"
   },
   "main": "./dist/src/index.js",
@@ -51,7 +52,7 @@
     "access": "public"
   },
   "scripts": {
-    "build": "tsc && cp src/skill_runner.mjs dist/src/ && chmod +x dist/src/server_entry.js dist/src/server_relay.js",
+    "build": "tsc && cp src/skill_runner.mjs dist/src/ && chmod +x dist/src/server_entry.js dist/src/server_relay.js dist/src/cli_entry.js",
     "dev": "tsc --watch",
     "prepare": "npm run build",
     "test": "vitest run",

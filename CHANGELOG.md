@@ -97,6 +97,31 @@ learning to say "no" or "I don't know" where it used to return a plausible answe
     `chair_skipped` and `reuse_rejected` progress events, `gig_monitor.skipped_chairs`, a
     `skipped` chair status of its own, and `OutputRecord.reused_from` on the record itself.
 
+- **A command line: `coltrane`.** The package shipped exactly one executable — the MCP stdio
+  server — so the engine was reachable from an MCP client and from nowhere else. Not CI, not
+  cron, not a container, not a queue worker, not a shell. A methodology engine whose only caller
+  is an interactive client cannot be part of a build.
+
+  ```
+  coltrane validate      # exits non-zero on load errors — the CI gate
+  coltrane dispatch <standard> --input @in.json [--depth skim] [--budget 5] [--reuse]
+  coltrane monitor <gig> --follow      coltrane trace <output-id>
+  coltrane logs <gig>                  coltrane simulate <standard>
+  coltrane abort <gig>                 coltrane health
+  coltrane serve         # the MCP stdio server, as before
+  ```
+
+  A thin wrapper by design: `dispatchTool` was already the whole tool surface as a pure
+  function and `bootstrapServerDeps` already resolved the genome, ledger and output store. Two
+  front doors that disagreed about what a dispatch means would be the defect this release spent
+  its time removing.
+
+  Data on stdout, everything else on stderr, so `coltrane dispatch … --json | jq` and
+  `coltrane dispatch … | xargs coltrane monitor` both work. Exit 0 success, 1 ran-and-failed,
+  2 malformed — a CI job can tell a broken genome from a broken invocation.
+
+  `coltrane-server` is unchanged, so no existing `.mcp.json` breaks.
+
 - **The capability gate fails CLOSED.** `exposedTools` walked the agent's grant and filtered
   only the tools it RECOGNISED; a tool in none of the three scope classes matched no branch and
   was exposed unconditionally, whatever the grant said. The gate's coverage was its own

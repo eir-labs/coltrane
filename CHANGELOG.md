@@ -97,6 +97,13 @@ learning to say "no" or "I don't know" where it used to return a plausible answe
     `chair_skipped` and `reuse_rejected` progress events, `gig_monitor.skipped_chairs`, a
     `skipped` chair status of its own, and `OutputRecord.reused_from` on the record itself.
 
+- **The capability gate fails CLOSED.** `exposedTools` walked the agent's grant and filtered
+  only the tools it RECOGNISED; a tool in none of the three scope classes matched no branch and
+  was exposed unconditionally, whatever the grant said. The gate's coverage was its own
+  allowlist, so the tools it had never heard of were exactly the ones it could not stop. An
+  unrecognised tool is now denied, and `undeclaredScopeTools()` lists them so an operator sees
+  the problem while authoring rather than mid-run.
+
 - **The prompt is delivered on stdin when it is too large for the command line.** Windows caps
   a command line at ~32,767 characters and the invoker put the whole chair prompt in argv, so a
   strategize-phase prompt (blueprint + draft + review) died with `ENAMETOOLONG`. A consumer

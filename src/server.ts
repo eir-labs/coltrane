@@ -18,6 +18,7 @@ import {
 import { createRegistry, loadRegistry, domainTypeDefect, type Registry, type DomainType } from "./registry.js";
 import { loadGenome, resolveGenome, type SkillRecord, type EvalRecord, type LoadError } from "./loader.js";
 import { SkillSchema, AgentSchema, StandardSchema } from "./genome_schema.js";
+import { runSkillFixtures } from "./skill_subprocess.js";
 import { sealAgentDefinition, sealDefinition, sealSkillPackage, recordIdentity } from "./genome_writer.js";
 import { createOutputStore, defaultOutputsPersistDir, type OutputStore } from "./outputs.js";
 import {
@@ -1677,6 +1678,9 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         const targetSlug = String(args["slug"] ?? "");
         const target = String(args["status"] ?? "");
         const current = args["current"] != null ? String(args["current"]) : null;
+        // Carried into the ledger row: a promotion that passed a fixture gate should record the
+        // evidence it passed on, or the audit trail says only that someone asked.
+        let fixtureReport: ReturnType<typeof runSkillFixtures> | undefined;
         if (!targetSlug || !target) {
           return { ok: false, requires_approval: approval, error: "missing slug or status" };
         }
@@ -1733,16 +1737,74 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
               error: `${slug}: skill "${targetSlug}" does not pass validation and must not become "${target}" — ${why}`,
             };
           }
+          // ── THE FIXTURE GATE ────────────────────────────────────────────────────────────
+          // Promotion to `active` is the moment a definition acquires production status. For a
+          // skill with a CODE half that has to mean its code demonstrably works, not that its
+          // metadata parses — schema validity says nothing about behaviour.
+          //
+          // Restored from the pre-open-source engine, which enforced exactly this at
+          // skill_evolve and skill_promote and refused the write on failure. The runner has been
+          // here the whole time (`runSkillFixtures`) with no caller outside tests: a real gate
+          // with nothing invoking it, the same shape as the capability gate this release closed.
+          //
+          // The threshold keys off MEASURED determinism, not the declared `determinism_ratio`:
+          // a skill whose runs agree is held to every fixture passing; one that varies is held
+          // to a supermajority. Claiming determinism therefore costs something, which is what
+          // stops the claim being free.
+          const gated = target === "active";
+          const pkgDir = (sk as { package_dir?: string }).package_dir;
+          const hasCode = (sk as { code_hash?: string | null }).code_hash != null;
+          if (gated && hasCode && pkgDir) {
+            let report: ReturnType<typeof runSkillFixtures>;
+            try {
+              report = runSkillFixtures(pkgDir);
+            } catch (e) {
+              return {
+                ok: false, requires_approval: approval,
+                error: `${slug}: could not run "${targetSlug}"'s fixtures, so it must not become "${target}" — ${e instanceof Error ? e.message : String(e)}`,
+              };
+            }
+            // No fixtures is not a pass. A code skill nobody can test is precisely the thing
+            // that must not carry production status, and silently allowing it would make this
+            // gate opt-out by omission.
+            if (report.total === 0) {
+              return {
+                ok: false, requires_approval: approval,
+                error: `${slug}: skill "${targetSlug}" ships executable code and no fixtures, so nothing establishes that it works — add fixtures before promoting it to "${target}"`,
+                data: { fixture_report: report },
+              };
+            }
+            const threshold = report.deterministic ? 1.0 : 0.8;
+            if (report.pass_rate < threshold) {
+              const failing = report.results.filter((r) => !r.passed).map((r) => r.id);
+              return {
+                ok: false, requires_approval: approval,
+                error: `${slug}: skill "${targetSlug}" passed ${report.passed}/${report.total} fixtures ` +
+                  `(${(report.pass_rate * 100).toFixed(0)}%), below the ${(threshold * 100).toFixed(0)}% required of a ` +
+                  `${report.deterministic ? "deterministic" : "non-deterministic"} skill — failing: ${failing.join(", ")}`,
+                data: { fixture_report: report },
+              };
+            }
+            fixtureReport = report;
+          }
         }
         const promotion_id = randomUUID();
         // v1 recorded neither WHICH entity was promoted nor the transition — standard_slug held
         // the TOOL name. A lifecycle transition is exactly the event an audit trail exists for.
         deps.ledger.append(governanceRow(slug, targetSlug, {
           promotion_id, from_status: current, to_status: target,
+          // The evidence the promotion rested on. A gate that passes and records nothing leaves
+          // the audit trail saying only that someone asked, not what was true when they did.
+          ...(fixtureReport
+            ? { fixtures: { total: fixtureReport.total, passed: fixtureReport.passed, pass_rate: fixtureReport.pass_rate, deterministic: fixtureReport.deterministic } }
+            : {}),
         }));
         return {
           ok: true, requires_approval: approval,
-          data: { slug: targetSlug, status: target, promoted: true, promotion_id },
+          data: {
+            slug: targetSlug, status: target, promoted: true, promotion_id,
+            ...(fixtureReport ? { fixture_report: fixtureReport } : {}),
+          },
         };
       }
       case "session_review_write": {

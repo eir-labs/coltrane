@@ -97,6 +97,22 @@ learning to say "no" or "I don't know" where it used to return a plausible answe
     `chair_skipped` and `reuse_rejected` progress events, `gig_monitor.skipped_chairs`, a
     `skipped` chair status of its own, and `OutputRecord.reused_from` on the record itself.
 
+- **A skill must pass its own fixtures to become `active`.** Promotion checked that a skill's
+  METADATA parsed and nothing else, so a code half that failed every one of its fixtures
+  promoted cleanly. `runSkillFixtures` — which runs each fixture repeatedly, checks expected
+  output and assertions, and checks the runs agree — had been in the tree the whole time with
+  no caller outside the test suite.
+
+  The threshold is keyed off MEASURED determinism, not the declared `determinism_ratio`: a
+  skill whose runs agree must pass every fixture, one that varies must pass 80%. Claiming
+  determinism therefore costs something.
+
+  A code skill with NO fixtures is refused — silence is not a pass, and allowing it would make
+  the gate opt-out by omission. Reasoning-only skills are not gated (there is nothing to run),
+  and promotion to a non-`active` status is not gated (a skill has to be able to reach the
+  state where the work happens). The passing report is recorded on the ledger row, so the audit
+  trail says what the promotion rested on rather than only that someone asked.
+
 - **A command line: `coltrane`.** The package shipped exactly one executable — the MCP stdio
   server — so the engine was reachable from an MCP client and from nowhere else. Not CI, not
   cron, not a container, not a queue worker, not a shell. A methodology engine whose only caller

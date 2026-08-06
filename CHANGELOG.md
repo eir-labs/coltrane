@@ -7,14 +7,19 @@ signals a breaking change and a **patch** signals an additive or internal one.
 `package.json`'s `version` — `tests/version_identity.test.ts` enforces that, and also that
 the MCP handshake reports the constant rather than a hardcoded literal.
 
-## Unreleased
+## 0.5.0
+
+The through-line of this release: **the engine had a habit of answering confidently when it
+should have refused.** A guardrail that no caller could discover, a filter that silently did
+nothing, a lifecycle field that round-tripped and changed nothing, a `proposal_id` for a
+proposal never recorded. Each read as working software. Most of what follows is the engine
+learning to say "no" or "I don't know" where it used to return a plausible answer.
 
 ### Breaking
 
-- **`OutputStore` gains two methods, `typeFingerprint(slug)` and `validateWrite(o)`.** Any
-  external implementation of the `OutputStore` interface must add them — same shape as
-  0.4.0's `Ledger.integrity()` addition, and for the same reason: the store is the single
-  owner of a question two layers now need answered.
+- **`OutputStore` gains `typeFingerprint(slug)` and `validateWrite(o)`.** Any external
+  implementation must add them — same shape as 0.4.0's `Ledger.integrity()` addition, and for
+  the same reason: the store is the single owner of a question two layers now need answered.
 
   `typeFingerprint` hashes a type's current shape (core + required list + schema).
   `validateWrite` answers "would `write` accept this?" without persisting — `write` now calls
@@ -29,6 +34,41 @@ the MCP handshake reports the constant rather than a hardcoded literal.
   validateWrite() { return { valid: true }; }
   ```
 
+- **`CheckpointStore` gains `remove(gig_id)`.** Called when a gig completes. Nothing previously
+  removed a checkpoint, so every gig a deployment ran left a file behind forever. A failed or
+  aborted gig keeps its checkpoint, because that is what resume reads.
+
+  **Migration.** `remove() {}` is a valid implementation; it forgoes the reclamation only.
+
+- **The loader refuses three definition shapes it used to accept silently**, plus six further
+  bypasses of the same rule found on review — including `type: ["string","null"]`, the same
+  constraint in JSON Schema's other legal spelling. A genome that loaded under 0.4.1 may now
+  report `load_errors`. That is the point: it was not loading what its author wrote.
+
+- **`gig_dispatch` refuses a `retired` standard** and warns on a `deprecated` one. Previously
+  `status` was recorded and read by nothing, so a standard marked retired stayed dispatchable.
+
+- **Calls that used to succeed on nonsense now fail.** In each case the prior behaviour was a
+  confident wrong answer, not a tolerant one:
+  - `capability_research` with no `need` — previously returned `gap: true, "propose a new
+    tool/type"` for a search of the empty string.
+  - `tool_propose` / `tool_deprecate_propose` with no `slug` — previously returned a
+    fabricated `proposal_id` for a proposal that was never recorded.
+  - `output_trace` with an unrecognised `direction`, `system_health` / `health_check` with an
+    unparseable `window`, `system_audit` with an unknown `check` — previously ignored, so the
+    caller received an answer to a different question with nothing marking the difference.
+
+- **`company_id` is removed from the MCP surface.** It was advertised on `gig_dispatch`,
+  `charter_read` and `charter_suggest_update` and read by none of them. It is worse than a
+  merely dead argument because it is tenancy-shaped: a caller passing it to scope a run would
+  reasonably believe the run was scoped. The engine deliberately does not do tenancy —
+  `principal` on the ledger is provenance, explicitly not access control — so it stops
+  advertising a guarantee it does not make. It survives as a field on `AccessGrant`.
+
+- **Several tools' advertised input schemas changed** to match what their handlers read. Most
+  notably `output_write` now advertises `gig_id`, `agent_slug`, `phase` and the cost fields;
+  `access_grant_check` and `capability_research` advertise the arguments they actually consume.
+
 ### Added
 
 - **Phase checkpoint/resume, and engine-level output reuse.** One idea, two ranges: reuse a
@@ -41,22 +81,67 @@ the MCP handshake reports the constant rather than a hardcoded literal.
     one you never have.
   - `RunDeps.resume_from` / `gig_dispatch({ resume_gig_id })` — continue that gig (same
     `gig_id`, so `output_trace` still reaches the restored ancestors), skipping what already
-    sealed. **Refused, never silently run cold**, if `genome_hash`, the dispatch payload,
-    `model_version`, `depth`, the canonical form, or any consumed domain type has moved; the
-    reply carries `resume_refused` and a `drift` list.
+    sealed. **Refused, never silently run cold**, if `genome_hash`, the **producers**, the
+    dispatch payload, `model_version`, `depth`, the canonical form, or any consumed domain type
+    has moved; the reply carries `resume_refused` and a `drift` list.
   - `RunDeps.reuse` / `gig_dispatch({ reuse: true })` — a chair whose producer definition,
     consumed input **content**, payload, model and depth hash to a prior sealed output is
     served from it instead of invoked. Presence of the store is the opt-in, for reads *and*
     writes: the store is cross-gig by construction, so populating it is itself a decision.
     A found-but-unusable entry is reported and the chair does the work.
   - Reuse is never a way to skip a check. Every recalled output crosses the same seal boundary
-    a derived one does (#263 core agreement, the registry schema, the #227/#228 substance
-    floor) and is re-hashed to the `content_sha` the original seal produced — which is why a
-    resumed or fully-reused run carries the **same `run_fingerprint`** as the cold run it
-    stands in for.
+    a derived one does (core agreement, the registry schema, the substance floor) and is
+    re-hashed to the `content_sha` the original seal produced — which is why a resumed or
+    fully-reused run carries the **same `run_fingerprint`** as the cold run it stands in for.
   - Nothing is silent: `GigResult.skipped` / `.resumed_from` / `.reuse`, the `gig_resumed`,
     `chair_skipped` and `reuse_rejected` progress events, `gig_monitor.skipped_chairs`, a
     `skipped` chair status of its own, and `OutputRecord.reused_from` on the record itself.
+
+- **A skill-backed chair is interruptible.** It ran a blocking subprocess, so abort could not
+  reach it — a "stopped" run kept burning. Now spawned non-blocking, SIGKILLed on abort, not
+  spawned at all if already aborted, and capped at 64MB of output.
+
+- **The advertised-schema guard covers all 37 tools.** A tool's `input_schema` and its handler
+  are two statements of one fact, and nothing checked they agreed. Both directions are bugs:
+  read-but-unadvertised is an undiscoverable control, advertised-but-unread is a silent no-op.
+
+- **Arguments that were advertised and ignored now work**: `window` on `system_health` /
+  `health_check`, `status` and `min_usage` on `type_browse`, `data_filter` on `output_query`,
+  `direction` on `output_trace`, `scope` / `check` on `system_audit`, `since` on
+  `learning_synthesize`, and the rationale fields (`reason`, `evidence`, `notes`,
+  `agent_version`, `domain`, `spec`, `category`) which are now recorded rather than discarded.
+
+- **`writeFileAtomic`** (`src/fs_atomic.ts`), shared by the genome writer and the checkpoint
+  store.
+
+### Fixed
+
+- **`output_write` read `gig_id` and advertised it nowhere.** A prompt written against the
+  schema omits it, the handler defaults it to `""`, and the sealed output attaches to no gig.
+  A live run of a consuming product produced 509 such orphans. This is that bug's root cause.
+
+- **`capability_research` reported a gap for every capability.** It advertised `need`/`context`
+  and read `query`/`capability` — no overlap — so every schema-following call searched the
+  empty string, matched nothing, and was told to build a new tool. The one tool whose purpose
+  is preventing redundant definitions recommended one unconditionally.
+
+- **Genome writes are atomic.** `sealDefinition` records a definition's identity in the ledger
+  *before* writing the file — deliberate, because the reverse manufactures a definition with no
+  recorded identity — and that ordering is only safe if the write is all-or-nothing. A torn
+  `writeFileSync` left the ledger asserting a content hash whose bytes on disk hash to
+  something else, which is the engine's central provenance claim failing silently. The same
+  function writes the prior version to history before overwriting, so an interrupted overwrite
+  could destroy the live file while its only backup was also mid-write.
+
+- **A refused resume destroyed the prior run's state**, turning a `failed` gig into a
+  permanently `running` one and discarding the very error being acted on.
+
+- **`type_extend` was a third door** that could persist a definition the loader had just
+  declared illegal.
+
+- **`tool_propose` and `tool_deprecate_propose` minted receipts for work they never did** —
+  a `randomUUID()` returned as a `proposal_id`, every argument discarded, nothing written. Both
+  are now recorded through the same ledger path `proposal_create` uses.
 
 ## 0.4.1
 

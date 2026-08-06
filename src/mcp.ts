@@ -111,7 +111,7 @@ export const MCP_TOOLS: readonly MCPToolDef[] = [
   // defaults it to "", and the sealed output lands in the store attached to NO gig. A live run
   // of the consuming product produced 509 such orphans. The provenance chain is the engine's
   // core promise, and the field that anchors an output to its run was undiscoverable.
-  { slug: "output_write",                  category: "run", input_schema: obj({ core_type: "string", primitive: "string", domain_type: "string", domain_type_version: "number", domain: "string", data: "object", input_refs: "array", refs: "array", gig_id: "string", agent_slug: "string", phase: "string", cost_usd: "number", tokens_used: "number", duration_ms: "number" }), output_schema: obj({ output_id: "string", validation_result: "object" }) },
+  { slug: "output_write",                  category: "run", input_schema: obj({ core_type: "string", primitive: "string", domain_type: "string", domain_type_version: "number", domain: "string", data: "object", input_refs: "array", refs: "array", gig_id: "string", agent_slug: "string", phase: "string", cost_usd: "number", tokens_used: "number", duration_ms: "number", model: "string", model_tier: "string" }), output_schema: obj({ output_id: "string", validation_result: "object" }) },
 
   { slug: "agent_validate_pipeline",       category: "improve", input_schema: obj({ agents: "array", standard_slug: "string", slug: "string", domain: "string", primitives: "array", phases: "array" }), output_schema: obj({ valid: "boolean", graph: "object", unsatisfied_inputs: "array", illegal_progressions: "array" }) },
   // #238 — success_rate and trend are NULLABLE, because the engine genuinely cannot compute
@@ -154,7 +154,7 @@ export const MCP_TOOLS: readonly MCPToolDef[] = [
   // `learning_synthesize` counts reviews; this MEASURES the change across producer versions.
   // Every input was already sealed — outputs carry agent_slug/cost_usd, reviews carry
   // quality_scores against a specific output_id and agent_version — and nothing joined them.
-  { slug: "improvement_report",            category: "improve", input_schema: obj({ agent_slug: "string", window: "string" }), output_schema: obj({ agent_slug: "string", total_outputs: "number", versions: "array", deltas: "array", comparable: "boolean", basis: "string" }) },
+  { slug: "improvement_report",            category: "improve", input_schema: obj({ agent_slug: "string", window: "string" }), output_schema: obj({ agent_slug: "string", total_outputs: "number", versions: "array", deltas: "array", tiers: "array", comparable: "boolean", basis: "string" }) },
   { slug: "learning_synthesize",           category: "improve", input_schema: obj({ agent_slug: "string", min_reviews: "number", since: "string", auto_propose: "boolean" }), output_schema: obj({ agent_slug: "string", review_count: "number", evidence_sufficient: "boolean", summary: "object", proposal_id: "string" }) },
 
   { slug: "agent_promote",                 category: "build", input_schema: obj({ slug: "string", status: "string", current: "string" }), output_schema: obj({ slug: "string", status: "string", promoted: "boolean" }) },

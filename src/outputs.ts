@@ -63,6 +63,20 @@ export interface OutputRecord {
   cost_usd?: number | undefined;
   tokens_used?: number | undefined;
   duration_ms?: number | undefined;
+  /**
+   * WHICH model produced this output, and the tier that selected it.
+   *
+   * `cost_usd` was recorded per chair and the model was not, so a run whose chairs deliberately
+   * sit on different tiers — the entire point of per-chair routing — could not attribute its
+   * spend to a tier. The gig ledger row's `by_model` is gig-level and cannot separate two
+   * chairs in the same run. Without this, "does the cheap tier still clear the bar for THIS
+   * chair" is not an answerable question.
+   *
+   * Absent for skill-backed chairs (no model ran) and for records sealed before this existed —
+   * absent means unknown, never "the default".
+   */
+  model?: string | undefined;
+  model_tier?: string | undefined;
   // When the producer is a skill-backed chair (deterministic code, no model), this pins
   // WHICH skill produced the output — slug + version + verified code_hash + permission tier.
   // It closes the chair→skill provenance gap: an audit can trace the ledger entry back to the
@@ -107,6 +121,9 @@ export interface OutputWrite {
   cost_usd?: number | undefined;
   tokens_used?: number | undefined;
   duration_ms?: number | undefined;
+  /** See OutputRecord.model — which model produced this, and the tier that selected it. */
+  model?: string | undefined;
+  model_tier?: string | undefined;
   skill_provenance?: { slug: string; version: number; code_hash: string; tier: number } | undefined;
   /** See OutputRecord.reused_from — recall, not derivation. */
   reused_from?: { output_id: string; gig_id: string; cache_key: string } | undefined;
@@ -526,6 +543,8 @@ export function createOutputStore(registry: Registry, options?: OutputStoreOptio
         cost_usd: o.cost_usd,
         tokens_used: o.tokens_used,
         duration_ms: o.duration_ms,
+        model: o.model,
+        model_tier: o.model_tier,
         skill_provenance: o.skill_provenance,
         reused_from: o.reused_from,
       };

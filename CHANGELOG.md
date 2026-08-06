@@ -97,6 +97,16 @@ learning to say "no" or "I don't know" where it used to return a plausible answe
     `chair_skipped` and `reuse_rejected` progress events, `gig_monitor.skipped_chairs`, a
     `skipped` chair status of its own, and `OutputRecord.reused_from` on the record itself.
 
+- **A sealed output records WHICH model produced it** (`model`, `model_tier`). `cost_usd` was
+  recorded per chair and the model was not, so a run whose chairs deliberately sit on different
+  tiers — the entire point of per-chair routing — could not attribute its own spend to a tier.
+  The gig ledger row's `by_model` is gig-level and cannot separate two chairs in one run.
+
+  Stamped through the invoker's own `resolveModel`, now exported, so the seal and the spawn
+  cannot disagree. Absent for skill-backed chairs and for anything sealed before this existed —
+  absent means unknown, never "the default". `improvement_report` gains a `tiers` axis on top
+  of it, which is what makes "does the cheap tier still clear the bar for THIS chair" answerable.
+
 - **`improvement_report` — improvement as a measurement, not a count.** `learning_synthesize`
   answers "is there enough evidence to act?" and returns a review count. It could not answer
   the question the typed-and-sealed design exists to make answerable: **did this producer get

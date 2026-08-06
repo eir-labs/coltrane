@@ -8,6 +8,7 @@ import type { Standard, Agent, Chair } from "./composition.js";
 import { PRIMITIVE_OUTPUT_TYPE, CORE_TYPES } from "./core_types.js";
 import { executeSkillAsync } from "./skill_subprocess.js";
 import { loadSkillPackage } from "./skills.js";
+import { resolveModel } from "./claude_invoker.js";
 
 // core type → the process primitive that produces it (reverse of PRIMITIVE_OUTPUT_TYPE).
 // A skill-backed chair seals its output as this primitive/core when its output_contract is
@@ -1884,6 +1885,15 @@ export async function runGig(
         data: slice,
         input_refs: inputs.map((i) => i.id),
         input_shas: inputs.map((i) => i.content_sha), // #196 — real predecessor hashes, engine-stamped
+        // WHICH model produced this, resolved through the invoker's own function so the stamp
+        // and the spawn cannot disagree. Absent for a skill-backed chair — no model ran, and
+        // absent must mean unknown rather than "the default".
+        ...(p.agent
+          ? {
+              model: resolveModel(p.agent.model_tier, deps.model_version),
+              ...(p.agent.model_tier ? { model_tier: p.agent.model_tier } : {}),
+            }
+          : {}),
         skill_provenance,
       });
       for (const i of inputs) deps.outputs.addRef(rec.id, i.id, "derived_from", spec.primitive);

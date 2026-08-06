@@ -540,6 +540,8 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
           domain: String(args["domain"] ?? ""),
           gig_id: String(args["gig_id"] ?? ""),
           agent_slug: String(args["agent_slug"] ?? ""),
+          ...(typeof args["model"] === "string" ? { model: args["model"] } : {}),
+          ...(typeof args["model_tier"] === "string" ? { model_tier: args["model_tier"] } : {}),
           phase: args["phase"] as string | undefined,
           primitive,
           data,
@@ -2072,6 +2074,28 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
           });
         }
 
+        // The same arithmetic across MODEL TIER rather than producer version. This is the axis
+        // the "spend expensive tokens once to find where the cheap ones hold" question turns on,
+        // and it is only answerable because the seal now records which model produced an output.
+        interface TierBucket { outputs: number; reviewed: number; cost: number[]; scores: number[] }
+        const tierBuckets = new Map<string, TierBucket>();
+        for (const o of outs) {
+          const k = (o as { model_tier?: string }).model_tier ?? (o as { model?: string }).model ?? "unrecorded";
+          const b = tierBuckets.get(k) ?? { outputs: 0, reviewed: 0, cost: [], scores: [] };
+          b.outputs += 1;
+          if (typeof o.cost_usd === "number" && Number.isFinite(o.cost_usd)) b.cost.push(o.cost_usd);
+          const rev = reviewByOutput.get(o.id);
+          if (rev && rev.score !== null) { b.reviewed += 1; b.scores.push(rev.score); }
+          tierBuckets.set(k, b);
+        }
+        const tiers = [...tierBuckets.entries()].map(([tier, b]) => ({
+          tier,
+          outputs: b.outputs,
+          reviewed: b.reviewed,
+          mean_cost_usd: mean(b.cost),
+          mean_quality: mean(b.scores),
+        })).sort((a2, b2) => (a2.tier < b2.tier ? -1 : 1));
+
         const measurable = versions.filter((v) => v.version !== null && v.mean_quality !== null).length;
         return {
           ok: true, requires_approval: approval,
@@ -2079,7 +2103,7 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
             agent_slug: subject,
             ...(win.after ? { since: win.after } : {}),
             total_outputs: outs.length,
-            versions, deltas,
+            versions, deltas, tiers,
             // Said plainly, because a report that cannot answer its own question should say so
             // rather than return empty arrays that read as "no change".
             comparable: measurable >= 2,

@@ -24,7 +24,12 @@ export const MODEL_TIER_MAP: Record<ModelTier, string> = {
   standard: "claude-sonnet-4-6",
   premium: "claude-opus-4-8",
 };
-function resolveModel(tier: ModelTier | undefined, fallback: string | undefined): string | undefined {
+/**
+ * Tier → the model that actually runs. EXPORTED because the runtime must stamp the same answer
+ * onto the sealed output that the invoker used to spawn. Two functions computing this
+ * separately is the two-gates-one-concern shape that produced the silent wrong-resume.
+ */
+export function resolveModel(tier: ModelTier | undefined, fallback: string | undefined): string | undefined {
   return tier ? MODEL_TIER_MAP[tier] : fallback;
 }
 

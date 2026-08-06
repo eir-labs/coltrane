@@ -157,3 +157,47 @@ describe("scoping", () => {
     expect((await dispatchTool("improvement_report", {}, bench())).ok).toBe(false);
   });
 });
+
+// ── the tier axis ───────────────────────────────────────────────────────────
+// "Spend expensive tokens once to find where the cheap ones hold" is only an answerable
+// question if a sealed output records WHICH model produced it. It did not: `cost_usd` was
+// per chair and the model was not recorded at all, so a run whose chairs deliberately sit on
+// different tiers — the entire point of per-chair routing — could not attribute its own spend.
+// The gig ledger row's `by_model` is gig-level and cannot separate two chairs in one run.
+describe("cost and quality attribute to a MODEL TIER", () => {
+  async function sealAt(d: ServerDeps, agent: string, tier: string, cost: number): Promise<string> {
+    const r = await dispatchTool("output_write", {
+      core_type: "Signal", domain_type: "note", domain: "demo",
+      gig_id: "g1", agent_slug: agent, data: { t: "x", source: "fixture://demo" },
+      cost_usd: cost, model_tier: tier,
+    }, d);
+    if (!r.ok) throw new Error(String(r.error));
+    return (r.data as { output_id: string }).output_id;
+  }
+
+  it("separates two tiers of the same producer", async () => {
+    const d = bench();
+    await review(d, "rev", await sealAt(d, "rev", "premium", 0.40), 1, 14);
+    await review(d, "rev", await sealAt(d, "rev", "premium", 0.40), 1, 14.2);
+    await review(d, "rev", await sealAt(d, "rev", "economy", 0.05), 1, 13.6);
+    await review(d, "rev", await sealAt(d, "rev", "economy", 0.05), 1, 13.8);
+
+    const got = (await report(d, "rev")).data as { tiers: Array<{ tier: string; mean_cost_usd: number; mean_quality: number; outputs: number }> };
+    const eco = got.tiers.find((t) => t.tier === "economy")!;
+    const prem = got.tiers.find((t) => t.tier === "premium")!;
+    expect(eco.outputs).toBe(2);
+    expect(eco.mean_cost_usd).toBeCloseTo(0.05, 5);
+    expect(prem.mean_cost_usd).toBeCloseTo(0.40, 5);
+    // The decision this exists to support: 8x cheaper for 0.4 rubric points.
+    expect(prem.mean_quality - eco.mean_quality).toBeCloseTo(0.4, 5);
+  });
+
+  it("labels an output with no recorded model rather than assuming a default", async () => {
+    // Absent must mean unknown. Attributing it to the default tier would invent the very
+    // attribution this field exists to establish.
+    const d = bench();
+    await seal(d, "rev", 0.20);
+    const got = (await report(d, "rev")).data as { tiers: Array<{ tier: string }> };
+    expect(got.tiers.map((t) => t.tier)).toEqual(["unrecorded"]);
+  });
+})

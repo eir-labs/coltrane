@@ -97,6 +97,23 @@ learning to say "no" or "I don't know" where it used to return a plausible answe
     `chair_skipped` and `reuse_rejected` progress events, `gig_monitor.skipped_chairs`, a
     `skipped` chair status of its own, and `OutputRecord.reused_from` on the record itself.
 
+- **`improvement_report` — improvement as a measurement, not a count.** `learning_synthesize`
+  answers "is there enough evidence to act?" and returns a review count. It could not answer
+  the question the typed-and-sealed design exists to make answerable: **did this producer get
+  better, and what did it cost?**
+
+  Every input was already sealed and nothing joined them. Outputs carry `agent_slug`,
+  `cost_usd` and `created_at`; reviews carry `quality_scores` against a specific `output_id`
+  and `agent_version`. The report buckets a producer's outputs by version and returns mean cost
+  and mean quality per version, plus the version-to-version delta and a verdict — *better and
+  cheaper*, *cheaper and worse*, and so on.
+
+  An unmeasured quantity is `null`, never `0`: zero cost reads as "free" and zero quality as
+  "worthless", and both would be fabricated numbers. A delta is emitted only where BOTH ends
+  are measured, and when the report cannot answer its own question it says
+  `comparable: false` with the reason, rather than returning empty arrays that read as "no
+  change".
+
 - **The skill iteration loop: `skill_browse`, `skill_inspect`, `skill_execute`, `skill_evolve`.**
   The surface was define + promote — a skill could be created and given production status, and
   never run, tested, listed or revised through the engine. Adding a fixture gate to promotion

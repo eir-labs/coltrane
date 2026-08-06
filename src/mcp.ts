@@ -150,6 +150,11 @@ export const MCP_TOOLS: readonly MCPToolDef[] = [
   // discoverable rather than folklore (#234).
   { slug: "capability_research",           category: "improve", input_schema: obj({ need: "string", query: "string", capability: "string" }), output_schema: obj({ existing_matches: "array", gap: "boolean", approaches: "array", mcp_options: "array", recommendation: "object" }) },
   { slug: "session_review_write",          category: "improve", input_schema: obj({ gig_id: "string", output_id: "string", agent_slug: "string", agent_version: "number", quality_scores: "object", domain: "string", notes: "string" }), output_schema: obj({ review_id: "string", recorded: "boolean" }) },
+  // The differentiator, made answerable: did this producer get BETTER, and what did it cost?
+  // `learning_synthesize` counts reviews; this MEASURES the change across producer versions.
+  // Every input was already sealed — outputs carry agent_slug/cost_usd, reviews carry
+  // quality_scores against a specific output_id and agent_version — and nothing joined them.
+  { slug: "improvement_report",            category: "improve", input_schema: obj({ agent_slug: "string", window: "string" }), output_schema: obj({ agent_slug: "string", total_outputs: "number", versions: "array", deltas: "array", comparable: "boolean", basis: "string" }) },
   { slug: "learning_synthesize",           category: "improve", input_schema: obj({ agent_slug: "string", min_reviews: "number", since: "string", auto_propose: "boolean" }), output_schema: obj({ agent_slug: "string", review_count: "number", evidence_sufficient: "boolean", summary: "object", proposal_id: "string" }) },
 
   { slug: "agent_promote",                 category: "build", input_schema: obj({ slug: "string", status: "string", current: "string" }), output_schema: obj({ slug: "string", status: "string", promoted: "boolean" }) },

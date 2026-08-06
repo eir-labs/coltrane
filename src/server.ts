@@ -1978,6 +1978,118 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         }, gig_id));
         return { ok: true, requires_approval: approval, data: { review_id, recorded: true, agent_slug, gig_id } };
       }
+      // ── improvement, as a measurement rather than a count ────────────────────────────
+      // `learning_synthesize` answers "is there enough evidence to act?" — a count. It cannot
+      // answer the question the whole typed-and-sealed design exists to make answerable: did
+      // this producer get BETTER, and what did that cost?
+      //
+      // Every input was already sealed and nothing joined them. Outputs carry `agent_slug`,
+      // `cost_usd` and `created_at`; reviews carry `quality_scores` against a specific
+      // `output_id` and `agent_version`; `agent_evolve` rows carry the version boundaries. The
+      // join is arithmetic over records this engine already writes — no new instrumentation,
+      // which is precisely why a consumer cannot compute this for themselves from a bill.
+      case "improvement_report": {
+        const subject = String(args["agent_slug"] ?? "");
+        if (!subject) return { ok: false, requires_approval: approval, error: "improvement_report requires agent_slug" };
+        const win = parseWindow(args["window"], Date.now());
+        if (win.error) return { ok: false, requires_approval: approval, error: win.error };
+
+        const outs = deps.outputs.all().filter(
+          (o) => o.agent_slug === subject && (!win.after || o.created_at >= win.after),
+        );
+        const reviews = deps.ledger.query({
+          kind: "governance", event: "session_review_write", subject_slug: subject,
+          ...(win.after ? { after: win.after } : {}),
+        }) as unknown as Array<{ detail?: Record<string, unknown> }>;
+
+        // A review names the output it judged, so quality attaches to a specific sealed record
+        // rather than to a time bucket. That is what makes the cost and the score describe the
+        // same unit of work.
+        const scoreOf = (d: Record<string, unknown> | undefined): number | null => {
+          const qs = d?.["quality_scores"];
+          if (!qs || typeof qs !== "object") return null;
+          const nums = Object.values(qs as Record<string, unknown>).filter((v): v is number => typeof v === "number" && Number.isFinite(v));
+          return nums.length ? nums.reduce((a, b) => a + b, 0) / nums.length : null;
+        };
+        const reviewByOutput = new Map<string, { score: number | null; version: number | null }>();
+        for (const r of reviews) {
+          const oid = String(r.detail?.["output_id"] ?? "");
+          if (!oid) continue;
+          const v = r.detail?.["agent_version"];
+          reviewByOutput.set(oid, { score: scoreOf(r.detail), version: typeof v === "number" ? v : null });
+        }
+
+        // Bucket by producer VERSION where a review supplied one. Version is the axis that
+        // matters: "did the edit help?" is a question about two definitions, not two dates.
+        interface Bucket { version: number | null; outputs: number; reviewed: number; cost: number[]; scores: number[] }
+        const buckets = new Map<string, Bucket>();
+        const keyOf = (v: number | null): string => (v === null ? "unversioned" : String(v));
+        for (const o of outs) {
+          const rev = reviewByOutput.get(o.id);
+          const k = keyOf(rev?.version ?? null);
+          const b = buckets.get(k) ?? { version: rev?.version ?? null, outputs: 0, reviewed: 0, cost: [], scores: [] };
+          b.outputs += 1;
+          if (typeof o.cost_usd === "number" && Number.isFinite(o.cost_usd)) b.cost.push(o.cost_usd);
+          if (rev && rev.score !== null) { b.reviewed += 1; b.scores.push(rev.score); }
+          buckets.set(k, b);
+        }
+        const mean = (xs: number[]): number | null => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
+        const versions = [...buckets.values()]
+          .sort((a, b) => (a.version ?? -1) - (b.version ?? -1))
+          .map((b) => ({
+            version: b.version,
+            outputs: b.outputs,
+            reviewed: b.reviewed,
+            // NULL, not 0, when nothing was measured. A zero here would read as "free" and
+            // "worthless" respectively, which is the exact class of fabricated number this
+            // engine spent a release removing.
+            mean_cost_usd: mean(b.cost),
+            mean_quality: mean(b.scores),
+            cost_basis: b.cost.length === b.outputs ? "complete"
+              : b.cost.length === 0 ? "no output carried a cost"
+              : `partial: ${b.cost.length} of ${b.outputs} outputs carried a cost`,
+            quality_basis: b.reviewed === 0 ? "no output was reviewed"
+              : `${b.reviewed} of ${b.outputs} outputs reviewed`,
+          }));
+
+        // The comparison, only where both ends are measured. A delta against an unmeasured
+        // version would be a number with nothing behind it.
+        const deltas: Array<Record<string, unknown>> = [];
+        for (let i = 1; i < versions.length; i++) {
+          const prev = versions[i - 1]!, cur = versions[i]!;
+          if (prev.version === null || cur.version === null) continue;
+          deltas.push({
+            from_version: prev.version, to_version: cur.version,
+            quality_delta: prev.mean_quality !== null && cur.mean_quality !== null ? cur.mean_quality - prev.mean_quality : null,
+            cost_delta_usd: prev.mean_cost_usd !== null && cur.mean_cost_usd !== null ? cur.mean_cost_usd - prev.mean_cost_usd : null,
+            // The sentence a person acts on. Only stated when BOTH ends are measured.
+            verdict: prev.mean_quality !== null && cur.mean_quality !== null && prev.mean_cost_usd !== null && cur.mean_cost_usd !== null
+              ? (cur.mean_quality >= prev.mean_quality && cur.mean_cost_usd <= prev.mean_cost_usd ? "better and cheaper"
+                : cur.mean_quality > prev.mean_quality ? "better, and more expensive"
+                : cur.mean_cost_usd < prev.mean_cost_usd ? "cheaper, and worse"
+                : "worse and more expensive")
+              : null,
+          });
+        }
+
+        const measurable = versions.filter((v) => v.version !== null && v.mean_quality !== null).length;
+        return {
+          ok: true, requires_approval: approval,
+          data: {
+            agent_slug: subject,
+            ...(win.after ? { since: win.after } : {}),
+            total_outputs: outs.length,
+            versions, deltas,
+            // Said plainly, because a report that cannot answer its own question should say so
+            // rather than return empty arrays that read as "no change".
+            comparable: measurable >= 2,
+            basis: measurable >= 2
+              ? `${measurable} versions carry both cost and quality`
+              : "not comparable yet — a version-to-version delta needs reviews recorded against outputs from at least two versions (session_review_write with agent_version)",
+          },
+        };
+      }
+
       case "learning_synthesize": {
         // §11 learning loop, half 2: aggregate session reviews into evolution evidence
         // for one agent. Returns evidence_sufficient=true only when review count meets

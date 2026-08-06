@@ -11,12 +11,19 @@ import type { GigUsage } from "./ledger.js";
 export interface GigChairState {
   role: string;
   phase: string;
-  status: "running" | "complete" | "failed";
+  /** `skipped` is its OWN status. A chair served from a checkpoint or the reuse cache did not
+   *  run, and rendering it as `complete` would make a recall indistinguishable from a very
+   *  fast derivation — which is the whole thing an operator watching a run needs to tell apart. */
+  status: "running" | "complete" | "failed" | "skipped";
   producer?: string;          // agent slug or skill slug that ran the chair
   output_types?: string[];    // the domain types it sealed
   duration_ms?: number;
   tool_calls: string[];       // tool names the chair's child invoked (from agent_event)
   error?: string;
+  /** skipped only — "resume" (this gig's own checkpoint) or "reuse" (a prior gig's output). */
+  skipped_reason?: "resume" | "reuse";
+  /** skipped only — the gig whose sealed output stood in for this chair. */
+  source_gig_id?: string;
 }
 
 /** The outcomes a tracked gig can reach. `aborted` is first-class (#251): without it a
@@ -43,6 +50,12 @@ export interface GigRunState {
   // ABORTED. An abort that kills children without capturing accrued usage would convert a
   // recorded cost into an unrecorded one: better cost control, worse accounting.
   usage?: GigUsage;
+  /** Chairs that did not run because a sealed output stood in for them (#resume/#reuse). */
+  skipped_chairs?: Array<{ phase: string; role: string; reason: "resume" | "reuse"; source_gig_id: string; output_types: string[] }>;
+  /** Set when this run resumed a prior attempt at the same gig. */
+  resumed_from?: { gig_id: string; roles: string[]; outputs: number };
+  /** Cache entries that were FOUND and refused. Surfaced so a cache that stopped hitting says why. */
+  reuse_rejected?: Array<{ phase: string; role: string; reason: string; detail?: string }>;
   // #236 — the budget snapshot, set on BOTH terminal paths. The synchronous dispatch reply
   // has carried this since the budget existed (server.ts), but the async path — which is the
   // DEFAULT — dropped it either way: a completed gig never reported what it consumed, and a
@@ -102,6 +115,28 @@ export function applyGigProgress(state: GigRunState, ev: GigProgressEvent): void
       c.error = ev.error;
       break;
     }
+    case "gig_resumed":
+      state.resumed_from = { gig_id: ev.from_gig_id, roles: ev.roles, outputs: ev.outputs };
+      state.outputs_count += ev.outputs;
+      break;
+    case "chair_skipped": {
+      // Not `complete`: a chair that did not run must not read as one that ran fast.
+      state.chairs[ev.role] = {
+        role: ev.role, phase: ev.phase, status: "skipped", tool_calls: [],
+        output_types: ev.output_types, skipped_reason: ev.reason, source_gig_id: ev.source_gig_id,
+      };
+      (state.skipped_chairs ??= []).push({
+        phase: ev.phase, role: ev.role, reason: ev.reason,
+        source_gig_id: ev.source_gig_id, output_types: ev.output_types,
+      });
+      break;
+    }
+    case "reuse_rejected":
+      (state.reuse_rejected ??= []).push({
+        phase: ev.phase, role: ev.role, reason: ev.reason,
+        ...(ev.detail !== undefined ? { detail: ev.detail } : {}),
+      });
+      break;
     case "gig_complete":
       state.outputs_count = ev.outputs;
       break;
@@ -152,6 +187,11 @@ export function gigEventLogLine(gig_id: string, ev: GigProgressEvent): string | 
     // is otherwise indistinguishable from a skilled one: same genome_hash, run_fingerprint,
     // content_sha. This log line is the only place the difference shows up while it happens.
     case "skills_unresolved": return JSON.stringify({ ...base, ev: "skills_unresolved", phase: ev.phase, role: ev.role, agent: ev.agent, missing: ev.missing });
+    // A run that skipped phases has to SAY SO in the live log, not only in the final manifest —
+    // an operator watching a gig fly through five phases in two seconds needs to know why.
+    case "gig_resumed": return JSON.stringify({ ...base, ev: "gig_resumed", from: ev.from_gig_id, roles: ev.roles, outputs: ev.outputs });
+    case "chair_skipped": return JSON.stringify({ ...base, ev: "chair_skipped", phase: ev.phase, role: ev.role, why: ev.reason, from_gig: ev.source_gig_id, sealed: ev.output_types });
+    case "reuse_rejected": return JSON.stringify({ ...base, ev: "reuse_rejected", phase: ev.phase, role: ev.role, reason: ev.reason, detail: ev.detail });
     case "gig_complete": return JSON.stringify({ ...base, ev: "gig_complete", outputs: ev.outputs });
     case "gig_failed": return JSON.stringify({ ...base, ev: "gig_failed", error: ev.error });
     case "gig_aborted": return JSON.stringify({ ...base, ev: "gig_aborted", reason: ev.reason });

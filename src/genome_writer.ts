@@ -5,6 +5,7 @@
 // standard_slug="agent_define", genome_hash=effective_hash. A hand-edited file with no
 // such ledger entry is an orphan — no identity, outside the substrate.
 import { writeFileSync, mkdirSync, existsSync, readFileSync } from "node:fs";
+import { writeFileAtomic } from "./fs_atomic.js";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { defineAgent, type Agent, type AgentDef } from "./composition.js";
@@ -38,11 +39,17 @@ export function writeGenomeFileVersioned(
       const prior = sha256Hex(oldBytes);
       const histDir = join(genome_dir, ".coltrane", "history", subdir, slug);
       mkdirSync(histDir, { recursive: true });
-      writeFileSync(join(histDir, `${prior}.json`), oldBytes);
+      // History first, and atomically: this is the only copy of the bytes about to be replaced.
+      writeFileAtomic(join(histDir, `${prior}.json`), oldBytes);
       result = { overwritten: true, prior_content_hash: prior };
     }
   }
-  writeFileSync(path, jsonText);
+  // Atomic replace. `sealDefinition` records this definition's identity in the ledger BEFORE
+  // calling here (#218) — a deliberate ordering, safe only if the write either happens or does
+  // not. A bare writeFileSync interrupted partway (crash, SIGKILL, ENOSPC) leaves a truncated
+  // file, so the ledger asserts a definition at a content hash whose bytes hash to something
+  // else. That is the engine's central provenance claim failing with nothing to notice it.
+  writeFileAtomic(path, jsonText);
   return result;
 }
 

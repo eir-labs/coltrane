@@ -62,8 +62,19 @@ export const MCP_TOOLS: readonly MCPToolDef[] = [
   { slug: "standard_simulate",             category: "build", input_schema: obj({ standard_slug: "string", mock_input: "object", depth: "string" }), output_schema: obj({ phases: "array", estimated_cost: "number", estimated_duration_ms: "number", basis: "string", sample_size: "number" }) },
   // #237 — `depth` is read now (and rejected when unrecognized); the response echoes the depth
   // the run actually took, so "I ran a cheap iteration" is verifiable rather than assumed.
-  { slug: "gig_dispatch",                  category: "run", input_schema: obj({ standard_slug: "string", input: "object", depth: "string", company_id: "string", wait: "boolean" }), output_schema: obj({ gig_id: "string", status: "string", depth: "string", manifest: "object" }) },
-  { slug: "gig_monitor",                   category: "run", input_schema: obj({ gig_id: "string" }), output_schema: obj({ status: "string", phases_complete: "number", current_phase: "string", chairs: "array", outputs_so_far: "array" }) },
+  //
+  // `resume_gig_id` + `reuse` are the two ways to reuse a sealed output instead of paying to
+  // derive it again, and both are ADVERTISED because an undiscoverable feature is #234 repeated.
+  //   resume_gig_id — continue a gig that died mid-pipeline, skipping the phases that already
+  //     sealed. Refused (never silently run cold) if the genome, payload, model, depth or a
+  //     domain type moved since; the reply then carries `resume_refused` + `drift`.
+  //   reuse — allow chair-level cache reads AND writes. A chair whose producer, resolved
+  //     inputs and payload hash to a prior sealed output is served from it instead of invoked.
+  // `skipped` / `resumed_from` / `reuse` on the response say exactly what did not run and why.
+  { slug: "gig_dispatch",                  category: "run", input_schema: obj({ standard_slug: "string", input: "object", depth: "string", company_id: "string", wait: "boolean", resume_gig_id: "string", reuse: "boolean" }), output_schema: obj({ gig_id: "string", status: "string", depth: "string", manifest: "object", resumed_from: "string", reuse: "boolean", resume_refused: "boolean", drift: "array" }) },
+  // `skipped_chairs` / `resumed_from` / `reuse_rejected` are the ASYNC path's only report of a
+  // saving — the manifest never reaches a caller who dispatched without `wait`.
+  { slug: "gig_monitor",                   category: "run", input_schema: obj({ gig_id: "string" }), output_schema: obj({ status: "string", phases_complete: "number", current_phase: "string", chairs: "array", outputs_so_far: "array", skipped_chairs: "array", resumed_from: "object", reuse_rejected: "array" }) },
   { slug: "gig_logs",                       category: "understand", input_schema: obj({ gig_id: "string", role: "string", type: "string", tail: "number" }), output_schema: obj({ gig_id: "string", roles: "array", count: "number", events: "array" }) },
   // #251 — `status` is the field both existing tests actually assert and it was not advertised.
   // `aborted` now means "this call delivered a cancellation to a live run", not "we looked at

@@ -25,7 +25,8 @@ import {
   type Ledger, type GovernanceLedgerEntry,
 } from "./ledger.js";
 import { standardSimulate } from "./simulate.js";
-import { runGig, BudgetExhausted, GigAborted, partialGigUsage, partialBudgetState, type AgentInvoker } from "./runtime.js";
+import { runGig, BudgetExhausted, GigAborted, ResumeRefused, partialGigUsage, partialBudgetState, type AgentInvoker } from "./runtime.js";
+import { createCheckpointStore, createReuseStore, type CheckpointStore, type ReuseStore } from "./reuse.js";
 import { makeClaudeInvoker, killLiveChairChildren } from "./claude_invoker.js";
 import { isDepth, DEPTHS, type Depth } from "./pricing.js";
 import type { ToolProvider } from "./tool_providers.js";
@@ -100,6 +101,15 @@ export interface ServerDeps {
   // Base dir for per-gig agent logs (<base>/<gig_id>/<role>.jsonl). Set by bootstrap to
   // the outputs persist dir; absent → no file tee (state-only observability, e.g. tests).
   gig_log_base?: string | undefined;
+  // Durable per-gig checkpoints, so a run that dies at phase 5 can be resumed instead of
+  // restarting from zero. Bootstrap wires it under the outputs persist dir. WRITING is
+  // automatic (a checkpoint you have to opt into before the failure is one you never have);
+  // acting on it needs `resume_gig_id` on the dispatch call.
+  checkpoints?: CheckpointStore | undefined;
+  // The chair-level reuse cache. Wired by bootstrap but only PASSED to runGig when the caller
+  // sets `reuse: true` — the store is cross-gig by construction, so both reading and writing
+  // are the caller's decision, never a side effect of having run something.
+  reuse?: ReuseStore | undefined;
   // #185 — the genome→provider bridge: each registered engine tool slug → an in_house provider, so
   // an agent's grant of a real engine tool RESOLVES instead of failing closed as a dead name. Built
   // by bootstrap from REGISTERED_TOOL_SLUGS, passed to the invoker, and kept live by tool_register.
@@ -482,6 +492,41 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         const depthArg = readDepth(args["depth"]);
         if (depthArg.error) return { ok: false, requires_approval: approval, error: depthArg.error };
         const depth = depthArg.depth;
+
+        // ── reuse a sealed output instead of re-deriving it ──────────────────────────────
+        // Both halves are opt-in, and both are named on the dispatch call so the decision is
+        // recorded where the run is requested rather than inferred from server configuration.
+        const resumeArg = args["resume_gig_id"] === undefined || args["resume_gig_id"] === null
+          ? undefined
+          : String(args["resume_gig_id"]);
+        if (resumeArg !== undefined && resumeArg.trim() === "") {
+          return { ok: false, requires_approval: approval, error: `gig_dispatch: "resume_gig_id" must be a gig id, not an empty string` };
+        }
+        if (resumeArg !== undefined && !deps.checkpoints) {
+          return { ok: false, requires_approval: approval, error: `gig_dispatch: resume_gig_id was supplied but this server has no checkpoint store wired, so no run is resumable` };
+        }
+        // A live run holds the AbortController for that gig_id; resuming into it would put two
+        // runs on one gig, writing to the same outputs file and racing the same checkpoint.
+        if (resumeArg !== undefined && deps.gig_runs?.get(resumeArg)?.status === "running") {
+          return { ok: false, requires_approval: approval, error: `gig_dispatch: gig "${resumeArg}" is still running — abort it before resuming` };
+        }
+        const reuseOn = args["reuse"] === true;
+        if (reuseOn && !deps.reuse) {
+          return { ok: false, requires_approval: approval, error: `gig_dispatch: reuse was requested but this server has no reuse store wired` };
+        }
+        const reuseWiring = {
+          ...(deps.checkpoints ? { checkpoints: deps.checkpoints } : {}),
+          ...(resumeArg !== undefined ? { resume_from: resumeArg } : {}),
+          ...(reuseOn && deps.reuse ? { reuse: deps.reuse } : {}),
+        };
+        /** What a run skipped, and why — echoed on every reply so a saving is never silent. */
+        const savings = (res: Awaited<ReturnType<typeof runGig>>): Record<string, unknown> => ({
+          ...(res.skipped ? { skipped: res.skipped } : {}),
+          ...(res.resumed_from ? { resumed_from: res.resumed_from } : {}),
+          ...(res.reuse ? { reuse: res.reuse } : {}),
+          ...(res.checkpoint_error ? { checkpoint_error: res.checkpoint_error } : {}),
+        });
+
         // Synchronous mode (opt-in via wait:true) — block, return the manifest. The
         // deterministic test path and any caller that wants the answer in one call.
         const wait = args["wait"] === true;
@@ -490,7 +535,7 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
             const res = await runGig(standard, gigInput, {
               outputs: deps.outputs, ledger: deps.ledger, invoke: deps.invoke,
               model_version: deps.model_version, skills: deps.skills, skill_dirs: deps.skill_dirs, evals: deps.evals, budget,
-              ...(depth ? { depth } : {}),
+              ...(depth ? { depth } : {}), ...reuseWiring,
             });
             return {
               ok: true, requires_approval: approval,
@@ -501,10 +546,17 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
                   genome_hash: res.genome_hash, run_fingerprint: res.run_fingerprint, output_count: res.outputs.length,
                   ...(res.usage ? { usage: res.usage } : {}), // #195 — settled model spend
                   ...(res.budget_state ? { budget_state: res.budget_state } : {}),
+                  ...savings(res),
                 },
               },
             };
           } catch (e) {
+            // A refused resume is a REFUSAL, not a crash: nothing ran, nothing was spent, and
+            // the caller needs the drift list to decide whether to re-dispatch cold.
+            if (e instanceof ResumeRefused) {
+              return { ok: false, requires_approval: approval, error: e.message,
+                data: { resume_refused: true, gig_id: e.gig_id, drift: e.drift } };
+            }
             if (e instanceof BudgetExhausted) {
               // #236 — the synchronous half: a depleted gig also burned real dollars before it
               // stopped, and the operator needs them in the same reply as the depletion notice.
@@ -519,8 +571,17 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         // Async mode (default) — register live state, run in the background, return the id
         // immediately so the caller can poll gig_monitor + tail the per-chair logs instead of
         // blocking for the whole run ("synchronous dispatch is not a good pattern").
-        const gigId = randomUUID();
+        // A resumed run CONTINUES the gig it resumes — same id — so the restored outputs stay
+        // in-gig and `output_trace` still reaches them. The live-state entry for the earlier
+        // attempt is replaced: that gig is running again, and showing its old `failed` state
+        // while it runs would be a lie the operator acts on.
+        const gigId = resumeArg ?? randomUUID();
         const runs = deps.gig_runs ?? (deps.gig_runs = new Map());
+        // #278 review — keep the prior attempt's record so a REFUSED resume can put it back.
+        // Overwriting it is right when the resume proceeds (that gig is running again), and
+        // destructive when it does not: the operator loses the `failed` status and error they
+        // were resuming in response to, and is left with a gig stuck at `running` forever.
+        const priorState = runs.get(gigId);
         const state = newGigRun(gigId, slug2, standard.phases.length, new Date().toISOString());
         // #249/#250 — the cancellation handle, held for as long as the run is live. This is the
         // object gig_abort reaches; before it existed there was nothing to reach.
@@ -541,15 +602,32 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
           const line = gigEventLogLine(gigId, ev);
           if (line) { try { process.stderr.write(line + "\n"); } catch { /* best-effort */ } }
         };
-        void runGig(standard, gigInput, {
+        const runPromise = runGig(standard, gigInput, {
           outputs: deps.outputs, ledger: deps.ledger, invoke: deps.invoke,
           model_version: deps.model_version, skills: deps.skills, skill_dirs: deps.skill_dirs, evals: deps.evals, budget,
-          gig_id: gigId, onProgress, signal: controller.signal, ...(depth ? { depth } : {}),
-        })
+          gig_id: gigId, onProgress, signal: controller.signal, ...(depth ? { depth } : {}), ...reuseWiring,
+        });
+        // A REFUSED resume must be answered in THIS reply, not discovered later by polling. The
+        // gate throws in runGig's SYNCHRONOUS phase — before its first `await`, which is exactly
+        // what "a refused resume spends nothing" means — so the promise is already rejected by
+        // the time we get here, and registering this handler first queues it ahead of the
+        // microtask that resumes the `await` below. tests/phase_resume_and_reuse pins that
+        // ordering property so it cannot silently regress into a "running" reply for a run that
+        // never started. (The main chain below still handles the rejection; this only observes.)
+        let resumeRefusal: ResumeRefused | undefined;
+        if (resumeArg !== undefined) {
+          void runPromise.catch((e: unknown) => { if (e instanceof ResumeRefused) resumeRefusal = e; });
+        }
+        void runPromise
           .then((res) => {
             state.status = "complete"; state.finished_at = new Date().toISOString();
             state.run_fingerprint = res.run_fingerprint; state.genome_hash = res.genome_hash; state.outputs_count = res.outputs.length;
             if (res.usage) state.usage = res.usage; // #195 — surface settled spend to gig_monitor
+            // Say what was skipped. On the async path the manifest never reaches the caller, so
+            // gig_monitor is the ONLY place a saving can be reported — and an unreported saving
+            // is indistinguishable from chairs that quietly failed to run.
+            if (res.skipped) state.skipped_chairs = res.skipped.map((s) => ({ phase: s.phase, role: s.role, reason: s.reason, source_gig_id: s.source_gig_id, output_types: s.output_types }));
+            if (res.reuse && res.reuse.rejected.length > 0) state.reuse_rejected = res.reuse.rejected.map((r) => ({ phase: r.phase, role: r.role, reason: r.reason, ...(r.detail !== undefined ? { detail: r.detail } : {}) }));
             // #236 — the synchronous reply has carried budget_state since the budget existed;
             // the async path never did, so the DEFAULT dispatch mode could not answer "what did
             // this consume?" even on success.
@@ -582,9 +660,28 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
             onProgress({ type: "gig_failed", error: state.error });
           })
           .finally(() => { state.controller = undefined; }); // don't pin a controller past settle
+        if (resumeArg !== undefined) {
+          await Promise.resolve(); // one turn — see the ordering note above
+          if (resumeRefusal) {
+            // The gig never started, so it must not be left masquerading as a live run — and
+            // RESTORING beats deleting. Deleting turned a `failed` gig into an unknown one and
+            // left any poller waiting on a run that no longer existed; the failure the operator
+            // was acting on is exactly what they still need to see.
+            if (priorState) deps.gig_runs?.set(gigId, priorState);
+            else deps.gig_runs?.delete(gigId);
+            return { ok: false, requires_approval: approval, error: resumeRefusal.message,
+              data: { resume_refused: true, gig_id: resumeRefusal.gig_id, drift: resumeRefusal.drift } };
+          }
+        }
         return {
           ok: true, requires_approval: approval,
-          data: { gig_id: gigId, status: "running", ...(depth ? { depth } : {}), ...(logDir ? { log_dir: logDir } : {}) },
+          data: {
+            gig_id: gigId, status: "running", ...(depth ? { depth } : {}), ...(logDir ? { log_dir: logDir } : {}),
+            // Echo the opt-ins back. A caller who typo'd `reuse` and paid full price for a run
+            // they believed was cached has no other way to find out.
+            ...(resumeArg !== undefined ? { resumed_from: resumeArg } : {}),
+            ...(reuseOn ? { reuse: true } : {}),
+          },
         };
       }
       case "gig_monitor": {
@@ -611,6 +708,12 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
               // `unit: "append-units"` and the real `settled_usd` alongside (#233), so nothing
               // reads the synthetic proxy as dollars.
               ...(live.budget_state ? { budget_state: live.budget_state } : {}),
+              // A run that skipped phases must SAY which and why. On the async path this is the
+              // only surface that can carry it, and a run showing 6 phases complete in 4 seconds
+              // is otherwise indistinguishable from one whose chairs quietly did nothing.
+              ...(live.skipped_chairs ? { skipped_chairs: live.skipped_chairs } : {}),
+              ...(live.resumed_from ? { resumed_from: live.resumed_from } : {}),
+              ...(live.reuse_rejected ? { reuse_rejected: live.reuse_rejected } : {}),
               ...(live.abort_reason ? { abort_reason: live.abort_reason } : {}), // why it stopped (#251)
               ...(live.error ? { error: live.error } : {}),
               ...(live.finished_at ? { finished_at: live.finished_at } : {}),
@@ -1622,6 +1725,9 @@ export function bootstrapServerDeps(genomeRoot?: string): ServerDeps {
     provenance: genome.provenance, // ← genome extension — which layer supplied each def
     gig_runs: new Map(), // ← async dispatch — live gig state gig_monitor reads
     gig_log_base: defaultOutputsPersistDir(), // ← per-gig agent logs at <base>/gigs/<id>/<role>.jsonl
+    // Checkpoints + the reuse cache live alongside outputs/ and refs/ under the same root.
+    checkpoints: createCheckpointStore(defaultOutputsPersistDir()),
+    reuse: createReuseStore(defaultOutputsPersistDir()),
   };
 }
 

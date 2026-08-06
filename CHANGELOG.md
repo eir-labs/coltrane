@@ -7,6 +7,57 @@ signals a breaking change and a **patch** signals an additive or internal one.
 `package.json`'s `version` — `tests/version_identity.test.ts` enforces that, and also that
 the MCP handshake reports the constant rather than a hardcoded literal.
 
+## Unreleased
+
+### Breaking
+
+- **`OutputStore` gains two methods, `typeFingerprint(slug)` and `validateWrite(o)`.** Any
+  external implementation of the `OutputStore` interface must add them — same shape as
+  0.4.0's `Ledger.integrity()` addition, and for the same reason: the store is the single
+  owner of a question two layers now need answered.
+
+  `typeFingerprint` hashes a type's current shape (core + required list + schema).
+  `validateWrite` answers "would `write` accept this?" without persisting — `write` now calls
+  the same internal gate, so the two answers cannot drift. Reuse needs both: the first to
+  detect that a domain type moved under a cached output, the second to decide about a
+  multi-output entry *before* any of it becomes durable.
+
+  **Migration.** A store with no registry can answer honestly:
+
+  ```ts
+  typeFingerprint(): string { return ""; }   // "" = cannot describe → never reused
+  validateWrite() { return { valid: true }; }
+  ```
+
+### Added
+
+- **Phase checkpoint/resume, and engine-level output reuse.** One idea, two ranges: reuse a
+  sealed output instead of paying to derive it again. A mid-run failure used to discard every
+  completed phase — a full convergence run is ~$4–7, and a failure at phase 5 threw away
+  phases 1–4.
+
+  - `RunDeps.checkpoints` — a durable per-gig record of each completed chair's sealed outputs.
+    Written automatically when wired; a checkpoint you must opt into *before* the failure is
+    one you never have.
+  - `RunDeps.resume_from` / `gig_dispatch({ resume_gig_id })` — continue that gig (same
+    `gig_id`, so `output_trace` still reaches the restored ancestors), skipping what already
+    sealed. **Refused, never silently run cold**, if `genome_hash`, the dispatch payload,
+    `model_version`, `depth`, the canonical form, or any consumed domain type has moved; the
+    reply carries `resume_refused` and a `drift` list.
+  - `RunDeps.reuse` / `gig_dispatch({ reuse: true })` — a chair whose producer definition,
+    consumed input **content**, payload, model and depth hash to a prior sealed output is
+    served from it instead of invoked. Presence of the store is the opt-in, for reads *and*
+    writes: the store is cross-gig by construction, so populating it is itself a decision.
+    A found-but-unusable entry is reported and the chair does the work.
+  - Reuse is never a way to skip a check. Every recalled output crosses the same seal boundary
+    a derived one does (#263 core agreement, the registry schema, the #227/#228 substance
+    floor) and is re-hashed to the `content_sha` the original seal produced — which is why a
+    resumed or fully-reused run carries the **same `run_fingerprint`** as the cold run it
+    stands in for.
+  - Nothing is silent: `GigResult.skipped` / `.resumed_from` / `.reuse`, the `gig_resumed`,
+    `chair_skipped` and `reuse_rejected` progress events, `gig_monitor.skipped_chairs`, a
+    `skipped` chair status of its own, and `OutputRecord.reused_from` on the record itself.
+
 ## 0.4.1
 
 ### Fixed

@@ -19,6 +19,9 @@ permissions:
 
 jobs:
   allowlist:
+    env:
+      # This job installs eslint + the TS parser, so the guard must genuinely run here.
+      COLTRANE_EXPECT_LINT_GUARD: "1"
     name: import allowlist (PR diff + full tree)
     runs-on: ubuntu-latest
     steps:

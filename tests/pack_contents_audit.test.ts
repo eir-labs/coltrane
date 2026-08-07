@@ -44,7 +44,7 @@ const PACK_HOOK_TIMEOUT_MS = 120_000;
 beforeAll(() => {
   // `npm pack --dry-run --json` enumerates the would-ship manifest without
   // writing a tarball or touching the registry. Deterministic + side-effect-free.
-  const out = execFileSync("npm", ["pack", "--dry-run", "--json"], {
+  const out = execFileSync("npm", ["pack", "--dry-run", "--json", "--ignore-scripts"], {
     cwd: REPO_ROOT,
     encoding: "utf-8",
   });

@@ -32,6 +32,9 @@ concurrency:
 permissions:
   contents: read
 
+# Node 22 only. The skill sandbox spawns with `--permission`, which does not exist before
+# Node 22 — on 20 every code-bearing skill dies with `node: bad option: --permission`.
+# package.json's engines field now says >=22 to match.
 jobs:
   typecheck:
     name: typecheck (${{ matrix.os }}, node ${{ matrix.node }})
@@ -40,7 +43,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
-        node: ["20.x", "22.x"]
+        node: ["22.x"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -57,7 +60,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
-        node: ["20.x", "22.x"]
+        node: ["22.x"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -76,7 +79,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
-        node: ["20.x", "22.x"]
+        node: ["22.x"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

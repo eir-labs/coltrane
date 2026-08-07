@@ -135,12 +135,21 @@ describe("import allowlist", () => {
 
   // Guards the guard. The three cases above all no-op when the toolchain is absent, which is
   // the honest thing to do locally — but it means a permanently-skipped guard looks identical
-  // to a passing one. CI installs eslint AND the parser (.github/workflows/lint-imports.yml),
-  // so there it must genuinely run, and this is what says so out loud.
+  // to a passing one.
+  //
+  // This keyed off `CI`, and that was wrong in a way only CI could show. `CI=true` is set in
+  // EVERY GitHub Actions job, but eslint is installed in exactly one workflow
+  // (.github/workflows/lint-imports.yml). This file runs in the `unit` job of test.yml, where
+  // it is not — so the assertion demanded a toolchain its own job never had, and every unit
+  // leg went red on the first run CI was allowed to execute.
+  //
+  // The signal is now explicit: the workflow that installs the toolchain sets
+  // COLTRANE_EXPECT_LINT_GUARD, and only there is skipping a failure. A guard against silent
+  // skipping should not itself depend on a variable that means something else.
   it("reports whether the guard actually ran", () => {
     const r = runGuard('import { x } from "/absolute";\nexport const y = x;\n');
-    if (process.env["CI"]) {
-      expect(r.ran, "CI installs eslint + @typescript-eslint/parser — the guard must not skip there").toBe(true);
+    if (process.env["COLTRANE_EXPECT_LINT_GUARD"]) {
+      expect(r.ran, "this job installs eslint + @typescript-eslint/parser — the guard must not skip here").toBe(true);
     } else if (!r.ran) {
       explainSkip(r.why);
     }

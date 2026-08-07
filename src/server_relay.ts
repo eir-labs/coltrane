@@ -167,6 +167,9 @@ export function buildNoChildError(id: string | number | null, method: string): J
 /** How long a fresh child gets to answer the replayed `initialize` before the restart FAILS. */
 export const HANDSHAKE_REPLAY_TIMEOUT_MS = 10_000;
 
+/** How long the OUTGOING child gets to honour SIGTERM before the relay escalates to SIGKILL. */
+export const GRACEFUL_EXIT_TIMEOUT_MS = 2_000;
+
 /** The outcome of one child swap. `ok: false` must reach the client — see buildRestartError. */
 export type RestartOutcome = { ok: true } | { ok: false; reason: string };
 
@@ -246,18 +249,37 @@ export async function runRelay(opts: { entryPath: string }): Promise<void> {
   forwardChildToParent(child);
 
   const restartChild = async (): Promise<RestartOutcome> => {
-    if (child.exitCode === null && child.signalCode === null) {
-      child.kill("SIGTERM");
+    // `dying` is captured deliberately. `child` is reassigned a few lines below, and the
+    // escalation timer must be able to reach exactly ONE process: the one it was armed for.
+    //
+    // It used to close over `child` instead, and `Promise.race` discards the loser's value but
+    // does not cancel it — so on the ordinary path (old child exits promptly, the exit branch
+    // wins) the timer stayed armed, fired 2s later, read the CURRENT `child`, found the
+    // healthy replacement, and SIGKILLed it. Every restart killed the process it had just
+    // reported as serving. The relay answered "New child process is up and serving", and about
+    // two seconds later there was no server at all.
+    //
+    // Downstream that surfaced two ways, depending on where the next call landed: after the
+    // exit was observed, `buildNoChildError` — a visible error telling you to restart a client
+    // that had just restarted successfully; before it, a write into a dying pipe, silently
+    // discarded, and an unbounded hang. #260 made a FAILED swap reportable; this made a
+    // SUCCESSFUL one fatal, which is why it hid behind it.
+    const dying = child;
+    if (dying.exitCode === null && dying.signalCode === null) {
+      dying.kill("SIGTERM");
       // Give it 2s to exit cleanly; otherwise SIGKILL.
+      let escalate: ReturnType<typeof setTimeout> | undefined;
       await Promise.race([
-        new Promise<void>((res) => child.once("exit", () => res())),
-        new Promise<void>((res) =>
-          setTimeout(() => {
-            if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+        new Promise<void>((res) => dying.once("exit", () => res())),
+        new Promise<void>((res) => {
+          escalate = setTimeout(() => {
+            if (dying.exitCode === null && dying.signalCode === null) dying.kill("SIGKILL");
             res();
-          }, 2000),
-        ),
+          }, GRACEFUL_EXIT_TIMEOUT_MS);
+        }),
       ]);
+      // Belt to the `dying` brace: nothing should be left armed once the swap moves on.
+      clearTimeout(escalate);
     }
     child = spawnChild(opts.entryPath);
     forwardChildToParent(child);

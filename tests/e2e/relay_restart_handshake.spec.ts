@@ -16,6 +16,7 @@ import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import type { Writable, Readable } from "node:stream";
+import { GRACEFUL_EXIT_TIMEOUT_MS } from "../../src/server_relay.js";
 
 const REPO = join(fileURLToPath(new URL(".", import.meta.url)), "..", "..");
 const RELAY_ENTRY = join(REPO, "dist", "src", "server_entry.js"); // requires `npm run build`
@@ -77,5 +78,57 @@ describe("relay restart replays the handshake (the next tool call does not hang)
     await c.request(4, "tools/call", { name: "server_restart", arguments: {} });
     const health2 = await c.request(5, "tools/call", { name: "system_health", arguments: {} });
     expect(health2["result"]).toBeDefined();
+  }, 120_000);
+
+  // ── the replacement has to still be there ────────────────────────────────
+  // The test above passed roughly 9 runs in 10. The tenth hung on that last call, and the
+  // cause was not the harness — it was the relay SIGKILLing the very child it had just
+  // reported as serving.
+  //
+  // `restartChild` raced the outgoing child's `exit` against a 2s escalation timer.
+  // `Promise.race` discards the loser's value but does not cancel it, and the timer closed
+  // over the mutable `child` binding rather than the process it was armed for. On the ordinary
+  // path — old child exits promptly, exit branch wins — the timer stayed armed, fired 2s
+  // later, read `child` (by then the healthy REPLACEMENT), found it alive, and killed it.
+  //
+  // So every restart destroyed its own successor about two seconds after answering "New child
+  // process is up and serving". Which symptom you got depended only on where the next call
+  // landed relative to the exit being reaped: `buildNoChildError`, telling you to restart a
+  // client that had just restarted successfully — or a write into a dying pipe, silently
+  // discarded, hanging forever. #260 made a FAILED swap reportable; this made a SUCCESSFUL
+  // one fatal, which is exactly why it hid behind it.
+  //
+  // The test above could only catch it by accident, because it finishes inside the 2s window
+  // on any reasonably quick machine. This one waits the window out on purpose.
+  it("the child a restart reports as serving is still alive after the kill window", async () => {
+    child = spawn(process.execPath, [RELAY_ENTRY], {
+      cwd: REPO,
+      stdio: ["pipe", "pipe", "pipe"],
+      env: { ...process.env, COLTRANE_GENOME: REPO },
+    }) as Child;
+    const c = rpc(child);
+
+    await c.request(1, "initialize", {
+      protocolVersion: "2024-11-05",
+      capabilities: {},
+      clientInfo: { name: "relay-test", version: "0" },
+    });
+    c.notify("notifications/initialized", {});
+
+    const restart = await c.request(2, "tools/call", { name: "server_restart", arguments: {} });
+    expect(restart["error"], "the restart must succeed for this test to mean anything").toBeUndefined();
+
+    // Sit idle across the escalation window — a stale timer from the swap fires in here.
+    await new Promise((r) => setTimeout(r, GRACEFUL_EXIT_TIMEOUT_MS + 1_500));
+
+    const health = await c.request(3, "tools/call", { name: "system_health", arguments: {} });
+    // Both failure shapes are caught. An `error` means the relay found no live child — it had
+    // killed it. A timeout means the write went into a dying pipe. Only a real result proves
+    // the replacement survived its own restart.
+    expect(
+      health["error"],
+      `the relay killed the child it had just reported as serving: ${JSON.stringify(health["error"])}`,
+    ).toBeUndefined();
+    expect(health["result"], "no result and no error — the call vanished into a dead pipe").toBeDefined();
   }, 120_000);
 });

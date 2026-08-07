@@ -7,6 +7,67 @@ signals a breaking change and a **patch** signals an additive or internal one.
 `package.json`'s `version` — `tests/version_identity.test.ts` enforces that, and also that
 the MCP handshake reports the constant rather than a hardcoded literal.
 
+## 0.5.1
+
+A patch release that exists because CI ran for the first time and disagreed with the package
+about what it could run on.
+
+### Fixed
+
+- **`server_restart` killed the child it had just reported as serving.** The relay's whole
+  purpose is swapping the server child without dropping the client's stdio pipe. Every swap
+  destroyed its own successor roughly two seconds later.
+
+  `restartChild` raced the outgoing child's `exit` against a 2s SIGKILL escalation.
+  `Promise.race` discards the loser's value but does not cancel it, and the timer closed over
+  the mutable `child` binding rather than the process it was armed for. On the ordinary path —
+  old child exits promptly, exit branch wins — the timer stayed armed, fired 2s later, read
+  `child` (by then the healthy replacement), found it alive, and killed it.
+
+  Which symptom you saw depended only on where your next call landed relative to the exit
+  being reaped: `buildNoChildError`, telling you to restart an MCP client that had just
+  restarted successfully — or a write into a dying pipe, silently discarded, hanging forever.
+
+  0.5.0's #260 work made a *failed* swap reportable. This made a *successful* one fatal, which
+  is why it hid behind it. The timer now targets a captured local and is cleared once the swap
+  moves on, so it can only ever reach the process it was armed for.
+
+  Found because `relay_restart_handshake` failed about 1 run in 10 — it finishes inside the 2s
+  window on a quick machine, so it could only catch this by accident. A second case now waits
+  the window out deliberately and asserts the replacement still answers.
+
+- **`engines` promised Node 20; the engine cannot run there.** Skill execution spawns with
+  `--permission`, which is Node 22+. On Node 20 every code-bearing skill dies with
+  `node: bad option: --permission`. 0.5.0 shipped claiming `>=20`, so npm installed it with a
+  warning and the failure arrived later, at the first skill.
+
+  `engines` now says `>=22`. Because npm treats that as advisory rather than a hard gate,
+  `skill_subprocess` also checks the runtime at both spawn sites and refuses with a message
+  naming the reason instead of the flag.
+
+  **There is deliberately no fallback.** Running a skill on a runtime with no permission model
+  means running it unsandboxed, and quietly doing that would invert the guarantee the sandbox
+  exists to provide. On Node < 22 skill execution refuses; everything else is unaffected.
+
+  **Migration.** Upgrade to Node 22+. If you are on 20 and cannot move yet, stay on 0.5.0 —
+  it is the same engine with a wrong compatibility claim, and skills were already failing.
+
+### Internal
+
+Test-infrastructure repairs with no runtime effect, kept here because each one was a check
+that reported success without doing its job:
+
+- The import-allowlist guard asserted it had run whenever `CI` was set — true in every Actions
+  job, while eslint installs in one. It now keys off a variable set where the dependency
+  actually exists.
+- Two pack audits each triggered a build into `dist/` and raced, one reading a file the other
+  was still writing. The build moved to a single `globalSetup`; the suite got faster.
+- `midflight_kill` spawned its worker through `npx`, so its SIGTERM went to npx rather than to
+  the process under test — which could not have handled the signal anyway, its loop never
+  unwinding to the event loop. Termination came from a SIGKILL that killed the tree on macOS
+  and orphaned it on Linux. The child is now the worker itself, and the test asserts the
+  signal was received.
+
 ## 0.5.0
 
 The through-line of this release: **the engine had a habit of answering confidently when it

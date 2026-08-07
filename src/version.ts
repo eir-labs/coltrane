@@ -14,7 +14,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 /** Engine semver. Keep in lockstep with package.json `version` (enforced by test). */
-export const COLTRANE_VERSION = "0.4.1";
+export const COLTRANE_VERSION = "0.5.0";
 
 /**
  * The commit this engine checkout is sitting on, or null when it can't be determined.

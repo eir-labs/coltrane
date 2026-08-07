@@ -24,7 +24,12 @@ export const MODEL_TIER_MAP: Record<ModelTier, string> = {
   standard: "claude-sonnet-4-6",
   premium: "claude-opus-4-8",
 };
-function resolveModel(tier: ModelTier | undefined, fallback: string | undefined): string | undefined {
+/**
+ * Tier → the model that actually runs. EXPORTED because the runtime must stamp the same answer
+ * onto the sealed output that the invoker used to spawn. Two functions computing this
+ * separately is the two-gates-one-concern shape that produced the silent wrong-resume.
+ */
+export function resolveModel(tier: ModelTier | undefined, fallback: string | undefined): string | undefined {
   return tier ? MODEL_TIER_MAP[tier] : fallback;
 }
 
@@ -507,12 +512,52 @@ export interface ClaudeInvokerOptions {
 // means the spawn loads ONLY the servers in that file (never the host's ambient MCP) —
 // deny-by-default. `--allowedTools`/`--disallowedTools` scope the tool surface to the
 // agent's declared grant. Ports OG's claude-launcher 4-flag cage.
+/**
+ * Default ceiling for a prompt carried as a command-line argument.
+ *
+ * Windows caps a whole command line at ~32,767 characters. The prompt is not the only thing on
+ * it — the mcp-config path, the model, and the allow/deny tool lists ride along — so the
+ * threshold sits well below the cap rather than at it.
+ */
+export const PROMPT_ARG_LIMIT_DEFAULT = 16_000;
+
+function promptArgLimit(): number {
+  const raw = process.env["COLTRANE_PROMPT_ARG_LIMIT"];
+  if (!raw) return PROMPT_ARG_LIMIT_DEFAULT;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : PROMPT_ARG_LIMIT_DEFAULT;
+}
+
+/**
+ * Whether this prompt must be delivered on the child's stdin instead of its command line.
+ *
+ * The engine used to put every chair prompt in argv. On Windows a strategize-phase prompt
+ * (blueprint + draft + review) exceeds the command-line cap and the spawn dies with
+ * ENAMETOOLONG — reported by a consumer as "broken on Windows … local dev was practically
+ * unusable", and worked around downstream by monkey-patching `child_process.spawn` against
+ * this module's built output. That patch is coupled to argv construction here and breaks
+ * SILENTLY if it changes, so the fix belongs in the engine.
+ *
+ * `COLTRANE_PROMPT_MODE` forces `arg` or `stdin`; anything else, including a typo, falls back
+ * to the size test rather than failing a dispatch.
+ */
+export function promptViaStdin(prompt: string): boolean {
+  const mode = process.env["COLTRANE_PROMPT_MODE"];
+  if (mode === "arg") return false;
+  if (mode === "stdin") return true;
+  return prompt.length > promptArgLimit();
+}
+
 export function buildInvokerArgs(
   prompt: string,
   mcpConfigPath: string,
   opts: { model?: string | undefined; allowed_tools?: readonly string[] | undefined; disallowed_tools?: readonly string[] | undefined; max_tool_calls?: number | undefined },
 ): string[] {
-  const args = ["-p", prompt];
+  // `-p` is a BOOLEAN flag and the prompt is a POSITIONAL argument, which is what makes the
+  // large-prompt path clean: keep the flag, drop the positional, write it to stdin. The
+  // downstream patch drops `-p` as well and lets the CLI infer print mode from a non-TTY
+  // stdin; keeping the flag states it, and costs nothing.
+  const args = promptViaStdin(prompt) ? ["-p"] : ["-p", prompt];
   if (opts.model) args.push("--model", opts.model);
   // per-agent blast-radius cap: a runaway agent can't burn past its own turn budget.
   if (opts.max_tool_calls !== undefined) args.push("--max-turns", String(opts.max_tool_calls));
@@ -629,7 +674,10 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
       const args = [...baseArgs, "--output-format", "stream-json", "--verbose"];
       // #250 level 3 — the cancellation signal and grace window reach the spawn, so an
       // aborted gig actually kills its chair child (and never spawns one if already aborted).
-      const stdout = await spawnStreaming(bin, args, spawnBounds, ctx.onEvent, ctx.signal, abortGraceMs);
+      const stdout = await spawnStreaming(
+        bin, args, spawnBounds, ctx.onEvent, ctx.signal, abortGraceMs,
+        promptViaStdin(prompt) ? prompt : undefined,
+      );
       const outcome = finalText(stdout);
       // #223 — the child reported an error result. Both discriminators are required, and
       // both are verified against the CLI (see the note on StreamOutcome): `subtype` for a
@@ -680,13 +728,30 @@ function spawnStreaming(
   onEvent?: (ev: AgentStreamEvent) => void,
   signal?: AbortSignal | undefined,
   abortGraceMs: number = DEFAULT_ABORT_GRACE_MS,
+  /** The prompt, when it is too large for the command line. Written to the child's stdin. */
+  stdinPayload?: string | undefined,
 ): Promise<string> {
   return new Promise<string>((resolve, reject) => {
     if (signal?.aborted) {
       reject(new Error(`chair child not spawned — gig aborted (${abortReasonText(signal)})`));
       return;
     }
-    const child = spawn(bin, [...args], { stdio: ["ignore", "pipe", "pipe"] });
+    // stdin is a pipe ONLY when a payload is going down it. Leaving it open otherwise would
+    // change the child's TTY detection for every existing caller.
+    const stdio: ["ignore" | "pipe", "pipe", "pipe"] =
+      [stdinPayload === undefined ? "ignore" : "pipe", "pipe", "pipe"];
+    const child = spawn(bin, [...args], { stdio });
+    // Slots 1 and 2 are literally "pipe" above, so both streams exist. Only slot 0 varies,
+    // and widening it costs the compiler the overload that proved this.
+    const childOut = child.stdout!;
+    const childErr = child.stderr!;
+    if (stdinPayload !== undefined) {
+      // Close after writing: the CLI reads the prompt until EOF, so a stdin left open hangs
+      // the child forever — a timeout rather than an answer, which is the failure this change
+      // exists to remove.
+      child.stdin?.on("error", () => { /* EPIPE if the child died first; the exit path reports it */ });
+      child.stdin?.end(stdinPayload, "utf8");
+    }
     LIVE_CHAIR_CHILDREN.add(child);
     let stdout = "";
     let stderr = "";
@@ -716,7 +781,7 @@ function spawnStreaming(
       if (!line || !onEvent) return;
       try { forwardStreamEvent(JSON.parse(line), onEvent); } catch { /* non-json line */ }
     };
-    child.stdout.on("data", (chunk: Buffer) => {
+    childOut.on("data", (chunk: Buffer) => {
       const s = chunk.toString();
       stdout += s;
       buf += s;
@@ -727,7 +792,7 @@ function spawnStreaming(
         forwardLine(line);
       }
     });
-    child.stderr.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
+    childErr.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
     child.on("error", (e) => { release(); reject(e); });
     child.on("close", (code) => {
       // #250/#252 — release() subsumes the old clearTimeout: it also deregisters the child

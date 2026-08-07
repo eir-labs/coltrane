@@ -7,6 +7,274 @@ signals a breaking change and a **patch** signals an additive or internal one.
 `package.json`'s `version` — `tests/version_identity.test.ts` enforces that, and also that
 the MCP handshake reports the constant rather than a hardcoded literal.
 
+## 0.5.0
+
+The through-line of this release: **the engine had a habit of answering confidently when it
+should have refused.** A guardrail that no caller could discover, a filter that silently did
+nothing, a lifecycle field that round-tripped and changed nothing, a `proposal_id` for a
+proposal never recorded. Each read as working software. Most of what follows is the engine
+learning to say "no" or "I don't know" where it used to return a plausible answer.
+
+### Breaking
+
+- **`OutputStore` gains `typeFingerprint(slug)` and `validateWrite(o)`.** Any external
+  implementation must add them — same shape as 0.4.0's `Ledger.integrity()` addition, and for
+  the same reason: the store is the single owner of a question two layers now need answered.
+
+  `typeFingerprint` hashes a type's current shape (core + required list + schema).
+  `validateWrite` answers "would `write` accept this?" without persisting — `write` now calls
+  the same internal gate, so the two answers cannot drift. Reuse needs both: the first to
+  detect that a domain type moved under a cached output, the second to decide about a
+  multi-output entry *before* any of it becomes durable.
+
+  **Migration.** A store with no registry can answer honestly:
+
+  ```ts
+  typeFingerprint(): string { return ""; }   // "" = cannot describe → never reused
+  validateWrite() { return { valid: true }; }
+  ```
+
+- **`CheckpointStore` gains `remove(gig_id)`.** Called when a gig completes. Nothing previously
+  removed a checkpoint, so every gig a deployment ran left a file behind forever. A failed or
+  aborted gig keeps its checkpoint, because that is what resume reads.
+
+  **Migration.** `remove() {}` is a valid implementation; it forgoes the reclamation only.
+
+- **The loader refuses three definition shapes it used to accept silently**, plus six further
+  bypasses of the same rule found on review — including `type: ["string","null"]`, the same
+  constraint in JSON Schema's other legal spelling. A genome that loaded under 0.4.1 may now
+  report `load_errors`. That is the point: it was not loading what its author wrote.
+
+- **`gig_dispatch` refuses a `retired` standard** and warns on a `deprecated` one. Previously
+  `status` was recorded and read by nothing, so a standard marked retired stayed dispatchable.
+
+- **Calls that used to succeed on nonsense now fail.** In each case the prior behaviour was a
+  confident wrong answer, not a tolerant one:
+  - `capability_research` with no `need` — previously returned `gap: true, "propose a new
+    tool/type"` for a search of the empty string.
+  - `tool_propose` / `tool_deprecate_propose` with no `slug` — previously returned a
+    fabricated `proposal_id` for a proposal that was never recorded.
+  - `output_trace` with an unrecognised `direction`, `system_health` / `health_check` with an
+    unparseable `window`, `system_audit` with an unknown `check` — previously ignored, so the
+    caller received an answer to a different question with nothing marking the difference.
+
+- **`company_id` is removed from the MCP surface.** It was advertised on `gig_dispatch`,
+  `charter_read` and `charter_suggest_update` and read by none of them. It is worse than a
+  merely dead argument because it is tenancy-shaped: a caller passing it to scope a run would
+  reasonably believe the run was scoped. The engine deliberately does not do tenancy —
+  `principal` on the ledger is provenance, explicitly not access control — so it stops
+  advertising a guarantee it does not make. It survives as a field on `AccessGrant`.
+
+- **Several tools' advertised input schemas changed** to match what their handlers read. Most
+  notably `output_write` now advertises `gig_id`, `agent_slug`, `phase` and the cost fields;
+  `access_grant_check` and `capability_research` advertise the arguments they actually consume.
+
+### Added
+
+- **Phase checkpoint/resume, and engine-level output reuse.** One idea, two ranges: reuse a
+  sealed output instead of paying to derive it again. A mid-run failure used to discard every
+  completed phase — a full convergence run is ~$4–7, and a failure at phase 5 threw away
+  phases 1–4.
+
+  - `RunDeps.checkpoints` — a durable per-gig record of each completed chair's sealed outputs.
+    Written automatically when wired; a checkpoint you must opt into *before* the failure is
+    one you never have.
+  - `RunDeps.resume_from` / `gig_dispatch({ resume_gig_id })` — continue that gig (same
+    `gig_id`, so `output_trace` still reaches the restored ancestors), skipping what already
+    sealed. **Refused, never silently run cold**, if `genome_hash`, the **producers**, the
+    dispatch payload, `model_version`, `depth`, the canonical form, or any consumed domain type
+    has moved; the reply carries `resume_refused` and a `drift` list.
+  - `RunDeps.reuse` / `gig_dispatch({ reuse: true })` — a chair whose producer definition,
+    consumed input **content**, payload, model and depth hash to a prior sealed output is
+    served from it instead of invoked. Presence of the store is the opt-in, for reads *and*
+    writes: the store is cross-gig by construction, so populating it is itself a decision.
+    A found-but-unusable entry is reported and the chair does the work.
+  - Reuse is never a way to skip a check. Every recalled output crosses the same seal boundary
+    a derived one does (core agreement, the registry schema, the substance floor) and is
+    re-hashed to the `content_sha` the original seal produced — which is why a resumed or
+    fully-reused run carries the **same `run_fingerprint`** as the cold run it stands in for.
+  - Nothing is silent: `GigResult.skipped` / `.resumed_from` / `.reuse`, the `gig_resumed`,
+    `chair_skipped` and `reuse_rejected` progress events, `gig_monitor.skipped_chairs`, a
+    `skipped` chair status of its own, and `OutputRecord.reused_from` on the record itself.
+
+- **A sealed output records WHICH model produced it** (`model`, `model_tier`). `cost_usd` was
+  recorded per chair and the model was not, so a run whose chairs deliberately sit on different
+  tiers — the entire point of per-chair routing — could not attribute its own spend to a tier.
+  The gig ledger row's `by_model` is gig-level and cannot separate two chairs in one run.
+
+  Stamped through the invoker's own `resolveModel`, now exported, so the seal and the spawn
+  cannot disagree. Absent for skill-backed chairs and for anything sealed before this existed —
+  absent means unknown, never "the default". `improvement_report` gains a `tiers` axis on top
+  of it, which is what makes "does the cheap tier still clear the bar for THIS chair" answerable.
+
+- **`improvement_report` — improvement as a measurement, not a count.** `learning_synthesize`
+  answers "is there enough evidence to act?" and returns a review count. It could not answer
+  the question the typed-and-sealed design exists to make answerable: **did this producer get
+  better, and what did it cost?**
+
+  Every input was already sealed and nothing joined them. Outputs carry `agent_slug`,
+  `cost_usd` and `created_at`; reviews carry `quality_scores` against a specific `output_id`
+  and `agent_version`. The report buckets a producer's outputs by version and returns mean cost
+  and mean quality per version, plus the version-to-version delta and a verdict — *better and
+  cheaper*, *cheaper and worse*, and so on.
+
+  An unmeasured quantity is `null`, never `0`: zero cost reads as "free" and zero quality as
+  "worthless", and both would be fabricated numbers. A delta is emitted only where BOTH ends
+  are measured, and when the report cannot answer its own question it says
+  `comparable: false` with the reason, rather than returning empty arrays that read as "no
+  change".
+
+- **The skill iteration loop: `skill_browse`, `skill_inspect`, `skill_execute`, `skill_evolve`.**
+  The surface was define + promote — a skill could be created and given production status, and
+  never run, tested, listed or revised through the engine. Adding a fixture gate to promotion
+  made that gap sharper rather than better: a skill could be refused for failing fixtures with
+  no supported way to run them and see which.
+
+  `skill_execute` with `mode: "test"` runs the skill's own fixtures and reports the threshold
+  promotion would hold it to, so "why was I refused" is one call. `skill_inspect` reports
+  `promotable` before anyone tries, and deliberately does NOT return fixture `expected_output`
+  — an answer key is not inspection.
+
+  `skill_evolve` is the one with the guarantee: a candidate runs against the CURRENT fixtures
+  in a throwaway copy and lands only on a clean pass, so **a skill cannot regress through this
+  door**. On acceptance the version bumps, because the bytes that run changed and an evolved
+  skill under an unchanged version is the edit-under-a-stable-slug shape `producers_sha` exists
+  to catch. `evolveSkill` had implemented exactly this since before the open-source split and
+  had no caller anywhere — the fourth gate this release found built and unwired.
+
+- **A skill must pass its own fixtures to become `active`.** Promotion checked that a skill's
+  METADATA parsed and nothing else, so a code half that failed every one of its fixtures
+  promoted cleanly. `runSkillFixtures` — which runs each fixture repeatedly, checks expected
+  output and assertions, and checks the runs agree — had been in the tree the whole time with
+  no caller outside the test suite.
+
+  The threshold is keyed off MEASURED determinism, not the declared `determinism_ratio`: a
+  skill whose runs agree must pass every fixture, one that varies must pass 80%. Claiming
+  determinism therefore costs something.
+
+  A code skill with NO fixtures is refused — silence is not a pass, and allowing it would make
+  the gate opt-out by omission. Reasoning-only skills are not gated (there is nothing to run),
+  and promotion to a non-`active` status is not gated (a skill has to be able to reach the
+  state where the work happens). The passing report is recorded on the ledger row, so the audit
+  trail says what the promotion rested on rather than only that someone asked.
+
+- **A command line: `coltrane`.** The package shipped exactly one executable — the MCP stdio
+  server — so the engine was reachable from an MCP client and from nowhere else. Not CI, not
+  cron, not a container, not a queue worker, not a shell. A methodology engine whose only caller
+  is an interactive client cannot be part of a build.
+
+  ```
+  coltrane validate      # exits non-zero on load errors — the CI gate
+  coltrane dispatch <standard> --input @in.json [--depth skim] [--budget 5] [--reuse]
+  coltrane monitor <gig> --follow      coltrane trace <output-id>
+  coltrane logs <gig>                  coltrane simulate <standard>
+  coltrane abort <gig>                 coltrane health
+  coltrane serve         # the MCP stdio server, as before
+  ```
+
+  A thin wrapper by design: `dispatchTool` was already the whole tool surface as a pure
+  function and `bootstrapServerDeps` already resolved the genome, ledger and output store. Two
+  front doors that disagreed about what a dispatch means would be the defect this release spent
+  its time removing.
+
+  Data on stdout, everything else on stderr, so `coltrane dispatch … --json | jq` and
+  `coltrane dispatch … | xargs coltrane monitor` both work. Exit 0 success, 1 ran-and-failed,
+  2 malformed — a CI job can tell a broken genome from a broken invocation.
+
+  `coltrane-server` is unchanged, so no existing `.mcp.json` breaks.
+
+- **The capability gate fails CLOSED.** `exposedTools` walked the agent's grant and filtered
+  only the tools it RECOGNISED; a tool in none of the three scope classes matched no branch and
+  was exposed unconditionally, whatever the grant said. The gate's coverage was its own
+  allowlist, so the tools it had never heard of were exactly the ones it could not stop. An
+  unrecognised tool is now denied, and `undeclaredScopeTools()` lists them so an operator sees
+  the problem while authoring rather than mid-run.
+
+- **The prompt is delivered on stdin when it is too large for the command line.** Windows caps
+  a command line at ~32,767 characters and the invoker put the whole chair prompt in argv, so a
+  strategize-phase prompt (blueprint + draft + review) died with `ENAMETOOLONG`. A consumer
+  reported it as "broken on Windows … local dev was practically unusable" and worked around it
+  by monkey-patching `child_process.spawn` — a patch coupled to this module's argv construction
+  through the package's built output, which would therefore break *silently* on any release
+  that touched it. `-p` is a boolean flag and the prompt is positional, so the fix keeps the
+  flag and moves the positional: no consumer needs to patch anything.
+
+  Threshold `COLTRANE_PROMPT_ARG_LIMIT` (default 16,000, deliberately well under the cap
+  because the mcp-config path and tool lists share the line); `COLTRANE_PROMPT_MODE=arg|stdin`
+  forces either route. An unrecognised value falls back to the size test rather than failing a
+  dispatch. Below the threshold nothing changes, and stdin is opened only when something is
+  going down it, so TTY detection is unaffected for existing callers.
+
+- **A skill-backed chair is interruptible.** It ran a blocking subprocess, so abort could not
+  reach it — a "stopped" run kept burning. Now spawned non-blocking, SIGKILLed on abort, not
+  spawned at all if already aborted, and capped at 64MB of output.
+
+- **The advertised-schema guard covers all 37 tools.** A tool's `input_schema` and its handler
+  are two statements of one fact, and nothing checked they agreed. Both directions are bugs:
+  read-but-unadvertised is an undiscoverable control, advertised-but-unread is a silent no-op.
+
+- **Arguments that were advertised and ignored now work**: `window` on `system_health` /
+  `health_check`, `status` and `min_usage` on `type_browse`, `data_filter` on `output_query`,
+  `direction` on `output_trace`, `scope` / `check` on `system_audit`, `since` on
+  `learning_synthesize`, and the rationale fields (`reason`, `evidence`, `notes`,
+  `agent_version`, `domain`, `spec`, `category`) which are now recorded rather than discarded.
+
+- **`writeFileAtomic`** (`src/fs_atomic.ts`), shared by the genome writer and the checkpoint
+  store.
+
+### Security
+
+- **A tier-0 skill could read any file, the whole parent environment, and reach the network** —
+  while the source asserted, in two places, that it "cannot write, spawn, or reach the network".
+  Probed through `executeSkill` on a real machine, a tier-0 skill read `/etc/passwd`, saw all 77
+  of the parent's environment variables, and completed an outbound HTTPS request.
+
+  `--allow-fs-read=*` is literally "read every file", so reads were never confined. The
+  environment inheritance is the one with teeth: `process.env` carries the provider credential,
+  so a skill could exfiltrate it in one line.
+
+  Now: tier 0 is confined to its own package directory (its inputs arrive on stdin; it never
+  needed more), tier 1+ still reads and writes broadly because that is what those tiers are
+  for, and **every** tier receives an explicit minimal environment instead of the parent's.
+
+  **What is still not gated: the network.** Node's permission model has no network flag, so the
+  original guarantee was unimplementable in this runtime rather than merely misconfigured. It is
+  now stated rather than denied. What changed is that there is no longer a credential in reach.
+
+  `tests/skill_sandbox_confinement.test.ts` probes the capability rather than the flag string —
+  asserting on flags is how the false claim survived. The `fs-read` threshold in the cage matrix
+  moves 0 → 1 accordingly; that matrix had been asserting what the implementation did rather
+  than what the tier promised.
+
+### Fixed
+
+- **`output_write` read `gig_id` and advertised it nowhere.** A prompt written against the
+  schema omits it, the handler defaults it to `""`, and the sealed output attaches to no gig.
+  A live run of a consuming product produced 509 such orphans. This is that bug's root cause.
+
+- **`capability_research` reported a gap for every capability.** It advertised `need`/`context`
+  and read `query`/`capability` — no overlap — so every schema-following call searched the
+  empty string, matched nothing, and was told to build a new tool. The one tool whose purpose
+  is preventing redundant definitions recommended one unconditionally.
+
+- **Genome writes are atomic.** `sealDefinition` records a definition's identity in the ledger
+  *before* writing the file — deliberate, because the reverse manufactures a definition with no
+  recorded identity — and that ordering is only safe if the write is all-or-nothing. A torn
+  `writeFileSync` left the ledger asserting a content hash whose bytes on disk hash to
+  something else, which is the engine's central provenance claim failing silently. The same
+  function writes the prior version to history before overwriting, so an interrupted overwrite
+  could destroy the live file while its only backup was also mid-write.
+
+- **A refused resume destroyed the prior run's state**, turning a `failed` gig into a
+  permanently `running` one and discarding the very error being acted on.
+
+- **`type_extend` was a third door** that could persist a definition the loader had just
+  declared illegal.
+
+- **`tool_propose` and `tool_deprecate_propose` minted receipts for work they never did** —
+  a `randomUUID()` returned as a `proposal_id`, every argument discarded, nothing written. Both
+  are now recorded through the same ledger path `proposal_create` uses.
+
 ## 0.4.1
 
 ### Fixed

@@ -5,6 +5,7 @@
 // standard_slug="agent_define", genome_hash=effective_hash. A hand-edited file with no
 // such ledger entry is an orphan — no identity, outside the substrate.
 import { writeFileSync, mkdirSync, existsSync, readFileSync } from "node:fs";
+import { writeFileAtomic } from "./fs_atomic.js";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { defineAgent, type Agent, type AgentDef } from "./composition.js";
@@ -38,11 +39,17 @@ export function writeGenomeFileVersioned(
       const prior = sha256Hex(oldBytes);
       const histDir = join(genome_dir, ".coltrane", "history", subdir, slug);
       mkdirSync(histDir, { recursive: true });
-      writeFileSync(join(histDir, `${prior}.json`), oldBytes);
+      // History first, and atomically: this is the only copy of the bytes about to be replaced.
+      writeFileAtomic(join(histDir, `${prior}.json`), oldBytes);
       result = { overwritten: true, prior_content_hash: prior };
     }
   }
-  writeFileSync(path, jsonText);
+  // Atomic replace. `sealDefinition` records this definition's identity in the ledger BEFORE
+  // calling here (#218) — a deliberate ordering, safe only if the write either happens or does
+  // not. A bare writeFileSync interrupted partway (crash, SIGKILL, ENOSPC) leaves a truncated
+  // file, so the ledger asserts a definition at a content hash whose bytes hash to something
+  // else. That is the engine's central provenance claim failing with nothing to notice it.
+  writeFileAtomic(path, jsonText);
   return result;
 }
 
@@ -64,6 +71,7 @@ export function sealDefinition(
   ledger: Ledger,
   genome_dir: string | undefined,
   subdir: string,
+  detail?: Record<string, unknown>,
 ): { content_hash: string; dependency_hash: string; effective_hash: string } {
   const content_hash = sha256Hex(canonJson(def));
   const dependency_hash = EMPTY_DEPENDENCY_HASH;
@@ -88,6 +96,8 @@ export function sealDefinition(
       output_hashes: [content_hash],
       started_at: now,
       finished_at: now,
+      // #234 — the authoring rationale, which the tools accepted and dropped.
+      ...(detail && Object.keys(detail).length ? { detail } : {}),
     });
     writeGenomeFileVersioned(genome_dir, subdir, slug, JSON.stringify(def, null, 2) + "\n");
   }
@@ -98,7 +108,7 @@ export function sealDefinition(
  *  whose new-version FILE materialization needs version-aware loader support (the one named
  *  boundary). The identity is still sealed in the append-only ledger, so the mutation is
  *  never a contract lie: its effective_hash is recorded even before the file lands. */
-export function recordIdentity(kind: string, slug: string, def: unknown, ledger: Ledger): { content_hash: string; dependency_hash: string; effective_hash: string } {
+export function recordIdentity(kind: string, slug: string, def: unknown, ledger: Ledger, detail?: Record<string, unknown>): { content_hash: string; dependency_hash: string; effective_hash: string } {
   const content_hash = sha256Hex(canonJson(def));
   const dependency_hash = EMPTY_DEPENDENCY_HASH;
   const effective_hash = effectiveHash(content_hash, dependency_hash);
@@ -115,6 +125,10 @@ export function recordIdentity(kind: string, slug: string, def: unknown, ledger:
     output_hashes: [content_hash],
     started_at: now,
     finished_at: now,
+    // #234 — the authoring tools advertised a `reason` and threw it away, so the seal recorded
+    // what changed and never why. Omitted entirely when there is nothing to say, so an entry
+    // with no rationale stays byte-identical to one written before the field existed.
+    ...(detail && Object.keys(detail).length ? { detail } : {}),
   });
   return { content_hash, dependency_hash, effective_hash };
 }

@@ -1,7 +1,7 @@
 {
   "name": "@eir-labs/coltrane",
-  "version": "0.4.1",
-  "description": "A methodology engine — a typed substrate for defining agents, composing multi-phase standards, dispatching gigs, and sealing every output to a content-addressed ledger. Ships as an MCP server.",
+  "version": "0.5.0",
+  "description": "A methodology engine \u2014 a typed substrate for defining agents, composing multi-phase standards, dispatching gigs, and sealing every output to a content-addressed ledger. Ships as an MCP server.",
   "type": "module",
   "license": "Apache-2.0",
   "author": "Eir",
@@ -25,6 +25,7 @@
     "node": ">=20"
   },
   "bin": {
+    "coltrane": "./dist/src/cli_entry.js",
     "coltrane-server": "./dist/src/server_entry.js"
   },
   "main": "./dist/src/index.js",
@@ -51,7 +52,7 @@
     "access": "public"
   },
   "scripts": {
-    "build": "tsc && cp src/skill_runner.mjs dist/src/ && chmod +x dist/src/server_entry.js dist/src/server_relay.js",
+    "build": "tsc && cp src/skill_runner.mjs dist/src/ && chmod +x dist/src/server_entry.js dist/src/server_relay.js dist/src/cli_entry.js",
     "dev": "tsc --watch",
     "prepare": "npm run build",
     "test": "vitest run",

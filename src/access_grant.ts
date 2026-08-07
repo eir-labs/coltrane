@@ -122,17 +122,46 @@ export interface ExposeQuery {
   grant: AccessGrant;
 }
 
+/**
+ * Tools in the agent's grant that belong to no declared scope class.
+ *
+ * Surfaced so an operator sees them while authoring rather than discovering, mid-run, that a
+ * chair silently did not receive a tool it was granted. A gate that drops a tool without saying
+ * so trades one silent failure for another.
+ */
+export function undeclaredScopeTools(agent_allowed: readonly string[]): string[] {
+  return agent_allowed.filter(
+    (t) => !READ_TOOLS.has(t) && !WRITE_TOOLS.has(t) && !DEPLOY_TOOLS.has(t),
+  );
+}
+
+/**
+ * The tools a grant actually exposes to a chair, for a phase. FAIL-CLOSED.
+ *
+ * v1 walked the allowed list and filtered only the tools it RECOGNISED — members of
+ * READ_TOOLS, WRITE_TOOLS or DEPLOY_TOOLS. A tool in none of the three matched no branch and
+ * fell through to `result.push(tool)`: exposed unconditionally, whatever the grant said. The
+ * gate's coverage was its own allowlist, so the tools it had never heard of were precisely the
+ * ones it could not stop. A consumer reported it as "a permissions check silently defaults to
+ * 'granted' whenever a tool declares no required scopes", and that was accurate.
+ *
+ * An unrecognised tool is not a safe tool; it is one nobody has classified, and the only
+ * honest answer to "may this chair use it?" is no.
+ */
 export function exposedTools(q: ExposeQuery): string[] {
   const result: string[] = [];
   for (const tool of q.agent_allowed) {
-    if (DEPLOY_TOOLS.has(tool) && !q.grant.permissions.deploy) continue;
-    if (WRITE_TOOLS.has(tool)) {
+    if (DEPLOY_TOOLS.has(tool)) {
+      if (!q.grant.permissions.deploy) continue;
+    } else if (WRITE_TOOLS.has(tool)) {
       if (!WRITE_PHASES.has(q.phase)) continue;
       if (!q.grant.permissions.write) continue;
-    }
-    if (READ_TOOLS.has(tool)) {
+    } else if (READ_TOOLS.has(tool)) {
       if (!q.grant.permissions.read) continue;
       if (!READ_PHASES.has(q.phase) && !WRITE_PHASES.has(q.phase)) continue;
+    } else {
+      // No declared scope class. Deny — this is the branch v1 did not have.
+      continue;
     }
     result.push(tool);
   }

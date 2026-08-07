@@ -15,9 +15,11 @@ import {
   checkPromotion,
   PromotionError,
 } from "./mcp.js";
-import { createRegistry, loadRegistry, type Registry, type DomainType } from "./registry.js";
+import { createRegistry, loadRegistry, domainTypeDefect, type Registry, type DomainType } from "./registry.js";
 import { loadGenome, resolveGenome, type SkillRecord, type EvalRecord, type LoadError } from "./loader.js";
 import { SkillSchema, AgentSchema, StandardSchema } from "./genome_schema.js";
+import { runSkillFixtures, executeSkill, loadFixtures } from "./skill_subprocess.js";
+import { evolveSkill } from "./skills.js";
 import { sealAgentDefinition, sealDefinition, sealSkillPackage, recordIdentity } from "./genome_writer.js";
 import { createOutputStore, defaultOutputsPersistDir, type OutputStore } from "./outputs.js";
 import {
@@ -25,7 +27,8 @@ import {
   type Ledger, type GovernanceLedgerEntry,
 } from "./ledger.js";
 import { standardSimulate } from "./simulate.js";
-import { runGig, BudgetExhausted, GigAborted, partialGigUsage, partialBudgetState, type AgentInvoker } from "./runtime.js";
+import { runGig, BudgetExhausted, GigAborted, ResumeRefused, partialGigUsage, partialBudgetState, type AgentInvoker } from "./runtime.js";
+import { createCheckpointStore, createReuseStore, type CheckpointStore, type ReuseStore } from "./reuse.js";
 import { makeClaudeInvoker, killLiveChairChildren } from "./claude_invoker.js";
 import { isDepth, DEPTHS, type Depth } from "./pricing.js";
 import type { ToolProvider } from "./tool_providers.js";
@@ -38,9 +41,10 @@ import { proposeAgentChange, evolveProfile, type AgentProfile } from "./agent_pr
 import { checkGrantTTL, validatePlanAgainstGrant, type AccessGrant, type PlanCheck } from "./access_grant.js";
 import { loadCharter, CharterError } from "./charter.js";
 import { COLTRANE_VERSION } from "./version.js";
-import { readFileSync, existsSync, mkdirSync, appendFileSync, readdirSync } from "node:fs";
+import { readFileSync, existsSync, mkdirSync, appendFileSync, readdirSync, writeFileSync, mkdtempSync, rmSync } from "node:fs";
 import { randomUUID, createHash } from "node:crypto";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
+import { tmpdir } from "node:os";
 import { newGigRun, applyGigProgress, gigEventLogLine, pruneGigRuns, type GigRunState } from "./gig_tracker.js";
 import { isGig } from "./ledger.js";
 import { SubthreadRecorder, ApiVersionMismatchError } from "./subthread_recorder.js";
@@ -56,6 +60,29 @@ import type { LoadedGenome } from "./loader.js";
 const STD_PASSTHROUGH = Object.keys(StandardSchema.shape).filter(
   (k) => !["slug", "domain", "agents", "agent_slugs", "phases"].includes(k),
 );
+
+/**
+ * `window` → the ISO instant to filter from, for the health surfaces (#234).
+ *
+ * Both `system_health` and `health_check` advertised a `window` and neither read it, so every
+ * health reading was over ALL TIME while presenting as a windowed one. That is the failure mode
+ * this engine keeps finding: not a missing answer but a confident wrong one — "$412 of spend"
+ * is a very different sentence depending on whether it covers a week or a year, and the caller
+ * who asked for a week had no way to tell which they got.
+ *
+ * Returns `{}` for an absent window (all time — the prior behaviour, now the explicit default)
+ * and an `error` for one that cannot be parsed. Silently falling back to all-time on a typo is
+ * how the argument came to be ignored in the first place.
+ */
+export function parseWindow(raw: unknown, now: number): { after?: string; error?: string } {
+  if (raw === undefined || raw === null || raw === "") return {};
+  const m = /^(\d+)\s*([hdw])$/.exec(String(raw).trim().toLowerCase());
+  if (!m) return { error: `unrecognized window "${String(raw)}" — use e.g. "24h", "7d", "2w"` };
+  const n = Number(m[1]);
+  if (n <= 0) return { error: `window must be positive, got "${String(raw)}"` };
+  const ms = m[2] === "h" ? 3_600_000 : m[2] === "d" ? 86_400_000 : 604_800_000;
+  return { after: new Date(now - n * ms).toISOString() };
+}
 
 export interface ServerDeps {
   registry: Registry;
@@ -100,6 +127,15 @@ export interface ServerDeps {
   // Base dir for per-gig agent logs (<base>/<gig_id>/<role>.jsonl). Set by bootstrap to
   // the outputs persist dir; absent → no file tee (state-only observability, e.g. tests).
   gig_log_base?: string | undefined;
+  // Durable per-gig checkpoints, so a run that dies at phase 5 can be resumed instead of
+  // restarting from zero. Bootstrap wires it under the outputs persist dir. WRITING is
+  // automatic (a checkpoint you have to opt into before the failure is one you never have);
+  // acting on it needs `resume_gig_id` on the dispatch call.
+  checkpoints?: CheckpointStore | undefined;
+  // The chair-level reuse cache. Wired by bootstrap but only PASSED to runGig when the caller
+  // sets `reuse: true` — the store is cross-gig by construction, so both reading and writing
+  // are the caller's decision, never a side effect of having run something.
+  reuse?: ReuseStore | undefined;
   // #185 — the genome→provider bridge: each registered engine tool slug → an in_house provider, so
   // an agent's grant of a real engine tool RESOLVES instead of failing closed as a dead name. Built
   // by bootstrap from REGISTERED_TOOL_SLUGS, passed to the invoker, and kept live by tool_register.
@@ -315,6 +351,25 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         let types = deps.registry.listTypes();
         if (args["domain"]) types = types.filter((t) => t.domain === args["domain"]);
         if (args["extends"]) types = types.filter((t) => t.extends === args["extends"]);
+        // #234/#203 — `status` was advertised here and never applied. The two issues compound:
+        // #203 gave domain types a lifecycle, and the tool for finding types offered to filter
+        // on it while returning retired ones anyway. An operator browsing for what they may
+        // build on got the retired definitions back with nothing marking them.
+        //
+        // The registry default is "active", so an undeclared type answers to `status:"active"`
+        // rather than being invisible to every filter.
+        if (args["status"]) {
+          const want = String(args["status"]);
+          types = types.filter((t) => ((t as { status?: string }).status ?? "active") === want);
+        }
+        // #234 — `min_usage` likewise advertised and ignored. Usage is the count of sealed
+        // outputs of that type, the same derivation system_audit uses to call a type unused.
+        if (typeof args["min_usage"] === "number") {
+          const min = args["min_usage"] as number;
+          const usage = new Map<string, number>();
+          for (const o of deps.outputs.all()) usage.set(o.domain_type, (usage.get(o.domain_type) ?? 0) + 1);
+          types = types.filter((t) => (usage.get(t.slug) ?? 0) >= min);
+        }
         return { ok: true, requires_approval: approval, data: { types, stats: { count: types.length } } };
       }
       case "type_register": {
@@ -333,7 +388,7 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         const res = deps.registry.registerType(def);
         // substrate seal: persist a loadable domain_types/<slug>.json (full record) + ledger.
         const fileDef = { slug: def.slug, version: 1, extends: def.extends, domain: def.domain, status: "active", schema: def.schema, required_fields: def.required_fields };
-        const sealed = sealDefinition("type_register", def.slug, fileDef, deps.ledger, deps.genome_dir, "domain_types");
+        const sealed = sealDefinition("type_register", def.slug, fileDef, deps.ledger, deps.genome_dir, "domain_types", args["reason"] != null ? { reason: args["reason"] } : undefined);
         return { ok: true, requires_approval: approval, data: { ...(res as object), content_hash: sealed.content_hash, dependency_hash: sealed.dependency_hash, effective_hash: sealed.effective_hash } };
       }
       case "standard_simulate": {
@@ -402,13 +457,62 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         if (args["domain_type"]) outs = outs.filter((o) => o.domain_type === args["domain_type"]);
         if (args["gig_id"]) outs = outs.filter((o) => o.gig_id === args["gig_id"]);
         if (args["agent_slug"]) outs = outs.filter((o) => o.agent_slug === args["agent_slug"]);
+        // #234 — `data_filter` was advertised and ignored, so a caller narrowing a query by
+        // payload got the UNFILTERED set back and a `total_count` describing it. Every key must
+        // match (AND), compared structurally so an object or array value filters as written.
+        const dataFilter = args["data_filter"];
+        if (dataFilter && typeof dataFilter === "object" && !Array.isArray(dataFilter)) {
+          const entries = Object.entries(dataFilter as Record<string, unknown>);
+          outs = outs.filter((o) => {
+            const data = (o.data ?? {}) as Record<string, unknown>;
+            return entries.every(([k, v]) => canonJson(data[k]) === canonJson(v));
+          });
+        }
         return { ok: true, requires_approval: approval, data: { outputs: outs, total_count: outs.length } };
       }
       case "output_trace": {
         const id = String(args["output_id"] ?? "");
         const maxDepth = typeof args["max_depth"] === "number" ? (args["max_depth"] as number) : undefined;
-        const chain = deps.outputs.trace(id, maxDepth !== undefined ? { max_depth: maxDepth } : undefined);
-        return { ok: true, requires_approval: approval, data: { graph: { nodes: chain }, root_signals: chain.filter((o) => o.input_refs.length === 0) } };
+        // #234 — `direction` was advertised and ignored: every trace walked UPSTREAM, so a
+        // caller asking "what was derived FROM this draft?" received its ancestors instead and
+        // nothing said the answer was to a different question. `outputs.trace` is inherently
+        // backward (it follows input_refs), so downstream is walked here over the same store.
+        const direction = String(args["direction"] ?? "upstream").toLowerCase();
+        if (!["upstream", "downstream", "both"].includes(direction)) {
+          return { ok: false, requires_approval: approval, error: `unrecognized direction "${direction}" — use "upstream", "downstream" or "both"` };
+        }
+        const upstream = direction === "downstream"
+          ? []
+          : deps.outputs.trace(id, maxDepth !== undefined ? { max_depth: maxDepth } : undefined);
+        // Forward walk: a node's children are the outputs naming it in their input_refs.
+        const downstream: typeof upstream = [];
+        if (direction !== "upstream") {
+          const all = deps.outputs.all();
+          const seen = new Set<string>([id]);
+          let frontier = [id];
+          for (let depth = 0; frontier.length && (maxDepth === undefined || depth < maxDepth); depth++) {
+            const next: string[] = [];
+            for (const o of all) {
+              if (seen.has(o.id)) continue;
+              if (o.input_refs.some((r) => frontier.includes(r))) {
+                seen.add(o.id); downstream.push(o); next.push(o.id);
+              }
+            }
+            frontier = next;
+          }
+        }
+        const nodes = direction === "upstream" ? upstream
+          : direction === "downstream" ? downstream
+          : [...upstream, ...downstream.filter((d) => !upstream.some((u) => u.id === d.id))];
+        return {
+          ok: true, requires_approval: approval,
+          data: {
+            graph: { nodes }, direction,
+            root_signals: nodes.filter((o) => o.input_refs.length === 0),
+            // The other end of the chain: outputs nothing else was derived from.
+            terminal_outputs: nodes.filter((o) => !deps.outputs.all().some((x) => x.input_refs.includes(o.id))),
+          },
+        };
       }
       case "output_write": {
         // §6 universal output write: validates against core+domain schema AT WRITE
@@ -436,6 +540,8 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
           domain: String(args["domain"] ?? ""),
           gig_id: String(args["gig_id"] ?? ""),
           agent_slug: String(args["agent_slug"] ?? ""),
+          ...(typeof args["model"] === "string" ? { model: args["model"] } : {}),
+          ...(typeof args["model_tier"] === "string" ? { model_tier: args["model_tier"] } : {}),
           phase: args["phase"] as string | undefined,
           primitive,
           data,
@@ -467,6 +573,29 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         const slug2 = String(args["standard_slug"] ?? "");
         const standard = deps.standards.get(slug2);
         if (!standard) return { ok: false, requires_approval: approval, error: `unknown standard "${slug2}"` };
+        // #203, the READ side. Preserving `status` through the loader was only half of it: the
+        // symptom recorded on the issue — "a retired standard stays dispatchable and nothing
+        // says otherwise" — survived the field being kept, because nothing consulted it. A
+        // declaration that round-trips and changes nothing is worse than one that is dropped;
+        // the round-trip is evidence it took effect.
+        //
+        // Placed ABOVE the wait/async split deliberately. Both modes have their own body below,
+        // and a guard sitting inside the synchronous branch would leave the DEFAULT path — the
+        // one the product dispatches through — open.
+        //
+        // deprecated ALLOWS and warns; retired REFUSES. Were both refused, `deprecated` would
+        // be a spelling of `retired` and there would be no way to say the softer thing.
+        const stdStatus = (standard as { status?: string }).status;
+        if (stdStatus === "retired") {
+          return {
+            ok: false, requires_approval: approval,
+            error: `standard "${slug2}" is retired and cannot be dispatched. ` +
+              `Promote it back to active (standard_promote) if it should run again.`,
+          };
+        }
+        const warnings: string[] = stdStatus === "deprecated"
+          ? [`standard "${slug2}" is deprecated — it still runs, but should not be built on.`]
+          : [];
         // Optional budget arg — when present, runtime enforces per-gig cost-budget
         // and raises BudgetExhausted on depletion (PR for T10 gap, see runtime.ts).
         const budgetArg = args["budget"] as Record<string, unknown> | undefined;
@@ -482,6 +611,41 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         const depthArg = readDepth(args["depth"]);
         if (depthArg.error) return { ok: false, requires_approval: approval, error: depthArg.error };
         const depth = depthArg.depth;
+
+        // ── reuse a sealed output instead of re-deriving it ──────────────────────────────
+        // Both halves are opt-in, and both are named on the dispatch call so the decision is
+        // recorded where the run is requested rather than inferred from server configuration.
+        const resumeArg = args["resume_gig_id"] === undefined || args["resume_gig_id"] === null
+          ? undefined
+          : String(args["resume_gig_id"]);
+        if (resumeArg !== undefined && resumeArg.trim() === "") {
+          return { ok: false, requires_approval: approval, error: `gig_dispatch: "resume_gig_id" must be a gig id, not an empty string` };
+        }
+        if (resumeArg !== undefined && !deps.checkpoints) {
+          return { ok: false, requires_approval: approval, error: `gig_dispatch: resume_gig_id was supplied but this server has no checkpoint store wired, so no run is resumable` };
+        }
+        // A live run holds the AbortController for that gig_id; resuming into it would put two
+        // runs on one gig, writing to the same outputs file and racing the same checkpoint.
+        if (resumeArg !== undefined && deps.gig_runs?.get(resumeArg)?.status === "running") {
+          return { ok: false, requires_approval: approval, error: `gig_dispatch: gig "${resumeArg}" is still running — abort it before resuming` };
+        }
+        const reuseOn = args["reuse"] === true;
+        if (reuseOn && !deps.reuse) {
+          return { ok: false, requires_approval: approval, error: `gig_dispatch: reuse was requested but this server has no reuse store wired` };
+        }
+        const reuseWiring = {
+          ...(deps.checkpoints ? { checkpoints: deps.checkpoints } : {}),
+          ...(resumeArg !== undefined ? { resume_from: resumeArg } : {}),
+          ...(reuseOn && deps.reuse ? { reuse: deps.reuse } : {}),
+        };
+        /** What a run skipped, and why — echoed on every reply so a saving is never silent. */
+        const savings = (res: Awaited<ReturnType<typeof runGig>>): Record<string, unknown> => ({
+          ...(res.skipped ? { skipped: res.skipped } : {}),
+          ...(res.resumed_from ? { resumed_from: res.resumed_from } : {}),
+          ...(res.reuse ? { reuse: res.reuse } : {}),
+          ...(res.checkpoint_error ? { checkpoint_error: res.checkpoint_error } : {}),
+        });
+
         // Synchronous mode (opt-in via wait:true) — block, return the manifest. The
         // deterministic test path and any caller that wants the answer in one call.
         const wait = args["wait"] === true;
@@ -490,21 +654,29 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
             const res = await runGig(standard, gigInput, {
               outputs: deps.outputs, ledger: deps.ledger, invoke: deps.invoke,
               model_version: deps.model_version, skills: deps.skills, skill_dirs: deps.skill_dirs, evals: deps.evals, budget,
-              ...(depth ? { depth } : {}),
+              ...(depth ? { depth } : {}), ...reuseWiring,
             });
             return {
               ok: true, requires_approval: approval,
               data: {
                 gig_id: res.gig_id,
                 ...(depth ? { depth } : {}),
+                warnings,
                 manifest: {
                   genome_hash: res.genome_hash, run_fingerprint: res.run_fingerprint, output_count: res.outputs.length,
                   ...(res.usage ? { usage: res.usage } : {}), // #195 — settled model spend
                   ...(res.budget_state ? { budget_state: res.budget_state } : {}),
+                  ...savings(res),
                 },
               },
             };
           } catch (e) {
+            // A refused resume is a REFUSAL, not a crash: nothing ran, nothing was spent, and
+            // the caller needs the drift list to decide whether to re-dispatch cold.
+            if (e instanceof ResumeRefused) {
+              return { ok: false, requires_approval: approval, error: e.message,
+                data: { resume_refused: true, gig_id: e.gig_id, drift: e.drift } };
+            }
             if (e instanceof BudgetExhausted) {
               // #236 — the synchronous half: a depleted gig also burned real dollars before it
               // stopped, and the operator needs them in the same reply as the depletion notice.
@@ -519,8 +691,17 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         // Async mode (default) — register live state, run in the background, return the id
         // immediately so the caller can poll gig_monitor + tail the per-chair logs instead of
         // blocking for the whole run ("synchronous dispatch is not a good pattern").
-        const gigId = randomUUID();
+        // A resumed run CONTINUES the gig it resumes — same id — so the restored outputs stay
+        // in-gig and `output_trace` still reaches them. The live-state entry for the earlier
+        // attempt is replaced: that gig is running again, and showing its old `failed` state
+        // while it runs would be a lie the operator acts on.
+        const gigId = resumeArg ?? randomUUID();
         const runs = deps.gig_runs ?? (deps.gig_runs = new Map());
+        // #278 review — keep the prior attempt's record so a REFUSED resume can put it back.
+        // Overwriting it is right when the resume proceeds (that gig is running again), and
+        // destructive when it does not: the operator loses the `failed` status and error they
+        // were resuming in response to, and is left with a gig stuck at `running` forever.
+        const priorState = runs.get(gigId);
         const state = newGigRun(gigId, slug2, standard.phases.length, new Date().toISOString());
         // #249/#250 — the cancellation handle, held for as long as the run is live. This is the
         // object gig_abort reaches; before it existed there was nothing to reach.
@@ -541,15 +722,32 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
           const line = gigEventLogLine(gigId, ev);
           if (line) { try { process.stderr.write(line + "\n"); } catch { /* best-effort */ } }
         };
-        void runGig(standard, gigInput, {
+        const runPromise = runGig(standard, gigInput, {
           outputs: deps.outputs, ledger: deps.ledger, invoke: deps.invoke,
           model_version: deps.model_version, skills: deps.skills, skill_dirs: deps.skill_dirs, evals: deps.evals, budget,
-          gig_id: gigId, onProgress, signal: controller.signal, ...(depth ? { depth } : {}),
-        })
+          gig_id: gigId, onProgress, signal: controller.signal, ...(depth ? { depth } : {}), ...reuseWiring,
+        });
+        // A REFUSED resume must be answered in THIS reply, not discovered later by polling. The
+        // gate throws in runGig's SYNCHRONOUS phase — before its first `await`, which is exactly
+        // what "a refused resume spends nothing" means — so the promise is already rejected by
+        // the time we get here, and registering this handler first queues it ahead of the
+        // microtask that resumes the `await` below. tests/phase_resume_and_reuse pins that
+        // ordering property so it cannot silently regress into a "running" reply for a run that
+        // never started. (The main chain below still handles the rejection; this only observes.)
+        let resumeRefusal: ResumeRefused | undefined;
+        if (resumeArg !== undefined) {
+          void runPromise.catch((e: unknown) => { if (e instanceof ResumeRefused) resumeRefusal = e; });
+        }
+        void runPromise
           .then((res) => {
             state.status = "complete"; state.finished_at = new Date().toISOString();
             state.run_fingerprint = res.run_fingerprint; state.genome_hash = res.genome_hash; state.outputs_count = res.outputs.length;
             if (res.usage) state.usage = res.usage; // #195 — surface settled spend to gig_monitor
+            // Say what was skipped. On the async path the manifest never reaches the caller, so
+            // gig_monitor is the ONLY place a saving can be reported — and an unreported saving
+            // is indistinguishable from chairs that quietly failed to run.
+            if (res.skipped) state.skipped_chairs = res.skipped.map((s) => ({ phase: s.phase, role: s.role, reason: s.reason, source_gig_id: s.source_gig_id, output_types: s.output_types }));
+            if (res.reuse && res.reuse.rejected.length > 0) state.reuse_rejected = res.reuse.rejected.map((r) => ({ phase: r.phase, role: r.role, reason: r.reason, ...(r.detail !== undefined ? { detail: r.detail } : {}) }));
             // #236 — the synchronous reply has carried budget_state since the budget existed;
             // the async path never did, so the DEFAULT dispatch mode could not answer "what did
             // this consume?" even on success.
@@ -582,9 +780,28 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
             onProgress({ type: "gig_failed", error: state.error });
           })
           .finally(() => { state.controller = undefined; }); // don't pin a controller past settle
+        if (resumeArg !== undefined) {
+          await Promise.resolve(); // one turn — see the ordering note above
+          if (resumeRefusal) {
+            // The gig never started, so it must not be left masquerading as a live run — and
+            // RESTORING beats deleting. Deleting turned a `failed` gig into an unknown one and
+            // left any poller waiting on a run that no longer existed; the failure the operator
+            // was acting on is exactly what they still need to see.
+            if (priorState) deps.gig_runs?.set(gigId, priorState);
+            else deps.gig_runs?.delete(gigId);
+            return { ok: false, requires_approval: approval, error: resumeRefusal.message,
+              data: { resume_refused: true, gig_id: resumeRefusal.gig_id, drift: resumeRefusal.drift } };
+          }
+        }
         return {
           ok: true, requires_approval: approval,
-          data: { gig_id: gigId, status: "running", ...(depth ? { depth } : {}), ...(logDir ? { log_dir: logDir } : {}) },
+          data: {
+            gig_id: gigId, status: "running", ...(depth ? { depth } : {}), warnings, ...(logDir ? { log_dir: logDir } : {}),
+            // Echo the opt-ins back. A caller who typo'd `reuse` and paid full price for a run
+            // they believed was cached has no other way to find out.
+            ...(resumeArg !== undefined ? { resumed_from: resumeArg } : {}),
+            ...(reuseOn ? { reuse: true } : {}),
+          },
         };
       }
       case "gig_monitor": {
@@ -611,6 +828,12 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
               // `unit: "append-units"` and the real `settled_usd` alongside (#233), so nothing
               // reads the synthetic proxy as dollars.
               ...(live.budget_state ? { budget_state: live.budget_state } : {}),
+              // A run that skipped phases must SAY which and why. On the async path this is the
+              // only surface that can carry it, and a run showing 6 phases complete in 4 seconds
+              // is otherwise indistinguishable from one whose chairs quietly did nothing.
+              ...(live.skipped_chairs ? { skipped_chairs: live.skipped_chairs } : {}),
+              ...(live.resumed_from ? { resumed_from: live.resumed_from } : {}),
+              ...(live.reuse_rejected ? { reuse_rejected: live.reuse_rejected } : {}),
               ...(live.abort_reason ? { abort_reason: live.abort_reason } : {}), // why it stopped (#251)
               ...(live.error ? { error: live.error } : {}),
               ...(live.finished_at ? { finished_at: live.finished_at } : {}),
@@ -759,6 +982,21 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
           slug: baseDef.slug, version: 1, extends: baseDef.extends, domain: baseDef.domain,
           status: "active", schema: { type: "object", properties: baseProps }, required_fields: baseDef.required_fields,
         };
+        // THE THIRD DOOR. `{...baseProps, ...addProps}` above is the exact merge #264 is
+        // about, and this handler reached `recordIdentity` without ever consulting
+        // `registerType` or `domainTypeDefect` — so `type_extend` could persist and version a
+        // definition the engine had just declared illegal. #264 names this tool explicitly.
+        //
+        // The thesis of that fix was "there are two doors into the type table, and a rule
+        // enforced at one of them is a rule with a way around it." There were three.
+        const extendDefect = domainTypeDefect({
+          slug: baseDef.slug,
+          extends: baseDef.extends,
+          schema: { properties: nextProps },
+        });
+        if (extendDefect) {
+          return { ok: false, requires_approval: approval, error: `type_extend rejected: ${extendDefect}` };
+        }
         const next: DomainTypeDef = {
           ...base, schema: { type: "object", properties: nextProps }, required_fields: nextRequired,
         };
@@ -767,7 +1005,7 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         // substrate seal: the new version's identity is recorded in the ledger (file
         // materialization of versioned types follows the version-aware loader path).
         const versioned = { ...next, version: proposal.next_version };
-        const tx = deps.genome_dir ? recordIdentity("type_extend", `${base.slug}@v${proposal.next_version}`, versioned, deps.ledger) : undefined;
+        const tx = deps.genome_dir ? recordIdentity("type_extend", `${base.slug}@v${proposal.next_version}`, versioned, deps.ledger, args["reason"] != null ? { reason: args["reason"] } : undefined) : undefined;
         return { ok: true, requires_approval: proposal.approval_required, data: { new_version: proposal.next_version, changelog_entry: `${proposal.change_class}: +${newFields} field(s)`, change_class: proposal.change_class, effective_hash: tx?.effective_hash, content_hash: tx?.content_hash } };
       }
       case "charter_read": {
@@ -818,7 +1056,12 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         // and `cost` describe different ledgers IN THE SAME RESPONSE. `read()`'s own docstring
         // promises "a single read pass shared by query / count / integrity, so the three can
         // never disagree"; the call site was undoing that.
-        const gigRows = deps.ledger.query({ kind: "gig" });
+        // #234 — `window` was advertised and ignored, so every reading below silently covered
+        // all time. It is a filter on the SAME single read pass, so the totals still cannot
+        // disagree with each other.
+        const shWindow = parseWindow(args["window"], Date.now());
+        if (shWindow.error) return { ok: false, requires_approval: approval, error: shWindow.error };
+        const gigRows = deps.ledger.query({ kind: "gig", ...(shWindow.after ? { after: shWindow.after } : {}) });
         const gigs_run = gigRows.length;
         // Settled spend where we have it (#195) — a real number now that gig rows are
         // separable, instead of a row-count proxy standing in for dollars.
@@ -982,10 +1225,17 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
       case "health_check": {
         const targetSlug = String(args["slug"] ?? "");
         const targetKind = String(args["kind"] ?? args["entity_type"] ?? "");
-        const all = deps.outputs.all();
+        // #234 — the advertised-and-ignored `window`, same as system_health.
+        const hcWindow = parseWindow(args["window"], Date.now());
+        if (hcWindow.error) return { ok: false, requires_approval: approval, error: hcWindow.error };
+        // The window has to reach BOTH stores. Applying it only to the ledger would make a
+        // windowed health_check on a standard mean one thing and on an agent mean another.
+        const all = hcWindow.after
+          ? deps.outputs.all().filter((o) => o.created_at >= hcWindow.after!)
+          : deps.outputs.all();
         // standards live in the ledger (executions); agents/types in the outputs store.
         const gigRows = targetKind === "standard"
-          ? deps.ledger.query({ kind: "gig", standard_slug: targetSlug }).filter(isGig)
+          ? deps.ledger.query({ kind: "gig", standard_slug: targetSlug, ...(hcWindow.after ? { after: hcWindow.after } : {}) }).filter(isGig)
           : [];
         const execution_count = gigRows.length;
         const filtered = targetKind === "agent"
@@ -1027,18 +1277,69 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
       case "system_audit": {
         // Real derivation over the genome: a registered domain type with zero
         // outputs is an unused type — the canonical audit finding in v0.
-        const types = deps.registry.listTypes();
-        const usedTypes = new Set(deps.outputs.all().map((o) => o.domain_type));
+        // #234 — `scope` and `check` were advertised and ignored, so a caller auditing one
+        // domain received findings for every domain and had no way to tell.
+        const auditScope = args["scope"] !== undefined ? String(args["scope"]) : undefined;
+        const auditCheck = args["check"] !== undefined ? String(args["check"]) : undefined;
+        const KNOWN_CHECKS = ["unused_type"];
+        if (auditCheck !== undefined && !KNOWN_CHECKS.includes(auditCheck)) {
+          return { ok: false, requires_approval: approval, error: `unknown check "${auditCheck}" — known checks: ${KNOWN_CHECKS.join(", ")}` };
+        }
+        // `scope` narrows to a domain; the counts reported must describe the SAME slice the
+        // findings do, or the response contradicts itself.
+        const allTypes = deps.registry.listTypes();
+        const types = auditScope ? allTypes.filter((t) => t.domain === auditScope) : allTypes;
+        const allOutputs = deps.outputs.all();
+        const scopedOutputs = auditScope
+          ? allOutputs.filter((o) => types.some((t) => t.slug === o.domain_type))
+          : allOutputs;
+        const usedTypes = new Set(allOutputs.map((o) => o.domain_type));
         const unused_types = types.filter((t) => !usedTypes.has(t.slug)).map((t) => t.slug);
-        const findings = unused_types.map((slug) => ({ kind: "unused_type", slug, severity: "info" }));
-        return { ok: true, requires_approval: approval, data: { findings, unused_types, type_count: types.length, output_count: deps.outputs.all().length } };
+        const findings = (auditCheck === undefined || auditCheck === "unused_type")
+          ? unused_types.map((slug) => ({ kind: "unused_type", slug, severity: "info" }))
+          : [];
+        return { ok: true, requires_approval: approval, data: { findings, unused_types, type_count: types.length, output_count: scopedOutputs.length, ...(auditScope ? { scope: auditScope } : {}), ...(auditCheck ? { check: auditCheck } : {}) } };
       }
+      // #234 — these two minted a UUID, discarded every argument, and reported success.
+      //
+      // Not a no-op: a fabricated `proposal_id` is a RECEIPT. A caller handed one has been told
+      // their proposal was recorded and can be looked up, and neither was true — the slug, spec
+      // and reason went nowhere, and nothing anywhere could be found under that id.
+      //
+      // Their own tests sat in a describe block named "proposal tools (LEDGER-BACKED)", where
+      // the `proposal_create` case asserts `ledger.query().length === 1` and these two assert
+      // only `typeof proposal_id === "string"` — which `randomUUID()` satisfies forever. A
+      // regression guard elsewhere states "all are wired against real in-repo impl now". The
+      // fabricated id is precisely what made both look true.
+      //
+      // So: record what the caller sent, through the same `governanceRow` path proposal_create
+      // uses. Deprecation is a governance act on the tool registry; a proposal to remove a tool
+      // that leaves no trace is worse than one that is refused, because the refusal is visible.
+      //
+      // Kept as two case blocks rather than one fallthrough: they take different arguments, and
+      // a shared body makes each tool appear to read the other's — which is exactly the
+      // schema/handler drift this issue is about, reintroduced in the fix for it.
       case "tool_propose": {
+        const toolSlug = String(args["slug"] ?? "");
+        if (!toolSlug) return { ok: false, requires_approval: approval, error: "tool_propose requires slug" };
         const proposal_id = randomUUID();
+        deps.ledger.append(governanceRow("tool_propose", toolSlug, {
+          proposal_id,
+          reason: args["reason"] ?? null,
+          tool_type: args["type"] ?? null,
+          spec: args["spec"] ?? null,
+        }));
         return { ok: true, requires_approval: true, data: { proposal_id } };
       }
       case "tool_deprecate_propose": {
+        const toolSlug = String(args["slug"] ?? "");
+        if (!toolSlug) return { ok: false, requires_approval: approval, error: "tool_deprecate_propose requires slug" };
         const proposal_id = randomUUID();
+        deps.ledger.append(governanceRow("tool_deprecate_propose", toolSlug, {
+          proposal_id,
+          reason: args["reason"] ?? null,
+          usage_stats: args["usage_stats"] ?? null,
+        }));
         return { ok: true, requires_approval: true, data: { proposal_id, affected_agents: [] } };
       }
       case "proposal_create": {
@@ -1060,14 +1361,31 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
       case "capability_research": {
         // Real local gap-search over the genome: does any existing tool or domain
         // type already cover the asked-for capability? If nothing matches, it's a gap.
-        const q = String(args["query"] ?? args["capability"] ?? "").toLowerCase();
-        const toolMatches = q ? MCP_TOOLS.filter((t) => t.slug.toLowerCase().includes(q)).map((t) => t.slug) : [];
-        const typeMatches = q ? deps.registry.listTypes().filter((t) => t.slug.toLowerCase().includes(q)).map((t) => t.slug) : [];
+        //
+        // #234 — this handler read `query`/`capability` while the tool advertised `need`/
+        // `context`. The two sets did not overlap, so EVERY caller following the schema
+        // searched for the empty string. That is not a no-op: an empty search matches nothing,
+        // nothing matched means `gap: true`, and the tool answered "no existing capability —
+        // propose a new tool/type" for every capability the engine has. The one tool whose job
+        // is to stop redundant definitions recommended a new one, unconditionally, to anyone
+        // who used it as documented — inverting this repo's "reuse and evolve, don't duplicate"
+        // rule at precisely the step that rule is meant to govern.
+        //
+        // `need` is now primary (it is the advertised name); `query`/`capability` stay as
+        // accepted aliases so existing callers keep working, and are advertised too.
+        const q = String(args["need"] ?? args["query"] ?? args["capability"] ?? "").trim().toLowerCase();
+        // An empty search is REFUSED rather than answered. Reporting `gap: true` for a question
+        // nobody asked is the specific failure above: a confident wrong answer, not a missing one.
+        if (!q) {
+          return { ok: false, requires_approval: approval, error: "capability_research needs a non-empty `need` (the capability to search for)" };
+        }
+        const toolMatches = MCP_TOOLS.filter((t) => t.slug.toLowerCase().includes(q)).map((t) => t.slug);
+        const typeMatches = deps.registry.listTypes().filter((t) => t.slug.toLowerCase().includes(q)).map((t) => t.slug);
         const existing_matches = [...toolMatches, ...typeMatches];
         const gap = existing_matches.length === 0;
         return {
           ok: true, requires_approval: approval,
-          data: { query: q, existing_matches, gap, approaches: [], mcp_options: toolMatches, recommendation: gap ? "no existing capability — propose a new tool/type" : "reuse existing" },
+          data: { need: q, query: q, existing_matches, gap, approaches: [], mcp_options: toolMatches, recommendation: gap ? "no existing capability — propose a new tool/type" : "reuse existing" },
         };
       }
       case "gig_abort": {
@@ -1179,7 +1497,15 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         // the caller told the call failed, and no audit row at all — the audit trail could not
         // answer "who granted this capability, and when".
         const registration_id = randomUUID();
-        deps.ledger.append(governanceRow("tool_register", targetSlug, { registration_id }));
+        // #234 — `type`, `spec` and `category` were advertised and discarded. This row IS the
+        // audit answer to "who granted this capability, and what did they grant?"; without the
+        // spec it could only answer the first half.
+        deps.ledger.append(governanceRow("tool_register", targetSlug, {
+          registration_id,
+          tool_type: args["type"] ?? null,
+          spec: args["spec"] ?? null,
+          category: args["category"] ?? null,
+        }));
         REGISTERED_TOOL_SLUGS.add(targetSlug);
         // Keep the #185 provider bridge live: a freshly-registered tool must resolve for a same-
         // session agent_define→dispatch (the registry and provider map share lifecycle).
@@ -1205,7 +1531,11 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
             : null;
           // substrate seal: the evolved version's identity (lineage claim) is recorded in
           // the ledger when persisting — never a contract lie, even before file materialization.
-          const ev = (evolved && deps.genome_dir) ? recordIdentity("agent_evolve", `${base.slug}@v${new_version}`, evolved, deps.ledger) : undefined;
+          const evolveDetail = {
+            ...(args["reason"] != null ? { reason: args["reason"] } : {}),
+            ...(args["evidence"] != null ? { evidence: args["evidence"] } : {}),
+          };
+          const ev = (evolved && deps.genome_dir) ? recordIdentity("agent_evolve", `${base.slug}@v${new_version}`, evolved, deps.ledger, evolveDetail) : undefined;
           return {
             ok: true, requires_approval: change.approval_required,
             data: { space: change.space, approval_required: change.approval_required, type_check_passed: change.type_check_passed ?? null, new_version, evolved_profile: evolved, parent_version: evolved?.parent_version ?? base.version, effective_hash: ev?.effective_hash, content_hash: ev?.content_hash, cascade_check: { agents_affected: [], standards_affected: [] } },
@@ -1333,6 +1663,147 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         deps.skills?.set(skSlug, def);
         return { ok: true, requires_approval: approval, data: { skill_id: skSlug, content_hash: sealed.content_hash, dependency_hash: sealed.dependency_hash, effective_hash: sealed.effective_hash } };
       }
+      // ── the skill iteration loop ─────────────────────────────────────────────────────
+      // Until now the surface was define + promote: a skill could be created and given
+      // production status, and never RUN, TESTED, LISTED or REVISED through the engine. The
+      // fixture gate on promotion made that gap sharper — you could be refused for failing
+      // fixtures with no way to run them and see why.
+      case "skill_browse": {
+        if (!deps.skills) return { ok: false, not_implemented: true, requires_approval: approval, error: "skill_browse needs a skills map (bootstrap from a genome)" };
+        let list = [...deps.skills.values()] as Array<Record<string, unknown>>;
+        if (args["domain"]) list = list.filter((k) => k["domain"] === args["domain"]);
+        if (args["status"]) list = list.filter((k) => (k["status"] ?? "draft") === args["status"]);
+        if (args["skill_type"]) list = list.filter((k) => k["skill_type"] === args["skill_type"]);
+        // `has_code` is the axis that matters for the promotion gate: only a code half can be
+        // held to fixtures, so it is the filter an operator actually reaches for.
+        if (args["has_code"] !== undefined) {
+          const want = args["has_code"] === true || args["has_code"] === "true";
+          list = list.filter((k) => (k["code_hash"] != null) === want);
+        }
+        const skills = list
+          .map((k) => ({
+            slug: k["slug"], version: k["version"], domain: k["domain"], status: k["status"] ?? null,
+            skill_type: k["skill_type"], input_type: k["input_type"], output_type: k["output_type"],
+            has_code: k["code_hash"] != null, code_hash: k["code_hash"] ?? null,
+            tier: (k["permission"] as { tier?: number } | undefined)?.tier ?? 0,
+          }))
+          .sort((a, b) => (String(a.slug) < String(b.slug) ? -1 : 1));
+        return { ok: true, requires_approval: approval, data: { skills, count: skills.length } };
+      }
+
+      case "skill_inspect": {
+        if (!deps.skills) return { ok: false, not_implemented: true, requires_approval: approval, error: "skill_inspect needs a skills map (bootstrap from a genome)" };
+        const target = String(args["slug"] ?? "");
+        if (!target) return { ok: false, requires_approval: approval, error: "skill_inspect requires slug" };
+        const sk = deps.skills.get(target) as Record<string, unknown> | undefined;
+        if (!sk) return { ok: false, requires_approval: approval, error: `unknown skill "${target}"` };
+        const dir = sk["package_dir"] as string | undefined;
+        // Fixtures are the skill's contract with the promotion gate, so they are what an
+        // operator most needs to see. Inputs only — an expected_output is an answer key.
+        const fixtures = dir ? loadFixtures(dir).map((f) => ({ id: f.id, input: f.input, has_expected: f.expected_output !== undefined, assertions: (f.assertions ?? []).length })) : [];
+        return {
+          ok: true, requires_approval: approval,
+          data: {
+            slug: sk["slug"], version: sk["version"], domain: sk["domain"], status: sk["status"] ?? null,
+            skill_type: sk["skill_type"], input_type: sk["input_type"], output_type: sk["output_type"],
+            description: sk["description"] ?? null,
+            permission: sk["permission"] ?? { tier: 0 },
+            has_code: sk["code_hash"] != null, code_hash: sk["code_hash"] ?? null,
+            has_md: sk["md"] !== undefined,
+            fixture_count: fixtures.length, fixtures,
+            package_dir: dir ?? null,
+            // Said plainly, because it is the difference between "will promote" and "cannot".
+            promotable: sk["code_hash"] == null ? true : fixtures.length > 0,
+          },
+        };
+      }
+
+      case "skill_execute": {
+        if (!deps.skills) return { ok: false, not_implemented: true, requires_approval: approval, error: "skill_execute needs a skills map (bootstrap from a genome)" };
+        const target = String(args["slug"] ?? "");
+        if (!target) return { ok: false, requires_approval: approval, error: "skill_execute requires slug" };
+        const sk = deps.skills.get(target) as Record<string, unknown> | undefined;
+        if (!sk) return { ok: false, requires_approval: approval, error: `unknown skill "${target}"` };
+        const dir = sk["package_dir"] as string | undefined;
+        if (!dir || sk["code_hash"] == null) {
+          return { ok: false, requires_approval: approval, error: `skill "${target}" has no code half — there is nothing to execute (it is a reasoning skill)` };
+        }
+        // mode:"test" runs the skill's own fixtures instead of a caller's input. This is the
+        // command that makes the promotion gate actionable: refused for failing fixtures, run
+        // this, see which and why.
+        if (args["mode"] === "test") {
+          const report = runSkillFixtures(dir);
+          const threshold = report.deterministic ? 1.0 : 0.8;
+          return {
+            ok: true, requires_approval: approval,
+            data: { ...report, threshold, would_promote: report.total > 0 && report.pass_rate >= threshold },
+          };
+        }
+        const started = Date.now();
+        const res = executeSkill(dir, args["input"] ?? {}, typeof args["timeout_ms"] === "number" ? (args["timeout_ms"] as number) : undefined);
+        // A skill that threw is not a tool that failed: the CALL succeeded and its answer is
+        // "the code errored". Collapsing those loses the distinction a caller needs.
+        return {
+          ok: true, requires_approval: approval,
+          data: { slug: target, ...res, duration_ms: res.duration_ms ?? Date.now() - started },
+        };
+      }
+
+      case "skill_evolve": {
+        if (!deps.skills) return { ok: false, not_implemented: true, requires_approval: approval, error: "skill_evolve needs a skills map (bootstrap from a genome)" };
+        const target = String(args["slug"] ?? "");
+        const code = args["code"];
+        if (!target || typeof code !== "string" || code.trim() === "") {
+          return { ok: false, requires_approval: approval, error: "skill_evolve requires slug and a non-empty code half" };
+        }
+        const sk = deps.skills.get(target) as Record<string, unknown> | undefined;
+        if (!sk) return { ok: false, requires_approval: approval, error: `unknown skill "${target}"` };
+        const dir = sk["package_dir"] as string | undefined;
+        if (!dir || sk["code_hash"] == null) {
+          return { ok: false, requires_approval: approval, error: `skill "${target}" has no code half to evolve` };
+        }
+        if (loadFixtures(dir).length === 0) {
+          return { ok: false, requires_approval: approval, error: `skill "${target}" has no fixtures, so there is nothing to hold a candidate to — add fixtures before evolving it` };
+        }
+        // The candidate runs against the CURRENT fixtures in a throwaway copy. Nothing is
+        // written unless it passes, which is the whole point: a skill cannot regress through
+        // this door. `evolveSkill` has implemented exactly this since before the open-source
+        // split and had no caller.
+        const tmpCode = join(mkdtempSync(join(tmpdir(), "coltrane-candidate-")), "skill.mjs");
+        let verdict: { accepted: boolean; failing_fixtures: string[] };
+        try {
+          writeFileSync(tmpCode, code, "utf8");
+          verdict = evolveSkill(dir, tmpCode);
+        } catch (e) {
+          return { ok: false, requires_approval: approval, error: `could not evaluate the candidate: ${e instanceof Error ? e.message : String(e)}` };
+        } finally {
+          try { rmSync(dirname(tmpCode), { recursive: true, force: true }); } catch { /* best-effort */ }
+        }
+        if (!verdict.accepted) {
+          return {
+            ok: false, requires_approval: approval,
+            error: `candidate for "${target}" is REJECTED — it fails fixture(s) the current code passes: ${verdict.failing_fixtures.join(", ")}`,
+            data: { accepted: false, failing_fixtures: verdict.failing_fixtures },
+          };
+        }
+        // Accepted: land the code and seal the new identity. Version bumps, because the bytes
+        // that run changed — an evolved skill under an unchanged version is the edit-under-a-
+        // stable-slug shape that `producers_sha` exists to catch.
+        const nextVersion = Number(sk["version"] ?? 1) + 1;
+        writeFileSync(join(dir, "skill.mjs"), code, "utf8");
+        const sealed = recordIdentity("skill_evolve", `${target}@v${nextVersion}`, { slug: target, version: nextVersion, code }, deps.ledger,
+          args["reason"] != null ? { reason: args["reason"] } : undefined);
+        (sk as Record<string, unknown>)["version"] = nextVersion;
+        return {
+          ok: true, requires_approval: approval,
+          data: {
+            slug: target, accepted: true, new_version: nextVersion,
+            content_hash: sealed.content_hash, effective_hash: sealed.effective_hash,
+            note: "the code half changed; re-promote to carry the new version to active",
+          },
+        };
+      }
+
       case "agent_promote":
       case "standard_promote":
       case "skill_promote": {
@@ -1352,6 +1823,9 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         const targetSlug = String(args["slug"] ?? "");
         const target = String(args["status"] ?? "");
         const current = args["current"] != null ? String(args["current"]) : null;
+        // Carried into the ledger row: a promotion that passed a fixture gate should record the
+        // evidence it passed on, or the audit trail says only that someone asked.
+        let fixtureReport: ReturnType<typeof runSkillFixtures> | undefined;
         if (!targetSlug || !target) {
           return { ok: false, requires_approval: approval, error: "missing slug or status" };
         }
@@ -1408,16 +1882,74 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
               error: `${slug}: skill "${targetSlug}" does not pass validation and must not become "${target}" — ${why}`,
             };
           }
+          // ── THE FIXTURE GATE ────────────────────────────────────────────────────────────
+          // Promotion to `active` is the moment a definition acquires production status. For a
+          // skill with a CODE half that has to mean its code demonstrably works, not that its
+          // metadata parses — schema validity says nothing about behaviour.
+          //
+          // Restored from the pre-open-source engine, which enforced exactly this at
+          // skill_evolve and skill_promote and refused the write on failure. The runner has been
+          // here the whole time (`runSkillFixtures`) with no caller outside tests: a real gate
+          // with nothing invoking it, the same shape as the capability gate this release closed.
+          //
+          // The threshold keys off MEASURED determinism, not the declared `determinism_ratio`:
+          // a skill whose runs agree is held to every fixture passing; one that varies is held
+          // to a supermajority. Claiming determinism therefore costs something, which is what
+          // stops the claim being free.
+          const gated = target === "active";
+          const pkgDir = (sk as { package_dir?: string }).package_dir;
+          const hasCode = (sk as { code_hash?: string | null }).code_hash != null;
+          if (gated && hasCode && pkgDir) {
+            let report: ReturnType<typeof runSkillFixtures>;
+            try {
+              report = runSkillFixtures(pkgDir);
+            } catch (e) {
+              return {
+                ok: false, requires_approval: approval,
+                error: `${slug}: could not run "${targetSlug}"'s fixtures, so it must not become "${target}" — ${e instanceof Error ? e.message : String(e)}`,
+              };
+            }
+            // No fixtures is not a pass. A code skill nobody can test is precisely the thing
+            // that must not carry production status, and silently allowing it would make this
+            // gate opt-out by omission.
+            if (report.total === 0) {
+              return {
+                ok: false, requires_approval: approval,
+                error: `${slug}: skill "${targetSlug}" ships executable code and no fixtures, so nothing establishes that it works — add fixtures before promoting it to "${target}"`,
+                data: { fixture_report: report },
+              };
+            }
+            const threshold = report.deterministic ? 1.0 : 0.8;
+            if (report.pass_rate < threshold) {
+              const failing = report.results.filter((r) => !r.passed).map((r) => r.id);
+              return {
+                ok: false, requires_approval: approval,
+                error: `${slug}: skill "${targetSlug}" passed ${report.passed}/${report.total} fixtures ` +
+                  `(${(report.pass_rate * 100).toFixed(0)}%), below the ${(threshold * 100).toFixed(0)}% required of a ` +
+                  `${report.deterministic ? "deterministic" : "non-deterministic"} skill — failing: ${failing.join(", ")}`,
+                data: { fixture_report: report },
+              };
+            }
+            fixtureReport = report;
+          }
         }
         const promotion_id = randomUUID();
         // v1 recorded neither WHICH entity was promoted nor the transition — standard_slug held
         // the TOOL name. A lifecycle transition is exactly the event an audit trail exists for.
         deps.ledger.append(governanceRow(slug, targetSlug, {
           promotion_id, from_status: current, to_status: target,
+          // The evidence the promotion rested on. A gate that passes and records nothing leaves
+          // the audit trail saying only that someone asked, not what was true when they did.
+          ...(fixtureReport
+            ? { fixtures: { total: fixtureReport.total, passed: fixtureReport.passed, pass_rate: fixtureReport.pass_rate, deterministic: fixtureReport.deterministic } }
+            : {}),
         }));
         return {
           ok: true, requires_approval: approval,
-          data: { slug: targetSlug, status: target, promoted: true, promotion_id },
+          data: {
+            slug: targetSlug, status: target, promoted: true, promotion_id,
+            ...(fixtureReport ? { fixture_report: fixtureReport } : {}),
+          },
         };
       }
       case "session_review_write": {
@@ -1435,11 +1967,153 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         // agent_slug / output_id / quality_scores were validated above and then thrown away,
         // because v1 LedgerEntry had nowhere to put them. That discard is the root cause of the
         // cross-agent evidence bug in learning_synthesize (#215).
+        // #234 — `agent_version`, `domain` and `notes` were advertised and dropped on the
+        // floor. `notes` is the reviewer's actual reasoning; discarding it while recording the
+        // scores keeps the number and loses the why, which is the half a later evolution
+        // decision needs. Recorded as null when absent rather than omitted, so a review with no
+        // note is distinguishable from one written before the field was kept.
         deps.ledger.append(governanceRow("session_review_write", agent_slug, {
           review_id, output_id, quality_scores,
+          agent_version: args["agent_version"] ?? null,
+          domain: args["domain"] ?? null,
+          notes: args["notes"] ?? null,
         }, gig_id));
         return { ok: true, requires_approval: approval, data: { review_id, recorded: true, agent_slug, gig_id } };
       }
+      // ── improvement, as a measurement rather than a count ────────────────────────────
+      // `learning_synthesize` answers "is there enough evidence to act?" — a count. It cannot
+      // answer the question the whole typed-and-sealed design exists to make answerable: did
+      // this producer get BETTER, and what did that cost?
+      //
+      // Every input was already sealed and nothing joined them. Outputs carry `agent_slug`,
+      // `cost_usd` and `created_at`; reviews carry `quality_scores` against a specific
+      // `output_id` and `agent_version`; `agent_evolve` rows carry the version boundaries. The
+      // join is arithmetic over records this engine already writes — no new instrumentation,
+      // which is precisely why a consumer cannot compute this for themselves from a bill.
+      case "improvement_report": {
+        const subject = String(args["agent_slug"] ?? "");
+        if (!subject) return { ok: false, requires_approval: approval, error: "improvement_report requires agent_slug" };
+        const win = parseWindow(args["window"], Date.now());
+        if (win.error) return { ok: false, requires_approval: approval, error: win.error };
+
+        const outs = deps.outputs.all().filter(
+          (o) => o.agent_slug === subject && (!win.after || o.created_at >= win.after),
+        );
+        const reviews = deps.ledger.query({
+          kind: "governance", event: "session_review_write", subject_slug: subject,
+          ...(win.after ? { after: win.after } : {}),
+        }) as unknown as Array<{ detail?: Record<string, unknown> }>;
+
+        // A review names the output it judged, so quality attaches to a specific sealed record
+        // rather than to a time bucket. That is what makes the cost and the score describe the
+        // same unit of work.
+        const scoreOf = (d: Record<string, unknown> | undefined): number | null => {
+          const qs = d?.["quality_scores"];
+          if (!qs || typeof qs !== "object") return null;
+          const nums = Object.values(qs as Record<string, unknown>).filter((v): v is number => typeof v === "number" && Number.isFinite(v));
+          return nums.length ? nums.reduce((a, b) => a + b, 0) / nums.length : null;
+        };
+        const reviewByOutput = new Map<string, { score: number | null; version: number | null }>();
+        for (const r of reviews) {
+          const oid = String(r.detail?.["output_id"] ?? "");
+          if (!oid) continue;
+          const v = r.detail?.["agent_version"];
+          reviewByOutput.set(oid, { score: scoreOf(r.detail), version: typeof v === "number" ? v : null });
+        }
+
+        // Bucket by producer VERSION where a review supplied one. Version is the axis that
+        // matters: "did the edit help?" is a question about two definitions, not two dates.
+        interface Bucket { version: number | null; outputs: number; reviewed: number; cost: number[]; scores: number[] }
+        const buckets = new Map<string, Bucket>();
+        const keyOf = (v: number | null): string => (v === null ? "unversioned" : String(v));
+        for (const o of outs) {
+          const rev = reviewByOutput.get(o.id);
+          const k = keyOf(rev?.version ?? null);
+          const b = buckets.get(k) ?? { version: rev?.version ?? null, outputs: 0, reviewed: 0, cost: [], scores: [] };
+          b.outputs += 1;
+          if (typeof o.cost_usd === "number" && Number.isFinite(o.cost_usd)) b.cost.push(o.cost_usd);
+          if (rev && rev.score !== null) { b.reviewed += 1; b.scores.push(rev.score); }
+          buckets.set(k, b);
+        }
+        const mean = (xs: number[]): number | null => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
+        const versions = [...buckets.values()]
+          .sort((a, b) => (a.version ?? -1) - (b.version ?? -1))
+          .map((b) => ({
+            version: b.version,
+            outputs: b.outputs,
+            reviewed: b.reviewed,
+            // NULL, not 0, when nothing was measured. A zero here would read as "free" and
+            // "worthless" respectively, which is the exact class of fabricated number this
+            // engine spent a release removing.
+            mean_cost_usd: mean(b.cost),
+            mean_quality: mean(b.scores),
+            cost_basis: b.cost.length === b.outputs ? "complete"
+              : b.cost.length === 0 ? "no output carried a cost"
+              : `partial: ${b.cost.length} of ${b.outputs} outputs carried a cost`,
+            quality_basis: b.reviewed === 0 ? "no output was reviewed"
+              : `${b.reviewed} of ${b.outputs} outputs reviewed`,
+          }));
+
+        // The comparison, only where both ends are measured. A delta against an unmeasured
+        // version would be a number with nothing behind it.
+        const deltas: Array<Record<string, unknown>> = [];
+        for (let i = 1; i < versions.length; i++) {
+          const prev = versions[i - 1]!, cur = versions[i]!;
+          if (prev.version === null || cur.version === null) continue;
+          deltas.push({
+            from_version: prev.version, to_version: cur.version,
+            quality_delta: prev.mean_quality !== null && cur.mean_quality !== null ? cur.mean_quality - prev.mean_quality : null,
+            cost_delta_usd: prev.mean_cost_usd !== null && cur.mean_cost_usd !== null ? cur.mean_cost_usd - prev.mean_cost_usd : null,
+            // The sentence a person acts on. Only stated when BOTH ends are measured.
+            verdict: prev.mean_quality !== null && cur.mean_quality !== null && prev.mean_cost_usd !== null && cur.mean_cost_usd !== null
+              ? (cur.mean_quality >= prev.mean_quality && cur.mean_cost_usd <= prev.mean_cost_usd ? "better and cheaper"
+                : cur.mean_quality > prev.mean_quality ? "better, and more expensive"
+                : cur.mean_cost_usd < prev.mean_cost_usd ? "cheaper, and worse"
+                : "worse and more expensive")
+              : null,
+          });
+        }
+
+        // The same arithmetic across MODEL TIER rather than producer version. This is the axis
+        // the "spend expensive tokens once to find where the cheap ones hold" question turns on,
+        // and it is only answerable because the seal now records which model produced an output.
+        interface TierBucket { outputs: number; reviewed: number; cost: number[]; scores: number[] }
+        const tierBuckets = new Map<string, TierBucket>();
+        for (const o of outs) {
+          const k = (o as { model_tier?: string }).model_tier ?? (o as { model?: string }).model ?? "unrecorded";
+          const b = tierBuckets.get(k) ?? { outputs: 0, reviewed: 0, cost: [], scores: [] };
+          b.outputs += 1;
+          if (typeof o.cost_usd === "number" && Number.isFinite(o.cost_usd)) b.cost.push(o.cost_usd);
+          const rev = reviewByOutput.get(o.id);
+          if (rev && rev.score !== null) { b.reviewed += 1; b.scores.push(rev.score); }
+          tierBuckets.set(k, b);
+        }
+        const tiers = [...tierBuckets.entries()].map(([tier, b]) => ({
+          tier,
+          outputs: b.outputs,
+          reviewed: b.reviewed,
+          mean_cost_usd: mean(b.cost),
+          mean_quality: mean(b.scores),
+        })).sort((a2, b2) => (a2.tier < b2.tier ? -1 : 1));
+
+        const measurable = versions.filter((v) => v.version !== null && v.mean_quality !== null).length;
+        return {
+          ok: true, requires_approval: approval,
+          data: {
+            agent_slug: subject,
+            ...(win.after ? { since: win.after } : {}),
+            total_outputs: outs.length,
+            versions, deltas, tiers,
+            // Said plainly, because a report that cannot answer its own question should say so
+            // rather than return empty arrays that read as "no change".
+            comparable: measurable >= 2,
+            basis: measurable >= 2
+              ? `${measurable} versions carry both cost and quality`
+              : "not comparable yet — a version-to-version delta needs reviews recorded against outputs from at least two versions (session_review_write with agent_version)",
+          },
+        };
+      }
+
       case "learning_synthesize": {
         // §11 learning loop, half 2: aggregate session reviews into evolution evidence
         // for one agent. Returns evidence_sufficient=true only when review count meets
@@ -1455,8 +2129,22 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         // echoed agent_slug back, so five reviews of five different agents opened the
         // evolution gate for a sixth with none (#215). The typed discriminators replace a
         // load-bearing String.startsWith on a synthetic gig_id.
+        // #234 — `since` was advertised and ignored, so "has this agent earned an evolution on
+        // RECENT evidence?" was always answered over its entire history. That is the wrong
+        // answer in the direction that matters: five poor reviews from a year ago kept counting
+        // toward a gate that exists to act on how the agent behaves now.
+        const sinceRaw = args["since"];
+        let since: string | undefined;
+        if (sinceRaw !== undefined && sinceRaw !== null && sinceRaw !== "") {
+          const parsed = new Date(String(sinceRaw));
+          if (Number.isNaN(parsed.getTime())) {
+            return { ok: false, requires_approval: approval, error: `unparseable since "${String(sinceRaw)}" — use an ISO timestamp` };
+          }
+          since = parsed.toISOString();
+        }
         const reviews = deps.ledger.query({
           kind: "governance", event: "session_review_write", subject_slug: agent_slug,
+          ...(since ? { after: since } : {}),
         });
         const review_count = reviews.length;
         const evidence_sufficient = review_count >= min_reviews;
@@ -1622,6 +2310,9 @@ export function bootstrapServerDeps(genomeRoot?: string): ServerDeps {
     provenance: genome.provenance, // ← genome extension — which layer supplied each def
     gig_runs: new Map(), // ← async dispatch — live gig state gig_monitor reads
     gig_log_base: defaultOutputsPersistDir(), // ← per-gig agent logs at <base>/gigs/<id>/<role>.jsonl
+    // Checkpoints + the reuse cache live alongside outputs/ and refs/ under the same root.
+    checkpoints: createCheckpointStore(defaultOutputsPersistDir()),
+    reuse: createReuseStore(defaultOutputsPersistDir()),
   };
 }
 

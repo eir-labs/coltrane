@@ -6,8 +6,9 @@
 import { randomUUID } from "node:crypto";
 import type { Standard, Agent, Chair } from "./composition.js";
 import { PRIMITIVE_OUTPUT_TYPE, CORE_TYPES } from "./core_types.js";
-import { executeSkill } from "./skill_subprocess.js";
+import { executeSkillAsync } from "./skill_subprocess.js";
 import { loadSkillPackage } from "./skills.js";
+import { resolveModel } from "./claude_invoker.js";
 
 // core type → the process primitive that produces it (reverse of PRIMITIVE_OUTPUT_TYPE).
 // A skill-backed chair seals its output as this primitive/core when its output_contract is
@@ -16,6 +17,12 @@ const CORE_TO_PRIMITIVE: Record<string, Agent["primitives"][number]> = Object.fr
   Object.entries(PRIMITIVE_OUTPUT_TYPE).map(([prim, core]) => [String(core), prim as Agent["primitives"][number]]),
 );
 import { sha256Hex, canonJson, runFingerprint, outputContentHash, CANONICAL_FORM_VERSION } from "./canonical_form.js";
+import { producersSha,
+  reuseCacheKey, checkReuseEntry, runIdentityMismatch,
+  CHECKPOINT_SCHEMA_VERSION, REUSE_SCHEMA_VERSION,
+  type CheckpointStore, type CheckpointRole, type GigCheckpoint,
+  type ReuseStore, type ReuseEntry, type ReuseOutput, type RunIdentity,
+} from "./reuse.js";
 import type { OutputStore, OutputRecord } from "./outputs.js";
 import { LEDGER_SCHEMA_VERSION, type Ledger, type GigUsage } from "./ledger.js";
 import type { Depth } from "./pricing.js";
@@ -98,6 +105,20 @@ export type GigProgressEvent =
   // AND content_sha — so this channel is the only place the difference is observable live.
   | { type: "skills_unresolved"; phase: string; role: string; agent: string; missing: string[] }
   | { type: "agent_event"; phase: string; role: string; event: AgentStreamEvent }
+  // ── reuse (checkpoint/resume + the chair-level cache) ───────────────────────
+  // A run that skipped work must SAY which and why, live. A silent saving is
+  // indistinguishable from a bug — and from a chair that quietly failed to run.
+  | { type: "gig_resumed"; from_gig_id: string; roles: string[]; outputs: number }
+  | {
+      type: "chair_skipped"; phase: string; role: string;
+      /** "resume" — restored from this gig's own checkpoint. "reuse" — a prior gig's output. */
+      reason: "resume" | "reuse";
+      source_gig_id: string;
+      output_types: string[];
+      cache_key?: string;
+    }
+  /** A cache entry was FOUND and refused. A silent refusal is as opaque as a silent hit. */
+  | { type: "reuse_rejected"; phase: string; role: string; cache_key: string; reason: string; detail?: string }
   | { type: "gig_complete"; outputs: number }
   | { type: "gig_failed"; error: string }
   | { type: "gig_aborted"; reason: string };
@@ -189,10 +210,10 @@ export interface RunDeps {
    * signal is threaded into every AgentInvocationContext, so an invoker that wires it to its
    * subprocess also stops the in-flight chair. Absent = an uncancellable run (the v0 shape).
    *
-   * Known bound: a SKILL-backed chair runs `spawnSync` (src/skill_subprocess.ts), which
-   * blocks the event loop, so an abort delivered while one is executing is not even RECEIVED
-   * until it returns. Skill chairs are therefore a hard uncancellable window of up to their
-   * declared `meta.timeout_ms` (default 120s). Deliberate for now — see #253.
+   * Skill chairs are cancellable too (#253). They used to run `spawnSync`, which blocks the
+   * event loop, so an abort delivered during one was not even RECEIVED until it returned —
+   * a hard uncancellable window of up to the skill's `meta.timeout_ms`, 120s by default.
+   * `executeSkillAsync` spawns without blocking and SIGKILLs on the signal.
    */
   signal?: AbortSignal | undefined;
   /**
@@ -200,6 +221,51 @@ export interface RunDeps {
    * the thing that actually spends. Absent = each agent's own `depth_profile` stands.
    */
   depth?: Depth | undefined;
+
+  // ── reuse a sealed output instead of re-deriving it ────────────────────────
+  /**
+   * Durable per-gig checkpoints. When wired, the runtime records each completed chair's sealed
+   * outputs (id + content_sha + type fingerprint) after every dispatch batch, so a run that
+   * dies at phase 5 can later be resumed instead of restarting from zero.
+   *
+   * WRITING is automatic; ACTING on it is not. That asymmetry is deliberate and it is the only
+   * one that works: a checkpoint you have to opt into BEFORE the failure is a checkpoint you
+   * never have. Recording a fact changes no behaviour; `resume_from` is what changes behaviour,
+   * and it is explicit.
+   *
+   * Absent = no checkpoints written, and `resume_from` is refused.
+   */
+  checkpoints?: CheckpointStore | undefined;
+  /**
+   * Resume the named gig. The run CONTINUES that gig — same `gig_id` — rather than minting a
+   * new one, because the outputs it restores already carry that id and `OutputStore.trace`
+   * scopes the provenance walk to a single gig. A fresh id would truncate every restored
+   * ancestor out of the chain, which is the opposite of what a resume is for.
+   *
+   * FAILURE POSTURE: a resume that cannot be honoured THROWS `ResumeRefused` and spends
+   * nothing. It never quietly falls back to a cold run. `resume_from` is a claim about a
+   * specific prior run; if the claim is false the caller is wrong about the world and needs to
+   * be told. And the "harmless" alternative is not harmless: a silent cold run charges the
+   * full price and returns a reply indistinguishable from a resume that worked, so the cost
+   * surprise is also an UNOBSERVABLE one. Dropping the flag and re-dispatching is one call
+   * away; noticing a silent $6 is not.
+   */
+  resume_from?: string | undefined;
+  /**
+   * The chair-level reuse cache. Presence IS the opt-in — the runtime never constructs one —
+   * and it enables BOTH reads and writes.
+   *
+   * Writes are gated by the same flag on purpose. This store is cross-gig by construction, so
+   * populating it is itself the decision that run A's sealed outputs may stand in for run B's
+   * work. That is a decision, not a side effect of having run something. The cost is that the
+   * first opted-in run only populates; the second one hits.
+   *
+   * FAILURE POSTURE, and it differs from resume's: a found-but-unusable entry is REPORTED and
+   * the chair does the work. `reuse` names no specific prior run — "no valid entry" is a
+   * normal outcome of a lookup, not a falsified premise — so the honest response is a miss,
+   * loudly recorded in `GigResult.reuse.rejected`, not a dead run.
+   */
+  reuse?: ReuseStore | undefined;
 }
 
 /**
@@ -276,6 +342,46 @@ export interface BudgetState {
   settled_usd: number;
 }
 
+/** One chair that did not run, and what stood in for it. */
+export interface SkippedChair {
+  phase: string;
+  role: string;
+  reason: "resume" | "reuse";
+  /** The gig whose sealed output was used. Equal to this gig's id for a resume. */
+  source_gig_id: string;
+  output_types: string[];
+  /** The content_shas served. Identical to what a fresh derivation would have sealed. */
+  content_shas: string[];
+  /** reuse only — the key that matched, so an operator can reason about WHY it matched. */
+  cache_key?: string;
+}
+
+export interface GigResumeReport {
+  from_gig_id: string;
+  /** When the checkpoint this resume read was last written. */
+  checkpoint_at: string;
+  roles: Array<{ phase: string; role: string; output_types: string[] }>;
+  outputs_restored: number;
+  /**
+   * What the earlier attempt(s) had spent when the checkpoint was written. Deliberately kept
+   * OUT of `GigResult.usage`: #235/#236 made `usage` mean "what THIS run actually captured",
+   * and widening it to "what the gig cost across attempts" would undo that. Two numbers, both
+   * true, reported separately. Absent when the earlier attempt captured no usage.
+   */
+  prior_usage?: unknown;
+}
+
+export interface GigReuseReport {
+  /** Chairs served from a prior gig's sealed output. */
+  hits: Array<{ phase: string; role: string; cache_key: string; source_gig_id: string; output_types: string[] }>;
+  /** Entries that were FOUND and refused. Never a silent miss — a stale entry gets a name. */
+  rejected: Array<{ phase: string; role: string; cache_key: string; reason: string; detail?: string }>;
+  /** Entries written this run. */
+  writes: number;
+  /** Entries that could not be written. Not fatal — the run is unaffected — but not silent. */
+  write_errors: Array<{ phase: string; role: string; reason: string }>;
+}
+
 export interface GigResult {
   gig_id: string;
   standard_slug: string;
@@ -308,6 +414,22 @@ export interface GigResult {
   budget_state?: BudgetState;
   /** Settled model spend (#195). Present when ≥1 real model invocation ran this gig. */
   usage?: GigUsage;
+  /**
+   * Chairs that did not run because a sealed output stood in for them. Present only when
+   * something was actually skipped — so its ABSENCE means every chair ran, and its presence
+   * is the run stating plainly that part of this manifest was recalled rather than derived.
+   */
+  skipped?: readonly SkippedChair[];
+  /** Present when this run resumed a prior attempt at the same gig. */
+  resumed_from?: GigResumeReport;
+  /** Present when the reuse cache was wired, whether or not anything hit. */
+  reuse?: GigReuseReport;
+  /**
+   * The checkpoint store was wired and could not be written. The run is unaffected and
+   * complete — but it is NOT resumable, and an operator who believes otherwise will find out
+   * at the worst possible moment.
+   */
+  checkpoint_error?: string;
 }
 
 /**
@@ -329,6 +451,29 @@ export function partialBudgetState(e: unknown): BudgetState | undefined {
 }
 
 export class RuntimeError extends Error {}
+
+/**
+ * A resume was requested and cannot be honoured. Thrown BEFORE any chair is prepared, so a
+ * refused resume costs nothing.
+ *
+ * Distinct from RuntimeError because it is not a crash and not a composition defect — it is
+ * the engine declining to splice two runs together. `drift` names exactly which identity
+ * fields disagree, so "it refused" is never the whole answer an operator gets.
+ */
+export class ResumeRefused extends Error {
+  public readonly gig_id: string;
+  public readonly drift: readonly string[];
+  constructor(gig_id: string, why: string, drift: readonly string[] = []) {
+    super(
+      `ResumeRefused: cannot resume gig "${gig_id}" — ${why}` +
+        (drift.length > 0 ? ` [${drift.join("; ")}]` : "") +
+        `. Re-dispatch without resume_from to run this cold.`,
+    );
+    this.name = "ResumeRefused";
+    this.gig_id = gig_id;
+    this.drift = drift;
+  }
+}
 
 /**
  * Raised when a gig is cancelled through `RunDeps.signal` (#249). Distinct from RuntimeError
@@ -491,9 +636,30 @@ export async function runGig(
   gigInput: Record<string, unknown>,
   deps: RunDeps,
 ): Promise<GigResult> {
-  const gig_id = deps.gig_id ?? randomUUID();
+  // A resumed run CONTINUES the gig it resumes: same id, so the restored outputs stay in-gig
+  // and `OutputStore.trace` (which scopes its walk to one gig_id) still reaches them. Two ids
+  // for one gig would make the provenance chain end at the resume boundary.
+  if (deps.resume_from !== undefined && deps.gig_id !== undefined && deps.gig_id !== deps.resume_from) {
+    throw new ResumeRefused(
+      deps.resume_from,
+      `the caller supplied a different gig_id ("${deps.gig_id}") — a resumed run continues the gig it resumes, it does not fork one`,
+    );
+  }
+  const gig_id = deps.resume_from ?? deps.gig_id ?? randomUUID();
   const started_at = new Date().toISOString();
   const produced: OutputRecord[] = [];
+
+  // Hoisted: `genome_hash` used to be computed at the very end, purely for the ledger row.
+  // Both halves of reuse need it at t=0 — it is the field that decides whether two runs are
+  // the same pipeline, and a gate that fires after the money is spent is not a gate.
+  const genome_hash = genomeHash(standard);
+
+  // Hash the gig input LAZILY. Three callers want it now (#196's provenance backfill, the
+  // resume identity, and the reuse key) but a hostile or circular payload must not be
+  // canonicalized on a run that never needs it — which is every run that uses none of the
+  // three. Memoized, so it is computed at most once.
+  let gigInputShaCache: string | undefined;
+  const gigInputSha = (): string => (gigInputShaCache ??= sha256Hex(canonJson(gigInput)));
 
   // #195 — settled model spend, accumulated from each agent invocation's `result` event (the
   // stream-json result carries usage + total_cost_usd + a per-model breakdown). These were
@@ -720,6 +886,170 @@ export async function runGig(
   // the manifest. Recording, not enforcement: see the seal loop.
   const unfulfilledOutputs: Array<{ role: string; phase: string; missing: readonly string[] }> = [];
 
+  // ── reuse a sealed output instead of re-deriving it ────────────────────────────────────
+  //
+  // Everything a run skipped, and why. Populated by BOTH halves, because from the manifest's
+  // point of view they are the same event: a chair that did not run, and the sealed output
+  // that stood in for it.
+  const skipped: SkippedChair[] = [];
+  const reuseReport: GigReuseReport = { hits: [], rejected: [], writes: 0, write_errors: [] };
+  let resumedFrom: GigResumeReport | undefined;
+  let checkpointError: string | undefined;
+
+  /**
+   * What "the same run" means, computed once. See RunIdentity in src/reuse.ts for why each
+   * field is here and why `run_fingerprint` is not.
+   */
+  /**
+   * Every resolved skill's verified code_hash, slug-keyed. The code IS the producer for a
+   * skill chair, and `meta.version` can stay put across a rewrite — `loadSkillPackage`
+   * computes the hash from the bytes, which is what makes this honest.
+   */
+  const resolvedSkillHashes = (): Array<{ slug: string; code_hash: string }> => {
+    const out: Array<{ slug: string; code_hash: string }> = [];
+    for (const [slug, dir] of deps.skill_dirs ?? []) {
+      try {
+        const pkg = loadSkillPackage(dir);
+        out.push({ slug, code_hash: pkg.codeHash ?? "" });
+      } catch {
+        // Unreadable here means unusable at dispatch too; record the absence rather than
+        // silently folding nothing, so a skill that vanished moves the identity.
+        out.push({ slug, code_hash: "<unreadable>" });
+      }
+    }
+    return out;
+  };
+
+  const identity = (): RunIdentity => ({
+    standard_slug: standard.slug,
+    genome_hash,
+    // #278 review — genome_hash does NOT see an agent's identity/method/constraints/tools,
+    // nor a skill's code. Those are the producer, and editing one under a stable slug is the
+    // ordinary response to a bad run. Without this the resume gate accepted exactly that.
+    producers_sha: producersSha({ agents: standard.agents, skills: resolvedSkillHashes() }),
+    gig_input_sha: gigInputSha(),
+    model_version: deps.model_version ?? "unknown",
+    depth: deps.depth ?? "",
+    canonical_form_version: CANONICAL_FORM_VERSION,
+  });
+
+  // Roles restored from a checkpoint: they are already sealed, so they never enter a phase's
+  // `remaining` map and are never prepared, budgeted or invoked.
+  const restoredRoles = new Map<string, { phase: string; records: OutputRecord[] }>();
+  // The checkpoint we will WRITE, accumulated as chairs complete. Seeded from the checkpoint we
+  // READ, so a second failure does not throw away the first attempt's progress — otherwise a
+  // gig that failed twice would be resumable only back to the second attempt's starting point.
+  const checkpointRoles = new Map<string, CheckpointRole>();
+  let checkpointStartedAt = started_at;
+
+  if (deps.resume_from !== undefined) {
+    if (!deps.checkpoints) {
+      throw new ResumeRefused(gig_id, "no checkpoint store is wired, so there is nothing to resume from");
+    }
+    let cp: GigCheckpoint | undefined;
+    try {
+      cp = deps.checkpoints.read(gig_id);
+    } catch (e) {
+      throw new ResumeRefused(gig_id, `its checkpoint could not be read — ${e instanceof Error ? e.message : String(e)}`);
+    }
+    if (!cp) throw new ResumeRefused(gig_id, "no checkpoint exists for it (nothing was ever recorded as complete)");
+    if (cp.schema_version !== CHECKPOINT_SCHEMA_VERSION) {
+      throw new ResumeRefused(gig_id, `its checkpoint is schema v${cp.schema_version} and this engine reads v${CHECKPOINT_SCHEMA_VERSION}`);
+    }
+    // THE GATE. A resume into a moved genome would have chairs from genome B consuming sealed
+    // outputs from genome A, and nothing in input_shas / genome_hash / run_fingerprint would
+    // record that it happened — the manifest would describe a system that never existed.
+    const drift = runIdentityMismatch(cp.identity, identity());
+    if (drift.length > 0) {
+      throw new ResumeRefused(gig_id, "it was checkpointed under a different run identity", drift);
+    }
+
+    const rolesInStandard = new Set(standard.phases.flatMap((p) => p.chairs.map((c) => c.role)));
+    for (const r of cp.roles) {
+      // Unreachable past the genome gate (roles live in `standard.phases`, which genomeHash
+      // folds) — but "provably impossible" is not a reason to inject silently if it happens.
+      if (!rolesInStandard.has(r.role)) {
+        throw new ResumeRefused(gig_id, `its checkpoint names role "${r.role}", which this standard does not define`);
+      }
+      const records: OutputRecord[] = [];
+      for (let i = 0; i < r.output_ids.length; i++) {
+        const id = r.output_ids[i]!;
+        const rec = deps.outputs.get(id);
+        if (!rec) {
+          throw new ResumeRefused(gig_id, `its checkpoint names output "${id}" for role "${r.role}", which the output store no longer holds`);
+        }
+        if (rec.content_sha !== r.content_shas[i]) {
+          throw new ResumeRefused(gig_id, `output "${id}" (role "${r.role}") has a different content_sha than the checkpoint recorded — the store moved under it`);
+        }
+        // genomeHash folds the standard and its agents; it does NOT fold the domain-type
+        // registry. So a type that changed shape between attempts is invisible to the gate
+        // above, and its already-sealed records would be injected into a run whose validator
+        // no longer agrees with them. Same fingerprint tool the chair-level cache uses.
+        const fp = deps.outputs.typeFingerprint(rec.domain_type);
+        if (fp === "") {
+          throw new ResumeRefused(gig_id, `the registry can no longer describe type "${rec.domain_type}" (role "${r.role}"), so its sealed output cannot be checked`);
+        }
+        if (fp !== r.type_fingerprints[i]) {
+          throw new ResumeRefused(gig_id, `type "${rec.domain_type}" (role "${r.role}") has changed shape since that output was sealed`);
+        }
+        records.push(rec);
+      }
+      restoredRoles.set(r.role, { phase: r.phase, records });
+      checkpointRoles.set(r.role, r);
+    }
+    checkpointStartedAt = cp.started_at;
+    resumedFrom = {
+      from_gig_id: gig_id,
+      checkpoint_at: cp.updated_at,
+      roles: cp.roles.map((r) => ({ phase: r.phase, role: r.role, output_types: [...r.domain_types] })),
+      outputs_restored: [...restoredRoles.values()].reduce((n, v) => n + v.records.length, 0),
+      ...(cp.prior_usage !== undefined ? { prior_usage: cp.prior_usage } : {}),
+    };
+    emit({
+      type: "gig_resumed", from_gig_id: gig_id,
+      roles: [...restoredRoles.keys()], outputs: resumedFrom.outputs_restored,
+    });
+  }
+
+  /** Record a completed chair against the checkpoint we will write. */
+  function noteCheckpointRole(role: string, phaseName: string, records: readonly OutputRecord[]): void {
+    if (!deps.checkpoints || records.length === 0) return;
+    checkpointRoles.set(role, {
+      role, phase: phaseName,
+      output_ids: records.map((r) => r.id),
+      content_shas: records.map((r) => r.content_sha),
+      domain_types: records.map((r) => r.domain_type),
+      type_fingerprints: records.map((r) => deps.outputs.typeFingerprint(r.domain_type)),
+      sealed_at: new Date().toISOString(),
+    });
+  }
+
+  /**
+   * Flush the checkpoint. Called at every dispatch-batch boundary — including BEFORE the throw
+   * that a failed batch raises, so a batch whose siblings succeeded still banks them.
+   *
+   * Swallow-and-report: a checkpoint write that fails must not kill a run that is otherwise
+   * fine (the money is already spent), but it must not be invisible either — a caller who
+   * believes the run is resumable and is wrong finds out at the worst possible moment.
+   */
+  function saveCheckpoint(): void {
+    if (!deps.checkpoints || checkpointRoles.size === 0) return;
+    try {
+      const prior = finalizeUsage();
+      deps.checkpoints.write({
+        schema_version: CHECKPOINT_SCHEMA_VERSION,
+        gig_id,
+        identity: identity(),
+        started_at: checkpointStartedAt,
+        updated_at: new Date().toISOString(),
+        roles: [...checkpointRoles.values()],
+        ...(prior ? { prior_usage: JSON.parse(JSON.stringify(prior)) as unknown } : {}),
+      });
+    } catch (e) {
+      checkpointError ??= e instanceof Error ? e.message : String(e);
+    }
+  }
+
   try {
 
   for (const phase of standard.phases) {
@@ -732,7 +1062,30 @@ export async function runGig(
     // into a single RuntimeError naming every failing chair role. Cross-phase
     // depends_on works because `producedByRole` carries across phases.
     const remaining = new Map<string, Chair>();
-    for (const ch of phase.chairs) remaining.set(ch.role, ch);
+    for (const ch of phase.chairs) {
+      // A role restored from this gig's checkpoint never enters the frontier at all: not
+      // prepared, not budgeted, not invoked. Seeding `producedByRole` here (rather than before
+      // the phase loop) keeps `produced` in phase order, which the legacy no-depends_on input
+      // gathering and ChairSelectionView both read.
+      const restored = restoredRoles.get(ch.role);
+      if (!restored) {
+        remaining.set(ch.role, ch);
+        continue;
+      }
+      producedByRole.set(ch.role, restored.records);
+      produced.push(...restored.records);
+      const row: SkippedChair = {
+        phase: phase.name, role: ch.role, reason: "resume", source_gig_id: gig_id,
+        output_types: restored.records.map((r) => r.domain_type),
+        content_shas: restored.records.map((r) => r.content_sha),
+      };
+      skipped.push(row);
+      emit({
+        type: "chair_skipped", phase: phase.name, role: ch.role, reason: "resume",
+        source_gig_id: gig_id, output_types: row.output_types,
+      });
+    }
+    if (remaining.size === 0) continue; // wholly restored phase — nothing to dispatch
 
     while (remaining.size > 0) {
       checkpoint(); // between dispatch batches — stops the NEXT topological level from firing
@@ -799,12 +1152,18 @@ export async function runGig(
         } else {
           producedByRole.set(ch.role, r.value);
           produced.push(...r.value);
+          noteCheckpointRole(ch.role, phase.name, r.value);
         }
       }
       // #233 — BATCH BOUNDARY is the only point at which real settled dollars can be
       // reconciled into the budget: prepareChair ran for every chair in this batch before any
       // of them was invoked, so no chair could have seen its siblings' cost. Reporting only.
       if (budget) budget.settled_usd = usage.total_cost_usd;
+
+      // Bank progress BEFORE the failure throw below. A batch whose siblings succeeded has
+      // durable outputs either way; the checkpoint is what makes them reachable next time,
+      // and writing it only on the happy path would forfeit exactly the runs that need it.
+      saveCheckpoint();
 
       if (failures.length > 0) {
         // A cancellation that reached the chair's child (level 3) surfaces here as a rejected
@@ -846,6 +1205,16 @@ export async function runGig(
     /** #232 — append-unit cost RESERVED for this chair at prep. Settled to `spent` only on
      *  success; released without charge otherwise. Absent when no budget is enforced. */
     cost?: number;
+    /** Who the sealed record names as producer, and under which domain. Resolved at prep so
+     *  the reuse key and the seal agree by construction rather than by two parallel derivations. */
+    producer_slug: string;
+    domain: string;
+    /** Set whenever `deps.reuse` is wired — the key this chair's work hashes to, hit or miss.
+     *  Kept on a miss too: it is what the post-seal cache WRITE is addressed by. */
+    reuse_key?: string;
+    /** Set on a HIT. Every record in it has already passed `validateWrite` and re-hashed to
+     *  the content_sha the original seal produced, so `executeChair` only has to write. */
+    reuse_hit?: { cache_key: string; source_gig_id: string; outputs: readonly ReuseOutput[] };
   }
 
   // Resolve a chair's declared output types into seal-specs (type → core → primitive).
@@ -855,6 +1224,101 @@ export async function runGig(
       const primitive = (CORE_TO_PRIMITIVE[core] ?? fallbackPrimitive) as Agent["primitives"][number];
       return { domain_type: dt, core_type: core, primitive };
     });
+  }
+
+  /**
+   * Is there a prior sealed output that stands in for what this chair is about to derive?
+   *
+   * Runs at PREP time, before the budget gate, because a chair that will not be invoked must
+   * not be charged for the context it will not consume. Returns the key on every path — a
+   * miss still needs it, since the key is what the post-seal cache write is addressed by.
+   *
+   * A plain miss (no entry) is silent: nothing was found, there is nothing to say. An entry
+   * that was FOUND and refused is always reported, on the event stream and in the manifest —
+   * "the cache stopped hitting" must never be something an operator has to guess at.
+   */
+  function lookupReuse(a: {
+    chair: Chair;
+    phaseName: string;
+    inputs: readonly OutputRecord[];
+    output_specs: PreparedChair["output_specs"];
+    agent?: Agent | undefined;
+    skill_provenance?: unknown;
+    skills: readonly SkillRecord[];
+    producer_slug: string;
+    domain: string;
+  }): { key: string; hit?: { cache_key: string; source_gig_id: string; outputs: readonly ReuseOutput[] } } | undefined {
+    const store = deps.reuse;
+    if (!store) return undefined;
+    const key = reuseCacheKey({
+      standard_slug: standard.slug,
+      phase: a.phaseName,
+      chair: a.chair,
+      agent: a.agent ?? null,
+      ...(a.skill_provenance !== undefined ? { skill_provenance: a.skill_provenance } : {}),
+      skills: a.skills.map((s) => ({
+        slug: s.slug,
+        version: Number((s as unknown as { version?: unknown }).version ?? 0),
+        code_hash: s.code_hash ?? "",
+      })),
+      input_shas: a.inputs.map((i) => i.content_sha),
+      gig_input_sha: gigInputSha(),
+      model_version: deps.model_version ?? "unknown",
+      depth: deps.depth ?? "",
+      output_types: a.output_specs.map((s) => s.domain_type),
+      canonical_form_version: CANONICAL_FORM_VERSION,
+    });
+    const reject = (reason: string, detail?: string): { key: string } => {
+      reuseReport.rejected.push({ phase: a.phaseName, role: a.chair.role, cache_key: key, reason, ...(detail !== undefined ? { detail } : {}) });
+      emit({ type: "reuse_rejected", phase: a.phaseName, role: a.chair.role, cache_key: key, reason, ...(detail !== undefined ? { detail } : {}) });
+      return { key };
+    };
+
+    let entry: ReuseEntry | undefined;
+    try {
+      entry = store.get(key);
+    } catch (e) {
+      return reject("unreadable", e instanceof Error ? e.message : String(e));
+    }
+    if (!entry) return { key }; // a plain miss — free, and the status quo
+
+    const check = checkReuseEntry(entry, (t) => deps.outputs.typeFingerprint(t));
+    if (!check.ok) return reject(check.reason ?? "rejected", check.detail);
+
+    // THE AUTHORITATIVE GUARD. Reuse must never become a way to skip a check: #243 made
+    // `output_contract` a floor and #263 made `core_type` agree with the registry, and a
+    // recalled output owes those invariants exactly as much as a derived one does.
+    //
+    // Every record is put through `validateWrite` — the SAME gate `write` runs, from the same
+    // implementation — and re-hashed under THIS run's resolved core/primitive/domain. Two
+    // properties fall out. First, an entry whose bytes no longer satisfy their type is
+    // refused rather than injected, whatever made it stale (a genome edit the fingerprint
+    // caught, an older engine's looser floor, a hand edit). Second, deciding here — before a
+    // single write — is what makes a multi-output chair all-or-nothing: an entry whose second
+    // record fails cannot leave its first one durable.
+    for (const o of entry.outputs) {
+      const spec = a.output_specs.find((s) => s.domain_type === o.domain_type);
+      if (!spec) return reject("seal-rejected", `the entry carries "${o.domain_type}", which this chair does not seal`);
+      const gate = deps.outputs.validateWrite({ core_type: spec.core_type, domain_type: o.domain_type, data: o.data });
+      if (!gate.valid) return reject("seal-rejected", gate.reason);
+      // Re-hashing proves the substitution is content-identical to what the original seal
+      // produced. It is also what lets a reused run carry the same `run_fingerprint` as the
+      // cold run it stands in for — the claim reuse is implicitly making.
+      const sha = outputContentHash({
+        core_type: spec.core_type,
+        domain_type: o.domain_type,
+        domain_type_version: 1,
+        domain: a.domain,
+        primitive: spec.primitive,
+        phase: a.phaseName,
+        agent_slug: a.producer_slug,
+        data: o.data,
+      });
+      if (sha !== o.content_sha) {
+        return reject("content-sha-mismatch", `re-sealing "${o.domain_type}" here yields a different content_sha than the entry recorded`);
+      }
+    }
+    return { key, hit: { cache_key: key, source_gig_id: entry.source_gig_id, outputs: entry.outputs } };
   }
 
   function prepareChair(chair: Chair, phaseName: string): PreparedChair {
@@ -888,7 +1352,28 @@ export async function runGig(
       }
       // A skill-backed chair seals exactly one output (its deterministic code returns one blob).
       const output_specs = [{ domain_type, core_type: core, primitive }];
-      return { chair, phaseName, skill_dir: dir, primitive, domain_type, output_specs, inputs, skills: [], missing_skills: [] };
+      // The producer of a skill chair is its CODE, so the key must name the verified code_hash
+      // — a skill whose implementation changed under a stable slug is a different producer.
+      // Loaded here only when reuse is on, and a load failure degrades to "no key" (a miss)
+      // rather than throwing: executeChair raises the real error a moment later, and a
+      // prep-time throw would change which layer reports it.
+      let skillIdentity: unknown;
+      if (deps.reuse) {
+        try {
+          const pkg = loadSkillPackage(dir);
+          skillIdentity = { slug: pkg.meta.slug, version: pkg.meta.version, code_hash: pkg.codeHash ?? "", tier: pkg.meta.permission?.tier ?? 0 };
+        } catch { /* no identity → no key → no reuse for this chair */ }
+      }
+      const skillReuse = skillIdentity === undefined
+        ? undefined
+        : lookupReuse({ chair, phaseName, inputs, output_specs, skill_provenance: skillIdentity, skills: [], producer_slug: chair.skill_slug!, domain: standard.domain });
+      return {
+        chair, phaseName, skill_dir: dir, primitive, domain_type, output_specs, inputs,
+        skills: [], missing_skills: [],
+        producer_slug: chair.skill_slug!, domain: standard.domain,
+        ...(skillReuse ? { reuse_key: skillReuse.key } : {}),
+        ...(skillReuse?.hit ? { reuse_hit: skillReuse.hit } : {}),
+      };
     }
 
     const agent = standard.agents.find((a) => a.slug === chair.agent_slug);
@@ -998,6 +1483,22 @@ export async function runGig(
       emit({ type: "skills_unresolved", phase: phaseName, role: chair.role, agent: agent.slug, missing: [...missing] });
     }
 
+    // Seal one record per type THIS CHAIR promises (#174): the output_contract is the SELECTOR,
+    // not just a check — a chair bound to a multi-output agent seals only the subset it declares,
+    // intersected with the agent's real outputs (so a stray contract entry can't conjure a type
+    // the agent doesn't produce; the post-invocation check below still reports that mismatch).
+    // Empty contract (legacy hand-rolled chair) → fall back to the agent's full output set.
+    const wanted = chair.output_contract.length
+      ? agent.output_types.filter((t) => chair.output_contract.includes(t))
+      : agent.output_types;
+    const output_specs = outputSpecsFor(wanted, primitive);
+    const domain = agent.domain ?? standard.domain;
+
+    // REUSE LOOKUP — deliberately ABOVE the budget gate. A chair served from cache consumes no
+    // context, so charging it (or worse, refusing it for lack of allowance) would be the budget
+    // enforcing a cost that is not going to be incurred.
+    const lookup = lookupReuse({ chair, phaseName, inputs, output_specs, agent, skills, producer_slug: agent.slug, domain });
+
     // BUDGET GATE — pre-invocation, and a RESERVATION only (#232). Synchronous so
     // BudgetExhausted (and a TypeError thrown from JSON.stringify on a circular gig_input)
     // propagate unwrapped to the caller rather than being aggregated as a chair failure.
@@ -1009,7 +1510,7 @@ export async function runGig(
     // charged and `invokeAndWriteChair` then ran for nobody. The operator saw spend for work
     // that never started, and that inflated figure is what BudgetExhausted.state reported.
     let reservedCost: number | undefined;
-    if (budget) {
+    if (budget && !lookup?.hit) {
       const cost = computeAppendCost({ agent, phase: phaseName, inputs, gig_input: gigInput }, budget.base_cost, budget.k);
       const available = budget.balance - reserved;
       if (available < cost) {
@@ -1022,16 +1523,13 @@ export async function runGig(
       reservedCost = cost;
     }
 
-    // Seal one record per type THIS CHAIR promises (#174): the output_contract is the SELECTOR,
-    // not just a check — a chair bound to a multi-output agent seals only the subset it declares,
-    // intersected with the agent's real outputs (so a stray contract entry can't conjure a type
-    // the agent doesn't produce; the post-invocation check below still reports that mismatch).
-    // Empty contract (legacy hand-rolled chair) → fall back to the agent's full output set.
-    const wanted = chair.output_contract.length
-      ? agent.output_types.filter((t) => chair.output_contract.includes(t))
-      : agent.output_types;
-    const output_specs = outputSpecsFor(wanted, primitive);
-    return { chair, phaseName, agent, primitive, domain_type, output_specs, inputs, skills, missing_skills: missing, ...(reservedCost !== undefined ? { cost: reservedCost } : {}) };
+    return {
+      chair, phaseName, agent, primitive, domain_type, output_specs, inputs, skills,
+      missing_skills: missing, producer_slug: agent.slug, domain,
+      ...(reservedCost !== undefined ? { cost: reservedCost } : {}),
+      ...(lookup ? { reuse_key: lookup.key } : {}),
+      ...(lookup?.hit ? { reuse_hit: lookup.hit } : {}),
+    };
   }
 
   // #232 — convert a chair's reservation into settled spend, or release it. `spent` moves ONLY
@@ -1065,13 +1563,66 @@ export async function runGig(
   }
 
   async function executeChair(p: PreparedChair): Promise<OutputRecord[]> {
-    const { chair, phaseName, inputs, skills, output_specs } = p;
+    const { chair, phaseName, inputs, skills, output_specs, producer_slug, domain } = p;
     const t0 = Date.now();
+
+    // ── REUSE HIT ────────────────────────────────────────────────────────────────────────
+    // Everything that could refuse this was decided at prep, before a byte was written. What
+    // is left is a normal seal: the record is written through the SAME `deps.outputs.write`
+    // gate a derived one crosses, into THIS gig, with THIS gig's `input_refs`/`input_shas`
+    // and provenance edges. The only thing skipped is the invocation.
+    //
+    // No `chair_start` is emitted — the chair did not start. `chair_skipped` is a different
+    // event precisely so a monitor cannot render a recall as a very fast derivation.
+    if (p.reuse_hit) {
+      const hit = p.reuse_hit;
+      const written: OutputRecord[] = [];
+      for (const o of hit.outputs) {
+        const spec = output_specs.find((s) => s.domain_type === o.domain_type)!;
+        const rec = deps.outputs.write({
+          core_type: spec.core_type,
+          domain_type: o.domain_type,
+          domain,
+          gig_id,
+          agent_slug: producer_slug,
+          from_role: chair.role,
+          phase: phaseName,
+          primitive: spec.primitive,
+          data: o.data,
+          input_refs: inputs.map((i) => i.id),
+          input_shas: inputs.map((i) => i.content_sha),
+          ...(o.skill_provenance ? { skill_provenance: o.skill_provenance } : {}),
+          reused_from: { output_id: o.source_output_id, gig_id: hit.source_gig_id, cache_key: hit.cache_key },
+        });
+        for (const i of inputs) deps.outputs.addRef(rec.id, i.id, "derived_from", spec.primitive);
+        written.push(rec);
+      }
+      const types = written.map((w) => w.domain_type);
+      // #278 review — a recalled chair owes the SAME manifest row a derived one does. The
+      // early return skipped the `unfulfilled_outputs` push below, so a declared-optional
+      // shortfall present in the cold run vanished on the reuse hit. The engine's own comment
+      // three lines from that push says a declared-optional absence "is still a fact about
+      // this run", and hiding it here made a reused run's manifest quietly better than the
+      // run it stands in for — while carrying an identical run_fingerprint.
+      const reusedMissing = output_specs.map((sp) => sp.domain_type).filter((t) => !types.includes(t));
+      if (reusedMissing.length > 0) {
+        unfulfilledOutputs.push({ role: chair.role, phase: phaseName, missing: reusedMissing });
+      }
+      skipped.push({
+        phase: phaseName, role: chair.role, reason: "reuse", source_gig_id: hit.source_gig_id,
+        output_types: types, content_shas: written.map((w) => w.content_sha), cache_key: hit.cache_key,
+      });
+      reuseReport.hits.push({ phase: phaseName, role: chair.role, cache_key: hit.cache_key, source_gig_id: hit.source_gig_id, output_types: types });
+      emit({
+        type: "chair_skipped", phase: phaseName, role: chair.role, reason: "reuse",
+        source_gig_id: hit.source_gig_id, output_types: types, cache_key: hit.cache_key,
+      });
+      return written;
+    }
+
     const producerHint = chair.skill_slug || p.agent?.slug || chair.agent_slug || chair.role;
     emit({ type: "chair_start", phase: phaseName, role: chair.role, producer: producerHint });
     let data: Record<string, unknown>;
-    let producer_slug: string;
-    let domain: string;
     // Skill-backed chairs record which skill (version + verified code_hash + tier) sealed the
     // output, so the ledger entry traces back to the exact SkillChainEvent. Undefined for agents.
     let skill_provenance: { slug: string; version: number; code_hash: string; tier: number } | undefined;
@@ -1082,11 +1633,15 @@ export async function runGig(
       // when it's a root chair). This is the proper fix for "an LLM should not babysit a
       // deterministic command": the command IS the chair.
       const skillInput = inputs.length > 0 ? Object.assign({}, ...inputs.map((i) => i.data)) : gigInput;
-      const r = executeSkill(p.skill_dir, skillInput);
+      // #253 — the ASYNC path, threaded with the run's abort signal. `executeSkill` uses
+      // spawnSync, which blocks the event loop for the skill's whole timeout (120s by
+      // default), so the cooperative abort chain could not run and the abort event could not
+      // even be DELIVERED. `gig_abort` during a skill chair was a promise the engine could
+      // not keep — #249's shape again, but a missing opportunity to kill rather than a
+      // missing kill.
+      const r = await executeSkillAsync(p.skill_dir, skillInput, 120_000, { signal: deps.signal });
       if (!r.ok) throw new RuntimeError(`skill chair "${chair.role}" ("${chair.skill_slug}") failed: ${r.error}`);
       data = (r.output && typeof r.output === "object" ? r.output : {}) as Record<string, unknown>;
-      producer_slug = chair.skill_slug!;
-      domain = standard.domain;
       const pkg = loadSkillPackage(p.skill_dir);
       skill_provenance = {
         slug: pkg.meta.slug,
@@ -1129,8 +1684,6 @@ export async function runGig(
           }
         }
       }
-      producer_slug = agent.slug;
-      domain = agent.domain ?? standard.domain;
     }
 
     // Seal one record per type this chair seals. The invoker blob may be keyed by domain_type
@@ -1177,10 +1730,8 @@ export async function runGig(
       set.add(inp.content_sha);
       shasByType.set(inp.domain_type, set);
     }
-    // Hash the gig input lazily — only when a placeholder actually resolves to it (most outputs have
-    // no *_sha fields, and a hostile/circular gig input shouldn't be canonicalized unless needed).
-    let gigInputShaCache: string | undefined;
-    const gigInputSha = (): string => (gigInputShaCache ??= sha256Hex(canonJson(gigInput)));
+    // The gig-input hash is lazy and memoized at the gig level (see `gigInputSha` above) —
+    // only computed when a placeholder actually resolves to it, or when resume/reuse needs it.
     type ShaResolution = { sha: string } | { ambiguous: string[] } | undefined;
     const resolveSha = (field: string): ShaResolution => {
       const bare = field.replace(/_sha$/i, "");
@@ -1292,7 +1843,34 @@ export async function runGig(
       );
     }
 
-    // Contract satisfied. Only now does anything become durable.
+    // Contract satisfied — and now the SEAL gates, still before anything is durable.
+    //
+    // #243 moved the contract checks ahead of the writes, which stopped a chair that
+    // under-delivered from leaving orphans behind. It did not close the whole hole:
+    // `write()` also validates (core agreement #263, the registry schema, the #227/#228
+    // substance floor), so a chair whose SECOND output failed one of those had already
+    // flushed its first to `outputs/<gig_id>.jsonl`. Same outcome by a different door —
+    // sealed records belonging to a gig that failed, and two audit surfaces disagreeing by
+    // construction.
+    //
+    // `validateWrite` is the gate `write` runs, asked as a question instead. The reuse path
+    // already uses it to make a multi-output entry all-or-nothing; the derived path gets it
+    // for exactly the same reason.
+    for (const { spec, slice } of resolved) {
+      const check = deps.outputs.validateWrite({
+        core_type: spec.core_type,
+        domain_type: spec.domain_type,
+        data: slice,
+      });
+      if (!check.valid) {
+        throw new RuntimeError(
+          `chair "${chair.role}" cannot seal "${spec.domain_type}": ${check.reason}. ` +
+            `Nothing was written — a chair's outputs are all-or-nothing.`,
+        );
+      }
+    }
+
+    // Only now does anything become durable.
     const written: OutputRecord[] = [];
     for (const { spec, slice } of resolved) {
       const rec = deps.outputs.write({
@@ -1307,10 +1885,54 @@ export async function runGig(
         data: slice,
         input_refs: inputs.map((i) => i.id),
         input_shas: inputs.map((i) => i.content_sha), // #196 — real predecessor hashes, engine-stamped
+        // WHICH model produced this, resolved through the invoker's own function so the stamp
+        // and the spawn cannot disagree. Absent for a skill-backed chair — no model ran, and
+        // absent must mean unknown rather than "the default".
+        ...(p.agent
+          ? {
+              model: resolveModel(p.agent.model_tier, deps.model_version),
+              ...(p.agent.model_tier ? { model_tier: p.agent.model_tier } : {}),
+            }
+          : {}),
         skill_provenance,
       });
       for (const i of inputs) deps.outputs.addRef(rec.id, i.id, "derived_from", spec.primitive);
       written.push(rec);
+    }
+    // Populate the cache. Only from a DERIVED chair (a recall has nothing new to record) and
+    // only when this run opted in — the store is cross-gig by construction, so writing to it
+    // is the decision that this run's outputs may stand in for another's.
+    //
+    // A write failure is recorded, not raised: the run is complete and correct either way, and
+    // killing a finished $6 gig because a cache file would not persist is the wrong trade. It
+    // is still not silent — a cache nobody can write is one an operator should know about.
+    if (deps.reuse && p.reuse_key && !p.reuse_hit && written.length > 0) {
+      const entryOutputs: ReuseOutput[] = [];
+      let cacheable = true;
+      for (const w of written) {
+        const fp = deps.outputs.typeFingerprint(w.domain_type);
+        // An entry whose type cannot be described could never be validated on read, so it
+        // would be refused there. Not writing it is the same decision, made earlier.
+        if (fp === "") { cacheable = false; break; }
+        entryOutputs.push({
+          core_type: w.core_type, domain_type: w.domain_type, domain: w.domain,
+          primitive: w.primitive, agent_slug: w.agent_slug, phase: phaseName,
+          data: w.data, content_sha: w.content_sha, type_fingerprint: fp, source_output_id: w.id,
+          ...(w.skill_provenance ? { skill_provenance: w.skill_provenance } : {}),
+        });
+      }
+      if (cacheable) {
+        try {
+          deps.reuse.put({
+            schema_version: REUSE_SCHEMA_VERSION, cache_key: p.reuse_key,
+            source_gig_id: gig_id, source_role: chair.role,
+            created_at: new Date().toISOString(), outputs: entryOutputs,
+          });
+          reuseReport.writes++;
+        } catch (e) {
+          reuseReport.write_errors.push({ phase: phaseName, role: chair.role, reason: e instanceof Error ? e.message : String(e) });
+        }
+      }
     }
     // A DECLARED-optional absence is still a fact about this run. Legitimising a shortfall is
     // not the same as hiding it, so it keeps its row in the manifest.
@@ -1325,7 +1947,6 @@ export async function runGig(
     return written;
   }
 
-  const genome_hash = genomeHash(standard);
   // Content-address each output (not its random UUID) so the fingerprint is
   // reproducible: an honest replay of the same outputs recomputes the same
   // hashes, while changed content shifts them. See outputContentHash.
@@ -1387,11 +2008,25 @@ export async function runGig(
     budget.settled_usd = usage.total_cost_usd; // #233 — final reconciliation of REAL dollars
   }
 
+  // The gig finished, so there is nothing left to resume — drop its checkpoint. Without this
+  // every gig a deployment ever runs leaves a file behind forever. Only the SUCCESS path clears
+  // it: a failed or aborted run's checkpoint is exactly what a later resume reads, and this line
+  // is not reached on either.
+  try { deps.checkpoints?.remove(gig_id); } catch { /* reclaiming disk must not fail a run that succeeded */ }
+
   const result: GigResult = { gig_id, standard_slug: standard.slug, genome_hash, run_fingerprint, outputs: produced, eval_scores, status: "complete" };
   if (settledUsage) result.usage = settledUsage;
   if (budget) result.budget_state = budget;
   if (unresolved_evals.length > 0) result.unresolved_evals = unresolved_evals;
   if (unfulfilledOutputs.length > 0) result.unfulfilled_outputs = unfulfilledOutputs;
+  // Say what was skipped and why. The ABSENCE of these fields is itself a claim — that every
+  // chair in this manifest ran — so they are present only when there is something to report,
+  // and `reuse` is present whenever the cache was wired even if nothing hit (a zero-hit run is
+  // a fact about the cache, not an absence of one).
+  if (skipped.length > 0) result.skipped = skipped;
+  if (resumedFrom) result.resumed_from = resumedFrom;
+  if (deps.reuse) result.reuse = reuseReport;
+  if (checkpointError !== undefined) result.checkpoint_error = checkpointError;
   emit({ type: "gig_complete", outputs: produced.length });
   return result;
 

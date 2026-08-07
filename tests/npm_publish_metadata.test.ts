@@ -78,10 +78,10 @@ describe("npm-publish metadata — version + license + author", () => {
 });
 
 describe("npm-publish metadata — repository + homepage + bugs", () => {
-  it("declares a repository pointing at eir-dev/coltrane", () => {
+  it("declares a repository pointing at eir-labs/coltrane", () => {
     const pkg = readPkg();
     const url = typeof pkg.repository === "string" ? pkg.repository : pkg.repository?.url ?? "";
-    expect(url).toMatch(/eir-dev\/coltrane/i);
+    expect(url).toMatch(/eir-labs\/coltrane/i);
   });
   it("declares homepage + bugs", () => {
     const pkg = readPkg();

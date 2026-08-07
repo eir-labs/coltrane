@@ -5,13 +5,13 @@
   "type": "module",
   "license": "Apache-2.0",
   "author": "Eir",
-  "homepage": "https://github.com/eir-dev/coltrane#readme",
+  "homepage": "https://github.com/eir-labs/coltrane#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/eir-dev/coltrane.git"
+    "url": "git+https://github.com/eir-labs/coltrane.git"
   },
   "bugs": {
-    "url": "https://github.com/eir-dev/coltrane/issues"
+    "url": "https://github.com/eir-labs/coltrane/issues"
   },
   "keywords": [
     "mcp",

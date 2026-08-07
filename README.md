@@ -20,11 +20,33 @@
 ## Run it
 
 ```bash
-git clone <repo-url> coltrane && cd coltrane
-npm install && npm run build
+npm install -g @eir-labs/coltrane
 ```
 
-Open Claude Code in this directory and say **hi**. The repo ships its own `.mcp.json`, so Coltrane's MCP server starts on its own — nothing to wire up. On a fresh clone, Claude offers to calibrate the instrument to you before any work starts.
+Three verbs and a JSON file:
+
+```bash
+coltrane validate                       # load the genome; non-zero exit on any error
+coltrane dispatch <standard> --input @in.json --depth skim
+coltrane trace <output-id>              # walk a result back to its root signals
+```
+
+`coltrane validate` is the one worth wiring into CI. It exits non-zero on any definition the
+loader cannot resolve, which turns a genome change from something a person has to remember to
+check into a job that fails in seconds without spending a token.
+
+**As an MCP server instead.** Point `.mcp.json` at the installed package and the
+`mcp__coltrane__*` tools appear in any MCP client:
+
+```json
+{ "mcpServers": { "coltrane": {
+    "command": "node",
+    "args": ["./node_modules/@eir-labs/coltrane/dist/src/server_entry.js"],
+    "env": { "COLTRANE_GENOME": "${PWD}" } } } }
+```
+
+Or clone this repo and open Claude Code in it — it ships its own `.mcp.json`, and on a fresh
+clone Claude offers to calibrate the instrument to you before any work starts.
 
 ## What this is
 
@@ -39,7 +61,7 @@ The bet underneath it: the reason jazz works is that music theory is well-define
 **Traceability — what ran, what changed, how it ran, why this result.**
 Every gig seals a `genome_hash` + `run_fingerprint` into an append-only ledger, and every output knows its parents. You can walk any result back to the raw input and the wiring that produced it — which standard ran, which agents filled which chairs, and which outputs fed which.
 
-`genome_hash` is a **structural** hash: it covers the standard's phase graph and each agent's slug, primitives, `input_types`, `output_types`, and domain. It deliberately does **not** cover an agent's `identity`, `method`, `constraints`, `behavioral_primitives`, `allowed_tools`, model tier, or `skill_slugs`. Two genomes that differ only in those fields produce the same `genome_hash` — and therefore the same `run_fingerprint` when their outputs coincide. So the chain answers *"was the wiring the same?"*, not *"was the prompt the same?"*. Authoring-time `content_hash`/`effective_hash` (sealed by `agent_define` and friends) *do* cover the full definition bytes; those are the hashes to compare when you need behavioral identity.
+`genome_hash` is a **structural** hash: it covers the standard's phase graph and each agent's slug, primitives, `input_types`, `output_types`, and domain. It deliberately does **not** cover an agent's `identity`, `method`, `constraints`, `behavioral_primitives`, `allowed_tools`, model tier, or `skill_slugs`. Two genomes that differ only in those fields produce the same `genome_hash` — and therefore the same `run_fingerprint` when their outputs coincide. So the chain answers *"was the wiring the same?"*, not *"was the prompt the same?"*. Authoring-time `content_hash`/`effective_hash` (sealed by `agent_define` and friends) *do* cover the full definition bytes; those are the hashes to compare when you need behavioral identity. Resume and reuse fold a third hash, `producers_sha`, over the whole agent definition plus each skill's verified `code_hash` — so an edit under a stable slug cannot silently splice two genomes together across a resume.
 
 **Reproducibility — can I run it reliably? Is it correct? Is it true?**
 The same genome replays byte-for-byte. The fingerprint distinguishes an honest replay from a tamper, so "it worked" becomes a checkable claim instead of a vibe.
@@ -59,6 +81,13 @@ Coltrane standards work the same way. The leverage is up top, at **definition ti
 - **Model the domain first.** Before doing the work, pause and dispatch a gig to define the *type space* of the domain — its shapes and the relationships between them. This formal step up front buys enormous solidity downstream. Let Coltrane learn a little about the domain, then run research / double-diamond standards to explore it in more dimensions than you'd think to on your own. (The fun part: push a *book* through a pipeline built for a *codebase* and watch what falls out — typed data run through consistent processes finds connections nobody asked for.)
 - **Orientation is everything.** Players aren't freely swappable; the orientation of an agent is the single biggest predictor of whether the band coheres. Claude can play almost any instrument — you just have to point it at the right method *before* the work starts.
 - **The score is built at runtime.** Prompts don't live in hand-edited `.md` files. The work is **encoded into the genome** and **decoded at runtime** for whatever model is playing (Claude today; the pattern is model-agnostic). An agent doesn't wake up and figure out its life — it opens its eyes to a seat, an instrument, a score, and a downbeat. Then it plays.
+
+## Since the first release
+
+- **A command line.** The package shipped only an MCP server, so the engine was reachable from an interactive client and nowhere else — not CI, not cron, not a container. `coltrane` fixes that.
+- **Checkpoint and resume.** A run that stops partway no longer discards the phases that finished. `--resume` continues from the last sealed phase, and refuses rather than silently running cold if the genome, the producers, the payload or the model moved since.
+- **Improvement as a measurement.** `improvement_report` buckets a producer's outputs by version and by model tier, reporting cost and quality together — so "did that change help?" and "does the cheaper model still clear the bar?" are questions with answers. Unmeasured quantities report `null`, never `0`.
+- **The skill loop.** Browse, inspect, execute against fixtures, evolve, promote. A candidate runs against the current fixtures in a throwaway copy and lands only on a clean pass, so a skill cannot regress through that door — and a code skill must pass its own fixtures, deterministically, to become `active`.
 
 ## What's next
 

@@ -25,7 +25,7 @@ const REPO_ROOT = fileURLToPath(new URL("../..", import.meta.url));
 
 // The bin target inside the installed package — what node_modules/.bin/coltrane-server
 // resolves to, and what we boot.
-const INSTALLED_PKG_REL = join("node_modules", "@eir-dev", "coltrane");
+const INSTALLED_PKG_REL = join("node_modules", "@eir-labs", "coltrane");
 const BIN_TARGET_REL = join(INSTALLED_PKG_REL, "dist", "src", "server_entry.js");
 
 let project = ""; // fresh downstream project dir

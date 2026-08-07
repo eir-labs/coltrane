@@ -14,6 +14,28 @@ about what it could run on.
 
 ### Fixed
 
+- **`server_restart` killed the child it had just reported as serving.** The relay's whole
+  purpose is swapping the server child without dropping the client's stdio pipe. Every swap
+  destroyed its own successor roughly two seconds later.
+
+  `restartChild` raced the outgoing child's `exit` against a 2s SIGKILL escalation.
+  `Promise.race` discards the loser's value but does not cancel it, and the timer closed over
+  the mutable `child` binding rather than the process it was armed for. On the ordinary path —
+  old child exits promptly, exit branch wins — the timer stayed armed, fired 2s later, read
+  `child` (by then the healthy replacement), found it alive, and killed it.
+
+  Which symptom you saw depended only on where your next call landed relative to the exit
+  being reaped: `buildNoChildError`, telling you to restart an MCP client that had just
+  restarted successfully — or a write into a dying pipe, silently discarded, hanging forever.
+
+  0.5.0's #260 work made a *failed* swap reportable. This made a *successful* one fatal, which
+  is why it hid behind it. The timer now targets a captured local and is cleared once the swap
+  moves on, so it can only ever reach the process it was armed for.
+
+  Found because `relay_restart_handshake` failed about 1 run in 10 — it finishes inside the 2s
+  window on a quick machine, so it could only catch this by accident. A second case now waits
+  the window out deliberately and asserts the replacement still answers.
+
 - **`engines` promised Node 20; the engine cannot run there.** Skill execution spawns with
   `--permission`, which is Node 22+. On Node 20 every code-bearing skill dies with
   `node: bad option: --permission`. 0.5.0 shipped claiming `>=20`, so npm installed it with a

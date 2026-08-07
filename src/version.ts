@@ -1,11 +1,15 @@
 // The engine's version identity — the thing a consumer can assert against.
 //
-// Why this exists: coltrane is not published to npm, so downstreams vendor it as a
-// git clone. Without an exported version there is no way for a consumer to answer
-// "is the engine I just loaded the engine I was built against?" — the only available
-// check was duck-typing two function names, which passes for *every* revision of the
-// engine and therefore proves nothing. A version mismatch then surfaces as a contract
-// failure deep inside a running gig, minutes and dollars in, instead of at boot.
+// Why this exists: a consumer needs to answer "is the engine I just loaded the engine I
+// was built against?" The only available check was duck-typing two function names, which
+// passes for *every* revision of the engine and therefore proves nothing. A version
+// mismatch then surfaces as a contract failure deep inside a running gig, minutes and
+// dollars in, instead of at boot.
+//
+// This predates publication — it was written when downstreams vendored the engine as a
+// git clone and the range in their package.json could not be the answer. It still is not:
+// a semver range says what npm was asked to install, not what got loaded, and the vendored
+// path remains supported.
 //
 // COLTRANE_VERSION is the single source of truth in code and MUST equal package.json's
 // `version` — `tests/version_identity.test.ts` fails the build if they drift.
@@ -14,7 +18,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 /** Engine semver. Keep in lockstep with package.json `version` (enforced by test). */
-export const COLTRANE_VERSION = "0.5.0";
+export const COLTRANE_VERSION = "0.5.1";
 
 /**
  * The commit this engine checkout is sitting on, or null when it can't be determined.

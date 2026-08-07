@@ -159,3 +159,34 @@ describe("what this sandbox does NOT claim", () => {
     // remaining network capability survivable rather than critical.
   });
 });
+
+// ── the runtime floor ───────────────────────────────────────────────────────
+// CI found this on the first run it was allowed to execute: `package.json` declared
+// `engines: {"node": ">=20"}` and the matrix tested Node 20, but the sandbox spawns with
+// `--permission`, which is Node 22+. Every code-bearing skill died with
+// `node: bad option: --permission` — 18 test files on that leg alone.
+//
+// It could not surface locally: this machine is Node 24. A green local band cannot rule out a
+// claim about a runtime it never runs on, which is the whole argument for the matrix.
+import { MIN_NODE_FOR_SANDBOX } from "../src/skill_subprocess.js";
+import { readFileSync as readPkg } from "node:fs";
+
+describe("the sandbox states the runtime it needs", () => {
+  it("declares an engines floor matching the flag it actually spawns with", () => {
+    const pkg = JSON.parse(readPkg(new URL("../package.json", import.meta.url), "utf-8")) as
+      { engines?: { node?: string } };
+    const declared = pkg.engines?.node ?? "";
+    const floor = Number(declared.replace(/[^\d]/g, "").slice(0, 2));
+    expect(
+      floor,
+      "engines must not promise a Node the sandbox cannot run on — --permission is 22+",
+    ).toBeGreaterThanOrEqual(MIN_NODE_FOR_SANDBOX);
+  });
+
+  it("refuses on an older runtime instead of running skills unsandboxed", () => {
+    // The failure mode being prevented is not the error message. It is the alternative: a
+    // runtime with no permission model executing skill code with none, silently.
+    expect(MIN_NODE_FOR_SANDBOX).toBe(22);
+    expect(Number(process.versions.node.split(".")[0])).toBeGreaterThanOrEqual(MIN_NODE_FOR_SANDBOX);
+  });
+});

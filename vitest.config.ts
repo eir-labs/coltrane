@@ -28,6 +28,10 @@ import { join } from "node:path";
 export default defineConfig({
   test: {
     include: ["tests/**/*.test.ts"],
+    // Build dist/ once, before any file runs. Two pack-audit files each fired `npm pack`,
+    // which fires `prepare` -> `npm run build`, and in parallel they raced on dist/ — one read
+    // runtime.js mid-write and npm reported an unexpected EOF. See tests/_support/build_once.ts.
+    globalSetup: ["tests/_support/build_once.ts"],
     // The suite must never seed the audit spine into the checkout. bootstrapServerDeps()
     // resolves its genome root to the repo (src/server.ts), several suites dispatch real gigs
     // through it, and the ledger now defaults to <root>/.coltrane/ledger.jsonl — so without

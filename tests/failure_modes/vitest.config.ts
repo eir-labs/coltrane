@@ -15,6 +15,10 @@ export default defineConfig({
     // mistaken for real history. This is the "bootstrap honors a test override" half of the
     // fix; FileLedger's lazy construction is the other half.
     env: { COLTRANE_LEDGER_PATH: join(tmpdir(), "coltrane-test-ledger", "ledger.jsonl") },
+    // `midflight_kill` spawns a worker that imports the BUILT FileLedger, so `dist/` has to
+    // exist before the suite runs. Shared with the root config — building twice concurrently
+    // is what broke CI in the first place.
+    globalSetup: ["tests/_support/build_once.ts"],
     testTimeout: 60_000,
     hookTimeout: 60_000,
     pool: "forks",

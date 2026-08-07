@@ -61,6 +61,36 @@ export interface ExecuteResult {
  * rather than denied. What has changed is that the credential is no longer in reach: the child
  * gets an explicit minimal environment (see `skillEnv`), so there is nothing worth exfiltrating.
  */
+/** Node major running this process. */
+function nodeMajor(): number {
+  return Number(process.versions.node.split(".")[0] ?? 0);
+}
+
+/**
+ * The runtime floor for skill execution, checked where it can be explained.
+ *
+ * The sandbox spawns with `--permission`, which is Node 22+. On Node 20 the child dies with
+ * `node: bad option: --permission` — a message that names the flag rather than the reason, and
+ * appears once per skill rather than once per process. `engines` in package.json says `>=22`,
+ * but npm treats that as advisory, so a consumer on 20 reaches here anyway.
+ *
+ * Refusing loudly is the only honest option. There is no degraded mode: running a skill on a
+ * runtime with no permission model means running it UNSANDBOXED, and silently doing that would
+ * invert the guarantee this module exists to provide.
+ */
+export const MIN_NODE_FOR_SANDBOX = 22;
+
+function assertSandboxCapableRuntime(): void {
+  const major = nodeMajor();
+  if (major < MIN_NODE_FOR_SANDBOX) {
+    throw new Error(
+      `coltrane needs Node ${MIN_NODE_FOR_SANDBOX}+ to execute skills; this is Node ${process.versions.node}. ` +
+        `Skill execution is sandboxed with --permission, which does not exist before Node ${MIN_NODE_FOR_SANDBOX}. ` +
+        `Running without it would execute skill code unsandboxed, so it is refused rather than degraded.`,
+    );
+  }
+}
+
 export function tierFlags(tier: number, skillDir?: string): string[] {
   // `RUNNER` lives in this package's dist/; the child must be able to read it to start, and to
   // read the skill it imports. Nothing else.
@@ -143,6 +173,7 @@ export function executeSkill(skillDir: string, input: unknown, timeoutMs = 120_0
   // SIGTERM-trapping child can't survive the timeout.
   const timeout = typeof meta.timeout_ms === "number" ? Math.min(timeoutMs, meta.timeout_ms) : timeoutMs;
   const started = Date.now();
+  assertSandboxCapableRuntime();
   const dir = realDir(skillDir);
   const res = spawnSync("node", [...tierFlags(tier, dir), RUNNER, dir], {
     input: JSON.stringify(input),
@@ -204,6 +235,7 @@ export async function executeSkillAsync(
   const timeout = typeof meta.timeout_ms === "number" ? Math.min(timeoutMs, meta.timeout_ms) : timeoutMs;
 
   return await new Promise<ExecuteResult>((resolve) => {
+    assertSandboxCapableRuntime();
     const dir = realDir(skillDir);
     const child = spawn("node", [...tierFlags(tier, dir), RUNNER, dir], {
       stdio: ["pipe", "pipe", "pipe"], env: skillEnv(),

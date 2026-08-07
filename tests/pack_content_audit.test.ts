@@ -62,15 +62,19 @@ let shipped: string[] = [];
 // same budget; see that file's header for the measurements (3.1–5.6s here, 12.76s on the
 // machine that filed the issue) and for why a generous budget costs a real break nothing.
 //
-// These two files are near-duplicates and each pays its own `npm pack` → `prepare` → `tsc`.
-// They are deliberately NOT merged: they are two different gates (#149 asks which FILES ship,
-// #150 asks what is INSIDE them) with different failure meanings, and they are among the very
-// few things in this repo that type-check the test tree by building it. Both stay in the
-// default run. The duplicated build is ~2 x 4s and is the price of that.
+// These two files are near-duplicates and are deliberately NOT merged: they are two different
+// gates (#149 asks which FILES ship, #150 asks what is INSIDE them) with different failure
+// meanings, and they are among the very few things in this repo that type-check the test tree
+// by building it. Both stay in the default run.
+//
+// They no longer each pay their own build. Running two `npm pack` calls in parallel meant two
+// `prepare` -> `tsc` runs writing dist/ at once, and CI caught one reading runtime.js
+// mid-write (`npm error encountered unexpected EOF`). dist/ is now built once by
+// tests/_support/build_once.ts and both packs run with `--ignore-scripts` against it.
 const PACK_HOOK_TIMEOUT_MS = 120_000;
 
 beforeAll(() => {
-  const out = execFileSync("npm", ["pack", "--dry-run", "--json"], {
+  const out = execFileSync("npm", ["pack", "--dry-run", "--json", "--ignore-scripts"], {
     cwd: REPO_ROOT,
     encoding: "utf-8",
   });

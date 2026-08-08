@@ -26,6 +26,7 @@ import {
   FileLedger, LedgerError, LEDGER_SCHEMA_VERSION, defaultLedgerPath,
   type Ledger, type GovernanceLedgerEntry,
 } from "./ledger.js";
+import { sealDrill } from "./seal_drill.js";
 import { standardSimulate } from "./simulate.js";
 import { runGig, BudgetExhausted, GigAborted, ResumeRefused, partialGigUsage, partialBudgetState, type AgentInvoker } from "./runtime.js";
 import { createCheckpointStore, createReuseStore, type CheckpointStore, type ReuseStore } from "./reuse.js";
@@ -450,7 +451,15 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
           ...(std ? { standard: { slug: std.slug, phases: std.phases.map((p) => ({ name: p.name, chairs: p.chairs.length })) } } : {}),
           ...(observed.length > 0 ? { observed_costs_usd: observed } : {}),
         });
-        return { ok: true, requires_approval: approval, data: res };
+        // WU-0008 — the seal drill: before quoting a price, prove every chair contract
+        // can seal AT ALL. A cost estimate for a run whose terminal chair is doomed is
+        // worse than useless (it prices a failure as if it were work). Failures ride in
+        // the SUCCESS payload loudly; dispatch stays unchanged — the operator decides.
+        const drill = sealDrill(
+          { phases: std.phases.map((p) => ({ name: p.name, chairs: p.chairs.map((c) => ({ role: c.role, output_contract: c.output_contract })) })) },
+          deps.registry,
+        );
+        return { ok: true, requires_approval: approval, data: { ...res, seal_drill: drill } };
       }
       case "output_query": {
         let outs = deps.outputs.all();

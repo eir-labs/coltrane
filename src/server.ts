@@ -993,6 +993,9 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
           slug: baseDef.slug,
           extends: baseDef.extends,
           schema: { properties: nextProps },
+          // 2026-08-08 — the undeclared-required check needs the extension's required
+          // set, or an extend could version-in a requirement no producer can see.
+          required_fields: nextRequired,
         });
         if (extendDefect) {
           return { ok: false, requires_approval: approval, error: `type_extend rejected: ${extendDefect}` };

@@ -61,6 +61,8 @@ export const EXTERNAL_SUBSTRATE: Record<string, string> = {
   "source-walker": "filesystem (local sources)",
   "domain-explorer": "coltrane registry (types, tools, charter, history)",
   "e2e-runner": "subprocess (test harness)",
+  "lineage-scout": "web (formal-lineage corpora: papers, canonical texts)",
+  "provenance-scout": "filesystem (the user's own corpus)",
 };
 
 /** Agents that act through tools (grants required) even where retrieval isn't the job. */

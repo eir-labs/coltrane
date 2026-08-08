@@ -79,6 +79,25 @@ export const DEPTH_MAX_TOOL_CALLS: Partial<Record<Depth, number>> = { skim: 8, q
 // genome's skills map and passes the records through. Empty/absent → the Skills
 // section is omitted entirely (no empty header, no noise) so the model only
 // sees skills the agent actually declared.
+/**
+ * The schema a producer is SHOWN for an output type — by construction the same object
+ * the seal enforces (`Registry.effectiveSchema`), never the raw authored schema.
+ *
+ * 2026-08-08 — three consecutive live chair failures shared one cause: the prompt
+ * rendered `dt.schema` verbatim while the seal enforced core-merged properties plus
+ * `union(schema.required, required_fields)`. A producer emitting a maximally-valid
+ * object against the shown contract was rejected against the enforced one, and the
+ * chair failed closed. This function is the unification point: if the producer's view
+ * ever needs to differ from the seal's again, that difference must be argued here.
+ */
+export function promptSchemaFor(
+  registry: Registry | undefined,
+  slug: string | undefined,
+): Record<string, unknown> | undefined {
+  if (!registry || !slug) return undefined;
+  return registry.effectiveSchema(slug);
+}
+
 export function buildPrompt(
   ctx: AgentInvocationContext,
   outputSchema?: Record<string, unknown>,
@@ -415,9 +434,14 @@ function schemaPropertyNames(schema: Record<string, unknown> | undefined): strin
  *  - MULTI-output chair — buildPrompt :138-147 asks for a blob keyed by type slug, so the
  *    slugs are the expected keys.
  *  - SINGLE-output chair — buildPrompt :148-155 asks for the bare data object, never
- *    wrapped in {"<type-slug>": …}, so the resolved schema's property names are the
- *    signal. Unioning the slug in here would make the set unsatisfiable under
- *    all-must-match semantics and destroy the signal entirely.
+ *    wrapped in {"<type-slug>": …}. The signal is the schema's REQUIRED field names —
+ *    the contract's floor, which every compliant emission must carry — falling back to
+ *    property names when the schema requires nothing. Required-first became necessary
+ *    with the producer/enforcer unification (2026-08-08): the schema here is now the
+ *    EFFECTIVE one, whose property list includes every core-inherited optional field;
+ *    under all-must-match semantics, all-props would demand keys no emission carries
+ *    and the signal would never narrow. (It was also quietly too strict before — a
+ *    candidate omitting a declared-optional field failed the old all-props signal.)
  *  - Neither available (bare core type, or a domain type absent from the registry) —
  *    no signal, so refuse to guess between rival candidates.
  */
@@ -426,6 +450,10 @@ export function extractOptionsForChair(
   schema: Record<string, unknown> | undefined,
 ): ExtractJsonOptions {
   if (sealTypes.length > 1) return { expectKeys: [...sealTypes] };
+  const req = Array.isArray(schema?.["required"])
+    ? (schema!["required"] as unknown[]).filter((k): k is string => typeof k === "string")
+    : [];
+  if (req.length > 0) return { expectKeys: req };
   const props = schemaPropertyNames(schema);
   return props.length > 0 ? { expectKeys: props } : { requireUnambiguous: true };
 }
@@ -619,9 +647,7 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
       resolvedMcpServers = resolved.mcpServers;
       effectiveAllowed = resolved.effectiveAllowed;
     }
-    const types = opts.registry?.listTypes() ?? [];
-    const schemaOf = (slug: string | undefined) =>
-      (types.find((t) => t.slug === slug)?.schema as Record<string, unknown> | undefined);
+    const schemaOf = (slug: string | undefined) => promptSchemaFor(opts.registry, slug);
     // #174 — schemas follow the chair's promised subset (ctx.output_types), not the agent's
     // whole catalogue; legacy ctx without it falls back to the agent's full output_types.
     const sealTypes = ctx.output_types?.length ? ctx.output_types : ctx.agent.output_types;

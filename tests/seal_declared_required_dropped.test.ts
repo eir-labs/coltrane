@@ -224,9 +224,11 @@ describe("#227 — the genome's declared required fields are dropped, not absent
       ).toBe(false);
       checked.push(t.slug);
     }
-    // All 30 domain types declare required fields somewhere, so all 30 must be covered.
+    // ALL domain types declare required fields somewhere, so all must be covered. The
+    // literal pins the census against silent genome shrinkage: 30 at #227, +4 on
+    // 2026-08-08 (lineage-hit, lineage-map, rep-cost-verdict, handoff).
     expect(checked).toHaveLength(genome.domain_types.size);
-    expect(checked.length).toBe(30);
+    expect(checked.length).toBe(34);
   });
 });
 

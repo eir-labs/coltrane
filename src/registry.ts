@@ -60,6 +60,15 @@ export interface Registry {
   resolveType(query: ResolveQuery): ResolveResult;
   validate(output: OutputToValidate): RegistryValidationResult;
   listTypes(): DomainType[];
+  // The EXACT schema the seal enforces for this domain type — core props merged under
+  // own props, `required` = union(schema.required, required_fields), declared
+  // additionalProperties honored. This is the object `validate()` compiles, exposed so
+  // the producer prompt can render the same contract the seal will enforce. A field
+  // required-but-not-shown was the live defect class (three chair failures, 2026-08-08):
+  // the producer emitted a maximally-valid object against the RAW authored schema and
+  // the seal rejected it against THIS one. One construction, both readers.
+  // Undefined for unknown slugs and bare core types (freeform outputs, #133).
+  effectiveSchema(slug: string): Record<string, unknown> | undefined;
   // Rebuild the type table from `defs`, in place. Used by genome_reload
   // (Rob #130) so editing domain_types/ on disk reflects in validation without
   // restarting the MCP server. Bypasses reuse-enforcement — this is a sync,
@@ -144,7 +153,15 @@ function overloadClash(
  * loader reading files off disk — and a rule enforced at only one of them is a rule with a
  * way around it. Returns a reason, or null when the type is fine.
  */
-export function domainTypeDefect(def: { slug: string; extends: string; schema?: unknown }): string | null {
+export function domainTypeDefect(def: {
+  slug: string;
+  extends: string;
+  schema?: unknown;
+  // Optional so existing single-purpose callers (overload checks) keep working; when
+  // present, the undeclared-required check below runs. Both doors (registerType, the
+  // loader) and the third (type_extend) pass it.
+  required_fields?: readonly string[];
+}): string | null {
   // #272 — a domain type must not be NAMED after a core.
   //
   // `coreTypeOf` answers "what core is this really" by short-circuiting on CORE_TYPES before
@@ -192,6 +209,30 @@ export function domainTypeDefect(def: { slug: string; extends: string; schema?: 
       }
     }
   }
+
+  // 2026-08-08 — a required field declared NOWHERE. The seal enforces
+  // union(schema.required, required_fields) (#229), but a field in that union that is
+  // neither an own property nor a core-inherited property is invisible to every producer:
+  // the prompt cannot describe it, so the first symptom is a terminal-chair seal abort —
+  // the exact failure mode of three consecutive live gigs. Refuse it at authoring time,
+  // where the author can still see the typo. Core-inherited names (Signal.source,
+  // Interpretation.claims, …) are DECLARED — the merged schema carries them — so
+  // requiring them is legal and common; only a name with no declaration anywhere is dead.
+  const ownPropNames = Object.keys(
+    ((def.schema as { properties?: Record<string, unknown> } | undefined)?.properties) ?? {},
+  );
+  const corePropNames = Object.keys(CORE_SCHEMA_PROPS[def.extends] ?? {});
+  const declaredNames = new Set([...ownPropNames, ...corePropNames]);
+  const requiredUnion = [
+    ...new Set([
+      ...(((def.schema as { required?: string[] } | undefined)?.required) ?? []),
+      ...(def.required_fields ?? []),
+    ]),
+  ];
+  const undeclared = requiredUnion.filter((f) => !declaredNames.has(f));
+  if (undeclared.length > 0) {
+    return `requires ${undeclared.map((f) => `"${f}"`).join(", ")} but declares no such propert${undeclared.length === 1 ? "y" : "ies"} — neither an own schema property nor a property inherited from ${def.extends}. A required field with no declaration is invisible to every producer and enforced at the seal anyway; the first symptom is a terminal-chair abort. Declare the field or drop the requirement`;
+  }
   return null;
 }
 
@@ -220,6 +261,35 @@ export function createRegistry(initial: DomainType[] = []): Registry {
     }
     const action = best >= 80 ? "use" : best >= 50 ? "extend" : "create";
     return { score: best, action, candidates };
+  }
+
+  // THE effective schema — the one object both the seal (validate) and the producer
+  // prompt (effectiveSchema → promptSchemaFor) read. Inherit the base core type's
+  // properties, then let the subtype overload + extend (#227: the core's substance
+  // floor is additionally forced at the seal boundary, see output_validation.ts).
+  // #200 — honor the type's declared additionalProperties (closed-by-default).
+  // #229 — `required` is the UNION of schema.required and required_fields: two authoring
+  // conventions exist in the genome, and precedence would silently void one of them.
+  // 2026-08-08 — this construction was previously inlined in validate() only, while the
+  // prompt rendered the RAW authored schema; a field required here but undeclared there
+  // was invisible to every producer and enforced anyway (three live chair failures).
+  function effective(dt: DomainType): Record<string, unknown> {
+    const baseProps = CORE_SCHEMA_PROPS[dt.extends] ?? {};
+    const ownProps = (dt.schema as { properties?: Record<string, unknown> }).properties ?? {};
+    const additionalProperties =
+      (dt.schema as { additionalProperties?: boolean }).additionalProperties ?? false;
+    const declaredRequired = [
+      ...new Set([
+        ...(((dt.schema as { required?: string[] }).required) ?? []),
+        ...dt.required_fields,
+      ]),
+    ];
+    return {
+      type: "object",
+      properties: { ...baseProps, ...ownProps },
+      required: declaredRequired,
+      additionalProperties,
+    };
   }
 
   return {
@@ -294,40 +364,11 @@ export function createRegistry(initial: DomainType[] = []): Registry {
       // subtype's OWN declared contract; `required` below stays the subtype's own because
       // the core's floor is already enforced unconditionally one layer out — not because
       // base fields are optional.
-      const baseProps = CORE_SCHEMA_PROPS[dt.extends] ?? {};
-      const ownProps = (dt.schema as { properties?: Record<string, unknown> }).properties ?? {};
-      // #200 — honor the type's declared additionalProperties. Closed-by-default
-      // stays the discipline (undeclared → false), but a type that opts into open
-      // extension with `additionalProperties: true` accepts agent-added contextual
-      // fields at seal instead of aborting the terminal chair.
-      const additionalProperties =
-        (dt.schema as { additionalProperties?: boolean }).additionalProperties ?? false;
-      // #229 — a type's required fields may be declared in EITHER place, and both are
-      // honored. Two authoring conventions exist in the genome and nothing reconciles
-      // them: most types populate `required_fields` and leave `schema.required` empty;
-      // the hand-authored seeding/bootstrap types do the reverse. Reading only
-      // `required_fields` (as this did) silently discarded the declaration of every type
-      // in the second group, so `{}` sealed as a well-formed instance of a type declaring
-      // 3-6 required fields.
-      //
-      // UNION, not precedence. `type_extend` (src/server.ts:609) resolves the same
-      // ambiguity as `schema.required ?? required_fields`, but precedence is the wrong
-      // rule at seal time: it makes one declaration silently void the other. No type in
-      // the genome populates both today, so the two rules are indistinguishable on
-      // current data — which is exactly why the safer rule should be the one that gets
-      // frozen in. Everything an author wrote down is enforced.
-      const declaredRequired = [
-        ...new Set([
-          ...(((dt.schema as { required?: string[] }).required) ?? []),
-          ...dt.required_fields,
-        ]),
-      ];
-      const schema = {
-        type: "object",
-        properties: { ...baseProps, ...ownProps },
-        required: declaredRequired,
-        additionalProperties,
-      };
+      // One construction for producer and seal — `effective()` below. The #200/#229
+      // reasoning (additionalProperties honored; required = UNION of both declaration
+      // styles) lives on that function now; validate() and effectiveSchema() must never
+      // fork it (2026-08-08 producer/enforcer unification).
+      const schema = effective(dt);
       const validateFn = ajv.compile(schema);
       const ok = validateFn(output.data);
       // Preserve instancePath + keyword in the error projection so operators see
@@ -354,6 +395,14 @@ export function createRegistry(initial: DomainType[] = []): Registry {
     },
     listTypes() {
       return [...types.values()];
+    },
+    effectiveSchema(slug) {
+      // Mirrors validate()'s freeform stances: no slug / bare core / unknown → no
+      // domain schema to show (the substance floor still binds at the seal, #227).
+      if (!slug || isCoreType(slug)) return undefined;
+      const dt = types.get(slug);
+      if (!dt) return undefined;
+      return effective(dt);
     },
   };
 }

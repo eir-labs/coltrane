@@ -7,7 +7,7 @@
 import type { AgentInvocationContext, AgentInvoker } from "./runtime.js";
 import type { Registry } from "./registry.js";
 import type { ModelTier } from "./pricing.js";
-import { buildPrompt, extractJson, extractOptionsForChair } from "./claude_invoker.js";
+import { buildPrompt, extractJson, extractOptionsForChair, promptSchemaFor } from "./claude_invoker.js";
 
 // One model invocation's wall-clock bound. Far below the Claude invoker's 10min
 // chair bound: this path is a single completion, not a tool-using child.
@@ -57,9 +57,10 @@ export function makeBifrostInvoker(opts: BifrostInvokerOptions): AgentInvoker {
 
   return async (ctx: AgentInvocationContext) => {
     // Same schema-into-prompt resolution as the Claude invoker (#174 subset rules).
-    const types = opts.registry?.listTypes() ?? [];
-    const schemaOf = (slug: string | undefined) =>
-      types.find((t) => t.slug === slug)?.schema as Record<string, unknown> | undefined;
+    // EFFECTIVE schema, same as the seal enforces — the producer/enforcer unification
+    // holds on this path too (review finding on the 2026-08-08 PR: the raw-schema
+    // pattern removed from the Claude invoker had survived here).
+    const schemaOf = (slug: string | undefined) => promptSchemaFor(opts.registry, slug);
     const sealTypes = ctx.output_types?.length ? ctx.output_types : ctx.agent.output_types;
     const schema = schemaOf(sealTypes[0]);
     const outputSchemas = sealTypes.length > 1

@@ -605,6 +605,22 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         const warnings: string[] = stdStatus === "deprecated"
           ? [`standard "${slug2}" is deprecated — it still runs, but should not be built on.`]
           : [];
+        // WU-0008 preflight: run the same sealDrill used by standard_simulate BEFORE spending
+        // on any chair. A structurally-unsealable standard is refused here (pennies) instead of
+        // after a chair runs and aborts. Gate is placed once, above the wait/async split, so a
+        // single check covers both runGig call-sites below.
+        const drill = sealDrill(
+          { phases: standard.phases.map((p) => ({ name: p.name, chairs: p.chairs.map((c) => ({ role: c.role, output_contract: c.output_contract })) })) },
+          deps.registry,
+        );
+        if (!drill.ok) {
+          return {
+            ok: false, requires_approval: approval,
+            error: `standard "${slug2}" cannot seal: ` +
+              drill.failures.map((f) => `${f.phase}/${f.role} → ${f.domain_type} (${f.errors.join("; ")})`).join(", "),
+            data: { seal_drill: drill },
+          };
+        }
         // Optional budget arg — when present, runtime enforces per-gig cost-budget
         // and raises BudgetExhausted on depletion (PR for T10 gap, see runtime.ts).
         const budgetArg = args["budget"] as Record<string, unknown> | undefined;

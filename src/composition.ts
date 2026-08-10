@@ -54,6 +54,9 @@ export interface Chair {
   // which is how the "an LLM should not babysit a deterministic command" path is fixed.
   // Declared here; compose-time validation + runtime routing land in Phase 1.
   skill_slug?: string;
+  /** The human seat: an approval office held by a person. No agent, no skill; the runtime
+   *  PARKS at this chair until the incumbent's verdict is supplied, then seals it. */
+  human?: boolean;
 }
 
 export interface PhaseDef {
@@ -267,7 +270,11 @@ export function composeStandard(def: {
       // code half instead of an agent — skip the agent/required-skills checks for it. The
       // type-flow (input/output_contract) below still applies.
       const isSkillChair = !!ch.skill_slug && (ch.agent_slug ?? "") === "";
-      if (!isSkillChair) {
+      // A HUMAN chair is an approval office: no agent, no skill — the incumbent is a person
+      // and their sealed verdict is the chair's output. Agent/skill checks don't apply; the
+      // type-flow below still does, and like a skill chair it seals exactly one output.
+      const isHumanChair = ch.human === true && (ch.agent_slug ?? "") === "" && !ch.skill_slug;
+      if (!isSkillChair && !isHumanChair) {
         const ag = agentBySlug.get(ch.agent_slug);
         if (!ag) {
           throw new CompositionError(
@@ -313,6 +320,14 @@ export function composeStandard(def: {
             `[${ch.output_contract.join(", ")}] but a skill seals exactly one. Only "${ch.output_contract[0]}" would ` +
             `ever be produced and the rest would be silently dropped — split the work across chairs, or back this ` +
             `chair with an agent.`,
+        );
+      }
+      // A human chair seals exactly one output for the same structural reason: one approval,
+      // one sealed verdict.
+      if (isHumanChair && ch.output_contract.length > 1) {
+        throw new CompositionError(
+          `standard ${def.slug}: human chair "${ch.role}" promises ${ch.output_contract.length} output types — ` +
+            `an approval office seals exactly one verdict.`,
         );
       }
     }
@@ -416,6 +431,7 @@ export function composeStandard(def: {
   for (const ph of phases) {
     for (const ch of ph.chairs) {
       if (ch.skill_slug && !ch.agent_slug) continue; // skill-backed chair: no agent to domain-check
+      if (ch.human === true && !ch.agent_slug) continue; // human chair: no agent to domain-check
       const ag = agentBySlug.get(ch.agent_slug)!; // existence verified above
       // Rob #134: agents with no explicit domain (null OR undefined) are
       // domain-agnostic — compatible with any standard. Only reject when the
@@ -440,6 +456,7 @@ export function composeStandard(def: {
     // treating prior chairs (same phase or earlier) as the upstream bag.
     for (const ch of ph.chairs) {
       if (ch.skill_slug && !ch.agent_slug) continue; // skill-backed chair: not in the primitive graph
+      if (ch.human === true && !ch.agent_slug) continue; // human chair: not in the primitive graph
       const ag = agentBySlug.get(ch.agent_slug)!;
       if (i > 0) {
         // #188: check what THIS PLACEMENT actually consumes, not the agent's GLOBAL input_types
@@ -485,9 +502,9 @@ export function composeStandard(def: {
     // After processing all chairs in this phase, fold their primitives + outputs
     // into the upstream bag for subsequent phases.
     for (const ch of ph.chairs) {
-      if (ch.skill_slug && !ch.agent_slug) {
-        // a skill-backed chair produces its declared output_contract types — fold those into
-        // the upstream bag so a downstream agent chair can consume them.
+      if ((ch.skill_slug || ch.human === true) && !ch.agent_slug) {
+        // a skill-backed or human chair produces its declared output_contract types — fold
+        // those into the upstream bag so a downstream agent chair can consume them.
         for (const ot of ch.output_contract) upstreamOutputs.add(ot);
         continue;
       }

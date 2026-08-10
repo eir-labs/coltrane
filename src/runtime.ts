@@ -121,6 +121,8 @@ export type GigProgressEvent =
   /** A cache entry was FOUND and refused. A silent refusal is as opaque as a silent hit. */
   | { type: "reuse_rejected"; phase: string; role: string; cache_key: string; reason: string; detail?: string }
   | { type: "gig_complete"; outputs: number }
+  /** The gig reached a HUMAN chair without an approval — parked, checkpointed, waiting. */
+  | { type: "gig_awaiting_approval"; phase: string; role: string }
   | { type: "gig_failed"; error: string }
   | { type: "gig_aborted"; reason: string };
 
@@ -200,6 +202,15 @@ export interface RunDeps {
   // state entry + return it immediately) and passes it in so state and result share one id.
   // Absent = the runtime mints one (the synchronous path).
   gig_id?: string | undefined;
+  /**
+   * The human seat's verdicts, keyed by chair role. A gig that reaches a human chair WITH
+   * its approval here seals it (through the same output gate, schema-validated) and
+   * continues; WITHOUT it, the gig parks as awaiting_approval. Supplied on the approving
+   * resume — the sketching happens before dispatch; this is the light gate after.
+   */
+  approvals?: Record<string, Record<string, unknown>> | undefined;
+  /** WHO approved — sealed as the approval output's agent_slug. Defaults to "human". */
+  approved_by?: string | undefined;
   // Chair-selection policy (the adaptive-router seam). When present, each dispatch
   // iteration narrows the ready frontier to the policy's chosen subset instead of
   // running every ready chair in parallel. Absent = the v0 topological-parallel
@@ -410,7 +421,9 @@ export interface GigResult {
    * seal loop. Present only when non-empty.
    */
   unfulfilled_outputs?: ReadonlyArray<{ role: string; phase: string; missing: readonly string[] }>;
-  status: "complete";
+  status: "complete" | "awaiting_approval";
+  /** Present iff status is "awaiting_approval": the human chair the run parked at. */
+  awaiting?: { phase: string; role: string };
   /** Final budget snapshot. Present only when a budget was supplied. */
   budget_state?: BudgetState;
   /** Settled model spend (#195). Present when ≥1 real model invocation ran this gig. */
@@ -781,6 +794,10 @@ export async function runGig(
         sealedByRole.set(ch.role, [ch.output_contract[0] ?? "Signal"]);
         continue;
       }
+      if (ch.human === true && (ch.agent_slug ?? "") === "") {
+        sealedByRole.set(ch.role, [ch.output_contract[0] ?? "Judgment"]);
+        continue;
+      }
       const ag = standard.agents.find((a) => a.slug === ch.agent_slug);
       if (!ag) continue; // prepareChair reports an unknown agent_slug precisely; don't pre-empt it
       sealedByRole.set(
@@ -1103,6 +1120,73 @@ export async function runGig(
         const stuck = [...remaining.values()].map((c) => c.role).join(", ");
         throw new RuntimeError(`phase "${phase.name}" cannot advance — chairs [${stuck}] have unresolved depends_on`);
       }
+
+      // ── THE HUMAN SEAT ─────────────────────────────────────────────────────────────
+      // A human chair in the frontier is handled before any model dispatch. With its
+      // approval supplied (deps.approvals[role]) the incumbent's verdict seals through the
+      // SAME output gate as every record — schema-validated, under the approving
+      // principal's name, carrying the input_shas of exactly what was approved. Without
+      // it, the gig PARKS: checkpointed, honestly drained as awaiting_approval, nothing
+      // hollow sealed. The sketching happens before dispatch; this gate is light.
+      const humanReady = ready.filter((c) => c.human === true && (c.agent_slug ?? "") === "");
+      for (const hc of humanReady) {
+        const approval = deps.approvals?.[hc.role];
+        if (!approval) {
+          checkpoint();
+          emit({ type: "gig_awaiting_approval", phase: phase.name, role: hc.role });
+          void drainGigHeader({
+            gig_id,
+            standard_slug: standard.slug,
+            status: "awaiting_approval",
+            genome_hash,
+            started_at,
+            finished_at: new Date().toISOString(),
+            outputs_count: produced.length,
+            error: `awaiting approval at human chair "${hc.role}" (phase "${phase.name}")`,
+          }).catch((de) => {
+            if (process.env["COLTRANE_DRAIN_DEBUG"]) console.error(`[drain] awaiting header ${gig_id}: ${String(de)}`);
+          });
+          return {
+            gig_id,
+            standard_slug: standard.slug,
+            genome_hash,
+            run_fingerprint: "",
+            outputs: produced,
+            eval_scores: {},
+            status: "awaiting_approval",
+            awaiting: { phase: phase.name, role: hc.role },
+          };
+        }
+        remaining.delete(hc.role);
+        const domain_type = hc.output_contract[0] ?? "Judgment";
+        const core = deps.outputs.coreTypeOf(domain_type) ?? domain_type;
+        const primitive = CORE_TO_PRIMITIVE[core] ?? "JUDGE";
+        const approvalInputs: OutputRecord[] = hc.depends_on.flatMap((d) => producedByRole.get(d) ?? []);
+        const t0 = Date.now();
+        emit({ type: "chair_start", phase: phase.name, role: hc.role, producer: deps.approved_by ?? "human" });
+        const rec = deps.outputs.write({
+          core_type: core,
+          domain_type,
+          domain: standard.domain,
+          gig_id,
+          agent_slug: deps.approved_by ?? "human",
+          from_role: hc.role,
+          phase: phase.name,
+          primitive,
+          data: approval,
+          input_refs: approvalInputs.map((i) => i.id),
+          input_shas: approvalInputs.map((i) => i.content_sha),
+        });
+        for (const i of approvalInputs) deps.outputs.addRef(rec.id, i.id, "derived_from", primitive);
+        producedByRole.set(hc.role, [rec]);
+        produced.push(rec);
+        emit({
+          type: "chair_complete", phase: phase.name, role: hc.role, producer: deps.approved_by ?? "human",
+          output_types: [domain_type], duration_ms: Date.now() - t0,
+        });
+      }
+      ready = ready.filter((c) => !(c.human === true && (c.agent_slug ?? "") === ""));
+      if (ready.length === 0) continue;
 
       // Routing policy: when a selector is injected, it narrows the frontier to the
       // chairs to dispatch THIS iteration; the rest stay in `remaining` and re-enter

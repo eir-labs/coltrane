@@ -59,6 +59,10 @@ export const ChairSchema = z.object({
   role: z.string(),
   agent_slug: z.string().optional(),
   skill_slug: z.string().optional(),
+  /** The human seat: the chair is an approval office held by a person. No agent, no skill —
+   *  the incumbent's sealed verdict is the chair's output, and a gig that reaches this chair
+   *  unapproved PARKS (awaiting_approval) rather than confabulating a yes. */
+  human: z.boolean().optional(),
   depends_on: z.array(z.string()).default([]),
   input_contract: z.array(z.string()).default([]),
   output_contract: z.array(z.string()).default([]),
@@ -245,6 +249,8 @@ export const InstitutionalChairSchema = z.object({
   id: z.string().optional(),
   institution_slug: z.string(),
   role: z.string(),
+  /** The human office: this chair is held by a person, never a model agent. */
+  human: z.boolean().optional(),
   function: PrimitiveSchema,
   mission: z.string(),
   required_skills: z.array(z.string()).default([]),

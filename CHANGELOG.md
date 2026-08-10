@@ -7,6 +7,42 @@ signals a breaking change and a **patch** signals an additive or internal one.
 `package.json`'s `version` — `tests/version_identity.test.ts` enforces that, and also that
 the MCP handshake reports the constant rather than a hardcoded literal.
 
+## Unreleased
+
+### Added
+
+- **The CHART — a gig is a performance of many standards.** `ChartSchema` (one Zod source,
+  `src/genome_schema.ts`) declares MOVEMENTS naming standards, typed EDGES carrying a movement's
+  sealed outputs into the next movement's entry chairs, arrangement-level APPROVAL GATES keyed by
+  `gate_id`, and a BUDGET ENVELOPE over the whole performance. `composeChart` (`src/chart.ts`) runs
+  ten rules in a fixed firing order (R0 schema → R1 movement_id → R2 standard resolution → R3 dead
+  seat → R4 endpoints → R5 acyclicity → R6 dead-name/optional classification → R7 dead slot → R8
+  gate keys → R9 envelope) and returns a structured violation list. `runChart` walks the movements
+  in topological order, one `runGig` each, and does everything interesting at the boundary — the
+  only place a stop is free: gathers the incoming edges' carriers as SEALED RECORDS (so the sink's
+  provenance reaches back across the boundary), parks on an unapproved gate, compares real settled
+  spend to the envelope, and records what completed so a resume never re-derives it.
+
+  A single-standard gig is the DEGENERATE one-movement chart: `chart_hash` short-circuits
+  byte-for-byte to `genomeHash` of that standard, so its `run_fingerprint`, ledger row id and
+  checkpoint id are unchanged. `GigLedgerEntry` gains `chart_slug` + `movement_id` (both optional;
+  `standard_slug` stays non-null, because a movement always names exactly one standard);
+  `CheckpointRole` gains `movement_id`; `GigCheckpoint` gains `prior_budget_state`; the reuse cache
+  key gains a chart namespace, appended only for a chart run so no existing key moves.
+
+### Changed
+
+- **`genome_hash` moved once, to stop moving.** 0.6.6 added two `.default([])` fields to
+  `ChairSchema`; no standard's structure changed, but the materialized empty arrays entered
+  `canonJson` and `genomeHash` moved for the whole genome — re-keying the ledger and refusing
+  resumes for a drift that did not exist. `genomeHash` now hashes through `canonStructuralJson`,
+  which drops object keys whose value states nothing (`undefined`, `null`, `[]`, `{}`) while keeping
+  `0`/`""`/`false` and every array position. Reaching that canonicalization moves the hash ONE final
+  time: a pre-existing ledger row's `genome_hash` will differ from a freshly computed one, and a
+  resume or drained-state reconstruction across the bump is REFUSED with a drift line (re-dispatch
+  cold). After this, a new schema default is hash-neutral. Pinned by
+  `tests/genome_hash_stability.test.ts`.
+
 ## 0.5.1
 
 A patch release that exists because CI ran for the first time and disagreed with the package

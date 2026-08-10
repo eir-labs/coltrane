@@ -165,10 +165,47 @@ export function runIdentityMismatch(a: RunIdentity, b: RunIdentity): string[] {
 // The checkpoint
 // ───────────────────────────────────────────────────────────────────────────────
 
+/**
+ * The composite identity of one checkpointed seat: `(chart_slug, movement_id, role)`.
+ *
+ * A bare role was enough while a gig ran one standard. Under a CHART two movements may each
+ * declare a chair named `reviewer`, and a resume keyed on the bare role would restore one
+ * movement's sealed output into the other's seat — a splice with nothing in the manifest to
+ * record it. `movement_id` (never `standard_slug`) is the disambiguator, which is also what
+ * keeps one standard appearing twice in a chart from sharing its instances' checkpoints.
+ *
+ * MIGRATION: a legacy row has no `movement_id`, and its movement_id defaults to the
+ * `standard_slug` it ran under — so an old `(standard_slug, role)` key maps onto
+ * `(chart_slug == standard_slug, movement_id == standard_slug, role)` with no collision.
+ */
+export function checkpointRoleKey(chart_slug: string, movement_id: string | undefined, role: string): string {
+  return `${chart_slug} ${movement_id ?? chart_slug} ${role}`;
+}
+
+/**
+ * The cumulative money state at a movement boundary.
+ *
+ * `spent_usd` is REAL settled model spend summed across the movements that have completed — the
+ * number a chart's `budget_envelope.total_usd` is denominated in. It is deliberately NOT the
+ * per-run `BudgetState.spent`, which counts synthetic append units (see BudgetState.unit); the
+ * whole per-run snapshot rides alongside under `budget_state` so nothing about money collapses to
+ * a single scalar.
+ */
+export interface PriorBudgetState {
+  spent_usd: number;
+  /** The last completed movement's own budget snapshot, unabridged. Absent when no budget was wired. */
+  budget_state?: unknown;
+}
+
 /** One completed chair, as recorded for a possible resume. */
 export interface CheckpointRole {
   role: string;
   phase: string;
+  /**
+   * WHICH movement of the chart this seat belongs to. Absent on a legacy (pre-chart) row, where
+   * it defaults to the standard's own slug — see `checkpointRoleKey`.
+   */
+  movement_id?: string;
   /** The sealed records, by store id. Resolved against the OutputStore at resume time. */
   output_ids: string[];
   /** Their content_shas, in the same order — so a store whose bytes moved is caught. */
@@ -195,6 +232,15 @@ export interface GigCheckpoint {
    * both true, kept apart.
    */
   prior_usage?: unknown;
+  /**
+   * The cumulative budget state at this checkpoint's MOVEMENT BOUNDARY (charts only).
+   *
+   * A chart's envelope spans movements, so a resumed performance has to know what the earlier
+   * movements already spent WITHOUT re-summing every prior movement's usage — and it has to know
+   * it before spawning the next movement's `runGig`, because a boundary is the last place a stop
+   * is free. Absent for a single-standard gig, which has no boundary to record.
+   */
+  prior_budget_state?: PriorBudgetState;
 }
 
 export interface CheckpointStore {
@@ -262,6 +308,20 @@ export interface ReuseStore {
 export interface ReuseKeyInput {
   /** Over-scoping, on purpose: two standards with identical chairs do not share entries. */
   standard_slug: string;
+  /**
+   * The CHART this chair played in, and WHICH movement of it. Present only for a chart run.
+   *
+   * `movement_id` — not `standard_slug` — is the disambiguator: a chart may name one standard
+   * twice, and with byte-identical inputs the two instances would otherwise key to the same entry
+   * and silently serve instance-1's work as instance-2's. Default is ISOLATION; cross-instance
+   * reuse would have to be an explicit opt-in, and layering that on later is cheap while
+   * unwinding a wrong default is not.
+   *
+   * Folded into the frame ONLY when present, so a non-chart run's key is byte-identical to what it
+   * was before charts existed — no cache is silently invalidated by this field's arrival.
+   */
+  chart_slug?: string | undefined;
+  movement_id?: string | undefined;
   phase: string;
   /** The chair definition, canonically. Its contracts and deps decide what it is asked for. */
   chair: unknown;
@@ -320,6 +380,13 @@ export interface ReuseKeyInput {
  */
 export function reuseCacheKey(input: ReuseKeyInput): string {
   const frame = (...parts: string[]): string => parts.map((p) => `${p.length}:${p}`).join("|");
+  // The chart namespace is a SUFFIX, added only when this chair played inside a chart, so every
+  // pre-chart key keeps its bytes. Framed like every other component: no component can forge a
+  // delimiter and masquerade as a different layout.
+  const chartFrame =
+    input.chart_slug === undefined && input.movement_id === undefined
+      ? ""
+      : frame("chart", input.chart_slug ?? "", input.movement_id ?? "");
   return sha256Hex(
     frame(
       REUSE_KEY_VERSION,
@@ -335,7 +402,7 @@ export function reuseCacheKey(input: ReuseKeyInput): string {
       input.model_version,
       input.depth,
       canonJson([...input.output_types].sort()),
-    ),
+    ) + chartFrame,
   );
 }
 

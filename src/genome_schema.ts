@@ -416,6 +416,94 @@ export type NorthstarOutput = z.output<typeof NorthstarSchema>;
 export type LineageEdgeOutput = z.output<typeof LineageEdgeSchema>;
 export type OrgServiceKeyOutput = z.output<typeof OrgServiceKeySchema>;
 
+// ── Chart — the ARRANGEMENT: one gig as a performance of many standards ───────────────────────
+//
+// A standard is a phase graph over chairs. A CHART is the same idea one level up: a typed DAG
+// over STANDARDS. Each MOVEMENT names a standard; each EDGE asserts that a type SEALED by the
+// source movement seeds an entry chair of the sink movement (the entry-chair-seed rule, promoted);
+// each APPROVAL GATE is a human seat at the arrangement level, keyed by `gate_id` so it cannot
+// collide with a within-movement human chair that happens to share a role name; the BUDGET
+// ENVELOPE bounds the whole performance rather than one movement of it.
+//
+// The single-standard gig is the DEGENERATE chart: one movement, no edges, no gates, whose
+// `chart_hash` short-circuits byte-for-byte to `genomeHash` of that standard (src/chart.ts), so an
+// existing run's `run_fingerprint` does not move. `venue` is deliberately opaque here — its
+// infrastructure meaning belongs to the runtime layer, and speculating it into the schema would
+// bind a decision this shape does not need.
+//
+// Nothing else in this file changes: every cross-reference below is a slug by `z.string()`, never
+// a Zod ref, so a chart names standards and agents without the chart schema depending on theirs.
+
+/** One typed edge: a type the source movement seals, consumed by the sink movement's entry chairs. */
+export const ChartEdgeSchema = z
+  .object({
+    from_movement: z.string(),
+    to_movement: z.string(),
+    output_type: z.string(),
+    /** true = a CONDITIONAL edge: the type lives only in a terminal chair's `optional_outputs`,
+     *  so the flow may legitimately carry nothing. Compose classifies it; it cannot prove the
+     *  optional output will be produced, which is why a conditional edge never satisfies a
+     *  REQUIRED entry slot (src/chart.ts R6/R7). */
+    optional: z.boolean().default(false),
+  })
+  .strict();
+
+/** Who plays which chair for this movement — a recorded act, optionally with its evidence. */
+export const ChartSeatingSchema = z
+  .object({
+    chair: z.string(),
+    agent_slug: z.string(),
+    technique_evidence: z.array(TechniqueEvidenceSchema).optional(),
+  })
+  .strict();
+
+/** One movement: a standard, its gig-bound hydration arguments, and its seatings.
+ *
+ *  `movement_id` — NOT `standard_slug` — is the identity everything keys on: the checkpoint
+ *  namespace, the reuse-cache namespace, the edge endpoints. That is what lets one standard
+ *  appear twice in a chart without the two instances sharing cached results. */
+export const ChartMovementSchema = z
+  .object({
+    movement_id: z.string(),
+    standard_slug: z.string(),
+    runtime_fills: z.record(z.string(), z.unknown()).default({}),
+    seatings: z.array(ChartSeatingSchema).default([]),
+  })
+  .strict();
+
+/** A human seat between movements. Parks on `deps.approvals[gate_id]`. */
+export const ChartApprovalGateSchema = z
+  .object({
+    gate_id: z.string(),
+    after_movement: z.string(),
+    before_movement: z.string(),
+    chair: z.string(),
+    prompt: z.string().optional(),
+  })
+  .strict();
+
+/** The ceiling for the whole performance, in real money. */
+export const ChartBudgetEnvelopeSchema = z.object({ total_usd: z.number().positive() }).strict();
+
+export const ChartSchema = z
+  .object({
+    slug: z.string(),
+    movements: z.array(ChartMovementSchema).min(1),
+    edges: z.array(ChartEdgeSchema).default([]),
+    approval_gates: z.array(ChartApprovalGateSchema).default([]),
+    budget_envelope: ChartBudgetEnvelopeSchema.optional(),
+    /** An opaque binding the runtime layer owns. Present as a field, unresolved as a semantics. */
+    venue: z.string().optional(),
+  })
+  .strict();
+
+export type ChartInput = z.input<typeof ChartSchema>;
+export type ChartOutput = z.output<typeof ChartSchema>;
+export type ChartMovementOutput = z.output<typeof ChartMovementSchema>;
+export type ChartEdgeOutput = z.output<typeof ChartEdgeSchema>;
+export type ChartApprovalGateOutput = z.output<typeof ChartApprovalGateSchema>;
+export type ChartSeatingOutput = z.output<typeof ChartSeatingSchema>;
+
 // ── zod → MCP input_schema properties. The MCP tool definitions (mcp.ts) derive their hand-written
 //    field lists from here, so the write-surface can never drift from the schema. Maps each top-level
 //    field to its coarse JSON type; optionals/defaults are flattened (MCP advertises the field). ──

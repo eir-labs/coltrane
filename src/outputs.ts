@@ -17,6 +17,7 @@ import { CORE_TYPES, type CoreType } from "./core_types.js";
 import { validateOutput } from "./output_validation.js";
 import { outputContentHash } from "./canonical_form.js";
 import { typeShapeFingerprint } from "./reuse.js";
+import type { OutputMirror } from "./output_mirror.js";
 
 // §6 output_refs.relation CHECK constraint, as a closed set.
 export const REF_RELATIONS = [
@@ -246,6 +247,12 @@ export interface OutputStoreOptions {
   // and reads lazy-hydrate from disk. Cross-session persistence for MCP clients
   // that close + reopen between gigs (PR #78 follow-up).
   persistDir?: string | undefined;
+  // The two-tier local mirror (+ credential-gated remote drain). When set, every sealed output
+  // ALSO persists a compact Tier-1 metadata row and a content-addressed Tier-2 payload artifact
+  // under the mirror root (`.coltrane/`, gitignored) — the reliable store MCP retrieval traverses
+  // with no remote configured. Independent of `persistDir`: the store's jsonl remains the
+  // provenance-graph engine; the mirror is the queryable, cross-process-fresh surface.
+  mirror?: OutputMirror | undefined;
 }
 
 // Default disk-persistence root, matching chain_keeper.py's ~/.eir/<chain>/ shape.
@@ -305,12 +312,16 @@ export function createOutputStore(registry: Registry, options?: OutputStoreOptio
   const outputs = new Map<string, OutputRecord>();
   const edges: OutputRef[] = [];
   const persistDir = options?.persistDir;
+  const mirror = options?.mirror;
   const outputsDir = persistDir ? path.join(persistDir, "outputs") : undefined;
   const refsDir = persistDir ? path.join(persistDir, "refs") : undefined;
 
-  // Track which gig_ids we've hydrated so a single gig file is read at most once.
+  // Track which gig_ids we've hydrated so a single gig file is PARSED at most once (a file this
+  // process wrote is marked hydrated at write() and never read back).
   const hydratedGigs = new Set<string>();
-  let fullyHydrated = false;
+  // Orphan refs files already pulled in — so the defensive refs scan reads each file at most once
+  // while still picking up NEW files a peer process appends.
+  const hydratedRefFiles = new Set<string>();
 
   // #248 — corruption accumulated across every hydrate, keyed by file so the defensive
   // orphan-refs re-read in hydrateAll can't double-report the same damaged line.
@@ -482,6 +493,7 @@ export function createOutputStore(registry: Registry, options?: OutputStoreOptio
     }
     if (refsDir) {
       const refsFile = path.join(refsDir, `${gig_id}.jsonl`);
+      hydratedRefFiles.add(refsFile); // this gig's refs are covered — the orphan scan can skip it
       for (const ref of readRows<OutputRef>(refsFile)) {
         if (!edges.some((e) => e.id === ref.id)) edges.push(ref);
       }
@@ -489,15 +501,22 @@ export function createOutputStore(registry: Registry, options?: OutputStoreOptio
   }
 
   function hydrateAll(): void {
-    if (!outputsDir || fullyHydrated) return;
-    fullyHydrated = true;
+    if (!outputsDir) return;
+    // RE-SCAN the directory every call. The old `fullyHydrated` latch cached the first scan for
+    // the process's life, so a long-lived MCP server NEVER saw a gig sealed by a separate CLI
+    // process after startup — `output_query`/`output_trace` returned empty for a payload file
+    // that sat right there on disk. The scan is a `readdir` (cheap); `hydrateGig` skips any gig
+    // already PARSED, so the per-call cost is one directory listing, not a full re-read.
     for (const file of listJsonl(outputsDir)) {
       const base = path.basename(file, ".jsonl");
       hydrateGig(base);
     }
-    // Also pull in any orphan refs files (defensive — addRef writes by from_gig_id).
+    // Also pull in any orphan refs files (defensive — addRef writes by from_gig_id). Each file is
+    // read at most once, but a NEW file a peer appends is still picked up on a later call.
     if (refsDir) {
       for (const file of listJsonl(refsDir)) {
+        if (hydratedRefFiles.has(file)) continue;
+        hydratedRefFiles.add(file);
         for (const ref of readRows<OutputRef>(file)) {
           if (!edges.some((e) => e.id === ref.id)) edges.push(ref);
         }
@@ -553,6 +572,19 @@ export function createOutputStore(registry: Registry, options?: OutputStoreOptio
         // Mark this gig hydrated so we don't re-read what we just wrote.
         hydratedGigs.add(rec.gig_id);
         appendJsonl(path.join(outputsDir, `${rec.gig_id}.jsonl`), rec);
+      }
+      // Two-tier mirror: a compact Tier-1 metadata row + a content-addressed Tier-2 payload
+      // artifact (+ credential-gated remote drain). This is what MCP retrieval traverses, and it
+      // is where a CLI-sealed gig becomes reliably readable. A mirror failure must not fail a
+      // finished seal, so it is best-effort.
+      if (mirror) {
+        try {
+          mirror.persist(rec);
+        } catch (e) {
+          if (process.env["COLTRANE_DRAIN_DEBUG"]) {
+            console.warn(`[outputs] mirror.persist failed: ${e instanceof Error ? e.message : String(e)}`);
+          }
+        }
       }
       return rec;
     },
@@ -694,10 +726,11 @@ export function createOutputStore(registry: Registry, options?: OutputStoreOptio
       //     gig a process ran was exempt from the corruption scan for that process's life —
       //     precisely the torn-append-from-a-crash case #248 exists to catch. The old code
       //     answered `{ok:true, scanned:0}` for a directory full of its own output.
-      //   • `hydrateAll` short-circuits on `fullyHydrated`, so the SECOND system_health
-      //     re-asserted the first one's answer no matter what had happened on disk since.
-      //     CLAUDE.md tells operators to run system_health first thing in a session, which
-      //     pins that snapshot at the earliest possible moment.
+      //   • `hydrateGig` skips a gig it has already PARSED, so a torn append to a gig this
+      //     process already read would not be re-read by the reads themselves. (The old
+      //     `fullyHydrated` latch made this worse — it cached the WHOLE first scan for the
+      //     process's life; that latch is gone, but per-gig parse-skipping remains, so an
+      //     honest damage report still cannot rely on read side effects.)
       //
       // A damage report has to describe the bytes now, not the bytes we happened to have
       // cached. `scanFile` re-reads a file whose (size, mtime) has moved since we last looked

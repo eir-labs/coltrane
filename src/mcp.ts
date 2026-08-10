@@ -43,7 +43,10 @@ export const MCP_TOOLS: readonly MCPToolDef[] = [
   { slug: "type_resolve",                  category: "understand", input_schema: obj({ core_type: "string", extends: "string", domain: "string", required_fields: "array" }), output_schema: obj({ action: "string", candidates: "array", recommendation: "object" }) },
   { slug: "type_browse",                   category: "understand", input_schema: obj({ domain: "string", extends: "string", status: "string", min_usage: "number" }), output_schema: obj({ types: "array", stats: "object" }) },
   { slug: "tool_registry_browse",          category: "understand", input_schema: obj({ category: "string" }), output_schema: obj({ tools: "array", usage_stats: "array", dependency_map: "object" }) },
-  { slug: "output_query",                  category: "understand", input_schema: obj({ domain_type: "string", gig_id: "string", agent_slug: "string", data_filter: "object" }), output_schema: obj({ outputs: "array", total_count: "number" }) },
+  // Tier-1 traversal by default (compact rows: id, gig_id, agent, phase, content_sha, preview,
+  // storage_ref…). `output_id`/`content_sha` + `include_data:true` is the deeper second pass —
+  // it fetches ONE output's full payload from the artifact tier (local mirror, or remote when drained).
+  { slug: "output_query",                  category: "understand", input_schema: obj({ domain_type: "string", gig_id: "string", agent_slug: "string", data_filter: "object", output_id: "string", content_sha: "string", include_data: "boolean" }), output_schema: obj({ outputs: "array", total_count: "number" }) },
   { slug: "output_trace",                  category: "understand", input_schema: obj({ output_id: "string", direction: "string", max_depth: "number" }), output_schema: obj({ graph: "object", root_signals: "array", terminal_outputs: "array" }) },
   { slug: "charter_read",          category: "understand", input_schema: obj({ path: "string" }), output_schema: obj({ products: "array", goals: "array", pain_points: "array", tech_stack: "array", access_grants: "array" }) },
   // #217 — advertised contract == handler. The five filters src/server.ts actually reads, and

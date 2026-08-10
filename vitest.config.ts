@@ -38,7 +38,13 @@ export default defineConfig({
     // this the developer's working tree accumulates rows from every test run and they get
     // mistaken for real history. This is the "bootstrap honors a test override" half of the
     // fix; FileLedger's lazy construction is the other half.
-    env: { COLTRANE_LEDGER_PATH: join(tmpdir(), "coltrane-test-ledger", "ledger.jsonl") },
+    // Same reasoning for the two-tier output mirror: bootstrapServerDeps roots it at
+    // <root>/.coltrane, so without an override a gig dispatched through a bootstrap-wired test
+    // would seed Tier-1/Tier-2 files into the developer's checkout. Point it at a tmp dir.
+    env: {
+      COLTRANE_LEDGER_PATH: join(tmpdir(), "coltrane-test-ledger", "ledger.jsonl"),
+      COLTRANE_MIRROR_DIR: join(tmpdir(), "coltrane-test-mirror"),
+    },
     // tests/honest_broker/** is delegated to its own config (#262): those two specs boot a
     // subprocess MCP server over stdio, and their config declares testTimeout 120_000 +
     // singleFork for that reason. Running them here handed them vitest's 5s default and the

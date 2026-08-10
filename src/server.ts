@@ -21,7 +21,8 @@ import { SkillSchema, AgentSchema, StandardSchema } from "./genome_schema.js";
 import { runSkillFixtures, executeSkill, loadFixtures } from "./skill_subprocess.js";
 import { evolveSkill } from "./skills.js";
 import { sealAgentDefinition, sealDefinition, sealSkillPackage, recordIdentity } from "./genome_writer.js";
-import { createOutputStore, defaultOutputsPersistDir, type OutputStore } from "./outputs.js";
+import { createOutputStore, defaultOutputsPersistDir, type OutputStore, type OutputRecord } from "./outputs.js";
+import { createOutputMirror, defaultMirrorDir, outputPreview, mirrorStorageRef, type OutputMirror, type OutputMeta } from "./output_mirror.js";
 import {
   FileLedger, LedgerError, LEDGER_SCHEMA_VERSION, defaultLedgerPath,
   type Ledger, type GovernanceLedgerEntry,
@@ -146,6 +147,12 @@ export interface ServerDeps {
   // gate/observe/rewrite tool calls in-process. The engine ships ZERO hooks and ZERO policy; it only
   // CALLS whatever is injected here. Absent/empty → dispatch is byte-identical to no seam.
   hooks?: readonly ToolHook[] | undefined;
+  // The two-tier local mirror (Tier-1 metadata rows + Tier-2 content-addressed payloads under
+  // `.coltrane/`, gitignored) that output_query/output_read traverse. Bootstrap wires it and
+  // passes the SAME instance to the OutputStore, so every sealed output — CLI- or MCP-dispatched
+  // — lands here and is retrievable with no remote configured. Absent → retrieval falls back to
+  // the in-memory/jsonl store (e.g. bare test deps).
+  output_mirror?: OutputMirror | undefined;
 }
 
 export interface ToolResult {
@@ -278,6 +285,45 @@ function syncMap<V extends { slug?: string }>(
     }
   }
   return { added, modified, removed };
+}
+
+// A queryable output row: the Tier-1 metadata projection (+ preview + storage_ref), with the
+// full `data` payload only when the caller wants it. Keeps output_query's default shape
+// backward-compatible (data present) while making the compact traversal and the deep second
+// pass first-class.
+function outputRow(rec: OutputRecord, deps: ServerDeps, withData: boolean): Record<string, unknown> {
+  const row: Record<string, unknown> = {
+    id: rec.id,
+    gig_id: rec.gig_id,
+    agent_slug: rec.agent_slug,
+    from_role: rec.from_role,
+    phase: rec.phase,
+    primitive: rec.primitive,
+    core_type: rec.core_type,
+    domain_type: rec.domain_type,
+    domain_type_version: rec.domain_type_version,
+    domain: rec.domain,
+    content_sha: rec.content_sha,
+    input_refs: rec.input_refs,
+    input_shas: rec.input_shas,
+    cost_usd: rec.cost_usd,
+    tokens_used: rec.tokens_used,
+    duration_ms: rec.duration_ms,
+    model: rec.model,
+    model_tier: rec.model_tier,
+    created_at: rec.created_at,
+    preview: outputPreview(rec.data),
+    storage_ref: deps.output_mirror ? mirrorStorageRef(rec.content_sha) : "",
+  };
+  if (withData) row["data"] = rec.data;
+  if (rec.skill_provenance !== undefined) row["skill_provenance"] = rec.skill_provenance;
+  if (rec.reused_from !== undefined) row["reused_from"] = rec.reused_from;
+  return row;
+}
+
+// A Tier-1 metadata row (from the mirror) shaped as an output_query row.
+function metaToRow(meta: OutputMeta): Record<string, unknown> {
+  return { ...meta };
 }
 
 /**
@@ -462,22 +508,56 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         return { ok: true, requires_approval: approval, data: { ...res, seal_drill: drill } };
       }
       case "output_query": {
-        let outs = deps.outputs.all();
-        if (args["domain_type"]) outs = outs.filter((o) => o.domain_type === args["domain_type"]);
-        if (args["gig_id"]) outs = outs.filter((o) => o.gig_id === args["gig_id"]);
-        if (args["agent_slug"]) outs = outs.filter((o) => o.agent_slug === args["agent_slug"]);
+        const mirror = deps.output_mirror;
+        // SECOND PASS — a single output's FULL payload by id or content_sha. This is the deeper
+        // Tier-2 read: prefer the content-addressed artifact tier (local mirror, or remote when
+        // drained), falling back to the store. Returns exactly the one output, with its data.
+        const wantId = args["output_id"] ? String(args["output_id"]) : undefined;
+        const wantSha = args["content_sha"] ? String(args["content_sha"]) : undefined;
+        if (wantId || wantSha) {
+          const rec = wantId
+            ? deps.outputs.get(wantId)
+            : deps.outputs.all().find((o) => o.content_sha === wantSha);
+          let row: Record<string, unknown> | undefined = rec ? outputRow(rec, deps, true) : undefined;
+          // Store miss (or a mirror-only payload): read the artifact tier directly.
+          if ((!row || row["data"] === undefined) && mirror) {
+            const sel: { id?: string; content_sha?: string } = {};
+            if (wantId) sel.id = wantId;
+            if (wantSha) sel.content_sha = wantSha;
+            const hit = mirror.readPayload(sel);
+            if (hit?.meta) row = { ...metaToRow(hit.meta), data: hit.data };
+            else if (row && hit?.data !== undefined) row["data"] = hit.data;
+          }
+          const outputs = row ? [row] : [];
+          return { ok: true, requires_approval: approval, data: { outputs, total_count: outputs.length } };
+        }
+
+        // LIST — Tier-1 traversal. The store is now cross-process-fresh (the `fullyHydrated`
+        // latch is gone), so a gig sealed by a separate CLI process is visible here. `data` is
+        // carried by default (backward-compat) and on `data_filter`; pass `include_data:false`
+        // for the compact Tier-1 rows (metadata + preview + storage_ref, no payload).
+        const dataFilter = args["data_filter"];
+        const hasDataFilter = Boolean(dataFilter && typeof dataFilter === "object" && !Array.isArray(dataFilter));
+        const includeData = args["include_data"] === false ? false : true;
+        let recs = deps.outputs.all();
+        if (args["domain_type"]) recs = recs.filter((o) => o.domain_type === args["domain_type"]);
+        if (args["gig_id"]) recs = recs.filter((o) => o.gig_id === args["gig_id"]);
+        if (args["agent_slug"]) recs = recs.filter((o) => o.agent_slug === args["agent_slug"]);
         // #234 — `data_filter` was advertised and ignored, so a caller narrowing a query by
         // payload got the UNFILTERED set back and a `total_count` describing it. Every key must
         // match (AND), compared structurally so an object or array value filters as written.
-        const dataFilter = args["data_filter"];
-        if (dataFilter && typeof dataFilter === "object" && !Array.isArray(dataFilter)) {
+        if (hasDataFilter) {
           const entries = Object.entries(dataFilter as Record<string, unknown>);
-          outs = outs.filter((o) => {
+          recs = recs.filter((o) => {
             const data = (o.data ?? {}) as Record<string, unknown>;
             return entries.every(([k, v]) => canonJson(data[k]) === canonJson(v));
           });
         }
-        return { ok: true, requires_approval: approval, data: { outputs: outs, total_count: outs.length } };
+        // Payload is dropped only when the caller explicitly asks for the compact rows AND is not
+        // filtering by payload (a data_filter needs the payload to have been read).
+        const withData = includeData || hasDataFilter;
+        const outputs = recs.map((o) => outputRow(o, deps, withData));
+        return { ok: true, requires_approval: approval, data: { outputs, total_count: outputs.length } };
       }
       case "output_trace": {
         const id = String(args["output_id"] ?? "");
@@ -2301,13 +2381,19 @@ export function bootstrapServerDeps(genomeRoot?: string): ServerDeps {
   const toolProviders = new Map<string, ToolProvider>(
     [...REGISTERED_TOOL_SLUGS].map((slug) => [slug, { tool: slug, kind: "in_house" as const, server: ENGINE_MCP_SERVER }]),
   );
+  // The two-tier local mirror, rooted at `<root>/.coltrane` (gitignored, beside the ledger).
+  // The SAME instance is handed to the OutputStore and exposed as `output_mirror`, so every
+  // sealed output — whether this process ran the gig or a separate CLI process did — lands in
+  // one content-addressed store MCP retrieval reads. COLTRANE_MIRROR_DIR overrides (tests).
+  const output_mirror = createOutputMirror(defaultMirrorDir(root));
   return {
     registry,
     toolProviders,
+    output_mirror,
     // PR #78 follow-up: persist outputs to disk so the audit chain survives an
     // MCP session close (Rob cold-trial requirement). COLTRANE_OUTPUTS_DIR
     // overrides the default ~/.eir/coltrane_outputs path (tests + sandboxes).
-    outputs: createOutputStore(registry, { persistDir: defaultOutputsPersistDir() }),
+    outputs: createOutputStore(registry, { persistDir: defaultOutputsPersistDir(), mirror: output_mirror }),
     // #209 — the audit spine is durable by default. The line above gives OUTPUTS a persistDir
     // under an explicit "the audit chain must survive an MCP session close" requirement
     // (PR #78); the ledger sat in RAM directly beneath it, which made absence-of-row mean

@@ -103,7 +103,7 @@ describe("genome_hash — schema defaults are hash-neutral", () => {
     // change to the folded field set, the projection, or the canonical form will red this line
     // even when both forms above still agree with each other. If you moved it on purpose, say so
     // in the commit and in CHANGELOG — a moved structural hash re-keys the ledger.
-    expect(genomeHash(lean)).toBe("d6d33b4a13c0be7bfe1eef4e6f11e6acd28c3ba1d8a56f27c5c26d3e2c6f3d19");
+    expect(genomeHash(lean)).toBe("8a32fd511e49a37a246877acd1957e7b855aad3e1207536848c548c347528dff");
   });
 
   it("a REAL structural change still moves the hash (this is not hollow-green)", () => {

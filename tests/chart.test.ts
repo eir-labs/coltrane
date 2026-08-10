@@ -45,6 +45,7 @@ const JUDGMENT = { criteria: ["the arrangement is approved to proceed"] };
 const scout: Agent = testAgent({ slug: "scout", primitives: ["SENSE"], output_types: ["Signal"], domain: "chart-demo" });
 const reader: Agent = testAgent({ slug: "reader", primitives: ["INTERPRET"], input_types: ["Signal"], output_types: ["Interpretation"], domain: "chart-demo" });
 const maybe: Agent = testAgent({ slug: "maybe", primitives: ["SENSE", "JUDGE"], output_types: ["Signal", "Judgment"], domain: "chart-demo" });
+const judge: Agent = testAgent({ slug: "judge", primitives: ["JUDGE"], input_types: ["Interpretation"], output_types: ["Judgment"], domain: "chart-demo" });
 
 /** Movement A's standard: seals a Signal from the dispatch payload. */
 const look = (): Standard => composeStandard({
@@ -56,6 +57,25 @@ const look = (): Standard => composeStandard({
 const digest = (): Standard => composeStandard({
   slug: "digest", domain: "chart-demo", agents: [reader], input_types: ["Signal"], output_types: ["Interpretation"],
   phases: [{ name: "p2", chairs: [{ role: "r2", agent_slug: "reader", depends_on: [], input_contract: ["Signal"], output_contract: ["Interpretation"], required_skills: [] }] }] as PhaseDef[],
+});
+
+/** Movement B, TWO chairs deep — so a failure in its second chair leaves a movement checkpoint. */
+const digestDeep = (): Standard => composeStandard({
+  slug: "digest-deep", domain: "chart-demo", agents: [reader, judge], input_types: ["Signal"], output_types: ["Judgment"],
+  phases: [
+    { name: "p2", chairs: [{ role: "r2", agent_slug: "reader", depends_on: [], input_contract: ["Signal"], output_contract: ["Interpretation"], required_skills: [] }] },
+    { name: "p3", chairs: [{ role: "r3", agent_slug: "judge", depends_on: ["r2"], input_contract: ["Interpretation"], output_contract: ["Judgment"], required_skills: [] }] },
+  ] as PhaseDef[],
+});
+
+/** Two standards that each name a chair `reviewer` — the collision the composite key must survive. */
+const lookRev = (): Standard => composeStandard({
+  slug: "look-rev", domain: "chart-demo", agents: [scout], output_types: ["Signal"],
+  phases: [{ name: "p1", chairs: [{ role: "reviewer", agent_slug: "scout", depends_on: [], input_contract: [], output_contract: ["Signal"], required_skills: [] }] }] as PhaseDef[],
+});
+const digestRev = (): Standard => composeStandard({
+  slug: "digest-rev", domain: "chart-demo", agents: [reader], input_types: ["Signal"], output_types: ["Interpretation"],
+  phases: [{ name: "p2", chairs: [{ role: "reviewer", agent_slug: "reader", depends_on: [], input_contract: ["Signal"], output_contract: ["Interpretation"], required_skills: [] }] }] as PhaseDef[],
 });
 
 /** A standard whose terminal chair seals `Judgment` ONLY as an optional output. */
@@ -74,9 +94,11 @@ const lookApprove = (): Standard => composeStandard({
 });
 
 const standards = (): ReadonlyMap<string, Standard> => new Map([
-  ["look", look()], ["digest", digest()], ["look-maybe", lookMaybe()], ["look-approve", lookApprove()],
+  ["look", look()], ["digest", digest()], ["digest-deep", digestDeep()],
+  ["look-maybe", lookMaybe()], ["look-approve", lookApprove()],
+  ["look-rev", lookRev()], ["digest-rev", digestRev()],
 ]);
-const agents = (): ReadonlyMap<string, Agent> => new Map([["scout", scout], ["reader", reader], ["maybe", maybe]]);
+const agents = (): ReadonlyMap<string, Agent> => new Map([["scout", scout], ["reader", reader], ["maybe", maybe], ["judge", judge]]);
 
 /** The two-movement chart the runtime tests drive: look ──Signal──▶ digest. */
 const lineChart = (over?: Record<string, unknown>) => ({
@@ -128,6 +150,7 @@ function counting(opts?: { failOn?: { agent: string; times: number }; usd?: Reco
     switch (ctx.agent.slug) {
       case "scout": return { ...SIGNAL };
       case "maybe": return { ...SIGNAL };
+      case "judge": return { ...JUDGMENT };
       default: return { ...INTERPRETATION };
     }
   };
@@ -598,12 +621,45 @@ describe("runChart — resume spans movements", () => {
     expect(checkpointRoleKey("look", undefined, "r1")).toBe(checkpointRoleKey("look", "look", "r1"));
   });
 
-  it("stamps movement_id on each CheckpointRole a movement writes", async () => {
+  it("…and does not collide in a REAL two-movement run (the spec's own falsifier)", async () => {
+    // Both standards declare a chair literally named `reviewer`. If the two shared a checkpoint
+    // namespace, the resume below would restore movement A's Signal into movement B's `reviewer`
+    // seat, skip its chair, and the performance would "complete" having sealed no Interpretation.
+    const chart = {
+      slug: "reviewers",
+      movements: [{ movement_id: "first", standard_slug: "look-rev" }, { movement_id: "second", standard_slug: "digest-rev" }],
+      edges: [{ from_movement: "first", to_movement: "second", output_type: "Signal" }],
+    };
     const b = bench();
-    await expect(runChart(plan(lineChart()), {}, deps(b, counting({ failOn: { agent: "reader", times: 1 } }).invoke))).rejects.toThrow();
-    const p = plan(lineChart());
-    const movementCp = b.checkpoints.read(movementCheckpointId(p, GIG, "sense")) as GigCheckpoint;
-    expect(movementCp.roles[0]).toMatchObject({ role: "r1", movement_id: "sense" });
+    await expect(runChart(plan(chart), {}, deps(b, counting({ failOn: { agent: "reader", times: 1 } }).invoke))).rejects.toThrow();
+
+    const second = counting();
+    const res = await runChart(plan(chart), {}, deps(b, second.invoke, { resume_from: GIG }));
+    expect(res.status).toBe("complete");
+    expect(second.calls, "the second movement's `reviewer` is a different seat from the first's").toEqual({ reader: 1 });
+    expect(res.movements[1]!.result!.outputs.map((o) => o.domain_type)).toEqual(["Interpretation"]);
+  });
+
+  it("refuses a resume of a performance nothing was ever recorded for", async () => {
+    const b = bench();
+    await expect(runChart(plan(lineChart()), {}, deps(b, counting().invoke, { resume_from: GIG })))
+      .rejects.toThrow(/ResumeRefused/);
+  });
+
+  it("stamps movement_id on each CheckpointRole a movement writes", async () => {
+    // Read INSIDE an unfinished movement: a movement that COMPLETES drops its own checkpoint (there
+    // is nothing left in it to resume — the chart checkpoint is what records its completion), so the
+    // movement-scoped rows are only observable while that movement is still mid-performance.
+    const chart = { ...lineChart(), movements: [
+      { movement_id: "sense", standard_slug: "look" }, { movement_id: "read", standard_slug: "digest-deep" },
+    ] };
+    const b = bench();
+    await expect(runChart(plan(chart), {}, deps(b, counting({ failOn: { agent: "judge", times: 1 } }).invoke))).rejects.toThrow();
+
+    const p = plan(chart);
+    const movementCp = b.checkpoints.read(movementCheckpointId(p, GIG, "read")) as GigCheckpoint;
+    expect(movementCp, "the movement that died mid-way banked the chair that succeeded").toBeTruthy();
+    expect(movementCp.roles.map((r) => [r.role, r.movement_id])).toEqual([["r2", "read"]]);
   });
 
   it("keys the reuse cache on movement_id, so one standard twice does not share entries (edge case C)", () => {
@@ -638,7 +694,7 @@ describe("runChart — a gate between movements parks the performance", () => {
   });
 
   it("drains an awaiting_approval header, exactly as an in-standard human chair does", async () => {
-    const fetchMock = vi.fn(async () => ({ ok: true, status: 201 }) as Response);
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => ({ ok: true, status: 201 }) as Response);
     vi.stubGlobal("fetch", fetchMock);
     process.env["COLTRANE_DRAIN_URL"] = "https://drain.example";
     process.env["COLTRANE_DRAIN_KEY"] = "cdk_test";
@@ -651,6 +707,29 @@ describe("runChart — a gate between movements parks the performance", () => {
       delete process.env["COLTRANE_DRAIN_KEY"];
       vi.unstubAllGlobals();
     }
+  });
+
+  it("a movement that parks at its OWN human chair parks the performance — and says it was a chair, not a gate", async () => {
+    // The chart has no more right to run past a person than the standard does. And the reply names
+    // the office it is waiting on: a within-movement chair is answered by approvals[role], an
+    // arrangement gate by approvals[gate_id], so calling one the other would misdirect the approver.
+    const chart = { slug: "human-first", movements: [
+      { movement_id: "sense", standard_slug: "look-approve" }, { movement_id: "read", standard_slug: "digest" },
+    ], edges: [{ from_movement: "sense", to_movement: "read", output_type: "Signal" }] };
+    const b = bench();
+    const first = counting();
+    const parked = await runChart(plan(chart), {}, deps(b, first.invoke));
+    expect(parked.status).toBe("awaiting_approval");
+    expect(parked.awaiting).toEqual({ movement_id: "sense", chair: "governor", phase: "p2" });
+    expect(parked.awaiting).not.toHaveProperty("gate_id");
+    expect(first.calls).toEqual({ scout: 1 });
+
+    const second = counting();
+    const res = await runChart(plan(chart), {}, deps(b, second.invoke, {
+      resume_from: GIG, approvals: { governor: JUDGMENT }, approved_by: "eugene",
+    }));
+    expect(res.status).toBe("complete");
+    expect(second.calls, "the sealed scan is restored, not re-derived").toEqual({ reader: 1 });
   });
 
   it("the approval SEALS through the same gate as every record, then the performance continues", async () => {
@@ -679,6 +758,32 @@ describe("runChart — a gate between movements parks the performance", () => {
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
 // The budget envelope — detected at the movement boundary, before any inference
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
+describe("runChart — a gate is answered ONCE per performance", () => {
+  const gatedDeep = () => ({
+    slug: "gated-deep",
+    movements: [{ movement_id: "sense", standard_slug: "look" }, { movement_id: "read", standard_slug: "digest-deep" }],
+    edges: [{ from_movement: "sense", to_movement: "read", output_type: "Signal" }],
+    approval_gates: [{ gate_id: "proceed", after_movement: "sense", before_movement: "read", chair: "producer" }],
+  });
+
+  it("a second resume restores the sealed yes instead of asking for it again", async () => {
+    const b = bench();
+    await runChart(plan(gatedDeep()), {}, deps(b, counting().invoke)); // park at the gate
+
+    // Approve — and die inside the gated movement, so the performance is resumed a second time.
+    await expect(runChart(plan(gatedDeep()), {}, deps(b, counting({ failOn: { agent: "judge", times: 1 } }).invoke, {
+      resume_from: GIG, approvals: { proceed: JUDGMENT }, approved_by: "eugene",
+    }))).rejects.toThrow();
+    expect(b.outputs.all().filter((o) => o.from_role === "producer")).toHaveLength(1);
+
+    // Resume WITHOUT re-supplying the approval: the gate is already answered and sealed.
+    const res = await runChart(plan(gatedDeep()), {}, deps(b, counting().invoke, { resume_from: GIG }));
+    expect(res.status).toBe("complete");
+    expect(b.outputs.all().filter((o) => o.from_role === "producer"), "one decision, one record").toHaveLength(1);
+    expect(res.gates_approved).toEqual([{ gate_id: "proceed", chair: "producer", approved_by: "eugene", output_id: expect.any(String) }]);
+  });
+});
+
 describe("runChart — the envelope is checked at the movement boundary (edge case B)", () => {
   const capped = () => ({ ...lineChart(), budget_envelope: { total_usd: 0.1 } });
 

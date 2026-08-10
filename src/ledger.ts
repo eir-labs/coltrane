@@ -91,7 +91,25 @@ interface LedgerEntryBase {
 export interface GigLedgerEntry extends LedgerEntryBase {
   kind: "gig";
   gig_id: string;
+  /**
+   * WHICH standard ran. Still non-null, and still populated on every row — including a chart's.
+   *
+   * A gig row is sealed per MOVEMENT, and a movement always names exactly one standard, so there is
+   * no row for which `null` would be truthful. (The chart spec anticipated a chart-level row with
+   * no single standard; this engine seals none — see `chart_slug` below.) An existing consumer
+   * reading `standard_slug` on a single-standard gig is therefore unaffected.
+   */
   standard_slug: string;
+  /**
+   * The ARRANGEMENT this run was a movement of, and WHICH movement (charts only).
+   *
+   * For the degenerate one-movement chart both equal `standard_slug`, so a chart-shaped reader and
+   * a standard-shaped reader see the same run the same way. Optional because ~50 direct `runGig`
+   * callers (and every row written before charts existed) legitimately have no arrangement — an
+   * absent field means "not part of a chart", never a sentinel.
+   */
+  chart_slug?: string;
+  movement_id?: string;
   genome_hash: string;
   run_fingerprint: string;
   // Settled model spend (#195). Present for gigs with ≥1 real model invocation; the result
@@ -140,6 +158,10 @@ export interface LedgerQuery {
   subject_gig_id?: string;
   gig_id?: string;
   standard_slug?: string;
+  /** "what did this arrangement do" / "what did this movement of it do" — a chart is auditable
+   *  by the same filtering as a standard, or it is only auditable by hand. */
+  chart_slug?: string;
+  movement_id?: string;
   genome_hash?: string;
   effective_hash?: string;
   after?: string;
@@ -298,6 +320,8 @@ function matches(entry: LedgerEntry, filter: LedgerQuery): boolean {
   if (filter.subject_gig_id && e["subject_gig_id"] !== filter.subject_gig_id) return false;
   if (filter.gig_id && e["gig_id"] !== filter.gig_id) return false;
   if (filter.standard_slug && e["standard_slug"] !== filter.standard_slug) return false;
+  if (filter.chart_slug && e["chart_slug"] !== filter.chart_slug) return false;
+  if (filter.movement_id && e["movement_id"] !== filter.movement_id) return false;
   if (filter.genome_hash && e["genome_hash"] !== filter.genome_hash) return false;
   if (filter.effective_hash && e["effective_hash"] !== filter.effective_hash) return false;
   if (filter.after && String(e["started_at"]) < filter.after) return false;

@@ -102,7 +102,7 @@ const Q = {
   domain_types: "coltrane_domain_types?select=slug,version,extends,domain,status,schema,required_fields",
   agents:
     "coltrane_agent_profiles?select=slug,version,status,primitives,input_types,output_types,domain," +
-    "identity,method,constraints,depth_profile,permissions,behavioral_primitives,skill_slots,default_skills",
+    "identity,method,constraints,depth_profile,permissions,behavioral_primitives,skill_slots,default_skills,carried_skills",
   standards: "coltrane_standards?select=slug,version,status,domain,phases,input_types,output_types",
   skills: "coltrane_skills?select=slug,name,description,skill_md,tier,input_type,output_type,status",
 } as const;
@@ -150,6 +150,9 @@ function agentDefFromRow(row: Row): Record<string, unknown> {
     code_tool_access: perms["code_tool_access"],
     depth_profile: row["depth_profile"],
     skill_slugs: row["default_skills"],
+    // Carried skills travel WITH the agent row (the player's own technique, portable across
+    // institutions); absent column or null → the agent simply carries none.
+    skills: row["carried_skills"] ?? undefined,
   };
   for (const k of Object.keys(def)) if (def[k] === undefined || def[k] === null) delete def[k];
   // domain is honestly nullable on the schema — restore it if the row said null.

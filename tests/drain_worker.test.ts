@@ -40,6 +40,9 @@ const GENOME_ROWS = {
       behavioral_primitives: ["explorer", "critic"],
       permissions: {},
       default_skills: [],
+      carried_skills: [
+        { slug: "carried-probe", skill_type: "extraction", description: "a carried definition riding the agent row" },
+      ],
     },
   ],
   standards: [
@@ -179,6 +182,8 @@ describe("rpcGenomeStore — the org genome, readable through a ctk bearer", () 
     mockStore({ claim: null });
     const genome = await rpcGenomeStore(CTX).load();
     expect(genome.agents.has("scout")).toBe(true);
+    // carried skills ride the agent row through the store round-trip
+    expect(genome.agents.get("scout")!.skills?.[0]?.slug).toBe("carried-probe");
     expect(genome.standards.has("wire-run-v0")).toBe(true);
     expect(genome.core_types.size).toBe(6); // canonical seed on empty rows
     expect(genome.load_errors).toEqual([]);

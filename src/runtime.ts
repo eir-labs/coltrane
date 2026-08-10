@@ -582,9 +582,16 @@ export function computeAppendCost(
 // in a canonical (sorted, JCS) form. This is the reproducibility key — same defs,
 // same genome_hash, regardless of model or run.
 /**
- * Resolve a list of skill slugs against the genome's skills map. REPORTS, never decides:
- * it returns both what resolved and what did not, and `prepareChair` decides what a miss
- * means (fatal when the chair declared the skill REQUIRED, reported otherwise).
+ * Resolve an agent's skills: the ones it CARRIES on its record, unioned with the repertoire
+ * packages its `skill_slugs` name. REPORTS, never decides: it returns both what resolved and what
+ * did not, and `prepareChair` decides what a miss means (fatal when the chair declared the skill
+ * REQUIRED, reported otherwise).
+ *
+ * CARRIED-FIRST, and carried wins the slug. An agent's own definition needs no genome lookup (it
+ * travels with the player into any institution), and where both a carried definition and a
+ * repertoire package answer to one slug the carried one SHADOWS it — the player's own technique is
+ * the one that plays, and the same slug never resolves to two skills in one prompt. A slug covered
+ * by a carried definition is therefore not missing.
  *
  * The boundary (#241): a skill package that LOADS is a legitimate degradation candidate —
  * it has an identity, a version, a code_hash, and its degradation is already surfaced and
@@ -599,11 +606,14 @@ export function computeAppendCost(
 function resolveSkills(
   slugs: readonly string[] | undefined,
   map: ReadonlyMap<string, SkillRecord> | undefined,
+  carried?: readonly SkillRecord[] | undefined,
 ): { skills: readonly SkillRecord[]; missing: readonly string[] } {
-  if (!slugs || slugs.length === 0 || !map) return { skills: [], missing: [] };
-  const skills: SkillRecord[] = [];
+  const skills: SkillRecord[] = [...(carried ?? [])];
+  const carriedSlugs = new Set(skills.map((s) => s.slug));
+  if (!slugs || slugs.length === 0 || !map) return { skills, missing: [] };
   const missing: string[] = [];
   for (const slug of slugs) {
+    if (carriedSlugs.has(slug)) continue; // the carried definition already answered this slug
     const rec = map.get(slug);
     if (rec) skills.push(rec);
     else missing.push(slug);
@@ -1547,7 +1557,7 @@ export async function runGig(
     // Resolve this agent's skill bindings (slugs) against the genome's skills map.
     // resolveSkills REPORTS; this is where the engine DECIDES — and it decides BEFORE the
     // budget deduction below, so a dangling binding costs nothing.
-    const { skills, missing } = resolveSkills(agent.skill_slugs, deps.skills);
+    const { skills, missing } = resolveSkills(agent.skill_slugs, deps.skills, agent.skills);
     if (missing.length > 0) {
       // #242 — `Chair.required_skills` was validated exactly once, at compose time, as a
       // string-subset check against the agent's own declaration. A chair could declare a

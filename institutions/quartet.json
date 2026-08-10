@@ -137,6 +137,12 @@
       "function": "CREATE",
       "mission": "Settle the ordered structure a piece of work will be built through \u2014 checks before the changes they check \u2014 and then make the thing that structure implies, from the upstream record alone.",
       "required_skills": [],
+      "preferred_skills": [
+        "structure-conformance"
+      ],
+      "supplies": {
+        "house-style": "Prose in the register of a standards document: complete sentences, no abbreviations, no first person, and no vocabulary internal to this institution. An identifier names what a thing is, not what it is for. A check is written before the change it checks and is named for the observation it makes. Where a convention is not stated here, it is not a convention."
+      },
       "caps": [
         {
           "edge_type": "produced-by",
@@ -201,6 +207,16 @@
       "agent_slug": "john",
       "org_slug": "quartet-ensemble",
       "contract_caps": [],
+      "technique_evidence": [
+        {
+          "source": "tests/default_genome_quartet.test.ts",
+          "claim": "The agent loads from the genome with no domain pin and with a read-only, call-capped tool grant, which is the least authority a reading office needs; both properties are asserted deterministically on every run of the suite."
+        },
+        {
+          "source": "standards/software-change-v1.json, standards/product-design-v1.json",
+          "claim": "Both shipped standards compose with this agent seated in their reading chair, and every type named in those chair contracts resolves to a registered core or domain type at compose time."
+        }
+      ],
       "witnessed_by": null
     },
     {
@@ -209,6 +225,16 @@
       "agent_slug": "miles",
       "org_slug": "quartet-ensemble",
       "contract_caps": [],
+      "technique_evidence": [
+        {
+          "source": "standards/software-change-v1.json, chairs frame-change and verify-change",
+          "claim": "One incumbent holds both the chair that fixes the criteria and the chair that applies them, and the phase graph binding the two is validated acyclic and free of forward references at compose time."
+        },
+        {
+          "source": "tests/default_genome_quartet.test.ts",
+          "claim": "The agent's disposition pair is distinct from those of the other two seats and it holds no mutating or executing tool grant; both are asserted deterministically in the suite."
+        }
+      ],
       "witnessed_by": null
     },
     {
@@ -217,6 +243,16 @@
       "agent_slug": "bill",
       "org_slug": "quartet-ensemble",
       "contract_caps": [],
+      "technique_evidence": [
+        {
+          "source": "tests/skills_agent_carried.test.ts",
+          "claim": "The agent carries the structure-conformance technique on its own record; this chair fills its institution-bound hydration slot and leaves its gig-bound slot to the dispatch payload, asserted deterministically in the suite."
+        },
+        {
+          "source": "standards/software-change-v1.json, chairs plan-change and write-change",
+          "claim": "One incumbent holds both the chair that settles the structure and the chair that makes the artefact, so the departure from a plan is reported by the seat accountable for the plan; the ordering is fixed by the standard's phase graph."
+        }
+      ],
       "witnessed_by": null
     }
   ],

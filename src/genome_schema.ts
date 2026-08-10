@@ -25,6 +25,68 @@ export const BrowserGrantSchema = z.object({
 });
 export type BrowserGrant = z.output<typeof BrowserGrantSchema>;
 
+// ── Skill — the package shape. Reconciles the two current shapes (SkillMeta typed + SkillRecord
+//    {slug;[k]:unknown} bag) into one. SHAPE-aligned only: determinism_ratio + fixtures are
+//    fields/artifacts the schema knows, but the OG rigid "fixtures pass ≥ threshold to PROMOTE"
+//    ceremony is deliberately NOT a schema invariant — promotion strictness is a separate, tunable
+//    policy. The fixture/determinism runner still enforces "fixtures pass + deterministic" in CI.
+//
+//    Declared ABOVE the agent because an agent CARRIES skills (AgentSchema.skills below): the
+//    package shape has to exist before the record that embeds it. ──
+export const NetworkGrantSchema = z.object({
+  allow: z.array(z.string()).default([]),
+  methods: z.array(z.string()).optional(),
+  max_requests: z.number().optional(),
+  max_bytes: z.number().optional(),
+});
+export const SkillPermissionSchema = z.object({
+  tier: z.number().optional(),
+  network: NetworkGrantSchema.optional(),
+});
+/**
+ * A HYDRATION SLOT — a named hole in a skill's method that something outside the agent fills.
+ *
+ * The seam this draws is the whole point of a carried skill: the METHOD is the agent's (portable,
+ * it travels into any institution that seats the player), while the DATA the method operates on is
+ * the institution's. A skill that hard-codes one house's constraints is not portable; a skill that
+ * declares the slot and receives the constraints is.
+ *
+ * `binding` says WHEN the slot is filled, and the two times are not interchangeable:
+ *   - "institution" (the default when omitted) — filled at SEAT time from the chair's `supplies`.
+ *     Known before any run exists, so a `required` slot nothing supplies is a DEAD SLOT and
+ *     composition refuses it, exactly as an unresolvable tool grant is refused.
+ *   - "gig" — filled at DISPATCH time from the gig payload. These are the chair contract's formal
+ *     parameters and the dispatch input is the argument list, so compose time cannot demand them:
+ *     it knows nothing about the arguments of a run that has not been asked for yet. Their floor
+ *     belongs to the runtime pre-flight at t=0.
+ */
+export const HydrationSlotSchema = z.object({
+  type: z.string(),
+  description: z.string().optional(),
+  required: z.boolean().optional(),
+  binding: z.enum(["institution", "gig"]).optional(),
+});
+export const SkillSchema = z.object({
+  slug: z.string(),
+  version: z.number().optional(),
+  skill_type: z.string().optional(),
+  input_type: z.string().optional(),
+  output_type: z.string().optional(),
+  corpus: z.string().optional(),
+  determinism_ratio: z.number().optional(),
+  permission: SkillPermissionSchema.optional(),
+  description: z.string().optional(),
+  timeout_ms: z.number().optional(),
+  /** Slot name → the declared shape of what fills it. See HydrationSlotSchema: the method is the
+   *  agent's, the slot data is the institution's (or the gig's). */
+  hydration: z.record(HydrationSlotSchema).optional(),
+  // a package declares fixtures (test suite + determinism meter) + its code. Present so skill_define
+  // is package-aware (meta + fixtures + code), not the retired flat {slug, domain, md}.
+  fixtures: z.array(z.unknown()).optional(),
+  code: z.string().optional(),
+  md: z.string().optional(),
+});
+
 // ── Agent — the template class, migrated end-to-end. z.input = AgentDef (what you author,
 //    optionals allowed); z.output = Agent (defaults applied). One definition, both types. ──
 export const AgentSchema = z.object({
@@ -41,7 +103,22 @@ export const AgentSchema = z.object({
   // the ~50 call-sites that build Agent objects don't all break. defineAgent applies the [] default.
   allowed_tools: z.array(z.string()).readonly().optional(),
   disallowed_tools: z.array(z.string()).readonly().optional(),
+  /** REFERENCES into the shared repertoire (`skills/<slug>/`): the off-the-shelf method, bound by
+   *  name, resolved against the genome's skills map at run time. A slug that resolves to no
+   *  package is a dangling binding (loader) and a dead name when a chair requires it (runtime). */
   skill_slugs: z.array(z.string()).readonly().optional(),
+  /** The agent's OWN skills, carried on its record rather than referenced by name.
+   *
+   *  An agent is the thing closest to its own work, so it is the agent that grows technique — and
+   *  grown technique has to be portable: the same player seated in a second institution brings its
+   *  method along instead of waiting for that institution's repertoire to contain it. Institution
+   *  data never rides along; a carried skill declares `hydration` slots and the seating fills them.
+   *
+   *  Relationship to `skill_slugs`: slugs name the SHARED repertoire, `skills` are the agent's own.
+   *  Resolution unions the two, carried-first, so a carried definition SHADOWS a same-slug
+   *  repertoire package (the player's own technique is the one that plays) and a slug covered by a
+   *  carried definition is not a dangling binding. */
+  skills: z.array(SkillSchema).readonly().optional(),
   model_tier: ModelTierSchema.optional(),
   max_tool_calls: z.number().optional(),
   max_token_budget: z.number().optional(),
@@ -69,7 +146,19 @@ export const ChairSchema = z.object({
   // #243 — which promised outputs may legitimately be absent. Deny-by-default: omitted
   // means every promised type is required. Subset of output_contract, checked at compose.
   optional_outputs: z.array(z.string()).default([]),
+  /** The FLOOR. A skill named here must be held by whoever is seated — bound by slug or carried on
+   *  the record — or the seating is refused at compose and the chair fails closed at run. */
   required_skills: z.array(z.string()).default([]),
+  /** The PREFERENCE. Technique this chair would rather its incumbent hold, stated without refusing
+   *  the ones who do not: the roster of available agents is a fact about the world, not a defect,
+   *  and a preference that refused a seating would be a second floor under another name. Nothing
+   *  checks it at compose time — deliberately, including its names, since a chair may legitimately
+   *  prefer a technique no agent in the genome has grown yet. */
+  preferred_skills: z.array(z.string()).default([]),
+  /** The institution's side of a hydration contract, at the phase-chair level: slot name → the
+   *  value that fills it. An institution-bound `required` slot on a skill the seated agent holds
+   *  and nothing here (or on the institutional chair) fills is refused at compose. */
+  supplies: z.record(z.unknown()).optional(),
 });
 export const PhaseSchema = z.object({ name: z.string(), chairs: z.array(ChairSchema) });
 /** Lifecycle status, shared by domain types and standards (#203). */
@@ -103,39 +192,6 @@ export const StandardSchema = z.object({
 export type StandardInput = z.input<typeof StandardSchema>;
 export type StandardOutput = z.output<typeof StandardSchema>;
 
-// ── Skill — the package shape. Reconciles the two current shapes (SkillMeta typed + SkillRecord
-//    {slug;[k]:unknown} bag) into one. SHAPE-aligned only: determinism_ratio + fixtures are
-//    fields/artifacts the schema knows, but the OG rigid "fixtures pass ≥ threshold to PROMOTE"
-//    ceremony is deliberately NOT a schema invariant — promotion strictness is a separate, tunable
-//    policy. The fixture/determinism runner still enforces "fixtures pass + deterministic" in CI. ──
-export const NetworkGrantSchema = z.object({
-  allow: z.array(z.string()).default([]),
-  methods: z.array(z.string()).optional(),
-  max_requests: z.number().optional(),
-  max_bytes: z.number().optional(),
-});
-export const SkillPermissionSchema = z.object({
-  tier: z.number().optional(),
-  network: NetworkGrantSchema.optional(),
-});
-export const SkillSchema = z.object({
-  slug: z.string(),
-  version: z.number().optional(),
-  skill_type: z.string().optional(),
-  input_type: z.string().optional(),
-  output_type: z.string().optional(),
-  corpus: z.string().optional(),
-  determinism_ratio: z.number().optional(),
-  permission: SkillPermissionSchema.optional(),
-  description: z.string().optional(),
-  timeout_ms: z.number().optional(),
-  // a package declares fixtures (test suite + determinism meter) + its code. Present so skill_define
-  // is package-aware (meta + fixtures + code), not the retired flat {slug, domain, md}.
-  fixtures: z.array(z.unknown()).optional(),
-  code: z.string().optional(),
-  md: z.string().optional(),
-});
-
 // ── Eval — retire the {slug;[k]:unknown} bag; the loader validates eval files against this. ──
 export const EvalSchema = z.object({
   slug: z.string(),
@@ -164,6 +220,7 @@ export const DomainTypeSchema = z.object({
 });
 
 export type SkillOutput = z.output<typeof SkillSchema>;
+export type HydrationSlot = z.output<typeof HydrationSlotSchema>;
 export type EvalOutput = z.output<typeof EvalSchema>;
 export type DomainTypeOutput = z.output<typeof DomainTypeSchema>;
 
@@ -253,18 +310,39 @@ export const InstitutionalChairSchema = z.object({
   human: z.boolean().optional(),
   function: PrimitiveSchema,
   mission: z.string(),
+  /** The floor: skills the office requires of whoever holds it. */
   required_skills: z.array(z.string()).default([]),
+  /** The preference: technique the office would rather its incumbent hold, stated without refusing
+   *  the agents who do not hold it. Same two-tier reading as the phase chair's. */
+  preferred_skills: z.array(z.string()).default([]),
+  /** The institution's data, delivered through the office: hydration slot name → the value that
+   *  fills it. This is where institution-specific content belongs — NOT inside the carried skill,
+   *  which is why the skill stays portable across institutions. */
+  supplies: z.record(z.unknown()).optional(),
   caps: z.array(CapGrantSchema).default([]),
   obligations: z.array(z.string()).default([]),
 });
 
-/** A seat: a named agent bound into a chair for an org, witnessed. */
+/** What a seating cited: a source and the claim read from it. Both required — a source with no
+ *  claim cites nothing in particular, and a claim with no source is a recollection. */
+export const TechniqueEvidenceSchema = z.object({
+  source: z.string(),
+  claim: z.string(),
+});
+
+/** A seat: a named agent bound into a chair for an org, witnessed.
+ *
+ *  Seating is a JUDGEMENT — this player, this office — and `technique_evidence` makes it a recorded
+ *  one: the ledger queries, improvement reports, prior gig fingerprints or deterministic suite
+ *  results the decision weighed. Optional, because a seating may be made on no evidence at all;
+ *  what is not optional is the difference between the two, which is exactly what the field records. */
 export const ChairAssignmentSchema = z.object({
   id: z.string().optional(),
   chair_id: z.string(),
   agent_slug: z.string(),
   org_slug: z.string(),
   contract_caps: z.array(CapGrantSchema).default([]),
+  technique_evidence: z.array(TechniqueEvidenceSchema).optional(),
   witnessed_by: z.string().nullable().default(null),
 });
 
@@ -331,6 +409,7 @@ export type AgentRecordOutput = z.output<typeof AgentRecordSchema>;
 export type CapGrant = z.output<typeof CapGrantSchema>;
 export type InstitutionalChairOutput = z.output<typeof InstitutionalChairSchema>;
 export type ChairAssignmentOutput = z.output<typeof ChairAssignmentSchema>;
+export type TechniqueEvidence = z.output<typeof TechniqueEvidenceSchema>;
 export type ExchangeContractOutput = z.output<typeof ExchangeContractSchema>;
 export type ForebearOutput = z.output<typeof ForebearSchema>;
 export type NorthstarOutput = z.output<typeof NorthstarSchema>;

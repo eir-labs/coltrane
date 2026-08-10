@@ -47,7 +47,28 @@ export interface Chair {
    * Must be a subset of output_contract; enforced at compose time.
    */
   optional_outputs?: readonly string[];
+  /** The FLOOR — a skill the seated agent must hold, by slug binding OR carried on its record.
+   *  Checked at compose (does the incumbent declare it) and at run (does it resolve). */
   required_skills: readonly string[];
+  /**
+   * The PREFERENCE — technique this chair would rather its incumbent hold.
+   *
+   * SOFT by construction: composition does not reject a seating that lacks these. The available
+   * roster is a fact about the world (an institution seats the agents it has), and a preference
+   * that refused a seating would be `required_skills` under another name. Its entries are not
+   * checked for existence either — a chair may legitimately prefer a technique no agent has grown
+   * yet, which is a statement of direction, not a dead name.
+   */
+  preferred_skills?: readonly string[];
+  /**
+   * The institution's side of the hydration contract: slot name → the value that fills it.
+   *
+   * A carried skill declares typed slots (`SkillSchema.hydration`); this is where the data those
+   * slots want comes from, at SEAT time. An institution-bound `required` slot that nothing here
+   * fills is a DEAD SLOT and composeStandard refuses it — the same defect class as a granted tool
+   * that resolves to no provider. Gig-bound slots are the run's arguments and are not checked here.
+   */
+  supplies?: Readonly<Record<string, unknown>>;
   // Skills-as-first-class (docs/skills-as-first-class.md): a chair MAY be backed by a
   // skill package instead of an agent. Mutually exclusive with a non-empty agent_slug —
   // a skill-backed chair runs the skill's deterministic code half (no model invocation),
@@ -235,6 +256,7 @@ export function composeStandard(def: {
       input_contract: ch.input_contract ?? [],
       output_contract: ch.output_contract ?? [],
       required_skills: ch.required_skills ?? [],
+      preferred_skills: ch.preferred_skills ?? [],
     })) as Chair[],
   }));
 
@@ -281,11 +303,40 @@ export function composeStandard(def: {
             `standard ${def.slug}: chair "${ch.role}" references unknown agent "${ch.agent_slug}" (not in standard's agents list)`,
           );
         }
-        const declared = new Set(ag.skill_slugs ?? []);
+        // The floor is satisfied by either kind of holding: a slug bound into the shared
+        // repertoire, or a full definition the agent CARRIES on its own record. A carried skill is
+        // not a weaker claim to hold a technique than a reference to someone else's package — it is
+        // the stronger one, since the definition travels with the player.
+        const declared = new Set([...(ag.skill_slugs ?? []), ...(ag.skills ?? []).map((s) => s.slug)]);
         for (const sk of ch.required_skills) {
           if (!declared.has(sk)) {
             throw new CompositionError(
               `standard ${def.slug}: chair "${ch.role}" requires skill "${sk}" which agent "${ag.slug}" does not declare`,
+            );
+          }
+        }
+        // ── The hydration seam ────────────────────────────────────────────────────────────
+        // A carried skill's method is generic; the data it works on is the institution's, and the
+        // SEAT is where that data enters. So an institution-bound slot the skill marks `required`
+        // and no seating fills is a DEAD SLOT: the run would invoke a method against a hole, which
+        // is the same defect class as a granted tool that resolves to no provider — caught here,
+        // where the genome is authored, rather than mid-run.
+        //
+        // Scoped to what is statically knowable: the agent's CARRIED skills (their definitions are
+        // on the record composeStandard already holds) and INSTITUTION-bound slots (a gig-bound slot
+        // is a formal parameter of the run — compose time knows nothing about the arguments of a
+        // dispatch that has not happened, so demanding one here would refuse a legal standard).
+        const supplied = new Set(Object.keys(ch.supplies ?? {}));
+        for (const sk of ag.skills ?? []) {
+          for (const [slot, spec] of Object.entries(sk.hydration ?? {})) {
+            if (spec.required !== true) continue;
+            if ((spec.binding ?? "institution") !== "institution") continue;
+            if (supplied.has(slot)) continue;
+            throw new CompositionError(
+              `standard ${def.slug}: chair "${ch.role}" seats agent "${ag.slug}", whose carried skill ` +
+                `"${sk.slug}" requires hydration slot "${slot}" (${spec.type}) and nothing supplies it — ` +
+                `an unfilled required slot is a dead slot. Supply it on the chair (\`supplies\`) or on the ` +
+                `institutional chair this seat is held under, or drop the slot's \`required\`.`,
             );
           }
         }

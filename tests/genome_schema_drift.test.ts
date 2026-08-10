@@ -78,6 +78,9 @@ describe("drift · litmus — defineAgent is loss-free", () => {
       slug: "litmus", primitives: ["SENSE"], input_types: ["a"], output_types: ["b"], domain: "demo",
       identity: "i", method: "1. a 2. b 3. c", constraints: [], behavioral_primitives: ["explorer", "critic"],
       allowed_tools: ["Read"], disallowed_tools: [], skill_slugs: ["s"],
+      // the agent's OWN carried skill (portable technique + its hydration slots) must survive too —
+      // a projection that dropped it would strip the method and leave the reference behind.
+      skills: [{ slug: "carried", version: 1, md: "technique", hydration: { "house-style": { type: "string", required: true } } }],
       model_tier: "standard", max_tool_calls: 5, max_token_budget: 100, code_tool_access: "none", depth_profile: "standard",
     };
     const agent = defineAgent(def) as Record<string, unknown>;
@@ -107,7 +110,7 @@ describe("drift · litmus — MCP write-surfaces stay generated from the schema"
   // type. zodToMcpProps once unwrapped a ZodArray to its element (following _def.type) and reported
   // `primitives: z.array(enum)` as "string" — so the MCP client serialized the value as a string and
   // agent_define rejected it ("primitives must be an array"). This pins the array fields.
-  for (const f of ["primitives", "allowed_tools", "input_types", "behavioral_primitives"]) {
+  for (const f of ["primitives", "allowed_tools", "input_types", "behavioral_primitives", "skills"]) {
     it(`agent_define advertises "${f}" as an array`, () => {
       expect(schemaPropType("agent_define", f), `${f} must advertise as array, not its element type`).toBe("array");
     });

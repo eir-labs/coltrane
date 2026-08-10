@@ -1,6 +1,6 @@
 {
   "name": "@eir-labs/coltrane",
-  "version": "0.6.2",
+  "version": "0.6.3",
   "description": "A methodology engine \u2014 a typed substrate for defining agents, composing multi-phase standards, dispatching gigs, and sealing every output to a content-addressed ledger. Ships as an MCP server.",
   "type": "module",
   "license": "Apache-2.0",

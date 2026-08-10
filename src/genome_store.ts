@@ -383,6 +383,40 @@ export function rpcGenomeStore(ctx: { baseUrl: string; anonKey: string; agentTok
   };
 }
 
+/** The agent-token gig-queue seam: queue one run through coltrane_mcp_dispatch, where the
+ *  chair contract authorizes (the seat grants the standard; the token may only narrow).
+ *  Same return shape as postgrestQueueGig so a host can swap them by bearer class. */
+export function rpcQueueGig(
+  ctx: { baseUrl: string; anonKey: string; agentToken: string },
+): (args: Record<string, unknown>) => Promise<Record<string, unknown>> {
+  return async (args) => {
+    const res = await fetch(`${ctx.baseUrl}/rest/v1/rpc/coltrane_mcp_dispatch`, {
+      method: "POST",
+      headers: {
+        apikey: ctx.anonKey,
+        Authorization: `Bearer ${ctx.anonKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        p_bearer: ctx.agentToken,
+        p_standard: args["standard_slug"],
+        p_mode: args["mode"] ?? "live",
+        p_input: args["input"] ?? {},
+      }),
+    });
+    const text = await res.text();
+    if (!res.ok) {
+      let message = text || `store error ${res.status}`;
+      try {
+        const parsed = JSON.parse(text) as { message?: string };
+        if (parsed.message) message = parsed.message;
+      } catch { /* keep the raw text */ }
+      throw new Error(message);
+    }
+    return { gig_id: JSON.parse(text) as string, status: "queued" };
+  };
+}
+
 /** The hosted gig-queue seam for createToolSurface: queue one run through the governor-gated
  *  dispatch RPC AS THE CALLER (member JWT — RLS + the governor gate decide). Queuing only;
  *  a drain worker claims and runs it. Shape mirrors hosted_tools' member dispatch path. */

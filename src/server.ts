@@ -17,7 +17,11 @@ import {
 } from "./mcp.js";
 import { createRegistry, loadRegistry, domainTypeDefect, type Registry, type DomainType } from "./registry.js";
 import { loadGenome, resolveGenome, type SkillRecord, type EvalRecord, type LoadError } from "./loader.js";
-import { SkillSchema, AgentSchema, StandardSchema, DomainTypeSchema } from "./genome_schema.js";
+import { SkillSchema, AgentSchema, StandardSchema, DomainTypeSchema, ChartSchema, VenueSchema, venueDefect } from "./genome_schema.js";
+import {
+  composeChart, runChart, chartHash, chartEntrySeedTypes, dispatchTarget,
+  type Chart, type Venue, type ChartPlan, type ChartResult, type ResolvedMovement,
+} from "./chart.js";
 import type { GenomeStore, GenomeClass } from "./genome_store.js";
 import { runSkillFixtures, executeSkill, loadFixtures } from "./skill_subprocess.js";
 import { evolveSkill } from "./skills.js";
@@ -100,6 +104,13 @@ export interface ServerDeps {
   // dispatcher reads — a definition made through the MCP surface is dispatchable
   // in the same session, not stale until re-bootstrap (T14 / manual-refresh gap).
   standards?: Map<string, Standard> | undefined;
+  /** The loaded ARRANGEMENTS. Mutable for the same reason `standards` is: a chart authored through
+   *  chart_define is dispatchable in the same session. Absent → chart_browse and a `chart_slug`
+   *  dispatch say what bootstrap they need rather than reporting an empty genome. */
+  charts?: Map<string, Chart> | undefined;
+  /** The loaded ROOMS. Consulted wherever a chart names a venue: composeChart's ceiling rule needs
+   *  the room to resolve, and an unresolvable ceiling fails closed. */
+  venues?: Map<string, Venue> | undefined;
   invoke?: AgentInvoker | undefined;
   model_version?: string | undefined;
   // §13/skills — passed through to runGig so each invocation can resolve its
@@ -660,9 +671,41 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         if (!deps.standards || !deps.invoke) {
           return { ok: false, not_implemented: true, requires_approval: approval, error: "gig_dispatch needs standards + invoke wired into the server" };
         }
-        const slug2 = String(args["standard_slug"] ?? "");
-        const standard = deps.standards.get(slug2);
-        if (!standard) return { ok: false, requires_approval: approval, error: `unknown standard "${slug2}"` };
+        // ── which performance? ───────────────────────────────────────────────────────────────
+        // EXACTLY ONE of standard_slug / chart_slug. A single-standard dispatch IS the degenerate
+        // one-movement chart, so naming both names two performances and naming neither names none;
+        // the refinement lives in one place (dispatchTarget) and is shared with the CLI.
+        const target = dispatchTarget({
+          standard_slug: args["standard_slug"] === undefined || args["standard_slug"] === null ? undefined : String(args["standard_slug"]),
+          chart_slug: args["chart_slug"] === undefined || args["chart_slug"] === null ? undefined : String(args["chart_slug"]),
+        });
+        if (!target.ok) return { ok: false, requires_approval: approval, error: target.error };
+        const chartDef = target.kind === "chart" ? deps.charts?.get(target.slug) : undefined;
+        if (target.kind === "chart" && !chartDef) {
+          return {
+            ok: false, requires_approval: approval,
+            error: deps.charts
+              ? `unknown chart "${target.slug}"`
+              : `unknown chart "${target.slug}": this server has no charts map (bootstrap from a genome with charts/)`,
+          };
+        }
+        const slug2 = target.slug;
+        // The standards this dispatch will actually run: one, or one per movement. Every preflight
+        // below is stated ONCE over this list, so a chart cannot route around a gate a standard
+        // dispatch has to pass.
+        const targetStandards: Standard[] = [];
+        if (chartDef) {
+          for (const m of chartDef.movements) {
+            const s = deps.standards.get(m.standard_slug);
+            // A dead standard name is composeChart's R2 and is reported with the rule named below;
+            // the preflights simply have nothing to check for that movement.
+            if (s) targetStandards.push(s);
+          }
+        } else {
+          const standard = deps.standards.get(slug2);
+          if (!standard) return { ok: false, requires_approval: approval, error: `unknown standard "${slug2}"` };
+          targetStandards.push(standard);
+        }
         // #203, the READ side. Preserving `status` through the loader was only half of it: the
         // symptom recorded on the issue — "a retired standard stays dispatchable and nothing
         // says otherwise" — survived the field being kept, because nothing consulted it. A
@@ -675,32 +718,41 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         //
         // deprecated ALLOWS and warns; retired REFUSES. Were both refused, `deprecated` would
         // be a spelling of `retired` and there would be no way to say the softer thing.
-        const stdStatus = (standard as { status?: string }).status;
-        if (stdStatus === "retired") {
-          return {
-            ok: false, requires_approval: approval,
-            error: `standard "${slug2}" is retired and cannot be dispatched. ` +
-              `Promote it back to active (standard_promote) if it should run again.`,
-          };
+        //
+        // Swept over EVERY standard this dispatch will run, so a chart cannot smuggle a retired
+        // movement past a gate a direct dispatch of the same standard would fail.
+        const warnings: string[] = [];
+        for (const s of targetStandards) {
+          const stdStatus = (s as { status?: string }).status;
+          if (stdStatus === "retired") {
+            return {
+              ok: false, requires_approval: approval,
+              error: `standard "${s.slug}" is retired and cannot be dispatched. ` +
+                `Promote it back to active (standard_promote) if it should run again.`,
+            };
+          }
+          if (stdStatus === "deprecated") {
+            warnings.push(`standard "${s.slug}" is deprecated — it still runs, but should not be built on.`);
+          }
         }
-        const warnings: string[] = stdStatus === "deprecated"
-          ? [`standard "${slug2}" is deprecated — it still runs, but should not be built on.`]
-          : [];
         // WU-0008 preflight: run the same sealDrill used by standard_simulate BEFORE spending
         // on any chair. A structurally-unsealable standard is refused here (pennies) instead of
         // after a chair runs and aborts. Gate is placed once, above the wait/async split, so a
-        // single check covers both runGig call-sites below.
-        const drill = sealDrill(
-          { phases: standard.phases.map((p) => ({ name: p.name, chairs: p.chairs.map((c) => ({ role: c.role, output_contract: c.output_contract })) })) },
-          deps.registry,
-        );
-        if (!drill.ok) {
-          return {
-            ok: false, requires_approval: approval,
-            error: `standard "${slug2}" cannot seal: ` +
-              drill.failures.map((f) => `${f.phase}/${f.role} → ${f.domain_type} (${f.errors.join("; ")})`).join(", "),
-            data: { seal_drill: drill },
-          };
+        // single check covers both runGig call-sites below — and over every movement's standard,
+        // because a chart that cannot seal at movement three is refused before movement one.
+        for (const s of targetStandards) {
+          const drill = sealDrill(
+            { phases: s.phases.map((p) => ({ name: p.name, chairs: p.chairs.map((c) => ({ role: c.role, output_contract: c.output_contract })) })) },
+            deps.registry,
+          );
+          if (!drill.ok) {
+            return {
+              ok: false, requires_approval: approval,
+              error: `standard "${s.slug}" cannot seal: ` +
+                drill.failures.map((f) => `${f.phase}/${f.role} → ${f.domain_type} (${f.errors.join("; ")})`).join(", "),
+              data: { seal_drill: drill },
+            };
+          }
         }
         // Optional budget arg — when present, runtime enforces per-gig cost-budget
         // and raises BudgetExhausted on depletion (PR for T10 gap, see runtime.ts).
@@ -769,9 +821,173 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
           ...(res.checkpoint_error ? { checkpoint_error: res.checkpoint_error } : {}),
         });
 
+        const wait = args["wait"] === true;
+
+        // ── the chart path ────────────────────────────────────────────────────────────────────
+        // A chart is COMPOSED here, not at load, because the last rule needs a fact the genome does
+        // not hold: which types the dispatch payload carries. Everything else composeChart checks it
+        // already checked at load; this pass is the one that can hold R7 to the real payload, so a
+        // performance whose first movement was never seeded is refused before it spawns anything.
+        if (chartDef) {
+          const composed = composeChart({
+            chart: chartDef,
+            standards: deps.standards,
+            ...(deps.agents ? { agents: deps.agents } : {}),
+            ...(deps.venues ? { venues: deps.venues } : {}),
+            payload_types: Object.keys(gigInput),
+          });
+          if (!composed.ok) {
+            return {
+              ok: false, requires_approval: approval,
+              error: `chart "${slug2}" cannot be performed: ` + composed.violations.map((v) => `${v.rule}: ${v.detail}`).join(" | "),
+              data: { validation_result: { valid: false, violations: composed.violations } },
+            };
+          }
+          const plan: ChartPlan = composed;
+          const chartDeps = {
+            outputs: deps.outputs, ledger: deps.ledger, invoke: deps.invoke,
+            model_version: deps.model_version, skills: deps.skills, skill_dirs: deps.skill_dirs, evals: deps.evals, budget,
+            ...(depth ? { depth } : {}), ...reuseWiring, ...humanWiring,
+          };
+          /** The ARRANGEMENT's manifest. A chart has no single genome_hash or run_fingerprint — it
+           *  has a chart_hash and one run per movement — so the reply says what a chart run is
+           *  rather than reshaping it into a standard run's fields. */
+          const chartManifest = (res: ChartResult): Record<string, unknown> => ({
+            chart_slug: res.chart_slug, chart_hash: res.chart_hash,
+            movements: res.movements.map((m) => ({
+              movement_id: m.movement_id, standard_slug: m.standard_slug, gig_id: m.gig_id,
+              status: m.status, output_count: m.outputs.length, spent_usd: m.spent_usd,
+              ...(m.result ? { genome_hash: m.result.genome_hash, run_fingerprint: m.result.run_fingerprint } : {}),
+            })),
+            output_count: res.movements.reduce((n, m) => n + m.outputs.length, 0),
+            spent_usd: res.spent_usd,
+            ...(res.budget ? { budget: res.budget } : {}),
+            ...(res.gates_approved ? { gates_approved: res.gates_approved } : {}),
+            ...(res.resumed ? { resumed: res.resumed } : {}),
+          });
+          if (wait) {
+            try {
+              const res = await runChart(plan, gigInput, chartDeps);
+              return {
+                ok: true, requires_approval: approval,
+                data: {
+                  gig_id: res.gig_id, status: res.status,
+                  ...(res.awaiting ? { awaiting: res.awaiting } : {}),
+                  ...(depth ? { depth } : {}),
+                  warnings, manifest: chartManifest(res),
+                },
+              };
+            } catch (e) {
+              if (e instanceof ResumeRefused) {
+                return { ok: false, requires_approval: approval, error: e.message,
+                  data: { resume_refused: true, gig_id: e.gig_id, drift: e.drift } };
+              }
+              if (e instanceof BudgetExhausted) {
+                const partial = partialGigUsage(e);
+                return { ok: false, requires_approval: approval, error: e.message,
+                  data: { budget_exhausted: true, agent_slug: e.agent_slug, balance: e.balance, cost: e.cost, budget_state: e.state,
+                    ...(partial ? { usage: partial } : {}) } };
+              }
+              throw e;
+            }
+          }
+          // Async, the default. Same live-state row an async standard dispatch registers, so
+          // gig_monitor and gig_abort reach a performance exactly as they reach a run: the row
+          // names the standard the performance OPENS with, and `chart_slug` names the arrangement.
+          const chartGigId = resumeArg ?? randomUUID();
+          const chartRuns = deps.gig_runs ?? (deps.gig_runs = new Map());
+          const priorChartState = chartRuns.get(chartGigId);
+          const chartState = newGigRun(
+            chartGigId, plan.movements[0]!.standard.slug,
+            plan.movements.reduce((n, m) => n + m.standard.phases.length, 0),
+            new Date().toISOString(),
+          );
+          chartState.chart_slug = plan.chart.slug;
+          const chartController = new AbortController();
+          chartState.controller = chartController;
+          chartRuns.set(chartGigId, chartState);
+          pruneGigRuns(chartRuns);
+          const chartLogDir = deps.gig_log_base ? join(deps.gig_log_base, "gigs", chartGigId) : undefined;
+          const onChartProgress = (ev: Parameters<typeof applyGigProgress>[1]): void => {
+            applyGigProgress(chartState, ev);
+            if (chartLogDir && ev.type === "agent_event") {
+              try { mkdirSync(chartLogDir, { recursive: true }); appendFileSync(join(chartLogDir, `${ev.role}.jsonl`), JSON.stringify(ev.event) + "\n"); } catch { /* best-effort */ }
+            }
+            const line = gigEventLogLine(chartGigId, ev);
+            if (line) { try { process.stderr.write(line + "\n"); } catch { /* best-effort */ } }
+          };
+          const chartPromise = runChart(plan, gigInput, {
+            ...chartDeps, gig_id: chartGigId, onProgress: onChartProgress, signal: chartController.signal,
+          });
+          let chartRefusal: ResumeRefused | undefined;
+          if (resumeArg !== undefined) {
+            void chartPromise.catch((e: unknown) => { if (e instanceof ResumeRefused) chartRefusal = e; });
+          }
+          void chartPromise
+            .then((res) => {
+              chartState.status = res.status === "complete" ? "complete" : "awaiting_approval";
+              // An arrangement-level GATE has no phase — its position is the movement it gates — so
+              // the movement_id fills the slot a within-movement park fills with its phase name.
+              if (res.awaiting) chartState.awaiting = { phase: res.awaiting.phase ?? res.awaiting.movement_id, role: res.awaiting.chair };
+              chartState.finished_at = new Date().toISOString();
+              // The arrangement's identity in the slot the run's identity occupies — the same
+              // substitution `run_fingerprint` makes for a chart (src/chart.ts), so a monitor reading
+              // this field gets the hash that actually identifies what ran.
+              chartState.genome_hash = res.chart_hash;
+              chartState.outputs_count = res.movements.reduce((n, m) => n + m.outputs.length, 0);
+              // A budget_exhausted performance settled without completing and without parking. It
+              // is not `complete` and there is no person to wait for, so it reads as failed with
+              // the boundary it stopped at named — the same posture a depleted run has.
+              if (res.status === "budget_exhausted") {
+                chartState.status = "failed";
+                chartState.error = `budget envelope exhausted at movement "${res.budget?.exhausted_at_movement ?? "?"}" (spent $${res.spent_usd} of $${res.budget?.total_usd ?? "?"})`;
+              }
+            })
+            .catch((e: unknown) => {
+              chartState.finished_at = new Date().toISOString();
+              if (e instanceof GigAborted) {
+                chartState.status = "aborted";
+                chartState.abort_reason = e.reason;
+                chartState.outputs_count = e.outputs.length;
+                if (e.usage) chartState.usage = e.usage;
+                return;
+              }
+              chartState.status = "failed";
+              chartState.error = e instanceof Error ? e.message : String(e);
+              const partial = partialGigUsage(e);
+              if (partial) chartState.usage = partial;
+              const bs = partialBudgetState(e);
+              if (bs) chartState.budget_state = bs;
+              onChartProgress({ type: "gig_failed", error: chartState.error });
+            })
+            .finally(() => { chartState.controller = undefined; });
+          if (resumeArg !== undefined) {
+            await Promise.resolve(); // one turn — see the ordering note on the standard path below
+            if (chartRefusal) {
+              if (priorChartState) chartRuns.set(chartGigId, priorChartState);
+              else chartRuns.delete(chartGigId);
+              return { ok: false, requires_approval: approval, error: chartRefusal.message,
+                data: { resume_refused: true, gig_id: chartRefusal.gig_id, drift: chartRefusal.drift } };
+            }
+          }
+          return {
+            ok: true, requires_approval: approval,
+            data: {
+              gig_id: chartGigId, status: "running", chart_slug: plan.chart.slug, chart_hash: plan.chart_hash,
+              ...(depth ? { depth } : {}), warnings, ...(chartLogDir ? { log_dir: chartLogDir } : {}),
+              ...(resumeArg !== undefined ? { resumed_from: resumeArg } : {}),
+              ...(reuseOn ? { reuse: true } : {}),
+            },
+          };
+        }
+
+        // ── the single-standard path ──────────────────────────────────────────────────────────
+        // Reached only when the target is a standard: the chart branch above always returns, and an
+        // unresolvable standard slug returned before the preflights. So there is exactly one here.
+        const standard = targetStandards[0]!;
+
         // Synchronous mode (opt-in via wait:true) — block, return the manifest. The
         // deterministic test path and any caller that wants the answer in one call.
-        const wait = args["wait"] === true;
         if (wait) {
           try {
             const res = await runGig(standard, gigInput, {
@@ -951,6 +1167,9 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
               // operator to guess which seat is theirs to sit in.
               ...(live.awaiting ? { awaiting: live.awaiting } : {}),
               standard_slug: live.standard_slug,
+              // Present iff this run is a performance of a chart. Absent means one standard, which
+              // is what every caller has always been looking at.
+              ...(live.chart_slug ? { chart_slug: live.chart_slug } : {}),
               current_phase: live.current_phase ?? null,
               phases_total: live.phases_total,
               phases_complete: live.phases_seen.length,
@@ -1070,6 +1289,107 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
           throw e;
         }
       }
+      case "chart_define": {
+        // The arrangement, authored through the genome's mouth. Every field is read explicitly from
+        // the schema's own key set — the surface is generated from ChartSchema, so a field added
+        // there must be threaded here or the drift guard reds.
+        if (!deps.standards) {
+          return { ok: false, not_implemented: true, requires_approval: approval, error: "chart_define needs a standards map (bootstrap from a genome) — a chart's movements name standards, and a chart composed against nothing is a chart of dead names" };
+        }
+        const cSlug = String(args["slug"] ?? "");
+        const chartInputDef = {
+          slug: cSlug,
+          movements: (args["movements"] as unknown[]) ?? [],
+          ...(args["edges"] !== undefined ? { edges: args["edges"] } : {}),
+          ...(args["approval_gates"] !== undefined ? { approval_gates: args["approval_gates"] } : {}),
+          ...(args["budget_envelope"] !== undefined ? { budget_envelope: args["budget_envelope"] } : {}),
+          ...(args["venue"] !== undefined ? { venue: args["venue"] } : {}),
+        } as Parameters<typeof composeChart>[0]["chart"];
+        const shape = ChartSchema.safeParse(chartInputDef);
+        const composed = composeChart({
+          chart: chartInputDef,
+          standards: deps.standards,
+          ...(deps.agents ? { agents: deps.agents } : {}),
+          ...(deps.venues ? { venues: deps.venues } : {}),
+          // Authoring time knows no payload, so a boundary movement's declared gig contract stands
+          // in for it — the same rule the loader applies, and dispatch re-checks against the real
+          // payload. (An unparseable chart has no movements to read; composeChart reports R0.)
+          payload_types: shape.success ? chartEntrySeedTypes(shape.data, deps.standards) : [],
+        });
+        if (!composed.ok) {
+          const why = composed.violations.map((v) => `${v.rule}: ${v.detail}`).join(" | ");
+          return {
+            ok: false, requires_approval: approval, error: `chart "${cSlug}" was refused: ${why}`,
+            data: { validation_result: { valid: false, violations: composed.violations } },
+          };
+        }
+        // Write-through to the LIVE map so gig_dispatch can perform it in the same session.
+        deps.charts?.set(cSlug, composed.chart);
+        const chartFile = { ...composed.chart };
+        const sealedChart = sealDefinition("chart_define", cSlug, chartFile, deps.ledger, deps.genome_dir, "charts");
+        return {
+          ok: true, requires_approval: approval,
+          data: {
+            chart_id: composed.chart.slug, chart_hash: composed.chart_hash,
+            movements: composed.order, edges_classified: composed.edges_classified,
+            content_hash: sealedChart.content_hash, dependency_hash: sealedChart.dependency_hash,
+            effective_hash: sealedChart.effective_hash,
+            validation_result: { valid: true },
+          },
+        };
+      }
+
+      case "venue_define": {
+        // The room. BOTH gates, in the loader's order: the single Zod source for the shape, then
+        // venueDefect for the cross-field rules — so a venue authored here cannot slip past a check
+        // a venue read off disk would hit.
+        const vSlug = String(args["slug"] ?? "");
+        const venueInputDef = {
+          slug: vSlug,
+          institution_slug: args["institution_slug"],
+          ...(args["description"] !== undefined ? { description: args["description"] } : {}),
+          ...(args["flavor"] !== undefined ? { flavor: args["flavor"] } : {}),
+          // Pass through only what was stated. The schema owns the defaults — including that an
+          // unstated `equipment` is the EMPTY room — so this handler cannot disagree with the loader
+          // about what a bare venue means.
+          ...(args["equipment"] !== undefined ? { equipment: args["equipment"] } : {}),
+          ...(args["doors"] !== undefined ? { doors: args["doors"] } : {}),
+          ...(args["installs"] !== undefined ? { installs: args["installs"] } : {}),
+          ...(args["credential_surface"] !== undefined ? { credential_surface: args["credential_surface"] } : {}),
+          ...(args["lifecycle"] !== undefined ? { lifecycle: args["lifecycle"] } : {}),
+          ...(args["responsible_chair"] !== undefined ? { responsible_chair: args["responsible_chair"] } : {}),
+        };
+        const parsedVenue = VenueSchema.safeParse(venueInputDef);
+        if (!parsedVenue.success) {
+          const why = parsedVenue.error.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`).join("; ");
+          return {
+            ok: false, requires_approval: approval, error: `venue "${vSlug}" was refused: ${why}`,
+            data: { validation_result: { valid: false, error: why } },
+          };
+        }
+        const vDefect = venueDefect(parsedVenue.data);
+        if (vDefect) {
+          return {
+            ok: false, requires_approval: approval, error: vDefect,
+            data: { validation_result: { valid: false, error: vDefect } },
+          };
+        }
+        deps.venues?.set(vSlug, parsedVenue.data);
+        const sealedVenue = sealDefinition("venue_define", vSlug, parsedVenue.data, deps.ledger, deps.genome_dir, "venues");
+        return {
+          ok: true, requires_approval: approval,
+          data: {
+            venue_id: parsedVenue.data.slug,
+            // What a room actually permits, echoed back: an author who meant "read-only tools" and
+            // typed nothing has built the EMPTY room, and the count is where they see it.
+            tool_count: parsedVenue.data.equipment.tools.length,
+            content_hash: sealedVenue.content_hash, dependency_hash: sealedVenue.dependency_hash,
+            effective_hash: sealedVenue.effective_hash,
+            validation_result: { valid: true },
+          },
+        };
+      }
+
       case "agent_validate_pipeline": {
         if (Array.isArray(args["primitives"])) {
           try {
@@ -1309,6 +1629,14 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         const agentsBefore = new Map(deps.agents ?? []);
         const agentsDiff = syncMap(deps.agents, fresh.agents, agentsBefore);
 
+        // charts + venues — same in-place sync. A reload that refreshed standards and left the
+        // arrangements over them stale would leave gig_dispatch performing a chart the genome no
+        // longer describes, which is the class of drift genome_reload exists to close.
+        const chartsBefore = new Map(deps.charts ?? []);
+        const chartsDiff = syncMap(deps.charts, fresh.charts, chartsBefore);
+        const venuesBefore = new Map(deps.venues ?? []);
+        const venuesDiff = syncMap(deps.venues, fresh.venues, venuesBefore);
+
         // typesBefore is captured for symmetry; not currently surfaced beyond typeDiff.
         void typesBefore;
 
@@ -1323,6 +1651,8 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
                 skills: skillsDiff.added,
                 evals: evalsDiff.added,
                 agents: agentsDiff.added,
+                charts: chartsDiff.added,
+                venues: venuesDiff.added,
               },
               modified: {
                 domain_types: typeDiff.modified,
@@ -1330,6 +1660,8 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
                 skills: skillsDiff.modified,
                 evals: evalsDiff.modified,
                 agents: agentsDiff.modified,
+                charts: chartsDiff.modified,
+                venues: venuesDiff.modified,
               },
               removed: {
                 domain_types: typeDiff.removed,
@@ -1337,6 +1669,8 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
                 skills: skillsDiff.removed,
                 evals: evalsDiff.removed,
                 agents: agentsDiff.removed,
+                charts: chartsDiff.removed,
+                venues: venuesDiff.removed,
               },
             },
             load_errors: deps.load_errors,
@@ -1851,6 +2185,66 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
           }))
           .sort((a, b) => (a.slug < b.slug ? -1 : 1));
         return { ok: true, requires_approval: approval, data: { standards, count: standards.length } };
+      }
+
+      case "chart_browse": {
+        if (!deps.charts) return { ok: false, not_implemented: true, requires_approval: approval, error: "chart_browse needs a charts map (bootstrap from a genome)" };
+        let clist = [...deps.charts.values()];
+        if (args["venue"]) clist = clist.filter((c) => c.venue === args["venue"]);
+        if (args["standard_slug"]) clist = clist.filter((c) => c.movements.some((m) => m.standard_slug === args["standard_slug"]));
+        const charts = clist
+          .map((c) => {
+            // The arrangement's identity, when it is computable. chartHash folds each movement's
+            // standard PROJECTION, so a chart naming a standard this server does not hold has no
+            // hash to report — and reporting null is the honest answer, not a fabricated prefix.
+            const resolvedMovements: ResolvedMovement[] = [];
+            for (const m of c.movements) {
+              const s = deps.standards?.get(m.standard_slug);
+              if (s) resolvedMovements.push({ movement_id: m.movement_id, standard: s, runtime_fills: m.runtime_fills, seatings: m.seatings });
+            }
+            const complete = resolvedMovements.length === c.movements.length;
+            return {
+              slug: c.slug,
+              standard_slugs: c.movements.map((m) => m.standard_slug),
+              movement_ids: c.movements.map((m) => m.movement_id),
+              movement_count: c.movements.length,
+              edge_count: c.edges.length,
+              gate_count: c.approval_gates.length,
+              venue: c.venue ?? null,
+              budget_usd: c.budget_envelope?.total_usd ?? null,
+              // A PREFIX: enough to tell two arrangements apart in a listing, not the identity
+              // itself (which a caller reads off the define call or the ledger).
+              chart_hash: complete ? chartHash({ movements: resolvedMovements, chart: c }).slice(0, 12) : null,
+            };
+          })
+          .sort((a, b) => (a.slug < b.slug ? -1 : 1));
+        return { ok: true, requires_approval: approval, data: { charts, count: charts.length } };
+      }
+
+      case "venue_browse": {
+        if (!deps.venues) return { ok: false, not_implemented: true, requires_approval: approval, error: "venue_browse needs a venues map (bootstrap from a genome)" };
+        let vlist = [...deps.venues.values()];
+        if (args["institution_slug"]) vlist = vlist.filter((v) => v.institution_slug === args["institution_slug"]);
+        if (args["flavor"]) vlist = vlist.filter((v) => v.flavor === args["flavor"]);
+        const venues = vlist
+          .map((v) => ({
+            slug: v.slug, institution_slug: v.institution_slug, flavor: v.flavor ?? null,
+            // COUNTS, not contents: the numbers are what a seating decision turns on ("does this
+            // room hold anything at all", "can anything leave"), and the full lists are one
+            // venue_define / file read away.
+            tool_count: v.equipment.tools.length,
+            tools: v.equipment.tools,
+            ingress_count: v.doors?.ingress.length ?? 0,
+            egress_count: v.doors?.egress.length ?? 0,
+            install_count: v.installs.length,
+            credential_surface: v.credential_surface,
+            lifecycle: v.lifecycle.policy,
+            rebuild_cadence: v.lifecycle.rebuild_cadence ?? null,
+            responsible_chair: v.responsible_chair ?? null,
+            description: v.description ?? null,
+          }))
+          .sort((a, b) => (a.slug < b.slug ? -1 : 1));
+        return { ok: true, requires_approval: approval, data: { venues, count: venues.length } };
       }
 
       case "agent_browse": {
@@ -2445,6 +2839,13 @@ const HOSTED_UPSERT: Readonly<Record<string, { cls: GenomeClass; keys: readonly 
   standard_compose: { cls: "standard", keys: Object.keys(StandardSchema.shape) },
   type_register: { cls: "domain_type", keys: Object.keys(DomainTypeSchema.shape) },
   skill_define: { cls: "skill", keys: Object.keys(SkillSchema.shape) },
+  // The chart and the venue ride the same port. The store side is NOT built — coltrane_genome_upsert
+  // has no branch for either class — so a hosted chart_define reaches the RPC and is refused there,
+  // with the store's own message, and the mutation fails loudly. That is the right failure: the
+  // class travels the port it is supposed to travel, and the missing half announces itself instead
+  // of the engine quietly declining to try. (Store-side work: two tables + two upsert branches.)
+  chart_define: { cls: "chart", keys: Object.keys(ChartSchema.shape) },
+  venue_define: { cls: "venue", keys: Object.keys(VenueSchema.shape) },
 };
 
 async function callSurfaceTool(
@@ -2632,6 +3033,8 @@ export function bootstrapServerDeps(genomeRoot?: string): ServerDeps {
     // — as tests/dispatch_tool_resolution.test.ts does with no root — leaves no trace.
     ledger: new FileLedger(defaultLedgerPath(root)),
     standards: genome.standards, // ← gig_dispatch can now resolve file-defined standards
+    charts: genome.charts,   // ← gig_dispatch resolves a chart_slug; chart_browse lists them
+    venues: genome.venues,   // ← the ceiling a chart's venue imposes has to resolve to something
     invoke: makeClaudeInvoker({
       registry,
       model: process.env["COLTRANE_MODEL"],

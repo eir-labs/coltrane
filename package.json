@@ -57,6 +57,8 @@
     "dist/src",
     "agents",
     "standards",
+    "charts",
+    "venues",
     "skills",
     "domain_types",
     "core_types",

@@ -492,7 +492,16 @@ export const ChartSchema = z
     edges: z.array(ChartEdgeSchema).default([]),
     approval_gates: z.array(ChartApprovalGateSchema).default([]),
     budget_envelope: ChartBudgetEnvelopeSchema.optional(),
-    /** An opaque binding the runtime layer owns. Present as a field, unresolved as a semantics. */
+    /** The VENUE this performance is held in, by slug — a `VenueSchema` in the genome (below).
+     *
+     *  A slug, never an inline room: the venue is an institution-level object shared by whichever
+     *  arrangement is fit for it, so it is named here and defined once there. A slug that resolves
+     *  to no venue is a dead name and `composeChart` refuses the chart (R10), exactly as an
+     *  unresolvable tool grant refuses a dispatch.
+     *
+     *  Deliberately NOT folded into `chart_hash`: a room is environment, not structure. Two runs of
+     *  the same arrangement in differently-configured rooms share an arrangement identity; what
+     *  distinguishes them belongs to the run's own record, not the chart's. */
     venue: z.string().optional(),
   })
   .strict();
@@ -503,6 +512,122 @@ export type ChartMovementOutput = z.output<typeof ChartMovementSchema>;
 export type ChartEdgeOutput = z.output<typeof ChartEdgeSchema>;
 export type ChartApprovalGateOutput = z.output<typeof ChartApprovalGateSchema>;
 export type ChartSeatingOutput = z.output<typeof ChartSeatingSchema>;
+
+// ── Venue — the institution's configured performance space ────────────────────────────────────
+//
+// A venue states what EXISTS to be acted with when a gig runs: which tools resolve, which doors
+// open inward and outward, what is installed, and which classes of credential may legitimately be
+// present. It is an institution-level object (one institution owns it; an institution may operate
+// several) and it is a CEILING, never a grant: the authority a seated agent actually holds is its
+// own `allowed_tools` INTERSECTED with `equipment.tools`, so a room can only ever narrow a player.
+// `composeChart` enforces that where a chart names a venue (src/chart.ts R10).
+//
+// The contract is deliberately a narrow waist. Nothing here is a harness escape hatch — no image
+// reference, no command string, no provisioning block — because a field that can express arbitrary
+// harness behaviour destroys the separation between what is declared and what realizes it. What
+// this shape covers is the STATICALLY CHECKABLE half of the design: the fields an engine can
+// enforce before anything runs. Realization (building the room from the contract) and verification
+// by behavioural probe are a lower layer and are not modelled here.
+//
+// Two asymmetries are load-bearing and stated in the shape rather than in prose:
+//   - `doors` separates ingress from egress, because what may reach the room and what may leave it
+//     are different questions with different threat models.
+//   - `installs` carries DIGESTS, not version ranges: an unpinned install names a family of rooms,
+//     which would make a room's identity meaningless.
+
+/** The room's equipment: a deny-by-default allowlist of tool grants, in the same vocabulary as an
+ *  agent's `allowed_tools`. A venue with no tools holds nothing — not "read-only tools", nothing. */
+export const VenueEquipmentSchema = z
+  .object({
+    tools: z.array(z.string()).default([]),
+  })
+  .strict();
+
+/** A host allowlist per direction. Deny-by-default: absent doors reach nothing and are reached by
+ *  nothing. `*` is refused — a wildcard door is not a door, it is the absence of one. */
+const HostSchema = z
+  .string()
+  .refine((h) => h.trim() !== "*", { message: `a door names hosts, never "*" — a wildcard door is not a door` });
+export const VenueDoorsSchema = z
+  .object({
+    ingress: z.array(HostSchema).default([]),
+    egress: z.array(HostSchema).default([]),
+  })
+  .strict();
+
+/** Lifecycle. Ephemeral is the default: the contract is the durable object and the realization is
+ *  disposable, because everything a standing room accumulates — drift, residue from prior gigs,
+ *  standing credentials, warm state — is exactly the class of thing no output's `input_shas` can
+ *  cover. `standing` is permitted as a named exception and owes a rebuild cadence (venueDefect). */
+export const VenueLifecycleSchema = z
+  .object({
+    policy: z.enum(["ephemeral", "standing"]).default("ephemeral"),
+    /** ISO-8601 duration or cron-shaped cadence — read by the responsible office, not the engine. */
+    rebuild_cadence: z.string().optional(),
+  })
+  .strict();
+
+/** An install must carry the digest of what will actually be present. */
+const InstallPinSchema = z.string().regex(
+  /sha256:[0-9a-f]{64}/,
+  "an install must be digest-pinned (…sha256:<64 hex>): a version range names a family of rooms, not one room, so an unpinned install makes the venue's identity meaningless",
+);
+
+export const VenueSchema = z
+  .object({
+    slug: z.string(),
+    /** Exactly one owning institution. The institution is the duty holder; the office below is the
+     *  appointed accountable individual. */
+    institution_slug: z.string(),
+    /** Why this room is shaped the way it is — read at review, never at runtime. */
+    description: z.string().optional(),
+    /** The base kind of room (e.g. "ingest-empty", "code-work"). A label for humans and for
+     *  "which room does this work want", not a resolvable reference. */
+    flavor: z.string().optional(),
+    /** Defaulted, not required, and the default is the EMPTY room. Every access-shaped field here
+     *  leans the same way: absent doors reach nothing, absent installs install nothing, an absent
+     *  credential surface permits nothing. A venue that forgot to state its equipment must hold
+     *  nothing rather than hold whatever the reader assumed — and both doors into this class (the
+     *  loader and venue_define) get that from the one schema rather than from two agreeing habits. */
+    equipment: VenueEquipmentSchema.default({}),
+    doors: VenueDoorsSchema.optional(),
+    /** Digest-pinned software the room contains. */
+    installs: z.array(InstallPinSchema).default([]),
+    /** Which CLASSES of credential may legitimately be present, by name. Never material, and never
+     *  a field material could occupy: a room that declares nothing here is a room where finding a
+     *  credential is a breach rather than a configuration difference. */
+    credential_surface: z.array(z.string()).default([]),
+    lifecycle: VenueLifecycleSchema.default({}),
+    /** The accountable office: an institutional chair id (the office, not its incumbent). One named
+     *  duty-holder answers for the room and for what it permits. */
+    responsible_chair: z.string().optional(),
+  })
+  .strict();
+
+export type VenueInput = z.input<typeof VenueSchema>;
+export type VenueOutput = z.output<typeof VenueSchema>;
+
+/**
+ * Cross-field venue rules — the ones a single field cannot state.
+ *
+ * A separate function rather than a `.superRefine`, on purpose and by the existing idiom
+ * (`domainTypeDefect` in src/registry.ts): the MCP write-surface is generated from
+ * `zodToMcpProps(VenueSchema)`, which needs a plain `ZodObject` with a `.shape`, and a refined
+ * schema is a `ZodEffects` that has neither. So both doors — the loader and `venue_define` — call
+ * `VenueSchema.safeParse` and then this, and a rule enforced at one door is enforced at both.
+ *
+ * Returns the teaching message, or null when the venue is sound.
+ */
+export function venueDefect(venue: VenueOutput): string | null {
+  if (venue.lifecycle.policy === "standing" && !venue.lifecycle.rebuild_cadence?.trim()) {
+    return (
+      `venue "${venue.slug}" is standing with no lifecycle.rebuild_cadence — that is a snowflake, not a venue. ` +
+      `A standing room accumulates drift, residue from prior gigs and warm state that no output's input_shas can cover, ` +
+      `so a standing exception owes a rebuild cadence: a phoenix on a slower clock. State one, or make it ephemeral.`
+    );
+  }
+  return null;
+}
 
 // ── zod → MCP input_schema properties. The MCP tool definitions (mcp.ts) derive their hand-written
 //    field lists from here, so the write-surface can never drift from the schema. Maps each top-level

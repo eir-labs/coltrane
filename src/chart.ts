@@ -9,7 +9,7 @@
 //
 // THREE SEAMS THIS MODULE OWNS, AND WHY THEY ARE HERE AND NOT IN runtime.ts:
 //
-//  1. COMPOSE (`composeChart`). Ten rules in a fixed firing order, each independently testable
+//  1. COMPOSE (`composeChart`). Eleven rules in a fixed firing order, each independently testable
 //     against a minimal violating input, returning a STRUCTURED violation list. A rule that fires
 //     stops the walk: a chart is refused for one named reason, not for a heap of cascading ones.
 //  2. IDENTITY (`chartHash`). The arrangement's own hash, folded into `run_fingerprint` in the slot
@@ -25,7 +25,8 @@
 // verified by a deliver-phase verdict (7/7) and approved by the governor. The ChartSchema itself
 // lives with every other genome class in src/genome_schema.ts — one Zod source, no exceptions.
 import { randomUUID } from "node:crypto";
-import { ChartSchema, type ChartInput, type ChartOutput, type ChartEdgeOutput, type ChartApprovalGateOutput } from "./genome_schema.js";
+import { ChartSchema, type ChartInput, type ChartOutput, type ChartEdgeOutput, type ChartApprovalGateOutput, type VenueOutput } from "./genome_schema.js";
+import { toolBaseName } from "./tool_providers.js";
 import type { Agent, Chair, Standard } from "./composition.js";
 import { composeMovementGigId, type OutputRecord } from "./outputs.js";
 import { canonJson, sha256Hex, CANONICAL_FORM_VERSION } from "./canonical_form.js";
@@ -37,6 +38,9 @@ export type Chart = ChartOutput;
 export type ChartMovement = Chart["movements"][number];
 export type ChartEdge = ChartEdgeOutput;
 export type ChartApprovalGate = ChartApprovalGateOutput;
+/** The room a performance is held in. Its shape is `VenueSchema` (one Zod source); its only engine
+ *  behaviour today is the ceiling rule below, which is why the type surfaces from this module. */
+export type Venue = VenueOutput;
 
 /** A movement with its standard RESOLVED — the composition's output, and what a run walks. */
 export interface ResolvedMovement {
@@ -84,6 +88,12 @@ export interface ChartComposeInput {
   standards: ReadonlyMap<string, Standard>;
   /** For R3: a seating names an agent, and an agent that does not exist is a dead seat. */
   agents?: ReadonlyMap<string, Agent> | undefined;
+  /**
+   * For R10: the rooms this caller knows. A chart that names a `venue` is composable ONLY against a
+   * map that holds it — an unresolvable ceiling is not an absent ceiling, so a caller who knows no
+   * venues cannot compose a chart that names one. A chart with no `venue` never consults this.
+   */
+  venues?: ReadonlyMap<string, Venue> | undefined;
   /**
    * The types the chart's DISPATCH PAYLOAD will carry — the third way an entry slot can be filled
    * (R7), beside an incoming hard edge and a movement's `runtime_fills`.
@@ -187,7 +197,7 @@ export function dispatchTarget(args: { standard_slug?: string | undefined; chart
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
-// Compose — R0..R9, in firing order
+// Compose — R0..R10, in firing order
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
 
 /** The charset the checkpoint store's path guard admits. An id outside it cannot be resumed. */
@@ -248,6 +258,48 @@ function outsideNeeds(standard: Standard): string[] {
     }
   }
   return [...needs];
+}
+
+/**
+ * The effective tool set of one agent in one room: its OWN grants, intersected with the room's
+ * equipment. Grants are returned as the agent declared them (scoping intact) and matched on their
+ * BASE name, because that is how every other grant resolution in the engine matches — a room that
+ * holds `Bash` holds `Bash(npx vitest run:*)`.
+ *
+ * The direction is the whole point: this can only ever return a subset of `agent.allowed_tools`. A
+ * tool present in the room and absent from the charter does not appear, so a venue cannot hand a
+ * player authority its charter never claimed.
+ */
+export function venueEffectiveTools(agent: Agent, venue: Venue): string[] {
+  const room = new Set(venue.equipment.tools.map(toolBaseName));
+  return (agent.allowed_tools ?? []).filter((g) => room.has(toolBaseName(g)));
+}
+
+/**
+ * The types a chart's SOURCE movements are seeded with — the honest answer to R7 at load time.
+ *
+ * R7 refuses a movement whose required outside input has no provider: no incoming hard edge, no
+ * `runtime_fills` entry, and not declared on the dispatch payload. The payload is a dispatch-time
+ * fact, so a LOADER cannot know it — and a loader that passed nothing would make every chart whose
+ * first movement declares a gig contract unloadable, which is not a defect in the chart.
+ *
+ * So the load-time answer is this: a movement with NO incoming edge is a boundary movement, seeded
+ * from outside the arrangement, and its standard's own `input_types` — the standard's declaration
+ * that these types enter from elsewhere (#177) — are what the payload is expected to carry. An
+ * INTERIOR movement gets nothing from here, so the dead slot R7 exists for (movement B needs a type
+ * and nothing upstream produces it) still fires at load.
+ *
+ * The strict check happens where the payload is a fact: `gig_dispatch` re-composes the chart with
+ * the real payload's keys, so a dispatch that does not actually carry the seed is refused there.
+ */
+export function chartEntrySeedTypes(chart: Chart, standards: ReadonlyMap<string, Standard>): string[] {
+  const hasIncoming = new Set(chart.edges.map((e) => e.to_movement));
+  const seeds = new Set<string>();
+  for (const m of chart.movements) {
+    if (hasIncoming.has(m.movement_id)) continue;
+    for (const t of standards.get(m.standard_slug)?.input_types ?? []) seeds.add(t);
+  }
+  return [...seeds];
 }
 
 export function composeChart(input: ChartComposeInput): ChartComposition {
@@ -457,11 +509,64 @@ export function composeChart(input: ChartComposeInput): ChartComposition {
     }
   }
 
+  // ── R10 the venue ceiling — a room NARROWS a player, never widens one ────────────────────────
+  // The venue is one enforcement layer among several, and the only one that bounds what EXISTS in
+  // the room rather than what a principal may reach for. So it composes with the others by
+  // INTERSECTION, and the failure it can prove statically is the one worth refusing here: a seated
+  // agent whose entire grant set lies outside the room. That chair's work is dead before the
+  // downbeat — the spawn would advertise nothing it was chartered to hold — so the arrangement is
+  // refused where it is authored, with the agent, the room and the emptiness named.
+  //
+  // What this does NOT do: decide whether a NON-empty intersection is sufficient. Which of an
+  // agent's tools a given chair actually needs is not stated anywhere in the genome, so claiming to
+  // check it would be a check in name only. Emptiness is the part that is provable.
+  if (chart.venue !== undefined) {
+    const venue = input.venues?.get(chart.venue);
+    if (!venue) {
+      return V([{
+        rule: "R10",
+        detail:
+          `unknown venue "${chart.venue}" — it resolves to nothing this caller can see, so the ceiling it is ` +
+          `supposed to impose cannot be computed. An unresolvable ceiling is not an absent ceiling: define the ` +
+          `venue under venues/<slug>.json (venue_define), or drop the field.`,
+      }]);
+    }
+    const violations: ChartViolation[] = [];
+    for (const m of resolved) {
+      // Everyone who plays this movement: the standard's own composed roster, plus any agent the
+      // chart seats over it. One pass per agent, whichever way it got into the room.
+      const seated = new Map<string, Agent>();
+      for (const a of m.standard.agents) seated.set(a.slug, a);
+      for (const s of m.seatings) {
+        const a = input.agents?.get(s.agent_slug);
+        if (a) seated.set(a.slug, a);
+      }
+      for (const a of seated.values()) {
+        const grants = a.allowed_tools ?? [];
+        // An agent that grants nothing needs nothing from the room. Deny-by-default cuts both ways.
+        if (grants.length === 0) continue;
+        if (venueEffectiveTools(a, venue).length > 0) continue;
+        violations.push({
+          rule: "R10",
+          movement_id: m.movement_id,
+          detail:
+            `venue "${venue.slug}" starves agent "${a.slug}" in movement "${m.movement_id}": its grants ` +
+            `[${grants.join(", ")}] intersect the room's equipment [${venue.equipment.tools.join(", ") || "nothing"}] in ` +
+            `NOTHING, so every tool the agent is chartered to hold is absent here. A venue is a ceiling, not a grant — ` +
+            `it cannot supply what the charter does not claim. Widen the room's equipment, seat an agent this room ` +
+            `equips, or hold this movement somewhere else.`,
+        });
+      }
+    }
+    if (violations.length > 0) return V(violations);
+  }
+
   const plan: ChartPlan = {
     chart,
     movements: resolved,
     order,
     edges_classified,
+    // The venue is NOT folded in: a room is environment, not structure (see ChartSchema.venue).
     chart_hash: chartHash({ movements: resolved, chart }),
   };
   return { ok: true, violations: [], ...plan };

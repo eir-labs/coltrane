@@ -20,16 +20,32 @@
 // approve RPC can re-queue it at once. The approval comes back on the next claim payload, and
 // the durable checkpoint (workerStateRoot) means the approved re-claim RESTORES the chairs that
 // already sealed instead of paying for them twice.
+//
+// THAT LOCAL CHECKPOINT IS ONLY THE FAST PATH. A human-in-the-loop delay is measured in hours
+// or days, and the worker that re-claims is a different process — often on a different machine
+// — from the one that parked. `workerStateRoot()` cannot travel, so on its own it makes the
+// saving conditional on the accident of which box picked the row up.
+//
+// The SINK already is the checkpoint. Every sealed output drained to the org store carries its
+// content_sha, its input_shas, its phase, its agent_slug and its whole `data`; the drained gig
+// header carries the run's genome_hash. So a worker with no local record reconstructs one from
+// the sink (`resumeStateFromDrain` below) and resumes from that. Resume state's home is the
+// store; the local checkpoint demotes to a fast path.
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { runGig, ResumeRefused, type AgentInvoker } from "./runtime.js";
+import { runGig, ResumeRefused, genomeHash, CORE_TO_PRIMITIVE, type AgentInvoker } from "./runtime.js";
 import { loadRegistry, type Registry } from "./registry.js";
-import { createOutputStore } from "./outputs.js";
+import { createOutputStore, type OutputStore } from "./outputs.js";
 import { MemoryLedger } from "./ledger.js";
 import { rpcGenomeStore } from "./genome_store.js";
 import { createOutputMirror } from "./output_mirror.js";
-import { createCheckpointStore, type GigCheckpoint } from "./reuse.js";
-import type { Standard } from "./composition.js";
+import { PRIMITIVE_OUTPUT_TYPE } from "./core_types.js";
+import { sha256Hex, canonJson, outputContentHash, CANONICAL_FORM_VERSION } from "./canonical_form.js";
+import {
+  createCheckpointStore, producersSha, CHECKPOINT_SCHEMA_VERSION,
+  type GigCheckpoint, type CheckpointRole, type RunIdentity,
+} from "./reuse.js";
+import type { Standard, Chair } from "./composition.js";
 import type { LoadedGenome } from "./loader.js";
 
 /** Where the org store is, and who is working. */
@@ -164,6 +180,392 @@ export async function failGig(ctx: WorkerContext, gig_id: string, error: string)
   return out === true;
 }
 
+// ───────────────────────────────────────────────────────────────────────────────
+// Resume state, reconstructed from the drain
+// ───────────────────────────────────────────────────────────────────────────────
+
+/**
+ * One sealed row as `coltrane_mcp_gig_outputs` hands it back — the sink's view of an output.
+ *
+ * NARROWER than an `OutputRecord`, and the gap is the whole difficulty: the sink returns no
+ * `core_type`, no `domain`, no `primitive`, no `domain_type_version` and no `from_role`. Every
+ * one of the first four is folded into `content_sha`, so they are RE-DERIVED from the loaded
+ * genome the way the seal boundary derives them, and the re-derivation is then proved against
+ * the sha the sink recorded. A row that no longer hashes to its claimed sha is refused.
+ */
+export interface DrainedOutput {
+  id: string;
+  domain_type: string;
+  agent_slug: string;
+  phase?: string | null;
+  content_sha: string;
+  input_shas?: readonly (string | null)[] | null;
+  created_at: string;
+  data: Record<string, unknown>;
+}
+
+/** A reconstruction either produced a checkpoint or refused, and a refusal always says why. */
+export type DrainResumeState =
+  | { ok: true; checkpoint: GigCheckpoint }
+  | { ok: false; reason: string };
+
+/** The sink's sealed rows for one gig. `[]` covers "no drain to read" as well as "nothing drained". */
+export async function fetchDrainedOutputs(
+  ctx: WorkerContext,
+  gig_id: string,
+): Promise<{ rows: DrainedOutput[]; error?: string }> {
+  let out: unknown;
+  try {
+    out = await workerRpc(ctx, "coltrane_mcp_gig_outputs", { p_bearer: ctx.agentToken, p_gig: gig_id });
+  } catch (e) {
+    // Every failure here is the same kind of event: resume state could not be read. The queue
+    // row is still runnable work, so this never fails the claim — it costs a cold run, which is
+    // exactly what the worker did before this path existed.
+    return { rows: [], error: e instanceof Error ? e.message : String(e) };
+  }
+  if (!Array.isArray(out)) return { rows: [] };
+  return { rows: out.filter((r): r is DrainedOutput => !!r && typeof r === "object") };
+}
+
+/**
+ * The `genome_hash` the sink recorded on this gig's drained HEADER.
+ *
+ * This is the only identity a drained gig carries, and reading it is what keeps the
+ * reconstruction from being a splice. `genomeHash` folds the standard's whole phase graph and
+ * every bound agent's type surface — chair `depends_on`, `input_contract`, an added or removed
+ * phase — none of which reaches an individual row's `content_sha`. Without this check a
+ * pipeline could be re-wired between the park and the approval and the restored outputs would
+ * be consumed by chairs that never produced them, with nothing in the manifest recording it.
+ *
+ * STATED GAP: the header carries no `producers_sha`, so a rewritten agent `method` (or a
+ * rewritten skill under a stable version) is invisible to this path — the very hole
+ * `RunIdentity.producers_sha` exists to close for a LOCAL checkpoint. A drain-reconstructed
+ * resume is therefore a weaker gate than a local one by exactly that much, and the strongest
+ * available check is the one applied: the sink's structural hash plus a per-row re-seal.
+ */
+export async function fetchDrainedGenomeHash(
+  ctx: WorkerContext,
+  gig_id: string,
+): Promise<{ genome_hash?: string; error?: string }> {
+  let out: unknown;
+  try {
+    out = await workerRpc(ctx, "coltrane_mcp_gig_status", { p_bearer: ctx.agentToken, p_gig: gig_id });
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : String(e) };
+  }
+  // The RPC may answer with the header row or a single-row array; both are the same fact.
+  const row = Array.isArray(out) ? out[0] : out;
+  if (!row || typeof row !== "object") return {};
+  const gh = (row as Record<string, unknown>)["genome_hash"];
+  // 64 hex or nothing: the header stores `null` for a run with no hash, and the ledger writes
+  // "n/a" in places. Neither is a genome identity, and treating one as if it were is the bug.
+  return typeof gh === "string" && /^[0-9a-f]{64}$/.test(gh) ? { genome_hash: gh } : {};
+}
+
+/** What a chair would seal, and under whose name — one entry per domain_type it promises. */
+interface ChairSeat {
+  chair: Chair;
+  phase: string;
+  /** The office. A human chair's incumbent is not knowable from the genome, hence `human`. */
+  producer: { kind: "agent" | "skill"; slug: string } | { kind: "human" };
+  specs: Map<string, { core_type: string; primitive: string; domain: string }>;
+}
+
+/**
+ * Re-derive every chair's seal specs from the loaded standard.
+ *
+ * This mirrors the runtime's own derivation chair-kind for chair-kind (`outputSpecsFor`, the
+ * skill-backed branch of `prepareChair`, and the human-seat branch of the phase loop), because
+ * `content_sha` folds exactly what it produces. Divergence here would not be a cosmetic
+ * mismatch — it would compute a different sha for an unchanged row and refuse every resume.
+ */
+function chairSeats(standard: Standard, outputs: OutputStore): ChairSeat[] {
+  const seats: ChairSeat[] = [];
+  for (const phase of standard.phases) {
+    for (const chair of phase.chairs) {
+      const specs = new Map<string, { core_type: string; primitive: string; domain: string }>();
+      if (chair.human === true && (chair.agent_slug ?? "") === "") {
+        const dt = chair.output_contract[0] ?? "Judgment";
+        const core = outputs.coreTypeOf(dt) ?? dt;
+        specs.set(dt, { core_type: core, primitive: CORE_TO_PRIMITIVE[core] ?? "JUDGE", domain: standard.domain });
+        seats.push({ chair, phase: phase.name, producer: { kind: "human" }, specs });
+        continue;
+      }
+      if (chair.skill_slug && (chair.agent_slug ?? "") === "") {
+        const dt = chair.output_contract[0] ?? "Signal";
+        const core = outputs.coreTypeOf(dt) ?? "Signal";
+        specs.set(dt, { core_type: core, primitive: CORE_TO_PRIMITIVE[core] ?? "SENSE", domain: standard.domain });
+        seats.push({ chair, phase: phase.name, producer: { kind: "skill", slug: chair.skill_slug }, specs });
+        continue;
+      }
+      const agent = standard.agents.find((a) => a.slug === chair.agent_slug);
+      const fallback = agent?.primitives[0];
+      // A chair whose agent the genome no longer holds could not have sealed anything under
+      // THIS genome. Skipping it means its rows find no seat and the reconstruction refuses,
+      // which is the honest outcome.
+      if (!agent || !fallback) continue;
+      const wanted = chair.output_contract.length
+        ? agent.output_types.filter((t) => chair.output_contract.includes(t))
+        : agent.output_types;
+      const domain = agent.domain ?? standard.domain;
+      for (const dt of wanted) {
+        const core = outputs.coreTypeOf(dt) ?? PRIMITIVE_OUTPUT_TYPE[fallback];
+        specs.set(dt, { core_type: core, primitive: CORE_TO_PRIMITIVE[core] ?? fallback, domain });
+      }
+      seats.push({ chair, phase: phase.name, producer: { kind: "agent", slug: agent.slug }, specs });
+    }
+  }
+  return seats;
+}
+
+/**
+ * The run identity a COLD run of this claim would compute, field for field.
+ *
+ * Kept adjacent to the `runGig` call in `workOnce` on purpose: `model_version` and `depth` are
+ * that call's defaults (it passes neither), and `skills: []` is what `resolvedSkillHashes()`
+ * folds for a worker that registers no `skill_dirs` — a store-loaded skill has no code half by
+ * construction. Change what `workOnce` passes and this has to move with it, or every
+ * reconstruction is refused for identity drift against its own run.
+ */
+function coldRunIdentity(standard: Standard, gigInput: Record<string, unknown>): RunIdentity {
+  return {
+    standard_slug: standard.slug,
+    genome_hash: genomeHash(standard),
+    producers_sha: producersSha({ agents: standard.agents, skills: [] }),
+    gig_input_sha: sha256Hex(canonJson(gigInput)),
+    model_version: "unknown",
+    depth: "",
+    canonical_form_version: CANONICAL_FORM_VERSION,
+  };
+}
+
+/** One verified sink row, with the chair it maps to and the spec it re-seals under. */
+interface PlannedRestore {
+  row: DrainedOutput;
+  seat: ChairSeat;
+  spec: { core_type: string; primitive: string; domain: string };
+  fingerprint: string;
+}
+
+/** Accumulate one restored record onto its chair's checkpoint role, whether written or adopted. */
+function noteRole(
+  byRole: Map<string, CheckpointRole>,
+  p: PlannedRestore,
+  output_id: string,
+  content_sha: string,
+): void {
+  const role = p.seat.chair.role;
+  const cur = byRole.get(role) ?? {
+    role, phase: p.seat.phase,
+    output_ids: [], content_shas: [], domain_types: [], type_fingerprints: [],
+    sealed_at: p.row.created_at,
+  };
+  cur.output_ids.push(output_id);
+  cur.content_shas.push(content_sha);
+  cur.domain_types.push(p.row.domain_type);
+  cur.type_fingerprints.push(p.fingerprint);
+  if (p.row.created_at > cur.sealed_at) cur.sealed_at = p.row.created_at;
+  byRole.set(role, cur);
+}
+
+/**
+ * Turn the sink's sealed rows into a resume checkpoint — or refuse, with a reason.
+ *
+ * ALL-OR-NOTHING, in two passes. Pass one derives and verifies every row while nothing is
+ * durable; pass two writes. A gig whose second row fails must not leave its first one in the
+ * local store seeding a half-resume, which is the same invariant #243 gave a single chair, one
+ * scope up.
+ *
+ * ROLE MAPPING. The sink does not record `from_role`, so each row is mapped to a chair by
+ * `phase` + the chair's SEAT: `agent_slug` for an agent chair, the skill slug for a skill-backed
+ * one, and name-agnostically for a human chair (its record seals under the approving principal,
+ * whom the genome cannot know). The row's `domain_type` narrows further — a chair that does not
+ * seal that type is not a candidate. Zero candidates or MORE THAN ONE both refuse: a guess about
+ * which chair produced a sealed output is a guess about the provenance chain.
+ *
+ * SHA VERIFICATION. Every row is re-sealed under the derived core/primitive/domain and the sha
+ * compared to the one the sink recorded. A mismatch refuses the WHOLE reconstruction — a sink
+ * row that no longer hashes to its claimed sha must never silently seed a resume, and one such
+ * row is evidence about the sink, not about that row alone.
+ */
+export function resumeStateFromDrain(args: {
+  gig_id: string;
+  standard: Standard;
+  identity: RunIdentity;
+  rows: readonly DrainedOutput[];
+  outputs: OutputStore;
+}): DrainResumeState {
+  const { gig_id, standard, identity, rows, outputs } = args;
+  if (rows.length === 0) return { ok: false, reason: "the sink holds no sealed outputs for this gig" };
+  const seats = chairSeats(standard, outputs);
+  // created_at order, so a row's in-gig predecessors are already re-written when it is written.
+  const ordered = [...rows].sort((a, b) => (a.created_at < b.created_at ? -1 : a.created_at > b.created_at ? 1 : 0));
+
+  const planned: PlannedRestore[] = [];
+  for (const row of ordered) {
+    const phase = typeof row.phase === "string" && row.phase !== "" ? row.phase : undefined;
+    if (phase === undefined) {
+      return { ok: false, reason: `sink row "${row.id}" records no phase, so it cannot be mapped to a chair` };
+    }
+    if (typeof row.content_sha !== "string" || !row.data || typeof row.data !== "object") {
+      return { ok: false, reason: `sink row "${row.id}" is not a sealed output shape (content_sha + data)` };
+    }
+    const candidates = seats.filter(
+      (s) => s.phase === phase && s.specs.has(row.domain_type) &&
+        (s.producer.kind === "human" || s.producer.slug === row.agent_slug),
+    );
+    if (candidates.length === 0) {
+      return {
+        ok: false,
+        reason: `no chair in phase "${phase}" seals "${row.domain_type}" for producer "${row.agent_slug}" — the standard has moved since that output sealed`,
+      };
+    }
+    if (candidates.length > 1) {
+      return {
+        ok: false,
+        reason: `chairs [${candidates.map((c) => c.chair.role).join(", ")}] in phase "${phase}" could each have sealed "${row.domain_type}" — the sink records no from_role, so the mapping is ambiguous`,
+      };
+    }
+    const seat = candidates[0]!;
+    const spec = seat.specs.get(row.domain_type)!;
+    // The registry moves independently of the standard, so genome_hash does not see a type that
+    // changed shape. Same fingerprint tool the local resume gate and the reuse cache use.
+    const fingerprint = outputs.typeFingerprint(row.domain_type);
+    if (fingerprint === "") {
+      return { ok: false, reason: `the registry can no longer describe type "${row.domain_type}", so the sink's row cannot be checked` };
+    }
+    const gate = outputs.validateWrite({ core_type: spec.core_type, domain_type: row.domain_type, data: row.data });
+    if (!gate.valid) {
+      return { ok: false, reason: `sink row "${row.id}" would not pass the seal boundary today — ${gate.reason}` };
+    }
+    const sha = outputContentHash({
+      core_type: spec.core_type,
+      domain_type: row.domain_type,
+      domain_type_version: 1,
+      domain: spec.domain,
+      primitive: spec.primitive,
+      phase,
+      agent_slug: row.agent_slug,
+      data: row.data,
+    });
+    if (sha !== row.content_sha) {
+      return {
+        ok: false,
+        reason: `sink row "${row.id}" ("${row.domain_type}", phase "${phase}") re-seals to a different content_sha than the sink recorded — the row no longer hashes to its claimed content_sha`,
+      };
+    }
+    planned.push({ row, seat, spec, fingerprint });
+  }
+
+  // Pass two — durable. The resume gate resolves a checkpoint's `output_ids` against the LOCAL
+  // output store, so the sink's rows have to become local records before they can be restored.
+  //
+  // IDEMPOTENT. The local store may already hold these rows: the checkpoint file can go missing
+  // while `outputs/<gig_id>.jsonl` survives (a swallowed checkpoint write, a cleared checkpoints
+  // dir), and appending second copies would leave `output_query` and `output_trace` reporting a
+  // gig that sealed each record twice. An existing IN-GIG record with the same content_sha IS
+  // that record — content_sha folds core, type, version, domain, primitive, phase, agent_slug and
+  // data, so an identical sha is an identical derivation — and it is adopted by id.
+  const alreadyHeld = new Map<string, string>();
+  for (const rec of outputs.all()) {
+    if (rec.gig_id === gig_id && !alreadyHeld.has(rec.content_sha)) alreadyHeld.set(rec.content_sha, rec.id);
+  }
+  const byRole = new Map<string, CheckpointRole>();
+  const shaToId = new Map<string, string>();
+  for (const p of planned) {
+    const adopted = alreadyHeld.get(p.row.content_sha);
+    if (adopted !== undefined) {
+      shaToId.set(p.row.content_sha, adopted);
+      noteRole(byRole, p, adopted, p.row.content_sha);
+      continue;
+    }
+    const inputShas = (p.row.input_shas ?? []).map((s) => (typeof s === "string" ? s : ""));
+    const mapped = inputShas.map((s) => shaToId.get(s));
+    // Object identity is machine-local: the sink's own output ids name nothing here, and the ids
+    // of the rows we are writing are fresh. The HASH chain does travel — each `input_sha` names
+    // the content a row consumed — so remap ids only when every entry resolves, and otherwise
+    // keep the engine-stamped hashes and leave `input_refs` empty rather than emit a
+    // half-aligned pair.
+    const remapped = mapped.every((id) => typeof id === "string") ? (mapped as string[]) : undefined;
+    let rec;
+    try {
+      rec = outputs.write({
+        core_type: p.spec.core_type,
+        domain_type: p.row.domain_type,
+        domain_type_version: 1,
+        domain: p.spec.domain,
+        gig_id,
+        agent_slug: p.row.agent_slug,
+        from_role: p.seat.chair.role,
+        phase: p.seat.phase,
+        primitive: p.spec.primitive,
+        data: p.row.data,
+        input_refs: remapped ?? [],
+        input_shas: inputShas,
+      });
+    } catch (e) {
+      // Unreachable: `validateWrite` above is the same gate `write` runs, from one implementation.
+      return { ok: false, reason: `sink row "${p.row.id}" could not be written locally — ${e instanceof Error ? e.message : String(e)}` };
+    }
+    if (rec.content_sha !== p.row.content_sha) {
+      return { ok: false, reason: `sink row "${p.row.id}" sealed locally to a different content_sha than the sink recorded` };
+    }
+    shaToId.set(rec.content_sha, rec.id);
+    noteRole(byRole, p, rec.id, rec.content_sha);
+  }
+
+  return {
+    ok: true,
+    checkpoint: {
+      schema_version: CHECKPOINT_SCHEMA_VERSION,
+      gig_id,
+      identity,
+      // The sink's own timestamps. `prior_usage` is deliberately absent: the outputs RPC carries
+      // no cost fields, so what the earlier attempt spent is genuinely unknown here, and an
+      // invented zero would be the "not captured reported as $0.00" defect #235/#236 removed.
+      started_at: ordered[0]!.created_at,
+      updated_at: ordered[ordered.length - 1]!.created_at,
+      roles: [...byRole.values()],
+    },
+  };
+}
+
+/** Read the sink and rebuild this claim's resume state, or say why it cannot be rebuilt. */
+async function rebuildFromDrain(
+  ctx: WorkerContext,
+  claim: ClaimedGig,
+  standard: Standard,
+  outputs: OutputStore,
+): Promise<DrainResumeState> {
+  const drained = await fetchDrainedOutputs(ctx, claim.gig_id);
+  if (drained.error !== undefined) return { ok: false, reason: `the sink's outputs could not be read — ${drained.error}` };
+  if (drained.rows.length === 0) return { ok: false, reason: "the sink holds no sealed outputs for this gig" };
+
+  const header = await fetchDrainedGenomeHash(ctx, claim.gig_id);
+  const current = genomeHash(standard);
+  if (header.genome_hash === undefined) {
+    // A miss is free; a wrong hit is not. An identity that cannot be checked resolves to doing
+    // the work — the same asymmetry every other substitution gate in this engine resolves on.
+    return {
+      ok: false,
+      reason: `the sink reports no genome_hash for this gig${header.error !== undefined ? ` (${header.error})` : ""}, so the pipeline those outputs sealed under cannot be checked`,
+    };
+  }
+  if (header.genome_hash !== current) {
+    return {
+      ok: false,
+      reason: `the genome moved since those outputs sealed (sink genome_hash="${header.genome_hash}" current="${current}")`,
+    };
+  }
+  return resumeStateFromDrain({
+    gig_id: claim.gig_id,
+    standard,
+    identity: coldRunIdentity(standard, claim.input),
+    rows: drained.rows,
+    outputs,
+  });
+}
+
 /**
  * Map the claim's per-role approval entries onto runGig's two arguments.
  *
@@ -232,13 +634,33 @@ export async function workOnce(ctx: WorkerContext, deps: WorkOnceDeps): Promise<
     const ledger = new MemoryLedger();
     const invoke = deps.makeInvoke(registry, genome);
     const checkpoints = createCheckpointStore(stateRoot);
+    // ORDER OF PREFERENCE: the local checkpoint (fast path — same box, nothing to fetch), then
+    // the DRAIN reconstruction (a different box, or a state root that was cleared), then cold.
+    // Exactly one line is logged for whichever path is taken, including the reason for cold.
     let checkpoint: GigCheckpoint | undefined;
+    let resumeSource: "local" | "drain" = "local";
+    let coldReason = "no local checkpoint and no drain to rebuild one from";
     try {
       checkpoint = checkpoints.read(claim.gig_id);
     } catch (e) {
       // A damaged checkpoint is not a reason to fail a runnable row — it is a reason to pay for
       // a cold run, and to say so.
       log(`checkpoint for ${claim.gig_id} unreadable, running cold: ${e instanceof Error ? e.message : String(e)}`);
+    }
+    if (!checkpoint) {
+      const rebuilt = await rebuildFromDrain(ctx, claim, standard, outputs);
+      if (rebuilt.ok) {
+        // Written to the LOCAL store because that is where the runtime's resume gate reads a
+        // checkpoint from. The reconstruction seeds that gate; the gate remains the authority —
+        // it re-resolves every output id, re-checks every content_sha and type fingerprint, and
+        // compares the identity itself, so a bad reconstruction is refused by the same code a
+        // bad local checkpoint is.
+        checkpoints.write(rebuilt.checkpoint);
+        checkpoint = rebuilt.checkpoint;
+        resumeSource = "drain";
+      } else {
+        coldReason = rebuilt.reason;
+      }
     }
     const human = approvalWiring(claim.approvals, standard, checkpoint?.roles.map((r) => r.role) ?? []);
     const run = (resume: boolean): ReturnType<typeof runGig> => runGig(standard, claim.input, {
@@ -258,7 +680,10 @@ export async function workOnce(ctx: WorkerContext, deps: WorkOnceDeps): Promise<
     if (checkpoint) {
       // An approved re-claim is the common case for this branch: the chairs before the human
       // seat already sealed and were already paid for, so replaying them is money spent twice.
-      log(`resuming ${claim.gig_id} from its checkpoint (${checkpoint.roles.length} chair(s) recorded)`);
+      log(
+        `resuming ${claim.gig_id} from its ${resumeSource === "drain" ? "DRAIN-reconstructed" : "local"} ` +
+        `checkpoint (${checkpoint.roles.length} chair(s) recorded)`,
+      );
       try {
         res = await run(true);
       } catch (e) {
@@ -270,6 +695,7 @@ export async function workOnce(ctx: WorkerContext, deps: WorkOnceDeps): Promise<
         res = await run(false);
       }
     } else {
+      log(`running ${claim.gig_id} COLD — ${coldReason}`);
       res = await run(false);
     }
 

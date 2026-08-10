@@ -1144,7 +1144,11 @@ export async function runGig(
         if (!approval) {
           checkpoint();
           emit({ type: "gig_awaiting_approval", phase: phase.name, role: hc.role });
-          void drainGigHeader({
+          // AWAITED, unlike the fire-and-forget completion drain: parking is the runtime's
+          // last act before the caller (often a CLI) exits, and an in-flight fetch dies with
+          // the process — which left the sink's row saying "running" about a gig that was
+          // waiting on a person. Parking is not latency-critical; the truth is.
+          await drainGigHeader({
             gig_id,
             standard_slug: standard.slug,
             status: "awaiting_approval",

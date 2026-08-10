@@ -161,6 +161,37 @@
         "Record every departure from the settled structure, with its reason, rather than revising the structure after the fact.",
         "Hold no tool grant: the artefact is emitted as reviewable content and is never applied."
       ]
+    },
+    {
+      "id": "quartet.chair.responsible-officer",
+      "institution_slug": "quartet",
+      "role": "responsible-officer",
+      "human": true,
+      "function": "JUDGE",
+      "mission": "Hold the office that commits the ensemble's work. This chair is held by a person, never a model agent: the incumbent reviews the sealed record a standard's approve chair presents and accepts or refuses it under their own name. A run that reaches this office unapproved waits; nothing ships on an absent yes. The office follows the duty-holder construct of safety-case regulation: accountability for an outcome attaches to a single, identifiable person.",
+      "required_skills": [],
+      "caps": [
+        {
+          "edge_type": "produced-by",
+          "scope": {
+            "institution": "quartet"
+          },
+          "expires": null
+        },
+        {
+          "grant": "dispatch",
+          "standards": [
+            "software-change-v1",
+            "product-design-v1"
+          ],
+          "expires": null
+        }
+      ],
+      "obligations": [
+        "Review the sealed outputs an approval presents before accepting them; an approval that does not cite what it reviewed is void.",
+        "Refuse rather than delegate the refusal: this office cannot be held by a model agent, and its verdict cannot be produced by one.",
+        "This chair ships UNASSIGNED. Seating it is the adopting organization's first governance act: the reader seats themselves."
+      ]
     }
   ],
   "assignments": [

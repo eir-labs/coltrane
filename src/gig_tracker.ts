@@ -30,7 +30,7 @@ export interface GigChairState {
  *  cancelled run could only surface as `failed` carrying a kill-shaped error string —
  *  indistinguishable from a genuine crash, which is the opposite of what an operator who
  *  just cancelled it needs to see. */
-export type GigStatus = "running" | "complete" | "failed" | "aborted";
+export type GigStatus = "running" | "complete" | "failed" | "aborted" | "awaiting_approval";
 
 export interface GigRunState {
   gig_id: string;
@@ -140,6 +140,9 @@ export function applyGigProgress(state: GigRunState, ev: GigProgressEvent): void
     case "gig_complete":
       state.outputs_count = ev.outputs;
       break;
+    case "gig_awaiting_approval":
+      state.status = "awaiting_approval";
+      break;
     case "gig_failed":
       state.error = ev.error;
       break;
@@ -193,6 +196,7 @@ export function gigEventLogLine(gig_id: string, ev: GigProgressEvent): string | 
     case "chair_skipped": return JSON.stringify({ ...base, ev: "chair_skipped", phase: ev.phase, role: ev.role, why: ev.reason, from_gig: ev.source_gig_id, sealed: ev.output_types });
     case "reuse_rejected": return JSON.stringify({ ...base, ev: "reuse_rejected", phase: ev.phase, role: ev.role, reason: ev.reason, detail: ev.detail });
     case "gig_complete": return JSON.stringify({ ...base, ev: "gig_complete", outputs: ev.outputs });
+    case "gig_awaiting_approval": return JSON.stringify({ ...base, ev: "gig_awaiting_approval", phase: ev.phase, role: ev.role });
     case "gig_failed": return JSON.stringify({ ...base, ev: "gig_failed", error: ev.error });
     case "gig_aborted": return JSON.stringify({ ...base, ev: "gig_aborted", reason: ev.reason });
     case "agent_event":

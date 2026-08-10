@@ -362,7 +362,7 @@ interface PgClient {
 export interface GigHeaderRecord {
   gig_id: string;
   standard_slug: string;
-  status: "complete" | "failed" | "aborted";
+  status: "complete" | "failed" | "aborted" | "awaiting_approval";
   genome_hash?: string;
   run_fingerprint?: string;
   started_at?: string;

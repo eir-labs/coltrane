@@ -130,6 +130,98 @@ export interface OutputWrite {
   reused_from?: { output_id: string; gig_id: string; cache_key: string } | undefined;
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+// The performance family — how a gig id says which performance it belongs to
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+//
+// A gig is a performance of many standards (src/chart.ts). Movement gig ids are LINKED, not
+// shared: a real arrangement runs movement M of performance G under `G.m.M`, so one movement's
+// checkpoint, header and ledger row cannot be another's. The chart's own gate approvals seal
+// under the bare root `G`.
+//
+// These three functions are the ONE owner of that scheme. `chart.ts` mints ids through
+// `composeMovementGigId`; this store reads them back through `performanceRoot` /
+// `movementOfGigId` to decide whether two records belong to the same performance. They live at
+// this layer, not in `chart.ts`, because the dependency has to point downward — the store cannot
+// import the arranger, and a second copy of the separator is exactly the drift that would let
+// the two disagree about what one performance is.
+
+/** The infix that separates a performance root from a movement id. Carries dots on BOTH sides so
+ *  it cannot occur in a bare uuid, and `.m` alone cannot be mistaken for it. */
+export const MOVEMENT_ID_INFIX = ".m.";
+
+/** A movement's gig id, from the performance's id and the movement's. */
+export function composeMovementGigId(gig_id: string, movement_id: string): string {
+  return `${gig_id}${MOVEMENT_ID_INFIX}${movement_id}`;
+}
+
+/**
+ * The performance a gig id belongs to. A plain gig id is its own root.
+ *
+ * Split at the FIRST infix, not the last: `composeChart`'s R1 admits `[A-Za-z0-9._-]+` for a
+ * movement_id, so a movement may itself contain `.m.` — and only a first-occurrence split puts
+ * two siblings of one performance under the same root.
+ */
+export function performanceRoot(gig_id: string): string {
+  const at = gig_id.indexOf(MOVEMENT_ID_INFIX);
+  return at < 0 ? gig_id : gig_id.slice(0, at);
+}
+
+/** Which movement a gig id names, or undefined when it names none (a plain gig, or a
+ *  degenerate chart, whose one movement runs under the performance's own id). */
+export function movementOfGigId(gig_id: string): string | undefined {
+  const at = gig_id.indexOf(MOVEMENT_ID_INFIX);
+  return at < 0 ? undefined : gig_id.slice(at + MOVEMENT_ID_INFIX.length);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+// Trace nodes — a walked record, or a named hole
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+
+/** Which way `trace` walks. `upstream` (the default) is the ancestor closure. */
+export type TraceDirection = "upstream" | "downstream" | "both";
+
+/**
+ * Where a traced record LIVED. Present only when there is something to say: a record sealed under
+ * a plain gig id, reached from a seed in that same gig, carries none of these — which is what
+ * keeps a single-standard gig's trace byte-identical to what it was before charts existed.
+ */
+export interface TraceLabels {
+  /** The movement whose gig sealed this record. Absent when its gig id names no movement. */
+  movement?: string | undefined;
+  /** The performance this record's gig belongs to. Absent when its gig id names no movement. */
+  performance_gig_id?: string | undefined;
+  /** Set when this node's gig_id differs from the seed's — the walk CROSSED a boundary to reach
+   *  it. Crossing is never silent: a consumer reads it off the node. */
+  crossed?: true | undefined;
+  /** Never set. The discriminant against `TraceMissingNode`. */
+  missing?: undefined;
+}
+
+/** A record the walk resolved, labelled with where it lived. */
+export type TraceRecordNode = OutputRecord & TraceLabels;
+
+/**
+ * A reference the chain makes and this store cannot resolve — the upstream movement drained
+ * remotely and was never local, or a row was lost.
+ *
+ * It is a NAMED terminal, never a dropped edge. Silently skipping it is the #248 defect exactly:
+ * the engine would report a SHORTER CHAIN as if it were the whole chain. The `content_sha` comes
+ * from the referring record's `input_shas` — engine-stamped at seal time, which is why the hole
+ * can be named rather than guessed at. It is `""` only when the reference carries no sha at all
+ * (a hand-authored `output_refs` edge, which records no hash).
+ */
+export interface TraceMissingNode {
+  /** The output id the chain referenced. */
+  id: string;
+  content_sha: string;
+  missing: true;
+  /** The record that referenced it — so an operator knows where the hole is. */
+  referenced_by: string;
+}
+
+export type TraceNode = TraceRecordNode | TraceMissingNode;
+
 // §6 `output_refs` row — one typed edge of the provenance graph.
 export interface OutputRef {
   id: string;
@@ -198,11 +290,25 @@ export interface OutputStore {
   // Provenance edge. relation must be in REF_RELATIONS; both endpoints must exist.
   addRef(from_output_id: string, to_output_id: string, relation: RefRelation, primitive: string): OutputRef;
   refs(): readonly OutputRef[];
-  // E6: walk backward from an artifact to its source signals (input_refs + derived_from/refines edges).
-  // Optional opts: max_depth caps the walk at N hops backward from the seed.
-  // gig_id scoping: the walk only follows edges into the seed's gig_id (cross-gig
-  // ancestors are not surfaced).
-  trace(id: string, opts?: { max_depth?: number }): OutputRecord[];
+  /**
+   * E6: walk the provenance graph from a seed record. Returns the reachable closure, cycle-safe,
+   * EXCLUDING the seed itself.
+   *
+   * `direction` — `upstream` (the default) follows `input_refs` plus `derived_from`/`refines`
+   * edges to the ancestors; `downstream` follows the reverse of `input_refs` to the descendants;
+   * `both` is their union, each node once.
+   *
+   * `max_depth` caps the walk at N hops from the seed. `0` returns nothing.
+   *
+   * SCOPE — the PERFORMANCE, not one gig and not the whole store. A movement's gig id is
+   * `<performance>.m.<movement>`, so the walk follows an edge into any gig of the same
+   * performance and LABELS the node with where it lived (`TraceLabels`). It refuses an edge into
+   * an unrelated gig: a hand-authored reference between two performances is out of family, and
+   * surfacing it would be the cross-gig leak PR #85 closed.
+   *
+   * A reference this store cannot resolve is returned as a `TraceMissingNode`, never dropped.
+   */
+  trace(id: string, opts?: { max_depth?: number; direction?: TraceDirection }): TraceNode[];
   // T8: the backward-compat findings view.
   findings(): Finding[];
   // Resolve a domain (or core) type slug to its core type. A core type resolves to
@@ -635,40 +741,118 @@ export function createOutputStore(registry: Registry, options?: OutputStoreOptio
     },
 
     trace(id, opts) {
-      // Walk backward: a node's parents are its input_refs plus the targets of
-      // its derived_from/refines edges. Returns every reachable ancestor (the
-      // provenance closure), cycle-safe.
+      // Walk the provenance graph from the seed, cycle-safe, seed excluded.
+      //
+      // UPSTREAM: a node's parents are its `input_refs` plus the targets of its
+      // derived_from/refines edges.
+      // DOWNSTREAM: a node's children are the records naming it in their `input_refs`. The
+      // reverse-edge set is deliberately NOT walked here: the runtime stamps a derived_from edge
+      // for every `input_refs` entry it seals, so the reverse of `input_refs` already covers
+      // every engine-produced descendant, and widening it would change what an existing
+      // downstream answer contains for reasons that have nothing to do with movements.
+      //
+      // max_depth: hard cap on hop count from the seed. depth=0 → no walk (returns []);
+      // depth=1 → only the immediate neighbours; etc.
+      //
+      // SCOPE — the PERFORMANCE. The walk follows an edge into any gig of the seed's performance
+      // (`performanceRoot`), which is what makes the chain across a chart's movement boundary
+      // visible instead of merely intact; it refuses an edge into an unrelated gig, which is the
+      // cross-gig leak PR #85 closed. Both ends of the rule matter: the old single-gig scope
+      // reported a movement's fragment as if it were the whole chain, and no scope at all would
+      // let a hand-authored reference drag another performance into this one's audit.
       hydrateAll();
-      //
-      // max_depth: hard cap on hop count from the seed. depth=0 → no walk
-      // (returns []); depth=1 → only direct parents; etc.
-      //
-      // gig_id scope: the walk only follows into nodes that share the seed's
-      // gig_id. Cross-gig ancestors are not surfaced.
       const maxDepth = opts?.max_depth;
+      const direction = opts?.direction ?? "upstream";
       const seed = outputs.get(id);
       const seedGigId = seed?.gig_id;
-      const seen = new Set<string>();
-      const order: OutputRecord[] = [];
-      const stack: Array<{ id: string; depth: number }> = [{ id, depth: 0 }];
-      while (stack.length) {
-        const { id: cur, depth } = stack.pop()!;
-        if (seen.has(cur)) continue;
-        seen.add(cur);
-        const rec = outputs.get(cur);
-        if (!rec) continue;
-        if (cur !== id) {
-          if (seedGigId !== undefined && rec.gig_id !== seedGigId) continue;
-          order.push(rec);
-        }
-        if (maxDepth !== undefined && depth >= maxDepth) continue;
-        for (const p of rec.input_refs) stack.push({ id: p, depth: depth + 1 });
-        for (const e of edges) {
-          if (e.from_output_id === cur && (e.relation === "derived_from" || e.relation === "refines")) {
-            stack.push({ id: e.to_output_id, depth: depth + 1 });
+      const family = seedGigId === undefined ? undefined : performanceRoot(seedGigId);
+      const inFamily = (rec: OutputRecord): boolean =>
+        family === undefined || performanceRoot(rec.gig_id) === family;
+
+      /** The record, wearing the labels it has earned — and NOTHING when it has earned none, so a
+       *  plain gig's trace hands back the store's own rows exactly as it always did. */
+      const label = (rec: OutputRecord): TraceRecordNode => {
+        const movement = movementOfGigId(rec.gig_id);
+        const crossed = seedGigId !== undefined && rec.gig_id !== seedGigId;
+        if (movement === undefined && !crossed) return rec;
+        return {
+          ...rec,
+          ...(movement !== undefined ? { movement, performance_gig_id: performanceRoot(rec.gig_id) } : {}),
+          ...(crossed ? { crossed: true as const } : {}),
+        };
+      };
+
+      /** A reference we cannot resolve, named. Its sha is the referrer's engine-stamped
+       *  `input_shas` entry — the one fact about the absent record that IS known. */
+      const hole = (missingId: string, referenced_by: string): TraceMissingNode => {
+        const from = outputs.get(referenced_by);
+        const at = from ? from.input_refs.indexOf(missingId) : -1;
+        return {
+          id: missingId,
+          content_sha: (at >= 0 ? from!.input_shas[at] : undefined) ?? "",
+          missing: true,
+          referenced_by,
+        };
+      };
+
+      /** Emitted already (the seed counts as emitted, so it is never its own ancestor or
+       *  descendant) — the dedup `direction: "both"` needs across its two walks. */
+      const emitted = new Set<string>([id]);
+      const order: TraceNode[] = [];
+
+      if (direction !== "downstream") {
+        // `walked` is the CYCLE guard and is separate from `emitted` on purpose: a provenance
+        // cycle leads back to the seed, and a guard that treated the seed as unvisited would
+        // expand it forever.
+        const walked = new Set<string>();
+        // `from` is the record that named this id, so an unresolvable one can say where the hole
+        // is. The seed has no referrer, so a seed this store does not hold walks to nothing —
+        // unchanged, and correct: nobody asserted the seed exists except the caller.
+        const stack: Array<{ id: string; depth: number; from?: string }> = [{ id, depth: 0 }];
+        while (stack.length) {
+          const { id: cur, depth, from } = stack.pop()!;
+          if (walked.has(cur)) continue;
+          walked.add(cur);
+          const rec = outputs.get(cur);
+          if (!rec) {
+            if (from !== undefined) order.push(hole(cur, from));
+            continue;
+          }
+          if (cur !== id) {
+            if (!inFamily(rec)) continue;
+            emitted.add(cur);
+            order.push(label(rec));
+          }
+          if (maxDepth !== undefined && depth >= maxDepth) continue;
+          for (const p of rec.input_refs) stack.push({ id: p, depth: depth + 1, from: cur });
+          for (const e of edges) {
+            if (e.from_output_id === cur && (e.relation === "derived_from" || e.relation === "refines")) {
+              stack.push({ id: e.to_output_id, depth: depth + 1, from: cur });
+            }
           }
         }
       }
+
+      if (direction !== "upstream") {
+        // Breadth-first over the frontier. A descendant cannot be a hole: this direction
+        // DISCOVERS children by reading records the store holds, so an absent record is not a
+        // reference anyone made — it is simply not here to be found.
+        const all = [...outputs.values()];
+        let frontier = new Set<string>([id]);
+        for (let depth = 0; frontier.size > 0 && (maxDepth === undefined || depth < maxDepth); depth++) {
+          const next = new Set<string>();
+          for (const o of all) {
+            if (emitted.has(o.id)) continue;
+            if (!o.input_refs.some((r) => frontier.has(r))) continue;
+            if (!inFamily(o)) continue;
+            emitted.add(o.id);
+            order.push(label(o));
+            next.add(o.id);
+          }
+          frontier = next;
+        }
+      }
+
       return order;
     },
 

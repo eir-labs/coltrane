@@ -21,12 +21,12 @@ import { resolveModel } from "./claude_invoker.js";
 export const CORE_TO_PRIMITIVE: Record<string, Agent["primitives"][number]> = Object.fromEntries(
   Object.entries(PRIMITIVE_OUTPUT_TYPE).map(([prim, core]) => [String(core), prim as Agent["primitives"][number]]),
 );
-import { sha256Hex, canonJson, runFingerprint, outputContentHash, CANONICAL_FORM_VERSION } from "./canonical_form.js";
+import { sha256Hex, canonJson, canonStructuralJson, runFingerprint, outputContentHash, CANONICAL_FORM_VERSION } from "./canonical_form.js";
 import { producersSha,
-  reuseCacheKey, checkReuseEntry, runIdentityMismatch,
+  reuseCacheKey, checkReuseEntry, runIdentityMismatch, checkpointRoleKey,
   CHECKPOINT_SCHEMA_VERSION, REUSE_SCHEMA_VERSION,
   type CheckpointStore, type CheckpointRole, type GigCheckpoint,
-  type ReuseStore, type ReuseEntry, type ReuseOutput, type RunIdentity,
+  type ReuseStore, type ReuseEntry, type ReuseOutput, type RunIdentity, type PriorBudgetState,
 } from "./reuse.js";
 import type { OutputStore, OutputRecord } from "./outputs.js";
 import { drainGigHeader } from "./output_mirror.js";
@@ -239,6 +239,27 @@ export interface RunDeps {
    */
   depth?: Depth | undefined;
 
+  // ── the chart: this run is one MOVEMENT of a performance ───────────────────
+  /**
+   * Set by `runChart` (src/chart.ts) when this gig is a movement of an arrangement. Absent = a
+   * plain single-standard run, byte-identical to every run before charts existed.
+   */
+  chart?: ChartRunContext | undefined;
+  /**
+   * Sealed records from an EARLIER MOVEMENT, offered to this run's entry chairs.
+   *
+   * A chart edge is a provenance edge, not a copy: the sink's entry chair consumes the source
+   * movement's real `OutputRecord`s, so what it seals carries their `input_refs`/`input_shas` and
+   * the chain reaches back across the movement boundary. Passing the DATA through the gig payload
+   * instead would satisfy the type check and produce an output whose provenance says it came from
+   * nowhere.
+   *
+   * Deliberately NOT folded into `produced`: a movement's manifest, ledger row and
+   * `run_fingerprint` describe the work THAT MOVEMENT did. Seeds are reported separately, in
+   * `GigResult.seeded_from`, so a chair consuming records this run did not produce is never silent.
+   */
+  seed_outputs?: readonly OutputRecord[] | undefined;
+
   // ── reuse a sealed output instead of re-deriving it ────────────────────────
   /**
    * Durable per-gig checkpoints. When wired, the runtime records each completed chair's sealed
@@ -399,11 +420,42 @@ export interface GigReuseReport {
   write_errors: Array<{ phase: string; role: string; reason: string }>;
 }
 
+/**
+ * What a run needs to know about being one MOVEMENT of a chart.
+ *
+ * Small on purpose: the runtime does not orchestrate arrangements (src/chart.ts does). It only
+ * needs to stamp the right identity on what it seals, so a movement's ledger row, checkpoint and
+ * fingerprint say which performance they belong to.
+ */
+export interface ChartRunContext {
+  chart_slug: string;
+  movement_id: string;
+  /**
+   * The arrangement's identity, folded into `run_fingerprint` in the EXACT slot that held
+   * `genome_hash`. For a degenerate chart this value IS `genomeHash(standard)`, so a
+   * single-standard gig's fingerprint is byte-identical to what it was before charts existed.
+   */
+  chart_hash: string;
+  /** One movement, no edges, no gates — the single-standard gig. Keeps ids and files unchanged. */
+  degenerate: boolean;
+  /** The cumulative spend at this movement's boundary, recorded on the checkpoint it writes. */
+  prior_budget_state?: PriorBudgetState | undefined;
+}
+
 export interface GigResult {
   gig_id: string;
   standard_slug: string;
+  /** Present when this run was a movement of a chart (RunDeps.chart). */
+  chart_slug?: string;
+  movement_id?: string;
   genome_hash: string;
   run_fingerprint: string;
+  /**
+   * Records this run CONSUMED but did not produce — an earlier movement's sealed outputs, carried
+   * in over a chart edge. Present only when seeds were actually read, so its absence is the claim
+   * that every input this run consumed was sealed inside it.
+   */
+  seeded_from?: ReadonlyArray<{ gig_id: string; output_id: string; domain_type: string; content_sha: string }>;
   outputs: readonly OutputRecord[];
   // 5th-class eval scores keyed by eval_slug. Empty when the standard declares
   // no eval_slugs. Populated by scanning the produced outputs against each
@@ -645,8 +697,14 @@ export function genomeHash(standard: Standard): string {
       domain: a.domain,
     }))
     .sort((x, y) => (x.slug < y.slug ? -1 : 1));
+  // canonStructuralJson, not canonJson: a field whose value states NOTHING (an empty array, an
+  // absent optional, a null domain) must not be able to move a STRUCTURAL hash. 0.6.6 added two
+  // `.default([])` chair fields, no standard's structure changed, and genome_hash moved for the
+  // entire genome — re-keying the ledger and refusing resumes for a drift that did not exist.
+  // Reaching this canonicalization moved the hash ONE final time; after it, a new schema default
+  // is hash-neutral. Pinned by tests/genome_hash_stability.test.ts, which states the bump loudly.
   return sha256Hex(
-    canonJson({ standard: { slug: standard.slug, domain: standard.domain, phases: standard.phases }, agents }),
+    canonStructuralJson({ standard: { slug: standard.slug, domain: standard.domain, phases: standard.phases }, agents }),
   );
 }
 
@@ -663,7 +721,10 @@ export function genomeHash(standard: Standard): string {
 // declarations are polymorphic, so a base player written against `Interpretation`
 // consumes any downstream subtype while domain contracts keep their precision.
 const CORE_TYPE_SET: ReadonlySet<string> = new Set(CORE_TYPES);
-function outputSatisfiesType(output: OutputRecord, declared: string): boolean {
+/** EXPORTED because the chart layer asks the same question at the movement boundary — which of a
+ *  source movement's sealed records does an edge of type T carry — and two layers answering "does
+ *  this record satisfy this declared type" differently is the #263 defect wearing a new hat. */
+export function outputSatisfiesType(output: OutputRecord, declared: string): boolean {
   if (output.domain_type === declared) return true;
   if (CORE_TYPE_SET.has(declared) && output.core_type === declared) return true;
   return false;
@@ -778,6 +839,11 @@ export async function runGig(
   // hard stop, so no model tokens are spent on bad input.
   const standardInputs = new Set<string>(standard.input_types ?? []);
 
+  // Sealed records an earlier MOVEMENT handed to this one over a chart edge (RunDeps.seed_outputs).
+  // They are inputs, not products: available to entry chairs, never folded into `produced`.
+  const seedRecords: readonly OutputRecord[] = deps.seed_outputs ?? [];
+  const seedsConsumed = new Map<string, OutputRecord>(); // output_id → record, for the manifest
+
   // Keys are the HYPHENATED type slug. `grant_requirements` vs `grant-requirements` is the
   // single most common dispatch mistake, and the caller's own keys are in scope here.
   const normalizeKey = (k: string): string => k.toLowerCase().replace(/[_\-\s]/g, "");
@@ -860,6 +926,9 @@ export async function runGig(
           if (!standardInputs.has(need)) continue;      // not a gig input — upstream's job
           if (gigInput[need] !== undefined) continue;   // supplied
           if (reachable.some((t) => mightSatisfy(t, need))) continue; // an upstream can cover it
+          // A chart edge satisfies a declared gig input with a SEALED RECORD rather than a payload
+          // key. Without this the pre-flight would refuse a correctly-arranged movement at t=0.
+          if (seedRecords.some((s) => outputSatisfiesType(s, need))) continue;
           throw missingGigInput(need, ch.role);
         }
         sealedThisPhase.push(...(sealedByRole.get(ch.role) ?? []));
@@ -964,7 +1033,10 @@ export async function runGig(
 
   const identity = (): RunIdentity => ({
     standard_slug: standard.slug,
-    genome_hash,
+    // A movement's resume gate carries the ARRANGEMENT's identity when it has one: chairs from
+    // chart B consuming a movement's sealed outputs from chart A is the same splice as a moved
+    // genome, one level up. Byte-identical for a degenerate chart, where chart_hash IS genome_hash.
+    genome_hash: deps.chart?.chart_hash ?? genome_hash,
     // #278 review — genome_hash does NOT see an agent's identity/method/constraints/tools,
     // nor a skill's code. Those are the producer, and editing one under a stable slug is the
     // ordinary response to a bad run. Without this the resume gate accepted exactly that.
@@ -1013,6 +1085,15 @@ export async function runGig(
       if (!rolesInStandard.has(r.role)) {
         throw new ResumeRefused(gig_id, `its checkpoint names role "${r.role}", which this standard does not define`);
       }
+      // THE SEAT'S FULL IDENTITY: (chart_slug, movement_id, role). Two movements of one chart may
+      // each declare a chair named "reviewer", and restoring one movement's sealed output into the
+      // other's seat would be a splice with nothing in the manifest recording it. A legacy row
+      // carries no movement_id and defaults to the standard's own slug, so it still restores.
+      const seatNow = checkpointRoleKey(deps.chart?.chart_slug ?? standard.slug, deps.chart?.movement_id, r.role);
+      const seatThen = checkpointRoleKey(deps.chart?.chart_slug ?? standard.slug, r.movement_id, r.role);
+      if (seatNow !== seatThen) {
+        throw new ResumeRefused(gig_id, `its checkpoint names seat "${seatThen}" and this run is seat "${seatNow}" — a movement does not restore another movement's chair`);
+      }
       const records: OutputRecord[] = [];
       for (let i = 0; i < r.output_ids.length; i++) {
         const id = r.output_ids[i]!;
@@ -1058,6 +1139,9 @@ export async function runGig(
     if (!deps.checkpoints || records.length === 0) return;
     checkpointRoles.set(role, {
       role, phase: phaseName,
+      // WHICH movement's seat this is. Two movements may both declare a chair named "reviewer";
+      // the composite (chart_slug, movement_id, role) is what keeps their checkpoints apart.
+      ...(deps.chart ? { movement_id: deps.chart.movement_id } : {}),
       output_ids: records.map((r) => r.id),
       content_shas: records.map((r) => r.content_sha),
       domain_types: records.map((r) => r.domain_type),
@@ -1086,6 +1170,9 @@ export async function runGig(
         updated_at: new Date().toISOString(),
         roles: [...checkpointRoles.values()],
         ...(prior ? { prior_usage: JSON.parse(JSON.stringify(prior)) as unknown } : {}),
+        // The chart's cumulative spend AT THIS MOVEMENT'S BOUNDARY, so a resumed performance can
+        // compare it to the envelope before spawning anything (src/chart.ts, edge case B).
+        ...(deps.chart?.prior_budget_state ? { prior_budget_state: deps.chart.prior_budget_state } : {}),
       });
     } catch (e) {
       checkpointError ??= e instanceof Error ? e.message : String(e);
@@ -1177,6 +1264,7 @@ export async function runGig(
           return {
             gig_id,
             standard_slug: standard.slug,
+            ...(deps.chart ? { chart_slug: deps.chart.chart_slug, movement_id: deps.chart.movement_id } : {}),
             genome_hash,
             run_fingerprint: "",
             outputs: produced,
@@ -1365,6 +1453,9 @@ export async function runGig(
     if (!store) return undefined;
     const key = reuseCacheKey({
       standard_slug: standard.slug,
+      // A chart may name one standard TWICE. Keyed on movement_id, the two instances occupy
+      // separate namespaces even with byte-identical inputs — isolation by default.
+      ...(deps.chart ? { chart_slug: deps.chart.chart_slug, movement_id: deps.chart.movement_id } : {}),
       phase: a.phaseName,
       chair: a.chair,
       agent: a.agent ?? null,
@@ -1434,6 +1525,23 @@ export async function runGig(
     return { key, hit: { cache_key: key, source_gig_id: entry.source_gig_id, outputs: entry.outputs } };
   }
 
+  /**
+   * Offer an ENTRY chair the seeds a chart edge carried in.
+   *
+   * Scoped to a chair with no `depends_on`: a chair that named its upstream roles asked for those
+   * specific seats, and a movement's seed is not one of them. Records enter `inputs` — so what the
+   * chair seals carries their content_shas — and are recorded as consumed for the manifest.
+   */
+  function pullSeeds(chair: Chair, inputs: OutputRecord[], wanted: readonly string[]): void {
+    if (seedRecords.length === 0 || chair.depends_on.length > 0) return;
+    for (const s of seedRecords) {
+      if (inputs.includes(s)) continue;
+      if (!wanted.some((t) => outputSatisfiesType(s, t))) continue;
+      inputs.push(s);
+      seedsConsumed.set(s.id, s);
+    }
+  }
+
   function prepareChair(chair: Chair, phaseName: string): PreparedChair {
     // A skill-backed chair runs the skill's deterministic code half — no agent, no model.
     if (chair.skill_slug && (chair.agent_slug ?? "") === "") {
@@ -1450,6 +1558,7 @@ export async function runGig(
         if (!recs?.length) throw new RuntimeError(`chair "${chair.role}" depends_on "${dep}" which has not been produced`);
         inputs.push(...recs);
       }
+      pullSeeds(chair, inputs, chair.input_contract);
       if (chair.input_contract.length > 0) {
         for (const need of chair.input_contract) {
           // #156: a type satisfied by an upstream record OR by the gig payload (entry-chair seed).
@@ -1513,6 +1622,9 @@ export async function runGig(
       }
     } else {
       inputs = produced.filter((o) => agent.input_types.some((t) => outputSatisfiesType(o, t)));
+      // A chart edge's carriers are offered to the same chair on the same terms as an in-gig
+      // upstream record — by type, as records, so provenance survives the movement boundary.
+      pullSeeds(chair, inputs, [...chair.input_contract, ...agent.input_types]);
     }
 
     // Runtime input_contract check: every type the chair declares it expects
@@ -2087,7 +2199,11 @@ export async function runGig(
   }
 
   const run_fingerprint = runFingerprint({
-    genome_hash,
+    // THE CHART SLOT. When this run is a movement of an arrangement, the arrangement's identity
+    // folds in exactly where `genome_hash` folded — because the reproducible thing is no longer
+    // "this standard's structure" but "this movement of this chart". For a degenerate chart
+    // `chart_hash === genomeHash(standard)`, so a single-standard gig's fingerprint is unmoved.
+    genome_hash: deps.chart?.chart_hash ?? genome_hash,
     model_version: deps.model_version ?? "unknown",
     canonical_form_version: CANONICAL_FORM_VERSION,
     eval_scores,
@@ -2100,9 +2216,13 @@ export async function runGig(
   deps.ledger.append({
     kind: "gig",
     schema_version: LEDGER_SCHEMA_VERSION,
+    // One ROW per movement, because a movement runs under its own gig id (src/chart.ts
+    // `movementGigId`) — and for the degenerate chart that id IS the chart's, which is what an
+    // existing single-standard reader looks up.
     entry_id: gig_id,
     gig_id,
     standard_slug: standard.slug,
+    ...(deps.chart ? { chart_slug: deps.chart.chart_slug, movement_id: deps.chart.movement_id } : {}),
     genome_hash,
     run_fingerprint,
     output_hashes,
@@ -2144,7 +2264,18 @@ export async function runGig(
   // is not reached on either.
   try { deps.checkpoints?.remove(gig_id); } catch { /* reclaiming disk must not fail a run that succeeded */ }
 
-  const result: GigResult = { gig_id, standard_slug: standard.slug, genome_hash, run_fingerprint, outputs: produced, eval_scores, status: "complete" };
+  const result: GigResult = {
+    gig_id, standard_slug: standard.slug,
+    ...(deps.chart ? { chart_slug: deps.chart.chart_slug, movement_id: deps.chart.movement_id } : {}),
+    genome_hash, run_fingerprint, outputs: produced, eval_scores, status: "complete",
+    ...(seedsConsumed.size > 0
+      ? {
+          seeded_from: [...seedsConsumed.values()].map((s) => ({
+            gig_id: s.gig_id, output_id: s.id, domain_type: s.domain_type, content_sha: s.content_sha,
+          })),
+        }
+      : {}),
+  };
   if (settledUsage) result.usage = settledUsage;
   if (budget) result.budget_state = budget;
   if (unresolved_evals.length > 0) result.unresolved_evals = unresolved_evals;

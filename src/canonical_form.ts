@@ -8,6 +8,56 @@ export function canonJson(value: unknown): string {
   return JSON.stringify(stripAndSortKeys(value));
 }
 
+/**
+ * Canonical form for a STRUCTURAL hash: `canonJson`, plus every object key whose value states
+ * NOTHING is dropped before hashing — `undefined`, `null`, `[]`, `{}`.
+ *
+ * WHY THIS EXISTS. 0.6.6 added `optional_outputs` and `preferred_skills` to `ChairSchema` with
+ * `.default([])`. No standard's structure changed — same phases, same chairs, same type flow — but
+ * every standard loaded through the schema now carried two materialized empty arrays, those arrays
+ * entered `canonJson`, and `genomeHash` MOVED for the whole genome. The reproducibility key shifted
+ * under runs that were byte-identical pipelines, and resume was refused for a drift that did not
+ * exist. A structural hash must be insensitive to a default that says nothing, or every future
+ * `.default([])` repeats it.
+ *
+ * WHAT IS NOT DROPPED, deliberately:
+ *   - `0`, `""`, `false` are VALUES, not absences. Dropping them would blind the hash to a real
+ *     difference — the inverse failure of the one this closes.
+ *   - array MEMBERS. An array is ordered structure; removing a null member would re-index its
+ *     neighbours and change what the remaining members mean. Members are canonicalized in place;
+ *     only object KEYS are dropped.
+ *
+ * Use this for identity over a SHAPE (the phase graph, the movement DAG). Keep `canonJson` for
+ * content — an output's `data` may legitimately carry an empty array as a fact about the world.
+ */
+export function canonStructuralJson(value: unknown): string {
+  return JSON.stringify(stripStructural(value));
+}
+
+function isEmptyValue(v: unknown): boolean {
+  if (v === undefined || v === null) return true;
+  if (Array.isArray(v)) return v.length === 0;
+  if (typeof v === "object") return Object.keys(v as Record<string, unknown>).length === 0;
+  return false;
+}
+
+function stripStructural(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stripStructural);
+  if (value !== null && typeof value === "object") {
+    const sorted: Record<string, unknown> = {};
+    for (const k of Object.keys(value as Record<string, unknown>).sort()) {
+      if (EXCLUDED_FIELDS.has(k)) continue;
+      const inner = stripStructural((value as Record<string, unknown>)[k]);
+      // Emptiness is judged AFTER the recursion, so `{a: {b: []}}` collapses the whole way down
+      // rather than leaving a husk that still shifts the bytes.
+      if (isEmptyValue(inner)) continue;
+      sorted[k] = inner;
+    }
+    return sorted;
+  }
+  return value;
+}
+
 export function canonText(value: string): string {
   const lf = value.replace(/\r\n/g, "\n");
   return lf.replace(/\n+$/, "") + "\n";

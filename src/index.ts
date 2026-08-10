@@ -25,6 +25,7 @@ export * from "./reuse.js";
 export * from "./charter.js";
 export * from "./server.js";
 export * from "./runtime.js";
+export * from "./chart.js";
 export * from "./claude_invoker.js";
 export * from "./bifrost_invoker.js";
 export * from "./circle_of_fifths.js";

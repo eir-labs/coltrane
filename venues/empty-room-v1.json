@@ -1,0 +1,19 @@
+{
+  "slug": "empty-room-v1",
+  "institution_slug": "quartet",
+  "flavor": "ingest-empty",
+  "description": "The goods entrance. This is the room for reading third-party content — mail, chat platforms, web pages, vendor documents — and it is bare because bareness is the control. Untrusted text cannot be reliably separated from instruction by the model reading it, so the constraint has to be structural: it holds NO tools (not read-only tools; none), no egress door of any kind, no credential surface, and nothing installed. One ingress door names the single source it reads from. A chair seated here can do exactly one thing: emit a typed record of what it read, whose provenance says the content is untrusted and never instruction, into a spool a LATER phase drains from a different room — one that holds interpretation capability and no ingress from this source. Private data is absent (no credentials, nothing mounted) and there is no attacker-steerable exit (no egress, and the one write goes to a fixed engine-chosen destination the content cannot redirect), so two of the three conditions that make injected instructions consequential are structurally missing rather than argued away. What remains is the spool write itself, which is a channel: fixed destination, declared type, no attacker-chosen route. The claim is a BOUNDED residual channel, not the absence of one. Ephemeral because a room that persists between ingestions carries the previous ingestion's content forward into whoever sits here next.",
+  "equipment": {
+    "tools": []
+  },
+  "doors": {
+    "ingress": ["mail.example.com"],
+    "egress": []
+  },
+  "installs": [],
+  "credential_surface": [],
+  "lifecycle": {
+    "policy": "ephemeral"
+  },
+  "responsible_chair": "quartet.chair.responsible-officer"
+}

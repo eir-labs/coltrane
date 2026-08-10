@@ -122,11 +122,18 @@ describe("VenueSchema — the room's declared end-state, and nothing about how i
     expect(v.lifecycle.policy, "the contract is durable; the realization is disposable").toBe("ephemeral");
   });
 
-  it("defaults a stated-but-bare lifecycle and equipment rather than inventing authority", () => {
-    const v = VenueSchema.parse({ slug: "bare", institution_slug: "quartet", equipment: {}, lifecycle: {} });
-    expect(v.equipment.tools).toEqual([]);
-    expect(v.lifecycle.policy).toBe("ephemeral");
-    expect(v.doors).toBeUndefined();
+  it("defaults toward the EMPTY room rather than inventing authority", () => {
+    const bare = VenueSchema.parse({ slug: "bare", institution_slug: "quartet", equipment: {}, lifecycle: {} });
+    expect(bare.equipment.tools).toEqual([]);
+    expect(bare.lifecycle.policy).toBe("ephemeral");
+    expect(bare.doors).toBeUndefined();
+    // Omitting the fields entirely means the same thing as stating them bare — the schema owns that,
+    // so the loader and venue_define cannot disagree about what an unstated equipment permits.
+    const silent = VenueSchema.parse({ slug: "silent", institution_slug: "quartet" });
+    expect(silent.equipment.tools).toEqual([]);
+    expect(silent.lifecycle.policy).toBe("ephemeral");
+    expect(silent.installs).toEqual([]);
+    expect(silent.credential_surface).toEqual([]);
   });
 
   it("is strict — an unknown key is a typo, not an extension point", () => {
@@ -238,13 +245,17 @@ describe("composeChart R10 — a chart's venue is checked where the chart is aut
   });
 
   it("the venue does not enter chart_hash — a room is environment, not structure", () => {
-    const bare = composeChart({ chart: line() as never, standards: stds(), agents: ags(), payload_types: ["Signal"] });
-    const roomed = composeChart({
-      chart: line({ venue: "reading-room-v1" }) as never, standards: stds(),
-      agents: new Map([["scout", scout], ["reader", testAgent({ slug: "reader", primitives: ["INTERPRET"], input_types: ["Signal"], output_types: ["Interpretation"], allowed_tools: ["Read"] })]]),
-      venues: vens(), payload_types: ["Signal"],
+    // Both compositions over the SAME standards, one held in a room the whole roster can play in.
+    const readerInRoom = testAgent({ slug: "reader", primitives: ["INTERPRET"], input_types: ["Signal"], output_types: ["Interpretation"], domain: "venue-demo", allowed_tools: ["Read"] });
+    const digestInRoom = composeStandard({
+      slug: "digest", domain: "venue-demo", agents: [readerInRoom], input_types: ["Signal"], output_types: ["Interpretation"],
+      phases: [{ name: "p2", chairs: [{ role: "r2", agent_slug: "reader", depends_on: [], input_contract: ["Signal"], output_contract: ["Interpretation"], required_skills: [] }] }] as PhaseDef[],
     });
-    expect(bare.ok && roomed.ok).toBe(true);
+    const roster = stds([["digest", digestInRoom]]);
+    const bare = composeChart({ chart: line() as never, standards: roster, agents: ags(), payload_types: ["Signal"] });
+    const roomed = composeChart({ chart: line({ venue: "reading-room-v1" }) as never, standards: roster, agents: ags(), venues: vens(), payload_types: ["Signal"] });
+    expect(bare.ok, "premise: the bare arrangement composes").toBe(true);
+    expect(roomed.ok, "premise: every seated agent survives the ceiling").toBe(true);
     if (!bare.ok || !roomed.ok) return;
     expect(roomed.chart_hash).toBe(bare.chart_hash);
   });
@@ -318,7 +329,10 @@ describe("loadGenome — the chart and the venue load from the genome", () => {
     // chartEntrySeedTypes is the loader's honest answer to R7 at load time: a movement with no
     // incoming edge is seeded by the payload, so its standard's declared input_types are treated
     // as provided. An INTERIOR movement's unmet need is still a dead slot.
-    expect(chartEntrySeedTypes(ChartSchema.parse(line()), stds())).toEqual(["Signal"]);
+    expect(
+      chartEntrySeedTypes(ChartSchema.parse(line()), stds()),
+      "the sink's need is carried by the edge, so the payload owes nothing",
+    ).toEqual([]);
     const twoSources = ChartSchema.parse({
       slug: "parallel",
       movements: [{ movement_id: "a", standard_slug: "look" }, { movement_id: "b", standard_slug: "digest" }],

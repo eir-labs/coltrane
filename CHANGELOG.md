@@ -7,6 +7,68 @@ signals a breaking change and a **patch** signals an additive or internal one.
 `package.json`'s `version` — `tests/version_identity.test.ts` enforces that, and also that
 the MCP handshake reports the constant rather than a hardcoded literal.
 
+## Unreleased
+
+### Added
+
+- **The chart is a loadable, authorable genome class.** 0.7.0 shipped `ChartSchema` and
+  `composeChart`/`runChart` with no way to load a chart from the genome and no MCP surface — the
+  implementing agent declined to advertise a tool it could not back. Now: `charts/` is a genome
+  directory. `loadGenome`/`resolveGenome` validate each file through `ChartSchema` **and**
+  `composeChart` against the loaded standards, agents and venues, so a chart naming a standard the
+  genome does not hold is a `LoadError` of kind `"chart"` carrying the rule that fired — not a
+  surprise at minute nine. `LoadedGenome` gains `charts` and `venues`; `loadLayeredGenome` folds both
+  (and threads `inheritedStandards`/`inheritedVenues`, so a consumer chart may arrange the base's
+  standards). `chart_define` + `chart_browse` and `venue_define` + `venue_browse` join the registry,
+  their `input_schema` generated from their schemas; the discoverability-parity table gains both
+  classes. `gig_dispatch` gains `chart_slug`, EXCLUSIVE with `standard_slug` through `dispatchTarget`
+  — a chart dispatch composes against the real payload's keys, runs `runChart` on both the
+  synchronous and async paths, and replies with the arrangement's own manifest (`chart_hash`, the
+  per-movement roll-up, cumulative spend against the envelope). Every dispatch preflight — the
+  retired/deprecated status read and the seal drill — now sweeps EVERY movement's standard, so a
+  chart cannot route a movement past a gate a direct dispatch would fail.
+
+  Ships `charts/software-delivery-v1.json`: ONE movement over `software-change-v1`. No truthful
+  two-movement pairing exists among the shipped standards — `software-change-v1` seals
+  `change-set`/`change-verdict`/`Judgment` and the only outside needs any other shipped standard
+  declares are `design-question`, `change-request` and `invention-disclosure`, so every candidate
+  edge would have been invented. A one-movement chart is the degenerate case and its `chart_hash`
+  short-circuits to `genomeHash` of that standard, which is exactly the honest thing to ship.
+
+- **The venue: `chart.venue` stops meaning nothing.** `VenueSchema` (one Zod source) declares a
+  room's end-state and never how it is built: `equipment.tools` (a deny-by-default allowlist),
+  `doors.ingress`/`doors.egress` stated separately because what may reach a room and what may leave
+  it are different questions, digest-pinned `installs`, a `credential_surface` of permitted key
+  CLASSES, an ephemeral-by-default `lifecycle`, and a `responsible_chair` — one named office that
+  answers for the room. Field rules have teeth: an install with no `sha256:<64 hex>` digest is
+  refused (an unpinned install names a family of rooms), a door containing `*` is refused, and
+  `venueDefect` refuses a `standing` venue with no `rebuild_cadence` — a standing room accumulates
+  drift and residue no output's `input_shas` can cover, so the exception owes a cadence.
+
+  **The ceiling rule (R10).** Where a chart names a venue, the effective tool set of every seated
+  agent — the movement's own composed roster plus anyone the chart seats over it — is
+  `allowed_tools ∩ equipment.tools`. A venue can therefore only NARROW a player; a tool present in
+  the room and absent from the charter never appears. An agent whose whole grant set is unreachable
+  in the room refuses the chart at compose time, naming the agent, the venue and the empty
+  intersection; an agent that grants nothing needs nothing from the room and is seated. A venue the
+  caller cannot resolve fails closed — an unresolvable ceiling is not an absent ceiling. The venue is
+  deliberately NOT folded into `chart_hash`: a room is environment, not structure.
+
+  Ships `venues/empty-room-v1.json` — the ingestion room, bare by construction: no tools, one
+  ingress door, no egress, no credentials, nothing installed, ephemeral, with the formal statement of
+  why bareness is the control rather than a configuration choice.
+
+  **Not implemented, and deliberately:** realizing a room from its contract, and verifying one by
+  behavioural probe. Those are the layer below the contract; what lands here is the half the engine
+  can enforce before anything runs.
+
+- `GigRunState` gains `chart_slug`, surfaced by `gig_monitor`, so an async performance is
+  distinguishable from an async run. `genome_reload` syncs charts and venues in place alongside the
+  other classes. `GenomeClass` gains `chart` and `venue`: the file store writes
+  `charts/<slug>.json` and `venues/<slug>.json`, and a hosted define rides the same upsert port —
+  where the STORE side is not yet built, so the RPC refuses it loudly rather than the engine
+  pretending the class does not exist.
+
 ## 0.7.0
 
 ### Added

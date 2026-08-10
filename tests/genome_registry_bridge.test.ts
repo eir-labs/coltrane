@@ -20,6 +20,8 @@ const genome: LoadedGenome = {
   standards: new Map(),
   skills: new Map(),
   evals: new Map(),
+  charts: new Map(),
+  venues: new Map(),
   load_errors: [],
 };
 

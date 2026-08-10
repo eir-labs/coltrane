@@ -145,7 +145,7 @@ standards (multi-phase workflows), dispatching gigs (runs), and sealing every ou
 a content-addressed ledger.
 
 It is an **MCP server**. You (Claude Code) are the natural client. The repo ships its own
-`.mcp.json` pointing at `dist/src/server_entry.js`, so after `npm run build` the 44 tools
+`.mcp.json` pointing at `dist/src/server_entry.js`, so after `npm run build` the 49 tools
 become available when Claude opens the directory. The same registry is host-mountable: a
 deployment imports `createToolSurface` (subpath `./tool_surface`) and mounts the identical
 surface over HTTP against an org genome store (subpath `./genome_store`) — there is one
@@ -196,13 +196,23 @@ has a promote tool today (evals are declared inside the standard that uses them)
 | `types` | typed schemas for inputs/outputs | `type_register · type_extend` |
 | `agents` | agent definitions (charters, capabilities, skill bindings) | `agent_define · agent_evolve · agent_promote` |
 | `standards` | multi-phase workflows that agents run | `standard_compose · standard_simulate · standard_promote` |
+| `charts` | ARRANGEMENTS: one gig as a performance of many standards — movements, typed between-movement edges, arrangement-level approval gates, a budget envelope, and the venue it is held in | `chart_define · chart_browse` |
+| `venues` | the institution's configured performance space: equipment (a deny-by-default tool CEILING), doors (ingress/egress origin allowlists), digest-pinned installs, credential surface, lifecycle, and the accountable office | `venue_define · venue_browse` |
 | `skills` | reusable cognitive primitives — bound into agents by slug, or CARRIED on an agent's own record (load-only + promote) | `skill_promote` |
 | `evals` | verdict shapes that judge gig outputs (load-only; declared with the standard) | _none — declared in the standard file_ |
 | `institutions` | institutional instances: an institution, its chairs (with dispatch grants), assignments, forebears, lineage edges | _file-shaped under `institutions/`, validated by the Zod schemas; no loader or MCP surface yet — `tests/default_genome_quartet.test.ts` is the gate_ |
 
 Discoverability parity is an invariant: every class you can author over MCP you can list
-over MCP (`type_browse · skill_browse · agent_browse · standard_browse`), pinned by
-`tests/genome_browse_parity.test.ts`.
+over MCP (`type_browse · skill_browse · agent_browse · standard_browse · chart_browse ·
+venue_browse`), pinned by `tests/genome_browse_parity.test.ts`.
+
+**A venue is a ceiling, never a grant.** Where a chart names a venue, the effective tool set of
+every seated agent is `agent.allowed_tools ∩ venue.equipment.tools` — so a room can only ever
+narrow a player. An agent whose entire grant set lies outside the room refuses the chart at
+COMPOSE time (rule R10), and a venue the genome does not hold is a dead name that fails closed,
+exactly as an unresolvable tool grant does. What is NOT implemented: realizing a room from its
+contract and verifying it by behavioural probe. That is a lower layer; the schema is the
+statically-checkable half.
 
 ## Six cognitive primitives
 

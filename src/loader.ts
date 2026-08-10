@@ -4,7 +4,8 @@ import { join, extname, resolve, isAbsolute, dirname } from "node:path";
 import { createRequire } from "node:module";
 import { defineAgent, composeStandard, CompositionError, GenomeIncompleteError, type Agent, type AgentDef, type Standard, type PhaseDef } from "./composition.js";
 import { loadSkillPackage, SkillLoadError } from "./skills.js";
-import { SkillSchema, EvalSchema, DomainTypeSchema, type SkillOutput, type EvalOutput, type DomainTypeOutput } from "./genome_schema.js";
+import { SkillSchema, EvalSchema, DomainTypeSchema, VenueSchema, ChartSchema, venueDefect, type SkillOutput, type EvalOutput, type DomainTypeOutput, type ChartInput, type VenueInput } from "./genome_schema.js";
+import { composeChart, chartEntrySeedTypes, type Chart, type Venue } from "./chart.js";
 import type { Primitive } from "./core_types.js";
 import { CANONICAL_CORE_TYPES } from "./canonical_core_types.js";
 
@@ -57,7 +58,7 @@ export type EvalRecord = EvalOutput;
 // gate around core_types still hard-throws — that's the minimum the system
 // needs to function. Anything past that softens.
 export interface LoadError {
-  readonly kind: "domain_type" | "agent" | "standard" | "skill" | "eval" | "manifest";
+  readonly kind: "domain_type" | "agent" | "standard" | "skill" | "eval" | "chart" | "venue" | "manifest";
   readonly path: string;
   readonly slug: string | null;
   readonly error: string;
@@ -73,6 +74,15 @@ export interface LoadedGenome {
   // Mutable: shared as deps.skills so skill_define writes through to the live map.
   skills: Map<string, SkillRecord>;
   evals: Map<string, EvalRecord>;
+  // Mutable, same reason as standards: chart_define / venue_define write through to the live maps
+  // so a definition authored over MCP is dispatchable in the same session.
+  //
+  // A chart is stored as the VALIDATED CHART, not as its composed plan. The plan carries a
+  // dispatch-time fact the loader cannot know (which types the payload will seed), so the
+  // authoritative composition happens at dispatch against the real payload; what the genome holds
+  // is the arrangement itself.
+  charts: Map<string, Chart>;
+  venues: Map<string, Venue>;
   // Rob #129 — per-definition load failures recorded here instead of throwing.
   load_errors: LoadError[];
   // Genome extension (docs/genome-extension.md): when this genome was resolved from
@@ -171,6 +181,11 @@ export function loadGenome(
   root: string,
   opts?: {
     inheritedAgents?: ReadonlyMap<string, Agent>;
+    /** Genome extension, the chart's side: a consumer chart arranges the BASE's standards and is
+     *  held in the base's venues, so both have to be resolvable while this layer's charts compose.
+     *  Same shape and same reason as `inheritedAgents`. */
+    inheritedStandards?: ReadonlyMap<string, Standard>;
+    inheritedVenues?: ReadonlyMap<string, Venue>;
     /** Set by loadLayeredGenome: defer the dangling-skill-binding post-pass to after the
      *  fold, so a base agent binding a skill the consumer layer supplies isn't false-flagged. */
     deferSkillBindingCheck?: boolean;
@@ -429,6 +444,88 @@ export function loadGenome(
     }
   }
 
+  // venues/ — the institution's configured performance spaces. Loaded BEFORE charts, because a
+  // chart names a venue and a chart's compose refuses a venue it cannot resolve. Soft-fail per
+  // file, the standards stance: one unsound room does not cost the genome its other rooms.
+  // BOTH gates run, the domain_types idiom: the single Zod source for the shape, then venueDefect
+  // for the cross-field rules a field cannot state — so a venue authored on disk cannot slip past a
+  // check a venue registered via venue_define would hit.
+  const venueRead = readJsonDir<VenueInput>(join(root, "venues"));
+  for (const f of venueRead.parse_failures) {
+    load_errors.push({ kind: "venue", path: f.path, slug: null, error: f.error });
+  }
+  const venues = new Map<string, Venue>();
+  const venue_paths = new Map<string, string>();
+  for (const { path, data: def } of venueRead.files) {
+    const slug = typeof def?.slug === "string" ? def.slug : null;
+    try {
+      if (!slug) throw new Error(`missing required "slug" field`);
+      if (venues.has(slug)) {
+        throw new Error(`duplicate venue slug "${slug}" (first seen in ${venue_paths.get(slug)})`);
+      }
+      const parsed = VenueSchema.safeParse(def);
+      if (!parsed.success) {
+        const why = parsed.error.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`).join("; ");
+        throw new Error(`venue schema validation failed — ${why}`);
+      }
+      const defect = venueDefect(parsed.data);
+      if (defect) throw new Error(defect);
+      venues.set(slug, parsed.data);
+      venue_paths.set(slug, path);
+    } catch (e) {
+      load_errors.push({ kind: "venue", path, slug, error: e instanceof Error ? e.message : String(e) });
+    }
+  }
+
+  // charts/ — the ARRANGEMENTS: a chart names standards by slug and is validated the same way a
+  // standard is, through the function that owns the rules. `composeChart` resolves every movement's
+  // standard, every seating's agent and the named venue against what this genome actually holds, so
+  // a chart naming a missing standard fails HERE, where it is a load error with the rule that fired
+  // named — not at minute nine of a performance. Soft-fail per file, like standards.
+  const chartRead = readJsonDir<ChartInput>(join(root, "charts"));
+  for (const f of chartRead.parse_failures) {
+    load_errors.push({ kind: "chart", path: f.path, slug: null, error: f.error });
+  }
+  const charts = new Map<string, Chart>();
+  const chart_paths = new Map<string, string>();
+  for (const { path, data: def } of chartRead.files) {
+    const slug = typeof def?.slug === "string" ? def.slug : null;
+    try {
+      if (!slug) throw new Error(`missing required "slug" field`);
+      if (charts.has(slug)) {
+        throw new Error(`duplicate chart slug "${slug}" (first seen in ${chart_paths.get(slug)})`);
+      }
+      // Shape first, so the seed computation below reads a parsed chart rather than raw JSON.
+      // composeChart re-runs the same parse as its R0 — idempotent, and it keeps ONE owner of the
+      // rules rather than a second half-check here.
+      const shape = ChartSchema.safeParse(def);
+      if (!shape.success) {
+        const why = shape.error.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`).join("; ");
+        throw new Error(`R0: chart does not parse — ${why}`);
+      }
+      // A movement's standard (and a seating's agent, and the venue) resolves against this layer
+      // first, then whatever a lower layer supplied — the same resolution order a standard's
+      // agent_slugs already get, so a consumer chart may arrange base standards.
+      const scopedStandards = new Map([...(opts?.inheritedStandards ?? []), ...standards]);
+      const composed = composeChart({
+        chart: shape.data,
+        standards: scopedStandards,
+        agents: new Map([...(opts?.inheritedAgents ?? []), ...agents]),
+        venues: new Map([...(opts?.inheritedVenues ?? []), ...venues]),
+        // The payload is a dispatch fact; at load time a boundary movement's declared gig contract
+        // stands in for it. See chartEntrySeedTypes — the interior dead slot still fires.
+        payload_types: chartEntrySeedTypes(shape.data, scopedStandards),
+      });
+      if (!composed.ok) {
+        throw new Error(composed.violations.map((v) => `${v.rule}: ${v.detail}`).join(" | "));
+      }
+      charts.set(slug, composed.chart);
+      chart_paths.set(slug, path);
+    } catch (e) {
+      load_errors.push({ kind: "chart", path, slug, error: e instanceof Error ? e.message : String(e) });
+    }
+  }
+
   // #241 — post-pass, now that BOTH the agents and skills maps exist.
   if (!opts?.deferSkillBindingCheck) {
     load_errors.push(
@@ -436,7 +533,7 @@ export function loadGenome(
     );
   }
 
-  return { core_types, domain_types, agents, standards, skills, evals, load_errors };
+  return { core_types, domain_types, agents, standards, skills, evals, charts, venues, load_errors };
 }
 
 /**
@@ -457,6 +554,8 @@ export function loadLayeredGenome(roots: readonly string[]): LoadedGenome {
   const standards = new Map<string, Standard>();
   const skills = new Map<string, SkillRecord>();
   const evals = new Map<string, EvalRecord>();
+  const charts = new Map<string, Chart>();
+  const venues = new Map<string, Venue>();
   const load_errors: LoadError[] = [];
   const provenance = new Map<string, string>();
   let core_types: ReadonlyMap<string, CoreTypeRecord> = new Map();
@@ -474,13 +573,20 @@ export function loadLayeredGenome(roots: readonly string[]): LoadedGenome {
     // #241 — the skill-binding check is deferred to the post-fold pass below: a BASE agent
     // may legitimately bind a skill a HIGHER layer supplies, so per-layer it would report a
     // dangle that the resolved genome does not have.
-    const layer = loadGenome(root, { inheritedAgents: agents, deferSkillBindingCheck: true });
+    const layer = loadGenome(root, {
+      inheritedAgents: agents,
+      inheritedStandards: standards,
+      inheritedVenues: venues,
+      deferSkillBindingCheck: true,
+    });
     core_types = layer.core_types; // immutable 6 — top layer's (all identical)
     fold(domain_types, layer.domain_types, root, "domain_type");
     fold(agents, layer.agents, root, "agent");
     fold(standards, layer.standards, root, "standard");
     fold(skills, layer.skills, root, "skill");
     fold(evals, layer.evals, root, "eval");
+    fold(venues, layer.venues, root, "venue");
+    fold(charts, layer.charts, root, "chart");
     for (const e of layer.load_errors) load_errors.push(e);
   }
 
@@ -492,7 +598,7 @@ export function loadLayeredGenome(roots: readonly string[]): LoadedGenome {
     }),
   );
 
-  return { core_types, domain_types, agents, standards, skills, evals, load_errors, provenance };
+  return { core_types, domain_types, agents, standards, skills, evals, charts, venues, load_errors, provenance };
 }
 
 /**

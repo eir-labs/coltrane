@@ -26,12 +26,21 @@ import {
 } from "./loader.js";
 import { writeGenomeFileVersioned } from "./genome_writer.js";
 import { defineAgent, composeStandard, type Agent, type Standard, type PhaseDef } from "./composition.js";
+import type { Chart, Venue } from "./chart.js";
 import { DomainTypeSchema, SkillSchema } from "./genome_schema.js";
 import { domainTypeDefect } from "./registry.js";
 import { CANONICAL_CORE_TYPES } from "./canonical_core_types.js";
 
-/** The genome classes a store can persist. (Core types are engine-owned and immutable.) */
-export type GenomeClass = "agent" | "standard" | "skill" | "domain_type";
+/** The genome classes a store can persist. (Core types are engine-owned and immutable.)
+ *
+ *  `chart` and `venue` are here because the ENGINE now authors them — the file backing writes
+ *  charts/<slug>.json and venues/<slug>.json, and the class rides through the PostgREST upsert
+ *  unchanged. The STORE side is not yet built: `coltrane_genome_upsert` has no branch for either
+ *  class and there are no chart/venue tables, so a hosted venue_define reaches the RPC and is
+ *  refused BY THE STORE, loudly, with the store's own message. That refusal is the honest state —
+ *  the class passes through the port it is supposed to pass through and the missing half says so
+ *  itself, rather than the engine pretending the class does not exist. */
+export type GenomeClass = "agent" | "standard" | "skill" | "domain_type" | "chart" | "venue";
 
 /** Where definitions live. load() yields the loader's genome shape; upsert() persists one
  *  definition of a class. The file impl writes genome files; the PostgREST impl rides the
@@ -56,6 +65,8 @@ const CLASS_SUBDIR: Record<GenomeClass, string> = {
   standard: "standards",
   skill: "skills",
   domain_type: "domain_types",
+  chart: "charts",
+  venue: "venues",
 };
 
 /** Local-dev backing: the existing loader/writer, behavior identical. load() is
@@ -303,8 +314,16 @@ export function reconstructGenome(rows: GenomeRows): LoadedGenome {
   // evals — no hosted table today; present and empty, the same shape as a genome
   // root with no evals/ directory.
   const evals = new Map<string, EvalRecord>();
+  // charts + venues — likewise: the classes exist in the engine and are authorable over the file
+  // backing, but the store has no coltrane_charts / coltrane_venues table to read yet. Present and
+  // empty is the same shape as a genome root with no charts/ or venues/ directory, so every reader
+  // (chart_browse, gig_dispatch, system_health) behaves identically against a hosted genome — it
+  // finds nothing, and says nothing was found. Adding the two tables + the upsert branches is
+  // store-side work; nothing here changes when they land.
+  const charts = new Map<string, Chart>();
+  const venues = new Map<string, Venue>();
 
-  return { core_types, domain_types, agents, standards, skills, evals, load_errors };
+  return { core_types, domain_types, agents, standards, skills, evals, charts, venues, load_errors };
 }
 
 /** Hosted backing: load the genome from the store's five tables and reconstruct the SAME

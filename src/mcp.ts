@@ -183,7 +183,10 @@ export const MCP_TOOLS: readonly MCPToolDef[] = [
   { slug: "skill_evolve",                  category: "build", input_schema: obj({ slug: "string", code: "string", reason: "string" }), output_schema: obj({ slug: "string", accepted: "boolean", new_version: "number", failing_fixtures: "array" }) },
   { slug: "skill_promote",                 category: "build", input_schema: obj({ slug: "string", status: "string", current: "string" }), output_schema: obj({ slug: "string", status: "string", promoted: "boolean", fixture_report: "object" }) },
 
-  { slug: "charter_suggest_update", category: "manage_context", input_schema: obj({ field: "string", current_value: "string", suggested_value: "string", evidence: "object" }), output_schema: obj({ proposal_id: "string" }) },
+    // The org context — set ONCE by a member; every write path then resolves the working org
+  // without being told (explicit org_slug on a call is an override, never a requirement).
+  { slug: "org_use",                       category: "manage_context", input_schema: obj({ org_slug: "string" }), output_schema: obj({ org_slug: "string", set: "boolean" }) },
+{ slug: "charter_suggest_update", category: "manage_context", input_schema: obj({ field: "string", current_value: "string", suggested_value: "string", evidence: "object" }), output_schema: obj({ proposal_id: "string" }) },
 ];
 
 // Lifecycle promotion order — forward-only. agent/standard share the same chain;

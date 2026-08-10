@@ -38,7 +38,9 @@ export type GenomeClass = "agent" | "standard" | "skill" | "domain_type";
  *  governed upsert RPC as the caller. */
 export interface GenomeStore {
   load(): Promise<LoadedGenome>;
-  upsert(cls: GenomeClass, payload: Record<string, unknown>): Promise<void>;
+  /** org_slug is an OPTIONAL override — the store resolves the caller's working org
+   *  (set once via org_use) when absent, so callers never track the org per call. */
+  upsert(cls: GenomeClass, payload: Record<string, unknown>, org_slug?: string): Promise<void>;
 }
 
 /** The store connection a hosted caller carries — same shape as HostedToolContext:
@@ -317,7 +319,7 @@ export function postgrestGenomeStore(ctx: PostgrestContext): GenomeStore {
       return reconstructGenome({ core_types, domain_types, agents, standards, skills });
     },
 
-    async upsert(cls: GenomeClass, payload: Record<string, unknown>): Promise<void> {
+    async upsert(cls: GenomeClass, payload: Record<string, unknown>, org_slug?: string): Promise<void> {
       const res = await fetch(`${ctx.baseUrl}/rest/v1/rpc/coltrane_genome_upsert`, {
         method: "POST",
         headers: {
@@ -325,7 +327,7 @@ export function postgrestGenomeStore(ctx: PostgrestContext): GenomeStore {
           Authorization: `Bearer ${ctx.bearer}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ p_class: cls, p_payload: payload }),
+        body: JSON.stringify({ p_class: cls, p_payload: payload, p_org_slug: org_slug ?? null }),
       });
       if (!res.ok) {
         const text = await res.text();
@@ -380,6 +382,32 @@ export function rpcGenomeStore(ctx: { baseUrl: string; anonKey: string; agentTok
     async upsert(): Promise<void> {
       throw new Error("an agent token does not author genome — authoring is a member act through the governed upsert");
     },
+  };
+}
+
+/** Set the caller's working organization — the formal switch, recorded in the store as a
+ *  member act. After this, every member write resolves the org without being told. */
+export function postgrestOrgUse(ctx: PostgrestContext): (org_slug: string) => Promise<string> {
+  return async (org_slug) => {
+    const res = await fetch(`${ctx.baseUrl}/rest/v1/rpc/coltrane_org_use`, {
+      method: "POST",
+      headers: {
+        apikey: ctx.anonKey,
+        Authorization: `Bearer ${ctx.bearer}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ p_org_slug: org_slug }),
+    });
+    const text = await res.text();
+    if (!res.ok) {
+      let message = text || `store error ${res.status}`;
+      try {
+        const parsed = JSON.parse(text) as { message?: string };
+        if (parsed.message) message = parsed.message;
+      } catch { /* keep the raw text */ }
+      throw new Error(message);
+    }
+    return JSON.parse(text) as string;
   };
 }
 

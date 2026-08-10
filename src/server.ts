@@ -118,6 +118,9 @@ export interface ServerDeps {
   // Soft-fail load errors from the most recent loadGenome (Rob #129).
   // Surfaced by system_health + refreshed by genome_reload (Rob #130).
   load_errors?: LoadError[] | undefined;
+  /** Org-context switch: wired by a hosted host to the store's coltrane_org_use RPC
+   *  (member act, recorded). Absent on file genomes — one working tree, one implicit org. */
+  orgUse?: ((org_slug: string) => Promise<string>) | undefined;
   // Live agent map from the genome — surfaced for standard_compose slug
   // resolution (Rob #132) AND genome_reload diff/refresh (Rob #130).
   agents?: Map<string, Agent> | undefined;
@@ -1656,12 +1659,18 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         const evolveSlug = typeof args["slug"] === "string" ? (args["slug"] as string) : undefined;
         const changes = (args["changes"] && typeof args["changes"] === "object")
           ? (args["changes"] as Partial<AgentDef>) : undefined;
-        if (evolveSlug && changes && deps.genome_dir) {
-          const agentPath = join(deps.genome_dir, "agents", `${evolveSlug}.json`);
-          if (!existsSync(agentPath)) {
+        if (evolveSlug && changes && (deps.genome_dir || deps.agents?.has(evolveSlug))) {
+          // The base definition: the genome file when a working tree exists, else the loaded
+          // agents map (a hosted surface has no filesystem — the STORE genome is the base,
+          // and the seam above persists the merged definition back through the store).
+          let currentDef: AgentDef;
+          if (deps.genome_dir && existsSync(join(deps.genome_dir, "agents", `${evolveSlug}.json`))) {
+            currentDef = JSON.parse(readFileSync(join(deps.genome_dir, "agents", `${evolveSlug}.json`), "utf-8")) as AgentDef;
+          } else if (deps.agents?.has(evolveSlug)) {
+            currentDef = deps.agents.get(evolveSlug) as unknown as AgentDef;
+          } else {
             return { ok: false, requires_approval: approval, error: `agent_evolve: unknown agent "${evolveSlug}" (no agents/${evolveSlug}.json)` };
           }
-          const currentDef = JSON.parse(readFileSync(agentPath, "utf-8")) as AgentDef;
           const nextDef = { ...currentDef, ...changes };
 
           // The agent must still be a legal composition on its own…
@@ -1714,9 +1723,12 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
               if (agentsArr[i]!.slug === evolveSlug) agentsArr[i] = sealed.agent;
             }
           }
+          // next_def is the seam's persistence source on a hosted surface (the store
+          // upsert writes the MERGED definition, not the raw evolve args).
+          deps.agents?.set(evolveSlug, sealed.agent);
           return {
             ok: true, requires_approval: approval,
-            data: { new_version, evolved: sealed.agent, content_hash: sealed.content_hash, effective_hash: sealed.effective_hash, cascade_check: { agents_affected: [], standards_affected } },
+            data: { new_version, evolved: sealed.agent, next_def: nextDef, content_hash: sealed.content_hash, effective_hash: sealed.effective_hash, cascade_check: { agents_affected: [], standards_affected } },
           };
         }
         return { ok: true, requires_approval: approval, data: { new_version, cascade_check: { agents_affected: [], standards_affected: [] } } };
@@ -1777,6 +1789,24 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
       // production status, and never RUN, TESTED, LISTED or REVISED through the engine. The
       // fixture gate on promotion made that gap sharper — you could be refused for failing
       // fixtures with no way to run them and see why.
+      // ── the org context switch — set once, inherited by every member write ─────────────
+      case "org_use": {
+        const orgSlug = String(args["org_slug"] ?? "");
+        if (!orgSlug) return { ok: false, requires_approval: approval, error: "org_use requires org_slug" };
+        if (!deps.orgUse) {
+          return {
+            ok: false, requires_approval: approval,
+            error: "org context is a store concept — a file genome has one implicit org (this working tree). On a hosted surface the host wires deps.orgUse to the store's coltrane_org_use RPC.",
+          };
+        }
+        try {
+          const set = await deps.orgUse(orgSlug);
+          return { ok: true, requires_approval: approval, data: { org_slug: set, set: true } };
+        } catch (e) {
+          return { ok: false, requires_approval: approval, error: e instanceof Error ? e.message : String(e) };
+        }
+      }
+
       // ── discoverability parity — a dispatcher must be able to FIND a slug over MCP ──────
       // (tests/genome_browse_parity.test.ts). Backed by the deps maps, so the same handler
       // serves a working-tree load and a hosted store load identically; no filesystem.
@@ -2385,6 +2415,7 @@ const HOSTED_BLOCKED: Readonly<Record<string, string>> = {
 // single source the handlers copy from), so the store payload can't drift from the schema.
 const HOSTED_UPSERT: Readonly<Record<string, { cls: GenomeClass; keys: readonly string[] }>> = {
   agent_define: { cls: "agent", keys: Object.keys(AgentSchema.shape) },
+  agent_evolve: { cls: "agent", keys: Object.keys(AgentSchema.shape) },
   standard_compose: { cls: "standard", keys: Object.keys(StandardSchema.shape) },
   type_register: { cls: "domain_type", keys: Object.keys(DomainTypeSchema.shape) },
   skill_define: { cls: "skill", keys: Object.keys(SkillSchema.shape) },
@@ -2426,8 +2457,16 @@ async function callSurfaceTool(
   // request's memory must not report success.
   const up = HOSTED_UPSERT[slug];
   if (deps.hosted && deps.store && result.ok && up) {
+    // No org rides the call: the caller set a working org ONCE (org_use) and the store's
+    // resolver supplies it — explicit-per-call disambiguators are exactly the bookkeeping
+    // the surface must not push onto agents.
+    // agent_evolve persists the MERGED definition the handler computed, not the raw args.
+    const source: Record<string, unknown> =
+      slug === "agent_evolve" && result.data && typeof result.data === "object" && (result.data as Record<string, unknown>)["next_def"]
+        ? ((result.data as Record<string, unknown>)["next_def"] as Record<string, unknown>)
+        : args;
     const payload: Record<string, unknown> = {};
-    for (const k of up.keys) if (args[k] !== undefined) payload[k] = args[k];
+    for (const k of up.keys) if (source[k] !== undefined) payload[k] = source[k];
     try {
       await deps.store.upsert(up.cls, payload);
     } catch (e) {

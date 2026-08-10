@@ -7,7 +7,7 @@ signals a breaking change and a **patch** signals an additive or internal one.
 `package.json`'s `version` — `tests/version_identity.test.ts` enforces that, and also that
 the MCP handshake reports the constant rather than a hardcoded literal.
 
-## Unreleased
+## 0.7.0
 
 ### Added
 

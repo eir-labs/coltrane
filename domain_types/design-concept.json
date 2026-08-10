@@ -1,0 +1,36 @@
+{
+  "slug": "design-concept",
+  "version": 1,
+  "extends": "Artifact",
+  "domain": "product-design",
+  "status": "active",
+  "description": "The product of the second divergence, built rather than described: a concept stated in enough mechanism that someone else could evaluate it. tradeoffs and open_questions are required — a concept presented without either reads as settled, and the delivery seat would verify it against criteria it has no way to know were contested.",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "concept_name":    { "type": "string", "description": "Short handle for the concept." },
+      "description":     { "type": "string", "description": "What it is, in the audience's register." },
+      "mechanism":       { "type": "array", "items": { "type": "string" }, "description": "How it works, step by step. The part that distinguishes a concept from a wish." },
+      "addresses":       { "type": "array", "items": { "type": "string" }, "description": "Which success criteria from the definition this concept answers, named individually." },
+      "tradeoffs":       {
+        "type": "array",
+        "description": "What this concept gives up, and what it buys with it.",
+        "items": {
+          "type": "object",
+          "properties": {
+            "gives_up": { "type": "string" },
+            "buys":     { "type": "string" }
+          },
+          "required": ["gives_up", "buys"]
+        }
+      },
+      "open_questions":  { "type": "array", "items": { "type": "string" }, "description": "What remains unresolved in the concept as built." }
+    }
+  },
+  "required_fields": [
+    "validation_criteria",
+    "input_refs",
+    "mechanism",
+    "tradeoffs"
+  ]
+}

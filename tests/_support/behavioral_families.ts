@@ -62,6 +62,11 @@ export const EXTERNAL_SUBSTRATE: Record<string, string> = {
   "domain-explorer": "coltrane registry (types, tools, charter, history)",
   "e2e-runner": "subprocess (test harness)",
   "lineage-scout": "web (formal-lineage corpora: papers, canonical texts)",
+  // The default genome's reading seat: the only one of the three named seats that holds a
+  // grant at all, and the reason it holds one is that its substrate is outside the run.
+  // Declared here so the floor test ENFORCES retrieval discipline + a real grant on it,
+  // rather than the agent file carrying those constraints voluntarily.
+  john: "filesystem (the working tree or corpus under examination)",
   "provenance-scout": "filesystem (the user's own corpus)",
 };
 

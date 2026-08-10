@@ -1,0 +1,39 @@
+{
+  "slug": "change-context",
+  "version": 1,
+  "extends": "Interpretation",
+  "domain": "software-change",
+  "status": "active",
+  "description": "The exhaustive read of the material a change lands in, produced before any decision is taken. Records what is present AND what is absent: unknowns is required because an incomplete reading that omits its gaps is indistinguishable from a complete one, and every downstream seat would treat it as complete.",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "repository":          { "type": "string", "description": "Repository or working-tree the reading covers." },
+      "boundary":            { "type": "array", "items": { "type": "string" }, "description": "The declared extent of the read: paths and artefacts inside it, and those deliberately outside it." },
+      "entry_points":        { "type": "array", "items": { "type": "string" }, "description": "Where control or data enters the region under change." },
+      "relevant_files":      {
+        "type": "array",
+        "description": "Each file the change plausibly touches, with the reason it is relevant and the locator the reading came from.",
+        "items": {
+          "type": "object",
+          "properties": {
+            "path":    { "type": "string" },
+            "why":     { "type": "string" },
+            "locator": { "type": "string", "description": "Tool plus path or query that produced this finding." }
+          },
+          "required": ["path", "why"]
+        }
+      },
+      "existing_tests":      { "type": "array", "items": { "type": "string" }, "description": "Checks that already cover the region — the baseline a later verdict is measured against." },
+      "conventions_observed": { "type": "array", "items": { "type": "string" }, "description": "Prevailing patterns the change is expected to hold to." },
+      "unknowns":            { "type": "array", "items": { "type": "string" }, "description": "Questions the material does not answer and paths that could not be reached. Required: the honest bound of the read." }
+    }
+  },
+  "required_fields": [
+    "claims",
+    "input_refs",
+    "relevant_files",
+    "existing_tests",
+    "unknowns"
+  ]
+}

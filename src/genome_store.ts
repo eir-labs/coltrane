@@ -26,8 +26,8 @@ import {
 } from "./loader.js";
 import { writeGenomeFileVersioned } from "./genome_writer.js";
 import { defineAgent, composeStandard, type Agent, type Standard, type PhaseDef } from "./composition.js";
-import type { Chart, Venue } from "./chart.js";
-import { DomainTypeSchema, SkillSchema } from "./genome_schema.js";
+import { composeChart, chartEntrySeedTypes, type Chart, type Venue } from "./chart.js";
+import { DomainTypeSchema, SkillSchema, ChartSchema, VenueSchema, venueDefect } from "./genome_schema.js";
 import { domainTypeDefect } from "./registry.js";
 import { CANONICAL_CORE_TYPES } from "./canonical_core_types.js";
 
@@ -116,6 +116,8 @@ const Q = {
     "identity,method,constraints,depth_profile,permissions,behavioral_primitives,skill_slots,default_skills,carried_skills",
   standards: "coltrane_standards?select=slug,version,status,domain,phases,input_types,output_types",
   skills: "coltrane_skills?select=slug,name,description,skill_md,tier,input_type,output_type,status",
+  charts: "coltrane_charts?select=slug,definition",
+  venues: "coltrane_venues?select=slug,definition",
 } as const;
 
 type Row = Record<string, unknown>;
@@ -182,6 +184,10 @@ export interface GenomeRows {
   agents: Row[];
   standards: Row[];
   skills: Row[];
+  /** Rows of {slug, definition} — the definition jsonb IS the file shape, validated through
+   *  the same gates the loader runs (ChartSchema+composeChart / VenueSchema+venueDefect). */
+  charts?: Row[];
+  venues?: Row[];
 }
 
 /** Reconstruct the loader's in-memory genome shape from store rows — ONE reconstruction,
@@ -323,6 +329,43 @@ export function reconstructGenome(rows: GenomeRows): LoadedGenome {
   const charts = new Map<string, Chart>();
   const venues = new Map<string, Venue>();
 
+  // venues before charts — a chart names a venue, exactly the loader's ordering.
+  for (const r of rows.venues ?? []) {
+    const slug = typeof r["slug"] === "string" ? r["slug"] : null;
+    const path = `postgrest:coltrane_venues/${slug ?? "?"}`;
+    try {
+      const check = VenueSchema.safeParse(r["definition"]);
+      if (!check.success) throw new Error(`venue schema validation failed — ${zodWhy(check.error.issues)}`);
+      const defect = venueDefect(check.data);
+      if (defect) throw new Error(defect);
+      if (venues.has(check.data.slug)) throw new Error(`duplicate venue slug "${check.data.slug}"`);
+      venues.set(check.data.slug, check.data);
+    } catch (e) {
+      load_errors.push({ kind: "venue", path, slug, error: e instanceof Error ? e.message : String(e) });
+    }
+  }
+  for (const r of rows.charts ?? []) {
+    const slug = typeof r["slug"] === "string" ? r["slug"] : null;
+    const path = `postgrest:coltrane_charts/${slug ?? "?"}`;
+    try {
+      const check = ChartSchema.safeParse(r["definition"]);
+      if (!check.success) throw new Error(`R0: chart does not parse — ${zodWhy(check.error.issues)}`);
+      if (charts.has(check.data.slug)) throw new Error(`duplicate chart slug "${check.data.slug}"`);
+      const composed = composeChart({
+        chart: check.data,
+        standards,
+        agents,
+        venues,
+        // the loader's own load-time stand-in for the dispatch payload
+        payload_types: chartEntrySeedTypes(check.data, standards),
+      });
+      if (!composed.ok) throw new Error(composed.violations.map((v) => `${v.rule}: ${v.detail}`).join(" | "));
+      charts.set(check.data.slug, composed.chart);
+    } catch (e) {
+      load_errors.push({ kind: "chart", path, slug, error: e instanceof Error ? e.message : String(e) });
+    }
+  }
+
   return { core_types, domain_types, agents, standards, skills, evals, charts, venues, load_errors };
 }
 
@@ -331,14 +374,16 @@ export function reconstructGenome(rows: GenomeRows): LoadedGenome {
 export function postgrestGenomeStore(ctx: PostgrestContext): GenomeStore {
   return {
     async load(): Promise<LoadedGenome> {
-      const [core_types, domain_types, agents, standards, skills] = await Promise.all([
+      const [core_types, domain_types, agents, standards, skills, charts, venues] = await Promise.all([
         restGet(ctx, Q.core_types),
         restGet(ctx, Q.domain_types),
         restGet(ctx, Q.agents),
         restGet(ctx, Q.standards),
         restGet(ctx, Q.skills),
+        restGet(ctx, Q.charts),
+        restGet(ctx, Q.venues),
       ]);
-      return reconstructGenome({ core_types, domain_types, agents, standards, skills });
+      return reconstructGenome({ core_types, domain_types, agents, standards, skills, charts, venues });
     },
 
     async upsert(cls: GenomeClass, payload: Record<string, unknown>, org_slug?: string): Promise<void> {
@@ -399,6 +444,8 @@ export function rpcGenomeStore(ctx: { baseUrl: string; anonKey: string; agentTok
         agents: rows.agents ?? [],
         standards: rows.standards ?? [],
         skills: rows.skills ?? [],
+        charts: rows.charts ?? [],
+        venues: rows.venues ?? [],
       });
     },
     async upsert(): Promise<void> {

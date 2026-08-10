@@ -106,10 +106,20 @@ export const MCP_TOOLS: readonly MCPToolDef[] = [
   // charter_read and charter_suggest_update too, so it is gone from the MCP surface entirely.
   // It survives only as a FIELD on the AccessGrant object (src/access_grant.ts), where it
   // describes the grant a caller passes in rather than promising the engine will scope by it.
-  { slug: "gig_dispatch",                  category: "run", input_schema: obj({ standard_slug: "string", input: "object", depth: "string", wait: "boolean", budget: "object", resume_gig_id: "string", reuse: "boolean" }), output_schema: obj({ gig_id: "string", status: "string", depth: "string", manifest: "object", resumed_from: "string", reuse: "boolean", resume_refused: "boolean", drift: "array" }) },
+  //
+  // `approvals` + `approved_by` are the human seat's door. A gig that reaches a chair marked
+  // `human: true` PARKS (`status: "awaiting_approval"`, the reply naming the chair in
+  // `awaiting`) until the incumbent's verdict is supplied here, keyed by chair role; the
+  // verdict then seals through the same gate as every other output, under `approved_by`.
+  // Undiscoverable, they would be an approval gate no operator could pass — #234 again, on
+  // the one control whose whole purpose is to be exercised by a person.
+  { slug: "gig_dispatch",                  category: "run", input_schema: obj({ standard_slug: "string", input: "object", depth: "string", wait: "boolean", budget: "object", resume_gig_id: "string", reuse: "boolean", approvals: "object", approved_by: "string" }), output_schema: obj({ gig_id: "string", status: "string", awaiting: "object", depth: "string", manifest: "object", resumed_from: "string", reuse: "boolean", resume_refused: "boolean", drift: "array" }) },
   // `skipped_chairs` / `resumed_from` / `reuse_rejected` are the ASYNC path's only report of a
   // saving — the manifest never reaches a caller who dispatched without `wait`.
-  { slug: "gig_monitor",                   category: "run", input_schema: obj({ gig_id: "string" }), output_schema: obj({ status: "string", phases_complete: "number", current_phase: "string", chairs: "array", outputs_so_far: "array", skipped_chairs: "array", resumed_from: "object", reuse_rejected: "array" }) },
+  // `awaiting` names the human chair a parked run stopped at. On the async path — the DEFAULT
+  // dispatch mode — the reply is only an id, so this is the only surface that can say a person
+  // is now the blocker rather than the engine.
+  { slug: "gig_monitor",                   category: "run", input_schema: obj({ gig_id: "string" }), output_schema: obj({ status: "string", awaiting: "object", phases_complete: "number", current_phase: "string", chairs: "array", outputs_so_far: "array", skipped_chairs: "array", resumed_from: "object", reuse_rejected: "array" }) },
   { slug: "gig_logs",                       category: "understand", input_schema: obj({ gig_id: "string", role: "string", type: "string", tail: "number" }), output_schema: obj({ gig_id: "string", roles: "array", count: "number", events: "array" }) },
   // #251 — `status` is the field both existing tests actually assert and it was not advertised.
   // `aborted` now means "this call delivered a cancellation to a live run", not "we looked at

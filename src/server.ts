@@ -747,6 +747,23 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
           ...(resumeArg !== undefined ? { resume_from: resumeArg } : {}),
           ...(reuseOn && deps.reuse ? { reuse: deps.reuse } : {}),
         };
+
+        // ── the human seat's door ────────────────────────────────────────────────────────
+        // A chair marked `human: true` parks the run until its incumbent's verdict arrives
+        // here, keyed by role. The typical shape is the SECOND call on one gig: dispatch,
+        // park, then re-dispatch with `resume_gig_id` + the approval, which restores the
+        // chairs already paid for and seals the verdict under `approved_by`.
+        const approvalsArg = args["approvals"];
+        const approvals = approvalsArg && typeof approvalsArg === "object" && !Array.isArray(approvalsArg)
+          ? (approvalsArg as Record<string, Record<string, unknown>>)
+          : undefined;
+        const approvedBy = typeof args["approved_by"] === "string" && args["approved_by"].trim() !== ""
+          ? args["approved_by"]
+          : undefined;
+        const humanWiring = {
+          ...(approvals ? { approvals } : {}),
+          ...(approvedBy !== undefined ? { approved_by: approvedBy } : {}),
+        };
         /** What a run skipped, and why — echoed on every reply so a saving is never silent. */
         const savings = (res: Awaited<ReturnType<typeof runGig>>): Record<string, unknown> => ({
           ...(res.skipped ? { skipped: res.skipped } : {}),
@@ -763,12 +780,16 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
             const res = await runGig(standard, gigInput, {
               outputs: deps.outputs, ledger: deps.ledger, invoke: deps.invoke,
               model_version: deps.model_version, skills: deps.skills, skill_dirs: deps.skill_dirs, evals: deps.evals, budget,
-              ...(depth ? { depth } : {}), ...reuseWiring,
+              ...(depth ? { depth } : {}), ...reuseWiring, ...humanWiring,
             });
             return {
               ok: true, requires_approval: approval,
               data: {
                 gig_id: res.gig_id,
+                // The run's own verdict on itself. A parked gig reported as nothing at all read
+                // as a completed one to every caller of the synchronous path.
+                status: res.status,
+                ...(res.awaiting ? { awaiting: res.awaiting } : {}),
                 ...(depth ? { depth } : {}),
                 warnings,
                 manifest: {
@@ -834,7 +855,7 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         const runPromise = runGig(standard, gigInput, {
           outputs: deps.outputs, ledger: deps.ledger, invoke: deps.invoke,
           model_version: deps.model_version, skills: deps.skills, skill_dirs: deps.skill_dirs, evals: deps.evals, budget,
-          gig_id: gigId, onProgress, signal: controller.signal, ...(depth ? { depth } : {}), ...reuseWiring,
+          gig_id: gigId, onProgress, signal: controller.signal, ...(depth ? { depth } : {}), ...reuseWiring, ...humanWiring,
         });
         // A REFUSED resume must be answered in THIS reply, not discovered later by polling. The
         // gate throws in runGig's SYNCHRONOUS phase — before its first `await`, which is exactly
@@ -849,7 +870,12 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         }
         void runPromise
           .then((res) => {
-            state.status = "complete"; state.finished_at = new Date().toISOString();
+            // A run that PARKED at a human chair settled without completing. Recording it as
+            // `complete` erased the park from gig_monitor — the only surface an async caller
+            // has — so the operator saw a finished gig with a chair that never sealed.
+            state.status = res.status === "awaiting_approval" ? "awaiting_approval" : "complete";
+            if (res.awaiting) state.awaiting = res.awaiting;
+            state.finished_at = new Date().toISOString();
             state.run_fingerprint = res.run_fingerprint; state.genome_hash = res.genome_hash; state.outputs_count = res.outputs.length;
             if (res.usage) state.usage = res.usage; // #195 — surface settled spend to gig_monitor
             // Say what was skipped. On the async path the manifest never reaches the caller, so
@@ -924,6 +950,9 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
             ok: true, requires_approval: approval,
             data: {
               status: live.status,
+              // Who the run is waiting ON. `awaiting_approval` with no chair named leaves the
+              // operator to guess which seat is theirs to sit in.
+              ...(live.awaiting ? { awaiting: live.awaiting } : {}),
               standard_slug: live.standard_slug,
               current_phase: live.current_phase ?? null,
               phases_total: live.phases_total,

@@ -46,6 +46,9 @@ export interface GigRunState {
   run_fingerprint?: string;
   genome_hash?: string;
   error?: string;
+  /** Set with `awaiting_approval`: the human chair the run parked at. The status says a person
+   *  is the blocker; this says WHICH seat, which is what the operator needs to act. */
+  awaiting?: { phase: string; role: string };
   // Settled model spend (#195), set when the run completes — and, since #249, when it is
   // ABORTED. An abort that kills children without capturing accrued usage would convert a
   // recorded cost into an unrecorded one: better cost control, worse accounting.
@@ -142,6 +145,7 @@ export function applyGigProgress(state: GigRunState, ev: GigProgressEvent): void
       break;
     case "gig_awaiting_approval":
       state.status = "awaiting_approval";
+      state.awaiting = { phase: ev.phase, role: ev.role };
       break;
     case "gig_failed":
       state.error = ev.error;

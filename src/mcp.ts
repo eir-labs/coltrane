@@ -43,6 +43,12 @@ export const MCP_TOOLS: readonly MCPToolDef[] = [
   { slug: "type_resolve",                  category: "understand", input_schema: obj({ core_type: "string", extends: "string", domain: "string", required_fields: "array" }), output_schema: obj({ action: "string", candidates: "array", recommendation: "object" }) },
   { slug: "type_browse",                   category: "understand", input_schema: obj({ domain: "string", extends: "string", status: "string", min_usage: "number" }), output_schema: obj({ types: "array", stats: "object" }) },
   { slug: "tool_registry_browse",          category: "understand", input_schema: obj({ category: "string" }), output_schema: obj({ tools: "array", usage_stats: "array", dependency_map: "object" }) },
+  // Discoverability parity (tests/genome_browse_parity.test.ts): every genome class that is
+  // authorable over MCP is listable over MCP. Standards and agents lacked these because the
+  // registry grew up in a working tree where `ls standards/` was free — the first hosted mount
+  // (no filesystem) turned that local assumption into an undiscoverable-slug hole.
+  { slug: "standard_browse",               category: "understand", input_schema: obj({ domain: "string", status: "string" }), output_schema: obj({ standards: "array", count: "number" }) },
+  { slug: "agent_browse",                  category: "understand", input_schema: obj({ domain: "string", primitive: "string" }), output_schema: obj({ agents: "array", count: "number" }) },
   // Tier-1 traversal by default (compact rows: id, gig_id, agent, phase, content_sha, preview,
   // storage_ref…). `output_id`/`content_sha` + `include_data:true` is the deeper second pass —
   // it fetches ONE output's full payload from the artifact tier (local mirror, or remote when drained).

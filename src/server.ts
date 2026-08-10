@@ -17,7 +17,8 @@ import {
 } from "./mcp.js";
 import { createRegistry, loadRegistry, domainTypeDefect, type Registry, type DomainType } from "./registry.js";
 import { loadGenome, resolveGenome, type SkillRecord, type EvalRecord, type LoadError } from "./loader.js";
-import { SkillSchema, AgentSchema, StandardSchema } from "./genome_schema.js";
+import { SkillSchema, AgentSchema, StandardSchema, DomainTypeSchema } from "./genome_schema.js";
+import type { GenomeStore, GenomeClass } from "./genome_store.js";
 import { runSkillFixtures, executeSkill, loadFixtures } from "./skill_subprocess.js";
 import { evolveSkill } from "./skills.js";
 import { sealAgentDefinition, sealDefinition, sealSkillPackage, recordIdentity } from "./genome_writer.js";
@@ -1776,6 +1777,42 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
       // production status, and never RUN, TESTED, LISTED or REVISED through the engine. The
       // fixture gate on promotion made that gap sharper — you could be refused for failing
       // fixtures with no way to run them and see why.
+      // ── discoverability parity — a dispatcher must be able to FIND a slug over MCP ──────
+      // (tests/genome_browse_parity.test.ts). Backed by the deps maps, so the same handler
+      // serves a working-tree load and a hosted store load identically; no filesystem.
+      case "standard_browse": {
+        if (!deps.standards) return { ok: false, not_implemented: true, requires_approval: approval, error: "standard_browse needs a standards map (bootstrap from a genome)" };
+        let list = [...deps.standards.values()];
+        if (args["domain"]) list = list.filter((s) => s.domain === args["domain"]);
+        if (args["status"]) list = list.filter((s) => (s.status ?? "active") === args["status"]);
+        const standards = list
+          .map((s) => ({
+            slug: s.slug, domain: s.domain, status: s.status ?? "active",
+            phases: s.phases.map((p) => p.name), phase_count: s.phases.length,
+            chair_count: s.phases.reduce((n, p) => n + p.chairs.length, 0),
+            input_types: s.input_types ?? [], output_types: s.output_types ?? [],
+            eval_slugs: s.eval_slugs ?? [], description: s.description ?? null,
+          }))
+          .sort((a, b) => (a.slug < b.slug ? -1 : 1));
+        return { ok: true, requires_approval: approval, data: { standards, count: standards.length } };
+      }
+
+      case "agent_browse": {
+        if (!deps.agents) return { ok: false, not_implemented: true, requires_approval: approval, error: "agent_browse needs an agents map (bootstrap from a genome)" };
+        let list = [...deps.agents.values()];
+        if (args["domain"]) list = list.filter((a) => a.domain === args["domain"]);
+        if (args["primitive"]) list = list.filter((a) => a.primitives.includes(args["primitive"] as Primitive));
+        const agents = list
+          .map((a) => ({
+            slug: a.slug, primitives: a.primitives, domain: a.domain,
+            input_types: a.input_types, output_types: a.output_types,
+            behavioral_primitives: a.behavioral_primitives,
+            skill_slugs: a.skill_slugs ?? [], model_tier: a.model_tier ?? null,
+          }))
+          .sort((x, y) => (x.slug < y.slug ? -1 : 1));
+        return { ok: true, requires_approval: approval, data: { agents, count: agents.length } };
+      }
+
       case "skill_browse": {
         if (!deps.skills) return { ok: false, not_implemented: true, requires_approval: approval, error: "skill_browse needs a skills map (bootstrap from a genome)" };
         let list = [...deps.skills.values()] as Array<Record<string, unknown>>;
@@ -2291,23 +2328,150 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
   }
 }
 
-/** Build the low-level MCP Server with ListTools + CallTool wired to the dispatcher. */
+// ── The exported tool surface (governor ruling: the hosted Coltrane MCP is the Coltrane
+//    MCP) ─────────────────────────────────────────────────────────────────────────────────
+//
+// createToolSurface is a REORGANIZATION of what this file already had — the MCP_TOOLS
+// declarations plus the dispatchTool routing — exported as one deps-injected, transport-
+// agnostic registry, so a host (a Next.js route, the stdio entry below, a test harness)
+// mounts the FULL engine surface per-request. In hosted mode (deps.hosted), tools whose
+// semantics are inherently local-process (subprocess spawns, filesystem reads) still EXIST
+// in the surface but return an honest typed error (`hosted_unsupported`) instead of
+// spawning or reading a filesystem that isn't there.
+
+export interface SurfaceToolResult extends ToolResult {
+  /** Set when the tool exists but its semantics are local-process and deps.hosted is true. */
+  hosted_unsupported?: boolean;
+}
+
+export interface ToolSurfaceDeps extends ServerDeps {
+  /** True when this surface serves a hosted (per-request, store-backed, no-filesystem) host. */
+  hosted?: boolean | undefined;
+  /** Hosted gig queuing: queue a run (e.g. postgrestQueueGig(ctx) → the coltrane_gig_dispatch
+   *  RPC). Without it, hosted gig_dispatch is an honest typed error — it NEVER spawns. */
+  queueGig?: ((args: Record<string, unknown>) => Promise<Record<string, unknown>>) | undefined;
+  /** Hosted genome persistence: a successful define/compose/register also upserts through
+   *  this store (the governed RPC), or the definition evaporates at end-of-request. */
+  store?: GenomeStore | undefined;
+}
+
+export interface SurfaceTool {
+  name: string;
+  description: string;
+  /** The existing generated JSON-schema properties (zodToMcpProps via mcp.ts) — same object. */
+  input_schema: object;
+  call(args: Record<string, unknown>): Promise<SurfaceToolResult>;
+}
+
+// Tools whose implementation is inherently local-process. Each entry names WHY, so the
+// hosted refusal teaches instead of stonewalling.
+const HOSTED_BLOCKED: Readonly<Record<string, string>> = {
+  server_restart:
+    "server_restart is a local-process concern (the stdio relay restarts its child); a hosted, per-request surface has no server process to restart",
+  skill_execute:
+    "skill_execute runs a skill's code half in a local subprocess against its on-disk package; hosted skills carry no local package — run code skills where the genome files live",
+  skill_evolve:
+    "skill_evolve runs candidate code against local fixtures in a subprocess; hosted skills carry no local package to evolve",
+  charter_read:
+    "charter_read reads a charter file from a local path; a hosted surface has no filesystem",
+  gig_logs:
+    "gig_logs tails per-chair log files under the local outputs dir; hosted runs are executed by the drain worker and their record lives in the store",
+  genome_reload:
+    "genome_reload re-reads genome files from disk; a hosted surface loads its genome from the store per-request, so there is nothing to reload",
+};
+
+// The genome-mutation tools whose success must ALSO land in the hosted store, and the class
+// each persists as. Payload is filtered by the class's own Zod schema key list (the same
+// single source the handlers copy from), so the store payload can't drift from the schema.
+const HOSTED_UPSERT: Readonly<Record<string, { cls: GenomeClass; keys: readonly string[] }>> = {
+  agent_define: { cls: "agent", keys: Object.keys(AgentSchema.shape) },
+  standard_compose: { cls: "standard", keys: Object.keys(StandardSchema.shape) },
+  type_register: { cls: "domain_type", keys: Object.keys(DomainTypeSchema.shape) },
+  skill_define: { cls: "skill", keys: Object.keys(SkillSchema.shape) },
+};
+
+async function callSurfaceTool(
+  slug: string,
+  args: Record<string, unknown>,
+  deps: ToolSurfaceDeps,
+): Promise<SurfaceToolResult> {
+  if (deps.hosted) {
+    const blocked = HOSTED_BLOCKED[slug];
+    if (blocked) return { ok: false, hosted_unsupported: true, error: blocked };
+    if (slug === "gig_dispatch") {
+      // Hosted dispatch NEVER spawns. With a queue seam it queues (the gig table is the
+      // queue; a drain worker claims and runs); without one it says so, typed.
+      if (deps.queueGig) {
+        try {
+          const data = await deps.queueGig(args);
+          return { ok: true, data };
+        } catch (e) {
+          return { ok: false, error: e instanceof Error ? e.message : String(e) };
+        }
+      }
+      return {
+        ok: false,
+        hosted_unsupported: true,
+        error:
+          "hosted dispatch goes through the queue RPC (coltrane_gig_dispatch) — nothing spawns in a hosted " +
+          "surface. Wire deps.queueGig (e.g. postgrestQueueGig(ctx) from ./genome_store) to queue the gig " +
+          "for the drain worker.",
+      };
+    }
+  }
+  const result = await dispatchTool(slug, args, deps);
+  // Hosted persistence: without a genome_dir the handlers compute + validate + seal identity
+  // but write no file (the validation path). The store upsert is the hosted write half; a
+  // refused upsert fails the mutation loudly — a definition that only ever lived in this
+  // request's memory must not report success.
+  const up = HOSTED_UPSERT[slug];
+  if (deps.hosted && deps.store && result.ok && up) {
+    const payload: Record<string, unknown> = {};
+    for (const k of up.keys) if (args[k] !== undefined) payload[k] = args[k];
+    try {
+      await deps.store.upsert(up.cls, payload);
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : String(e) };
+    }
+  }
+  return result;
+}
+
+/** The engine's FULL MCP tool surface as a transport-agnostic registry. The stdio server
+ *  below consumes this internally; a hosted host mounts it per-request with hosted deps. */
+export function createToolSurface(deps: ToolSurfaceDeps): SurfaceTool[] {
+  return MCP_TOOLS.map((t) => ({
+    name: t.slug,
+    description: `${t.category} tool`,
+    input_schema: t.input_schema,
+    call: (args: Record<string, unknown>): Promise<SurfaceToolResult> => callSurfaceTool(t.slug, args, deps),
+  }));
+}
+
+/** Build the low-level MCP Server with ListTools + CallTool wired to the tool surface. */
 export function createColtraneServer(deps: ServerDeps, recorder?: SubthreadRecorder): Server {
   const server = new Server(
     { name: "coltrane", version: COLTRANE_VERSION },
     { capabilities: { tools: {} } },
   );
 
+  const surface = createToolSurface(deps);
+  const byName = new Map(surface.map((t) => [t.name, t] as const));
+
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: MCP_TOOLS.map((t) => ({
-      name: t.slug,
-      description: `${t.category} tool`,
+    tools: surface.map((t) => ({
+      name: t.name,
+      description: t.description,
       inputSchema: t.input_schema as { type: "object" },
     })),
   }));
 
   server.setRequestHandler(CallToolRequestSchema, async (req) => {
-    const result = await dispatchTool(req.params.name, (req.params.arguments ?? {}) as Record<string, unknown>, deps);
+    const args = (req.params.arguments ?? {}) as Record<string, unknown>;
+    const tool = byName.get(req.params.name);
+    // A name outside the surface falls through to the dispatcher's own unknown-tool answer,
+    // keeping the reply byte-identical to the pre-surface path.
+    const result = tool ? await tool.call(args) : await dispatchTool(req.params.name, args, deps);
     if (recorder) {
       recorder.recordToolCall(req.params.name);
       recorder.recordObservability(`call:${req.params.name}`, { ok: result.ok });

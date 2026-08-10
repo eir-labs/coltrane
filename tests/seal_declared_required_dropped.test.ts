@@ -225,10 +225,12 @@ describe("#227 — the genome's declared required fields are dropped, not absent
       checked.push(t.slug);
     }
     // ALL domain types declare required fields somewhere, so all must be covered. The
-    // literal pins the census against silent genome shrinkage: 30 at #227, +4 on
-    // 2026-08-08 (lineage-hit, lineage-map, rep-cost-verdict, handoff).
+    // literal pins the census against silent genome shrinkage: 30 at #227. Org-authored
+    // types (the 2026-08 studio/live/auth/genome/naming sets) live in an org STORE, not in
+    // this tree — the repo genome is the base repertoire, and the genome-reconcile that
+    // moved them is the reason this pin went 59 → 30 rather than anything shrinking silently.
     expect(checked).toHaveLength(genome.domain_types.size);
-    expect(checked.length).toBe(34);
+    expect(checked.length).toBe(30);
   });
 });
 

@@ -1,0 +1,354 @@
+// genome_store.ts — the GenomeStore port. Governor ruling: GENOME IS NOT LOCAL. The hosted
+// Coltrane MCP is the Coltrane MCP — the full tool surface, functioning against the Supabase
+// store — so the engine needs ONE port for "where do definitions live", with two backings:
+//
+//   * fileGenomeStore(root)      — the existing loader/writer, unchanged behavior. Local dev
+//     and the stdio server keep reading/writing genome files on disk.
+//   * postgrestGenomeStore(ctx)  — loads the five genome tables over PostgREST (the caller's
+//     bearer rides the Authorization header, so RLS is the scope) and reconstructs the SAME
+//     in-memory genome shape the file loader produces. Every record is validated through the
+//     genome_schema Zod parsers exactly as the loader does; rows that fail parse are load
+//     errors (LoadedGenome.load_errors — surfaced by system_health), never silent skips.
+//     Writes ride the coltrane_genome_upsert RPC as the caller.
+//
+// No new dependencies: plain fetch, and the Zod schemas the engine already owns.
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import {
+  resolveGenome,
+  GenomeLoadError,
+  type LoadedGenome,
+  type LoadError,
+  type CoreTypeRecord,
+  type DomainTypeRecord,
+  type SkillRecord,
+  type EvalRecord,
+} from "./loader.js";
+import { writeGenomeFileVersioned } from "./genome_writer.js";
+import { defineAgent, composeStandard, type Agent, type Standard, type PhaseDef } from "./composition.js";
+import { DomainTypeSchema, SkillSchema } from "./genome_schema.js";
+import { domainTypeDefect } from "./registry.js";
+import { CANONICAL_CORE_TYPES } from "./canonical_core_types.js";
+
+/** The genome classes a store can persist. (Core types are engine-owned and immutable.) */
+export type GenomeClass = "agent" | "standard" | "skill" | "domain_type";
+
+/** Where definitions live. load() yields the loader's genome shape; upsert() persists one
+ *  definition of a class. The file impl writes genome files; the PostgREST impl rides the
+ *  governed upsert RPC as the caller. */
+export interface GenomeStore {
+  load(): Promise<LoadedGenome>;
+  upsert(cls: GenomeClass, payload: Record<string, unknown>): Promise<void>;
+}
+
+/** The store connection a hosted caller carries — same shape as HostedToolContext:
+ *  where the org store is, its public anon key, and WHO is calling (bearer). */
+export interface PostgrestContext {
+  baseUrl: string;
+  anonKey: string;
+  bearer: string;
+}
+
+const CLASS_SUBDIR: Record<GenomeClass, string> = {
+  agent: "agents",
+  standard: "standards",
+  skill: "skills",
+  domain_type: "domain_types",
+};
+
+/** Local-dev backing: the existing loader/writer, behavior identical. load() is
+ *  resolveGenome (manifest-aware, canonical-core seeding); upsert() writes the loadable
+ *  file via the versioned writer (prior bytes snapshotted, atomic replace). Ledger sealing
+ *  stays where it lives today — in the MCP tools (sealDefinition / sealAgentDefinition). */
+export function fileGenomeStore(root: string): GenomeStore {
+  return {
+    async load(): Promise<LoadedGenome> {
+      return resolveGenome(root);
+    },
+    async upsert(cls: GenomeClass, payload: Record<string, unknown>): Promise<void> {
+      const slug = typeof payload["slug"] === "string" ? payload["slug"].trim() : "";
+      if (!slug) throw new Error(`genome upsert: ${cls} payload has no slug`);
+      if (cls === "skill") {
+        // Skills are PACKAGE directories (the loader's only skill format) — mirror
+        // sealSkillPackage's file half: meta.json + code/md halves + fixtures.
+        const pkgDir = join(root, "skills", slug);
+        mkdirSync(pkgDir, { recursive: true });
+        const { fixtures, code, md, ...meta } = payload;
+        writeFileSync(join(pkgDir, "meta.json"), JSON.stringify(meta, null, 2) + "\n");
+        if (typeof code === "string") writeFileSync(join(pkgDir, "skill.mjs"), code);
+        if (typeof md === "string") writeFileSync(join(pkgDir, "skill.md"), md);
+        if (Array.isArray(fixtures)) {
+          const fxDir = join(pkgDir, "fixtures");
+          mkdirSync(fxDir, { recursive: true });
+          fixtures.forEach((fx, i) =>
+            writeFileSync(join(fxDir, `fixture-${String(i + 1).padStart(3, "0")}.json`), JSON.stringify(fx, null, 2) + "\n"),
+          );
+        }
+        return;
+      }
+      writeGenomeFileVersioned(root, CLASS_SUBDIR[cls], slug, JSON.stringify(payload, null, 2) + "\n");
+    },
+  };
+}
+
+// ── PostgREST backing ─────────────────────────────────────────────────────────────
+
+// The five genome tables and the columns the engine reads back. Row shapes are the
+// round-tripped Supabase schema (org_id is RLS's concern, not the engine's).
+const Q = {
+  core_types: "coltrane_core_types?select=slug,primitive,base_schema,description",
+  domain_types: "coltrane_domain_types?select=slug,version,extends,domain,status,schema,required_fields",
+  agents:
+    "coltrane_agent_profiles?select=slug,version,status,primitives,input_types,output_types,domain," +
+    "identity,method,constraints,depth_profile,permissions,behavioral_primitives,skill_slots,default_skills",
+  standards: "coltrane_standards?select=slug,version,status,domain,phases,output_types",
+  skills: "coltrane_skills?select=slug,name,description,skill_md,tier,input_type,output_type,status",
+} as const;
+
+type Row = Record<string, unknown>;
+
+async function restGet(ctx: PostgrestContext, pathAndQuery: string): Promise<Row[]> {
+  const res = await fetch(`${ctx.baseUrl}/rest/v1/${pathAndQuery}`, {
+    headers: {
+      apikey: ctx.anonKey,
+      // The bearer authenticates via the header; RLS scopes what this caller may load.
+      Authorization: `Bearer ${ctx.bearer}`,
+      "Content-Type": "application/json",
+    },
+  });
+  const text = await res.text();
+  if (!res.ok) {
+    throw new GenomeLoadError(`genome load: GET ${pathAndQuery.split("?")[0]} → ${res.status}: ${text}`);
+  }
+  const parsed: unknown = text ? JSON.parse(text) : [];
+  return Array.isArray(parsed) ? (parsed as Row[]) : [];
+}
+
+const zodWhy = (issues: { path: (string | number)[]; message: string }[]): string =>
+  issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`).join("; ");
+
+/** Build the engine AgentDef from an agent-profile row: the permissions jsonb unpacks to the
+ *  flat schema fields; default_skills is the row's skill-binding column (skill_slugs). */
+function agentDefFromRow(row: Row): Record<string, unknown> {
+  const perms = (row["permissions"] ?? {}) as Row;
+  const def: Record<string, unknown> = {
+    slug: row["slug"],
+    primitives: row["primitives"],
+    input_types: row["input_types"] ?? [],
+    output_types: row["output_types"] ?? [],
+    domain: row["domain"] ?? null,
+    identity: row["identity"],
+    method: row["method"],
+    constraints: row["constraints"] ?? [],
+    behavioral_primitives: row["behavioral_primitives"],
+    allowed_tools: perms["allowed_tools"],
+    disallowed_tools: perms["disallowed_tools"],
+    model_tier: perms["model_tier"],
+    max_tool_calls: perms["max_tool_calls"],
+    code_tool_access: perms["code_tool_access"],
+    depth_profile: row["depth_profile"],
+    skill_slugs: row["default_skills"],
+  };
+  for (const k of Object.keys(def)) if (def[k] === undefined || def[k] === null) delete def[k];
+  // domain is honestly nullable on the schema — restore it if the row said null.
+  if (!("domain" in def)) def["domain"] = null;
+  return def;
+}
+
+const REQUIRED_CORE_SLUGS = ["Signal", "Interpretation", "Judgment", "Plan", "Artifact", "Verdict"];
+
+/** Hosted backing: load the genome from the store's five tables and reconstruct the SAME
+ *  in-memory shape the file loader produces; upsert through the governed RPC. */
+export function postgrestGenomeStore(ctx: PostgrestContext): GenomeStore {
+  return {
+    async load(): Promise<LoadedGenome> {
+      const [coreRows, typeRows, agentRows, standardRows, skillRows] = await Promise.all([
+        restGet(ctx, Q.core_types),
+        restGet(ctx, Q.domain_types),
+        restGet(ctx, Q.agents),
+        restGet(ctx, Q.standards),
+        restGet(ctx, Q.skills),
+      ]);
+      const load_errors: LoadError[] = [];
+
+      // core types — engine-owned, immutable 6. No rows visible → seed the canonical set,
+      // exactly as loadGenome does for a root with no core_types/. A PARTIAL set is a corrupt
+      // store view and hard-fails, mirroring the loader's strict gate.
+      const core_types = new Map<string, CoreTypeRecord>();
+      if (coreRows.length === 0) {
+        for (const c of CANONICAL_CORE_TYPES) core_types.set(c.slug, c);
+      } else {
+        for (const r of coreRows) {
+          core_types.set(String(r["slug"]), {
+            slug: String(r["slug"]),
+            primitive: String(r["primitive"]),
+            description: String(r["description"] ?? ""),
+            schema: (r["base_schema"] ?? {}) as object,
+          });
+        }
+        const missing = REQUIRED_CORE_SLUGS.filter((s) => !core_types.has(s));
+        if (missing.length > 0) {
+          throw new GenomeLoadError(`coltrane_core_types missing required slugs: ${missing.join(", ")}`);
+        }
+      }
+
+      // domain types — the loader's three checks, in the loader's order: core-type extends,
+      // representability (domainTypeDefect), then the single Zod source. Soft-fail per row.
+      const domain_types = new Map<string, DomainTypeRecord>();
+      for (const r of typeRows) {
+        const slug = typeof r["slug"] === "string" ? r["slug"] : null;
+        const path = `postgrest:coltrane_domain_types/${slug ?? "?"}`;
+        try {
+          if (!core_types.has(String(r["extends"]))) {
+            throw new Error(`field "extends" references "${String(r["extends"])}" which is not a core type`);
+          }
+          const defect = domainTypeDefect(r as never);
+          if (defect) throw new Error(defect);
+          const check = DomainTypeSchema.safeParse(r);
+          if (!check.success) throw new Error(`type schema validation failed — ${zodWhy(check.error.issues)}`);
+          const rec = check.data as DomainTypeRecord;
+          domain_types.set(`${rec.slug}@${rec.version}`, rec);
+        } catch (e) {
+          load_errors.push({ kind: "domain_type", path, slug, error: e instanceof Error ? e.message : String(e) });
+        }
+      }
+
+      // agents — defineAgent is the loader's own gate (schema parse + composition rules).
+      // Hosted rows soft-fail per row: one broken profile is a reported load error, not a
+      // dead genome for every caller behind this RLS scope.
+      const agents = new Map<string, Agent>();
+      for (const r of agentRows) {
+        const slug = typeof r["slug"] === "string" ? r["slug"] : null;
+        const path = `postgrest:coltrane_agent_profiles/${slug ?? "?"}`;
+        try {
+          if (!slug) throw new Error(`missing required "slug" field`);
+          if (agents.has(slug)) throw new Error(`duplicate agent slug "${slug}"`);
+          agents.set(slug, defineAgent(agentDefFromRow(r) as never));
+        } catch (e) {
+          load_errors.push({ kind: "agent", path, slug, error: e instanceof Error ? e.message : String(e) });
+        }
+      }
+
+      // standards — phases jsonb is already the engine phase shape; the agents a standard
+      // composes are the ones its chairs name. composeStandard is the loader's own gate.
+      const standards = new Map<string, Standard>();
+      for (const r of standardRows) {
+        const slug = typeof r["slug"] === "string" ? r["slug"] : null;
+        const path = `postgrest:coltrane_standards/${slug ?? "?"}`;
+        try {
+          if (!slug) throw new Error(`missing required "slug" field`);
+          if (standards.has(slug)) throw new Error(`duplicate standard slug "${slug}"`);
+          const phases = (r["phases"] ?? []) as readonly PhaseDef[];
+          const chairAgentSlugs = [
+            ...new Set(phases.flatMap((p) => (p.chairs ?? []).map((c) => c.agent_slug).filter((s): s is string => !!s))),
+          ];
+          const resolved: Agent[] = chairAgentSlugs.map((aslug) => {
+            const a = agents.get(aslug);
+            if (!a) throw new Error(`references unknown agent "${aslug}"`);
+            return a;
+          });
+          standards.set(
+            slug,
+            composeStandard({
+              slug,
+              domain: String(r["domain"] ?? ""),
+              agents: resolved,
+              phases,
+              status: (r["status"] as "active" | "deprecated" | "retired" | undefined) ?? "active",
+              ...(Array.isArray(r["output_types"]) ? { output_types: r["output_types"] as string[] } : {}),
+            }),
+          );
+        } catch (e) {
+          load_errors.push({ kind: "standard", path, slug, error: e instanceof Error ? e.message : String(e) });
+        }
+      }
+
+      // skills — the row's skill_md IS the loaded reasoning half (`md`, the prompt's Skills
+      // layer). Hosted skills carry no local package dir / code half by construction.
+      const skills = new Map<string, SkillRecord>();
+      for (const r of skillRows) {
+        const slug = typeof r["slug"] === "string" ? r["slug"] : null;
+        const path = `postgrest:coltrane_skills/${slug ?? "?"}`;
+        try {
+          if (!slug) throw new Error(`missing required "slug" field`);
+          if (skills.has(slug)) throw new Error(`duplicate skill slug "${slug}"`);
+          const meta: Row = {
+            slug,
+            description: r["description"] ?? undefined,
+            input_type: r["input_type"] ?? undefined,
+            output_type: r["output_type"] ?? undefined,
+            ...(typeof r["tier"] === "number" ? { permission: { tier: r["tier"] } } : {}),
+            ...(typeof r["skill_md"] === "string" ? { md: r["skill_md"] } : {}),
+          };
+          for (const k of Object.keys(meta)) if (meta[k] === undefined) delete meta[k];
+          const check = SkillSchema.safeParse(meta);
+          if (!check.success) throw new Error(`skill schema validation failed — ${zodWhy(check.error.issues)}`);
+          skills.set(slug, check.data as SkillRecord);
+        } catch (e) {
+          load_errors.push({ kind: "skill", path, slug, error: e instanceof Error ? e.message : String(e) });
+        }
+      }
+
+      // evals — no hosted table today; present and empty, the same shape as a genome
+      // root with no evals/ directory.
+      const evals = new Map<string, EvalRecord>();
+
+      return { core_types, domain_types, agents, standards, skills, evals, load_errors };
+    },
+
+    async upsert(cls: GenomeClass, payload: Record<string, unknown>): Promise<void> {
+      const res = await fetch(`${ctx.baseUrl}/rest/v1/rpc/coltrane_genome_upsert`, {
+        method: "POST",
+        headers: {
+          apikey: ctx.anonKey,
+          Authorization: `Bearer ${ctx.bearer}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ p_class: cls, p_payload: payload }),
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        let message = text || `store error ${res.status}`;
+        try {
+          const parsed = JSON.parse(text) as { message?: string };
+          if (parsed.message) message = parsed.message;
+        } catch { /* keep the raw text */ }
+        throw new Error(`genome upsert (${cls}) refused: ${message}`);
+      }
+    },
+  };
+}
+
+/** The hosted gig-queue seam for createToolSurface: queue one run through the governor-gated
+ *  dispatch RPC AS THE CALLER (member JWT — RLS + the governor gate decide). Queuing only;
+ *  a drain worker claims and runs it. Shape mirrors hosted_tools' member dispatch path. */
+export function postgrestQueueGig(
+  ctx: PostgrestContext,
+): (args: Record<string, unknown>) => Promise<Record<string, unknown>> {
+  return async (args) => {
+    const res = await fetch(`${ctx.baseUrl}/rest/v1/rpc/coltrane_gig_dispatch`, {
+      method: "POST",
+      headers: {
+        apikey: ctx.anonKey,
+        Authorization: `Bearer ${ctx.bearer}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        p_standard: args["standard_slug"],
+        p_mode: args["mode"] ?? "live",
+        p_input: args["input"] ?? {},
+        p_org_slug: args["org_slug"] ?? null,
+      }),
+    });
+    const text = await res.text();
+    if (!res.ok) {
+      let message = text || `store error ${res.status}`;
+      try {
+        const parsed = JSON.parse(text) as { message?: string };
+        if (parsed.message) message = parsed.message;
+      } catch { /* keep the raw text */ }
+      throw new Error(message);
+    }
+    return { gig_id: JSON.parse(text) as string, status: "queued" };
+  };
+}

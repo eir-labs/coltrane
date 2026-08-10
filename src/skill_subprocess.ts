@@ -11,7 +11,14 @@ import { readFileSync, readdirSync, existsSync, realpathSync } from "node:fs";
 import { join, extname, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const RUNNER = fileURLToPath(new URL("./skill_runner.mjs", import.meta.url));
+// Lazily resolved: computing fileURLToPath at module load crashes cross-realm bundlers
+// (a hosted Next.js build has its own URL class), and a hosted surface never runs skills'
+// code halves anyway — only the stdio path ever reaches the runner.
+let RUNNER_PATH: string | undefined;
+function runnerPath(): string {
+  if (!RUNNER_PATH) RUNNER_PATH = fileURLToPath(new URL("./skill_runner.mjs", import.meta.url));
+  return RUNNER_PATH;
+}
 
 export interface SkillMeta {
   slug: string;
@@ -102,7 +109,7 @@ export function tierFlags(tier: number, skillDir?: string): string[] {
   // macOS the system temp dir is a symlink (`/var/folders/...` → `/private/var/folders/...`),
   // so granting the symlinked path grants nothing and every skill under it fails at import.
   const real = (pth: string): string => { try { return realpathSync(pth); } catch { return pth; } };
-  const own = [real(dirname(RUNNER)), ...(skillDir ? [real(skillDir)] : [])];
+  const own = [real(dirname(runnerPath())), ...(skillDir ? [real(skillDir)] : [])];
   const flags = ["--permission"];
 
   // TIER 0 is confined to its own package. The tier is documented as "read-only with no side
@@ -175,7 +182,7 @@ export function executeSkill(skillDir: string, input: unknown, timeoutMs = 120_0
   const started = Date.now();
   assertSandboxCapableRuntime();
   const dir = realDir(skillDir);
-  const res = spawnSync("node", [...tierFlags(tier, dir), RUNNER, dir], {
+  const res = spawnSync("node", [...tierFlags(tier, dir), runnerPath(), dir], {
     input: JSON.stringify(input),
     encoding: "utf-8",
     maxBuffer: 64 * 1024 * 1024,
@@ -237,7 +244,7 @@ export async function executeSkillAsync(
   return await new Promise<ExecuteResult>((resolve) => {
     assertSandboxCapableRuntime();
     const dir = realDir(skillDir);
-    const child = spawn("node", [...tierFlags(tier, dir), RUNNER, dir], {
+    const child = spawn("node", [...tierFlags(tier, dir), runnerPath(), dir], {
       stdio: ["pipe", "pipe", "pipe"], env: skillEnv(),
     });
     // Mirror executeSkill's `maxBuffer: 64 MB`. Accumulating without a cap was a regression

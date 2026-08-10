@@ -54,6 +54,25 @@ const GENOME_ROWS = {
       ],
       output_types: ["Signal"],
     },
+    // The drift the worker's first live claim found: input_types is load-bearing (the
+    // entry-chair-seed rule) and the store round-trip had dropped it — every org standard
+    // failed composition at its entry chair. A store standard whose entry chair leans on
+    // the gig input must reconstruct cleanly.
+    {
+      slug: "seeded-entry-v0",
+      domain: "demo",
+      status: "draft",
+      input_types: ["Signal"],
+      phases: [
+        {
+          name: "scan",
+          chairs: [
+            { role: "scan", agent_slug: "scout", depends_on: [], input_contract: ["Signal"], output_contract: ["Signal"], optional_outputs: [], required_skills: [] },
+          ],
+        },
+      ],
+      output_types: ["Signal"],
+    },
   ],
   skills: [],
 };
@@ -118,6 +137,10 @@ describe("rpcGenomeStore — the org genome, readable through a ctk bearer", () 
     expect(genome.standards.has("wire-run-v0")).toBe(true);
     expect(genome.core_types.size).toBe(6); // canonical seed on empty rows
     expect(genome.load_errors).toEqual([]);
+    // input_types survived the round-trip: the seeded-entry standard composed instead of
+    // dying with "requires Signal not produced by any upstream chair".
+    expect(genome.standards.has("seeded-entry-v0")).toBe(true);
+    expect(genome.standards.get("seeded-entry-v0")!.input_types).toEqual(["Signal"]);
   });
 
   it("refuses upsert — an agent token does not author genome", async () => {

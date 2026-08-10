@@ -101,7 +101,7 @@ const Q = {
   agents:
     "coltrane_agent_profiles?select=slug,version,status,primitives,input_types,output_types,domain," +
     "identity,method,constraints,depth_profile,permissions,behavioral_primitives,skill_slots,default_skills",
-  standards: "coltrane_standards?select=slug,version,status,domain,phases,output_types",
+  standards: "coltrane_standards?select=slug,version,status,domain,phases,input_types,output_types",
   skills: "coltrane_skills?select=slug,name,description,skill_md,tier,input_type,output_type,status",
 } as const;
 
@@ -258,6 +258,9 @@ export function reconstructGenome(rows: GenomeRows): LoadedGenome {
               agents: resolved,
               phases,
               status: (r["status"] as "active" | "deprecated" | "retired" | undefined) ?? "active",
+              // input_types is load-bearing: it names the entry-chair contracts the GIG INPUT
+              // satisfies. Dropping it fails composition at every entry chair (found live).
+              ...(Array.isArray(r["input_types"]) ? { input_types: r["input_types"] as string[] } : {}),
               ...(Array.isArray(r["output_types"]) ? { output_types: r["output_types"] as string[] } : {}),
             }),
           );

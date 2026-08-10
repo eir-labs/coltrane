@@ -31,6 +31,12 @@ coltrane dispatch <standard> --input @in.json --depth skim
 coltrane trace <output-id>              # walk a result back to its root signals
 ```
 
+And a fourth for the band pattern: `coltrane work` claims one queued gig from an
+organization's store — atomically, under a lease, authorized by the chair contract the
+agent is seated on — runs it under the claimed gig's own id, and drains the sealed results
+back. A queue, a worker, and an audit chain, with no coordination structure beyond the gig
+table itself.
+
 `coltrane validate` is the one worth wiring into CI. It exits non-zero on any definition the
 loader cannot resolve, which turns a genome change from something a person has to remember to
 check into a job that fails in seconds without spending a token.
@@ -82,12 +88,29 @@ Coltrane standards work the same way. The leverage is up top, at **definition ti
 - **Orientation is everything.** Players aren't freely swappable; the orientation of an agent is the single biggest predictor of whether the band coheres. Claude can play almost any instrument — you just have to point it at the right method *before* the work starts.
 - **The score is built at runtime.** Prompts don't live in hand-edited `.md` files. The work is **encoded into the genome** and **decoded at runtime** for whatever model is playing (Claude today; the pattern is model-agnostic). An agent doesn't wake up and figure out its life — it opens its eyes to a seat, an instrument, a score, and a downbeat. Then it plays.
 
+## The quartet — named seats, bound by contract
+
+The default genome ships three named agents — **john**, **bill**, and **miles**, their
+lineage rooted formally in the players the engine is named for — and one example
+institution (`institutions/quartet.json`) that binds them: chairs carry the **dispatch
+grant** (`{"grant": "dispatch", "standards": [...]}`) naming which standards the seat may
+run; assignments seat the agents; forebear records and lineage edges carry real citations.
+Authority sits on the office, not the player: swap who holds the chair and the contract
+stands. Two default standards — `software-change-v1` and `product-design-v1` — give the
+quartet real work, and `tests/default_genome_quartet.test.ts` holds a grant naming a
+missing standard to be a dead name that fails at authoring time. The pattern is the
+product: an organization is what you'd call a project, its chairs carry the roles, and any
+player fit for the seat can sit in it.
+
 ## Since the first release
 
 - **A command line.** The package shipped only an MCP server, so the engine was reachable from an interactive client and nowhere else — not CI, not cron, not a container. `coltrane` fixes that.
 - **Checkpoint and resume.** A run that stops partway no longer discards the phases that finished. `--resume` continues from the last sealed phase, and refuses rather than silently running cold if the genome, the producers, the payload or the model moved since.
 - **Improvement as a measurement.** `improvement_report` buckets a producer's outputs by version and by model tier, reporting cost and quality together — so "did that change help?" and "does the cheaper model still clear the bar?" are questions with answers. Unmeasured quantities report `null`, never `0`.
 - **The skill loop.** Browse, inspect, execute against fixtures, evolve, promote. A candidate runs against the current fixtures in a throwaway copy and lands only on a clean pass, so a skill cannot regress through that door — and a code skill must pass its own fixtures, deterministically, to become `active`.
+- **One surface, any host.** The full tool registry is a mountable module (`createToolSurface`): the stdio server, a hosted HTTP deployment with OAuth, and a test harness all mount the same 44 tools. A genome can live in files or in an organization's instance store (`GenomeStore`), loaded per-caller; the repo's genome is the base repertoire every deployment starts from.
+- **The worker.** `coltrane work` — claim, run, drain. Claims are atomic and leased (a worker that dies leaves an expiring lease, not a stuck row); authorization derives from the chair contract; a failed run records failure, with its reason, in the same chain a success records completion.
+- **Discoverability parity.** Every genome class you can author over the wire you can list over the wire (`standard_browse`, `agent_browse` joined `type_browse`, `skill_browse`) — an invariant with a test, learned the honest way: the first hosted session could compose a standard but not discover one.
 
 ## What's next
 

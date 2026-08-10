@@ -221,11 +221,24 @@ export const OrgMemberSchema = z.object({ org_slug: z.string(), agent_slug: z.st
 export const OrgInstitutionSchema = z.object({ org_slug: z.string(), institution_slug: z.string() });
 
 /** A capability grant: a typed lineage-edge scope, optionally expiring. The grant IS the policy. */
-export const CapGrantSchema = z.object({
+export const EdgeCapGrantSchema = z.object({
   edge_type: LineageEdgeTypeSchema,
   scope: z.record(z.unknown()),
   expires: z.string().nullable().default(null),
 });
+
+/** The chair-contract dispatch grant — the office names which standards its incumbent may
+ *  run. Authority sits on the chair; a credential presented by the incumbent may only
+ *  narrow it, never widen it. (This is the shape the store's authorization function reads:
+ *  a flat cap, not a scope smuggled inside a lineage edge.) */
+export const DispatchCapGrantSchema = z.object({
+  grant: z.literal("dispatch"),
+  standards: z.array(z.string()).readonly(),
+  expires: z.string().nullable().default(null),
+});
+
+/** A chair cap is a lineage-edge grant or a dispatch grant. One union, one Zod source. */
+export const CapGrantSchema = z.union([EdgeCapGrantSchema, DispatchCapGrantSchema]);
 
 /** The chair is the thing: the seat's configuration, not a person. */
 export const InstitutionalChairSchema = z.object({

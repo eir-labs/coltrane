@@ -271,11 +271,11 @@ describe("the chair contract is the dispatch authority — and it has no dead na
     doc.chairs.flatMap((raw) => {
       const chair = InstitutionalChairSchema.parse(raw);
       return chair.caps
-        .filter((c) => (c.scope as { grant?: string }).grant === "dispatch")
+        .filter((c): c is Extract<typeof c, { grant: "dispatch" }> => "grant" in c && c.grant === "dispatch")
         .map((c) => ({
           file,
           chair,
-          standards: ((c.scope as { standards?: unknown }).standards ?? []) as string[],
+          standards: [...c.standards],
         }));
     }),
   );
@@ -318,8 +318,8 @@ describe("the chair contract is the dispatch authority — and it has no dead na
         if (!chair) continue; // reported by the resolution test above
         const granted = grantsByAgent.get(seat.agent_slug) ?? new Set<string>();
         for (const cap of [...chair.caps, ...seat.contract_caps]) {
-          if ((cap.scope as { grant?: string }).grant !== "dispatch") continue;
-          for (const s of ((cap.scope as { standards?: unknown }).standards ?? []) as string[]) granted.add(s);
+          if (!("grant" in cap) || cap.grant !== "dispatch") continue;
+          for (const s of cap.standards) granted.add(s);
         }
         grantsByAgent.set(seat.agent_slug, granted);
       }

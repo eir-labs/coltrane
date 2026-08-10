@@ -53,9 +53,18 @@
     }
   ],
   "org_members": [
-    { "org_slug": "quartet-ensemble", "agent_slug": "john" },
-    { "org_slug": "quartet-ensemble", "agent_slug": "bill" },
-    { "org_slug": "quartet-ensemble", "agent_slug": "miles" }
+    {
+      "org_slug": "quartet-ensemble",
+      "agent_slug": "john"
+    },
+    {
+      "org_slug": "quartet-ensemble",
+      "agent_slug": "bill"
+    },
+    {
+      "org_slug": "quartet-ensemble",
+      "agent_slug": "miles"
+    }
   ],
   "chairs": [
     {
@@ -69,16 +78,23 @@
         {
           "edge_type": "produced-by",
           "scope": {
-            "grant": "dispatch",
-            "standards": ["software-change-v1", "product-design-v1"]
+            "institution": "quartet"
           },
+          "expires": null
+        },
+        {
+          "grant": "dispatch",
+          "standards": [
+            "software-change-v1",
+            "product-design-v1"
+          ],
           "expires": null
         }
       ],
       "obligations": [
         "State the boundary of the read in the output; an unstated boundary makes an incomplete read indistinguishable from a complete one.",
         "Record the source locator for every retrieved fact.",
-        "Emit no scope, ranking, or recommendation — those belong to the direction-setter.",
+        "Emit no scope, ranking, or recommendation \u2014 those belong to the direction-setter.",
         "Hold only a read-only tool grant, and only for the duration of the seating."
       ]
     },
@@ -93,9 +109,16 @@
         {
           "edge_type": "produced-by",
           "scope": {
-            "grant": "dispatch",
-            "standards": ["software-change-v1", "product-design-v1"]
+            "institution": "quartet"
           },
+          "expires": null
+        },
+        {
+          "grant": "dispatch",
+          "standards": [
+            "software-change-v1",
+            "product-design-v1"
+          ],
           "expires": null
         }
       ],
@@ -112,15 +135,22 @@
       "institution_slug": "quartet",
       "role": "structure-builder",
       "function": "CREATE",
-      "mission": "Settle the ordered structure a piece of work will be built through — checks before the changes they check — and then make the thing that structure implies, from the upstream record alone.",
+      "mission": "Settle the ordered structure a piece of work will be built through \u2014 checks before the changes they check \u2014 and then make the thing that structure implies, from the upstream record alone.",
       "required_skills": [],
       "caps": [
         {
           "edge_type": "produced-by",
           "scope": {
-            "grant": "dispatch",
-            "standards": ["software-change-v1", "product-design-v1"]
+            "institution": "quartet"
           },
+          "expires": null
+        },
+        {
+          "grant": "dispatch",
+          "standards": [
+            "software-change-v1",
+            "product-design-v1"
+          ],
           "expires": null
         }
       ],
@@ -174,7 +204,7 @@
       "name": "Bill Evans",
       "domain": "modern jazz (piano)",
       "kind": "musician",
-      "what_taken": "Born 16 August 1929 in Plainfield, New Jersey; died 15 September 1980 in New York City. What the structure-builder chair takes is the documented practice of harmonic construction: rootless left-hand voicings built interval by interval, and the layered self-scrutiny of Conversations with Myself (Verve, 1963), on which Evans overdubbed three simultaneous piano parts and answered his own lines. Evans stated the underlying discipline himself in Improvisation in Jazz, his liner note to Miles Davis's Kind of Blue (Columbia, 1959), where he compared the improviser's position to that of the Japanese brush painter working on a surface that permits no erasure — structure settled before the stroke. Nothing of the man's biography beyond this working disposition is claimed or carried."
+      "what_taken": "Born 16 August 1929 in Plainfield, New Jersey; died 15 September 1980 in New York City. What the structure-builder chair takes is the documented practice of harmonic construction: rootless left-hand voicings built interval by interval, and the layered self-scrutiny of Conversations with Myself (Verve, 1963), on which Evans overdubbed three simultaneous piano parts and answered his own lines. Evans stated the underlying discipline himself in Improvisation in Jazz, his liner note to Miles Davis's Kind of Blue (Columbia, 1959), where he compared the improviser's position to that of the Japanese brush painter working on a surface that permits no erasure \u2014 structure settled before the stroke. Nothing of the man's biography beyond this working disposition is claimed or carried."
     },
     {
       "slug": "davis-miles",
@@ -182,7 +212,7 @@
       "name": "Miles Davis",
       "domain": "modern jazz (trumpet, bandleading)",
       "kind": "musician",
-      "what_taken": "Born 26 May 1926 in Alton, Illinois; died 28 September 1991 in Santa Monica, California. What the direction-setter chair takes is the documented practice of setting direction by subtraction. Bill Evans's liner note to Kind of Blue (Columbia, 1959) records that Davis conceived the settings only hours before the recording dates and arrived with sketches indicating to the group what was to be played — the direction fixed, the execution left to the players. The same disposition at longer range produced the serial abandonment of settled idioms across Birth of the Cool (Capitol, sessions 1949-1950), Kind of Blue (1959) and Bitches Brew (Columbia, 1970), documented in Ian Carr, Miles Davis: The Definitive Biography (revised edition, 1998). Nothing of the man's biography beyond this working disposition is claimed or carried."
+      "what_taken": "Born 26 May 1926 in Alton, Illinois; died 28 September 1991 in Santa Monica, California. What the direction-setter chair takes is the documented practice of setting direction by subtraction. Bill Evans's liner note to Kind of Blue (Columbia, 1959) records that Davis conceived the settings only hours before the recording dates and arrived with sketches indicating to the group what was to be played \u2014 the direction fixed, the execution left to the players. The same disposition at longer range produced the serial abandonment of settled idioms across Birth of the Cool (Capitol, sessions 1949-1950), Kind of Blue (1959) and Bitches Brew (Columbia, 1970), documented in Ian Carr, Miles Davis: The Definitive Biography (revised edition, 1998). Nothing of the man's biography beyond this working disposition is claimed or carried."
     }
   ],
   "lineage_edges": [
@@ -237,7 +267,7 @@
           "Kind of Blue (Columbia CL 1355, 1959)",
           "Bitches Brew (Columbia GP 26, 1970)"
         ],
-        "primary_text": "Bill Evans, 'Improvisation in Jazz', liner note to Kind of Blue (Columbia CL 1355, 1959) — records that Davis arrived at the sessions with sketches conceived only hours before",
+        "primary_text": "Bill Evans, 'Improvisation in Jazz', liner note to Kind of Blue (Columbia CL 1355, 1959) \u2014 records that Davis arrived at the sessions with sketches conceived only hours before",
         "scholarship": "Ian Carr, Miles Davis: The Definitive Biography (revised edition, 1998); Miles Davis with Quincy Troupe, Miles: The Autobiography (New York: Simon & Schuster, 1989)",
         "attributed_disposition": "direction fixed by subtraction; execution left to the players",
         "note": "A public historical figure. The attribution names a documented working disposition; it is not an endorsement, a likeness, or a claim on the person."

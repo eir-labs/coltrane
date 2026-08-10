@@ -14,7 +14,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { workOnce, claimNextGig, failGig, type WorkerContext } from "../src/worker.js";
 import { rpcGenomeStore } from "../src/genome_store.js";
-import type { AgentInvoker } from "../src/runtime.js";
+import { genomeHash, type AgentInvoker } from "../src/runtime.js";
 
 const CTX: WorkerContext = {
   baseUrl: "https://store.example",
@@ -116,7 +116,15 @@ const CLAIM = {
 
 type FetchCall = { url: string; body: Record<string, unknown> };
 
-function mockStore(opts: { claim: unknown; failResult?: boolean; park?: boolean | "absent" }) {
+function mockStore(opts: {
+  claim: unknown;
+  failResult?: boolean;
+  park?: boolean | "absent";
+  /** What `coltrane_mcp_gig_outputs` answers — the gig's drained rows. Default: none. */
+  drained?: unknown;
+  /** What `coltrane_mcp_gig_status` answers — the drained gig HEADER. Default: no header. */
+  header?: unknown;
+}) {
   const calls: FetchCall[] = [];
   vi.stubGlobal("fetch", vi.fn(async (url: string | URL, init?: RequestInit) => {
     const u = String(url);
@@ -124,6 +132,12 @@ function mockStore(opts: { claim: unknown; failResult?: boolean; park?: boolean 
     calls.push({ url: u, body });
     if (u.endsWith("/rest/v1/rpc/coltrane_mcp_claim")) {
       return new Response(JSON.stringify(opts.claim), { status: 200 });
+    }
+    if (u.endsWith("/rest/v1/rpc/coltrane_mcp_gig_outputs")) {
+      return new Response(JSON.stringify(opts.drained ?? []), { status: 200 });
+    }
+    if (u.endsWith("/rest/v1/rpc/coltrane_mcp_gig_status")) {
+      return new Response(JSON.stringify(opts.header ?? null), { status: 200 });
     }
     if (u.endsWith("/rest/v1/rpc/coltrane_mcp_genome")) {
       return new Response(JSON.stringify(GENOME_ROWS), { status: 200 });
@@ -340,6 +354,161 @@ describe("workOnce — the human seat, claimed twice", () => {
     expect(second.status).toBe("complete");
     expect(invoke, "cold means the model chair runs again").toHaveBeenCalledTimes(2);
     expect(lines.join("\n"), "and it must SAY it paid for a cold run").toMatch(/cold/i);
+  });
+});
+
+// ── resume from the DRAIN ────────────────────────────────────────────────────────
+// The local checkpoint cannot serve the case the human seat actually creates: a gig parked at
+// a person's chair is re-claimed hours or days later, by a DIFFERENT worker on a DIFFERENT
+// machine, which has never seen this gig's durable state. The sink has, though — every sealed
+// output drained to it with its content_sha, its input_shas, its phase and its data. These
+// tests drive that reconstruction, and every one of them asserts on MONEY: whether the model
+// was invoked a second time for work the org already paid for.
+describe("workOnce — the drain IS the checkpoint (a fresh worker re-claims)", () => {
+  const APPROVAL_CLAIM = { ...CLAIM, standard_slug: "approve-run-v0" };
+  const VERDICT = {
+    id: "approval-1", input_refs: [],
+    criteria: ["the scan covers the declared boundary"],
+    verdicts: [{ criterion: "the scan covers the declared boundary", verdict: "approved" }],
+    reasoning_chain: ["read the sealed scan; the boundary matches the queued payload"],
+  };
+  const APPROVED_CLAIM = {
+    ...APPROVAL_CLAIM,
+    approvals: { approve: { verdict: VERDICT, approved_by: "eugene" } },
+  };
+
+  /** Temp roots the "first worker" used — cleaned after each test. */
+  let priorRoots: string[] = [];
+  afterEach(() => {
+    for (const r of priorRoots) rmSync(r, { recursive: true, force: true });
+    priorRoots = [];
+  });
+
+  const sealedIn = (root: string, gig_id: string): Array<Record<string, unknown>> =>
+    readFileSync(join(root, "outputs", `${gig_id}.jsonl`), "utf8")
+      .split("\n").filter(Boolean).map((l) => JSON.parse(l) as Record<string, unknown>);
+
+  /** The genome_hash the store's own header would carry for this standard, right now. */
+  async function currentGenomeHash(): Promise<string> {
+    const genome = await rpcGenomeStore(CTX).load();
+    return genomeHash(genome.standards.get("approve-run-v0")!);
+  }
+
+  /**
+   * Park the gig on ONE worker, then hand back its sealed rows PROJECTED to exactly the field
+   * set `coltrane_mcp_gig_outputs` returns — which is what a second machine can actually see.
+   * The first worker's durable state is left behind (its own temp root), so the second run
+   * starts with no local checkpoint and no local output store: a genuinely fresh worker.
+   */
+  async function parkOnAnotherWorker(invoke: AgentInvoker): Promise<Array<Record<string, unknown>>> {
+    const firstRoot = mkdtempSync(join(tmpdir(), "coltrane-worker-first-"));
+    priorRoots.push(firstRoot);
+    process.env["COLTRANE_WORKER_CHECKPOINTS"] = firstRoot;
+    const res = await workOnce(CTX, { makeInvoke: () => invoke });
+    if (!res.claimed || res.status !== "awaiting_approval") throw new Error(`expected a park, got ${JSON.stringify(res)}`);
+    process.env["COLTRANE_WORKER_CHECKPOINTS"] = stateRoot;
+    return sealedIn(firstRoot, CLAIM.gig_id).map((r) => ({
+      id: r["id"], domain_type: r["domain_type"], agent_slug: r["agent_slug"], phase: r["phase"],
+      content_sha: r["content_sha"], input_shas: r["input_shas"], created_at: r["created_at"], data: r["data"],
+    }));
+  }
+
+  it("rebuilds the checkpoint from the drain: the paid chair is restored, not re-invoked", async () => {
+    const invoke = vi.fn(async () => sealableSignal) as unknown as AgentInvoker;
+    mockStore({ claim: APPROVAL_CLAIM });
+    const drained = await parkOnAnotherWorker(invoke);
+    expect(drained).toHaveLength(1);
+    const genome_hash = await currentGenomeHash();
+
+    const lines: string[] = [];
+    mockStore({ claim: APPROVED_CLAIM, drained, header: { genome_hash } });
+    const res = await workOnce(CTX, { makeInvoke: () => invoke, log: (l) => lines.push(l) });
+    if (!res.claimed) throw new Error("unreachable");
+    expect(res.status).toBe("complete");
+    // THE WHOLE POINT: one invocation across two workers. The scan came back from the sink.
+    expect(invoke, "the model chair must be restored from the drain, not paid for twice").toHaveBeenCalledTimes(1);
+    expect(res.outputs_count).toBe(2);
+    expect(lines.join("\n"), "and it must SAY which path it took").toMatch(/drain/i);
+
+    // The approval sealed under the approving principal, and its provenance names the
+    // reconstructed scan by CONTENT — the chain crosses the machine boundary intact.
+    const rows = sealedIn(stateRoot, CLAIM.gig_id);
+    const judgment = rows.find((o) => o["domain_type"] === "Judgment");
+    expect(judgment, "the human chair sealed").toBeDefined();
+    expect(judgment!["agent_slug"]).toBe("eugene");
+    expect(judgment!["input_shas"]).toEqual([drained[0]!["content_sha"]]);
+    const restored = rows.find((o) => o["domain_type"] === "Signal")!;
+    expect(restored["content_sha"], "the reconstructed row re-hashes to the sha the sink recorded")
+      .toBe(drained[0]!["content_sha"]);
+  });
+
+  it("a local checkpoint is the FAST PATH — the drain is not even asked for", async () => {
+    const invoke = vi.fn(async () => sealableSignal) as unknown as AgentInvoker;
+    mockStore({ claim: APPROVAL_CLAIM });
+    await workOnce(CTX, { makeInvoke: () => invoke });
+    const calls = mockStore({ claim: APPROVED_CLAIM, drained: [], header: {} });
+    const res = await workOnce(CTX, { makeInvoke: () => invoke });
+    if (!res.claimed) throw new Error("unreachable");
+    expect(res.status).toBe("complete");
+    expect(invoke).toHaveBeenCalledTimes(1);
+    expect(calls.some((c) => c.url.includes("coltrane_mcp_gig_outputs")), "the local checkpoint answered; nothing to fetch").toBe(false);
+  });
+
+  it("a sink row that no longer hashes to its claimed content_sha must never seed a resume", async () => {
+    const invoke = vi.fn(async () => sealableSignal) as unknown as AgentInvoker;
+    mockStore({ claim: APPROVAL_CLAIM });
+    const drained = await parkOnAnotherWorker(invoke);
+    const genome_hash = await currentGenomeHash();
+    const tampered = drained.map((r) => ({ ...r, content_sha: "0".repeat(64) }));
+
+    const lines: string[] = [];
+    mockStore({ claim: APPROVED_CLAIM, drained: tampered, header: { genome_hash } });
+    const res = await workOnce(CTX, { makeInvoke: () => invoke, log: (l) => lines.push(l) });
+    if (!res.claimed) throw new Error("unreachable");
+    expect(res.status).toBe("complete");
+    expect(invoke, "a row whose bytes do not match its sha buys a COLD run, not a resume").toHaveBeenCalledTimes(2);
+    expect(lines.join("\n")).toMatch(/content_sha/i);
+    expect(lines.join("\n")).toMatch(/cold/i);
+  });
+
+  it("a genome that moved since those outputs sealed is refused, and it says so", async () => {
+    const invoke = vi.fn(async () => sealableSignal) as unknown as AgentInvoker;
+    mockStore({ claim: APPROVAL_CLAIM });
+    const drained = await parkOnAnotherWorker(invoke);
+
+    const lines: string[] = [];
+    mockStore({ claim: APPROVED_CLAIM, drained, header: { genome_hash: "a".repeat(64) } });
+    const res = await workOnce(CTX, { makeInvoke: () => invoke, log: (l) => lines.push(l) });
+    if (!res.claimed) throw new Error("unreachable");
+    expect(res.status).toBe("complete");
+    expect(invoke, "chairs from genome B must not consume outputs sealed under genome A").toHaveBeenCalledTimes(2);
+    expect(lines.join("\n")).toMatch(/genome/i);
+    expect(lines.join("\n")).toMatch(/cold/i);
+  });
+
+  it("a header the sink cannot pin a genome_hash on is not a resume either", async () => {
+    const invoke = vi.fn(async () => sealableSignal) as unknown as AgentInvoker;
+    mockStore({ claim: APPROVAL_CLAIM });
+    const drained = await parkOnAnotherWorker(invoke);
+
+    const lines: string[] = [];
+    mockStore({ claim: APPROVED_CLAIM, drained, header: null });
+    const res = await workOnce(CTX, { makeInvoke: () => invoke, log: (l) => lines.push(l) });
+    if (!res.claimed) throw new Error("unreachable");
+    expect(res.status).toBe("complete");
+    expect(invoke, "an unverifiable pipeline identity resolves to doing the work").toHaveBeenCalledTimes(2);
+    expect(lines.join("\n")).toMatch(/genome_hash/i);
+  });
+
+  it("an empty drain is simply a cold run — the offline case is unchanged", async () => {
+    const invoke = vi.fn(async () => sealableSignal) as unknown as AgentInvoker;
+    const lines: string[] = [];
+    mockStore({ claim: APPROVED_CLAIM, drained: [], header: {} });
+    const res = await workOnce(CTX, { makeInvoke: () => invoke, log: (l) => lines.push(l) });
+    if (!res.claimed) throw new Error("unreachable");
+    expect(res.status).toBe("complete");
+    expect(invoke).toHaveBeenCalledTimes(1); // the one model chair of this run, cold
+    expect(res.outputs_count).toBe(2);
   });
 });
 

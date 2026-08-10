@@ -13,7 +13,12 @@ import { resolveModel } from "./claude_invoker.js";
 // core type → the process primitive that produces it (reverse of PRIMITIVE_OUTPUT_TYPE).
 // A skill-backed chair seals its output as this primitive/core when its output_contract is
 // a core type.
-const CORE_TO_PRIMITIVE: Record<string, Agent["primitives"][number]> = Object.fromEntries(
+//
+// EXPORTED because `primitive` is folded into `content_sha`. Anything that has to re-derive
+// what a chair WOULD have sealed — the drain reconstruction in src/worker.ts — has to arrive
+// at the same primitive this seal boundary does, and a second copy of the mapping is exactly
+// the drift that makes two gates on one concern answer differently.
+export const CORE_TO_PRIMITIVE: Record<string, Agent["primitives"][number]> = Object.fromEntries(
   Object.entries(PRIMITIVE_OUTPUT_TYPE).map(([prim, core]) => [String(core), prim as Agent["primitives"][number]]),
 );
 import { sha256Hex, canonJson, runFingerprint, outputContentHash, CANONICAL_FORM_VERSION } from "./canonical_form.js";
@@ -621,7 +626,16 @@ function resolveSkills(
   return { skills, missing };
 }
 
-function genomeHash(standard: Standard): string {
+/**
+ * The structural identity of a pipeline: the standard's phase graph plus each bound agent's
+ * type surface. Deterministic across machines for a given structure.
+ *
+ * EXPORTED because it is the one identity a DRAINED gig carries. The sink's gig header records
+ * `genome_hash` and nothing else about the run's producers, so a worker reconstructing a resume
+ * from the sink (src/worker.ts) has to be able to ask "is the standard I just loaded the one
+ * those outputs were sealed under" — and it must ask with this function, not a lookalike.
+ */
+export function genomeHash(standard: Standard): string {
   const agents = [...standard.agents]
     .map((a) => ({
       slug: a.slug,

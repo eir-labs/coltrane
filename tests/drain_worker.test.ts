@@ -500,6 +500,30 @@ describe("workOnce — the drain IS the checkpoint (a fresh worker re-claims)", 
     expect(lines.join("\n")).toMatch(/genome_hash/i);
   });
 
+  it("adopts rows the local store already holds instead of sealing each one twice", async () => {
+    // The reachable shape of this: the checkpoint file goes missing (a swallowed checkpoint
+    // write, a cleared checkpoints dir) while `outputs/<gig>.jsonl` survives. Reconstructing
+    // then must not append second copies — `output_query` and `output_trace` would report a gig
+    // that sealed each record twice, and the duplicates would be byte-identical.
+    const invoke = vi.fn(async () => sealableSignal) as unknown as AgentInvoker;
+    mockStore({ claim: APPROVAL_CLAIM });
+    const res1 = await workOnce(CTX, { makeInvoke: () => invoke });
+    if (!res1.claimed || res1.status !== "awaiting_approval") throw new Error("expected a park");
+    const drained = sealedIn(stateRoot, CLAIM.gig_id).map((r) => ({
+      id: r["id"], domain_type: r["domain_type"], agent_slug: r["agent_slug"], phase: r["phase"],
+      content_sha: r["content_sha"], input_shas: r["input_shas"], created_at: r["created_at"], data: r["data"],
+    }));
+    rmSync(join(stateRoot, "checkpoints", `${CLAIM.gig_id}.json`), { force: true });
+    const genome_hash = await currentGenomeHash();
+
+    mockStore({ claim: APPROVED_CLAIM, drained, header: { genome_hash } });
+    const res = await workOnce(CTX, { makeInvoke: () => invoke });
+    if (!res.claimed) throw new Error("unreachable");
+    expect(res.status).toBe("complete");
+    expect(invoke).toHaveBeenCalledTimes(1);
+    expect(sealedIn(stateRoot, CLAIM.gig_id), "one Signal, one Judgment — no duplicate seal").toHaveLength(2);
+  });
+
   it("an empty drain is simply a cold run — the offline case is unchanged", async () => {
     const invoke = vi.fn(async () => sealableSignal) as unknown as AgentInvoker;
     const lines: string[] = [];

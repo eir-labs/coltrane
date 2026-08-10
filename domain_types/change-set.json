@@ -1,0 +1,46 @@
+{
+  "slug": "change-set",
+  "version": 1,
+  "extends": "Artifact",
+  "domain": "software-change",
+  "status": "active",
+  "description": "The change itself, carried as content rather than applied — the seat that produces it holds a read-only grant, so the artefact is reviewable before anything mutates. departures is separate from rationale on purpose: a change that diverged from its plan and amended the record is honest, and a change that diverged silently is not distinguishable from one that did not.",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "diffs":       {
+        "type": "array",
+        "description": "Per-path patch content, in unified-diff form.",
+        "items": {
+          "type": "object",
+          "properties": {
+            "path":  { "type": "string" },
+            "patch": { "type": "string" }
+          },
+          "required": ["path", "patch"]
+        }
+      },
+      "tests_added": { "type": "array", "items": { "type": "string" }, "description": "Checks introduced by this change, named so a verifier can run exactly them." },
+      "rationale":   { "type": "array", "items": { "type": "string" }, "description": "The non-obvious choices this change makes, each with the reason it was made." },
+      "departures":  {
+        "type": "array",
+        "description": "Where the artefact left the plan, and why.",
+        "items": {
+          "type": "object",
+          "properties": {
+            "from_step": { "type": "string" },
+            "instead":   { "type": "string" },
+            "why":       { "type": "string" }
+          },
+          "required": ["from_step", "instead", "why"]
+        }
+      }
+    }
+  },
+  "required_fields": [
+    "validation_criteria",
+    "input_refs",
+    "diffs",
+    "rationale"
+  ]
+}

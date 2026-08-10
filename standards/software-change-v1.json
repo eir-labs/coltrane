@@ -1,0 +1,55 @@
+{
+  "slug": "software-change-v1",
+  "domain": "software-change",
+  "status": "active",
+  "description": "The default software-change standard. Read the material exhaustively, fix the direction, settle the structure, make the change, then say whether what was built is what was decided. The seams are deliberate: the seat that reads does not decide, the seat that decides does not build, and the seat that builds does not judge its own work. Only the reading seat holds a tool grant, and it is read-only — the change is emitted as reviewable content, never applied.",
+  "agent_slugs": [
+    "john",
+    "bill",
+    "miles"
+  ],
+  "phases": [
+    {
+      "name": "sense-context",
+      "chairs": [
+        { "role": "read-context", "agent_slug": "john", "depends_on": [], "input_contract": ["change-request"], "output_contract": ["change-context"], "required_skills": [] }
+      ],
+      "intent": "Read the material the change lands in, to the declared boundary and no further: entry points, the files the change plausibly touches, the checks that already cover the region, the conventions it must hold to — and the unknowns, which are part of the reading, not a failure of it. No decision is taken here."
+    },
+    {
+      "name": "frame-change",
+      "chairs": [
+        { "role": "frame-change", "agent_slug": "miles", "depends_on": ["read-context"], "input_contract": ["change-context"], "output_contract": ["change-decision"], "required_skills": [] }
+      ],
+      "intent": "Fix the direction from the reading: scope, non-goals, stop condition, and the alternatives set aside with their reasons. Stated before any structure exists, so the structure is answerable to it. Settled for the run — later phases append observations, never revisions."
+    },
+    {
+      "name": "plan-change",
+      "chairs": [
+        { "role": "plan-change", "agent_slug": "bill", "depends_on": ["read-context", "frame-change"], "input_contract": ["change-context", "change-decision"], "output_contract": ["change-plan"], "required_skills": [] }
+      ],
+      "intent": "Settle the structure the change will be built through: ordered steps with explicit dependencies, the checks that land FIRST together with what each reports while the change is absent, the paths the plan commits to touching, and the tradeoff at every step where more than one structure would have served."
+    },
+    {
+      "name": "create-change",
+      "chairs": [
+        { "role": "write-change", "agent_slug": "bill", "depends_on": ["plan-change"], "input_contract": ["change-plan"], "output_contract": ["change-set"], "required_skills": [] }
+      ],
+      "intent": "Make the change the structure implies, as patch content plus the checks it introduces. Where the artefact left the plan, the departure is recorded with its reason — the same seat that settled the structure is the one accountable for saying where it did not hold."
+    },
+    {
+      "name": "verify-change",
+      "chairs": [
+        { "role": "verify-change", "agent_slug": "miles", "depends_on": ["plan-change", "write-change"], "input_contract": ["change-plan", "change-set"], "output_contract": ["change-verdict"], "required_skills": [] }
+      ],
+      "intent": "Measure the change against the commitments as fixed, criterion by criterion: which acceptance criteria are unmet, where the scope drifted, and — separately and always — which checks could not be executed and were reasoned about instead. When the evidence does not reach the question, the verdict is insufficient evidence, not a pass."
+    }
+  ],
+  "input_types": [
+    "change-request"
+  ],
+  "output_types": [
+    "change-set",
+    "change-verdict"
+  ]
+}

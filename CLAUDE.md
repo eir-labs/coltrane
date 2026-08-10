@@ -145,8 +145,13 @@ standards (multi-phase workflows), dispatching gigs (runs), and sealing every ou
 a content-addressed ledger.
 
 It is an **MCP server**. You (Claude Code) are the natural client. The repo ships its own
-`.mcp.json` pointing at `dist/src/server_entry.js`, so after `npm run build` the 37 tools
-become available when Claude opens the directory.
+`.mcp.json` pointing at `dist/src/server_entry.js`, so after `npm run build` the 44 tools
+become available when Claude opens the directory. The same registry is host-mountable: a
+deployment imports `createToolSurface` (subpath `./tool_surface`) and mounts the identical
+surface over HTTP against an org genome store (subpath `./genome_store`) — there is one
+surface, whatever the transport. It is also a **command line** (`coltrane …`), including a
+queue worker (`coltrane work`) that claims a queued gig from an org store, runs it under the
+claimed gig's own id, and drains the results.
 
 This repo gives you:
 - a way to **define agents** as content-addressed definitions, not glue code
@@ -193,6 +198,11 @@ has a promote tool today (evals are declared inside the standard that uses them)
 | `standards` | multi-phase workflows that agents run | `standard_compose · standard_simulate · standard_promote` |
 | `skills` | reusable cognitive primitives bound into agents (load-only + promote) | `skill_promote` |
 | `evals` | verdict shapes that judge gig outputs (load-only; declared with the standard) | _none — declared in the standard file_ |
+| `institutions` | institutional instances: an institution, its chairs (with dispatch grants), assignments, forebears, lineage edges | _file-shaped under `institutions/`, validated by the Zod schemas; no loader or MCP surface yet — `tests/default_genome_quartet.test.ts` is the gate_ |
+
+Discoverability parity is an invariant: every class you can author over MCP you can list
+over MCP (`type_browse · skill_browse · agent_browse · standard_browse`), pinned by
+`tests/genome_browse_parity.test.ts`.
 
 ## Six cognitive primitives
 
@@ -273,6 +283,25 @@ Use built-in Claude Code tools only for:
 - reading source files (`src/`, `tests/`) to understand the engine
 - editing TypeScript source when working on the engine itself
 - running `npm` commands
+
+---
+
+## The repo genome is the base repertoire — org genomes live in stores
+
+The genome in THIS tree is the **default repertoire** every deployment starts from: the demo
+agents, the named quartet (john · bill · miles, seated by `institutions/quartet.json`), the
+default standards, the base skills. An organization's own authored definitions do NOT live
+here — they live in the organization's **genome store** (a PostgREST-shaped instance store),
+loaded per-caller at the surface. The `GenomeStore` port (`src/genome_store.ts`) has three
+backings: files (this tree), a member's JWT over PostgREST, and an agent capability token
+over definer RPCs. One reconstruction is shared by all store backings so the views cannot
+drift.
+
+Authorization for running standards sits **on the chair contract**: a chair's `caps` may
+carry `{"grant": "dispatch", "standards": [...]}` (`DispatchCapGrantSchema`), an agent is
+seated by a chair assignment, and a credential presented by the incumbent may only narrow
+what the chair grants — never widen it. Drain credentials are org-level (the organization is
+the resource boundary); agent tokens are per-agent and issued only by a human governor.
 
 ---
 

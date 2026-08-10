@@ -1,0 +1,37 @@
+{
+  "slug": "design-brief",
+  "version": 1,
+  "extends": "Interpretation",
+  "domain": "product-design",
+  "status": "active",
+  "description": "The product of the first divergence: what was found when the question was held open, before anything was chosen. divergence_breadth and unknowns are both required — a brief that reports only its findings makes a narrow exploration and an exhaustive one look identical, and the definition phase would converge on the narrow one without knowing it.",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "observations":        {
+        "type": "array",
+        "description": "What was found, each with the locator it was found through.",
+        "items": {
+          "type": "object",
+          "properties": {
+            "observation": { "type": "string" },
+            "locator":     { "type": "string", "description": "Tool plus path or query that produced this observation." }
+          },
+          "required": ["observation"]
+        }
+      },
+      "audience_segments":   { "type": "array", "items": { "type": "string" }, "description": "Distinguishable groups the question lands differently for." },
+      "unmet_needs":         { "type": "array", "items": { "type": "string" }, "description": "Needs the current state does not serve. Findings, not proposals." },
+      "adjacent_questions":  { "type": "array", "items": { "type": "string" }, "description": "Questions the exploration surfaced that the posed question did not contain." },
+      "divergence_breadth":  { "type": "string", "enum": ["narrow", "moderate", "wide"], "description": "How far the exploration actually reached, judged against the material available rather than against effort spent." },
+      "unknowns":            { "type": "array", "items": { "type": "string" }, "description": "What the exploration could not determine. Required: the honest bound of the divergence." }
+    }
+  },
+  "required_fields": [
+    "claims",
+    "input_refs",
+    "observations",
+    "unmet_needs",
+    "unknowns"
+  ]
+}

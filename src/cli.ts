@@ -21,6 +21,8 @@
  */
 import { dispatchTool, bootstrapServerDeps, type ServerDeps, type ToolResult } from "./server.js";
 import { COLTRANE_VERSION } from "./version.js";
+import { workOnce } from "./worker.js";
+import { makeClaudeInvoker } from "./claude_invoker.js";
 import { readFileSync } from "node:fs";
 
 export interface CliIO {
@@ -43,6 +45,11 @@ export const USAGE = `coltrane ${COLTRANE_VERSION}
   coltrane simulate <standard>          cost/shape a standard without running it
   coltrane health                       engine + store health
   coltrane serve                        run the MCP server on stdio
+  coltrane work                         claim one queued gig from the org store and run it
+                                        (env: COLTRANE_STORE_URL, COLTRANE_STORE_ANON,
+                                         COLTRANE_AGENT_TOKEN; results drain via
+                                         COLTRANE_DRAIN_URL + COLTRANE_DRAIN_KEY;
+                                         exit 0 complete, 1 failed, 3 queue empty)
 
 Options
   --input <json|@file|->                dispatch payload; @file reads a file, - reads stdin
@@ -125,7 +132,7 @@ export async function runCli(argv: readonly string[], io: CliIO): Promise<number
   if (flags["version"]) { io.out(COLTRANE_VERSION + "\n"); return 0; }
   if (cmd === undefined || flags["help"] || cmd === "help") { io.out(USAGE); return cmd === undefined ? 2 : 0; }
 
-  const KNOWN = ["validate", "dispatch", "monitor", "logs", "abort", "trace", "simulate", "health", "serve"];
+  const KNOWN = ["validate", "dispatch", "monitor", "logs", "abort", "trace", "simulate", "health", "serve", "work"];
   if (!KNOWN.includes(cmd)) {
     line(io, `unknown command "${cmd}"\n`);
     io.err(USAGE);
@@ -135,6 +142,45 @@ export async function runCli(argv: readonly string[], io: CliIO): Promise<number
     // Handled by the entry shim, which must not have booted deps twice.
     line(io, "coltrane serve is handled by the entrypoint");
     return 2;
+  }
+
+  // `work` runs against the ORG STORE, not a genome root — the seated agent's token is the
+  // read scope and the chair contract is the authorization, so no file genome boots here.
+  if (cmd === "work") {
+    const baseUrl = process.env["COLTRANE_STORE_URL"];
+    const anonKey = process.env["COLTRANE_STORE_ANON"];
+    const agentToken = process.env["COLTRANE_AGENT_TOKEN"];
+    if (!baseUrl || !anonKey || !agentToken) {
+      line(io, "work needs COLTRANE_STORE_URL, COLTRANE_STORE_ANON and COLTRANE_AGENT_TOKEN in the environment");
+      return 2;
+    }
+    const res = await workOnce(
+      {
+        baseUrl,
+        anonKey,
+        agentToken,
+        ...(typeof flags["worker"] === "string" ? { worker: flags["worker"] } : {}),
+      },
+      {
+        makeInvoke: (registry) =>
+          makeClaudeInvoker({
+            registry,
+            model: process.env["COLTRANE_MODEL"],
+            ...(process.env["COLTRANE_CHAIR_TIMEOUT_MS"] ? { timeout_ms: Number(process.env["COLTRANE_CHAIR_TIMEOUT_MS"]) } : {}),
+          }),
+        log: (l) => line(io, l),
+      },
+    );
+    if (!res.claimed) {
+      line(io, "queue empty — nothing this seat's chair contract may claim");
+      return 3;
+    }
+    if (emitJson(io, json, res)) return res.status === "complete" ? 0 : 1;
+    io.out(res.gig_id + "\n");
+    line(io, `${res.status}` +
+      (res.outputs_count !== undefined ? ` — ${res.outputs_count} sealed output(s)` : "") +
+      (res.error ? ` — ${res.error}` : ""));
+    return res.status === "complete" ? 0 : 1;
   }
 
   // Booting loads the genome and constructs the invoker, so it happens only after the command

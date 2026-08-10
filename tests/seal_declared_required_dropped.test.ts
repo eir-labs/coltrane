@@ -207,7 +207,7 @@ describe("#227 — the genome's declared required fields are dropped, not absent
     });
   }
 
-  it("EVERY type with declared required fields still rejects {} — all 30, not a spot-check", () => {
+  it("EVERY type with declared required fields still rejects {} — all 41, not a spot-check", () => {
     // Guards against a fix that SWAPS the source (schema.required instead of
     // required_fields) rather than unioning them. A swap would silently stop enforcing the
     // 23 types that use required_fields — and a single-type spot-check would not notice.
@@ -229,8 +229,16 @@ describe("#227 — the genome's declared required fields are dropped, not absent
     // types (the 2026-08 studio/live/auth/genome/naming sets) live in an org STORE, not in
     // this tree — the repo genome is the base repertoire, and the genome-reconcile that
     // moved them is the reason this pin went 59 → 30 rather than anything shrinking silently.
+    //
+    // 30 → 41: the default-genome quartet added 11 types — the software-change set
+    // (change-request, change-context, change-decision, change-plan, change-set,
+    // change-verdict) and the product-design set (design-question, design-brief,
+    // design-definition, design-concept, design-verdict). All 11 declare their required
+    // fields in `required_fields`, so they join `checked` rather than slipping past the
+    // `declared.length === 0` skip above, and none of them appears in the `lossy` census —
+    // which is why that assertion is untouched.
     expect(checked).toHaveLength(genome.domain_types.size);
-    expect(checked.length).toBe(30);
+    expect(checked.length).toBe(41);
   });
 });
 

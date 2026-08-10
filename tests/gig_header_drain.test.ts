@@ -79,3 +79,56 @@ describe("drainGigHeader — fire-and-forget to the drain service", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });
+
+// A FAILED run must drain its header too. Found live (drain worker, first day): the local
+// success path drained "completed" and the failure path drained nothing, so a failed local
+// run left the sink's row stale forever — the stuck-"running" stub problem, one layer up.
+describe("runGig drains a FAILED header — the sink learns the truth either way", () => {
+  const fetchMock = vi.fn(async () => ({ ok: true, status: 201 }) as Response);
+  beforeEach(() => {
+    vi.stubGlobal("fetch", fetchMock);
+    process.env["COLTRANE_DRAIN_URL"] = "https://drain.example";
+    process.env["COLTRANE_DRAIN_KEY"] = "cdk_test";
+    fetchMock.mockClear();
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    delete process.env["COLTRANE_DRAIN_URL"];
+    delete process.env["COLTRANE_DRAIN_KEY"];
+  });
+
+  it("a chair failure produces one failed-header POST carrying the error", async () => {
+    const { composeStandard, defineAgent } = await import("../src/composition.js");
+    const { runGig } = await import("../src/runtime.js");
+    const { createRegistry } = await import("../src/registry.js");
+    const { createOutputStore } = await import("../src/outputs.js");
+    const { MemoryLedger } = await import("../src/ledger.js");
+    const agent = defineAgent({
+      slug: "doomed", primitives: ["SENSE"], input_types: [], output_types: ["Signal"],
+      domain: "test", identity: "you are doomed", method: "1. try 2. die 3. stop",
+      constraints: [], behavioral_primitives: ["explorer", "critic"],
+    });
+    const std = composeStandard({
+      slug: "doomed-v0", domain: "test", agents: [agent],
+      phases: [{ name: "sense", chairs: [{ role: "s", agent_slug: "doomed", depends_on: [], input_contract: [], output_contract: ["Signal"], optional_outputs: [], required_skills: [] }] }],
+    });
+    const registry = createRegistry();
+    await expect(
+      runGig(std, {}, {
+        outputs: createOutputStore(registry),
+        ledger: new MemoryLedger(),
+        invoke: async () => { throw new Error("boom in the chair"); },
+        gig_id: "22222222-2222-2222-2222-222222222222",
+      }),
+    ).rejects.toThrow(/boom in the chair/);
+    // fire-and-forget: give the drained header its microtask
+    await new Promise((r) => setImmediate(r));
+    const calls = fetchMock.mock.calls as unknown as [string, RequestInit][];
+    const call = calls.find(([u]) => String(u).includes("coltrane_gigs"));
+    expect(call, "failed run must drain a header").toBeDefined();
+    const body = JSON.parse(call![1].body as string) as Record<string, unknown>;
+    expect(body["id"]).toBe("22222222-2222-2222-2222-222222222222");
+    expect(body["status"]).toBe("failed");
+    expect((body["manifest"] as Record<string, unknown>)["error"]).toMatch(/boom in the chair/);
+  });
+});

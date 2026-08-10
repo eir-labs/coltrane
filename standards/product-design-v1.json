@@ -1,0 +1,48 @@
+{
+  "slug": "product-design-v1",
+  "domain": "product-design",
+  "status": "active",
+  "description": "The default product-design standard: a double diamond mapped onto the cognitive primitives without embellishment. Discover diverges (SENSE then INTERPRET); define converges (JUDGE, sealing a Plan); develop diverges again and builds (PLAN then CREATE); deliver converges (VERIFY). The two convergences are held by the same seat and the two divergences by different ones, so a widening pass is never marked complete by the seat that narrowed it.",
+  "agent_slugs": [
+    "john",
+    "bill",
+    "miles"
+  ],
+  "phases": [
+    {
+      "name": "discover",
+      "chairs": [
+        { "role": "discover", "agent_slug": "john", "depends_on": [], "input_contract": ["design-question"], "output_contract": ["design-brief"], "required_skills": [] }
+      ],
+      "intent": "First divergence. Hold the question open: observations with their locators, the audience segments it lands differently for, the needs the current state does not serve, the adjacent questions the exploration surfaced, and an honest statement of how far the exploration actually reached. Findings only — nothing is chosen here."
+    },
+    {
+      "name": "define",
+      "chairs": [
+        { "role": "define", "agent_slug": "miles", "depends_on": ["discover"], "input_contract": ["design-brief"], "output_contract": ["design-definition"], "required_skills": [] }
+      ],
+      "intent": "First convergence, and the seam between the diamonds. Name the ONE problem the second diamond opens on, what is out of scope, the success criteria a stranger could check — and, explicitly, the problems the brief surfaced that this definition discarded, each with its reason. Sealed as a Plan because the definition sequences what follows."
+    },
+    {
+      "name": "develop",
+      "chairs": [
+        { "role": "develop", "agent_slug": "bill", "depends_on": ["define"], "input_contract": ["design-definition"], "output_contract": ["design-concept"], "required_skills": [] }
+      ],
+      "intent": "Second divergence, built rather than described. The concept states its mechanism step by step, names which success criteria it answers, and carries its tradeoffs and open questions — a concept presented as settled cannot be evaluated against the contest it hides."
+    },
+    {
+      "name": "deliver",
+      "chairs": [
+        { "role": "deliver", "agent_slug": "miles", "depends_on": ["define", "develop"], "input_contract": ["design-definition", "design-concept"], "output_contract": ["design-verdict"], "required_skills": [] }
+      ],
+      "intent": "Second convergence. Measure the concept against the definition as sealed, criterion by criterion, and separate what was observed from what was reasoned about — most design criteria cannot be executed, so a verdict that does not say so overstates its own evidence. Where the concept is sound but the problem was the wrong one, the recommendation returns the run to the first seam."
+    }
+  ],
+  "input_types": [
+    "design-question"
+  ],
+  "output_types": [
+    "design-concept",
+    "design-verdict"
+  ]
+}

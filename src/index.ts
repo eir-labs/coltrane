@@ -18,6 +18,7 @@ export * from "./canonical_core_types.js";
 export * from "./canonical_form.js";
 export * from "./ledger.js";
 export * from "./outputs.js";
+export * from "./output_mirror.js";
 export * from "./reuse.js";
 export * from "./charter.js";
 export * from "./server.js";

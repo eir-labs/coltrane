@@ -157,19 +157,22 @@ function agentDefFromRow(row: Row): Record<string, unknown> {
 
 const REQUIRED_CORE_SLUGS = ["Signal", "Interpretation", "Judgment", "Plan", "Artifact", "Verdict"];
 
-/** Hosted backing: load the genome from the store's five tables and reconstruct the SAME
- *  in-memory shape the file loader produces; upsert through the governed RPC. */
-export function postgrestGenomeStore(ctx: PostgrestContext): GenomeStore {
-  return {
-    async load(): Promise<LoadedGenome> {
-      const [coreRows, typeRows, agentRows, standardRows, skillRows] = await Promise.all([
-        restGet(ctx, Q.core_types),
-        restGet(ctx, Q.domain_types),
-        restGet(ctx, Q.agents),
-        restGet(ctx, Q.standards),
-        restGet(ctx, Q.skills),
-      ]);
-      const load_errors: LoadError[] = [];
+/** The row bundle both store backings feed the reconstruction: the five genome tables,
+ *  however they were fetched (PostgREST GETs under a JWT, or the coltrane_mcp_genome RPC
+ *  under an agent token). */
+export interface GenomeRows {
+  core_types: Row[];
+  domain_types: Row[];
+  agents: Row[];
+  standards: Row[];
+  skills: Row[];
+}
+
+/** Reconstruct the loader's in-memory genome shape from store rows — ONE reconstruction,
+ *  shared by every backing, so a JWT-loaded genome and a ctk-loaded genome cannot drift. */
+export function reconstructGenome(rows: GenomeRows): LoadedGenome {
+  const { core_types: coreRows, domain_types: typeRows, agents: agentRows, standards: standardRows, skills: skillRows } = rows;
+  const load_errors: LoadError[] = [];
 
       // core types — engine-owned, immutable 6. No rows visible → seed the canonical set,
       // exactly as loadGenome does for a root with no core_types/. A PARTIAL set is a corrupt
@@ -289,11 +292,26 @@ export function postgrestGenomeStore(ctx: PostgrestContext): GenomeStore {
         }
       }
 
-      // evals — no hosted table today; present and empty, the same shape as a genome
-      // root with no evals/ directory.
-      const evals = new Map<string, EvalRecord>();
+  // evals — no hosted table today; present and empty, the same shape as a genome
+  // root with no evals/ directory.
+  const evals = new Map<string, EvalRecord>();
 
-      return { core_types, domain_types, agents, standards, skills, evals, load_errors };
+  return { core_types, domain_types, agents, standards, skills, evals, load_errors };
+}
+
+/** Hosted backing: load the genome from the store's five tables and reconstruct the SAME
+ *  in-memory shape the file loader produces; upsert through the governed RPC. */
+export function postgrestGenomeStore(ctx: PostgrestContext): GenomeStore {
+  return {
+    async load(): Promise<LoadedGenome> {
+      const [core_types, domain_types, agents, standards, skills] = await Promise.all([
+        restGet(ctx, Q.core_types),
+        restGet(ctx, Q.domain_types),
+        restGet(ctx, Q.agents),
+        restGet(ctx, Q.standards),
+        restGet(ctx, Q.skills),
+      ]);
+      return reconstructGenome({ core_types, domain_types, agents, standards, skills });
     },
 
     async upsert(cls: GenomeClass, payload: Record<string, unknown>): Promise<void> {
@@ -315,6 +333,49 @@ export function postgrestGenomeStore(ctx: PostgrestContext): GenomeStore {
         } catch { /* keep the raw text */ }
         throw new Error(`genome upsert (${cls}) refused: ${message}`);
       }
+    },
+  };
+}
+
+/** Agent-token backing: the org genome through coltrane_mcp_genome. PostgREST verifies only
+ *  JWTs, so a ctk_ bearer cannot ride the REST tables — the definer RPC resolves the token's
+ *  hash inside the store and returns the org's rows. Same reconstruction as every backing.
+ *  Read-only by design: an agent token does not author genome (authoring is a member act,
+ *  governed by the upsert RPC as auth.uid()). */
+export function rpcGenomeStore(ctx: { baseUrl: string; anonKey: string; agentToken: string }): GenomeStore {
+  return {
+    async load(): Promise<LoadedGenome> {
+      const res = await fetch(`${ctx.baseUrl}/rest/v1/rpc/coltrane_mcp_genome`, {
+        method: "POST",
+        headers: {
+          apikey: ctx.anonKey,
+          // The ctk bearer is NOT a JWT: it authenticates inside the definer RPC via the
+          // body; the transport rides the anon key.
+          Authorization: `Bearer ${ctx.anonKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ p_bearer: ctx.agentToken }),
+      });
+      const text = await res.text();
+      if (!res.ok) {
+        let message = text || `store error ${res.status}`;
+        try {
+          const parsed = JSON.parse(text) as { message?: string };
+          if (parsed.message) message = parsed.message;
+        } catch { /* keep the raw text */ }
+        throw new GenomeLoadError(`genome load (agent token): ${message}`);
+      }
+      const rows = JSON.parse(text) as Partial<GenomeRows>;
+      return reconstructGenome({
+        core_types: rows.core_types ?? [],
+        domain_types: rows.domain_types ?? [],
+        agents: rows.agents ?? [],
+        standards: rows.standards ?? [],
+        skills: rows.skills ?? [],
+      });
+    },
+    async upsert(): Promise<void> {
+      throw new Error("an agent token does not author genome — authoring is a member act through the governed upsert");
     },
   };
 }

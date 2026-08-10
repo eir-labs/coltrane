@@ -14,11 +14,14 @@
 // header completes the queue row itself — one record per gig, no parallel bookkeeping. A
 // run that throws is recorded as failed through coltrane_mcp_gig_fail; a worker crash
 // leaves only an expiring lease, which the claim RPC hands to the next worker.
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { runGig, type AgentInvoker } from "./runtime.js";
 import { loadRegistry, type Registry } from "./registry.js";
 import { createOutputStore } from "./outputs.js";
 import { MemoryLedger } from "./ledger.js";
 import { rpcGenomeStore } from "./genome_store.js";
+import { createOutputMirror } from "./output_mirror.js";
 import type { LoadedGenome } from "./loader.js";
 
 /** Where the org store is, and who is working. */
@@ -116,7 +119,12 @@ export async function workOnce(ctx: WorkerContext, deps: WorkOnceDeps): Promise<
       );
     }
     const registry = loadRegistry(genome);
-    const outputs = createOutputStore(registry);
+    // The mirror tier is where OUTPUT drain lives (the header drains from the runtime
+    // directly) — without it a worker's sealed outputs never reach the sink. Found live:
+    // the first worker run drained its failure header and none of its sealed phases.
+    const outputs = createOutputStore(registry, {
+      mirror: createOutputMirror(join(tmpdir(), "coltrane-worker-mirror")),
+    });
     const ledger = new MemoryLedger();
     const invoke = deps.makeInvoke(registry, genome);
     const res = await runGig(standard, claim.input, {

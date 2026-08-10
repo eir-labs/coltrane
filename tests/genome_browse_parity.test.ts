@@ -46,6 +46,11 @@ describe("discoverability parity — authoring tool implies browse tool", () => 
     ["skills", "skill_define", "skill_browse"],
     ["agents", "agent_define", "agent_browse"],
     ["standards", "standard_compose", "standard_browse"],
+    // The chart and the venue join the table the moment they become authorable: 0.7.0 shipped
+    // ChartSchema with no MCP surface at all, which kept the invariant vacuously true. A class
+    // that can be authored and not listed is a slug no caller can discover.
+    ["charts", "chart_define", "chart_browse"],
+    ["venues", "venue_define", "venue_browse"],
   ];
 
   it("every authorable genome class has a browse tool in the registry", () => {

@@ -2057,11 +2057,28 @@ export async function runGig(
     // not. Attaching the partial accounting to the error is what lets gig_monitor and a
     // synchronous caller report it. This does NOT write a ledger row — absence-of-row remains
     // the honest "un-sealed gig" signal (recorder_durability_mid_crash.spec.ts).
+    let partial: ReturnType<typeof finalizeUsage>;
     if (e && typeof e === "object") {
-      const partial = finalizeUsage();
+      partial = finalizeUsage();
       if (partial) (e as Record<string, unknown>)["usage"] = partial;
       if (budget) (e as Record<string, unknown>)["budget_state"] = budget;
     }
+    // The sink learns the truth either way: a failed run drains a FAILED header (same
+    // fire-and-forget seam as the success path), so the queue row never sits stale on a
+    // local failure. Found live: the worker's first day exposed the success-only drain.
+    void drainGigHeader({
+      gig_id,
+      standard_slug: standard.slug,
+      status: "failed",
+      genome_hash,
+      started_at,
+      finished_at: new Date().toISOString(),
+      outputs_count: produced.length,
+      error: e instanceof Error ? e.message : String(e),
+      ...(partial ? { usage: { total_cost_usd: partial.total_cost_usd, input_tokens: partial.input_tokens, output_tokens: partial.output_tokens } } : {}),
+    }).catch((de) => {
+      if (process.env["COLTRANE_DRAIN_DEBUG"]) console.error(`[drain] failed-gig header ${gig_id}: ${String(de)}`);
+    });
     throw e;
   }
 }

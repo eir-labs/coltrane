@@ -120,3 +120,73 @@ describe("non-hosted mode is byte-identical to the old dispatch path", () => {
     expect(res.ok).toBe(true);
   });
 });
+
+describe("hosted authoring — no org rides the call; evolve works store-backed", () => {
+  const VALID_AGENT2 = { ...VALID_AGENT, slug: "scout2" };
+
+  it("agent_define upserts with NO org argument — the store resolves the working org", async () => {
+    const upserts: Array<{ cls: string; payload: Record<string, unknown>; org?: string }> = [];
+    const deps = bareDeps({
+      hosted: true,
+      store: {
+        load: async () => { throw new Error("unused"); },
+        upsert: async (cls: string, payload: Record<string, unknown>, org_slug?: string) => {
+          upserts.push({ cls, payload, ...(org_slug ? { org: org_slug } : {}) });
+        },
+      } as never,
+    });
+    const surface = createToolSurface(deps);
+    const r = await surface.find((t) => t.name === "agent_define")!.call({ ...VALID_AGENT2 });
+    expect(r.ok).toBe(true);
+    expect(upserts).toHaveLength(1);
+    expect(upserts[0]!.cls).toBe("agent");
+    // the caller never tracks the org: nothing rides the call; the store's resolver
+    // (org_use preference > sole membership) supplies it
+    expect(upserts[0]!.org).toBeUndefined();
+    expect(upserts[0]!.payload["org_slug"]).toBeUndefined();
+  });
+
+  it("agent_evolve (slug, changes) works hosted from the agents map and upserts the merged def", async () => {
+    const upserts: Array<{ cls: string; payload: Record<string, unknown>; org?: string }> = [];
+    const { defineAgent } = await import("../src/composition.js");
+    const deps = bareDeps({
+      hosted: true,
+      agents: new Map([["scout", defineAgent(VALID_AGENT as never)]]),
+      store: {
+        load: async () => { throw new Error("unused"); },
+        upsert: async (cls: string, payload: Record<string, unknown>, org_slug?: string) => {
+          upserts.push({ cls, payload, ...(org_slug ? { org: org_slug } : {}) });
+        },
+      } as never,
+    });
+    const surface = createToolSurface(deps);
+    const r = await surface.find((t) => t.name === "agent_evolve")!.call(
+      { slug: "scout", changes: { output_types: ["scan-report", "design-brief"] }, reason: "seat widening" },
+    );
+    expect(r.ok, String(r.error)).toBe(true);
+    expect(upserts).toHaveLength(1);
+    expect(upserts[0]!.cls).toBe("agent");
+    expect(upserts[0]!.org).toBeUndefined();
+    expect(upserts[0]!.payload["slug"]).toBe("scout");
+    expect(upserts[0]!.payload["output_types"]).toEqual(["scan-report", "design-brief"]);
+  });
+});
+
+
+describe("org_use — the formal switch, set once", () => {
+  it("wires through deps.orgUse and reports what it set", async () => {
+    const calls: string[] = [];
+    const deps = bareDeps({ hosted: true, orgUse: async (slug: string) => { calls.push(slug); return slug; } });
+    const surface = createToolSurface(deps);
+    const r = await surface.find((t) => t.name === "org_use")!.call({ org_slug: "eugene-studio" });
+    expect(r.ok).toBe(true);
+    expect((r.data as { org_slug: string }).org_slug).toBe("eugene-studio");
+    expect(calls).toEqual(["eugene-studio"]);
+  });
+
+  it("on a file genome, says plainly that the working tree IS the org", async () => {
+    const r = await createToolSurface(bareDeps()).find((t) => t.name === "org_use")!.call({ org_slug: "x" });
+    expect(r.ok).toBe(false);
+    expect(String(r.error)).toMatch(/file genome/);
+  });
+});

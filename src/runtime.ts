@@ -24,6 +24,7 @@ import { producersSha,
   type ReuseStore, type ReuseEntry, type ReuseOutput, type RunIdentity,
 } from "./reuse.js";
 import type { OutputStore, OutputRecord } from "./outputs.js";
+import { drainGigHeader } from "./output_mirror.js";
 import { LEDGER_SCHEMA_VERSION, type Ledger, type GigUsage } from "./ledger.js";
 import type { Depth } from "./pricing.js";
 import type { SkillRecord, EvalRecord } from "./loader.js";
@@ -1983,6 +1984,7 @@ export async function runGig(
   });
 
   const settledUsage = finalizeUsage();
+  const gig_finished_at = new Date().toISOString();
   deps.ledger.append({
     kind: "gig",
     schema_version: LEDGER_SCHEMA_VERSION,
@@ -1993,11 +1995,27 @@ export async function runGig(
     run_fingerprint,
     output_hashes,
     started_at,
-    finished_at: new Date().toISOString(),
+    finished_at: gig_finished_at,
     // settled model spend (#195) — omitted when nothing was CAPTURED (skill-only gigs, stubbed
     // invokers, or a run whose every invocation reported no usage payload). #235: an absent
     // usage block means "not captured", never "$0.00".
     ...(settledUsage ? { usage: settledUsage } : {}),
+  });
+
+  // Drain the gig HEADER to the sink (fire-and-forget, like every output before it) — the
+  // stub row the drain service fabricated for FK integrity is replaced by the run's own record.
+  void drainGigHeader({
+    gig_id,
+    standard_slug: standard.slug,
+    status: "complete",
+    genome_hash,
+    run_fingerprint,
+    started_at,
+    finished_at: gig_finished_at,
+    outputs_count: produced.length,
+    ...(settledUsage ? { usage: { total_cost_usd: settledUsage.total_cost_usd, input_tokens: settledUsage.input_tokens, output_tokens: settledUsage.output_tokens } } : {}),
+  }).catch((e) => {
+    if (process.env["COLTRANE_DRAIN_DEBUG"]) console.error(`[drain] gig header ${gig_id}: ${String(e)}`);
   });
 
   // Cycle complete — when a budget was supplied, mark it `settled` and

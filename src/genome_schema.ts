@@ -163,6 +163,161 @@ export type SkillOutput = z.output<typeof SkillSchema>;
 export type EvalOutput = z.output<typeof EvalSchema>;
 export type DomainTypeOutput = z.output<typeof DomainTypeSchema>;
 
+// ── The institutional layer — institutions, organizations, agents-as-members, chairs, seats,
+//    lineage, keys. The DEFINITIONS live here (public structure, one Zod source); the INSTANCES
+//    (a real institution's orgs, named agents, issued keys) live in a governed instance store and
+//    are written only through the MCP surface. Same discipline as every class above: the same
+//    concepts had grown three disagreeing representations (engine files, hand-shaped instance
+//    tables, empty carryover tables); this is the one source they all derive from.
+//
+//    An agent RECORD is membership/identity — who exists in the organization, human and model on
+//    the SAME contract — distinct from the performer profile (AgentSchema above), which is what a
+//    seat renders when the agent plays. A human record links to its auth account; a model record
+//    simply has no auth account. Chairs carry the configuration (role, function, mission,
+//    required_skills, caps, obligations); agents are the few named players who swap into them. ──
+
+/** The typed lineage-edge vocabulary. Caps grant these; lineage edges are made of them. */
+export const LineageEdgeTypeSchema = z.enum(["anchored-in", "produced-by", "evolved-from", "descends-from"]);
+
+// Slugs NAME identities; LOOKUPS go by id. The instance store assigns each institutional
+// identity a stable uuid; references and RLS key on the id, never the slug.
+export const InstitutionSchema = z.object({
+  id: z.string().optional(),
+  slug: z.string(),
+  name: z.string(),
+  kind: z.enum(["institution", "personal"]),
+  laws: z.array(z.string()).default([]),
+  wiki_space: z.string().optional(),
+  sovereign: z.boolean().default(false),
+});
+
+export const OrganizationSchema = z.object({
+  id: z.string().optional(),
+  slug: z.string(),
+  name: z.string(),
+  charter: z.string().nullable().default(null),
+  address: z.string().optional(),
+  parent_org: z.string().nullable().default(null),
+});
+
+/** Membership/identity record: human and model agents on the SAME contract. */
+export const AgentRecordSchema = z.object({
+  id: z.string().optional(),
+  slug: z.string(),
+  name: z.string(),
+  kind: z.enum(["human", "steve"]),
+  is_institution: z.boolean().default(false),
+  skill_slugs: z.array(z.string()).default([]),
+  // Lifecycle: nothing is active until governed so; "named" is sealed through the naming
+  // ceremony (never self-approved — the proposal routes to the human governor).
+  status: z.enum(["proposed", "named", "active", "retired"]).default("proposed"),
+  named_from_forebear: z.string().nullable().default(null),
+  // The auth link for human agents (the org's identity provider user id). A model agent
+  // has no auth account; its authority is always a delegated, attenuated grant.
+  auth_user_id: z.string().nullable().default(null),
+});
+
+export const OrgMemberSchema = z.object({ org_slug: z.string(), agent_slug: z.string() });
+export const OrgInstitutionSchema = z.object({ org_slug: z.string(), institution_slug: z.string() });
+
+/** A capability grant: a typed lineage-edge scope, optionally expiring. The grant IS the policy. */
+export const CapGrantSchema = z.object({
+  edge_type: LineageEdgeTypeSchema,
+  scope: z.record(z.unknown()),
+  expires: z.string().nullable().default(null),
+});
+
+/** The chair is the thing: the seat's configuration, not a person. */
+export const InstitutionalChairSchema = z.object({
+  id: z.string().optional(),
+  institution_slug: z.string(),
+  role: z.string(),
+  function: PrimitiveSchema,
+  mission: z.string(),
+  required_skills: z.array(z.string()).default([]),
+  caps: z.array(CapGrantSchema).default([]),
+  obligations: z.array(z.string()).default([]),
+});
+
+/** A seat: a named agent bound into a chair for an org, witnessed. */
+export const ChairAssignmentSchema = z.object({
+  id: z.string().optional(),
+  chair_id: z.string(),
+  agent_slug: z.string(),
+  org_slug: z.string(),
+  contract_caps: z.array(CapGrantSchema).default([]),
+  witnessed_by: z.string().nullable().default(null),
+});
+
+/** Cross-institution exposure happens only by contract across the wall. */
+export const ExchangeContractSchema = z.object({
+  id: z.string().optional(),
+  from_institution: z.string(),
+  to_institution: z.string(),
+  caps: z.array(CapGrantSchema).default([]),
+  witnessed_by: z.string().nullable().default(null),
+});
+
+export const ForebearSchema = z.object({
+  slug: z.string(),
+  institution_slug: z.string(),
+  name: z.string(),
+  domain: z.string().optional(),
+  what_taken: z.string().optional(),
+  kind: z.string().optional(),
+});
+
+export const NorthstarSchema = z.object({
+  slug: z.string(),
+  institution_slug: z.string(),
+  ordinal: z.number().optional(),
+  kind: z.string().optional(),
+  title: z.string(),
+  statement: z.string(),
+  source: z.record(z.unknown()).optional(),
+  quote: z.string().optional(),
+});
+
+export const LineageEdgeSchema = z.object({
+  id: z.number().optional(),
+  institution_slug: z.string(),
+  edge_type: LineageEdgeTypeSchema,
+  from_node: z.string(),
+  to_node: z.string(),
+  kind: z.string().optional(),
+  source: z.record(z.unknown()).optional(),
+});
+
+/** The issued org service key DOCUMENT — self-describing (key id, org scope, issuer, scopes,
+ *  endpoints) so downstream images have a uniform understanding of what they hold. STRICT by
+ *  construction: the secret has no field to live in, so a record carrying key material fails to
+ *  parse. Org-scoped because the organization is the resource-usage boundary. Never a platform
+ *  service_role. */
+export const OrgServiceKeySchema = z
+  .object({
+    key_id: z.string(),
+    org_slug: z.string(),
+    issuer: z.string(),
+    scopes: z.array(z.string()).default([]),
+    endpoints: z.record(z.string()).optional(),
+    issued_at: z.string().optional(),
+    expires: z.string().nullable().default(null),
+    status: z.enum(["active", "revoked"]).default("active"),
+  })
+  .strict();
+
+export type InstitutionOutput = z.output<typeof InstitutionSchema>;
+export type OrganizationOutput = z.output<typeof OrganizationSchema>;
+export type AgentRecordOutput = z.output<typeof AgentRecordSchema>;
+export type CapGrant = z.output<typeof CapGrantSchema>;
+export type InstitutionalChairOutput = z.output<typeof InstitutionalChairSchema>;
+export type ChairAssignmentOutput = z.output<typeof ChairAssignmentSchema>;
+export type ExchangeContractOutput = z.output<typeof ExchangeContractSchema>;
+export type ForebearOutput = z.output<typeof ForebearSchema>;
+export type NorthstarOutput = z.output<typeof NorthstarSchema>;
+export type LineageEdgeOutput = z.output<typeof LineageEdgeSchema>;
+export type OrgServiceKeyOutput = z.output<typeof OrgServiceKeySchema>;
+
 // ── zod → MCP input_schema properties. The MCP tool definitions (mcp.ts) derive their hand-written
 //    field lists from here, so the write-surface can never drift from the schema. Maps each top-level
 //    field to its coarse JSON type; optionals/defaults are flattened (MCP advertises the field). ──

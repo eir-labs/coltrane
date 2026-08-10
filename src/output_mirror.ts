@@ -350,6 +350,105 @@ interface PgClient {
   end(): Promise<void>;
 }
 
+// ── The gig-HEADER drain ──────────────────────────────────────────────────────────────────
+// Outputs drained but the gig row didn't: the sink's queue table held service-fabricated
+// stubs for every real run — sealed outputs hanging off a header that said nothing true
+// about the run. On a terminal state the runtime hands this seam the run's own record and
+// the stub is replaced (merge semantics) with the real standard, status, spend, timestamps,
+// and reproducibility keys. Fire-and-forget like the output drain: a sink outage degrades
+// the mirror, never the run.
+
+/** The slice of the run's terminal state the sink's gig row wants. */
+export interface GigHeaderRecord {
+  gig_id: string;
+  standard_slug: string;
+  status: "complete" | "failed" | "aborted";
+  genome_hash?: string;
+  run_fingerprint?: string;
+  started_at?: string;
+  finished_at?: string;
+  outputs_count?: number;
+  usage?: { total_cost_usd?: number; input_tokens?: number; output_tokens?: number } | undefined;
+  error?: string;
+}
+
+/** The sink row, derived entirely from the run's own record (engine "complete" → sink "completed"). */
+export function gigHeaderBody(rec: GigHeaderRecord): Record<string, unknown> {
+  const started = rec.started_at ? Date.parse(rec.started_at) : NaN;
+  const finished = rec.finished_at ? Date.parse(rec.finished_at) : NaN;
+  const duration = Number.isFinite(started) && Number.isFinite(finished) ? finished - started : null;
+  const tokens =
+    rec.usage && (rec.usage.input_tokens !== undefined || rec.usage.output_tokens !== undefined)
+      ? (rec.usage.input_tokens ?? 0) + (rec.usage.output_tokens ?? 0)
+      : null;
+  const manifest: Record<string, unknown> = {};
+  if (rec.outputs_count !== undefined) manifest["output_count"] = rec.outputs_count;
+  if (rec.error !== undefined) manifest["error"] = rec.error;
+  return {
+    id: rec.gig_id,
+    standard_slug: rec.standard_slug,
+    status: rec.status === "complete" ? "completed" : rec.status,
+    genome_hash: rec.genome_hash ?? null,
+    run_fingerprint: rec.run_fingerprint ?? null,
+    started_at: rec.started_at ?? null,
+    completed_at: rec.finished_at ?? null,
+    total_cost_usd: rec.usage?.total_cost_usd ?? null,
+    total_tokens: tokens,
+    total_duration_ms: duration,
+    manifest,
+  };
+}
+
+/** Drain the header. Silent no-op when no drain credential is configured. */
+export async function drainGigHeader(rec: GigHeaderRecord): Promise<void> {
+  if (!remoteConfigured()) return;
+  const key = process.env["COLTRANE_DRAIN_KEY"];
+  if (key) {
+    const base = (process.env["COLTRANE_DRAIN_URL"] ?? "").replace(/\/$/, "");
+    if (!base) throw new Error("COLTRANE_DRAIN_KEY is set but COLTRANE_DRAIN_URL (drain service base) is missing");
+    const res = await fetch(`${base}/rest/v1/coltrane_gigs`, {
+      method: "POST",
+      headers: {
+        apikey: key,
+        Authorization: `Bearer ${key}`,
+        "Content-Type": "application/json",
+        Prefer: "resolution=merge-duplicates,return=minimal",
+      },
+      body: JSON.stringify(gigHeaderBody(rec)),
+    });
+    if (!res.ok) throw new Error(`coltrane_gigs POST ${res.status}`);
+    return;
+  }
+  const pgConn = process.env["COLTRANE_DRAIN_PG"];
+  if (pgConn) {
+    const moduleName = "pg";
+    const pg = (await import(moduleName)) as { Client?: new (c: { connectionString: string }) => PgClient };
+    if (!pg.Client) throw new Error("'pg' loaded but exposes no Client");
+    const client = new pg.Client({ connectionString: pgConn });
+    await client.connect();
+    try {
+      const b = gigHeaderBody(rec);
+      await client.query(
+        `insert into coltrane_gigs (id, standard_slug, status, genome_hash, run_fingerprint, started_at, completed_at, total_cost_usd, total_tokens, total_duration_ms, manifest)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+         on conflict (id) do update set
+           standard_slug = excluded.standard_slug, status = excluded.status,
+           genome_hash = excluded.genome_hash, run_fingerprint = excluded.run_fingerprint,
+           started_at = excluded.started_at, completed_at = excluded.completed_at,
+           total_cost_usd = excluded.total_cost_usd, total_tokens = excluded.total_tokens,
+           total_duration_ms = excluded.total_duration_ms, manifest = excluded.manifest`,
+        [
+          b["id"], b["standard_slug"], b["status"], b["genome_hash"], b["run_fingerprint"],
+          b["started_at"], b["completed_at"], b["total_cost_usd"], b["total_tokens"],
+          b["total_duration_ms"], JSON.stringify(b["manifest"]),
+        ],
+      );
+    } finally {
+      await client.end();
+    }
+  }
+}
+
 // TODO(scoped-credential): the remote tier expects an APPEND-ONLY credential — either a
 // per-consumer issued key (COLTRANE_DRAIN_KEY) whose grant is exactly "insert a coltrane_outputs
 // row + upload an artifact object" and nothing else, or a Postgres role (COLTRANE_DRAIN_PG)

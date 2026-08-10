@@ -147,7 +147,12 @@ function danglingSkillBindingErrors(
 ): LoadError[] {
   const out: LoadError[] = [];
   for (const [slug, agent] of agents) {
-    const missing = (agent.skill_slugs ?? []).filter((s) => !skills.has(s));
+    // A slug the agent CARRIES a definition for is not dangling: the definition on the record IS
+    // the package for that slug, and resolution prefers it over a repertoire package of the same
+    // name (src/runtime.ts resolveSkills). Only a slug nothing answers — neither the genome's
+    // skills map nor the agent's own carried set — is a dead reference.
+    const carried = new Set((agent.skills ?? []).map((s) => s.slug));
+    const missing = (agent.skill_slugs ?? []).filter((s) => !skills.has(s) && !carried.has(s));
     if (missing.length === 0) continue;
     out.push({
       kind: "agent",

@@ -11,13 +11,13 @@
 // removing. So the assertions below are mostly about faithful translation: the right tool, the
 // right arguments, and an exit code that means what a script will assume it means.
 import { describe, it, expect } from "vitest";
-import { runCli, parseArgs, readInput, USAGE, type CliIO } from "../src/cli.js";
-import { createRegistry, createOutputStore, MemoryLedger } from "../src/index.js";
+import { runCli, parseArgs, readInput, readApprovals, USAGE, type CliIO } from "../src/cli.js";
+import { createRegistry, createOutputStore, MemoryLedger, composeStandard, type PhaseDef } from "../src/index.js";
 import type { ServerDeps } from "../src/server.js";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { TEST_BEHAVIOR } from "./_support/agents.js";
+import { TEST_BEHAVIOR, testAgent } from "./_support/agents.js";
 
 function io(over: Partial<CliIO> = {}): CliIO & { stdout: string[]; stderr: string[] } {
   const stdout: string[] = [];
@@ -212,6 +212,86 @@ describe("dispatch translates faithfully to gig_dispatch", () => {
   it("reports a malformed --input before spending anything", async () => {
     const o = io({ deps: capturing().deps });
     expect(await runCli(["dispatch", "s", "--input", "@/no/such/file.json"], o)).toBe(2);
+  });
+});
+
+// ── the human seat, from a shell ─────────────────────────────────────────────────
+// The approval is the one control in the engine whose incumbent is a PERSON, so the shell is
+// its natural door: an operator reads a parked gig's outputs, writes a verdict, and hands it
+// back on the resume. What these tests hold is that the two halves of that sentence are true —
+// the parked reply says so plainly, and the verdict arrives under a name.
+describe("dispatch carries a human chair's approval", () => {
+  const SIGNAL = { id: "sig-1", source: "test", data: { seen: true }, completeness: 1, acquisition_cost: 0 };
+  const VERDICT = {
+    id: "approval-1", input_refs: ["sig-1"],
+    criteria: ["the scan covers the declared boundary"],
+    verdicts: [{ criterion: "the scan covers the declared boundary", verdict: "approved" }],
+    reasoning_chain: ["read the sealed scan; the boundary matches the dispatch payload"],
+  };
+
+  function humanDeps(): ServerDeps {
+    const registry = createRegistry();
+    const std = composeStandard({
+      slug: "sense-then-approve", domain: "test",
+      agents: [testAgent({ slug: "scout", primitives: ["SENSE"], input_types: [], output_types: ["Signal"], domain: "test" })],
+      phases: [
+        { name: "scan", chairs: [{ role: "scan", agent_slug: "scout", depends_on: [], input_contract: [], output_contract: ["Signal"], optional_outputs: [], required_skills: [] }] },
+        { name: "approve", chairs: [{ role: "approve", human: true, agent_slug: "", depends_on: ["scan"], input_contract: [], output_contract: ["Judgment"], optional_outputs: [], required_skills: [] }] },
+      ] as PhaseDef[],
+    });
+    return {
+      registry,
+      outputs: createOutputStore(registry),
+      ledger: new MemoryLedger(),
+      standards: new Map([[std.slug, std]]),
+      invoke: async () => SIGNAL,
+      gig_runs: new Map(),
+    } as unknown as ServerDeps;
+  }
+
+  it("reads a verdict per chair, from a file or inline", () => {
+    const dir = mkdtempSync(join(tmpdir(), "cli-approve-"));
+    try {
+      writeFileSync(join(dir, "v.json"), JSON.stringify(VERDICT));
+      expect(readApprovals([`approve=@${join(dir, "v.json")}`, 'sign={"id":"s"}'], io()).value)
+        .toEqual({ approve: VERDICT, sign: { id: "s" } });
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it("refuses a malformed --approve instead of dispatching without it", () => {
+    // A dropped approval parks the run AGAIN after paying for every chair before the seat.
+    expect(readApprovals("approve", io()).error).toMatch(/<role>=/);
+    expect(readApprovals("approve=[1,2]", io()).error).toMatch(/JSON object/);
+    expect(readApprovals("approve=@/no/such/verdict.json", io()).error).toBeTruthy();
+  });
+
+  it("a repeated flag collects rather than overwrites", () => {
+    // `--approve a=… --approve b=…` is two chairs; last-wins would drop one person's verdict.
+    expect(parseArgs(["dispatch", "s", "--approve", "a=1", "--approve", "b=2"]).flags["approve"])
+      .toEqual(["a=1", "b=2"]);
+  });
+
+  it("says the gig is parked, names the chair, and exits 0", async () => {
+    const o = io({ deps: humanDeps() });
+    const code = await runCli(["dispatch", "sense-then-approve", "--wait"], o);
+    expect(code, "a gig waiting on a person is not a failed gig").toBe(0);
+    expect(o.stderr.join("")).toMatch(/awaiting approval/);
+    expect(o.stderr.join(""), "and WHICH seat is theirs to sit in").toMatch(/approve/);
+    // stdout stays the gig id alone, so the approving resume can be piped straight in.
+    expect(o.stdout.join("").trim()).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
+  it("hands the verdict and the approver through to the run", async () => {
+    const d = humanDeps();
+    const o = io({ deps: d });
+    const code = await runCli([
+      "dispatch", "sense-then-approve", "--wait",
+      "--approve", `approve=${JSON.stringify(VERDICT)}`, "--as", "eugene",
+    ], o);
+    expect(code, o.stderr.join("")).toBe(0);
+    expect(o.stderr.join("")).toMatch(/complete — 2 sealed output/);
+    const judgment = d.outputs.all().find((x) => x.domain_type === "Judgment");
+    expect(judgment?.agent_slug, "the seal carries the approver, not the engine").toBe("eugene");
   });
 });
 

@@ -62,7 +62,10 @@
           "output_contract": [
             "design-concept"
           ],
-          "required_skills": []
+          "required_skills": [],
+          "preferred_skills": [
+            "structure-conformance"
+          ]
         }
       ],
       "intent": "Second divergence, built rather than described. The concept states its mechanism step by step, names which success criteria it answers, and carries its tradeoffs and open questions \u2014 a concept presented as settled cannot be evaluated against the contest it hides."

@@ -16,7 +16,10 @@
  * Conventions, chosen so this composes with other programs:
  *   - DATA goes to stdout, everything else to stderr. `coltrane dispatch … --json | jq` works.
  *   - Exit 0 success, 1 the command ran and failed, 2 the command was malformed. `validate`
- *     exits non-zero when the genome has load errors, which is what makes it a CI gate.
+ *     exits non-zero when the genome has load errors, which is what makes it a CI gate. A
+ *     dispatch that PARKS at a human chair exits 0: waiting on a person is the standard
+ *     working as written, and a job that read it as failure would retry a run that needs a
+ *     signature rather than a fix.
  *   - `--json` prints the tool's `data` verbatim; without it, a short human summary.
  */
 import { dispatchTool, bootstrapServerDeps, type ServerDeps, type ToolResult } from "./server.js";
@@ -49,7 +52,9 @@ export const USAGE = `coltrane ${COLTRANE_VERSION}
                                         (env: COLTRANE_STORE_URL, COLTRANE_STORE_ANON,
                                          COLTRANE_AGENT_TOKEN; results drain via
                                          COLTRANE_DRAIN_URL + COLTRANE_DRAIN_KEY;
-                                         exit 0 complete, 1 failed, 3 queue empty)
+                                         checkpoints under COLTRANE_WORKER_CHECKPOINTS,
+                                         default ~/.coltrane/worker-checkpoints;
+                                         exit 0 complete or parked, 1 failed, 3 queue empty)
 
 Options
   --input <json|@file|->                dispatch payload; @file reads a file, - reads stdin
@@ -57,23 +62,39 @@ Options
   --budget <dollars>                    per-gig ceiling; the run stops when it is gone
   --reuse                               allow chair-level reuse of prior sealed outputs
   --resume <gig-id>                     continue a gig that died mid-pipeline
+  --approve <role>=<json|@file>         a human chair's verdict; repeat once per chair
+  --as <name>                           who is approving; sealed as the verdict's author
   --wait                                block until the run finishes
   --follow                              poll until the gig reaches a terminal state
   --direction <upstream|downstream|both>  for trace
   --json                                print the raw result to stdout
   --genome <path>                       genome root (default: $COLTRANE_GENOME or cwd)
   --help, --version
+
+A dispatch that reaches a chair a HUMAN holds parks: it names the waiting chair and exits 0,
+because a gig waiting on a person is not a failed gig. Approve it on the resume —
+
+  coltrane dispatch <standard> --resume <gig> --input @orig.json \\
+      --approve approve=@verdict.json --as eugene
 `;
 
 interface Parsed {
   cmd: string | undefined;
   positional: string[];
-  flags: Record<string, string | boolean>;
+  flags: Record<string, string | boolean | string[]>;
 }
 
 export function parseArgs(argv: readonly string[]): Parsed {
   const positional: string[] = [];
-  const flags: Record<string, string | boolean> = {};
+  const flags: Record<string, string | boolean | string[]> = {};
+  /** A flag given twice COLLECTS rather than overwrites — `--approve a=… --approve b=…` is two
+   *  chairs, and last-wins would silently drop one of them (and with it one person's verdict). */
+  const set = (name: string, value: string): void => {
+    const prior = flags[name];
+    if (typeof prior === "string") flags[name] = [prior, value];
+    else if (Array.isArray(prior)) prior.push(value);
+    else flags[name] = value;
+  };
   for (let i = 0; i < argv.length; i++) {
     const tok = argv[i]!;
     if (!tok.startsWith("--")) {
@@ -83,14 +104,14 @@ export function parseArgs(argv: readonly string[]): Parsed {
     const body = tok.slice(2);
     const eq = body.indexOf("=");
     if (eq >= 0) {
-      flags[body.slice(0, eq)] = body.slice(eq + 1);
+      set(body.slice(0, eq), body.slice(eq + 1));
       continue;
     }
     // A flag takes the next token as its value UNLESS that token is itself a flag, which is
     // what makes `--reuse --json` parse as two booleans rather than one flag valued "--json".
     const next = argv[i + 1];
     if (next !== undefined && !next.startsWith("--")) {
-      flags[body] = next;
+      set(body, next);
       i++;
     } else {
       flags[body] = true;
@@ -100,7 +121,7 @@ export function parseArgs(argv: readonly string[]): Parsed {
 }
 
 /** `@file` reads a file, `-` reads stdin, anything else is parsed as inline JSON. */
-export function readInput(spec: string | undefined, io: CliIO): { value?: unknown; error?: string } {
+export function readInput(spec: string | undefined, io: CliIO, label = "--input"): { value?: unknown; error?: string } {
   if (spec === undefined) return { value: {} };
   try {
     if (spec === "-") {
@@ -110,11 +131,44 @@ export function readInput(spec: string | undefined, io: CliIO): { value?: unknow
     if (spec.startsWith("@")) return { value: JSON.parse(readFileSync(spec.slice(1), "utf8")) };
     return { value: JSON.parse(spec) };
   } catch (e) {
-    return { error: `could not read --input: ${e instanceof Error ? e.message : String(e)}` };
+    return { error: `could not read ${label}: ${e instanceof Error ? e.message : String(e)}` };
   }
 }
 
-const TERMINAL = new Set(["complete", "failed", "aborted"]);
+/**
+ * `--approve <role>=<json|@file>`, once per human chair, into the role→verdict map the dispatch
+ * surface takes.
+ *
+ * A malformed verdict is refused BEFORE the dispatch, like a malformed `--input`: a run that
+ * silently dropped an unreadable approval would park again after paying for every chair before
+ * the seat, and the operator would be told nothing about why their yes did not land.
+ */
+export function readApprovals(
+  spec: string | boolean | string[] | undefined,
+  io: CliIO,
+): { value?: Record<string, unknown>; error?: string } {
+  if (spec === undefined) return {};
+  const specs = typeof spec === "string" ? [spec] : Array.isArray(spec) ? spec : [];
+  if (specs.length === 0) return { error: `--approve needs <role>=<json|@file>` };
+  const out: Record<string, unknown> = {};
+  for (const s of specs) {
+    const eq = s.indexOf("=");
+    if (eq <= 0) return { error: `--approve must be <role>=<json|@file>, got "${s}"` };
+    const role = s.slice(0, eq);
+    const read = readInput(s.slice(eq + 1), io, `--approve ${role}`);
+    if (read.error) return { error: read.error };
+    const verdict = read.value;
+    if (typeof verdict !== "object" || verdict === null || Array.isArray(verdict)) {
+      return { error: `--approve ${role} must be a JSON object — the verdict seals as a typed output` };
+    }
+    out[role] = verdict;
+  }
+  return { value: out };
+}
+
+// What `--follow` stops on. `awaiting_approval` belongs here: the run has settled and will not
+// move again until a person acts, so polling for it forever is a loop that cannot end.
+const TERMINAL = new Set(["complete", "failed", "aborted", "awaiting_approval"]);
 
 function line(io: CliIO, s: string): void { io.err(s + "\n"); }
 
@@ -175,12 +229,16 @@ export async function runCli(argv: readonly string[], io: CliIO): Promise<number
       line(io, "queue empty — nothing this seat's chair contract may claim");
       return 3;
     }
-    if (emitJson(io, json, res)) return res.status === "complete" ? 0 : 1;
+    // A claim that PARKED at a human chair exits 0: the row was run correctly and now waits on
+    // a person. Exiting 1 would make every supervisor restart a worker that did its job.
+    const code = res.status === "failed" ? 1 : 0;
+    if (emitJson(io, json, res)) return code;
     io.out(res.gig_id + "\n");
     line(io, `${res.status}` +
+      (res.awaiting ? ` at human chair "${res.awaiting.role}" (phase "${res.awaiting.phase}")` : "") +
       (res.outputs_count !== undefined ? ` — ${res.outputs_count} sealed output(s)` : "") +
       (res.error ? ` — ${res.error}` : ""));
-    return res.status === "complete" ? 0 : 1;
+    return code;
   }
 
   // Booting loads the genome and constructs the invoker, so it happens only after the command
@@ -229,11 +287,16 @@ export async function runCli(argv: readonly string[], io: CliIO): Promise<number
       const input = readInput(typeof flags["input"] === "string" ? flags["input"] : undefined, io);
       if (input.error) { line(io, input.error); return 2; }
 
+      const approvals = readApprovals(flags["approve"], io);
+      if (approvals.error) { line(io, approvals.error); return 2; }
+
       const args: Record<string, unknown> = { standard_slug: standard, input: input.value };
       if (typeof flags["depth"] === "string") args["depth"] = flags["depth"];
       if (typeof flags["resume"] === "string") args["resume_gig_id"] = flags["resume"];
       if (flags["reuse"] === true) args["reuse"] = true;
       if (flags["wait"] === true) args["wait"] = true;
+      if (approvals.value) args["approvals"] = approvals.value;
+      if (typeof flags["as"] === "string") args["approved_by"] = flags["as"];
       if (typeof flags["budget"] === "string") {
         const opening = Number(flags["budget"]);
         if (!Number.isFinite(opening) || opening <= 0) { line(io, `--budget must be a positive number`); return 2; }
@@ -242,13 +305,25 @@ export async function runCli(argv: readonly string[], io: CliIO): Promise<number
 
       const r = await call("gig_dispatch", args);
       if (!r.ok) { line(io, `dispatch failed: ${r.error ?? "unknown error"}`); return 1; }
-      const d = r.data as { gig_id: string; status?: string; warnings?: string[]; manifest?: Record<string, unknown> };
+      const d = r.data as {
+        gig_id: string; status?: string; awaiting?: { phase: string; role: string };
+        warnings?: string[]; manifest?: Record<string, unknown>;
+      };
       for (const w of d.warnings ?? []) line(io, `warning: ${w}`);
       if (emitJson(io, json, r.data)) return 0;
 
       // The gig id is the ONLY thing on stdout for a bare dispatch, so it pipes into the
       // other subcommands without parsing.
       io.out(d.gig_id + "\n");
+      // A parked gig must SAY it parked. The manifest line below would otherwise print
+      // "complete" over a run that sealed nothing at its final chair — and the operator whose
+      // signature the run is waiting for would have no way to know it is theirs to give.
+      if (d.status === "awaiting_approval") {
+        line(io, `awaiting approval` +
+          (d.awaiting ? ` at human chair "${d.awaiting.role}" (phase "${d.awaiting.phase}")` : "") +
+          `; nothing after it ran. Approve with: --resume ${d.gig_id} --approve <role>=<verdict> --as <name>`);
+        return 0; // waiting on a person is not a failure
+      }
       if (d.manifest) {
         const m = d.manifest as { output_count?: number; run_fingerprint?: string; usage?: { total_cost_usd?: number } };
         line(io, `complete — ${m.output_count ?? 0} sealed output(s)` +
@@ -273,9 +348,11 @@ export async function runCli(argv: readonly string[], io: CliIO): Promise<number
           return d.status === "failed" ? 1 : 0;
         }
         if (TERMINAL.has(String(d.status))) {
-          if (emitJson(io, json, r.data)) return d.status === "complete" ? 0 : 1;
+          // Parked is not failed — same reasoning as the dispatch reply.
+          const settled = d.status === "complete" || d.status === "awaiting_approval" ? 0 : 1;
+          if (emitJson(io, json, r.data)) return settled;
           io.out(`${d.status}\n`);
-          return d.status === "complete" ? 0 : 1;
+          return settled;
         }
         line(io, `${d.status ?? "running"} — ${d.phases_complete ?? 0} phase(s)` +
           (d.current_phase ? `, in ${d.current_phase}` : ""));

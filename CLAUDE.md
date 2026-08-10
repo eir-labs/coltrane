@@ -196,7 +196,7 @@ has a promote tool today (evals are declared inside the standard that uses them)
 | `types` | typed schemas for inputs/outputs | `type_register · type_extend` |
 | `agents` | agent definitions (charters, capabilities, skill bindings) | `agent_define · agent_evolve · agent_promote` |
 | `standards` | multi-phase workflows that agents run | `standard_compose · standard_simulate · standard_promote` |
-| `skills` | reusable cognitive primitives bound into agents (load-only + promote) | `skill_promote` |
+| `skills` | reusable cognitive primitives — bound into agents by slug, or CARRIED on an agent's own record (load-only + promote) | `skill_promote` |
 | `evals` | verdict shapes that judge gig outputs (load-only; declared with the standard) | _none — declared in the standard file_ |
 | `institutions` | institutional instances: an institution, its chairs (with dispatch grants), assignments, forebears, lineage edges | _file-shaped under `institutions/`, validated by the Zod schemas; no loader or MCP surface yet — `tests/default_genome_quartet.test.ts` is the gate_ |
 
@@ -245,6 +245,33 @@ and every restatement follows — there is no second place to edit.
 When you change a class's shape, change the schema. Do **not** hand-edit a TypeScript type, an
 MCP `input_schema`, or a loader check to "match" — that's the drift this collapses, and the
 drift reds in `tests/genome_schema_drift.test.ts` will catch a hand-rolled surface that diverges.
+
+---
+
+## Skills travel with the player; the institution supplies the data
+
+Method and technique belong to the **agent**; law and data belong to the **institution**.
+
+- `Agent.skill_slugs` REFERENCES the shared repertoire (`skills/<slug>/`). `Agent.skills` CARRIES
+  full definitions on the agent's own record — the technique it grew, portable into any
+  institution that seats it. Resolution unions both, **carried-first**, so a carried definition
+  shadows a same-slug repertoire package and a slug covered by a carried one is not dangling.
+- A skill declares `hydration` slots (name → `{type, description?, required?, binding?}`) instead
+  of hard-coding one house's data. `binding: "institution"` (the default) is filled at SEAT time
+  from a chair's `supplies`; `binding: "gig"` is filled at DISPATCH time from the gig payload —
+  the chair contract's formal parameters, whose argument list is the dispatch input.
+- A required INSTITUTION-bound slot nothing supplies is a **dead slot** and `composeStandard`
+  refuses it (same defect class as a tool grant with no provider). Gig-bound slots are not
+  compose time's business — nothing is known about a run's arguments before the run.
+- Chairs state two tiers: `required_skills` is the floor (it refuses a seating);
+  `preferred_skills` is soft and unchecked, including its names — a chair may prefer a technique
+  no agent has grown yet.
+- A seating may cite `technique_evidence` (`{source, claim}`) on the chair assignment, which is
+  what makes "why this player in this chair" a record rather than a recollection.
+
+The gate is `tests/skills_agent_carried.test.ts`; the shipped demonstration is bill's carried
+`structure-conformance` plus the quartet's `structure-builder` chair, which supplies its
+`house-style` slot and leaves its `target-paths` slot to the gig.
 
 ---
 

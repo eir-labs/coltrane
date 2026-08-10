@@ -9,6 +9,9 @@
 //
 // RED-first: written against an engine with no src/worker.ts and no rpcGenomeStore.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { workOnce, claimNextGig, failGig, type WorkerContext } from "../src/worker.js";
 import { rpcGenomeStore } from "../src/genome_store.js";
 import type { AgentInvoker } from "../src/runtime.js";
@@ -73,6 +76,28 @@ const GENOME_ROWS = {
       ],
       output_types: ["Signal"],
     },
+    // The human seat, as an org standard: one model chair, then a chair a PERSON holds. A
+    // worker that claims this row cannot finish it alone — the approval is the gate.
+    {
+      slug: "approve-run-v0",
+      domain: "demo",
+      status: "draft",
+      phases: [
+        {
+          name: "scan",
+          chairs: [
+            { role: "scan", agent_slug: "scout", depends_on: [], input_contract: [], output_contract: ["Signal"], optional_outputs: [], required_skills: [] },
+          ],
+        },
+        {
+          name: "approve",
+          chairs: [
+            { role: "approve", human: true, agent_slug: "", depends_on: ["scan"], input_contract: [], output_contract: ["Judgment"], optional_outputs: [], required_skills: [] },
+          ],
+        },
+      ],
+      output_types: ["Signal", "Judgment"],
+    },
   ],
   skills: [],
 };
@@ -88,7 +113,7 @@ const CLAIM = {
 
 type FetchCall = { url: string; body: Record<string, unknown> };
 
-function mockStore(opts: { claim: unknown; failResult?: boolean }) {
+function mockStore(opts: { claim: unknown; failResult?: boolean; park?: boolean | "absent" }) {
   const calls: FetchCall[] = [];
   vi.stubGlobal("fetch", vi.fn(async (url: string | URL, init?: RequestInit) => {
     const u = String(url);
@@ -103,6 +128,13 @@ function mockStore(opts: { claim: unknown; failResult?: boolean }) {
     if (u.endsWith("/rest/v1/rpc/coltrane_mcp_gig_fail")) {
       return new Response(JSON.stringify(opts.failResult ?? true), { status: 200 });
     }
+    if (u.endsWith("/rest/v1/rpc/coltrane_mcp_gig_park")) {
+      // A store that has not deployed the park RPC yet answers PostgREST's own 404.
+      if (opts.park === "absent") {
+        return new Response(JSON.stringify({ code: "PGRST202", message: "Could not find the function public.coltrane_mcp_gig_park(p_bearer, p_gig) in the schema cache" }), { status: 404 });
+      }
+      return new Response(JSON.stringify(opts.park ?? true), { status: 200 });
+    }
     return new Response(`unexpected url ${u}`, { status: 500 });
   }));
   return calls;
@@ -110,8 +142,21 @@ function mockStore(opts: { claim: unknown; failResult?: boolean }) {
 
 const sealableSignal = { id: "sig-1", source: "test", data: { seen: true }, completeness: 1, acquisition_cost: 0 };
 
-beforeEach(() => vi.unstubAllGlobals());
-afterEach(() => vi.unstubAllGlobals());
+// The worker keeps durable state (checkpoints + the sealed rows they name) so an approved
+// re-claim can resume. Every test in this file redirects that root into a temp dir: a suite
+// that wrote into $HOME would leave a checkpoint behind, and the NEXT run of the test above
+// would silently resume from it instead of running cold.
+let stateRoot: string;
+beforeEach(() => {
+  vi.unstubAllGlobals();
+  stateRoot = mkdtempSync(join(tmpdir(), "coltrane-worker-state-"));
+  process.env["COLTRANE_WORKER_CHECKPOINTS"] = stateRoot;
+});
+afterEach(() => {
+  vi.unstubAllGlobals();
+  delete process.env["COLTRANE_WORKER_CHECKPOINTS"];
+  rmSync(stateRoot, { recursive: true, force: true });
+});
 
 describe("claimNextGig — the atomic claim, spoken through the agent's own token", () => {
   it("returns the claimed gig payload", async () => {
@@ -196,6 +241,100 @@ describe("workOnce — claim, run under the claimed id, drain or fail honestly",
     const fail = calls.find((c) => c.url.includes("coltrane_mcp_gig_fail"));
     expect(fail).toBeDefined();
     expect(String(fail!.body["p_error"])).toMatch(/not-in-genome/);
+  });
+});
+
+// ── the approval loop, seen from the queue ───────────────────────────────────────
+// The worker is the process that ACTUALLY runs an org's gigs, so the human seat is only
+// reachable in production if the worker speaks it: park the row without failing it, carry
+// the approvals the store handed back on the next claim, and resume from the checkpoint so
+// the chairs already paid for are not replayed. Every one of those is money or truth.
+describe("workOnce — the human seat, claimed twice", () => {
+  const APPROVAL_CLAIM = { ...CLAIM, standard_slug: "approve-run-v0" };
+  const VERDICT = {
+    id: "approval-1", input_refs: [],
+    criteria: ["the scan covers the declared boundary"],
+    verdicts: [{ criterion: "the scan covers the declared boundary", verdict: "approved" }],
+    reasoning_chain: ["read the sealed scan; the boundary matches the queued payload"],
+  };
+  /** The claim payload the approve RPC produces: per-role verdict + who approved it. */
+  const APPROVED_CLAIM = {
+    ...APPROVAL_CLAIM,
+    approvals: { approve: { verdict: VERDICT, approved_by: "eugene" } },
+  };
+
+  const sealed = (gig_id: string): Array<Record<string, unknown>> =>
+    readFileSync(join(stateRoot, "outputs", `${gig_id}.jsonl`), "utf8")
+      .split("\n").filter(Boolean).map((l) => JSON.parse(l) as Record<string, unknown>);
+
+  it("parks an unapproved human chair: not complete, not failed, and the lease is released", async () => {
+    const calls = mockStore({ claim: APPROVAL_CLAIM });
+    const invoke = vi.fn(async () => sealableSignal);
+    const res = await workOnce(CTX, { makeInvoke: () => invoke as unknown as AgentInvoker });
+    expect(res.claimed).toBe(true);
+    if (!res.claimed) throw new Error("unreachable");
+    expect(res.status).toBe("awaiting_approval");
+    expect(res.awaiting).toEqual({ phase: "approve", role: "approve" });
+    // Recording it as failed would be a lie an operator acts on, and would take the row out of
+    // the approve→requeue path entirely.
+    expect(calls.some((c) => c.url.includes("coltrane_mcp_gig_fail")), "a parked gig is not a failed gig").toBe(false);
+    const park = calls.find((c) => c.url.includes("coltrane_mcp_gig_park"));
+    expect(park, "the lease must be released so the approval can re-queue the row").toBeDefined();
+    expect(park!.body["p_bearer"]).toBe("ctk_test000");
+    expect(park!.body["p_gig"]).toBe(CLAIM.gig_id);
+  });
+
+  it("a store without the park RPC does not turn a park into a failure", async () => {
+    // The drained header already says awaiting_approval; an absent release is a missing
+    // convenience, not a lost fact, and must not be reported as a crashed run.
+    const lines: string[] = [];
+    mockStore({ claim: APPROVAL_CLAIM, park: "absent" });
+    const res = await workOnce(CTX, { makeInvoke: () => vi.fn(async () => sealableSignal) as unknown as AgentInvoker, log: (l) => lines.push(l) });
+    if (!res.claimed) throw new Error("unreachable");
+    expect(res.status).toBe("awaiting_approval");
+    expect(lines.join("\n")).toMatch(/park/i);
+  });
+
+  it("the claim's approvals reach the run: it completes and seals under the approver", async () => {
+    mockStore({ claim: APPROVED_CLAIM });
+    const invoke = vi.fn(async () => sealableSignal);
+    const res = await workOnce(CTX, { makeInvoke: () => invoke as unknown as AgentInvoker });
+    if (!res.claimed) throw new Error("unreachable");
+    expect(res.status).toBe("complete");
+    expect(res.outputs_count).toBe(2);
+    const judgment = sealed(CLAIM.gig_id).find((o) => o["domain_type"] === "Judgment");
+    expect(judgment, "the human chair sealed").toBeDefined();
+    expect(judgment!["agent_slug"], "under the approving principal, not \"human\"").toBe("eugene");
+  });
+
+  it("an approved RE-CLAIM resumes from the checkpoint instead of replaying the paid chair", async () => {
+    const invoke = vi.fn(async () => sealableSignal);
+    const make = () => invoke as unknown as AgentInvoker;
+    mockStore({ claim: APPROVAL_CLAIM });
+    expect((await workOnce(CTX, { makeInvoke: make }) as { status: string }).status).toBe("awaiting_approval");
+    expect(invoke).toHaveBeenCalledTimes(1);
+    // Approved, re-queued, claimed again — the scan already sealed and was already paid for.
+    mockStore({ claim: APPROVED_CLAIM });
+    const second = await workOnce(CTX, { makeInvoke: make });
+    if (!second.claimed) throw new Error("unreachable");
+    expect(second.status).toBe("complete");
+    expect(invoke, "the model chair must be restored, not re-run").toHaveBeenCalledTimes(1);
+  });
+
+  it("a checkpoint the run identity has moved under is re-run COLD, not failed", async () => {
+    const invoke = vi.fn(async () => sealableSignal);
+    const make = () => invoke as unknown as AgentInvoker;
+    const lines: string[] = [];
+    mockStore({ claim: APPROVAL_CLAIM });
+    await workOnce(CTX, { makeInvoke: make, log: (l) => lines.push(l) });
+    // Same row, different payload — the resume gate refuses (gig_input_sha moved). A refusal is
+    // the engine declining to splice two runs together, not a reason to fail the gig.
+    mockStore({ claim: { ...APPROVED_CLAIM, input: { subject: "a different wire" } } });
+    const second = await workOnce(CTX, { makeInvoke: make, log: (l) => lines.push(l) });
+    if (!second.claimed) throw new Error("unreachable");
+    expect(second.status).toBe("complete");
+    expect(invoke, "cold means the model chair runs again").toHaveBeenCalledTimes(2);
+    expect(lines.join("\n"), "and it must SAY it paid for a cold run").toMatch(/cold/i);
   });
 });
 

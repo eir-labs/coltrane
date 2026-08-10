@@ -25,6 +25,8 @@ import { createRegistry } from "../src/registry.js";
 import { createOutputStore } from "../src/outputs.js";
 import { MemoryLedger } from "../src/ledger.js";
 import { createCheckpointStore } from "../src/reuse.js";
+import { dispatchTool, type ServerDeps } from "../src/server.js";
+import { MCP_TOOLS } from "../src/mcp.js";
 
 const scout = defineAgent({
   slug: "scout", primitives: ["SENSE"], input_types: [], output_types: ["Signal"],
@@ -129,6 +131,75 @@ describe("runtime — the approval seals under the approving principal and compl
     expect(second.status).toBe("complete");
     expect((invoke as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(1); // scan restored, not replayed
     expect(second.outputs.some((o) => o.domain_type === "Judgment" && o.agent_slug === "eugene")).toBe(true);
+  });
+});
+
+// ── the operator's door ──────────────────────────────────────────────────────────
+// The runtime parks and resumes; until the TOOL SURFACE carries the two arguments, no
+// operator can reach either half. An approval mechanism whose only caller is a test is the
+// same defect as an undiscoverable spend ceiling (#234): the control exists and nobody can
+// set it.
+describe("gig_dispatch carries the approval", () => {
+  const props = (s: object): Record<string, unknown> => (s as { properties: Record<string, unknown> }).properties;
+
+  function serverDeps(): ServerDeps {
+    const registry = createRegistry();
+    const s = std();
+    return {
+      registry,
+      outputs: createOutputStore(registry),
+      ledger: new MemoryLedger(),
+      standards: new Map([[s.slug, s]]),
+      invoke: vi.fn(async () => SIGNAL) as unknown as AgentInvoker,
+      gig_runs: new Map(),
+    } as unknown as ServerDeps;
+  }
+
+  it("advertises `approvals` and `approved_by`", () => {
+    const def = MCP_TOOLS.find((t) => t.slug === "gig_dispatch")!;
+    expect(Object.keys(props(def.input_schema))).toEqual(expect.arrayContaining(["approvals", "approved_by"]));
+  });
+
+  it("a dispatch with no approval PARKS, and the reply names the chair that is waiting", async () => {
+    const d = serverDeps();
+    const r = await dispatchTool("gig_dispatch", { standard_slug: "sense-then-approve", input: {}, wait: true }, d);
+    expect(r.ok, r.error).toBe(true);
+    const data = r.data as { status?: string; awaiting?: { phase: string; role: string } };
+    // A parked gig is not a failed one, and "complete" would be a lie about an unsealed chair.
+    expect(data.status).toBe("awaiting_approval");
+    expect(data.awaiting).toEqual({ phase: "approve", role: "approve" });
+  });
+
+  it("approvals + approved_by reach the run: it completes and seals under the approver", async () => {
+    const d = serverDeps();
+    const r = await dispatchTool("gig_dispatch", {
+      standard_slug: "sense-then-approve", input: {}, wait: true,
+      approvals: { approve: APPROVAL }, approved_by: "eugene",
+    }, d);
+    expect(r.ok, r.error).toBe(true);
+    const data = r.data as { status?: string; manifest?: { output_count?: number } };
+    expect(data.status).toBe("complete");
+    expect(data.manifest?.output_count).toBe(2);
+    const judgment = d.outputs.all().find((o) => o.domain_type === "Judgment");
+    expect(judgment?.agent_slug, "the seal carries the approving principal, not \"human\"").toBe("eugene");
+  });
+
+  it("the ASYNC path parks too, and gig_monitor names the chair", async () => {
+    // Async is the DEFAULT dispatch mode, and its reply is only an id — so gig_monitor is the
+    // only place a parked run can be discovered. A `.then` that recorded every settled run as
+    // `complete` would erase the park from the one surface that can report it.
+    const d = serverDeps();
+    const r = await dispatchTool("gig_dispatch", { standard_slug: "sense-then-approve", input: {} }, d);
+    expect(r.ok, r.error).toBe(true);
+    const gig_id = (r.data as { gig_id: string }).gig_id;
+    let seen: Record<string, unknown> = {};
+    for (let i = 0; i < 200; i++) {
+      seen = (await dispatchTool("gig_monitor", { gig_id }, d)).data as Record<string, unknown>;
+      if (seen["status"] !== "running") break;
+      await new Promise((res) => setTimeout(res, 5));
+    }
+    expect(seen["status"]).toBe("awaiting_approval");
+    expect(seen["awaiting"]).toEqual({ phase: "approve", role: "approve" });
   });
 });
 

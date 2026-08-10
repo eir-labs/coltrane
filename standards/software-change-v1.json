@@ -64,7 +64,10 @@
           "output_contract": [
             "change-plan"
           ],
-          "required_skills": []
+          "required_skills": [],
+          "preferred_skills": [
+            "structure-conformance"
+          ]
         }
       ],
       "intent": "Settle the structure the change will be built through: ordered steps with explicit dependencies, the checks that land FIRST together with what each reports while the change is absent, the paths the plan commits to touching, and the tradeoff at every step where more than one structure would have served."
@@ -84,7 +87,10 @@
           "output_contract": [
             "change-set"
           ],
-          "required_skills": []
+          "required_skills": [],
+          "preferred_skills": [
+            "structure-conformance"
+          ]
         }
       ],
       "intent": "Make the change the structure implies, as patch content plus the checks it introduces. Where the artefact left the plan, the departure is recorded with its reason \u2014 the same seat that settled the structure is the one accountable for saying where it did not hold."

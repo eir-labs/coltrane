@@ -32,6 +32,28 @@
     "analyst",
     "synthesizer"
   ],
+  "skills": [
+    {
+      "slug": "structure-conformance",
+      "version": 1,
+      "skill_type": "analysis",
+      "description": "Conform a settled structure to the constraints of the house it is being built in, and report where the two disagree rather than resolving the disagreement silently. Carried by this seat, not borrowed from a repertoire: it is the technique the making seat develops by making, and it travels with the seat into any institution that seats it.",
+      "hydration": {
+        "house-style": {
+          "type": "string",
+          "description": "The institution's own written formatting, naming and layout constraints. Filled at seat time from the chair that seats this agent — the technique is the same in every institution, the constraints are not.",
+          "binding": "institution"
+        },
+        "target-paths": {
+          "type": "array",
+          "description": "The files or regions this run's artefact is expected to touch. Filled at dispatch time from the gig payload: a formal parameter of the run, not a property of the institution, so no seating can answer it in advance.",
+          "required": true,
+          "binding": "gig"
+        }
+      },
+      "md": "# Structure conformance\n\nA structure is answerable twice: to the decision it serves, and to the conventions of the house it is being built in. This technique checks the second without loosening the first.\n\n1. Restate the settled structure as an ordered list of steps, each naming the observation that shows it was done.\n2. Read the constraints supplied in the `house-style` slot and list the ones that bear on those steps. A constraint that bears on nothing is not applied.\n3. For each step, name the constraints it satisfies, and the constraints it cannot satisfy without reopening the upstream decision. Report the second set; do not resolve it here.\n4. Confine the artefact to the regions supplied in the `target-paths` slot. A step that reaches outside them is recorded as a departure with its reason, never included silently.\n5. Where a slot is unfilled, say so in the output and proceed on the upstream record alone. Never infer a house convention from the material at hand: an inferred convention is indistinguishable in the artefact from a stated one, and only one of them is binding."
+    }
+  ],
   "model_tier": "premium",
   "depth_profile": "standard"
 }

@@ -26,12 +26,21 @@ import {
 } from "./loader.js";
 import { writeGenomeFileVersioned } from "./genome_writer.js";
 import { defineAgent, composeStandard, type Agent, type Standard, type PhaseDef } from "./composition.js";
-import { DomainTypeSchema, SkillSchema } from "./genome_schema.js";
+import { composeChart, chartEntrySeedTypes, type Chart, type Venue } from "./chart.js";
+import { DomainTypeSchema, SkillSchema, ChartSchema, VenueSchema, venueDefect } from "./genome_schema.js";
 import { domainTypeDefect } from "./registry.js";
 import { CANONICAL_CORE_TYPES } from "./canonical_core_types.js";
 
-/** The genome classes a store can persist. (Core types are engine-owned and immutable.) */
-export type GenomeClass = "agent" | "standard" | "skill" | "domain_type";
+/** The genome classes a store can persist. (Core types are engine-owned and immutable.)
+ *
+ *  `chart` and `venue` are here because the ENGINE now authors them — the file backing writes
+ *  charts/<slug>.json and venues/<slug>.json, and the class rides through the PostgREST upsert
+ *  unchanged. The STORE side is not yet built: `coltrane_genome_upsert` has no branch for either
+ *  class and there are no chart/venue tables, so a hosted venue_define reaches the RPC and is
+ *  refused BY THE STORE, loudly, with the store's own message. That refusal is the honest state —
+ *  the class passes through the port it is supposed to pass through and the missing half says so
+ *  itself, rather than the engine pretending the class does not exist. */
+export type GenomeClass = "agent" | "standard" | "skill" | "domain_type" | "chart" | "venue";
 
 /** Where definitions live. load() yields the loader's genome shape; upsert() persists one
  *  definition of a class. The file impl writes genome files; the PostgREST impl rides the
@@ -56,6 +65,8 @@ const CLASS_SUBDIR: Record<GenomeClass, string> = {
   standard: "standards",
   skill: "skills",
   domain_type: "domain_types",
+  chart: "charts",
+  venue: "venues",
 };
 
 /** Local-dev backing: the existing loader/writer, behavior identical. load() is
@@ -105,6 +116,8 @@ const Q = {
     "identity,method,constraints,depth_profile,permissions,behavioral_primitives,skill_slots,default_skills,carried_skills",
   standards: "coltrane_standards?select=slug,version,status,domain,phases,input_types,output_types",
   skills: "coltrane_skills?select=slug,name,description,skill_md,tier,input_type,output_type,status",
+  charts: "coltrane_charts?select=slug,definition",
+  venues: "coltrane_venues?select=slug,definition",
 } as const;
 
 type Row = Record<string, unknown>;
@@ -171,6 +184,10 @@ export interface GenomeRows {
   agents: Row[];
   standards: Row[];
   skills: Row[];
+  /** Rows of {slug, definition} — the definition jsonb IS the file shape, validated through
+   *  the same gates the loader runs (ChartSchema+composeChart / VenueSchema+venueDefect). */
+  charts?: Row[];
+  venues?: Row[];
 }
 
 /** Reconstruct the loader's in-memory genome shape from store rows — ONE reconstruction,
@@ -303,8 +320,53 @@ export function reconstructGenome(rows: GenomeRows): LoadedGenome {
   // evals — no hosted table today; present and empty, the same shape as a genome
   // root with no evals/ directory.
   const evals = new Map<string, EvalRecord>();
+  // charts + venues — likewise: the classes exist in the engine and are authorable over the file
+  // backing, but the store has no coltrane_charts / coltrane_venues table to read yet. Present and
+  // empty is the same shape as a genome root with no charts/ or venues/ directory, so every reader
+  // (chart_browse, gig_dispatch, system_health) behaves identically against a hosted genome — it
+  // finds nothing, and says nothing was found. Adding the two tables + the upsert branches is
+  // store-side work; nothing here changes when they land.
+  const charts = new Map<string, Chart>();
+  const venues = new Map<string, Venue>();
 
-  return { core_types, domain_types, agents, standards, skills, evals, load_errors };
+  // venues before charts — a chart names a venue, exactly the loader's ordering.
+  for (const r of rows.venues ?? []) {
+    const slug = typeof r["slug"] === "string" ? r["slug"] : null;
+    const path = `postgrest:coltrane_venues/${slug ?? "?"}`;
+    try {
+      const check = VenueSchema.safeParse(r["definition"]);
+      if (!check.success) throw new Error(`venue schema validation failed — ${zodWhy(check.error.issues)}`);
+      const defect = venueDefect(check.data);
+      if (defect) throw new Error(defect);
+      if (venues.has(check.data.slug)) throw new Error(`duplicate venue slug "${check.data.slug}"`);
+      venues.set(check.data.slug, check.data);
+    } catch (e) {
+      load_errors.push({ kind: "venue", path, slug, error: e instanceof Error ? e.message : String(e) });
+    }
+  }
+  for (const r of rows.charts ?? []) {
+    const slug = typeof r["slug"] === "string" ? r["slug"] : null;
+    const path = `postgrest:coltrane_charts/${slug ?? "?"}`;
+    try {
+      const check = ChartSchema.safeParse(r["definition"]);
+      if (!check.success) throw new Error(`R0: chart does not parse — ${zodWhy(check.error.issues)}`);
+      if (charts.has(check.data.slug)) throw new Error(`duplicate chart slug "${check.data.slug}"`);
+      const composed = composeChart({
+        chart: check.data,
+        standards,
+        agents,
+        venues,
+        // the loader's own load-time stand-in for the dispatch payload
+        payload_types: chartEntrySeedTypes(check.data, standards),
+      });
+      if (!composed.ok) throw new Error(composed.violations.map((v) => `${v.rule}: ${v.detail}`).join(" | "));
+      charts.set(check.data.slug, composed.chart);
+    } catch (e) {
+      load_errors.push({ kind: "chart", path, slug, error: e instanceof Error ? e.message : String(e) });
+    }
+  }
+
+  return { core_types, domain_types, agents, standards, skills, evals, charts, venues, load_errors };
 }
 
 /** Hosted backing: load the genome from the store's five tables and reconstruct the SAME
@@ -312,14 +374,16 @@ export function reconstructGenome(rows: GenomeRows): LoadedGenome {
 export function postgrestGenomeStore(ctx: PostgrestContext): GenomeStore {
   return {
     async load(): Promise<LoadedGenome> {
-      const [core_types, domain_types, agents, standards, skills] = await Promise.all([
+      const [core_types, domain_types, agents, standards, skills, charts, venues] = await Promise.all([
         restGet(ctx, Q.core_types),
         restGet(ctx, Q.domain_types),
         restGet(ctx, Q.agents),
         restGet(ctx, Q.standards),
         restGet(ctx, Q.skills),
+        restGet(ctx, Q.charts),
+        restGet(ctx, Q.venues),
       ]);
-      return reconstructGenome({ core_types, domain_types, agents, standards, skills });
+      return reconstructGenome({ core_types, domain_types, agents, standards, skills, charts, venues });
     },
 
     async upsert(cls: GenomeClass, payload: Record<string, unknown>, org_slug?: string): Promise<void> {
@@ -380,6 +444,8 @@ export function rpcGenomeStore(ctx: { baseUrl: string; anonKey: string; agentTok
         agents: rows.agents ?? [],
         standards: rows.standards ?? [],
         skills: rows.skills ?? [],
+        charts: rows.charts ?? [],
+        venues: rows.venues ?? [],
       });
     },
     async upsert(): Promise<void> {

@@ -103,6 +103,12 @@ const GENOME_ROWS = {
     },
   ],
   skills: [],
+  venues: [
+    { slug: "bare-room", definition: { slug: "bare-room", institution_slug: "demo", equipment: { tools: [] }, lifecycle: { policy: "ephemeral" } } },
+  ],
+  charts: [
+    { slug: "wire-set-v0", definition: { slug: "wire-set-v0", movements: [{ movement_id: "only", standard_slug: "wire-run-v0" }] } },
+  ],
 };
 
 const CLAIM = {
@@ -200,6 +206,9 @@ describe("rpcGenomeStore — the org genome, readable through a ctk bearer", () 
     expect(genome.agents.get("scout")!.skills?.[0]?.slug).toBe("carried-probe");
     expect(genome.standards.has("wire-run-v0")).toBe(true);
     expect(genome.core_types.size).toBe(6); // canonical seed on empty rows
+    // charts + venues ride the store round-trip through the same gates the loader runs
+    expect(genome.venues.has("bare-room")).toBe(true);
+    expect(genome.charts.has("wire-set-v0")).toBe(true);
     expect(genome.load_errors).toEqual([]);
     // input_types survived the round-trip: the seeded-entry standard composed instead of
     // dying with "requires Signal not produced by any upstream chair".

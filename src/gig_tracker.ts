@@ -35,6 +35,10 @@ export type GigStatus = "running" | "complete" | "failed" | "aborted" | "awaitin
 export interface GigRunState {
   gig_id: string;
   standard_slug: string;
+  /** Set when this run is a PERFORMANCE of a chart rather than of one standard. `standard_slug`
+   *  then names the standard the performance opens with — a chart has no single standard, so the
+   *  arrangement is named here instead of overloading the field that means one thing. */
+  chart_slug?: string;
   status: GigStatus;
   started_at: string;
   finished_at?: string;

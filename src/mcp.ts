@@ -1,5 +1,5 @@
 import type { ChangeClass } from "./type_versioning.js";
-import { zodToMcpProps, AgentSchema, StandardSchema, SkillSchema, DomainTypeSchema } from "./genome_schema.js";
+import { zodToMcpProps, AgentSchema, StandardSchema, SkillSchema, DomainTypeSchema, ChartSchema, VenueSchema } from "./genome_schema.js";
 
 export type MCPCategory =
   | "understand"
@@ -49,11 +49,23 @@ export const MCP_TOOLS: readonly MCPToolDef[] = [
   // (no filesystem) turned that local assumption into an undiscoverable-slug hole.
   { slug: "standard_browse",               category: "understand", input_schema: obj({ domain: "string", status: "string" }), output_schema: obj({ standards: "array", count: "number" }) },
   { slug: "agent_browse",                  category: "understand", input_schema: obj({ domain: "string", primitive: "string" }), output_schema: obj({ agents: "array", count: "number" }) },
+  // The chart and the venue joined the parity table when they became authorable (0.7.0 shipped
+  // ChartSchema with no MCP surface at all, which is why there was nothing to list). A chart row
+  // carries what a dispatcher chooses on: the movements' standards, how many edges and gates the
+  // arrangement has, the room it is held in, and a chart_hash prefix to tell two arrangements apart.
+  { slug: "chart_browse",                  category: "understand", input_schema: obj({ venue: "string", standard_slug: "string" }), output_schema: obj({ charts: "array", count: "number" }) },
+  // A venue row carries what a SEATING decides on: whose institution owns the room, how much
+  // equipment it holds at all (the ceiling), whether anything may leave it, and its lifecycle.
+  { slug: "venue_browse",                  category: "understand", input_schema: obj({ institution_slug: "string", flavor: "string" }), output_schema: obj({ venues: "array", count: "number" }) },
   // Tier-1 traversal by default (compact rows: id, gig_id, agent, phase, content_sha, preview,
   // storage_ref…). `output_id`/`content_sha` + `include_data:true` is the deeper second pass —
   // it fetches ONE output's full payload from the artifact tier (local mirror, or remote when drained).
   { slug: "output_query",                  category: "understand", input_schema: obj({ domain_type: "string", gig_id: "string", agent_slug: "string", data_filter: "object", output_id: "string", content_sha: "string", include_data: "boolean" }), output_schema: obj({ outputs: "array", total_count: "number" }) },
-  { slug: "output_trace",                  category: "understand", input_schema: obj({ output_id: "string", direction: "string", max_depth: "number" }), output_schema: obj({ graph: "object", root_signals: "array", terminal_outputs: "array" }) },
+  // The walk crosses a chart's MOVEMENT boundaries: each graph node carries the `gig_id` it was
+  // sealed under plus its `movement`/`performance_gig_id`, and `crossed` when the walk left the
+  // seed's gig to reach it. `missing` names each referenced content_sha this store does not hold
+  // — a hole in the chain is reported, never dropped. `direction` echoes which way was walked.
+  { slug: "output_trace",                  category: "understand", input_schema: obj({ output_id: "string", direction: "string", max_depth: "number" }), output_schema: obj({ graph: "object", direction: "string", root_signals: "array", terminal_outputs: "array", missing: "array" }) },
   { slug: "charter_read",          category: "understand", input_schema: obj({ path: "string" }), output_schema: obj({ products: "array", goals: "array", pain_points: "array", tech_stack: "array", access_grants: "array" }) },
   // #217 — advertised contract == handler. The five filters src/server.ts actually reads, and
   // the two keys it actually returns. The old {company_id, domain} in / {gigs,
@@ -72,6 +84,12 @@ export const MCP_TOOLS: readonly MCPToolDef[] = [
   { slug: "agent_define",                  category: "build", input_schema: obj(zodToMcpProps(AgentSchema)), output_schema: obj({ agent_profile_id: "string", validation_result: "object" }) },
   { slug: "agent_evolve",                  category: "build", input_schema: obj({ slug: "string", changes: "object", base: "object", next: "object", new_version: "number", reason: "string", evidence: "object" }), output_schema: obj({ new_version: "number", cascade_check: "object" }) },
   { slug: "standard_compose",              category: "build", input_schema: obj(zodToMcpProps(StandardSchema)), output_schema: obj({ standard_id: "string", validation_result: "object" }) },
+  // chart_define / venue_define — generated from their schemas, like every migrated class. The
+  // define call is where a chart's eleven rules and a venue's cross-field rules fire, so
+  // `validation_result` carries the STRUCTURED violation list (rule + detail + where), not a
+  // boolean: a chart is refused for one named reason at one named place.
+  { slug: "chart_define",                  category: "build", input_schema: obj(zodToMcpProps(ChartSchema)), output_schema: obj({ chart_id: "string", chart_hash: "string", validation_result: "object" }) },
+  { slug: "venue_define",                  category: "build", input_schema: obj(zodToMcpProps(VenueSchema)), output_schema: obj({ venue_id: "string", validation_result: "object" }) },
   // #239 — `basis`/`sample_size` say WHERE the estimate came from (a measured mean of real runs,
   // the standard's real structure, or a per-slug guess). estimated_duration_ms is the key the
   // handler actually returns; the old `estimated_duration` was never present on a response.
@@ -113,7 +131,14 @@ export const MCP_TOOLS: readonly MCPToolDef[] = [
   // verdict then seals through the same gate as every other output, under `approved_by`.
   // Undiscoverable, they would be an approval gate no operator could pass — #234 again, on
   // the one control whose whole purpose is to be exercised by a person.
-  { slug: "gig_dispatch",                  category: "run", input_schema: obj({ standard_slug: "string", input: "object", depth: "string", wait: "boolean", budget: "object", resume_gig_id: "string", reuse: "boolean", approvals: "object", approved_by: "string" }), output_schema: obj({ gig_id: "string", status: "string", awaiting: "object", depth: "string", manifest: "object", resumed_from: "string", reuse: "boolean", resume_refused: "boolean", drift: "array" }) },
+  // `chart_slug` is the second way to name what a gig performs, and it is EXCLUSIVE with
+  // `standard_slug`: "a standard AND a chart" names two performances, "neither" names none, and a
+  // single-standard dispatch already IS the one-movement chart. Both are optional at the schema
+  // level so no existing caller's shape breaks; the exactly-one refinement lives in the handler
+  // (dispatchTarget, src/chart.ts). A chart dispatch's reply carries the ARRANGEMENT's manifest —
+  // chart_hash, the per-movement roll-up, cumulative spend against the envelope — where a standard
+  // dispatch carries the run's.
+  { slug: "gig_dispatch",                  category: "run", input_schema: obj({ standard_slug: "string", chart_slug: "string", input: "object", depth: "string", wait: "boolean", budget: "object", resume_gig_id: "string", reuse: "boolean", approvals: "object", approved_by: "string" }), output_schema: obj({ gig_id: "string", status: "string", awaiting: "object", depth: "string", manifest: "object", resumed_from: "string", reuse: "boolean", resume_refused: "boolean", drift: "array" }) },
   // `skipped_chairs` / `resumed_from` / `reuse_rejected` are the ASYNC path's only report of a
   // saving — the manifest never reaches a caller who dispatched without `wait`.
   // `awaiting` names the human chair a parked run stopped at. On the async path — the DEFAULT

@@ -27,7 +27,7 @@
 import { randomUUID } from "node:crypto";
 import { ChartSchema, type ChartInput, type ChartOutput, type ChartEdgeOutput, type ChartApprovalGateOutput } from "./genome_schema.js";
 import type { Agent, Chair, Standard } from "./composition.js";
-import type { OutputRecord } from "./outputs.js";
+import { composeMovementGigId, type OutputRecord } from "./outputs.js";
 import { canonJson, sha256Hex, CANONICAL_FORM_VERSION } from "./canonical_form.js";
 import { producersSha, CHECKPOINT_SCHEMA_VERSION, type CheckpointRole, type GigCheckpoint, type PriorBudgetState, type RunIdentity } from "./reuse.js";
 import { runGig, genomeHash, outputSatisfiesType, CORE_TO_PRIMITIVE, ResumeRefused, type GigResult, type RunDeps } from "./runtime.js";
@@ -486,13 +486,17 @@ export function chartCheckpointId(gig_id: string): string {
  * The degenerate chart's movement runs under the chart's own id, unchanged — same outputs file,
  * same checkpoint, same ledger row id a single-standard dispatch always had. A real arrangement
  * gives each movement its own id, so one movement's checkpoint, header and row cannot be another's.
- * (Whether the movements of one chart should instead SHARE a gig id — which would make
- * `OutputStore.trace`, scoped to a single gig, walk the whole performance — is the open question
- * the spec deliberately left unresolved. Provenance survives either way: a sink's records carry the
- * source's `input_refs`/`input_shas`, and `OutputStore.get` resolves them across gigs.)
+ *
+ * The spec left open whether the movements of one chart should instead SHARE a gig id, so that
+ * `OutputStore.trace` — scoped to a single gig — would walk the whole performance. That question
+ * is now ANSWERED THE OTHER WAY: the ids stay separate (a movement keeps its own checkpoint,
+ * header and row) and the STORE learned the id scheme instead. `performanceRoot` reads a
+ * performance off a movement's gig id, so `trace` walks the whole arrangement and LABELS each
+ * node with the movement it lived in. The composition is the one owner of how the id is built;
+ * the store is the one owner of how it is read back apart.
  */
 export function movementGigId(plan: { chart: Chart }, gig_id: string, movement_id: string): string {
-  return isDegenerateChart(plan.chart) ? gig_id : `${gig_id}.m.${movement_id}`;
+  return isDegenerateChart(plan.chart) ? gig_id : composeMovementGigId(gig_id, movement_id);
 }
 
 /** Where a movement's own checkpoint lives. Equal to the gig id, as `runGig` expects. */

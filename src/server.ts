@@ -22,7 +22,10 @@ import type { GenomeStore, GenomeClass } from "./genome_store.js";
 import { runSkillFixtures, executeSkill, loadFixtures } from "./skill_subprocess.js";
 import { evolveSkill } from "./skills.js";
 import { sealAgentDefinition, sealDefinition, sealSkillPackage, recordIdentity } from "./genome_writer.js";
-import { createOutputStore, defaultOutputsPersistDir, type OutputStore, type OutputRecord } from "./outputs.js";
+import {
+  createOutputStore, defaultOutputsPersistDir,
+  type OutputStore, type OutputRecord, type TraceDirection, type TraceMissingNode, type TraceRecordNode,
+} from "./outputs.js";
 import { createOutputMirror, defaultMirrorDir, outputPreview, mirrorStorageRef, type OutputMirror, type OutputMeta } from "./output_mirror.js";
 import {
   FileLedger, LedgerError, LEDGER_SCHEMA_VERSION, defaultLedgerPath,
@@ -574,36 +577,30 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         if (!["upstream", "downstream", "both"].includes(direction)) {
           return { ok: false, requires_approval: approval, error: `unrecognized direction "${direction}" — use "upstream", "downstream" or "both"` };
         }
-        const upstream = direction === "downstream"
-          ? []
-          : deps.outputs.trace(id, maxDepth !== undefined ? { max_depth: maxDepth } : undefined);
-        // Forward walk: a node's children are the outputs naming it in their input_refs.
-        const downstream: typeof upstream = [];
-        if (direction !== "upstream") {
-          const all = deps.outputs.all();
-          const seen = new Set<string>([id]);
-          let frontier = [id];
-          for (let depth = 0; frontier.length && (maxDepth === undefined || depth < maxDepth); depth++) {
-            const next: string[] = [];
-            for (const o of all) {
-              if (seen.has(o.id)) continue;
-              if (o.input_refs.some((r) => frontier.includes(r))) {
-                seen.add(o.id); downstream.push(o); next.push(o.id);
-              }
-            }
-            frontier = next;
-          }
-        }
-        const nodes = direction === "upstream" ? upstream
-          : direction === "downstream" ? downstream
-          : [...upstream, ...downstream.filter((d) => !upstream.some((u) => u.id === d.id))];
+        // The WALK — every direction of it — belongs to the store, which is the one owner of the
+        // performance-family crossing rule and of the labels that make a crossing visible. This
+        // handler used to hand-roll the forward walk over `all()`, which gave downstream a
+        // different scope than upstream (none at all) and no labels either.
+        const nodes = deps.outputs.trace(id, {
+          ...(maxDepth !== undefined ? { max_depth: maxDepth } : {}),
+          direction: direction as TraceDirection,
+        });
+        // A hole is reported as itself: named on its own key AND left in the graph, never dropped
+        // from either. It is deliberately kept OUT of the two classifications, which read fields
+        // an absent record does not have — a hole carries no `input_refs`, so the root-signal test
+        // ("nothing upstream of it") would have called every unresolvable reference a root signal,
+        // which is the opposite of what is known about it: nothing at all.
+        const missing = nodes.filter((n): n is TraceMissingNode => n.missing === true);
+        const held = nodes.filter((n): n is TraceRecordNode => n.missing !== true);
+        const all = deps.outputs.all();
         return {
           ok: true, requires_approval: approval,
           data: {
             graph: { nodes }, direction,
-            root_signals: nodes.filter((o) => o.input_refs.length === 0),
+            root_signals: held.filter((o) => o.input_refs.length === 0),
             // The other end of the chain: outputs nothing else was derived from.
-            terminal_outputs: nodes.filter((o) => !deps.outputs.all().some((x) => x.input_refs.includes(o.id))),
+            terminal_outputs: held.filter((o) => !all.some((x) => x.input_refs.includes(o.id))),
+            missing,
           },
         };
       }

@@ -22,7 +22,8 @@
 //   verdict.failed     ≈ output with core_type='Verdict' and data.pass === false
 //   cycle              ≈ gig_id
 //   event_hash         ≈ output_id (or the content_hash if one is computed)
-//   cycle_lineage      ≈ output_trace(output_id) restricted to a single gig_id
+//   cycle_lineage      ≈ output_trace(output_id) restricted to one PERFORMANCE (a gig plus the
+//                        movement gigs of its chart — see outputs.ts `performanceRoot`)
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { setupTempdirColtrane, type TempdirColtrane } from "./_harness.js";
@@ -238,9 +239,10 @@ describe("chain_query primitives (T7) — failure_rate + cycle_lineage", () => {
     const nodes = (trace.data as { graph: { nodes: Array<{ id: string; gig_id: string }> } }).graph.nodes;
     const otherGigNodes = nodes.filter((n) => n.gig_id !== gigLater);
 
-    // GREEN: output_trace scopes the walk to the seed's gig_id. Cross-gig
-    // ancestors do not leak into the trace. cycle_lineage's gig-scope guarantee
-    // is enforced at the store layer (outputs.ts trace()).
+    // GREEN: output_trace scopes the walk to the seed's PERFORMANCE — the gig, plus the sibling
+    // movement gigs of the same chart (`<gig>.m.<movement>`), and nothing else. These two gig ids
+    // are unrelated, so an ancestor across them stays out: cycle_lineage's scope guarantee is
+    // enforced at the store layer (outputs.ts trace(), `performanceRoot`).
     expect(otherGigNodes.length).toBe(0);
   });
 });

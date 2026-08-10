@@ -53,7 +53,11 @@ export const MCP_TOOLS: readonly MCPToolDef[] = [
   // storage_ref…). `output_id`/`content_sha` + `include_data:true` is the deeper second pass —
   // it fetches ONE output's full payload from the artifact tier (local mirror, or remote when drained).
   { slug: "output_query",                  category: "understand", input_schema: obj({ domain_type: "string", gig_id: "string", agent_slug: "string", data_filter: "object", output_id: "string", content_sha: "string", include_data: "boolean" }), output_schema: obj({ outputs: "array", total_count: "number" }) },
-  { slug: "output_trace",                  category: "understand", input_schema: obj({ output_id: "string", direction: "string", max_depth: "number" }), output_schema: obj({ graph: "object", root_signals: "array", terminal_outputs: "array" }) },
+  // The walk crosses a chart's MOVEMENT boundaries: each graph node carries the `gig_id` it was
+  // sealed under plus its `movement`/`performance_gig_id`, and `crossed` when the walk left the
+  // seed's gig to reach it. `missing` names each referenced content_sha this store does not hold
+  // — a hole in the chain is reported, never dropped. `direction` echoes which way was walked.
+  { slug: "output_trace",                  category: "understand", input_schema: obj({ output_id: "string", direction: "string", max_depth: "number" }), output_schema: obj({ graph: "object", direction: "string", root_signals: "array", terminal_outputs: "array", missing: "array" }) },
   { slug: "charter_read",          category: "understand", input_schema: obj({ path: "string" }), output_schema: obj({ products: "array", goals: "array", pain_points: "array", tech_stack: "array", access_grants: "array" }) },
   // #217 — advertised contract == handler. The five filters src/server.ts actually reads, and
   // the two keys it actually returns. The old {company_id, domain} in / {gigs,

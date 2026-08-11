@@ -241,6 +241,84 @@ export class ModelOutputParseError extends Error {
   }
 }
 
+/**
+ * A payload that parsed cleanly but VIOLATES its output_contract, after the bounded in-loop
+ * repair was exhausted. Distinct from ModelOutputParseError (which is "no answer / unparseable
+ * answer"): this is a well-formed answer that does not satisfy the schema the seal enforces.
+ *
+ * It exists so the failure is legible at the write boundary — the earliest frame the predicate
+ * is answerable and the producer could still have acted — rather than post-hoc at seal, after
+ * the agent process has exited (runtime.ts validateWrite, which now only ever fires as an
+ * unreachable backstop for a model chair).
+ */
+export class ModelOutputContractError extends Error {
+  readonly slug: string;
+  readonly reason: string;
+  readonly attempts: number;
+  constructor(slug: string, reason: string, attempts: number) {
+    super(
+      `chair "${slug}" did not satisfy its output_contract after ${attempts} attempt(s): ${reason}. ` +
+        `The payload was adjudicated at the write boundary and rejected, so nothing was sealed.`,
+    );
+    this.name = "ModelOutputContractError";
+    this.slug = slug;
+    this.reason = reason;
+    this.attempts = attempts;
+  }
+}
+
+/** How many in-loop repair re-prompts a chair gets before its output fails the contract. */
+export const MAX_CONTRACT_REPAIRS = 2;
+
+/**
+ * Adjudicate an EXTRACTED chair payload against its output_contract, using the SAME
+ * `registry.validate` the seal runs (outputs.ts checkWritable → registry.validate). Returns a
+ * human-readable reason when the payload violates the contract, or `undefined` when it satisfies
+ * it — or cannot be checked here (no registry wired, or a bare-core / freeform / unregistered
+ * type, all of which registry.validate itself treats as pass or defers to the seal).
+ *
+ * The slice logic MIRRORS the runtime's (runtime.ts ~2187): a multi-output blob is keyed by
+ * type slug, so each PRESENT key is validated and an ABSENT key is skipped (optionality is the
+ * seal's business via `optional_outputs`, and nothing about a run's arguments is known here); a
+ * single-output blob is either keyed by its type slug or IS the bare data object. What the
+ * invoker checks is therefore exactly what the seal would enforce, so the two cannot disagree.
+ */
+export function contractViolation(
+  registry: Registry | undefined,
+  sealTypes: readonly string[],
+  payload: Record<string, unknown>,
+): string | undefined {
+  if (!registry) return undefined;
+  const single = sealTypes.length === 1;
+  const problems: string[] = [];
+  for (const t of sealTypes) {
+    const keyed = payload[t] as Record<string, unknown> | undefined;
+    const slice = keyed !== undefined && keyed !== null ? keyed : single ? payload : undefined;
+    if (slice === undefined || slice === null) continue; // absent → seal adjudicates optionality
+    if (typeof slice !== "object" || Array.isArray(slice)) {
+      problems.push(`"${t}" must be a JSON object, got ${Array.isArray(slice) ? "array" : typeof slice}`);
+      continue;
+    }
+    const res = registry.validate({ core_type: "", domain_type: t, data: slice as Record<string, unknown> });
+    if (!res.valid) problems.push(`"${t}": ${res.errors.join("; ")}`);
+  }
+  return problems.length > 0 ? problems.join(" | ") : undefined;
+}
+
+/**
+ * The repair instruction appended to the ORIGINAL prompt for an in-loop retry. Names the exact
+ * contract violation so the model corrects THIS defect — the difference between a targeted
+ * repair and a blind restart.
+ */
+export function repairPromptAppendix(reason: string): string {
+  return (
+    `\n\n# Output Contract Violation — Correct And Re-emit\n` +
+    `Your previous response parsed, but did NOT satisfy the output contract:\n${reason}\n` +
+    `Emit a corrected JSON object that fixes exactly this. ` +
+    `Respond with ONLY the corrected JSON object — no prose, no code fence.`
+  );
+}
+
 export interface ExtractJsonOptions {
   /**
    * Keys the answer is expected to carry. A candidate matches only if it contains **all**
@@ -688,53 +766,74 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
       const maxToolCalls = depthCap === undefined
         ? a.max_tool_calls
         : Math.min(depthCap, a.max_tool_calls ?? depthCap);
-      const baseArgs = buildInvokerArgs(prompt, cfgPath, {
-        model: resolveModel(a.model_tier, opts.model),
-        allowed_tools: effectiveAllowed,
-        disallowed_tools: [...(a.disallowed_tools ?? []), ...codeToolDenials(a.code_tool_access)],
-        max_tool_calls: maxToolCalls,
-      });
-      // Custom run (tests): plain mode, the returned string IS the JSON blob — no streaming.
-      if (customRun) return extractJson(await customRun(bin, baseArgs, spawnBounds), extractOpts);
-      // Default: stream-json so the child's tool calls / reasoning are observable LIVE. Each
-      // event is forwarded to ctx.onEvent (the runtime tees it to the gig's per-chair log);
-      // the final result text is extracted from the stream and parsed into the typed output.
-      const args = [...baseArgs, "--output-format", "stream-json", "--verbose"];
-      // #250 level 3 — the cancellation signal and grace window reach the spawn, so an
-      // aborted gig actually kills its chair child (and never spawns one if already aborted).
-      const stdout = await spawnStreaming(
-        bin, args, spawnBounds, ctx.onEvent, ctx.signal, abortGraceMs,
-        promptViaStdin(prompt) ? prompt : undefined,
-      );
-      const outcome = finalText(stdout);
-      // #223 — the child reported an error result. Both discriminators are required, and
-      // both are verified against the CLI (see the note on StreamOutcome): `subtype` for a
-      // run that did not complete, `is_error` for an API-error payload riding subtype
-      // "success". Neither is a chair answer, and the CLI exits 0 for the subtype cases —
-      // so without this the partial reasoning seals as if it had succeeded.
-      if (outcome.errorSubtype !== undefined) {
-        throw new Error(
-          `claude ended with result subtype "${outcome.errorSubtype}" — the run did not ` +
-            `complete, so any text it emitted is partial reasoning, not an answer`,
+      // Run ONE invocation with the given prompt and return the raw answer text. Custom run
+      // (tests): plain mode, the returned string IS the JSON blob. Default: stream-json so the
+      // child's tool calls / reasoning are observable LIVE, teed to ctx.onEvent.
+      const runOnce = async (promptText: string): Promise<string> => {
+        const baseArgs = buildInvokerArgs(promptText, cfgPath, {
+          model: resolveModel(a.model_tier, opts.model),
+          allowed_tools: effectiveAllowed,
+          disallowed_tools: [...(a.disallowed_tools ?? []), ...codeToolDenials(a.code_tool_access)],
+          max_tool_calls: maxToolCalls,
+        });
+        if (customRun) return await customRun(bin, baseArgs, spawnBounds);
+        const args = [...baseArgs, "--output-format", "stream-json", "--verbose"];
+        // #250 level 3 — the cancellation signal and grace window reach the spawn, so an
+        // aborted gig actually kills its chair child (and never spawns one if already aborted).
+        const stdout = await spawnStreaming(
+          bin, args, spawnBounds, ctx.onEvent, ctx.signal, abortGraceMs,
+          promptViaStdin(promptText) ? promptText : undefined,
         );
+        const outcome = finalText(stdout);
+        // #223 — the child reported an error result. Both discriminators are required, and
+        // both are verified against the CLI (see the note on StreamOutcome): `subtype` for a
+        // run that did not complete, `is_error` for an API-error payload riding subtype
+        // "success". Neither is a chair answer, and the CLI exits 0 for the subtype cases —
+        // so without this the partial reasoning seals as if it had succeeded.
+        if (outcome.errorSubtype !== undefined) {
+          throw new Error(
+            `claude ended with result subtype "${outcome.errorSubtype}" — the run did not ` +
+              `complete, so any text it emitted is partial reasoning, not an answer`,
+          );
+        }
+        if (outcome.apiErrorText !== undefined) {
+          throw new Error(
+            `claude flagged its result with is_error — the payload is an error message, not an ` +
+              `answer: ${outcome.apiErrorText.slice(0, 300)}`,
+          );
+        }
+        // #222 — the stream parsed but carried no answer at all (e.g. only a system/init
+        // event). Report THAT, with the raw stdout as evidence, instead of blaming the model
+        // for emitting no JSON.
+        if (outcome.text.trim() === "") {
+          throw new ModelOutputParseError(
+            "the model produced no answer — the stream carried no result text and no assistant text",
+            0,
+            stdout,
+          );
+        }
+        return outcome.text;
+      };
+
+      // THE WRITE-BOUNDARY GUARD. Extract the payload, then adjudicate it against its
+      // output_contract HERE — the earliest frame the predicate is answerable and the producer
+      // can still act — using the same registry.validate the seal runs. On a violation, RE-PROMPT
+      // the SAME agent with the exact validation error (a targeted repair, not a blind restart),
+      // bounded to MAX_CONTRACT_REPAIRS. Only a persistently-invalid output fails the chair, and
+      // it fails HERE with the reason rather than post-hoc at seal after the agent has exited. The
+      // seal's own validateWrite stays as an unreachable backstop for this path.
+      let promptForAttempt = prompt;
+      let lastViolation = "";
+      for (let attempt = 0; ; attempt++) {
+        const payload = extractJson(await runOnce(promptForAttempt), extractOpts);
+        const violation = contractViolation(opts.registry, sealTypes, payload);
+        if (violation === undefined) return payload;
+        lastViolation = violation;
+        if (attempt >= MAX_CONTRACT_REPAIRS) {
+          throw new ModelOutputContractError(a.slug, lastViolation, attempt + 1);
+        }
+        promptForAttempt = prompt + repairPromptAppendix(violation);
       }
-      if (outcome.apiErrorText !== undefined) {
-        throw new Error(
-          `claude flagged its result with is_error — the payload is an error message, not an ` +
-            `answer: ${outcome.apiErrorText.slice(0, 300)}`,
-        );
-      }
-      // #222 — the stream parsed but carried no answer at all (e.g. only a system/init
-      // event). Report THAT, with the raw stdout as evidence, instead of blaming the model
-      // for emitting no JSON.
-      if (outcome.text.trim() === "") {
-        throw new ModelOutputParseError(
-          "the model produced no answer — the stream carried no result text and no assistant text",
-          0,
-          stdout,
-        );
-      }
-      return extractJson(outcome.text, extractOpts);
     } finally {
       try { unlinkSync(cfgPath); } catch { /* best-effort cleanup */ }
     }

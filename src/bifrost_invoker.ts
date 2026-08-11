@@ -7,7 +7,16 @@
 import type { AgentInvocationContext, AgentInvoker } from "./runtime.js";
 import type { Registry } from "./registry.js";
 import type { ModelTier } from "./pricing.js";
-import { buildPrompt, extractJson, extractOptionsForChair, promptSchemaFor } from "./claude_invoker.js";
+import {
+  buildPrompt,
+  extractJson,
+  extractOptionsForChair,
+  promptSchemaFor,
+  contractViolation,
+  repairPromptAppendix,
+  ModelOutputContractError,
+  MAX_CONTRACT_REPAIRS,
+} from "./claude_invoker.js";
 
 // One model invocation's wall-clock bound. Far below the Claude invoker's 10min
 // chair bound: this path is a single completion, not a tool-using child.
@@ -70,60 +79,67 @@ export function makeBifrostInvoker(opts: BifrostInvokerOptions): AgentInvoker {
 
     const overrideTier = ctx.agent.model_tier ? opts.tierMap?.[ctx.agent.model_tier] : undefined;
     const query = `coltrane chair "${ctx.agent.slug}" (${ctx.phase})`;
-    const body: Record<string, unknown> = {
-      query,
-      messages: [{ role: "user", content: prompt }],
-      budget: { tokens: maxTokens, usd: 0.05, ms: timeoutMs },
-      // context.query is REQUIRED by /v1/generate (422 without it), mirroring the
-      // canonical client, which repeats the top-level query inside context.
-      context: {
+    const extractOpts = extractOptionsForChair(sealTypes, schema);
+
+    // One /v1/generate round-trip for the given prompt → the raw answer text. Bifrost spend is
+    // surfaced through the CLI-shaped `result` event so runGig's usage accounting folds it in
+    // untouched (#235: report only what Bifrost actually said — an absent cost means "not
+    // reported", not "free").
+    const runOnce = async (promptText: string): Promise<string> => {
+      const body: Record<string, unknown> = {
         query,
-        intent: "coltrane",
-        target_seam: "generate",
-        ...(overrideTier ? { override_tier: overrideTier } : {}),
-      },
-      device_token: opts.deviceToken,
+        messages: [{ role: "user", content: promptText }],
+        budget: { tokens: maxTokens, usd: 0.05, ms: timeoutMs },
+        // context.query is REQUIRED by /v1/generate (422 without it), mirroring the
+        // canonical client, which repeats the top-level query inside context.
+        context: {
+          query,
+          intent: "coltrane",
+          target_seam: "generate",
+          ...(overrideTier ? { override_tier: overrideTier } : {}),
+        },
+        device_token: opts.deviceToken,
+      };
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      let reply: BifrostReply;
+      try {
+        const res = await doFetch(endpoint, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+          signal: controller.signal,
+        });
+        if (!res.ok) {
+          const text = await res.text().catch(() => "");
+          throw new Error(`bifrost /v1/generate ${res.status}: ${text.slice(0, 300)}`);
+        }
+        reply = (await res.json()) as BifrostReply;
+      } finally {
+        clearTimeout(timer);
+      }
+      const cost = reply.cost as Record<string, unknown> | number | undefined;
+      const usd = typeof cost === "number" ? cost
+        : cost && typeof cost === "object" && typeof cost["usd"] === "number" ? (cost["usd"] as number)
+        : undefined;
+      ctx.onEvent?.({ type: "result", raw: { ...(usd !== undefined ? { total_cost_usd: usd } : {}) } });
+      return typeof reply.body === "string" ? reply.body : JSON.stringify(reply.body ?? "");
     };
 
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
-    let reply: BifrostReply;
-    try {
-      const res = await doFetch(endpoint, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(body),
-        signal: controller.signal,
-      });
-      if (!res.ok) {
-        const text = await res.text().catch(() => "");
-        throw new Error(`bifrost /v1/generate ${res.status}: ${text.slice(0, 300)}`);
+    // The write-boundary guard, shared with the Claude invoker: adjudicate the extracted payload
+    // against its output_contract HERE (registry.validate, the seal's own enforcer), and on a
+    // violation re-prompt the SAME model with the exact error, bounded to MAX_CONTRACT_REPAIRS.
+    // Only a persistently-invalid output fails the chair — never a silent accept-then-fatal-seal.
+    // #221 policy 5 — the same key signal as the Claude invoker (extractOpts above).
+    let promptForAttempt = prompt;
+    for (let attempt = 0; ; attempt++) {
+      const payload = extractJson(await runOnce(promptForAttempt), extractOpts);
+      const violation = contractViolation(opts.registry, sealTypes, payload);
+      if (violation === undefined) return payload;
+      if (attempt >= MAX_CONTRACT_REPAIRS) {
+        throw new ModelOutputContractError(ctx.agent.slug, violation, attempt + 1);
       }
-      reply = (await res.json()) as BifrostReply;
-    } finally {
-      clearTimeout(timer);
+      promptForAttempt = prompt + repairPromptAppendix(violation);
     }
-
-    // Surface Bifrost spend through the same event shape as the CLI's stream-json
-    // `result`, so the runtime's usage accounting folds it in untouched. Bifrost
-    // cost shapes vary by deployment ({usd} | number | absent) — normalize to usd.
-    //
-    // #235 — this used to emit `usage: { input_tokens: 0, output_tokens: 0 }` unconditionally
-    // and default an absent cost to 0. Both are fabrications: /v1/generate reports no token
-    // counts at all, and a reply with no cost means "not reported", not "free". Folded as fact
-    // they turned the one number in this system that is supposed to be settled truth into a
-    // confident zero. Report only what Bifrost actually said; an empty result event is read by
-    // the runtime as an UNATTRIBUTED invocation, which is exactly what it is.
-    const cost = reply.cost as Record<string, unknown> | number | undefined;
-    const usd = typeof cost === "number" ? cost
-      : cost && typeof cost === "object" && typeof cost["usd"] === "number" ? (cost["usd"] as number)
-      : undefined;
-    ctx.onEvent?.({ type: "result", raw: { ...(usd !== undefined ? { total_cost_usd: usd } : {}) } });
-
-    const text = typeof reply.body === "string" ? reply.body : JSON.stringify(reply.body ?? "");
-    // #221 policy 5 — same key signal as the Claude invoker. The schema is already resolved
-    // above; without this the Bifrost port would share the fixed extractor's behaviour but
-    // none of its disambiguation.
-    return extractJson(text, extractOptionsForChair(sealTypes, schema));
   };
 }

@@ -661,7 +661,12 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         for (const r of refs) {
           deps.outputs.addRef(rec.id, r.to, r.relation as never, primitive);
         }
-        return { ok: true, requires_approval: approval, data: { output_id: rec.id, primitive, output: rec } };
+        // `validation_result` is declared on this tool AND load-bearing: the write validated
+        // (deps.outputs.write → checkWritable) before the row existed, so reaching here means it
+        // passed — an INVALID payload would have thrown and been returned as { ok:false, error }
+        // by dispatchTool's try/catch. Say so, in the same { valid } shape the define/compose
+        // tools use, rather than declaring a field and never returning it (#234 family).
+        return { ok: true, requires_approval: approval, data: { output_id: rec.id, primitive, output: rec, validation_result: { valid: true } } };
       }
       case "execution_history_read": {
         // Read the append-only ledger — the genome's run history. Filterable by

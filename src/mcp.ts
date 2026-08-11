@@ -48,6 +48,11 @@ export const MCP_TOOLS: readonly MCPToolDef[] = [
   // registry grew up in a working tree where `ls standards/` was free — the first hosted mount
   // (no filesystem) turned that local assumption into an undiscoverable-slug hole.
   { slug: "standard_browse",               category: "understand", input_schema: obj({ domain: "string", status: "string" }), output_schema: obj({ standards: "array", count: "number" }) },
+  // The single-record read for a standard, mirroring skill_inspect: browse lists shallow rows,
+  // inspect returns ONE standard's full record — its phases with each chair's seat (role,
+  // agent/skill/human, contracts), its type surface, its evals, and its description. Without it
+  // there was no MCP read path to a standard's whole shape.
+  { slug: "standard_inspect",              category: "understand", input_schema: obj({ slug: "string" }), output_schema: obj({ slug: "string", domain: "string", status: "string", phases: "array", input_types: "array", output_types: "array", eval_slugs: "array", description: nullable("string") }) },
   { slug: "agent_browse",                  category: "understand", input_schema: obj({ domain: "string", primitive: "string" }), output_schema: obj({ agents: "array", count: "number" }) },
   // The chart and the venue joined the parity table when they became authorable (0.7.0 shipped
   // ChartSchema with no MCP surface at all, which is why there was nothing to list). A chart row
@@ -150,6 +155,13 @@ export const MCP_TOOLS: readonly MCPToolDef[] = [
   // `aborted` now means "this call delivered a cancellation to a live run", not "we looked at
   // the stores and guessed"; `cancellable` says whether this server could reach the run at all.
   { slug: "gig_abort",                     category: "run", input_schema: obj({ gig_id: "string", reason: "string" }), output_schema: obj({ status: "string", aborted: "boolean", cancellable: "boolean", cleanup_result: "object" }) },
+  // Approval is a MEMBER act — the web console does it, and this is the same act over MCP so a
+  // human on an MCP client can approve a parked gig over the wire. `verdict` is the Judgment the
+  // human seat seals. The tool is a pure pass-through to the store's member-JWT-only
+  // coltrane_gig_approve RPC (an agent token is refused store-side, which is where that
+  // enforcement belongs); hosted routes to deps.approveGig, non-hosted has no local run to
+  // approve (a local run takes its verdicts through gig_dispatch's `approvals`).
+  { slug: "gig_approve",                   category: "run", input_schema: obj({ gig_id: "string", role: "string", verdict: "object" }), output_schema: obj({ gig_id: "string", role: "string", status: "string", approved: "boolean" }) },
   // #234 — `gig_id`, `agent_slug` and `phase` were read by the handler and advertised nowhere.
   // This one had teeth: a skill prompt written against this schema omits `gig_id`, the handler
   // defaults it to "", and the sealed output lands in the store attached to NO gig. A live run

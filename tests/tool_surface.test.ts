@@ -83,6 +83,46 @@ describe("hosted mode — local-process tools fail honestly, nothing spawns", ()
     expect(res.error).toMatch(/may_dispatch/);
   });
 
+  // ── gig_approve — the member approval act over MCP (engine seam, store authorizes) ──────────
+  it("gig_approve is in the surface", () => {
+    const surface = createToolSurface(bareDeps());
+    expect(surface.find((t) => t.name === "gig_approve"), "gig_approve must be a mounted tool").toBeDefined();
+    expect(MCP_TOOLS.find((t) => t.slug === "gig_approve")?.category).toBe("run");
+  });
+
+  it("gig_approve without an approve seam is a typed hosted error naming the member RPC", async () => {
+    const surface = createToolSurface(bareDeps({ hosted: true }));
+    const res = await surface.find((t) => t.name === "gig_approve")!.call({ gig_id: "gig-9", role: "approver", verdict: { criteria: ["ok"] } });
+    expect(res.ok).toBe(false);
+    expect(res.hosted_unsupported).toBe(true);
+    expect(res.error).toMatch(/approve|coltrane_gig_approve|member/i);
+  });
+
+  it("gig_approve with a deps.approveGig seam routes through it and returns its result", async () => {
+    const approveGig = vi.fn(async () => ({ gig_id: "gig-9", role: "approver", status: "approved", approved: true }));
+    const surface = createToolSurface(bareDeps({ hosted: true, approveGig }));
+    const verdict = { criteria: ["meets the bar"] };
+    const res = await surface.find((t) => t.name === "gig_approve")!.call({ gig_id: "gig-9", role: "approver", verdict });
+    expect(approveGig).toHaveBeenCalledWith({ gig_id: "gig-9", role: "approver", verdict });
+    expect(res.ok).toBe(true);
+    expect(res.data).toEqual({ gig_id: "gig-9", role: "approver", status: "approved", approved: true });
+  });
+
+  it("a failed approve surfaces the store's refusal (e.g. an agent token is not a member)", async () => {
+    const approveGig = vi.fn(async () => { throw new Error("approval requires a member JWT"); });
+    const surface = createToolSurface(bareDeps({ hosted: true, approveGig }));
+    const res = await surface.find((t) => t.name === "gig_approve")!.call({ gig_id: "gig-9", role: "approver", verdict: {} });
+    expect(res.ok).toBe(false);
+    expect(res.error).toMatch(/member JWT/);
+  });
+
+  it("non-hosted gig_approve is a typed no-op pointing at gig_dispatch's approvals", async () => {
+    const surface = createToolSurface(bareDeps()); // not hosted → reaches dispatchTool
+    const res = await surface.find((t) => t.name === "gig_approve")!.call({ gig_id: "gig-9", role: "approver", verdict: { criteria: ["ok"] } });
+    expect(res.ok).toBe(false);
+    expect(res.error).toMatch(/approvals|hosted member seam/i);
+  });
+
   it("hosted genome mutations persist through the injected GenomeStore, not the filesystem", async () => {
     const upsert = vi.fn(async () => undefined);
     const store = { load: vi.fn(), upsert } as unknown as NonNullable<ToolSurfaceDeps["store"]>;

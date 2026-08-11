@@ -9,6 +9,7 @@ import { PRIMITIVE_OUTPUT_TYPE, CORE_TYPES } from "./core_types.js";
 import { executeSkillAsync } from "./skill_subprocess.js";
 import { loadSkillPackage } from "./skills.js";
 import { resolveModel } from "./claude_invoker.js";
+import { resolveAgentGrants, type ToolProviderRegistry } from "./tool_providers.js";
 
 // core type → the process primitive that produces it (reverse of PRIMITIVE_OUTPUT_TYPE).
 // A skill-backed chair seals its output as this primitive/core when its output_contract is
@@ -305,6 +306,23 @@ export interface RunDeps {
    * loudly recorded in `GigResult.reuse.rejected`, not a dead run.
    */
   reuse?: ReuseStore | undefined;
+
+  // ── the dispatch-preflight tool-grant guard's environment ──────────────────
+  /**
+   * The provider registry + mcp server configs the runtime resolves every seated agent's
+   * `allowed_tools` against, at t=0 before the first chair is invoked — the IDENTICAL environment
+   * `makeClaudeInvoker` spawns each chair into. When BOTH are supplied (bootstrapServerDeps supplies
+   * them together, from the same source the invoker holds), runGig runs a preflight that refuses the
+   * whole gig if any chair grants a tool with no provider — naming every offending (chair, agent,
+   * dead tool). The invoker DOES fail closed on a dead name, but per chair at invoke time, i.e.
+   * MID-PHASE, after earlier chairs already ran and spent; a tool absent from the environment must
+   * be impossible to START, not merely to FINISH.
+   *
+   * BOTH absent = the preflight is skipped (bare/test deps), exactly as the invoker's own resolution
+   * stays off until a deployment wires it. The invoker's per-chair guard remains the backstop.
+   */
+  toolProviders?: ToolProviderRegistry | undefined;
+  mcpServerConfigs?: Readonly<Record<string, unknown>> | undefined;
 }
 
 /**
@@ -523,6 +541,33 @@ export function partialBudgetState(e: unknown): BudgetState | undefined {
 }
 
 export class RuntimeError extends Error {}
+
+/**
+ * A dispatch PREFLIGHT refusal: one or more seated agents grant a tool the execution environment
+ * cannot provide (a dead name). Thrown at t=0, BEFORE the first chair is invoked, so a doomed gig
+ * spends ZERO model tokens — the invoker's own per-chair fail-closed guard does not fire until that
+ * chair is prepared MID-PHASE, after earlier chairs already ran and spent.
+ *
+ * Distinct error kind (like ResumeRefused) — it is the engine declining to start a gig it can see
+ * will fail, not a crash. `offenders` names EVERY (chair, agent, dead tool(s)) triple, not just the
+ * first, so one refusal lists every grant to fix rather than surfacing them one re-dispatch at a
+ * time.
+ */
+export class PreflightToolGrantError extends Error {
+  public readonly offenders: ReadonlyArray<{ chair: string; agent: string; tools: readonly string[] }>;
+  constructor(offenders: ReadonlyArray<{ chair: string; agent: string; tools: readonly string[] }>) {
+    const detail = offenders
+      .map((o) => `chair "${o.chair}" (agent "${o.agent}") grants unresolvable tool(s) [${o.tools.join(", ")}]`)
+      .join("; ");
+    super(
+      `PreflightToolGrantRefused: dispatch refused before any chair ran — ${detail}. ` +
+        `A tool granted in the work but absent from the execution environment has no provider (a dead name); ` +
+        `register a provider or remove the grant.`,
+    );
+    this.name = "PreflightToolGrantError";
+    this.offenders = offenders;
+  }
+}
 
 /**
  * A resume was requested and cannot be honoured. Thrown BEFORE any chair is prepared, so a
@@ -985,6 +1030,38 @@ export async function runGig(
 
   // Resolve agent-by-slug once.
   const agentBySlug = new Map(standard.agents.map((a) => [a.slug, a]));
+
+  // ── dispatch preflight: tool-grant resolution at t=0 ───────────────────────
+  // The invoker fails closed on a dead-name grant — but per chair, at invoke time, i.e. MID-PHASE,
+  // after earlier chairs already ran and spent. A tool granted in the work but absent from the
+  // execution environment must be impossible to START, not merely to FINISH. When the runtime is
+  // wired with the SAME provider registry + mcp server configs the invoker uses (both present —
+  // bootstrapServerDeps supplies them together), resolve EVERY seated agent's grants HERE, at t=0,
+  // through the same `resolveAgentGrants` the spawn path uses (so preflight and chair resolve
+  // against the identical environment, browser cage included), and refuse the whole gig if any
+  // grant is a dead name — naming every offending (chair, agent, tool). The per-chair guard stays
+  // as the backstop. BOTH absent → skipped (bare/test deps), exactly as the invoker's resolution
+  // stays off until a deployment wires it.
+  if (deps.toolProviders !== undefined && deps.mcpServerConfigs !== undefined) {
+    const providers = deps.toolProviders;
+    const configs = deps.mcpServerConfigs;
+    const offenders: Array<{ chair: string; agent: string; tools: string[] }> = [];
+    for (const ph of standard.phases) {
+      for (const ch of ph.chairs) {
+        // Human + skill chairs seat no agent → no agent grants to resolve.
+        const agentSlug = ch.agent_slug ?? "";
+        if (agentSlug === "") continue;
+        const ag = agentBySlug.get(agentSlug);
+        if (!ag) continue; // an unknown agent_slug is prepareChair's to report precisely
+        if (!ag.allowed_tools || ag.allowed_tools.length === 0) continue; // nothing to resolve
+        const resolved = resolveAgentGrants(ag, providers, configs);
+        if (resolved.unknown.length > 0) {
+          offenders.push({ chair: ch.role, agent: ag.slug, tools: resolved.unknown });
+        }
+      }
+    }
+    if (offenders.length > 0) throw new PreflightToolGrantError(offenders);
+  }
 
   // Cross-phase role → output map. A chair in phase N can depends_on a chair
   // in phase 0..N-1; this map carries each completed chair's outputS by role so

@@ -161,6 +161,12 @@ export interface ServerDeps {
   // by bootstrap from REGISTERED_TOOL_SLUGS, passed to the invoker, and kept live by tool_register.
   // Shared by reference with the invoker, so a mid-session register reaches resolution immediately.
   toolProviders?: Map<string, ToolProvider> | undefined;
+  // The mcp server configs (server slug → --mcp-config entry) the invoker wires into each spawn.
+  // Kept on the deps so the dispatch-preflight tool-grant guard in runGig resolves grants against
+  // the IDENTICAL environment the invoker spawns into — no drift between what preflight checks and
+  // what a chair gets. Built by bootstrap from `.mcp.json` (deny-by-default: coltrane's own server
+  // unless the deployment registers more), the SAME object handed to makeClaudeInvoker.
+  mcpServerConfigs?: Record<string, unknown> | undefined;
   // #206 — the interception seam. A wrapping layer (control plane) injects pre/post hooks that
   // gate/observe/rewrite tool calls in-process. The engine ships ZERO hooks and ZERO policy; it only
   // CALLS whatever is injected here. Absent/empty → dispatch is byte-identical to no seam.
@@ -847,6 +853,7 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
           const chartDeps = {
             outputs: deps.outputs, ledger: deps.ledger, invoke: deps.invoke,
             model_version: deps.model_version, skills: deps.skills, skill_dirs: deps.skill_dirs, evals: deps.evals, budget,
+            toolProviders: deps.toolProviders, mcpServerConfigs: deps.mcpServerConfigs, // each movement's preflight resolves against the invoker's environment
             ...(depth ? { depth } : {}), ...reuseWiring, ...humanWiring,
           };
           /** The ARRANGEMENT's manifest. A chart has no single genome_hash or run_fingerprint — it
@@ -993,6 +1000,7 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
             const res = await runGig(standard, gigInput, {
               outputs: deps.outputs, ledger: deps.ledger, invoke: deps.invoke,
               model_version: deps.model_version, skills: deps.skills, skill_dirs: deps.skill_dirs, evals: deps.evals, budget,
+              toolProviders: deps.toolProviders, mcpServerConfigs: deps.mcpServerConfigs, // dispatch preflight resolves against the invoker's environment
               ...(depth ? { depth } : {}), ...reuseWiring, ...humanWiring,
             });
             return {
@@ -1068,6 +1076,7 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         const runPromise = runGig(standard, gigInput, {
           outputs: deps.outputs, ledger: deps.ledger, invoke: deps.invoke,
           model_version: deps.model_version, skills: deps.skills, skill_dirs: deps.skill_dirs, evals: deps.evals, budget,
+          toolProviders: deps.toolProviders, mcpServerConfigs: deps.mcpServerConfigs, // dispatch preflight resolves against the invoker's environment
           gig_id: gigId, onProgress, signal: controller.signal, ...(depth ? { depth } : {}), ...reuseWiring, ...humanWiring,
         });
         // A REFUSED resume must be answered in THIS reply, not discovered later by polling. The
@@ -3094,6 +3103,7 @@ export function bootstrapServerDeps(genomeRoot?: string): ServerDeps {
   return {
     registry,
     toolProviders,
+    mcpServerConfigs, // the SAME object handed to the invoker — the preflight guard resolves against it
     output_mirror,
     // PR #78 follow-up: persist outputs to disk so the audit chain survives an
     // MCP session close (Rob cold-trial requirement). COLTRANE_OUTPUTS_DIR

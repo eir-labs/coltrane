@@ -186,17 +186,12 @@ describe("lineage-pass-v1 — the standard's phase/chair graph", () => {
     expect(ext.allowed_tools).toEqual(expect.arrayContaining(["WebSearch", "WebFetch"]));
     expect((ext.allowed_tools ?? []).some((t) => t.startsWith("mcp__eir-wiki"))).toBe(false);
     expect(ext.allowed_tools).not.toContain("Read");
-    // internal senses the wiki + the working tree
+    // internal senses the FILE STORE only (OSS: no eir-wiki — it is not open source). Read/Glob/Grep
+    // resolve in any execution environment; the wiki server does not.
     expect(int.allowed_tools).toEqual(
-      expect.arrayContaining([
-        "mcp__eir-wiki__search_wiki",
-        "mcp__eir-wiki__get_page",
-        "mcp__eir-wiki__list_pages",
-        "Read",
-        "Glob",
-        "Grep",
-      ]),
+      expect.arrayContaining(["Read", "Glob", "Grep"]),
     );
+    expect((int.allowed_tools ?? []).some((t) => t.startsWith("mcp__eir-wiki"))).toBe(false);
     expect(int.allowed_tools).not.toContain("WebSearch");
     expect(int.allowed_tools).not.toContain("WebFetch");
   });

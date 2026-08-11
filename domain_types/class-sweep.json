@@ -1,0 +1,34 @@
+{
+  "slug": "class-sweep",
+  "version": 1,
+  "extends": "Verdict",
+  "domain": "engineering",
+  "status": "active",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "instances_found": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "instances_checked_clean": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "sweep_scope": {
+        "type": "string"
+      },
+      "sweep_complete": {
+        "type": "boolean"
+      }
+    }
+  },
+  "required_fields": [
+    "instances_found",
+    "sweep_scope"
+  ]
+}

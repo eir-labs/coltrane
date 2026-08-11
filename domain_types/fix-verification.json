@@ -1,0 +1,28 @@
+{
+  "slug": "fix-verification",
+  "version": 1,
+  "extends": "Verdict",
+  "domain": "engineering",
+  "status": "active",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "per_instance_results": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        }
+      },
+      "class_guard_passes": {
+        "type": "boolean"
+      },
+      "repro_now_passes": {
+        "type": "boolean"
+      }
+    }
+  },
+  "required_fields": [
+    "per_instance_results",
+    "class_guard_passes"
+  ]
+}

@@ -88,6 +88,11 @@ export const EXTERNAL_SUBSTRATE: Record<string, string> = {
   // discipline + a real grant on it, exactly as it does for deploy-agent, rather than the
   // agent file carrying those constraints voluntarily.
   "pr-publisher": "git + GitHub (gh CLI) — the branch it pushes and the PR it opens",
+  // The defect-investigator (defect-investigation-v1): its substrate is the working tree and a
+  // subprocess — it reproduces a failing case with Bash and reads code with Read/Glob/Grep, and
+  // every location and sweep result it seals must come from a tool result in the run. Declared
+  // here so the floor ENFORCES retrieval discipline + a real grant on it.
+  "defect-investigator": "filesystem + subprocess (the working tree and the failing case it reproduces)",
 };
 
 /** Agents that act through tools (grants required) even where retrieval isn't the job. */

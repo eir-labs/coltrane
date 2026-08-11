@@ -252,8 +252,14 @@ describe("#227 — the genome's declared required fields are dropped, not absent
     // 51 → 52: the software-change-pr set added 1 type — pull-request (extends Artifact),
     // the opened PR the pr-publisher seat seals. It declares its required fields in
     // `required_fields`, so it joins `checked` and does not appear in the `lossy` census.
+    //
+    // 52 → 60: the defect-investigation-v1 set added 8 types — reproduction, defect-report
+    // (extend Signal), defect-location, defect-class (extend Interpretation), root-cause
+    // (extends Judgment), fix-spec (extends Plan), class-sweep, fix-verification (extend
+    // Verdict). All 8 declare their required fields in `required_fields`, so they join
+    // `checked` and none appears in the `lossy` census.
     expect(checked).toHaveLength(genome.domain_types.size);
-    expect(checked.length).toBe(52);
+    expect(checked.length).toBe(60);
   });
 });
 

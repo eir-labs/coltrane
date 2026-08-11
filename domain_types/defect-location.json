@@ -1,0 +1,28 @@
+{
+  "slug": "defect-location",
+  "version": 1,
+  "extends": "Interpretation",
+  "domain": "engineering",
+  "status": "active",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "call_chain": {
+        "type": "string"
+      },
+      "manifestation_site": {
+        "type": "string"
+      },
+      "read_locators": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  "required_fields": [
+    "call_chain",
+    "manifestation_site"
+  ]
+}

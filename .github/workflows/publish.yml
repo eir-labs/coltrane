@@ -21,11 +21,12 @@ jobs:
           node-version: "22"
           registry-url: "https://registry.npmjs.org"
           cache: "npm"
-      - run: npm install -g npm@latest   # trusted publishing needs npm >= 11.5.1; node 22 ships 10.x
       - run: npm ci
+      # Verify runs on the node-shipped npm (10.x) — the version the pack-audit tests target.
+      # `npm pack --dry-run` changed its manifest output under npm 11, so upgrading BEFORE verify
+      # (as the first draft did) broke tests/pack_content_audit for a CI-only reason.
       - run: npm run verify
-      # Only a merge that bumped package.json version publishes. Bumping the version in the PR
-      # is the release act; every other merge runs green and no-ops here.
+      # Only a merge that bumped package.json version publishes; every other merge no-ops here.
       - id: check
         run: |
           V=$(node -p "require('./package.json').version")
@@ -36,6 +37,9 @@ jobs:
             echo "publish=true" >> "$GITHUB_OUTPUT"
             echo "version=$V" >> "$GITHUB_OUTPUT"
           fi
+      # Trusted publishing needs npm >= 11.5.1; upgrade only now, past verify.
+      - if: steps.check.outputs.publish == 'true'
+        run: npm install -g npm@latest
       - if: steps.check.outputs.publish == 'true'
         run: npm publish
       - if: steps.check.outputs.publish == 'true'

@@ -92,5 +92,5 @@
     }
   ],
   "input_types": ["lineage-question"],
-  "output_types": ["lineage-record", "lineage-verdict"]
+  "output_types": ["lineage-record", "lineage-verdict", "internal-inventory", "lineage-hit"]
 }

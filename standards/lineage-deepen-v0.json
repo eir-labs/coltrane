@@ -1,0 +1,27 @@
+{
+  "slug": "lineage-deepen-v0",
+  "domain": "lineage",
+  "status": "active",
+  "description": "A LINEAGE DEEPEN re-runs only the thin external seat of a lineage pass, with a sharper question. When a completed pass leaves a gap on the external side — a source it did not reach, a precedent read too shallowly — this standard re-performs just the outward sense: the external scout sweeps the body of prior work again under a re-pointed lineage-question and seals fresh lineage-hits. It touches neither the internal inventory nor the drawn lineage; those are reused as-is by the re-weave. One phase, one chair, least authority — the smallest re-run that sharpens the external reading of a pass without paying to redo the whole thing.",
+  "agent_slugs": [
+    "lineage-scout-external"
+  ],
+  "phases": [
+    {
+      "name": "identify",
+      "chairs": [
+        {
+          "role": "identify-external",
+          "agent_slug": "lineage-scout-external",
+          "depends_on": [],
+          "input_contract": ["lineage-question"],
+          "output_contract": ["lineage-hit"],
+          "required_skills": []
+        }
+      ],
+      "intent": "Re-run the outward sense alone. identify-external takes the sharpened lineage-question and sweeps the external body of prior work with web tools, verifying each source live and sealing grounded lineage-hits — the deepened external reading. It holds no internal grant and draws no connection: it produces hits the re-weave can be held to, nothing more."
+    }
+  ],
+  "input_types": ["lineage-question"],
+  "output_types": ["lineage-hit"]
+}

@@ -40,7 +40,10 @@ describe("institution", () => {
       slug: "founder-personal",
       name: "Founder (personal institution)",
       kind: "personal",
-      laws: ["self-governed by the founder's north stars", "exposes to other institutions only by contract"],
+      laws: [
+        { attributes: "the personal institution", deontic: "obliged", aim: "govern itself by the founder's north stars", conditions: "at all times", or_else: "the act is ungoverned and is refused", check: { predicate: "(governed_by north_stars)", inputs: { north_stars: "Northstar[]" } }, content_hash: "sha256:test-law-a" },
+        { attributes: "the personal institution", deontic: "forbidden", aim: "expose a capability to another institution except by contract", conditions: "at all times", or_else: "the exposure is refused", check: { predicate: "(backed_by_contract exposure)", inputs: { exposure: "Access" } }, content_hash: "sha256:test-law-b" },
+      ],
       sovereign: true,
       wiki_space: "founder",
     });
@@ -130,10 +133,11 @@ describe("cap grants + chairs — the chair is the thing", () => {
       mission: "adjudicate the mint",
       required_skills: ["institutional-adjudication"],
       caps: [{ edge_type: "produced-by", scope: { institution: "atelier" } }],
-      obligations: ["review-verdict"],
+      obligations: [{ attributes: "the adjudicator", aim: "review the verdict before sealing it" }],
     });
     expect(chair.function).toBe("VERIFY");
     expect(chair.required_skills).toContain("institutional-adjudication");
+    expect(chair.obligations[0]!.deontic).toBe("obliged"); // norm-pair deontic defaults to obliged
   });
 
   it("chair function must be one of the six primitives", () => {

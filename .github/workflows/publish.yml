@@ -1,0 +1,44 @@
+name: publish
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write        # tag push at the end
+      id-token: write         # OIDC trusted publishing (provenance attached automatically)
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+          cache: "npm"
+      - run: npm install -g npm@latest   # trusted publishing needs npm >= 11.5.1; node 22 ships 10.x
+      - run: npm ci
+      - run: npm run verify
+      # Only a merge that bumped package.json version publishes. Bumping the version in the PR
+      # is the release act; every other merge runs green and no-ops here.
+      - id: check
+        run: |
+          V=$(node -p "require('./package.json').version")
+          if npm view "@eir-labs/coltrane@$V" version >/dev/null 2>&1; then
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "$V already on npm — skipping"
+          else
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+            echo "version=$V" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.check.outputs.publish == 'true'
+        run: npm publish
+      - if: steps.check.outputs.publish == 'true'
+        run: |
+          git tag "v${{ steps.check.outputs.version }}"
+          git push origin "v${{ steps.check.outputs.version }}"

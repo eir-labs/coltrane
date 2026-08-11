@@ -237,8 +237,13 @@ describe("#227 — the genome's declared required fields are dropped, not absent
     // fields in `required_fields`, so they join `checked` rather than slipping past the
     // `declared.length === 0` skip above, and none of them appears in the `lossy` census —
     // which is why that assertion is untouched.
+    //
+    // 41 → 44: the preview-deploy set (sealed gig 0538105e) added 3 types —
+    // preview-deployment (extends Artifact), deploy-verdict (extends Verdict) and
+    // branch-state (extends Signal). All 3 declare their required fields in
+    // `required_fields`, so they join `checked` and none appears in the `lossy` census.
     expect(checked).toHaveLength(genome.domain_types.size);
-    expect(checked.length).toBe(41);
+    expect(checked.length).toBe(44);
   });
 });
 

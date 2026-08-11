@@ -1,0 +1,10 @@
+{
+  "id": "ready-within-budget",
+  "description": "A build that reaches READY within the poll budget passes with no deadline and no logs tail.",
+  "input": { "polls": ["QUEUED", "INITIALIZING", "BUILDING", "READY"], "max_polls": 24 },
+  "assertions": [
+    { "path": "terminal_state", "op": "equals", "value": "READY" },
+    { "path": "pass", "op": "equals", "value": true },
+    { "path": "deadline_exceeded", "op": "equals", "value": false }
+  ]
+}

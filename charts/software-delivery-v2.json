@@ -1,0 +1,39 @@
+{
+  "slug": "software-delivery-v2",
+  "movements": [
+    {
+      "movement_id": "movement-1",
+      "standard_slug": "software-change-v1"
+    },
+    {
+      "movement_id": "movement-2",
+      "standard_slug": "preview-deploy-v1"
+    },
+    {
+      "movement_id": "movement-3",
+      "standard_slug": "promote-v1"
+    }
+  ],
+  "edges": [
+    {
+      "from_movement": "movement-1",
+      "to_movement": "movement-2",
+      "output_type": "change-set"
+    },
+    {
+      "from_movement": "movement-2",
+      "to_movement": "movement-3",
+      "output_type": "preview-deployment"
+    }
+  ],
+  "approval_gates": [
+    {
+      "gate_id": "preview-approval",
+      "after_movement": "movement-2",
+      "before_movement": "movement-3",
+      "chair": "preview-officer",
+      "prompt": "Review the sealed preview-deployment: open its preview_url (supabase-auth login) and confirm the change looks right, then read the deploy-verdict's terminal_state. Approve to promote this deployment to production; the deployment is promoted by id, so what you approve is exactly what ships."
+    }
+  ],
+  "venue": "ci-deploy-room-v1"
+}

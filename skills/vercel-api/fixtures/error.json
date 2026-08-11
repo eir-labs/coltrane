@@ -1,0 +1,10 @@
+{
+  "id": "error-terminal-carries-logs",
+  "description": "A build that reaches ERROR fails, and carries the build log tail for the human to read.",
+  "input": { "polls": ["QUEUED", "BUILDING", "ERROR"], "max_polls": 24, "logs_tail": ["Type error: TS2322 in app/page.tsx"] },
+  "assertions": [
+    { "path": "terminal_state", "op": "equals", "value": "ERROR" },
+    { "path": "pass", "op": "equals", "value": false },
+    { "path": "deadline_exceeded", "op": "equals", "value": false }
+  ]
+}

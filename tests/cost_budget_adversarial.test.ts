@@ -356,10 +356,10 @@ describe("PR #99 adversarial review — cost-budget enforcement", () => {
   // PROBE 10: composition error vs budget — composition wins (by-design)
   // ─────────────────────────────────────────────────────────────────────────
 
-  it("BY-DESIGN — composition-RuntimeError fires BEFORE budget check; ordering is unambiguous", async () => {
-    // A phase referencing an unknown agent throws RuntimeError at line 197 of
-    // runtime.ts, before the budget block at line 209. Even with opening=0,
-    // composition errors take precedence.
+  it("BY-DESIGN — the preflight refusal fires BEFORE budget check; ordering is unambiguous", async () => {
+    // A phase referencing an unknown agent is a dead reference the unified t=0 preflight sweep
+    // refuses (PreflightDispatchError, message contains "unknown agent"), before the budget block
+    // is ever reached. Even with opening=0, the structural refusal takes precedence.
     const brokenStandard: Standard = {
       slug: "broken",
       domain: "eirtests",

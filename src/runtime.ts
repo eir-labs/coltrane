@@ -9,6 +9,7 @@ import { PRIMITIVE_OUTPUT_TYPE, CORE_TYPES } from "./core_types.js";
 import { executeSkillAsync } from "./skill_subprocess.js";
 import { loadSkillPackage } from "./skills.js";
 import { resolveModel } from "./claude_invoker.js";
+import { resolveAgentGrants, type ToolProviderRegistry } from "./tool_providers.js";
 
 // core type → the process primitive that produces it (reverse of PRIMITIVE_OUTPUT_TYPE).
 // A skill-backed chair seals its output as this primitive/core when its output_contract is
@@ -305,6 +306,23 @@ export interface RunDeps {
    * loudly recorded in `GigResult.reuse.rejected`, not a dead run.
    */
   reuse?: ReuseStore | undefined;
+
+  // ── the dispatch-preflight tool-grant guard's environment ──────────────────
+  /**
+   * The provider registry + mcp server configs the runtime resolves every seated agent's
+   * `allowed_tools` against, at t=0 before the first chair is invoked — the IDENTICAL environment
+   * `makeClaudeInvoker` spawns each chair into. When BOTH are supplied (bootstrapServerDeps supplies
+   * them together, from the same source the invoker holds), runGig runs a preflight that refuses the
+   * whole gig if any chair grants a tool with no provider — naming every offending (chair, agent,
+   * dead tool). The invoker DOES fail closed on a dead name, but per chair at invoke time, i.e.
+   * MID-PHASE, after earlier chairs already ran and spent; a tool absent from the environment must
+   * be impossible to START, not merely to FINISH.
+   *
+   * BOTH absent = the preflight is skipped (bare/test deps), exactly as the invoker's own resolution
+   * stays off until a deployment wires it. The invoker's per-chair guard remains the backstop.
+   */
+  toolProviders?: ToolProviderRegistry | undefined;
+  mcpServerConfigs?: Readonly<Record<string, unknown>> | undefined;
 }
 
 /**
@@ -523,6 +541,62 @@ export function partialBudgetState(e: unknown): BudgetState | undefined {
 }
 
 export class RuntimeError extends Error {}
+
+/**
+ * One dead reference the dispatch preflight caught. Four kinds, ALL knowable at t=0 from the
+ * standard alone — no chair need run to see any of them:
+ *
+ *   tool-grant        — a seated agent grants a tool the execution environment cannot provide
+ *                       (a dead name). Carries the unresolvable `tools`. GATED on a wired provider
+ *                       environment (resolution stays off until a deployment supplies it).
+ *   missing-skill-dir — a skill-backed chair whose skill_dir is not registered.
+ *   unknown-agent     — a chair seats an agent absent from the standard's agents list.
+ *   no-primitive      — a seated agent declares no primitives[0].
+ *   no-output-type    — a seated agent declares no output_types[0].
+ *
+ * `detail` is the human-readable line; `phase`/`chair` locate it; `agent`/`tools` are present when
+ * the kind carries them. One chair CAN produce two offenders (an agent with neither a primitive nor
+ * an output type offends both) — each is its own row.
+ */
+export interface PreflightOffender {
+  readonly kind: "tool-grant" | "missing-skill-dir" | "unknown-agent" | "no-primitive" | "no-output-type";
+  readonly phase: string;
+  readonly chair: string;
+  readonly agent?: string;
+  readonly tools?: readonly string[];
+  readonly detail: string;
+}
+
+/**
+ * A dispatch PREFLIGHT refusal: one unified t=0 sweep found one or more dead references — a grant
+ * with no provider, a skill-backed chair with no skill_dir, a chair seating an unknown agent, or a
+ * seated agent with no primitive / no output type. Thrown at t=0, BEFORE the first chair is invoked,
+ * so a doomed gig spends ZERO model tokens — the per-chair guards (invoker grant resolution;
+ * prepareChair's own throws) do not fire until that chair is prepared MID-PHASE, after earlier
+ * chairs already ran and spent.
+ *
+ * Distinct error kind (like ResumeRefused) — it is the engine declining to start a gig it can see
+ * will fail, not a crash. `offenders` names EVERY defect across every phase, not just the first, so
+ * one refusal lists everything to fix rather than surfacing them one re-dispatch at a time.
+ */
+export class PreflightDispatchError extends Error {
+  public readonly offenders: ReadonlyArray<PreflightOffender>;
+  constructor(offenders: ReadonlyArray<PreflightOffender>) {
+    const detail = offenders
+      .map((o) => {
+        const who = o.agent !== undefined ? ` (agent "${o.agent}")` : "";
+        return `[${o.kind}] phase "${o.phase}" chair "${o.chair}"${who}: ${o.detail}`;
+      })
+      .join("; ");
+    super(
+      `PreflightDispatchRefused: dispatch refused before any chair ran — ${detail}. ` +
+        `A tool granted in the work but absent from the execution environment has no provider (a dead name); ` +
+        `register a provider or remove the grant.`,
+    );
+    this.name = "PreflightDispatchError";
+    this.offenders = offenders;
+  }
+}
 
 /**
  * A resume was requested and cannot be honoured. Thrown BEFORE any chair is prepared, so a
@@ -985,6 +1059,78 @@ export async function runGig(
 
   // Resolve agent-by-slug once.
   const agentBySlug = new Map(standard.agents.map((a) => [a.slug, a]));
+
+  // ── dispatch preflight: the UNIFIED t=0 dead-reference sweep ────────────────
+  // Four defect classes are ALL knowable at t=0 from the standard alone, yet three of them were, until
+  // this sweep, discovered only MID-PHASE in prepareChair — after earlier chairs already ran and spent.
+  // Fold all four into ONE pass over every chair in every phase: collect every offender, throw once.
+  //
+  //   tool-grant        — a seated agent grants a tool with no provider (a dead name). GATED on a wired
+  //                       provider environment (toolProviders + mcpServerConfigs, both present —
+  //                       bootstrapServerDeps supplies them together), resolved through the same
+  //                       `resolveAgentGrants` the spawn path uses, so preflight and chair resolve
+  //                       against the identical environment, browser cage included. BOTH absent →
+  //                       this sub-check is skipped (bare/test deps), exactly as the invoker's own
+  //                       resolution stays off until a deployment wires it.
+  //   missing-skill-dir — a skill-backed chair whose skill_dir is not registered (mirrors :1648).
+  //   unknown-agent     — a chair seats an agent absent from the agents list (mirrors :1701).
+  //   no-primitive /    — a seated agent with no primitives[0] / no output_types[0] (mirrors :1703/:1705);
+  //   no-output-type      one agent can offend both, and both are reported.
+  //
+  // Classes 2/3/4 need NO providers — they run UNCONDITIONALLY. The mid-phase throws stay in place as
+  // unreachable backstops. This refuses the whole gig, naming every offender across every phase.
+  {
+    const providersWired = deps.toolProviders !== undefined && deps.mcpServerConfigs !== undefined;
+    const offenders: PreflightOffender[] = [];
+    for (const ph of standard.phases) {
+      for (const ch of ph.chairs) {
+        // A skill-backed chair (skill_slug set, no agent_slug) seats no agent → its dead reference is
+        // a missing skill_dir, not a tool grant. Mirror prepareChair's exact condition.
+        if (ch.skill_slug && (ch.agent_slug ?? "") === "") {
+          if (deps.skill_dirs?.get(ch.skill_slug) === undefined) {
+            offenders.push({
+              kind: "missing-skill-dir", phase: ph.name, chair: ch.role,
+              detail: `is skill-backed ("${ch.skill_slug}") but no skill_dir is registered`,
+            });
+          }
+          continue;
+        }
+        // A human/approval chair (no agent_slug, not skill-backed) seats no agent → nothing to check.
+        const agentSlug = ch.agent_slug ?? "";
+        if (agentSlug === "") continue;
+        const ag = agentBySlug.get(agentSlug);
+        if (!ag) {
+          offenders.push({
+            kind: "unknown-agent", phase: ph.name, chair: ch.role, agent: agentSlug,
+            detail: `references unknown agent "${agentSlug}"`,
+          });
+          continue;
+        }
+        if (!ag.primitives[0]) {
+          offenders.push({
+            kind: "no-primitive", phase: ph.name, chair: ch.role, agent: ag.slug,
+            detail: `seats agent "${ag.slug}" which declares no primitive`,
+          });
+        }
+        if (!ag.output_types[0]) {
+          offenders.push({
+            kind: "no-output-type", phase: ph.name, chair: ch.role, agent: ag.slug,
+            detail: `seats agent "${ag.slug}" which declares no output_type`,
+          });
+        }
+        if (providersWired && ag.allowed_tools?.length) {
+          const resolved = resolveAgentGrants(ag, deps.toolProviders!, deps.mcpServerConfigs!);
+          if (resolved.unknown.length > 0) {
+            offenders.push({
+              kind: "tool-grant", phase: ph.name, chair: ch.role, agent: ag.slug, tools: resolved.unknown,
+              detail: `grants unresolvable tool(s) [${resolved.unknown.join(", ")}]`,
+            });
+          }
+        }
+      }
+    }
+    if (offenders.length > 0) throw new PreflightDispatchError(offenders);
+  }
 
   // Cross-phase role → output map. A chair in phase N can depends_on a chair
   // in phase 0..N-1; this map carries each completed chair's outputS by role so

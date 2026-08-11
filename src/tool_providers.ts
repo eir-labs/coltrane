@@ -1,3 +1,6 @@
+import { playwrightServerFor } from "./playwright_cage.js";
+import type { BrowserGrant } from "./genome_schema.js";
+
 // Tool-grant → provider resolution (#185). An agent's `allowed_tools` is a set of grants, each of
 // which resolves to one of three provider classes:
 //   - host-builtin (Read/Write/Edit/Bash/Glob/Grep/WebFetch/WebSearch/…): provided by the Claude
@@ -123,6 +126,25 @@ export function resolveToolGrants(
     unknown.push(grant);
   }
   return { mcpServers, inHouse, unknown, effectiveAllowed };
+}
+
+/** Per-agent grant resolution: fold the deny-by-default browser cage this agent's `browser_grant`
+ *  builds into the mcp server configs, then resolve every grant. This is the ONE place per-agent
+ *  resolution happens — shared by the invoker's spawn path (claude_invoker) and runGig's dispatch
+ *  preflight (runtime) so the two resolve against the IDENTICAL environment. A preflight that
+ *  resolved against a different environment than the chair actually gets would either refuse a
+ *  runnable gig or wave a doomed one through — the drift this collapses. Structural agent type so
+ *  it needs no dependency on the full Agent record. */
+export function resolveAgentGrants(
+  agent: { allowed_tools?: readonly string[] | undefined; browser_grant?: BrowserGrant | undefined },
+  registry: ToolProviderRegistry,
+  mcpServerConfigs: Readonly<Record<string, unknown>> = {},
+): ResolvedGrants {
+  const browserCage = playwrightServerFor(agent.browser_grant);
+  const effectiveConfigs = browserCage
+    ? { ...mcpServerConfigs, playwright: browserCage }
+    : mcpServerConfigs;
+  return resolveToolGrants(agent.allowed_tools ?? [], registry, effectiveConfigs);
 }
 
 /** Fail closed: an agent that grants an unresolvable tool must not be dispatched — a granted tool

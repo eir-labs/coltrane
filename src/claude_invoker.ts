@@ -11,8 +11,7 @@ import { abortReasonText, type AgentInvocationContext, type AgentInvoker, type A
 import type { Registry } from "./registry.js";
 import type { Depth, ModelTier } from "./pricing.js";
 import type { CodeToolAccess } from "./composition.js";
-import { assertToolGrantsResolvable, type ToolProviderRegistry } from "./tool_providers.js";
-import { playwrightServerFor } from "./playwright_cage.js";
+import { resolveAgentGrants, type ToolProviderRegistry } from "./tool_providers.js";
 
 const EMPTY_TOOL_REGISTRY: ToolProviderRegistry = new Map();
 
@@ -628,22 +627,25 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
     // tool granted by bare slug becomes mcp__<server>__<tool>, the name its server advertises (#204).
     let effectiveAllowed: readonly string[] | undefined = ctx.agent.allowed_tools;
     if (resolutionEnabled) {
-      // The caged browser: if this agent declares a browser_grant, coltrane builds a deny-by-default
-      // Playwright server scoped to exactly its allowed origins and offers it as the "playwright"
-      // provider. An agent that grants mcp__playwright__* tools but declares NO browser_grant has no
-      // playwright config → its grant is unresolvable → fails closed (no uncaged browser, ever).
-      const browserCage = playwrightServerFor(ctx.agent.browser_grant);
-      const effectiveConfigs = browserCage
-        ? { ...(opts.mcpServerConfigs ?? {}), playwright: browserCage }
-        : (opts.mcpServerConfigs ?? {});
-      // assertToolGrantsResolvable is the single source of the fail-closed guard (it throws on a
-      // dead name) AND returns the resolved servers — no duplicated inline throw.
-      const resolved = assertToolGrantsResolvable(
-        ctx.agent.slug,
-        ctx.agent.allowed_tools ?? [],
+      // resolveAgentGrants folds the deny-by-default browser cage this agent's browser_grant builds
+      // (an agent that grants mcp__playwright__* but declares NO browser_grant has no playwright
+      // config → unresolvable → fails closed, no uncaged browser ever) and resolves every grant. It
+      // is the ONE place per-agent resolution happens — shared with runGig's dispatch preflight so
+      // the two resolve against the IDENTICAL environment (no drift between what preflight checks and
+      // what this chair gets). This per-chair throw stays the fail-closed BACKSTOP: the preflight
+      // refuses a doomed gig at t=0, but any chair reached by another path still fails closed here,
+      // before a child is spawned that advertises a tool it cannot back.
+      const resolved = resolveAgentGrants(
+        ctx.agent,
         opts.toolProviders ?? EMPTY_TOOL_REGISTRY,
-        effectiveConfigs,
+        opts.mcpServerConfigs ?? {},
       );
+      if (resolved.unknown.length > 0) {
+        throw new Error(
+          `agent "${ctx.agent.slug}" grants unresolvable tool(s) [${resolved.unknown.join(", ")}] — no provider registered ` +
+            `(a granted tool with no provider is a dead name; register a provider or remove the grant)`,
+        );
+      }
       resolvedMcpServers = resolved.mcpServers;
       effectiveAllowed = resolved.effectiveAllowed;
     }

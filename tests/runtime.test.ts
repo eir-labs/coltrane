@@ -7,6 +7,7 @@ import { TEST_BEHAVIOR } from "./_support/agents.js";
 import {
   runGig,
   RuntimeError,
+  PreflightDispatchError,
   createRegistry,
   createOutputStore,
   MemoryLedger,
@@ -141,7 +142,10 @@ describe("runtime: gig execution end-to-end", () => {
   it("rejects a phase referencing an unknown agent", async () => {
     const { outputs, ledger } = setup();
     const broken: Standard = { ...standard, phases: [{ name: "x", chairs: [{ role: "x", agent_slug: "ghost", depends_on: [], input_contract: [], output_contract: ["Interpretation"], required_skills: [] }] }] };
-    await expect(runGig(broken, {}, { outputs, ledger, invoke: mockInvoke })).rejects.toThrow(RuntimeError);
+    // An unknown agent_slug is a dead reference the unified t=0 preflight sweep now catches BEFORE any
+    // chair runs — so this refuses with PreflightDispatchError at dispatch, not the mid-phase
+    // RuntimeError prepareChair still throws as an unreachable backstop.
+    await expect(runGig(broken, {}, { outputs, ledger, invoke: mockInvoke })).rejects.toThrow(PreflightDispatchError);
   });
 
   it("rejects bad-schema agent output at write (validation flows through the runtime)", async () => {

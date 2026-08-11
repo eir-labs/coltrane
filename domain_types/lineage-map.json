@@ -1,0 +1,32 @@
+{
+  "slug": "lineage-map",
+  "version": 1,
+  "extends": "Interpretation",
+  "domain": "lineage",
+  "status": "active",
+  "description": "THE ESTABLISHED LINEAGE — the heart of the pass. An array of connection edges, each drawing one internal representation to one external source under a typed relation, grounded on BOTH sides: a real internal reference and a real external source. The connection IS the lineage; an edge missing either grounding is a claim, not a lineage.",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "edges": {
+        "type": "array",
+        "minItems": 1,
+        "items": {
+          "type": "object",
+          "properties": {
+            "internal_ref": { "type": "string" },
+            "external_ref": { "type": "string" },
+            "relation": {
+              "type": "string",
+              "enum": ["descends-from", "aligns-with", "diverges-from", "supersedes", "informed-by"]
+            },
+            "grounding_internal": { "type": "string" },
+            "grounding_external": { "type": "string" }
+          },
+          "required": ["internal_ref", "external_ref", "relation", "grounding_internal", "grounding_external"]
+        }
+      }
+    }
+  },
+  "required_fields": ["edges"]
+}

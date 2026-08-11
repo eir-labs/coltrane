@@ -240,6 +240,24 @@ export type DomainTypeOutput = z.output<typeof DomainTypeSchema>;
 /** The typed lineage-edge vocabulary. Caps grant these; lineage edges are made of them. */
 export const LineageEdgeTypeSchema = z.enum(["anchored-in", "produced-by", "evolved-from", "descends-from"]);
 
+/** A reference from an institution to a published lineage-record that grounds it. The record
+ *  itself is sealed content-addressed in the ledger; the institution carries the REFERENCE, so an
+ *  APPROVED lineage (the lineage-pass standard's `approve` chair sealed a passing lineage-verdict)
+ *  becomes first-class institutional grounding — see `institutionLineageGrounding` below. `record_ref`
+ *  is the only non-optional field: a lineage reference that names no record references nothing.
+ *  Store-side home is `coltrane_institution_lineage` (follow-up; not built here). */
+export const LineageRecordRefSchema = z.object({
+  /** content_sha (or slug) of the sealed lineage-record this institution is grounded in. */
+  record_ref: z.string(),
+  /** the lineage-question the record answered, for display without dereferencing the record. */
+  question: z.string().optional(),
+  /** the human seal: filled from the approve chair's verdict when the lineage is adopted. Null
+   *  until then — an institution never grounds itself on an unapproved lineage. */
+  approved_by: z.string().nullable().default(null),
+  sealed_at: z.string().optional(),
+});
+export type LineageRecordRefOutput = z.output<typeof LineageRecordRefSchema>;
+
 // Slugs NAME identities; LOOKUPS go by id. The instance store assigns each institutional
 // identity a stable uuid; references and RLS key on the id, never the slug.
 export const InstitutionSchema = z.object({
@@ -250,6 +268,12 @@ export const InstitutionSchema = z.object({
   laws: z.array(z.string()).default([]),
   wiki_space: z.string().optional(),
   sovereign: z.boolean().default(false),
+  /** First-class lineage: references to approved lineage-records that ground this institution.
+   *  Additive and defaulted, so an institution declared without it simply has no adopted lineage
+   *  yet. A record lands here only after the lineage-pass `approve` chair seals it; every agent
+   *  seated in the institution then inherits these as formal grounding (see the surfacing seam in
+   *  `institutionLineageGrounding`). */
+  lineage: z.array(LineageRecordRefSchema).default([]),
 });
 
 export const OrganizationSchema = z.object({
@@ -404,6 +428,18 @@ export const OrgServiceKeySchema = z
   .strict();
 
 export type InstitutionOutput = z.output<typeof InstitutionSchema>;
+
+/** The institution-lineage SURFACING SEAM. When a seat renders a player into a Claude Code
+ *  subagent (`src/player_to_claude_code.ts`, the seat→prompt transform), the institution's approved
+ *  lineage-records are read through here and folded into the agent's formal grounding — the same
+ *  seam a future institutional-northstars / forebears surface would use. Today it returns the refs
+ *  themselves (the institution definition carries them); the STORE-BACKED path (dereferencing each
+ *  `record_ref` to its sealed lineage-record via `coltrane_institution_lineage`) is the follow-up
+ *  the instance layer fills. Named here, additively, so the seam has one home rather than being
+ *  reinvented at the render call site. */
+export function institutionLineageGrounding(inst: InstitutionOutput): readonly LineageRecordRefOutput[] {
+  return inst.lineage;
+}
 export type OrganizationOutput = z.output<typeof OrganizationSchema>;
 export type AgentRecordOutput = z.output<typeof AgentRecordSchema>;
 export type CapGrant = z.output<typeof CapGrantSchema>;

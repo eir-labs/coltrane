@@ -31,6 +31,7 @@
 // header carries the run's genome_hash. So a worker with no local record reconstructs one from
 // the sink (`resumeStateFromDrain` below) and resumes from that. Resume state's home is the
 // store; the local checkpoint demotes to a fast path.
+import * as fs from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { runGig, ResumeRefused, genomeHash, CORE_TO_PRIMITIVE, type AgentInvoker } from "./runtime.js";
@@ -88,6 +89,134 @@ export function workerStateRoot(): string {
   const override = process.env["COLTRANE_WORKER_CHECKPOINTS"];
   if (override && override.length > 0) return override;
   return join(homedir(), ".coltrane", "worker-checkpoints");
+}
+
+/** Default worker-state TTL, in days. A checkpoint older than this is presumed abandoned. */
+export const DEFAULT_WORKER_STATE_TTL_DAYS = 7;
+
+/** Resolve the reaper TTL from `COLTRANE_WORKER_STATE_TTL_DAYS`, falling back to the default. */
+export function workerStateTtlDays(): number {
+  const raw = process.env["COLTRANE_WORKER_STATE_TTL_DAYS"];
+  if (raw && raw.trim().length > 0) {
+    const n = Number(raw);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+  return DEFAULT_WORKER_STATE_TTL_DAYS;
+}
+
+export interface ReapOptions {
+  /** Age threshold in days. State whose mtime is older than this is eligible. Defaults to `workerStateTtlDays()`. */
+  ttlDays?: number;
+  /** "Now", in epoch ms, for the age comparison. Defaults to `Date.now()` at call time (never module load). */
+  now?: number;
+}
+
+export interface ReapResult {
+  /** gig ids whose checkpoint (+ siblings) were removed for being older than the TTL. */
+  checkpoints_removed: string[];
+  /** gig ids whose orphan output/refs rows (no live checkpoint) were removed for age. */
+  orphans_removed: string[];
+  /** How many checkpoint files were inspected and KEPT (fresh, or load-bearing). */
+  kept: number;
+  /** Non-fatal per-file errors, so a partial sweep is visible without throwing. */
+  errors: string[];
+}
+
+/**
+ * Bound the worker state root's growth. The runtime deletes a checkpoint on SUCCESS, but a
+ * FAILED / awaiting-approval / abandoned gig leaves its `checkpoints/<gig>.json` (plus the
+ * `outputs/<gig>.jsonl` + `refs/<gig>.jsonl` it names) behind forever — an unbounded disk
+ * leak. This drops what is old enough to be presumed abandoned.
+ *
+ * WHAT IT TOUCHES:
+ *  - A `checkpoints/<gig>.json` whose MTIME is older than the TTL, together with that gig's
+ *    sibling `outputs/<gig>.jsonl` and `refs/<gig>.jsonl` — they are dead weight once the
+ *    checkpoint that named them is gone.
+ *  - An ORPHAN `outputs/<gig>.jsonl` / `refs/<gig>.jsonl` (no checkpoint file for that gig at
+ *    all — e.g. a completed gig whose checkpoint was already dropped on success) older than the
+ *    TTL. This is the other half of the leak: success removes the checkpoint but leaves the rows.
+ *
+ * WHAT IT NEVER TOUCHES:
+ *  - Any gig whose checkpoint is FRESHER than the TTL. A parked / awaiting-approval gig's
+ *    checkpoint is LOAD-BEARING for the approved resume, and the TTL is the "reasonable window"
+ *    that protects it — the reaper cannot see the org store's row status locally, so mtime is
+ *    the proxy: recent state is kept. A fresh checkpoint's outputs are never swept even if the
+ *    outputs file itself looks old (a restore-only resume re-touches the checkpoint but appends
+ *    no new rows), because the sweep is driven from checkpoint age, not output age.
+ *
+ * Best-effort by construction: every filesystem op is caught and recorded in `errors`; the
+ * function never throws, so a reap failure can never fail the claim it runs ahead of.
+ */
+export function reapWorkerState(root: string, opts?: ReapOptions): ReapResult {
+  const result: ReapResult = { checkpoints_removed: [], orphans_removed: [], kept: 0, errors: [] };
+  const ttlDays = opts?.ttlDays ?? workerStateTtlDays();
+  const now = opts?.now ?? Date.now();
+  const ttlMs = ttlDays * 24 * 60 * 60 * 1000;
+
+  const cpDir = join(root, "checkpoints");
+  const outDir = join(root, "outputs");
+  const refDir = join(root, "refs");
+
+  const listDir = (dir: string): string[] => {
+    try {
+      return fs.existsSync(dir) ? fs.readdirSync(dir) : [];
+    } catch (e) {
+      result.errors.push(`readdir ${dir}: ${e instanceof Error ? e.message : String(e)}`);
+      return [];
+    }
+  };
+  const ageMs = (file: string): number | null => {
+    try {
+      return now - fs.statSync(file).mtimeMs;
+    } catch (e) {
+      result.errors.push(`stat ${file}: ${e instanceof Error ? e.message : String(e)}`);
+      return null;
+    }
+  };
+  const rm = (file: string): void => {
+    try {
+      fs.rmSync(file, { force: true });
+    } catch (e) {
+      result.errors.push(`rm ${file}: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  };
+
+  // Pass 1 — checkpoint-driven. A gig id is exactly a checkpoint file's basename.
+  const liveGigs = new Set<string>();
+  for (const name of listDir(cpDir)) {
+    if (!name.endsWith(".json")) continue;
+    const gig = name.slice(0, -".json".length);
+    const age = ageMs(join(cpDir, name));
+    if (age === null) { liveGigs.add(gig); continue; } // couldn't stat → keep, don't guess
+    if (age > ttlMs) {
+      rm(join(cpDir, name));
+      rm(join(outDir, `${gig}.jsonl`));
+      rm(join(refDir, `${gig}.jsonl`));
+      result.checkpoints_removed.push(gig);
+    } else {
+      // Fresh checkpoint — load-bearing. Its gig's rows are protected regardless of their own age.
+      liveGigs.add(gig);
+      result.kept += 1;
+    }
+  }
+
+  // Pass 2 — orphan rows: an outputs/refs file for a gig that has NO checkpoint at all.
+  const sweepOrphans = (dir: string): void => {
+    for (const name of listDir(dir)) {
+      if (!name.endsWith(".jsonl")) continue;
+      const gig = name.slice(0, -".jsonl".length);
+      if (liveGigs.has(gig)) continue; // a live checkpoint owns it — keep
+      if (result.checkpoints_removed.includes(gig)) continue; // already removed as a sibling
+      const age = ageMs(join(dir, name));
+      if (age === null || age <= ttlMs) continue;
+      rm(join(dir, name));
+      if (!result.orphans_removed.includes(gig)) result.orphans_removed.push(gig);
+    }
+  };
+  sweepOrphans(outDir);
+  sweepOrphans(refDir);
+
+  return result;
 }
 
 export type WorkOnceResult =
@@ -605,6 +734,16 @@ export function approvalWiring(
  *  outcome is `awaiting_approval` — its own status, because it is neither finished nor broken. */
 export async function workOnce(ctx: WorkerContext, deps: WorkOnceDeps): Promise<WorkOnceResult> {
   const log = deps.log ?? (() => {});
+  // Best-effort bounded reap of the worker state root before we claim. Wrapped so a reap
+  // failure can never fail a claim — the money-losing outcome is a run refused, not a file kept.
+  try {
+    const reaped = reapWorkerState(workerStateRoot());
+    if (reaped.checkpoints_removed.length > 0 || reaped.orphans_removed.length > 0) {
+      log(`reaped worker state: ${reaped.checkpoints_removed.length} checkpoint(s), ${reaped.orphans_removed.length} orphan row(s)`);
+    }
+  } catch (e) {
+    log(`worker-state reap skipped: ${e instanceof Error ? e.message : String(e)}`);
+  }
   const claim = await claimNextGig(ctx);
   if (!claim) return { claimed: false };
   log(`claimed ${claim.gig_id} (${claim.standard_slug}, ${claim.mode}) as ${claim.acting_for}`);

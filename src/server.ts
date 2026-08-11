@@ -1912,6 +1912,25 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
           data: { status, aborted, cancellable: aborted, cleanup_result: { reason } },
         };
       }
+      case "gig_approve": {
+        // Approval is a MEMBER act whose authority lives in the STORE (the coltrane_gig_approve RPC
+        // is member-JWT-only; an agent token is refused there — the enforcement belongs store-side,
+        // not here). The HOSTED surface routes this to deps.approveGig (see callSurfaceTool);
+        // reaching this switch is a NON-hosted call, which has no store-backed run to approve — a
+        // local run takes its human verdicts through gig_dispatch's `approvals` argument instead.
+        const gigId = String(args["gig_id"] ?? "");
+        const role = String(args["role"] ?? "");
+        const verdict = args["verdict"];
+        if (!gigId || !role || verdict === undefined) {
+          return { ok: false, requires_approval: approval, error: "gig_approve requires gig_id, role, and verdict (the Judgment the human seat seals)" };
+        }
+        return {
+          ok: false, not_implemented: true, requires_approval: approval,
+          error:
+            `gig_approve is the hosted member seam — approve gig "${gigId}" role "${role}" over a store-backed ` +
+            "surface (wire deps.approveGig). A local run takes its human verdicts through gig_dispatch's `approvals` argument.",
+        };
+      }
       case "agent_define": {
         // Build the def by the SCHEMA's own field list (genome_schema.ts AgentSchema): copy exactly
         // the fields the schema declares from args. This handler was one of the restatements that
@@ -2185,6 +2204,36 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
           }))
           .sort((a, b) => (a.slug < b.slug ? -1 : 1));
         return { ok: true, requires_approval: approval, data: { standards, count: standards.length } };
+      }
+
+      case "standard_inspect": {
+        // The single-record read, mirroring skill_inspect: browse lists shallow rows; this returns
+        // ONE standard's full shape. Same failure postures as the browse handlers — no standards
+        // map is "needs a standards map", an unknown slug is an honest error, never a silent null.
+        if (!deps.standards) return { ok: false, not_implemented: true, requires_approval: approval, error: "standard_inspect needs a standards map (bootstrap from a genome)" };
+        const target = String(args["slug"] ?? "");
+        if (!target) return { ok: false, requires_approval: approval, error: "standard_inspect requires slug" };
+        const std = deps.standards.get(target);
+        if (!std) return { ok: false, requires_approval: approval, error: `unknown standard "${target}"` };
+        return {
+          ok: true, requires_approval: approval,
+          data: {
+            slug: std.slug, domain: std.domain, status: std.status ?? "active",
+            phases: std.phases.map((p) => ({
+              name: p.name,
+              chairs: p.chairs.map((c) => ({
+                role: c.role,
+                agent_slug: c.agent_slug ?? null,
+                skill_slug: c.skill_slug ?? null,
+                human: c.human ?? false,
+                input_contract: c.input_contract ?? [],
+                output_contract: c.output_contract ?? [],
+              })),
+            })),
+            input_types: std.input_types ?? [], output_types: std.output_types ?? [],
+            eval_slugs: std.eval_slugs ?? [], description: std.description ?? null,
+          },
+        };
       }
 
       case "chart_browse": {
@@ -2800,6 +2849,11 @@ export interface ToolSurfaceDeps extends ServerDeps {
   /** Hosted gig queuing: queue a run (e.g. postgrestQueueGig(ctx) → the coltrane_gig_dispatch
    *  RPC). Without it, hosted gig_dispatch is an honest typed error — it NEVER spawns. */
   queueGig?: ((args: Record<string, unknown>) => Promise<Record<string, unknown>>) | undefined;
+  /** Hosted member approval: approve a parked gig (e.g. postgrestApproveGig(ctx) → the
+   *  coltrane_gig_approve RPC, which is member-JWT-only). Parallel to queueGig — the engine
+   *  passes through, the store authorizes (an agent token is refused there). Without it, hosted
+   *  gig_approve is an honest typed error. */
+  approveGig?: ((args: Record<string, unknown>) => Promise<Record<string, unknown>>) | undefined;
   /** Hosted genome persistence: a successful define/compose/register also upserts through
    *  this store (the governed RPC), or the definition evaporates at end-of-request. */
   store?: GenomeStore | undefined;
@@ -2874,6 +2928,27 @@ async function callSurfaceTool(
           "hosted dispatch goes through the queue RPC (coltrane_gig_dispatch) — nothing spawns in a hosted " +
           "surface. Wire deps.queueGig (e.g. postgrestQueueGig(ctx) from ./genome_store) to queue the gig " +
           "for the drain worker.",
+      };
+    }
+    if (slug === "gig_approve") {
+      // Approval is a MEMBER act. The tool is a pure pass-through to the store's member-JWT-only
+      // coltrane_gig_approve RPC — an AGENT token is refused THERE, which is where that
+      // enforcement belongs, not in the engine. With the seam wired it approves; without it, typed.
+      if (deps.approveGig) {
+        try {
+          const data = await deps.approveGig(args);
+          return { ok: true, data };
+        } catch (e) {
+          return { ok: false, error: e instanceof Error ? e.message : String(e) };
+        }
+      }
+      return {
+        ok: false,
+        hosted_unsupported: true,
+        error:
+          "hosted approval goes through the member RPC (coltrane_gig_approve) — a member act the store " +
+          "authorizes, never the engine. Wire deps.approveGig (parallel to deps.queueGig) to approve the " +
+          "parked gig over the wire.",
       };
     }
   }

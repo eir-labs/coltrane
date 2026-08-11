@@ -1,0 +1,10 @@
+{
+  "id": "budget-spent-never-settled",
+  "description": "A build still BUILDING when the poll budget is spent is UNSETTLED with deadline_exceeded — the honest never-settled path, not a guessed READY.",
+  "input": { "polls": ["QUEUED", "BUILDING", "BUILDING"], "max_polls": 3 },
+  "assertions": [
+    { "path": "terminal_state", "op": "equals", "value": "UNSETTLED" },
+    { "path": "deadline_exceeded", "op": "equals", "value": true },
+    { "path": "pass", "op": "equals", "value": false }
+  ]
+}

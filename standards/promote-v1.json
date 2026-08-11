@@ -1,0 +1,41 @@
+{
+  "slug": "promote-v1",
+  "domain": "preview-deploy",
+  "status": "active",
+  "description": "A minimal promote stub — the third movement of software-delivery-v2. It declares preview-deployment in its input_types so the chart's movement-2 → movement-3 edge is a satisfied hard edge (R7), and its one chair reads the deployment_id from the sealed preview-deployment to promote it to production, sealing a deploy-verdict for the production build's terminal state. Its FULL phase graph is deferred by the sealed design (gig 0538105e names movement-3 as a contract boundary only, requiring its own design run); this file is built only to the extent the chart's honest edge and the approval gate before it require. The gate's Judgment is offered to this movement as a seed at runtime — the approver's decision lands in the production deploy's ledger ancestry — without being declared in input_contract, because declaring it as a standard input would make it an outside-need the chart has no edge to satisfy.",
+  "agent_slugs": [
+    "deploy-agent"
+  ],
+  "phases": [
+    {
+      "name": "promote",
+      "chairs": [
+        {
+          "role": "promote-preview",
+          "agent_slug": "deploy-agent",
+          "depends_on": [],
+          "input_contract": [
+            "preview-deployment"
+          ],
+          "output_contract": [
+            "deploy-verdict"
+          ],
+          "required_skills": [
+            "vercel-api"
+          ],
+          "supplies": {
+            "vercel_token": "env:VERCEL_TOKEN",
+            "vercel_team_id": "env:VERCEL_TEAM_ID"
+          }
+        }
+      ],
+      "intent": "Read the deployment_id from the sealed preview-deployment, promote that deployment to production through the Vercel promote API, and wait on the production build with the same bounded poll, sealing a deploy-verdict for its terminal state. STUB: the full promote phase graph is deferred to its own design run per the sealed design's boundary."
+    }
+  ],
+  "input_types": [
+    "preview-deployment"
+  ],
+  "output_types": [
+    "deploy-verdict"
+  ]
+}

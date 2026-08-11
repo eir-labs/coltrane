@@ -1,0 +1,10 @@
+{
+  "slug": "vercel-api",
+  "version": 1,
+  "skill_type": "action",
+  "input_type": "branch-state",
+  "output_type": "deploy-verdict",
+  "determinism_ratio": 1.0,
+  "permission": { "tier": 0 },
+  "description": "The deterministic half of the deploy act: resolve a bounded sequence of Vercel readyState observations into one terminal deploy state (READY | ERROR | CANCELED | UNSETTLED), with the honest deadline_exceeded path when the poll budget is spent before a terminal state. Pure — the network I/O (POST /v13/deployments, GET /v6/deployments) is the agent's WebFetch grant; this code only resolves what those calls observed. The credentials are institution-bound hydration slots, never in the code."
+}

@@ -1,0 +1,43 @@
+{
+  "slug": "pull-request",
+  "version": 1,
+  "extends": "Artifact",
+  "domain": "software-change",
+  "status": "active",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "base": {
+        "type": "string",
+        "description": "The target branch the PR merges into (the protected main line). The seat never merges it — a human governor does, on green CI."
+      },
+      "branch": {
+        "type": "string",
+        "description": "The non-main feature branch the change was applied and pushed to."
+      },
+      "commit_sha": {
+        "type": "string",
+        "description": "The HEAD commit pushed to the branch, taken from the actual push output in this run — never fabricated."
+      },
+      "pr_url": {
+        "type": "string",
+        "description": "The opened pull request URL, taken from the gh/API response in this run."
+      },
+      "pr_number": {
+        "type": "number",
+        "description": "The opened pull request number, from the same response."
+      },
+      "title": {
+        "type": "string",
+        "description": "The PR title, stating what changed."
+      }
+    }
+  },
+  "required_fields": [
+    "validation_criteria",
+    "input_refs",
+    "branch",
+    "commit_sha",
+    "pr_url"
+  ]
+}

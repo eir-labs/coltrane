@@ -1,0 +1,28 @@
+{
+  "slug": "ci-deploy-room-v1",
+  "institution_slug": "quartet",
+  "flavor": "ci-deploy",
+  "description": "The room a change-to-preview arrangement is held in. It equips exactly what the movements need and nothing more: read-only filesystem tools so the reading and branch-sensing seats can read the working tree, and the Vercel REST origin so the deploy seat can build and poll — a ceiling, not a grant, so it can only narrow a seated agent's own charter, never widen it. The one egress door names api.vercel.com; the only credential class it admits is the Vercel token, filled at seat time from the environment. Ephemeral, because a room that stood between runs would carry one gig's branch state and warm credentials into the next.",
+  "equipment": {
+    "tools": [
+      "Read",
+      "Glob",
+      "Grep",
+      "WebFetch(https://api.vercel.com/*)"
+    ]
+  },
+  "doors": {
+    "ingress": [],
+    "egress": [
+      "api.vercel.com"
+    ]
+  },
+  "installs": [],
+  "credential_surface": [
+    "vercel-token"
+  ],
+  "lifecycle": {
+    "policy": "ephemeral"
+  },
+  "responsible_chair": "quartet.chair.responsible-officer"
+}

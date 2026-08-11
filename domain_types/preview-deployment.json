@@ -1,0 +1,32 @@
+{
+  "slug": "preview-deployment",
+  "version": 1,
+  "extends": "Artifact",
+  "domain": "preview-deploy",
+  "status": "active",
+  "description": "A branch built to a Vercel preview and sealed as a typed artifact — the terminal record of movement-2 and the typed edge into a promote movement. commit_sha and branch are sensed independently of the change-set the run reviewed: the write-change chair that produces a change-set holds a read-only grant and emits diffs as content, never an applied commit, so the deploy is decoupled from the diff and reads the branch HEAD itself. protection is required because it decides whether the preview URL is reachable from a phone at the approval gate: supabase-auth is reachable by any credentialed app user, vercel-sso requires an active Vercel team SSO session, public needs no login. inspector_url is optional — present only when the deployment response carried it.",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "preview_url":   { "type": "string", "description": "The reachable preview URL from POST /v13/deployments (the deployment's url, https-prefixed)." },
+      "commit_sha":    { "type": "string", "description": "The exact commit deployed, sensed from branch HEAD — not read out of the change-set." },
+      "branch":        { "type": "string", "description": "The git branch deployed to the preview target." },
+      "project_id":    { "type": "string", "description": "The Vercel project id (prj_...) the deployment belongs to." },
+      "deployment_id": { "type": "string", "description": "The Vercel deployment id (dpl_...), read later by a promote chair to call the promote API." },
+      "build_status":  { "type": "string", "description": "The last observed Vercel readyState: QUEUED | INITIALIZING | BUILDING | READY | ERROR | CANCELED." },
+      "protection":    { "type": "string", "enum": ["vercel-sso", "supabase-auth", "public"], "description": "How the preview URL is gated. supabase-auth is the phone-reachable mode required at the approval gate." },
+      "inspector_url": { "type": "string", "description": "The Vercel inspector/dashboard URL for the deployment, when the response carried it." }
+    }
+  },
+  "required_fields": [
+    "validation_criteria",
+    "input_refs",
+    "preview_url",
+    "commit_sha",
+    "branch",
+    "project_id",
+    "deployment_id",
+    "build_status",
+    "protection"
+  ]
+}

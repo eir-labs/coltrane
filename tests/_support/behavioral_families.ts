@@ -68,6 +68,12 @@ export const EXTERNAL_SUBSTRATE: Record<string, string> = {
   // rather than the agent file carrying those constraints voluntarily.
   john: "filesystem (the working tree or corpus under examination)",
   "provenance-scout": "filesystem (the user's own corpus)",
+  // The preview-deploy pair (sealed gig 0538105e): the branch reader's substrate is the
+  // working tree's git refs; the deploy seat's substrate is the Vercel REST API. Declaring
+  // both here makes the floor ENFORCE retrieval discipline + a real grant on each, rather
+  // than the agent files carrying those constraints voluntarily.
+  "deploy-scout": "filesystem (the working tree's git refs)",
+  "deploy-agent": "Vercel REST API (api.vercel.com)",
 };
 
 /** Agents that act through tools (grants required) even where retrieval isn't the job. */

@@ -1,0 +1,56 @@
+{
+  "slug": "lineage-reweave-v0",
+  "domain": "lineage",
+  "status": "active",
+  "description": "A LINEAGE REWEAVE re-draws the synthesis of a lineage pass from REUSED and NEW seeds, without re-running the scouts. Its entry chair takes the two senses from outside itself — the unchanged internal-inventory the original pass already sealed, and the external lineage-hits (the pass's original plus any a deepen re-run sharpened) — and draws the connection again: a lineage-map of grounded edges, each saying our X descends-from / aligns-with / diverges-from / supersedes / informed-by their Y. It then judges the gap against the re-drawn lineage and plans the alignment, and composes the formal lineage-record. The associate chair is an ENTRY chair (depends_on []): the senses are seeded by the arrangement's edges, so no seat here re-senses anything — the reweave reasons over what was retrieved before, exactly the cost a re-pass is meant to save.",
+  "agent_slugs": [
+    "lineage-weaver",
+    "lineage-scribe"
+  ],
+  "phases": [
+    {
+      "name": "associate",
+      "chairs": [
+        {
+          "role": "associate",
+          "agent_slug": "lineage-weaver",
+          "depends_on": [],
+          "input_contract": ["lineage-hit", "internal-inventory"],
+          "output_contract": ["lineage-map"],
+          "required_skills": []
+        }
+      ],
+      "intent": "The core act, re-performed. Reason over the seeded senses — the reused internal-inventory and both the original and the deepened lineage-hits — and DRAW THE CONNECTION: for each defensible pairing, an edge naming the relation, grounded on BOTH sides, dropping any edge that cannot be grounded both ways. No tools: this seat connects only what the senses already retrieved. The lineage-map it seals is the re-drawn lineage."
+    },
+    {
+      "name": "assess",
+      "chairs": [
+        {
+          "role": "assess",
+          "agent_slug": "lineage-weaver",
+          "depends_on": ["associate"],
+          "input_contract": ["lineage-map"],
+          "output_contract": ["alignment-plan"],
+          "required_skills": []
+        }
+      ],
+      "intent": "Judge the gap and plan the alignment off the re-drawn lineage. Where our internal state has no edge to a source the sharpened prior work establishes, or a source supersedes what we hold, name the gap plainly; then sequence the actions that would close it — cite, adopt, diverge deliberately, or supersede — sealed with the gap summary as an alignment-plan."
+    },
+    {
+      "name": "compose",
+      "chairs": [
+        {
+          "role": "compose",
+          "agent_slug": "lineage-scribe",
+          "depends_on": ["associate", "assess"],
+          "input_contract": ["lineage-map", "alignment-plan"],
+          "output_contract": ["lineage-record"],
+          "required_skills": []
+        }
+      ],
+      "intent": "Compose the re-woven lineage-record: the identified external body, the reused internal inventory, the re-drawn connections, the gap, and the alignment recommendation — carrying each connection's both-side grounding through so the artifact is checkable citation by citation. Create only from upstream; introduce no new source."
+    }
+  ],
+  "input_types": ["lineage-hit", "internal-inventory"],
+  "output_types": ["lineage-record"]
+}

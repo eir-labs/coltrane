@@ -1,0 +1,43 @@
+{
+  "slug": "studio-repass-v0",
+  "movements": [
+    {
+      "movement_id": "m1-pass",
+      "standard_slug": "lineage-pass-v1"
+    },
+    {
+      "movement_id": "m2-deepen",
+      "standard_slug": "lineage-deepen-v0"
+    },
+    {
+      "movement_id": "m3-reweave",
+      "standard_slug": "lineage-reweave-v0"
+    }
+  ],
+  "edges": [
+    {
+      "from_movement": "m1-pass",
+      "to_movement": "m3-reweave",
+      "output_type": "internal-inventory"
+    },
+    {
+      "from_movement": "m1-pass",
+      "to_movement": "m3-reweave",
+      "output_type": "lineage-hit"
+    },
+    {
+      "from_movement": "m2-deepen",
+      "to_movement": "m3-reweave",
+      "output_type": "lineage-hit"
+    }
+  ],
+  "approval_gates": [
+    {
+      "gate_id": "lineage-repass-approval",
+      "after_movement": "m2-deepen",
+      "before_movement": "m3-reweave",
+      "chair": "lineage-steward",
+      "prompt": "Review the deepened lineage-hit sealed by m2-deepen against the original pass's hits and the reused internal-inventory. Approve to spend the reweave: on your yes, m3-reweave re-draws the lineage-map from the reused internal-inventory plus both the original and deepened external hits, judges the gap, and composes a fresh lineage-record. Nothing is re-woven on an absent yes."
+    }
+  ]
+}

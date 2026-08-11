@@ -242,8 +242,14 @@ describe("#227 — the genome's declared required fields are dropped, not absent
     // preview-deployment (extends Artifact), deploy-verdict (extends Verdict) and
     // branch-state (extends Signal). All 3 declare their required fields in
     // `required_fields`, so they join `checked` and none appears in the `lossy` census.
+    //
+    // 44 → 51: the lineage-pass set (lineage-pass-v1) added 7 types — lineage-question,
+    // lineage-hit, internal-inventory (extend Signal), lineage-map (extends Interpretation),
+    // alignment-plan (extends Plan), lineage-record (extends Artifact) and lineage-verdict
+    // (extends Verdict). All 7 declare their required fields in `required_fields`, so they
+    // join `checked` and none appears in the `lossy` census.
     expect(checked).toHaveLength(genome.domain_types.size);
-    expect(checked.length).toBe(44);
+    expect(checked.length).toBe(51);
   });
 });
 

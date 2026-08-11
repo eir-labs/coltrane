@@ -1,0 +1,16 @@
+{
+  "slug": "alignment-plan",
+  "version": 1,
+  "extends": "Plan",
+  "domain": "lineage",
+  "status": "active",
+  "description": "The gap between our internal state and the external body, plus the recommendation for closing it: what our representations do not yet acknowledge that the prior work establishes, and the sequenced actions to align (cite, adopt, diverge deliberately, or supersede). Sealed as a Plan because the recommendation sequences what follows.",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "gap_summary": { "type": "string" },
+      "alignment_recommendation": { "type": "string" }
+    }
+  },
+  "required_fields": ["gap_summary"]
+}

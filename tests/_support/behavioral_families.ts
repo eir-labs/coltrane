@@ -61,7 +61,13 @@ export const EXTERNAL_SUBSTRATE: Record<string, string> = {
   "source-walker": "filesystem (local sources)",
   "domain-explorer": "coltrane registry (types, tools, charter, history)",
   "e2e-runner": "subprocess (test harness)",
-  "lineage-scout": "web (formal-lineage corpora: papers, canonical texts)",
+  // The lineage-pass senses (lineage-pass-v1): two seats under least authority. The external
+  // scout's substrate is the web (prior-art / precedent / canonical corpora); the internal scout's
+  // is the eir-wiki plus the working tree. Both are declared here so the floor ENFORCES retrieval
+  // discipline + a real grant on each, rather than the agent files carrying those constraints
+  // voluntarily. Their grants are disjoint by design — neither can reach the other's substrate.
+  "lineage-scout-external": "web (formal-lineage corpora: papers, precedent, canonical texts)",
+  "lineage-scout-internal": "eir-wiki (read) + filesystem (the genome and working tree)",
   // The default genome's reading seat: the only one of the three named seats that holds a
   // grant at all, and the reason it holds one is that its substrate is outside the run.
   // Declared here so the floor test ENFORCES retrieval discipline + a real grant on it,

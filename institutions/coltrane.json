@@ -1,0 +1,149 @@
+{
+  "institution": {
+    "slug": "coltrane",
+    "name": "Coltrane",
+    "kind": "institution",
+    "laws": [
+      {
+        "attributes": "any seated agent that is not a human governor",
+        "deontic": "forbidden",
+        "aim": "merge a change into the institution's protected main line",
+        "conditions": "at all times",
+        "or_else": "the merge is refused; a change lands only after its continuous-integration check is green on an open pull request and a human governor merges it",
+        "check": {
+          "predicate": "(=> (and (is-agent actor) (not (human-governor actor)) (= action \"merge-main\")) deny)",
+          "inputs": {
+            "actor": "principal",
+            "action": "action-kind",
+            "target_branch": "branch-name"
+          }
+        },
+        "content_hash": "sha256:7519ba7320e92e29c4b911e579f91b4c93894cfb5d79935213c02727efc5ddbb"
+      },
+      {
+        "attributes": "any seated agent proposing a change",
+        "deontic": "permitted",
+        "aim": "open a pull request proposing a change to the institution's main line",
+        "conditions": "the change is committed on a non-main branch and its local verify passed",
+        "or_else": "not applicable — a permission, not an obligation",
+        "check": {
+          "predicate": "(=> (and (is-agent actor) (= action \"open-pr\") (not (= source \"main\"))) allow)",
+          "inputs": {
+            "actor": "principal",
+            "action": "action-kind",
+            "source": "branch-name"
+          }
+        },
+        "content_hash": "sha256:16a421955526178557f84c668a5f7f78df76bb6b63ddc2941b5640bae6ee1131"
+      },
+      {
+        "attributes": "a pull request proposed for merge",
+        "deontic": "obliged",
+        "aim": "present a green continuous-integration result before it may be merged",
+        "conditions": "before any merge to the protected main line",
+        "or_else": "the merge is blocked until continuous integration is green",
+        "check": {
+          "predicate": "(=> (= action \"merge-main\") (require (= ci-status \"green\")))",
+          "inputs": {
+            "action": "action-kind",
+            "ci-status": "ci-status"
+          }
+        },
+        "content_hash": "sha256:c4c2b5fe59fdad6b299a43b60b4d61dfff9c848fe578d72ebf3d932fd5d15b13"
+      }
+    ],
+    "sovereign": true,
+    "lineage": []
+  },
+  "organizations": [
+    {
+      "slug": "eir-labs",
+      "name": "Eir Labs",
+      "charter": "The organization that develops Coltrane through Coltrane's own governed pipeline. Its charter is to carry every change to the engine and its genome through a reviewed pull request a human governor merges on green continuous integration — never a direct write to the protected main line. It ships no capability it has not been granted and lands no change its checks have not passed.",
+      "parent_org": null
+    }
+  ],
+  "agent_records": [
+    {
+      "slug": "coltrane-proposer",
+      "name": "Coltrane Proposer",
+      "kind": "steve",
+      "is_institution": false,
+      "skill_slugs": [],
+      "status": "active",
+      "named_from_forebear": null,
+      "auth_user_id": null
+    }
+  ],
+  "org_members": [
+    {
+      "org_slug": "eir-labs",
+      "agent_slug": "coltrane-proposer"
+    }
+  ],
+  "chairs": [
+    {
+      "id": "coltrane.chair.change-author",
+      "institution_slug": "coltrane",
+      "role": "change-author",
+      "function": "CREATE",
+      "mission": "Propose changes to Coltrane as pull requests a human governor decides on. This chair reads, plans, builds and verifies a change, then opens it as a proposal on a non-main branch. It never merges its own work; landing the change on the protected main line is the governor's act, on green continuous integration.",
+      "required_skills": [],
+      "caps": [
+        {
+          "grant": "dispatch",
+          "standards": [
+            "software-change-v1"
+          ],
+          "expires": null
+        }
+      ],
+      "obligations": [
+        {
+          "attributes": "the change-author",
+          "aim": "open every change as a pull request on a non-main branch",
+          "deontic": "obliged"
+        },
+        {
+          "attributes": "the change-author",
+          "aim": "merge its own pull request, or any change, into the protected main line",
+          "deontic": "forbidden"
+        }
+      ]
+    },
+    {
+      "id": "coltrane.chair.human-governor",
+      "institution_slug": "coltrane",
+      "role": "human-governor",
+      "human": true,
+      "function": "JUDGE",
+      "mission": "Hold the merge authority for Coltrane's protected main line. This chair is held by a person, never a model agent: the governor reviews an open pull request and its continuous-integration result and merges it under their own name, or refuses it. Nothing lands on main without this office's yes. The office ships unassigned — the adopting organization seats a person here as its first governance act.",
+      "required_skills": [],
+      "caps": [],
+      "obligations": [
+        {
+          "attributes": "the human-governor",
+          "aim": "review the open pull request and confirm its continuous-integration result is green before merging",
+          "deontic": "obliged"
+        },
+        {
+          "attributes": "the human-governor",
+          "aim": "delegate the merge decision to a model agent, or let the office be held by one",
+          "deontic": "forbidden"
+        }
+      ]
+    }
+  ],
+  "assignments": [
+    {
+      "id": "coltrane.seat.change-author",
+      "chair_id": "coltrane.chair.change-author",
+      "agent_slug": "coltrane-proposer",
+      "org_slug": "eir-labs",
+      "contract_caps": [],
+      "witnessed_by": null
+    }
+  ],
+  "forebears": [],
+  "lineage_edges": []
+}

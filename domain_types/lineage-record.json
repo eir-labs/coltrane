@@ -1,0 +1,19 @@
+{
+  "slug": "lineage-record",
+  "version": 1,
+  "extends": "Artifact",
+  "domain": "lineage",
+  "status": "active",
+  "description": "The formal, publishable lineage: the identified external body, our internal inventory, the established connections between them, the gap, and the alignment recommendation — grounded citation by citation. On human approval this record becomes first-class lineage attached to an institution, inherited by every agent seated there.",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "external_body": { "type": "array" },
+      "internal_inventory": { "type": "array" },
+      "connections": { "type": "array" },
+      "gap": { "type": "string" },
+      "alignment_recommendation": { "type": "string" }
+    }
+  },
+  "required_fields": ["external_body", "internal_inventory", "connections", "gap", "alignment_recommendation"]
+}

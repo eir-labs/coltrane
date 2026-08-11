@@ -1,0 +1,96 @@
+{
+  "slug": "lineage-pass-v1",
+  "domain": "lineage",
+  "status": "active",
+  "description": "A LINEAGE PASS establishes lineage for a question. It senses BOTH sides in one parallel phase — the external body of prior work (papers, precedent, canonical texts) and our own internal representations (repo, genome, wiki) — under least authority: the external sense holds only web tools, the internal sense holds only the wiki-read and working-tree tools, and neither can reach the other's substrate. Its core act is the second phase: drawing the connection between the two senses into a lineage-map of grounded edges, each saying our X descends-from / aligns-with / diverges-from / supersedes / informed-by their Y, grounded on both sides. It then judges the gap and plans the alignment, composes a formal lineage-record, and parks at a human approve chair whose sealed verdict is what promotes the record to first-class institutional lineage. The two senses are held by different seats, so no seat draws a connection to work it did not itself go and read.",
+  "agent_slugs": [
+    "lineage-scout-external",
+    "lineage-scout-internal",
+    "lineage-weaver",
+    "lineage-scribe"
+  ],
+  "phases": [
+    {
+      "name": "identify",
+      "chairs": [
+        {
+          "role": "identify-external",
+          "agent_slug": "lineage-scout-external",
+          "depends_on": [],
+          "input_contract": ["lineage-question"],
+          "output_contract": ["lineage-hit"],
+          "required_skills": []
+        },
+        {
+          "role": "identify-internal",
+          "agent_slug": "lineage-scout-internal",
+          "depends_on": [],
+          "input_contract": ["lineage-question"],
+          "output_contract": ["internal-inventory"],
+          "required_skills": []
+        }
+      ],
+      "intent": "Sense both sides in parallel, each seat under least authority. identify-external sweeps the external body of prior work with web tools and seals grounded lineage-hits; identify-internal sweeps our own repo, genome, and wiki with the wiki-read and working-tree tools and seals an internal-inventory. Neither seat holds the other's grant, and neither draws a connection — each produces a reading the next phase can be held to."
+    },
+    {
+      "name": "associate",
+      "chairs": [
+        {
+          "role": "associate",
+          "agent_slug": "lineage-weaver",
+          "depends_on": ["identify-external", "identify-internal"],
+          "input_contract": ["lineage-hit", "internal-inventory"],
+          "output_contract": ["lineage-map"],
+          "required_skills": []
+        }
+      ],
+      "intent": "The core act. Reason over the two senses and DRAW THE CONNECTION: for each defensible pairing of an internal representation and an external source, a connection edge naming the relation (descends-from / aligns-with / diverges-from / supersedes / informed-by), grounded on BOTH sides. No external tools — this seat connects only what the senses retrieved, and drops any edge it cannot ground both ways. The lineage-map it seals IS the established lineage."
+    },
+    {
+      "name": "assess",
+      "chairs": [
+        {
+          "role": "assess",
+          "agent_slug": "lineage-weaver",
+          "depends_on": ["associate"],
+          "input_contract": ["lineage-map"],
+          "output_contract": ["alignment-plan"],
+          "required_skills": []
+        }
+      ],
+      "intent": "Judge the gap and plan the alignment off the drawn lineage. Where our internal state has no edge to a source the prior work establishes, or a source supersedes what we hold, name the gap plainly; then sequence the actions that would close it — cite, adopt, diverge deliberately, or supersede — sealed with the gap summary as an alignment-plan."
+    },
+    {
+      "name": "compose",
+      "chairs": [
+        {
+          "role": "compose",
+          "agent_slug": "lineage-scribe",
+          "depends_on": ["identify-external", "identify-internal", "associate", "assess"],
+          "input_contract": ["lineage-map", "alignment-plan"],
+          "output_contract": ["lineage-record"],
+          "required_skills": []
+        }
+      ],
+      "intent": "Compose the formal, publishable lineage-record: the identified external body, our internal inventory, the established connections, the gap, and the alignment recommendation — carrying each connection's both-side grounding through so the artifact is checkable citation by citation. Create only from upstream; introduce no new source."
+    },
+    {
+      "name": "approve",
+      "chairs": [
+        {
+          "role": "approve",
+          "agent_slug": "",
+          "human": true,
+          "depends_on": ["compose"],
+          "input_contract": [],
+          "output_contract": ["lineage-verdict"],
+          "optional_outputs": [],
+          "required_skills": []
+        }
+      ],
+      "intent": "A human approval office. The incumbent reviews the sealed lineage-record and either seals a passing lineage-verdict — which is what promotes the record to first-class lineage attached to an institution — or refuses it. A run that reaches this office unapproved PARKS awaiting the seal; nothing is adopted on an absent yes."
+    }
+  ],
+  "input_types": ["lineage-question"],
+  "output_types": ["lineage-record", "lineage-verdict"]
+}

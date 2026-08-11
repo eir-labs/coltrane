@@ -221,6 +221,21 @@ export interface GigCheckpoint {
   schema_version: number;
   gig_id: string;
   identity: RunIdentity;
+  /**
+   * The engine build (COLTRANE_VERSION) that WROTE this checkpoint.
+   *
+   * `schema_version` moves only when the checkpoint's on-disk shape changes; the genome shape a
+   * given engine build enforces can evolve WITHOUT it moving, so `identity` (genome_hash /
+   * producers_sha) legitimately drifts between two builds that both write `schema_version` 1.
+   * When a resume then refuses on that drift, the raw before/after hashes alone do not tell an
+   * operator WHICH build would have matched — they have to guess the producing version. Recording
+   * it here turns "these two 64-hex strings disagree" into "resume from a <version> build".
+   *
+   * Optional for BACK-COMPAT: a checkpoint written before this field existed has none, and a
+   * resume of it refuses/succeeds exactly as before, naming "(engine version unrecorded)" in
+   * place of a version — never a crash.
+   */
+  engine_version?: string;
   started_at: string;
   updated_at: string;
   roles: CheckpointRole[];

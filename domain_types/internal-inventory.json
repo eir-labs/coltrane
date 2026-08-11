@@ -1,0 +1,26 @@
+{
+  "slug": "internal-inventory",
+  "version": 1,
+  "extends": "Signal",
+  "domain": "lineage",
+  "status": "active",
+  "description": "Our INTERNAL representations found for the question: the repo, genome, and wiki artifacts that already express, or bear on, the thing whose lineage is being established. Each representation carries a reference (a locator another chair can be held to), its kind, and a short summary.",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "representations": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "reference": { "type": "string" },
+            "kind": { "type": "string" },
+            "summary": { "type": "string" }
+          },
+          "required": ["reference"]
+        }
+      }
+    }
+  },
+  "required_fields": ["representations"]
+}

@@ -1,0 +1,16 @@
+{
+  "slug": "lineage-verdict",
+  "version": 1,
+  "extends": "Verdict",
+  "domain": "lineage",
+  "status": "active",
+  "description": "The quality gate on a lineage-record: whether every connection is grounded on both sides, the external sources are real and cited, and the gap and recommendation follow from the drawn lineage. Sealed by the human approve chair; a passing verdict is what promotes the record to first-class institutional lineage.",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "approver": { "type": "string" },
+      "rationale": { "type": "string" }
+    }
+  },
+  "required_fields": ["rationale"]
+}

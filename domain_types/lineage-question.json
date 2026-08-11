@@ -1,0 +1,17 @@
+{
+  "slug": "lineage-question",
+  "version": 1,
+  "extends": "Signal",
+  "domain": "lineage",
+  "status": "active",
+  "description": "The question a lineage pass establishes lineage for, seeding both the internal and the external sense. internal_scope names where in our own representations to look (repo/genome/wiki); external_scope names the body of prior work to search.",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "question": { "type": "string", "minLength": 1 },
+      "internal_scope": { "type": "string" },
+      "external_scope": { "type": "string" }
+    }
+  },
+  "required_fields": ["question"]
+}

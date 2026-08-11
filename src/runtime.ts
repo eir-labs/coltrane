@@ -33,6 +33,7 @@ import { drainGigHeader } from "./output_mirror.js";
 import { LEDGER_SCHEMA_VERSION, type Ledger, type GigUsage } from "./ledger.js";
 import type { Depth } from "./pricing.js";
 import type { SkillRecord, EvalRecord } from "./loader.js";
+import { COLTRANE_VERSION } from "./version.js";
 
 // What an agent invocation sees. The invoker returns the output `data` (validated
 // downstream against the agent's declared output domain type). `skills` carries
@@ -1075,7 +1076,25 @@ export async function runGig(
     // record that it happened — the manifest would describe a system that never existed.
     const drift = runIdentityMismatch(cp.identity, identity());
     if (drift.length > 0) {
-      throw new ResumeRefused(gig_id, "it was checkpointed under a different run identity", drift);
+      // DIAGNOSTIC HONESTY, not a widened resume. The genome genuinely moved, so the refusal
+      // stands — but the operator's real fix is "resume from the build that wrote this", and
+      // nothing told them which build that was. `engine_version` (stamped by every build since
+      // this landed) names it; a checkpoint from before this field says so plainly rather than
+      // crash. Lead with the version + the action; the raw before/after hashes still ride in
+      // `drift` for a builder who wants them.
+      const cur = identity();
+      const wroteBy = cp.engine_version
+        ? `coltrane ${cp.engine_version}`
+        : "an earlier build (engine version unrecorded)";
+      const resumeAction = cp.engine_version
+        ? `Resume from a ${cp.engine_version} build, or re-dispatch cold`
+        : "Resume from the matching build, or re-dispatch cold";
+      throw new ResumeRefused(
+        gig_id,
+        `this checkpoint was written by ${wroteBy} (genome_hash ${cp.identity.genome_hash}); ` +
+          `the current build is coltrane ${COLTRANE_VERSION} (genome_hash ${cur.genome_hash}). ${resumeAction}`,
+        drift,
+      );
     }
 
     const rolesInStandard = new Set(standard.phases.flatMap((p) => p.chairs.map((c) => c.role)));
@@ -1166,6 +1185,9 @@ export async function runGig(
         schema_version: CHECKPOINT_SCHEMA_VERSION,
         gig_id,
         identity: identity(),
+        // The build that wrote this. When a later build's evolved schema drifts the identity,
+        // this is what turns the refusal's two raw hashes into "resume from a <version> build".
+        engine_version: COLTRANE_VERSION,
         started_at: checkpointStartedAt,
         updated_at: new Date().toISOString(),
         roles: [...checkpointRoles.values()],

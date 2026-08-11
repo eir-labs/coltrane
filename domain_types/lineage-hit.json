@@ -1,0 +1,19 @@
+{
+  "slug": "lineage-hit",
+  "version": 1,
+  "extends": "Signal",
+  "domain": "lineage",
+  "status": "active",
+  "description": "One EXTERNAL source identified by the lineage pass: a piece of prior art, precedent, or canonical text, with the claim read from it and its attribution. A source with no claim cites nothing in particular; url and citation carry the locator the claim was verified against.",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "source": { "type": "string" },
+      "claim": { "type": "string" },
+      "attribution": { "type": "string" },
+      "url": { "type": "string" },
+      "citation": { "type": "string" }
+    }
+  },
+  "required_fields": ["source", "claim"]
+}

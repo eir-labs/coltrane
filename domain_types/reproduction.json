@@ -1,0 +1,28 @@
+{
+  "slug": "reproduction",
+  "version": 1,
+  "extends": "Signal",
+  "domain": "engineering",
+  "status": "active",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "reproduced": {
+        "type": "boolean"
+      },
+      "minimal_case": {
+        "type": "string"
+      },
+      "steps": {
+        "type": "string"
+      },
+      "error_text": {
+        "type": "string"
+      }
+    }
+  },
+  "required_fields": [
+    "reproduced",
+    "minimal_case"
+  ]
+}

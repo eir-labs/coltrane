@@ -1,0 +1,28 @@
+{
+  "slug": "root-cause",
+  "version": 1,
+  "extends": "Judgment",
+  "domain": "engineering",
+  "status": "active",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "violated_invariant": {
+        "type": "string"
+      },
+      "why_chain": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "is_root_not_symptom": {
+        "type": "boolean"
+      }
+    }
+  },
+  "required_fields": [
+    "violated_invariant",
+    "why_chain"
+  ]
+}

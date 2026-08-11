@@ -1,0 +1,28 @@
+{
+  "slug": "defect-report",
+  "version": 1,
+  "extends": "Signal",
+  "domain": "engineering",
+  "status": "active",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "symptom": {
+        "type": "string"
+      },
+      "trigger": {
+        "type": "string"
+      },
+      "error_text": {
+        "type": "string"
+      },
+      "observed_at": {
+        "type": "string"
+      }
+    }
+  },
+  "required_fields": [
+    "symptom",
+    "trigger"
+  ]
+}

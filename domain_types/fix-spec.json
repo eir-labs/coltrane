@@ -1,0 +1,28 @@
+{
+  "slug": "fix-spec",
+  "version": 1,
+  "extends": "Plan",
+  "domain": "engineering",
+  "status": "active",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "per_instance_fixes": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        }
+      },
+      "class_guard_test": {
+        "type": "string"
+      },
+      "covers_all_swept_instances": {
+        "type": "boolean"
+      }
+    }
+  },
+  "required_fields": [
+    "per_instance_fixes",
+    "class_guard_test"
+  ]
+}

@@ -1,0 +1,156 @@
+{
+  "slug": "defect-investigation-v1",
+  "domain": "engineering",
+  "agent_slugs": [
+    "defect-investigator"
+  ],
+  "phases": [
+    {
+      "name": "reproduce",
+      "intent": "Reproduce the defect deterministically; no investigation proceeds on a guess.",
+      "chairs": [
+        {
+          "role": "reproduce",
+          "agent_slug": "defect-investigator",
+          "depends_on": [],
+          "input_contract": [
+            "defect-report"
+          ],
+          "output_contract": [
+            "reproduction"
+          ],
+          "required_skills": []
+        }
+      ]
+    },
+    {
+      "name": "locate",
+      "intent": "Trace the exact failing call-chain in read code, file:symbol.",
+      "chairs": [
+        {
+          "role": "locate",
+          "agent_slug": "defect-investigator",
+          "depends_on": [
+            "reproduce"
+          ],
+          "input_contract": [
+            "reproduction"
+          ],
+          "output_contract": [
+            "defect-location"
+          ],
+          "required_skills": []
+        }
+      ]
+    },
+    {
+      "name": "root-cause",
+      "intent": "Why-chain to the violated invariant, not the surface symptom.",
+      "chairs": [
+        {
+          "role": "root-cause",
+          "agent_slug": "defect-investigator",
+          "depends_on": [
+            "locate"
+          ],
+          "input_contract": [
+            "defect-location"
+          ],
+          "output_contract": [
+            "root-cause"
+          ],
+          "required_skills": []
+        }
+      ]
+    },
+    {
+      "name": "generalize",
+      "intent": "Abstract the root cause to its defect CLASS and the single invariant that kills the whole class.",
+      "chairs": [
+        {
+          "role": "generalize",
+          "agent_slug": "defect-investigator",
+          "depends_on": [
+            "root-cause"
+          ],
+          "input_contract": [
+            "root-cause"
+          ],
+          "output_contract": [
+            "defect-class"
+          ],
+          "required_skills": []
+        }
+      ]
+    },
+    {
+      "name": "sweep",
+      "intent": "Sweep the WHOLE codebase for every instance of the class — found and checked-clean. Deferring a sibling is illegal.",
+      "chairs": [
+        {
+          "role": "sweep",
+          "agent_slug": "defect-investigator",
+          "depends_on": [
+            "generalize"
+          ],
+          "input_contract": [
+            "defect-class"
+          ],
+          "output_contract": [
+            "class-sweep"
+          ],
+          "required_skills": []
+        }
+      ]
+    },
+    {
+      "name": "fix-spec",
+      "intent": "Plan a fix for EVERY swept instance, each RED-first, plus a class-guard test.",
+      "chairs": [
+        {
+          "role": "fix-spec",
+          "agent_slug": "defect-investigator",
+          "depends_on": [
+            "sweep",
+            "root-cause"
+          ],
+          "input_contract": [
+            "class-sweep"
+          ],
+          "output_contract": [
+            "fix-spec"
+          ],
+          "required_skills": []
+        }
+      ]
+    },
+    {
+      "name": "verify",
+      "intent": "Confirm RED→GREEN per instance, the class-guard passes, and the original reproduction passes.",
+      "chairs": [
+        {
+          "role": "verify",
+          "agent_slug": "defect-investigator",
+          "depends_on": [
+            "fix-spec"
+          ],
+          "input_contract": [
+            "fix-spec"
+          ],
+          "output_contract": [
+            "fix-verification"
+          ],
+          "required_skills": []
+        }
+      ]
+    }
+  ],
+  "input_types": [
+    "defect-report"
+  ],
+  "output_types": [
+    "fix-spec",
+    "fix-verification"
+  ],
+  "description": "A defect is investigated to a CLASS-COMPLETE fix, never an instance patch. Reproduce → locate → root-cause → GENERALIZE to the defect class → SWEEP the whole codebase for every instance → fix-spec covering all of them (each RED-first, plus a class-guard test) → verify. The generalize+sweep phases are load-bearing: no defect closes until its class is swept, so 'the same class of bug we already fixed' becomes structurally impossible. A human governor seals the completed investigation."
+}

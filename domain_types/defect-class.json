@@ -1,0 +1,25 @@
+{
+  "slug": "defect-class",
+  "version": 1,
+  "extends": "Interpretation",
+  "domain": "engineering",
+  "status": "active",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "class_shape": {
+        "type": "string"
+      },
+      "killing_invariant": {
+        "type": "string"
+      },
+      "class_name": {
+        "type": "string"
+      }
+    }
+  },
+  "required_fields": [
+    "class_shape",
+    "killing_invariant"
+  ]
+}

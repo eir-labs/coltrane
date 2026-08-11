@@ -13,7 +13,7 @@ import { describe, it, expect } from "vitest";
 import { TEST_BEHAVIOR } from "./_support/agents.js";
 import {
   runGig,
-  PreflightToolGrantError,
+  PreflightDispatchError,
   createRegistry,
   createOutputStore,
   MemoryLedger,
@@ -94,7 +94,7 @@ describe("preflight tool-grant guard: a doomed gig spends ZERO model tokens", ()
 
     await expect(
       runGig(standard, { topic: "x" }, { outputs, ledger, invoke: makeInvoke(counter), toolProviders, mcpServerConfigs }),
-    ).rejects.toBeInstanceOf(PreflightToolGrantError);
+    ).rejects.toBeInstanceOf(PreflightDispatchError);
 
     // The whole point: nothing ran. Pre-guard, the sensor chair fires before the summarizer's
     // grant is resolved and this is >= 1.
@@ -107,18 +107,27 @@ describe("preflight tool-grant guard: a doomed gig spends ZERO model tokens", ()
   it("(b) the refusal names the chair, the agent, and the dead tool", async () => {
     const { outputs, ledger } = setup();
     const { standard } = standardWithSummarizerGrants(["mcp__nonexistent__tool"]);
-    let err: PreflightToolGrantError | undefined;
+    let err: PreflightDispatchError | undefined;
     try {
       await runGig(standard, {}, { outputs, ledger, invoke: makeInvoke({ n: 0 }), toolProviders, mcpServerConfigs });
     } catch (e) {
-      err = e as PreflightToolGrantError;
+      err = e as PreflightDispatchError;
     }
-    expect(err).toBeInstanceOf(PreflightToolGrantError);
+    expect(err).toBeInstanceOf(PreflightDispatchError);
     expect(err!.message).toMatch(/interpret/); // the chair role
     expect(err!.message).toMatch(/summarizer/); // the agent slug
     expect(err!.message).toMatch(/mcp__nonexistent__tool/); // the dead tool
-    // structured, not just a string: offenders names the triple
-    expect(err!.offenders).toEqual([{ chair: "interpret", agent: "summarizer", tools: ["mcp__nonexistent__tool"] }]);
+    // structured, not just a string: offenders names the kind + location + tools
+    expect(err!.offenders).toEqual([
+      {
+        kind: "tool-grant",
+        phase: "interpret",
+        chair: "interpret",
+        agent: "summarizer",
+        tools: ["mcp__nonexistent__tool"],
+        detail: `grants unresolvable tool(s) [mcp__nonexistent__tool]`,
+      },
+    ]);
   });
 
   it("(c) a gig whose grants all resolve runs normally (regression)", async () => {
@@ -158,10 +167,10 @@ describe("preflight tool-grant guard: a doomed gig spends ZERO model tokens", ()
         { name: "interpret", chairs: [{ role: "interpret", agent_slug: "summarizer", depends_on: ["sense"], input_contract: [], output_contract: ["summary"], required_skills: [] }] },
       ],
     };
-    let err: PreflightToolGrantError | undefined;
+    let err: PreflightDispatchError | undefined;
     try {
       await runGig(standard, {}, { outputs, ledger, invoke: makeInvoke({ n: 0 }), toolProviders, mcpServerConfigs });
-    } catch (e) { err = e as PreflightToolGrantError; }
+    } catch (e) { err = e as PreflightDispatchError; }
     expect(err!.offenders.map((o) => o.chair).sort()).toEqual(["interpret", "sense"]);
   });
 

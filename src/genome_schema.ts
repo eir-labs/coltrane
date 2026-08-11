@@ -258,6 +258,54 @@ export const LineageRecordRefSchema = z.object({
 });
 export type LineageRecordRefOutput = z.output<typeof LineageRecordRefSchema>;
 
+/** An institutional LAW as an invocable, machine-checkable contract rather than prose.
+ *
+ *  Follows Crawford & Ostrom's ADICO grammar — Attributes (who it binds), Deontic
+ *  (permitted | obliged | forbidden), aIm (the action or state governed), Conditions (when it
+ *  applies), Or-else (the consequence on breach) — the deontic operator drawn from deontic logic.
+ *  `check` is the machine-checkable surface: a normalized, serializable predicate an evaluator can
+ *  invoke plus the typed inputs it reads (design-by-contract). The evaluator that RUNS the
+ *  predicate is a follow-on; this is the shape it consumes. STRICT: an ADICO record with an unknown
+ *  field fails to parse. Each law carries its OWN `content_hash` (over its canonical ADICO
+ *  content), which canonical_form.ts already lists in EXCLUDED_FIELDS, so a law never moves the
+ *  institution's structural genome_hash — laws are hashed as content, not folded into structure. */
+export const DeonticSchema = z.enum(["permitted", "obliged", "forbidden"]);
+export const InstitutionalLawCheckSchema = z
+  .object({
+    /** A normalized, serializable predicate (e.g. an s-expression) an evaluator invokes. */
+    predicate: z.string(),
+    /** The typed inputs the predicate reads: input name → its type name. */
+    inputs: z.record(z.string()),
+  })
+  .strict();
+export const InstitutionalLawSchema = z
+  .object({
+    attributes: z.string(),
+    deontic: DeonticSchema,
+    aim: z.string(),
+    conditions: z.string(),
+    or_else: z.string(),
+    check: InstitutionalLawCheckSchema,
+    content_hash: z.string(),
+  })
+  .strict();
+
+/** A chair OBLIGATION as a deontic NORM PAIR — the deliberate structural SUBSET of ADICO the
+ *  change-request specifies for obligations: who it binds (`attributes`) and the action or state
+ *  governed (`aim`), with `deontic` defaulting to `obliged` (an obligation is obliged unless it
+ *  says otherwise). Not the full law: conditions / or_else / check are institution-level, not a
+ *  burden every chair obligation carries. */
+export const NormPairSchema = z
+  .object({
+    attributes: z.string(),
+    aim: z.string(),
+    deontic: DeonticSchema.default("obliged"),
+  })
+  .strict();
+export type DeonticOperator = z.output<typeof DeonticSchema>;
+export type InstitutionalLawOutput = z.output<typeof InstitutionalLawSchema>;
+export type NormPairOutput = z.output<typeof NormPairSchema>;
+
 // Slugs NAME identities; LOOKUPS go by id. The instance store assigns each institutional
 // identity a stable uuid; references and RLS key on the id, never the slug.
 export const InstitutionSchema = z.object({
@@ -265,7 +313,7 @@ export const InstitutionSchema = z.object({
   slug: z.string(),
   name: z.string(),
   kind: z.enum(["institution", "personal"]),
-  laws: z.array(z.string()).default([]),
+  laws: z.array(InstitutionalLawSchema).default([]),
   wiki_space: z.string().optional(),
   sovereign: z.boolean().default(false),
   /** First-class lineage: references to approved lineage-records that ground this institution.
@@ -344,7 +392,7 @@ export const InstitutionalChairSchema = z.object({
    *  which is why the skill stays portable across institutions. */
   supplies: z.record(z.unknown()).optional(),
   caps: z.array(CapGrantSchema).default([]),
-  obligations: z.array(z.string()).default([]),
+  obligations: z.array(NormPairSchema).default([]),
 });
 
 /** What a seating cited: a source and the claim read from it. Both required — a source with no

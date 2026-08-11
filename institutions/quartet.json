@@ -4,11 +4,51 @@
     "name": "The Quartet",
     "kind": "institution",
     "laws": [
-      "Authority attaches to the chair, never to the incumbent. A named agent may act only within the capability grants of a chair it has been seated in; removing the agent from the chair removes the authority with it.",
-      "A capability grant names its objects exhaustively. A grant that names a standard, tool, or type the genome does not contain is a dead name and is refused at authoring time rather than resolved at dispatch.",
-      "Every chair states its mission and its obligations before an incumbent is seated. An office whose mission is inferred from its occupant's behaviour is not an office.",
-      "Lineage is cited or it is not claimed. An agent's name may be anchored in a forebear only where the record carries the forebear's identity and the primary or scholarly source the attributed disposition is documented in.",
-      "The institution exposes nothing to another institution except by contract."
+      {
+        "attributes": "any agent seated in an institutional chair",
+        "deontic": "forbidden",
+        "aim": "exercise a capability the seated chair grants do not contain",
+        "conditions": "while acting under an institutional seating",
+        "or_else": "the action is refused at dispatch, and the authority lapses the moment the agent is unseated",
+        "check": { "predicate": "(subseteq exercised_caps chair_caps)", "inputs": { "exercised_caps": "CapGrant[]", "chair_caps": "CapGrant[]" } },
+        "content_hash": "sha256:0d27ad56db185576590af99cd368e5826b7bc1589cf23b95bbbb890f8a863253"
+      },
+      {
+        "attributes": "any capability grant",
+        "deontic": "obliged",
+        "aim": "name only standards, tools, and types the genome contains",
+        "conditions": "at authoring time",
+        "or_else": "the grant is a dead name and is refused at authoring rather than resolved at dispatch",
+        "check": { "predicate": "(forall o grant_objects (resolvable o genome))", "inputs": { "grant_objects": "string[]", "genome": "Genome" } },
+        "content_hash": "sha256:faa936f438ae56f08a9f206f0c06603bb4e6c7012f4e2112f3a4557996ec5904"
+      },
+      {
+        "attributes": "every chair",
+        "deontic": "obliged",
+        "aim": "state its mission and its obligations before an incumbent is seated",
+        "conditions": "before any chair assignment for the chair is created",
+        "or_else": "the seating is refused; an office whose mission is inferred from its occupant is not an office",
+        "check": { "predicate": "(and (nonempty chair_mission) (declared_before chair_obligations seat_created))", "inputs": { "chair_mission": "string", "chair_obligations": "NormPair[]", "seat_created": "timestamp" } },
+        "content_hash": "sha256:92d78f11e0b46bf31afe7b41c5037d0f238290589f2636b86118ab533249e2cc"
+      },
+      {
+        "attributes": "any agent name anchored in a forebear",
+        "deontic": "forbidden",
+        "aim": "claim descent from a forebear whose record lacks the forebear identity and a primary or scholarly source for the attributed disposition",
+        "conditions": "whenever a lineage attribution edge is authored",
+        "or_else": "the attribution is not claimed; an uncited lineage is a recollection, not a record",
+        "check": { "predicate": "(and (has edge_source_figure) (or (has edge_source_primary_text) (has edge_source_scholarship)))", "inputs": { "edge_source_figure": "string", "edge_source_primary_text": "string", "edge_source_scholarship": "string" } },
+        "content_hash": "sha256:ee6c8db46e22e9b50a4862b140912634458438d96a6c1fda503e2b6782101e10"
+      },
+      {
+        "attributes": "the institution",
+        "deontic": "forbidden",
+        "aim": "expose any capability to another institution except through a witnessed exchange contract",
+        "conditions": "at all times",
+        "or_else": "the cross-institution access is refused; exposure exists only where an exchange contract carries the cap",
+        "check": { "predicate": "(forall x cross_institution_access (backed_by_contract x exchange_contracts))", "inputs": { "cross_institution_access": "Access[]", "exchange_contracts": "ExchangeContract[]" } },
+        "content_hash": "sha256:09c3ca9ff6c1da5921e1fc97a42602fc0896b4ac660ba8ae6ed51e4594070b60"
+      }
     ],
     "sovereign": false
   },
@@ -92,10 +132,10 @@
         }
       ],
       "obligations": [
-        "State the boundary of the read in the output; an unstated boundary makes an incomplete read indistinguishable from a complete one.",
-        "Record the source locator for every retrieved fact.",
-        "Emit no scope, ranking, or recommendation \u2014 those belong to the direction-setter.",
-        "Hold only a read-only tool grant, and only for the duration of the seating."
+        { "attributes": "the field-reader", "aim": "state the boundary of the read in the output", "deontic": "obliged" },
+        { "attributes": "the field-reader", "aim": "record the source locator for every retrieved fact", "deontic": "obliged" },
+        { "attributes": "the field-reader", "aim": "emit any scope, ranking, or recommendation, which belong to the direction-setter", "deontic": "forbidden" },
+        { "attributes": "the field-reader", "aim": "hold any tool grant wider than read-only or outlasting the seating", "deontic": "forbidden" }
       ]
     },
     {
@@ -123,11 +163,11 @@
         }
       ],
       "obligations": [
-        "State the criteria before applying them.",
-        "Record every alternative set aside, with its reason.",
-        "Do not re-decide the scope at verification time to make a failing result pass.",
-        "Separate what was checked from what was reasoned about, and return insufficient evidence where the evidence does not reach the question.",
-        "Do not perform the work this chair directs."
+        { "attributes": "the direction-setter", "aim": "state the criteria before applying them", "deontic": "obliged" },
+        { "attributes": "the direction-setter", "aim": "record every alternative set aside, with its reason", "deontic": "obliged" },
+        { "attributes": "the direction-setter", "aim": "re-decide the scope at verification time to make a failing result pass", "deontic": "forbidden" },
+        { "attributes": "the direction-setter", "aim": "separate what was checked from what was reasoned about, and return insufficient evidence where the evidence does not reach the question", "deontic": "obliged" },
+        { "attributes": "the direction-setter", "aim": "perform the work this chair directs", "deontic": "forbidden" }
       ]
     },
     {
@@ -161,11 +201,11 @@
         }
       ],
       "obligations": [
-        "Settle the structure before producing the artefact.",
-        "Order the check before the change it checks.",
-        "Do not widen the scope the direction-setter fixed.",
-        "Record every departure from the settled structure, with its reason, rather than revising the structure after the fact.",
-        "Hold no tool grant: the artefact is emitted as reviewable content and is never applied."
+        { "attributes": "the structure-builder", "aim": "settle the structure before producing the artefact", "deontic": "obliged" },
+        { "attributes": "the structure-builder", "aim": "order the check before the change it checks", "deontic": "obliged" },
+        { "attributes": "the structure-builder", "aim": "widen the scope the direction-setter fixed", "deontic": "forbidden" },
+        { "attributes": "the structure-builder", "aim": "record every departure from the settled structure, with its reason, rather than revising the structure after the fact", "deontic": "obliged" },
+        { "attributes": "the structure-builder", "aim": "hold any tool grant or apply the artefact to a working tree; the artefact is emitted as reviewable content", "deontic": "forbidden" }
       ]
     },
     {
@@ -194,9 +234,9 @@
         }
       ],
       "obligations": [
-        "Review the sealed outputs an approval presents before accepting them; an approval that does not cite what it reviewed is void.",
-        "Refuse rather than delegate the refusal: this office cannot be held by a model agent, and its verdict cannot be produced by one.",
-        "This chair ships UNASSIGNED. Seating it is the adopting organization's first governance act: the reader seats themselves."
+        { "attributes": "the responsible-officer", "aim": "review the sealed outputs an approval presents before accepting them; an approval that does not cite what it reviewed is void", "deontic": "obliged" },
+        { "attributes": "the responsible-officer", "aim": "delegate the refusal, or let the office be held or its verdict produced by a model agent", "deontic": "forbidden" },
+        { "attributes": "the adopting organization", "aim": "seat this chair as its first governance act, since it ships unassigned and the reader seats themselves", "deontic": "obliged" }
       ]
     }
   ],

@@ -82,6 +82,12 @@ export const EXTERNAL_SUBSTRATE: Record<string, string> = {
   // than the agent files carrying those constraints voluntarily.
   "deploy-scout": "filesystem (the working tree's git refs)",
   "deploy-agent": "Vercel REST API (api.vercel.com)",
+  // The software-change-pr publish seat: its substrate is git and GitHub — the branch it
+  // pushes and the PR it opens, every fact it seals (branch, commit sha, PR url and number)
+  // coming from a git or gh call in the run. Declared here so the floor ENFORCES retrieval
+  // discipline + a real grant on it, exactly as it does for deploy-agent, rather than the
+  // agent file carrying those constraints voluntarily.
+  "pr-publisher": "git + GitHub (gh CLI) — the branch it pushes and the PR it opens",
 };
 
 /** Agents that act through tools (grants required) even where retrieval isn't the job. */

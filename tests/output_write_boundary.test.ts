@@ -1,24 +1,19 @@
-// RED-first — a model chair's emitted payload MUST be adjudicated against its output_contract
-// at the WRITE BOUNDARY (the earliest frame the predicate is answerable and the producer can
-// still act), not post-hoc at seal after the agent process has exited.
+// The write boundary is `output_write`, and the seal predicate it enforces is the COMPLETE one.
 //
-// THE BUG this file pins:
-//   makeClaudeInvoker's extractJson returns the parsed object to the runtime as the chair's
-//   answer with NO schema/contract validation. An output that violates its output_contract
-//   (e.g. a missing required field) is only caught post-hoc at seal (runtime.ts →
-//   deps.outputs.validateWrite → outputs.ts checkWritable), by which point the agent has
-//   EXITED — a total, unrecoverable failure with no feedback to the producer.
+// THE BUG this file pins, and the governor's two rejections of the first fix:
+//   1. A model chair must self-correct IN-BAND within its single agentic run — NOT by the invoker
+//      re-prompting/re-invoking it. The correct mechanism: the chair SEALS by calling `output_write`
+//      during its run; a violation returns in-band (dispatchTool's { ok:false, error }) and the
+//      agent calls output_write again with a corrected payload. The invoker never re-prompts.
+//   2. The boundary must enforce the FULL seal predicate — `checkWritable` (the substance floor via
+//      validateOutput + the domain schema via registry.validate + core agreement) — NOT the
+//      registry.validate SUBSET the first fix used. A subset silently passes an output the seal
+//      rejects (e.g. a bare-core Interpretation with no `claims`).
 //
-// THE INVARIANT the fix installs:
-//   In the invoker, after extracting the payload, validate it with registry.validate against
-//   the resolved output-type schema BEFORE returning it. On invalid, RE-PROMPT the SAME agent
-//   with the exact validation error, bounded to a small number of repair attempts, so it can
-//   correct within its own turn. Only a persistently-invalid output fails the chair — cleanly,
-//   with the reason — NOT a silent accept-then-fatal-seal.
-//
-// The injected `run` seam stands in for the spawned `claude` here: it returns the raw JSON
-// blob the model would have emitted, deterministically, so the whole loop is exercised without
-// a subprocess.
+// THE RECONCILIATION (option b): output_write, in a chair's spawn, runs in VALIDATE mode — it
+// adjudicates against the full predicate and returns the verdict WITHOUT persisting. The invoker
+// captures the payload that PASSED and hands it back; the runtime (executeChair) is the one sealer,
+// so the output is sealed EXACTLY ONCE and the seal's own gate is an unreachable backstop.
 import { describe, it, expect } from "vitest";
 import { makeClaudeInvoker } from "../src/claude_invoker.js";
 import * as invokerModule from "../src/claude_invoker.js";
@@ -26,9 +21,8 @@ import { createRegistry, createOutputStore, MemoryLedger, MCP_TOOLS, type Domain
 import { dispatchTool, type ServerDeps } from "../src/server.js";
 import { testAgent } from "./_support/agents.js";
 
-// A registered `report` type whose contract REQUIRES `title`. A payload without `title` is
-// exactly the "violates its output_contract" case — and registry.validate (the same enforcer
-// the seal runs) rejects it.
+// A registered `report` type: an Interpretation whose schema REQUIRES `title`. So a valid report
+// owes BOTH `title` (its domain schema) and `claims` (the Interpretation substance floor).
 const REPORT_TYPE: DomainType = {
   slug: "report",
   extends: "Interpretation",
@@ -41,75 +35,155 @@ const REPORT_TYPE: DomainType = {
   required_fields: ["title"],
 };
 
-const registry = () => createRegistry([REPORT_TYPE]);
+const makeRegistry = () => createRegistry([REPORT_TYPE]);
 const reporter = () => testAgent({ slug: "reporter", primitives: ["INTERPRET"], output_types: ["report"] });
 const ctx = () => ({
   agent: reporter(),
   phase: "interpret",
+  gig_id: "g1",
   inputs: [] as never[],
   gig_input: {},
   output_types: ["report"] as const,
 });
 
-const VALID = JSON.stringify({ title: "the finding", claims: ["a"] });
-const INVALID = JSON.stringify({ claims: ["a"] }); // missing required `title`
+// Build ServerDeps; `mode` selects the output_write write-boundary behaviour for this process.
+const deps = (mode?: "validate"): ServerDeps => {
+  const registry = makeRegistry();
+  return {
+    registry,
+    outputs: createOutputStore(registry),
+    ledger: new MemoryLedger(),
+    gig_runs: new Map(),
+    ...(mode ? { output_write_mode: mode } : {}),
+  };
+};
 
-// The prompt an injected run was handed (from `-p <prompt>`), so a test can prove the repair
-// re-prompt carried the exact validation error.
-function promptOf(args: string[]): string {
-  const i = args.indexOf("-p");
-  return i >= 0 && i + 1 < args.length ? args[i + 1]! : "";
-}
+// ── (a) The boundary rejects in-band and does NOT seal; the agent corrects and a valid output
+//        passes — all through output_write, with no invoker re-prompt. ──────────────────────────
+describe("output_write is the write boundary: validate-mode adjudicates in-band and seals nothing", () => {
+  it("a contract-violating payload is rejected IN-BAND (a returned error, not a throw) and nothing persists", async () => {
+    const d = deps("validate");
+    // Missing the required `title` — exactly the "violates its output_contract" case.
+    const r = await dispatchTool("output_write", {
+      core_type: "Interpretation", domain_type: "report", domain: "test",
+      gig_id: "g1", phase: "interpret", agent_slug: "reporter", data: { claims: ["a"] },
+    }, d);
+    expect(r.ok).toBe(false);                       // in-band verdict, reachable by the still-running agent
+    expect(String(r.error)).toMatch(/title|report/i);
+    expect(d.outputs.all().length).toBe(0);         // rejected — nothing sealed
+  });
 
-describe("output-write boundary: a chair's payload is adjudicated where it is written, not at seal", () => {
-  it("a valid payload passes straight through, unchanged, on the first attempt", async () => {
+  it("a valid payload is VALIDATED but NOT persisted — the runtime is the one sealer (no double-seal)", async () => {
+    const d = deps("validate");
+    const r = await dispatchTool("output_write", {
+      core_type: "Interpretation", domain_type: "report", domain: "test",
+      gig_id: "g1", phase: "interpret", agent_slug: "reporter", data: { title: "the finding", claims: ["a"] },
+    }, d);
+    expect(r.ok).toBe(true);
+    const data = r.data as { validated?: boolean; validation_result?: { valid: boolean } };
+    expect(data.validated).toBe(true);
+    expect(data.validation_result?.valid).toBe(true);
+    // The whole point of validate-mode: the chair's own output_write does NOT create a durable row.
+    // Only the runtime seals the captured payload, so the output is sealed exactly once.
+    expect(d.outputs.all().length).toBe(0);
+  });
+
+  it("in SEAL mode (a human/agent output_write) the same valid payload DOES persist exactly one row", async () => {
+    const d = deps(); // default seal mode
+    const r = await dispatchTool("output_write", {
+      core_type: "Interpretation", domain_type: "report", domain: "test",
+      gig_id: "g1", phase: "interpret", agent_slug: "reporter", data: { title: "the finding", claims: ["a"] },
+    }, d);
+    expect(r.ok).toBe(true);
+    expect(d.outputs.all().length).toBe(1); // seal mode is unchanged
+  });
+});
+
+// ── (b) The boundary enforces the FULL checkWritable, not the registry.validate SUBSET. ─────────
+describe("the boundary enforces the COMPLETE seal predicate, not the registry.validate subset", () => {
+  it("a substance-floor violation registry.validate would PASS is caught at the boundary", async () => {
+    const d = deps("validate");
+    // A bare-core Interpretation (no domain_type) with no `claims`. registry.validate short-circuits
+    // an absent domain_type to VALID — so the first fix's registry.validate-only check passed it.
+    const bareCore = { core_type: "Interpretation", domain_type: "", data: { frame: "x" } };
+    expect(d.registry.validate(bareCore).valid).toBe(true); // the SUBSET says fine…
+
+    const r = await dispatchTool("output_write", {
+      core_type: "Interpretation", domain_type: "", domain: "test",
+      gig_id: "g1", phase: "interpret", agent_slug: "reporter", data: { frame: "x" },
+    }, d);
+    expect(r.ok).toBe(false);                        // …the FULL checkWritable does not
+    expect(String(r.error)).toMatch(/claims|substance|Interpretation/i);
+    expect(d.outputs.all().length).toBe(0);
+  });
+});
+
+// ── The invoker captures from output_write and NEVER re-invokes. ────────────────────────────────
+describe("the output_write-seal invoker captures the passed payload and runs the agent exactly once", () => {
+  // A stream-json transcript standing in for the spawned `claude`: the agent calls output_write with
+  // an invalid payload (rejected in-band), then AGAIN with a valid one (accepted) — all inside its
+  // ONE run. The invoker must capture the payload that passed and never re-invoke.
+  const STREAM = [
+    { type: "system", subtype: "init" },
+    { type: "assistant", message: { content: [{ type: "tool_use", id: "tu_bad", name: "mcp__coltrane__output_write",
+      input: { core_type: "Interpretation", domain_type: "report", gig_id: "g1", phase: "interpret", agent_slug: "reporter", data: { claims: ["a"] } } }] } },
+    { type: "user", message: { content: [{ type: "tool_result", tool_use_id: "tu_bad", is_error: true, content: "output rejected: report failed schema validation — must have required property 'title'" }] } },
+    { type: "assistant", message: { content: [{ type: "tool_use", id: "tu_ok", name: "mcp__coltrane__output_write",
+      input: { core_type: "Interpretation", domain_type: "report", gig_id: "g1", phase: "interpret", agent_slug: "reporter", data: { title: "the finding", claims: ["a"] } } }] } },
+    { type: "user", message: { content: [{ type: "tool_result", tool_use_id: "tu_ok", is_error: false, content: "{\"validated\":true}" }] } },
+    { type: "result", subtype: "success", is_error: false, result: "Sealed the report." },
+  ].map((e) => JSON.stringify(e)).join("\n");
+
+  it("captures the LAST passing output_write payload and calls the model ONCE (no re-prompt loop)", async () => {
     let calls = 0;
     const invoke = makeClaudeInvoker({
-      registry: registry(),
-      run: () => { calls++; return VALID; },
+      registry: makeRegistry(),
+      sealVia: "output_write",
+      run: () => { calls++; return STREAM; },
     });
     const out = await invoke(ctx());
-    expect(out).toEqual({ title: "the finding", claims: ["a"] });
-    expect(calls).toBe(1); // no repair loop for a compliant output
+    // The blob the runtime seals — keyed by domain_type, carrying the payload that PASSED (not the
+    // earlier rejected one).
+    expect(out).toEqual({ report: { title: "the finding", claims: ["a"] } });
+    // The heart of the governor's first rejection: the agent self-corrected WITHIN its single run.
+    // The invoker did not re-invoke — so exactly one call, never the old bounded repair loop.
+    expect(calls).toBe(1);
   });
 
-  it("a persistently-invalid payload FAILS CLOSED at the boundary — never silently returned", async () => {
-    // Before the fix this RESOLVES with the invalid object (silent accept), which then dies
-    // post-hoc at seal after the agent has exited. After the fix it REJECTS in-loop with the
-    // contract reason, so the producer's failure is legible where it happened.
+  it("a run that never gets a write past the boundary fails legibly — never a silent empty seal", async () => {
+    // Only rejected output_write calls: nothing passed, so the chair sealed nothing.
+    const onlyRejected = [
+      { type: "assistant", message: { content: [{ type: "tool_use", id: "tu_bad", name: "mcp__coltrane__output_write",
+        input: { core_type: "Interpretation", domain_type: "report", data: { claims: ["a"] } } }] } },
+      { type: "user", message: { content: [{ type: "tool_result", tool_use_id: "tu_bad", is_error: true, content: "rejected" }] } },
+      { type: "result", subtype: "success", is_error: false, result: "gave up" },
+    ].map((e) => JSON.stringify(e)).join("\n");
     let calls = 0;
     const invoke = makeClaudeInvoker({
-      registry: registry(),
-      run: () => { calls++; return INVALID; },
+      registry: makeRegistry(),
+      sealVia: "output_write",
+      run: () => { calls++; return onlyRejected; },
     });
-    await expect(invoke(ctx())).rejects.toThrow(/report|title/i);
-    // Bounded repair: the initial attempt plus a small, finite number of repairs — not one,
-    // and not unbounded.
-    expect(calls).toBeGreaterThan(1);
-    expect(calls).toBeLessThanOrEqual(3);
+    await expect(invoke(ctx())).rejects.toThrow(/write boundary|output_write/i);
+    expect(calls).toBe(1); // still no re-invocation
   });
 
-  it("an invalid first payload is REPAIRED in-loop: the re-prompt carries the exact validation error", async () => {
-    const prompts: string[] = [];
-    let calls = 0;
+  it("the prompt tells the agent to seal via output_write (the in-band boundary), not to print JSON", async () => {
+    let prompt = "";
     const invoke = makeClaudeInvoker({
-      registry: registry(),
+      registry: makeRegistry(),
+      sealVia: "output_write",
       run: (_bin, args) => {
-        prompts.push(promptOf(args));
-        calls++;
-        return calls === 1 ? INVALID : VALID; // fix it on the second turn
+        const i = args.indexOf("-p");
+        prompt = i >= 0 && i + 1 < args.length ? args[i + 1]! : "";
+        return STREAM;
       },
     });
-    const out = await invoke(ctx());
-    expect(out).toEqual({ title: "the finding", claims: ["a"] });
-    expect(calls).toBe(2); // one repair, then success
-    // The repair prompt must name the field that was wrong — a blind restart would not.
-    expect(prompts[1]).toMatch(/title/i);
-    expect(prompts[1]!.length).toBeGreaterThan(prompts[0]!.length); // the base prompt + a repair appendix
+    await invoke(ctx());
+    expect(prompt).toMatch(/output_write/);
   });
 
-  it("exposes a typed contract error distinct from the parse error", () => {
-    // Probed as a namespace property so a missing export does not hard-fail the whole file.
+  it("still exposes the typed contract error", () => {
     const ModelOutputContractError = (invokerModule as unknown as Record<string, unknown>)[
       "ModelOutputContractError"
     ];
@@ -117,14 +191,14 @@ describe("output-write boundary: a chair's payload is adjudicated where it is wr
   });
 });
 
+// ── The secondary bug the PR already fixed stays fixed: output_write's declared output_schema
+//    matches what the handler actually returns. ──────────────────────────────────────────────────
 describe("output_write: the declared output_schema matches what the handler actually returns", () => {
-  // Secondary bug of the same family: mcp.ts declared `validation_result` and the handler never
-  // returned it, while the handler returned `primitive`/`output` the schema never advertised.
   const note: DomainType = {
     slug: "note", extends: "Signal", domain: "demo",
     schema: { properties: { t: { type: "string" } } }, required_fields: ["t"],
   };
-  const deps = (): ServerDeps => {
+  const noteDeps = (): ServerDeps => {
     const registry = createRegistry([note]);
     return { registry, outputs: createOutputStore(registry), ledger: new MemoryLedger(), gig_runs: new Map() };
   };
@@ -133,10 +207,9 @@ describe("output_write: the declared output_schema matches what the handler actu
     const r = await dispatchTool("output_write", {
       core_type: "Signal", domain_type: "note", domain: "demo", gig_id: "g1", agent_slug: "sensor",
       data: { t: "x", source: "fixture://demo/sensor" },
-    }, deps());
+    }, noteDeps());
     expect(r.ok).toBe(true);
-    const data = r.data as { output_id: string; validation_result?: { valid: boolean } };
-    expect(data.output_id).toBeTypeOf("string");
+    const data = r.data as { output_id?: string; validation_result?: { valid: boolean } };
     expect(data.validation_result).toBeDefined();
     expect(data.validation_result!.valid).toBe(true);
   });
@@ -144,7 +217,6 @@ describe("output_write: the declared output_schema matches what the handler actu
   it("every key the handler returns is advertised in the declared output_schema", () => {
     const tool = MCP_TOOLS.find((t) => t.slug === "output_write")!;
     const declared = Object.keys((tool.output_schema as { properties: Record<string, unknown> }).properties);
-    // The handler returns { output_id, primitive, output, validation_result }.
     for (const k of ["output_id", "primitive", "output", "validation_result"]) {
       expect(declared, `output_write must advertise "${k}"`).toContain(k);
     }

@@ -45,6 +45,11 @@ import { COLTRANE_VERSION } from "./version.js";
 export interface AgentInvocationContext {
   agent: Agent;
   phase: string;
+  // The id of the gig this chair runs under. Threaded so a model chair can seal its output
+  // IN-BAND: the invoker tells the agent to call `output_write({ gig_id, phase, agent_slug, … })`,
+  // and that gig_id is what ties the chair's write-boundary adjudication to this run. Absent for a
+  // legacy hand-rolled ctx (the text-seal path, which never sealed via output_write).
+  gig_id?: string | undefined;
   inputs: readonly OutputRecord[]; // upstream outputs matching this agent's input_types
   gig_input: Record<string, unknown>;
   // The output types THIS chair seals — the chair's output_contract intersected with the
@@ -2052,7 +2057,7 @@ export async function runGig(
       startedInvocations++;
       try {
         data = await deps.invoke({
-          agent, phase: phaseName, inputs, gig_input: gigInput, skills,
+          agent, phase: phaseName, gig_id, inputs, gig_input: gigInput, skills,
           missing_skills: p.missing_skills, // #241 — what did NOT resolve, so the prompt can't assert it
           output_types: output_specs.map((s) => s.domain_type), // #174 — the chair's promised subset
           // #250 level 2 + #237 — the cancellation signal and the run's depth reach the invocation

@@ -12,10 +12,6 @@ import {
   extractJson,
   extractOptionsForChair,
   promptSchemaFor,
-  contractViolation,
-  repairPromptAppendix,
-  ModelOutputContractError,
-  MAX_CONTRACT_REPAIRS,
 } from "./claude_invoker.js";
 
 // One model invocation's wall-clock bound. Far below the Claude invoker's 10min
@@ -126,20 +122,13 @@ export function makeBifrostInvoker(opts: BifrostInvokerOptions): AgentInvoker {
       return typeof reply.body === "string" ? reply.body : JSON.stringify(reply.body ?? "");
     };
 
-    // The write-boundary guard, shared with the Claude invoker: adjudicate the extracted payload
-    // against its output_contract HERE (registry.validate, the seal's own enforcer), and on a
-    // violation re-prompt the SAME model with the exact error, bounded to MAX_CONTRACT_REPAIRS.
-    // Only a persistently-invalid output fails the chair — never a silent accept-then-fatal-seal.
-    // #221 policy 5 — the same key signal as the Claude invoker (extractOpts above).
-    let promptForAttempt = prompt;
-    for (let attempt = 0; ; attempt++) {
-      const payload = extractJson(await runOnce(promptForAttempt), extractOpts);
-      const violation = contractViolation(opts.registry, sealTypes, payload);
-      if (violation === undefined) return payload;
-      if (attempt >= MAX_CONTRACT_REPAIRS) {
-        throw new ModelOutputContractError(ctx.agent.slug, violation, attempt + 1);
-      }
-      promptForAttempt = prompt + repairPromptAppendix(violation);
-    }
+    // Bifrost v0 is text-in/JSON-out — a single completion with NO tool surface, so a chair here
+    // cannot seal in-band via output_write and cannot self-correct within its run. The honest
+    // boundary for this transport is therefore the runtime's own seal (executeChair → the full
+    // checkWritable): the earliest frame the predicate is answerable for a single-shot completion.
+    // Extract the payload and hand it back; there is no invoker re-prompt (removed with the Claude
+    // invoker's repair loop — the governor's ruling that a chair self-corrects in-band, not by the
+    // invoker re-invoking it, holds here too, and a tool-less transport has no in-band frame).
+    return extractJson(await runOnce(prompt), extractOpts);
   };
 }

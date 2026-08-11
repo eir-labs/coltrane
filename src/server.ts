@@ -167,6 +167,15 @@ export interface ServerDeps {
   // what a chair gets. Built by bootstrap from `.mcp.json` (deny-by-default: coltrane's own server
   // unless the deployment registers more), the SAME object handed to makeClaudeInvoker.
   mcpServerConfigs?: Record<string, unknown> | undefined;
+  // The write-boundary mode for `output_write` in THIS process. "seal" (default) durably writes
+  // the validated record. "validate" runs the FULL seal predicate (checkWritable, as a question
+  // via validateWrite) and returns the verdict WITHOUT persisting — the in-band contract boundary
+  // for a spawned model chair. The runtime is the ONE sealer (executeChair), so a chair's own
+  // `output_write` calls must adjudicate-not-seal, or the same output would be sealed twice: once
+  // by the chair's cross-process coltrane server and once by the runtime that captures it. Set
+  // from COLTRANE_OUTPUT_WRITE_MODE in bootstrapServerDeps; the invoker injects that env into the
+  // chair's spawn so the child's coltrane server validates instead of sealing.
+  output_write_mode?: "seal" | "validate" | undefined;
   // #206 — the interception seam. A wrapping layer (control plane) injects pre/post hooks that
   // gate/observe/rewrite tool calls in-process. The engine ships ZERO hooks and ZERO policy; it only
   // CALLS whatever is injected here. Absent/empty → dispatch is byte-identical to no seam.
@@ -640,6 +649,27 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         const data_raw = args["data"];
         // undefined → {} (caller never sent the field); null stays null so Ajv sees it.
         const data = (data_raw === undefined ? {} : data_raw) as Record<string, unknown>;
+        // THE WRITE BOUNDARY. In "validate" mode the caller is a spawned model chair sealing
+        // in-band: run the COMPLETE seal predicate (validateWrite === checkWritable: the substance
+        // floor via validateOutput + the domain schema via registry.validate + core agreement) and
+        // return the verdict WITHOUT persisting. On a violation the throw below becomes an in-band
+        // { ok:false, error } (dispatchTool's catch), so the STILL-RUNNING agent gets the exact
+        // reason and self-corrects by calling output_write again — no invoker re-prompt, and no
+        // subset check. The runtime (executeChair) is the one sealer, so validating-not-sealing
+        // here is what keeps the output sealed exactly once.
+        if (deps.output_write_mode === "validate") {
+          const verdict = deps.outputs.validateWrite({ core_type, domain_type, data });
+          if (!verdict.valid) {
+            throw new Error(
+              verdict.reason ??
+                `output rejected: "${domain_type || core_type}" did not satisfy its output contract`,
+            );
+          }
+          return {
+            ok: true, requires_approval: approval,
+            data: { validated: true, validation_result: { valid: true } },
+          };
+        }
         const rec = deps.outputs.write({
           core_type,
           domain_type,
@@ -3109,6 +3139,11 @@ export function bootstrapServerDeps(genomeRoot?: string): ServerDeps {
     registry,
     toolProviders,
     mcpServerConfigs, // the SAME object handed to the invoker — the preflight guard resolves against it
+    // A chair's spawn sets COLTRANE_OUTPUT_WRITE_MODE=validate so this child's coltrane server
+    // adjudicates the chair's in-band output_write calls against the full seal predicate WITHOUT
+    // persisting — the runtime that captures the validated payload is the one that seals. A bare
+    // server start (no env) keeps "seal": a human/agent output_write durably writes as before.
+    ...(process.env["COLTRANE_OUTPUT_WRITE_MODE"] === "validate" ? { output_write_mode: "validate" as const } : {}),
     output_mirror,
     // PR #78 follow-up: persist outputs to disk so the audit chain survives an
     // MCP session close (Rob cold-trial requirement). COLTRANE_OUTPUTS_DIR
@@ -3132,6 +3167,11 @@ export function bootstrapServerDeps(genomeRoot?: string): ServerDeps {
       // own server + any the deployment registers in .mcp.json). An unresolvable grant fails closed.
       mcpServerConfigs,
       toolProviders, // the genome→provider bridge (above) — makes in_house grants resolvable
+      // The production seal path: a model chair SEALS IN-BAND by calling output_write (validated at
+      // the full write boundary, corrected in-band), and the invoker captures what passed. The
+      // engine server config above is bridged into the spawn and its validate-mode env set, so the
+      // chair's output_write adjudicates-not-persists and the runtime seals exactly once.
+      sealVia: "output_write",
       // per-chair wall-clock bound; COLTRANE_CHAIR_TIMEOUT_MS overrides for slow deployments
       ...(process.env["COLTRANE_CHAIR_TIMEOUT_MS"] ? { timeout_ms: Number(process.env["COLTRANE_CHAIR_TIMEOUT_MS"]) } : {}),
     }),

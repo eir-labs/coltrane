@@ -11,9 +11,13 @@ import { abortReasonText, type AgentInvocationContext, type AgentInvoker, type A
 import type { Registry } from "./registry.js";
 import type { Depth, ModelTier } from "./pricing.js";
 import type { CodeToolAccess } from "./composition.js";
-import { resolveAgentGrants, type ToolProviderRegistry } from "./tool_providers.js";
+import { resolveAgentGrants, ENGINE_MCP_SERVER, type ToolProviderRegistry } from "./tool_providers.js";
+import { CORE_TYPES } from "./core_types.js";
 
 const EMPTY_TOOL_REGISTRY: ToolProviderRegistry = new Map();
+
+/** The tool name a chair's in-band `output_write` seal is advertised under in the spawn. */
+const OUTPUT_WRITE_TOOL = `mcp__${ENGINE_MCP_SERVER}__output_write`;
 
 // Per-tier model resolution (the old MODEL_TIER_MAP: economy/standard/premium →
 // haiku/sonnet/opus). An agent's model_tier picks the concrete spawn model; falls back to
@@ -97,6 +101,22 @@ export function promptSchemaFor(
   return registry.effectiveSchema(slug);
 }
 
+/**
+ * When set, the Task layer tells the chair to seal each output IN-BAND by calling `output_write`
+ * (the write-boundary tool) rather than printing final-text JSON for the invoker to parse. The
+ * tool runs the full seal predicate and returns its verdict in-band, so the agent self-corrects
+ * within its own single run — there is no invoker re-prompt. Absent → the legacy text-seal Task
+ * (unchanged, so every buildPrompt fixture stays stable).
+ */
+export interface OutputWriteSeal {
+  via: "output_write";
+  gig_id: string;
+  agent_slug: string;
+  phase: string;
+  /** domain_type slug → its core_type, so the agent passes the right `core_type` to output_write. */
+  core_by_type: Record<string, string>;
+}
+
 export function buildPrompt(
   ctx: AgentInvocationContext,
   outputSchema?: Record<string, unknown>,
@@ -104,6 +124,7 @@ export function buildPrompt(
   // more than one output type, the Task layer asks for a blob keyed by type rather than a
   // single object — the runtime then seals one record per key.
   outputSchemas?: Record<string, Record<string, unknown> | undefined>,
+  seal?: OutputWriteSeal,
 ): string {
   const a = ctx.agent;
   const layers: string[] = [];
@@ -180,7 +201,29 @@ export function buildPrompt(
   // chair is asked for only its promised subset, not its whole catalogue. Legacy ctx without it
   // falls back to the agent's full output_types.
   const sealTypes = ctx.output_types?.length ? ctx.output_types : a.output_types;
-  if (sealTypes.length > 1) {
+  if (seal) {
+    // IN-BAND WRITE-BOUNDARY SEAL. Each output is sealed by an `output_write` call whose payload
+    // the engine adjudicates against the FULL contract; a rejection returns in-band and the agent
+    // fixes `data` and calls again — its own single run self-corrects, no invoker re-prompt.
+    const perType = sealTypes
+      .map((t) => {
+        const s = outputSchemas?.[t] ?? (sealTypes.length === 1 ? outputSchema : undefined);
+        const core = seal.core_by_type[t] ?? "";
+        return (
+          `- output_write({ "core_type": "${core}", "domain_type": "${t}", ` +
+          `"gig_id": "${seal.gig_id}", "phase": "${seal.phase}", "agent_slug": "${seal.agent_slug}", ` +
+          `"data": <object${s ? ` matching ${JSON.stringify(s)}` : ""}> })`
+        );
+      })
+      .join("\n");
+    layers.push(
+      `# Task\nSeal each of your output types by calling the \`output_write\` tool — one call per type:\n${perType}\n\n` +
+        `The tool validates your \`data\` against the complete output contract and returns ` +
+        `\`{ ok: false, error }\` if it does not pass. When that happens, read the error, correct the ` +
+        `\`data\`, and call \`output_write\` again — repeat until it returns \`ok: true\`. The successful ` +
+        `call IS the seal; do NOT print the output as text, and do not stop until every type is sealed.`,
+    );
+  } else if (sealTypes.length > 1) {
     // multi-output: one JSON object keyed by each output-type slug; each value is that
     // type's data. The runtime seals one record per key (a SENSE+JUDGE agent yields its
     // Signal and its Judgment in one pass).
@@ -242,81 +285,26 @@ export class ModelOutputParseError extends Error {
 }
 
 /**
- * A payload that parsed cleanly but VIOLATES its output_contract, after the bounded in-loop
- * repair was exhausted. Distinct from ModelOutputParseError (which is "no answer / unparseable
- * answer"): this is a well-formed answer that does not satisfy the schema the seal enforces.
+ * A chair completed its run but sealed NONE of its promised outputs through `output_write`.
+ * Distinct from ModelOutputParseError (a text-seal chair that emitted no parseable answer): this
+ * is the output_write-seal path, where the boundary that adjudicates a payload against its full
+ * output contract is the chair's own in-band `output_write` call (validated by the engine's
+ * checkWritable, corrected in-band by the agent), NOT a re-prompt from this invoker. A chair that
+ * never gets a single write past that boundary produced nothing this invoker can hand back.
  *
- * It exists so the failure is legible at the write boundary — the earliest frame the predicate
- * is answerable and the producer could still have acted — rather than post-hoc at seal, after
- * the agent process has exited (runtime.ts validateWrite, which now only ever fires as an
- * unreachable backstop for a model chair).
+ * The runtime's own floor check (executeChair, `missingRequired`) also catches a shortfall and is
+ * the authority on which promised types were merely optional; this error is the earlier, chair-
+ * local signal that the write boundary sealed nothing at all.
  */
 export class ModelOutputContractError extends Error {
   readonly slug: string;
   readonly reason: string;
-  readonly attempts: number;
-  constructor(slug: string, reason: string, attempts: number) {
-    super(
-      `chair "${slug}" did not satisfy its output_contract after ${attempts} attempt(s): ${reason}. ` +
-        `The payload was adjudicated at the write boundary and rejected, so nothing was sealed.`,
-    );
+  constructor(slug: string, reason: string) {
+    super(`chair "${slug}" sealed no output through its write boundary: ${reason}`);
     this.name = "ModelOutputContractError";
     this.slug = slug;
     this.reason = reason;
-    this.attempts = attempts;
   }
-}
-
-/** How many in-loop repair re-prompts a chair gets before its output fails the contract. */
-export const MAX_CONTRACT_REPAIRS = 2;
-
-/**
- * Adjudicate an EXTRACTED chair payload against its output_contract, using the SAME
- * `registry.validate` the seal runs (outputs.ts checkWritable → registry.validate). Returns a
- * human-readable reason when the payload violates the contract, or `undefined` when it satisfies
- * it — or cannot be checked here (no registry wired, or a bare-core / freeform / unregistered
- * type, all of which registry.validate itself treats as pass or defers to the seal).
- *
- * The slice logic MIRRORS the runtime's (runtime.ts ~2187): a multi-output blob is keyed by
- * type slug, so each PRESENT key is validated and an ABSENT key is skipped (optionality is the
- * seal's business via `optional_outputs`, and nothing about a run's arguments is known here); a
- * single-output blob is either keyed by its type slug or IS the bare data object. What the
- * invoker checks is therefore exactly what the seal would enforce, so the two cannot disagree.
- */
-export function contractViolation(
-  registry: Registry | undefined,
-  sealTypes: readonly string[],
-  payload: Record<string, unknown>,
-): string | undefined {
-  if (!registry) return undefined;
-  const single = sealTypes.length === 1;
-  const problems: string[] = [];
-  for (const t of sealTypes) {
-    const keyed = payload[t] as Record<string, unknown> | undefined;
-    const slice = keyed !== undefined && keyed !== null ? keyed : single ? payload : undefined;
-    if (slice === undefined || slice === null) continue; // absent → seal adjudicates optionality
-    if (typeof slice !== "object" || Array.isArray(slice)) {
-      problems.push(`"${t}" must be a JSON object, got ${Array.isArray(slice) ? "array" : typeof slice}`);
-      continue;
-    }
-    const res = registry.validate({ core_type: "", domain_type: t, data: slice as Record<string, unknown> });
-    if (!res.valid) problems.push(`"${t}": ${res.errors.join("; ")}`);
-  }
-  return problems.length > 0 ? problems.join(" | ") : undefined;
-}
-
-/**
- * The repair instruction appended to the ORIGINAL prompt for an in-loop retry. Names the exact
- * contract violation so the model corrects THIS defect — the difference between a targeted
- * repair and a blind restart.
- */
-export function repairPromptAppendix(reason: string): string {
-  return (
-    `\n\n# Output Contract Violation — Correct And Re-emit\n` +
-    `Your previous response parsed, but did NOT satisfy the output contract:\n${reason}\n` +
-    `Emit a corrected JSON object that fixes exactly this. ` +
-    `Respond with ONLY the corrected JSON object — no prose, no code fence.`
-  );
 }
 
 export interface ExtractJsonOptions {
@@ -535,6 +523,70 @@ export function extractOptionsForChair(
   return props.length > 0 ? { expectKeys: props } : { requireUnambiguous: true };
 }
 
+// ───────────────────── output_write capture (the write-boundary seal path) ─────────────────────
+//
+// A model chair on the output_write-seal path does NOT print a final-text answer — it SEALS each
+// output in-band by calling `output_write`, whose payload the engine adjudicates against the full
+// contract (validate-mode, returning the verdict in-band so the agent self-corrects). This reads
+// those calls back out of the child's stream-json stdout: the payload of each SUCCESSFUL
+// output_write call (a tool_use whose tool_result was not an error) is what the chair sealed, and
+// the runtime's own boundary seals it exactly once. Because the agent corrects a rejected write by
+// calling again, the LAST non-errored call per type is the one that passed.
+
+/** The name a chair's `output_write` grant is advertised under in the spawn (mcp__<server>__<tool>),
+ *  plus the bare slug for a legacy pass-through invoker. Matched by suffix so either resolves. */
+function isOutputWriteToolName(name: string): boolean {
+  return name === "output_write" || name.endsWith("__output_write");
+}
+
+/**
+ * Extract the chair's sealed payloads from a stream-json stdout, keyed by the chair's seal types.
+ * Returns the blob shape the runtime already consumes (a key per domain_type, or the bare data for
+ * a lone single-output write), so executeChair seals it through its one boundary unchanged.
+ */
+export function captureOutputWrites(
+  stdout: string,
+  sealTypes: readonly string[],
+): Record<string, unknown> {
+  interface Write { id: string; domain_type: string; data: unknown; }
+  const writes: Write[] = [];
+  const errored = new Set<string>();
+  for (const raw of stdout.split("\n")) {
+    const line = raw.trim();
+    if (!line) continue;
+    let e: Record<string, unknown>;
+    try { e = JSON.parse(line) as Record<string, unknown>; } catch { continue; }
+    const type = typeof e["type"] === "string" ? (e["type"] as string) : "";
+    const msg = e["message"];
+    if ((type === "assistant" || type === "user") && msg && typeof msg === "object") {
+      const content = (msg as { content?: Array<Record<string, unknown>> }).content ?? [];
+      for (const b of content) {
+        const bt = String(b["type"] ?? "");
+        if (bt === "tool_use" && isOutputWriteToolName(String(b["name"] ?? ""))) {
+          const input = (b["input"] && typeof b["input"] === "object" ? b["input"] : {}) as Record<string, unknown>;
+          writes.push({ id: String(b["id"] ?? ""), domain_type: String(input["domain_type"] ?? ""), data: input["data"] });
+        } else if (bt === "tool_result" && b["is_error"] === true) {
+          errored.add(String(b["tool_use_id"] ?? ""));
+        }
+      }
+    }
+  }
+  const passed = writes.filter((w) => !w.id || !errored.has(w.id));
+  const byType = new Map<string, unknown>();
+  for (const w of passed) byType.set(w.domain_type, w.data); // last non-errored write per type wins
+  const blob: Record<string, unknown> = {};
+  for (const t of sealTypes) {
+    if (byType.has(t)) blob[t] = byType.get(t);
+  }
+  // Single-output chairs may seal with an empty/other domain_type (buildPrompt names it, but a
+  // model can still omit it). If nothing matched by name and exactly one output was sealed, that
+  // lone payload IS the single output — key it under the promised type.
+  if (sealTypes.length === 1 && blob[sealTypes[0]!] === undefined && passed.length > 0) {
+    blob[sealTypes[0]!] = passed[passed.length - 1]!.data;
+  }
+  return blob;
+}
+
 // The wall-clock bound on one chair's spawn. A tool-granted child has no inherent
 // terminus (it can search/loop), and the gig runs the spawn synchronously — so without
 // this bound one wedged child wedges the whole server. SIGKILL, not SIGTERM: a
@@ -610,6 +662,19 @@ export interface ClaudeInvokerOptions {
   // When set, the spawned child receives COLTRANE_PARENT_SESSION_ID so its first
   // recorded turn seals the lineage edge to its parent.
   parent_session_id?: string | undefined;
+  /**
+   * How a model chair produces its sealed output.
+   *  - "output_write" (production): the chair SEALS IN-BAND by calling `output_write` during its
+   *    run. The spawn advertises `mcp__coltrane__output_write` and its coltrane server runs in
+   *    validate-mode (COLTRANE_OUTPUT_WRITE_MODE=validate), so each call adjudicates the payload
+   *    against the FULL seal predicate and returns the verdict in-band — the agent self-corrects
+   *    within its single run. The invoker captures the validated payload from the chair's
+   *    successful output_write calls; the runtime (executeChair) is the ONE sealer.
+   *  - "text" (default, and every injected-run test): the chair prints final-text JSON, which the
+   *    invoker extracts and hands back for the runtime to seal at its boundary. Unchanged legacy
+   *    behaviour, so a bare/test invoker is unaffected.
+   */
+  sealVia?: "text" | "output_write" | undefined;
 }
 
 // The blast-radius cage, PURE. Given the agent's tool grant + a per-gig mcp-config path,
@@ -690,6 +755,13 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
   // running engine always resolves + fails closed.
   const resolutionEnabled = opts.toolProviders !== undefined || opts.mcpServerConfigs !== undefined;
   const abortGraceMs = opts.abort_grace_ms ?? DEFAULT_ABORT_GRACE_MS;
+  const sealViaOutputWrite = opts.sealVia === "output_write";
+  // The core type each domain type extends — the `core_type` the agent must pass to output_write.
+  const coreTypeOf = (slug: string): string => {
+    if ((CORE_TYPES as readonly string[]).includes(slug)) return slug;
+    const dt = opts.registry?.listTypes().find((t) => t.slug === slug);
+    return dt ? dt.extends : "";
+  };
   return async (ctx) => {
     // #250 — a chair whose gig is already cancelled spends nothing: no prompt, no mcp-config,
     // no spawn. This is the cheapest point on the whole cancellation chain.
@@ -727,6 +799,17 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
       resolvedMcpServers = resolved.mcpServers;
       effectiveAllowed = resolved.effectiveAllowed;
     }
+    // WIRE THE IN-BAND SEAL. A model chair on the output_write-seal path must be able to CALL
+    // output_write regardless of what it declared in allowed_tools — the seal is engine mechanism,
+    // not an optional capability. Bridge the engine's own MCP server into the spawn and add the
+    // output_write grant so the child can reach it. Gated on the engine server config being wired
+    // (bootstrapServerDeps always supplies it); a bare/test invoker without it captures from the
+    // injected stream instead of a real spawn, so it needs no grant.
+    const engineServerCfg = (opts.mcpServerConfigs ?? {})[ENGINE_MCP_SERVER];
+    if (sealViaOutputWrite && engineServerCfg !== undefined) {
+      resolvedMcpServers = { ...resolvedMcpServers, [ENGINE_MCP_SERVER]: engineServerCfg };
+      effectiveAllowed = [...new Set([...(effectiveAllowed ?? []), OUTPUT_WRITE_TOOL])];
+    }
     const schemaOf = (slug: string | undefined) => promptSchemaFor(opts.registry, slug);
     // #174 — schemas follow the chair's promised subset (ctx.output_types), not the agent's
     // whole catalogue; legacy ctx without it falls back to the agent's full output_types.
@@ -738,7 +821,18 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
     const outputSchemas = sealTypes.length > 1
       ? Object.fromEntries(sealTypes.map((t) => [t, schemaOf(t)]))
       : undefined;
-    const prompt = buildPrompt(ctx, schema, outputSchemas);
+    // The in-band seal directive: present only when this invoker seals via output_write AND the
+    // runtime threaded a gig_id (the write needs it). Absent → the legacy text-seal Task layer.
+    const seal: OutputWriteSeal | undefined = sealViaOutputWrite && ctx.gig_id
+      ? {
+          via: "output_write",
+          gig_id: ctx.gig_id,
+          agent_slug: ctx.agent.slug,
+          phase: ctx.phase,
+          core_by_type: Object.fromEntries(sealTypes.map((t) => [t, coreTypeOf(t)])),
+        }
+      : undefined;
+    const prompt = buildPrompt(ctx, schema, outputSchemas, seal);
     // #221 — the key signal for candidate selection, derived from what we just resolved.
     // Threaded into BOTH extract calls below; threading only the injected-run one would
     // leave every real chair unscored.
@@ -748,16 +842,24 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
     // the base map (opts.mcpServers) + the per-agent servers its grants resolved to (#185).
     const servers = { ...(opts.mcpServers ?? {}), ...resolvedMcpServers };
     const parent = opts.parent_session_id;
-    // Inject parent_session_id env into every named server so children seal lineage.
-    const enriched = parent
-      ? Object.fromEntries(
-          Object.entries(servers).map(([name, def]) => {
-            const d = (def && typeof def === "object" ? def : {}) as Record<string, unknown>;
-            const env = (d["env"] && typeof d["env"] === "object" ? d["env"] : {}) as Record<string, unknown>;
-            return [name, { ...d, env: { ...env, COLTRANE_PARENT_SESSION_ID: parent } }];
-          }),
-        )
-      : servers;
+    // Per-server env additions: parent_session_id into every server (so children seal lineage), and
+    // COLTRANE_OUTPUT_WRITE_MODE=validate into the ENGINE server on the output_write-seal path — so
+    // the child's coltrane server ADJUDICATES the chair's in-band output_write calls against the
+    // full seal predicate and returns the verdict, without persisting (the runtime is the one
+    // sealer, so this is what keeps the output sealed exactly once).
+    const envFor = (name: string): Record<string, unknown> => ({
+      ...(parent ? { COLTRANE_PARENT_SESSION_ID: parent } : {}),
+      ...(sealViaOutputWrite && name === ENGINE_MCP_SERVER ? { COLTRANE_OUTPUT_WRITE_MODE: "validate" } : {}),
+    });
+    const enriched = Object.fromEntries(
+      Object.entries(servers).map(([name, def]) => {
+        const additions = envFor(name);
+        if (Object.keys(additions).length === 0) return [name, def];
+        const d = (def && typeof def === "object" ? def : {}) as Record<string, unknown>;
+        const env = (d["env"] && typeof d["env"] === "object" ? d["env"] : {}) as Record<string, unknown>;
+        return [name, { ...d, env: { ...env, ...additions } }];
+      }),
+    );
     writeFileSync(cfgPath, JSON.stringify({ mcpServers: enriched }));
     try {
       const a = ctx.agent;
@@ -766,74 +868,71 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
       const maxToolCalls = depthCap === undefined
         ? a.max_tool_calls
         : Math.min(depthCap, a.max_tool_calls ?? depthCap);
-      // Run ONE invocation with the given prompt and return the raw answer text. Custom run
-      // (tests): plain mode, the returned string IS the JSON blob. Default: stream-json so the
-      // child's tool calls / reasoning are observable LIVE, teed to ctx.onEvent.
-      const runOnce = async (promptText: string): Promise<string> => {
-        const baseArgs = buildInvokerArgs(promptText, cfgPath, {
-          model: resolveModel(a.model_tier, opts.model),
-          allowed_tools: effectiveAllowed,
-          disallowed_tools: [...(a.disallowed_tools ?? []), ...codeToolDenials(a.code_tool_access)],
-          max_tool_calls: maxToolCalls,
-        });
-        if (customRun) return await customRun(bin, baseArgs, spawnBounds);
-        const args = [...baseArgs, "--output-format", "stream-json", "--verbose"];
-        // #250 level 3 — the cancellation signal and grace window reach the spawn, so an
-        // aborted gig actually kills its chair child (and never spawns one if already aborted).
-        const stdout = await spawnStreaming(
-          bin, args, spawnBounds, ctx.onEvent, ctx.signal, abortGraceMs,
-          promptViaStdin(promptText) ? promptText : undefined,
+      // Run ONE invocation and return the child's raw stdout. Custom run (tests): the returned
+      // string IS the transcript (a bare JSON blob on the text path, a stream-json transcript on
+      // the output_write path). Default: stream-json so the child's tool calls / reasoning are
+      // observable LIVE, teed to ctx.onEvent.
+      const baseArgs = buildInvokerArgs(prompt, cfgPath, {
+        model: resolveModel(a.model_tier, opts.model),
+        allowed_tools: effectiveAllowed,
+        disallowed_tools: [...(a.disallowed_tools ?? []), ...codeToolDenials(a.code_tool_access)],
+        max_tool_calls: maxToolCalls,
+      });
+      // ONE invocation only — on the output_write path the agent self-corrects a rejected write
+      // WITHIN this single run (each output_write rejection returns in-band and it calls again),
+      // and on the text path there is a single answer. Either way, the invoker never re-prompts.
+      const stdout = customRun
+        ? await customRun(bin, baseArgs, spawnBounds)
+        : await spawnStreaming(
+            bin, [...baseArgs, "--output-format", "stream-json", "--verbose"], spawnBounds,
+            ctx.onEvent, ctx.signal, abortGraceMs, promptViaStdin(prompt) ? prompt : undefined,
+          );
+      const outcome = finalText(stdout);
+      // #223 — the child reported an error result. `subtype` catches a run that did not complete;
+      // `is_error` catches an API-error payload riding subtype "success". The CLI exits 0 for both,
+      // so without this the partial reasoning seals as if it had succeeded. Applies to both paths.
+      if (outcome.errorSubtype !== undefined) {
+        throw new Error(
+          `claude ended with result subtype "${outcome.errorSubtype}" — the run did not ` +
+            `complete, so any text it emitted is partial reasoning, not an answer`,
         );
-        const outcome = finalText(stdout);
-        // #223 — the child reported an error result. Both discriminators are required, and
-        // both are verified against the CLI (see the note on StreamOutcome): `subtype` for a
-        // run that did not complete, `is_error` for an API-error payload riding subtype
-        // "success". Neither is a chair answer, and the CLI exits 0 for the subtype cases —
-        // so without this the partial reasoning seals as if it had succeeded.
-        if (outcome.errorSubtype !== undefined) {
-          throw new Error(
-            `claude ended with result subtype "${outcome.errorSubtype}" — the run did not ` +
-              `complete, so any text it emitted is partial reasoning, not an answer`,
-          );
-        }
-        if (outcome.apiErrorText !== undefined) {
-          throw new Error(
-            `claude flagged its result with is_error — the payload is an error message, not an ` +
-              `answer: ${outcome.apiErrorText.slice(0, 300)}`,
-          );
-        }
-        // #222 — the stream parsed but carried no answer at all (e.g. only a system/init
-        // event). Report THAT, with the raw stdout as evidence, instead of blaming the model
-        // for emitting no JSON.
-        if (outcome.text.trim() === "") {
-          throw new ModelOutputParseError(
-            "the model produced no answer — the stream carried no result text and no assistant text",
-            0,
-            stdout,
-          );
-        }
-        return outcome.text;
-      };
-
-      // THE WRITE-BOUNDARY GUARD. Extract the payload, then adjudicate it against its
-      // output_contract HERE — the earliest frame the predicate is answerable and the producer
-      // can still act — using the same registry.validate the seal runs. On a violation, RE-PROMPT
-      // the SAME agent with the exact validation error (a targeted repair, not a blind restart),
-      // bounded to MAX_CONTRACT_REPAIRS. Only a persistently-invalid output fails the chair, and
-      // it fails HERE with the reason rather than post-hoc at seal after the agent has exited. The
-      // seal's own validateWrite stays as an unreachable backstop for this path.
-      let promptForAttempt = prompt;
-      let lastViolation = "";
-      for (let attempt = 0; ; attempt++) {
-        const payload = extractJson(await runOnce(promptForAttempt), extractOpts);
-        const violation = contractViolation(opts.registry, sealTypes, payload);
-        if (violation === undefined) return payload;
-        lastViolation = violation;
-        if (attempt >= MAX_CONTRACT_REPAIRS) {
-          throw new ModelOutputContractError(a.slug, lastViolation, attempt + 1);
-        }
-        promptForAttempt = prompt + repairPromptAppendix(violation);
       }
+      if (outcome.apiErrorText !== undefined) {
+        throw new Error(
+          `claude flagged its result with is_error — the payload is an error message, not an ` +
+            `answer: ${outcome.apiErrorText.slice(0, 300)}`,
+        );
+      }
+
+      if (seal) {
+        // THE IN-BAND WRITE BOUNDARY. The chair sealed each output by calling output_write, whose
+        // payload the engine adjudicated against the FULL seal predicate (checkWritable, run in
+        // validate-mode) and whose rejection it corrected in-band. Capture the payloads that
+        // PASSED; the runtime (executeChair) then seals them through its own boundary exactly once.
+        // A chair that got nothing past the boundary produced nothing — fail here, legibly.
+        const blob = captureOutputWrites(stdout, sealTypes);
+        if (Object.keys(blob).length === 0) {
+          throw new ModelOutputContractError(
+            a.slug,
+            `no output_write call passed the write boundary for [${sealTypes.join(", ")}]`,
+          );
+        }
+        return blob;
+      }
+
+      // TEXT-SEAL PATH (default; every injected-run test). No in-band tool surface, so the payload
+      // is the child's final answer text; the runtime's own seal is this path's write boundary and
+      // its full checkWritable adjudicates the extracted payload.
+      // #222 — the stream parsed but carried no answer at all. Report THAT, with the raw stdout as
+      // evidence, rather than blaming the model for emitting no JSON.
+      if (outcome.text.trim() === "") {
+        throw new ModelOutputParseError(
+          "the model produced no answer — the stream carried no result text and no assistant text",
+          0,
+          stdout,
+        );
+      }
+      return extractJson(outcome.text, extractOpts);
     } finally {
       try { unlinkSync(cfgPath); } catch { /* best-effort cleanup */ }
     }

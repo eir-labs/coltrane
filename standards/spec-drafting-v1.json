@@ -65,7 +65,7 @@
           "required_skills": []
         }
       ],
-      "intent": "Write the spec AS red tests, directly into the working tree: for every contract invariant, a real running assertion against the real callsite, failing today because the enforcement is absent, using the verification method the grounding chose (property-based/axiomatic where universal). The files land on disk and the red-spec is the real captured diff; the coverage_map binds every invariant to its test; uncovered must be empty. No implementation ships — only the falsifiable contract."
+      "intent": "Write the spec AS red tests, directly into the working tree: for every contract invariant, a real running assertion against the real callsite, failing today because the enforcement is absent, using the verification method the grounding chose (property-based/axiomatic where universal). The files land on disk and the red-spec is the real captured diff; the coverage_map binds every invariant to its test; uncovered must be empty. Each test must be genuinely RED — it must FAIL on the missing enforcement, never pass regardless (a subset law that already holds on the un-wired path is a tautology, not a red test; assert the strict effect so it is green only once the enforcement exists). No implementation ships — only the falsifiable contract."
     },
     {
       "name": "review",
@@ -87,7 +87,7 @@
           "required_skills": []
         }
       ],
-      "intent": "The gate that stops a spec from lying: read the tests, not the coverage_map's word. Refuse on a single uncovered invariant, one tautological test that passes regardless of the implementation, or one pending placeholder. A passing review means every claim in the contract has a failing test that proves it."
+      "intent": "The gate that stops a spec from lying: read the tests, not the coverage_map's word. Refuse on a single uncovered invariant, one tautological test that passes regardless of the implementation, or one pending placeholder. A passing review means every claim in the contract has a failing test that proves it. On a failing review the red-spec-drafter amends and is re-reviewed — the spec is not published until it genuinely holds."
     },
     {
       "name": "publish-red-spec",
@@ -120,5 +120,6 @@
     "change-verdict",
     "pull-request"
   ],
-  "description": "Draft a buildable spec for a subsystem/contract AND publish it as a RED pull request for human approval. A buildable spec is not prose — it is comprehensive RED tests: real running assertions, one or more per contract invariant, failing because the enforcement does not exist yet, with a coverage map that leaves nothing uncovered. Five seats, seam-separated so a spec cannot certify itself: the grounder runs a lineage pass (our codebase + internet prior art, including how to verify formally); the contract-definer fixes the exhaustive contract; the red-spec-drafter WRITES a real red test for every invariant directly into the working tree using the grounded verification method; the reviewer refuses on a single uncovered invariant, one tautological test, or one pending placeholder; and the spec-publisher opens exactly one PR whose CI is red by design — the failing tests ARE the buildable contract, gated on the review of the spec's quality, not the test run. This is the deliberate human-approval handoff: a person approves the contract on GitHub, then the implementation pipeline (a separate standard) takes this same branch and turns it green."
+  "max_examine_rounds": 3,
+  "description": "Draft a buildable spec for a subsystem/contract AND publish it as a RED pull request for human approval. A buildable spec is not prose — it is comprehensive RED tests: real running assertions, one or more per contract invariant, failing because the enforcement does not exist yet, with a coverage map that leaves nothing uncovered. Five seats, seam-separated so a spec cannot certify itself: the grounder runs a lineage pass; the contract-definer fixes the exhaustive contract; the red-spec-drafter WRITES a real red test for every invariant directly into the working tree; the reviewer refuses on a single uncovered invariant, one tautological test, or one pending placeholder; and the spec-publisher opens exactly one PR whose CI is red by design. max_examine_rounds wires the review→redraft loop: a failing review re-runs the red-spec-drafter with the review fed back — so a tautological or not-actually-red test is amended and re-reviewed, iterating until the spec genuinely holds or the rounds are spent, before anything is published. This is the deliberate human-approval handoff: a person approves the contract on GitHub, then the implementation pipeline (a separate standard) takes this same branch and turns it green."
 }

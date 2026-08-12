@@ -1588,9 +1588,17 @@ export async function runGig(
         if (!primitivesOf(vch.agent_slug).includes("VERIFY")) continue;
         let verdict = failingVerdict(vch.role);
         if (!verdict) continue; // no verdict, or it passed — nothing to amend
+        // The maker(s) to amend are the dependencies that produced the ARTIFACT this verdict
+        // judged — keyed on the chair's Artifact OUTPUT, not the agent's primitive set. A
+        // multi-primitive agent (e.g. one seat plans, another writes) must have only its writing
+        // seat re-run; the plan is settled for the run and is not amended.
+        const producesArtifact = (c: Chair): boolean => {
+          const out = c.output_contract[0];
+          return !!out && (deps.outputs.coreTypeOf(out) ?? "") === "Artifact";
+        };
         const makers = vch.depends_on
           .map((role) => allChairs.find((c) => c.role === role))
-          .filter((c): c is Chair => !!c && primitivesOf(c.agent_slug).includes("CREATE"));
+          .filter((c): c is Chair => !!c && producesArtifact(c));
         if (makers.length === 0) continue; // nothing to re-run — a verify with no maker to amend
 
         for (let round = 1; round <= examineRounds && verdict; round++) {

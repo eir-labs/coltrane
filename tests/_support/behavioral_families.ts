@@ -110,6 +110,13 @@ export const EXTERNAL_SUBSTRATE: Record<string, string> = {
   // on it — the verdict has to be executed, not reasoned. This is the fix for the hollow-verify seam:
   // the seat that says whether the change is correct is now the seat that ran it.
   "change-verifier": "filesystem + subprocess (the working tree it applies the change-set into, and the test run that grounds the verdict)",
+  // The code-implementer (software-change-pr-v1's write seat, inverted from a grant-less content
+  // emitter to a seat that WRITES directly): its substrate is the working tree — it writes the
+  // change with Write/Edit and captures the real diff with git, so the change lands as actual
+  // files rather than a hand-authored patch someone else must apply. Declared external so the
+  // floor ENFORCES retrieval discipline + a real grant on it. The cage is the isolated tree, not
+  // the absence of write tools.
+  "code-implementer": "filesystem (the isolated working tree it writes the change into and captures the diff from)",
 };
 
 /** Agents that act through tools (grants required) even where retrieval isn't the job. */

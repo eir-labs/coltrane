@@ -1,0 +1,95 @@
+{
+  "slug": "grounding-dossier",
+  "version": 1,
+  "extends": "Interpretation",
+  "domain": "spec-drafting",
+  "status": "active",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "internal_sources": {
+        "type": "array",
+        "description": "Our own lineage read: each {source, contribution}.",
+        "items": {
+          "type": "object",
+          "properties": {
+            "source": {
+              "type": "string"
+            },
+            "contribution": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "source",
+            "contribution"
+          ]
+        }
+      },
+      "external_sources": {
+        "type": "array",
+        "description": "Internet prior art on building the subsystem: each {citation, url, mechanism, applicability}.",
+        "items": {
+          "type": "object",
+          "properties": {
+            "citation": {
+              "type": "string"
+            },
+            "url": {
+              "type": "string"
+            },
+            "mechanism": {
+              "type": "string"
+            },
+            "applicability": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "citation",
+            "mechanism",
+            "applicability"
+          ]
+        }
+      },
+      "method_findings": {
+        "type": "array",
+        "description": "How to formally/axiomatically verify a contract (property-based testing, deterministic algebra, model-based, contract testing): each {approach, source, how_it_applies}.",
+        "items": {
+          "type": "object",
+          "properties": {
+            "approach": {
+              "type": "string"
+            },
+            "source": {
+              "type": "string"
+            },
+            "how_it_applies": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "approach",
+            "how_it_applies"
+          ]
+        }
+      },
+      "synthesis": {
+        "type": "string",
+        "description": "The high-resolution argument tying domain + method grounding into an implementation approach."
+      },
+      "open_questions": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  "required_fields": [
+    "internal_sources",
+    "external_sources",
+    "method_findings",
+    "synthesis"
+  ]
+}

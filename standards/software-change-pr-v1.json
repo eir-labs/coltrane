@@ -3,8 +3,9 @@
   "domain": "software-change",
   "agent_slugs": [
     "john",
-    "bill",
     "miles",
+    "bill",
+    "change-verifier",
     "pr-publisher"
   ],
   "phases": [
@@ -99,7 +100,7 @@
       "chairs": [
         {
           "role": "verify-change",
-          "agent_slug": "miles",
+          "agent_slug": "change-verifier",
           "depends_on": [
             "plan-change",
             "write-change"
@@ -114,7 +115,7 @@
           "required_skills": []
         }
       ],
-      "intent": "Measure the change against the commitments as fixed, criterion by criterion: which acceptance criteria are unmet, where the scope drifted, and — separately and always — which checks could not be executed and were reasoned about instead. When the evidence does not reach the question, the verdict is insufficient evidence, not a pass."
+      "intent": "Apply the change-set and RUN the checks the plan fixed — the suite it names, and the targeted tests for the touched files — then measure the change against its commitments criterion by criterion from the actual run: which acceptance criteria the run confirms green, where scope drifted, and which checks could not be executed at all. A criterion passes only when a real test asserted it and that test went green in this run; a check that could not run is unverified, never a pass; a red run is reported verbatim. The seat that clears the change is the seat that ran it."
     },
     {
       "name": "publish-pr",
@@ -139,7 +140,6 @@
       "intent": "Turn the verified change into an open pull request the pipeline cannot merge. Apply the change-set to a fresh non-main branch, commit it with a message drawn from the rationale, push it, and open exactly one PR whose body carries the rationale and the verifier's verdict. A failed verdict is not published — it is surfaced as a caveat and the seat stops. Landing the PR on main is a human governor's act on green CI, external to this run."
     }
   ],
-  "status": "active",
   "input_types": [
     "change-request"
   ],
@@ -148,5 +148,5 @@
     "change-verdict",
     "pull-request"
   ],
-  "description": "The full governed dev-loop: read the material, fix the direction, settle the structure, make the change, say whether what was built is what was decided — then open it as a pull request the seat that built it cannot merge. Extends software-change-v1 with a terminal publish-pr seat: the change-set (emitted as reviewable content, never applied by its author) is applied to a fresh non-main branch, pushed, and opened as one PR. The seams hold: the seat that reads does not decide, the seat that decides does not build, the seat that builds does not judge its own work, and the seat that publishes does not merge. Landing on the protected main line is a human governor's act on green CI (institutional law A/B/C), not the pipeline's."
+  "description": "The full governed dev-loop: read the material, fix the direction, settle the structure, make the change, RUN it to say whether what was built is what was decided — then open it as a pull request the seat that built it cannot merge. Extends software-change-v1 with a terminal publish-pr seat: the change-set (emitted as reviewable content, never applied by its author) is applied to a fresh non-main branch, pushed, and opened as one PR. The seams hold: the seat that reads does not decide, the seat that decides does not build, the seat that builds does not judge its own work, and the seat that publishes does not merge. The verify seat EXECUTES — it applies the change-set and runs the checks, so a change is cleared by a real run, never by argument. Landing on the protected main line is a human governor's act on green CI (institutional law A/B/C), not the pipeline's."
 }

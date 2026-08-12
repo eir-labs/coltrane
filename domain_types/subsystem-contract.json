@@ -1,0 +1,106 @@
+{
+  "slug": "subsystem-contract",
+  "version": 1,
+  "extends": "Judgment",
+  "domain": "spec-drafting",
+  "status": "active",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "obligations": {
+        "type": "array",
+        "description": "What the subsystem MUST do: each {id, statement}.",
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "statement": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "statement"
+          ]
+        }
+      },
+      "invariants": {
+        "type": "array",
+        "description": "Machine-statable properties that must hold: each {id, statement, checkable} — checkable names how it can be verified (property/example/algebraic).",
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "statement": {
+              "type": "string"
+            },
+            "checkable": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "statement",
+            "checkable"
+          ]
+        }
+      },
+      "failure_modes": {
+        "type": "array",
+        "description": "What must fail closed: each {id, condition, refusal}.",
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "condition": {
+              "type": "string"
+            },
+            "refusal": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "condition",
+            "refusal"
+          ]
+        }
+      },
+      "inputs": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "outputs": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "scope_in": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "scope_out": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  "required_fields": [
+    "obligations",
+    "invariants",
+    "failure_modes"
+  ]
+}

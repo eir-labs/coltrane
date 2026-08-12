@@ -93,6 +93,23 @@ export const EXTERNAL_SUBSTRATE: Record<string, string> = {
   // every location and sweep result it seals must come from a tool result in the run. Declared
   // here so the floor ENFORCES retrieval discipline + a real grant on it.
   "defect-investigator": "filesystem + subprocess (the working tree and the failing case it reproduces)",
+  // The spec-drafting grounder (spec-drafting-v1): its substrate is the web AND our own file store —
+  // it runs a lineage pass over prior art on the internet (how the subsystem is built, and how to
+  // verify it formally) and over our codebase/records, and every source it seals must come from a
+  // WebSearch/WebFetch or a file read in the run. Declared here so the floor ENFORCES retrieval
+  // discipline + a real grant on it.
+  grounder: "web (prior art + verification method) + filesystem (our codebase and records)",
+  // The red-spec-drafter (spec-drafting-v1): reads the target codebase to write real RED tests
+  // against real callsites, so every callsite and invariant it encodes is grounded in a file read
+  // in the run, not recalled. Declared external so the floor enforces retrieval discipline + a grant.
+  "red-spec-drafter": "filesystem (the target codebase the red tests are written against)",
+  // The change-verifier (software-change-pr-v1's verify seat, re-seated from a reasoning judge to a
+  // test-runner): its substrate is a subprocess and the working tree — it APPLIES the change-set and
+  // RUNS the tests, and every pass/fail it seals must come from a real run (git apply + the suite),
+  // never from argument. Declared external so the floor ENFORCES retrieval discipline + a real grant
+  // on it — the verdict has to be executed, not reasoned. This is the fix for the hollow-verify seam:
+  // the seat that says whether the change is correct is now the seat that ran it.
+  "change-verifier": "filesystem + subprocess (the working tree it applies the change-set into, and the test run that grounds the verdict)",
 };
 
 /** Agents that act through tools (grants required) even where retrieval isn't the job. */

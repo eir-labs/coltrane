@@ -12,6 +12,7 @@ import type { Registry } from "./registry.js";
 import type { Depth, ModelTier } from "./pricing.js";
 import type { CodeToolAccess } from "./composition.js";
 import { resolveAgentGrants, ENGINE_MCP_SERVER, type ToolProviderRegistry } from "./tool_providers.js";
+import { venueEffectiveTools } from "./chart.js";
 import { CORE_TYPES } from "./core_types.js";
 
 const EMPTY_TOOL_REGISTRY: ToolProviderRegistry = new Map();
@@ -654,7 +655,9 @@ export interface ClaudeInvokerOptions {
   // name never reaches the model). Absent = empty (only host-builtins resolve; any MCP grant fails).
   toolProviders?: ToolProviderRegistry | undefined;
   mcpServerConfigs?: Record<string, unknown> | undefined;
-  run?: ((bin: string, args: string[], spawn: SpawnBounds) => string | Promise<string>) | undefined; // injectable spawn (tests)
+  // Injectable spawn (tests). The venue → dispatch wire feeds the constructed child env as the 4th
+  // argument; a venue-less dispatch passes `undefined` (the child inherits the ambient env).
+  run?: ((bin: string, args: string[], spawn: SpawnBounds, env?: Record<string, string>) => string | Promise<string>) | undefined;
   // Per-deployment override of the per-chair wall-clock bound.
   timeout_ms?: number | undefined;
   // Grace between SIGTERM and SIGKILL when a chair is cancelled. Override in tests.
@@ -799,6 +802,23 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
       resolvedMcpServers = resolved.mcpServers;
       effectiveAllowed = resolved.effectiveAllowed;
     }
+    // VENUE CONFINEMENT BY CONSTRUCTION. When the dispatch path resolved a room for this chair
+    // (ctx.realization + ctx.venue both threaded by runGig), the spawn reflects the realization:
+    //  - `--allowedTools` carries EXACTLY venueEffectiveTools(agent, venue) — the SAME shared oracle
+    //    the compose-time R10 check refuses against (src/chart.ts), never a re-inlined intersection
+    //    and never the un-intersected grant, so runtime enforcement and compose-time refusal cannot
+    //    drift.
+    //  - the child env is the realization's deny-by-default allowlist (SeatRealization.env, `{}` when
+    //    the surface admits nothing), so an undeclared ambient credential never reaches the child.
+    // Narrowed BEFORE the in-band-seal block below, so the engine's own output_write grant — engine
+    // mechanism, not an optional capability — is re-added on top of the room's ceiling. Absent on
+    // either field → the un-narrowed path above stands and no child env is constructed (INV10).
+    let childEnv: Record<string, string> | undefined;
+    if (ctx.realization && ctx.venue) {
+      effectiveAllowed = venueEffectiveTools(ctx.agent, ctx.venue);
+      const seat = ctx.realization.seats.find((s) => s.agent_slug === ctx.agent.slug);
+      childEnv = seat?.env ?? {};
+    }
     // WIRE THE IN-BAND SEAL. A model chair on the output_write-seal path must be able to CALL
     // output_write regardless of what it declared in allowed_tools — the seal is engine mechanism,
     // not an optional capability. Bridge the engine's own MCP server into the spawn and add the
@@ -882,10 +902,11 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
       // WITHIN this single run (each output_write rejection returns in-band and it calls again),
       // and on the text path there is a single answer. Either way, the invoker never re-prompts.
       const stdout = customRun
-        ? await customRun(bin, baseArgs, spawnBounds)
+        ? await customRun(bin, baseArgs, spawnBounds, childEnv)
         : await spawnStreaming(
             bin, [...baseArgs, "--output-format", "stream-json", "--verbose"], spawnBounds,
             ctx.onEvent, ctx.signal, abortGraceMs, promptViaStdin(prompt) ? prompt : undefined,
+            childEnv,
           );
       const outcome = finalText(stdout);
       // #223 — the child reported an error result. `subtype` catches a run that did not complete;
@@ -956,6 +977,9 @@ function spawnStreaming(
   abortGraceMs: number = DEFAULT_ABORT_GRACE_MS,
   /** The prompt, when it is too large for the command line. Written to the child's stdin. */
   stdinPayload?: string | undefined,
+  /** The venue → dispatch wire's deny-by-default child env. When present it REPLACES the inherited
+   *  process.env (no ambient credential leaks into a confined child); absent = inherit, unchanged. */
+  childEnv?: Record<string, string> | undefined,
 ): Promise<string> {
   return new Promise<string>((resolve, reject) => {
     if (signal?.aborted) {
@@ -966,7 +990,7 @@ function spawnStreaming(
     // change the child's TTY detection for every existing caller.
     const stdio: ["ignore" | "pipe", "pipe", "pipe"] =
       [stdinPayload === undefined ? "ignore" : "pipe", "pipe", "pipe"];
-    const child = spawn(bin, [...args], { stdio });
+    const child = spawn(bin, [...args], { stdio, ...(childEnv ? { env: childEnv } : {}) });
     // Slots 1 and 2 are literally "pipe" above, so both streams exist. Only slot 0 varies,
     // and widening it costs the compiler the overload that proved this.
     const childOut = child.stdout!;

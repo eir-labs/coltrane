@@ -10,6 +10,8 @@ import { executeSkillAsync } from "./skill_subprocess.js";
 import { loadSkillPackage } from "./skills.js";
 import { resolveModel } from "./claude_invoker.js";
 import { resolveAgentGrants, type ToolProviderRegistry } from "./tool_providers.js";
+import { resolveAndRealize, type Realization, type RealizationOk } from "./venue_realize.js";
+import type { Venue } from "./chart.js";
 
 // core type → the process primitive that produces it (reverse of PRIMITIVE_OUTPUT_TYPE).
 // A skill-backed chair seals its output as this primitive/core when its output_contract is
@@ -79,6 +81,14 @@ export interface AgentInvocationContext {
   // documented "skim first" cost practice had no mechanism behind it. Absent = the agent's
   // own profile stands.
   depth?: Depth | undefined;
+  // ── the venue this chair is confined to (venue → dispatch wiring) ──────────────
+  // When the gig names a venue, runGig resolves it, calls resolveAndRealize BEFORE this
+  // invocation, and threads the resulting room here. The Claude invoker reads BOTH to confine
+  // the spawn BY CONSTRUCTION: `--allowedTools` is narrowed to venueEffectiveTools(agent, venue)
+  // (the shared oracle the compose-time R10 check uses) and the child env is the realization's
+  // deny-by-default allowlist. Absent on both fields = a venue-less dispatch, unnarrowed.
+  realization?: Realization | undefined;
+  venue?: Venue | undefined;
 }
 
 // One parsed event from a chair's child process (a stream-json line). `type` is the
@@ -328,6 +338,25 @@ export interface RunDeps {
    */
   toolProviders?: ToolProviderRegistry | undefined;
   mcpServerConfigs?: Readonly<Record<string, unknown>> | undefined;
+
+  // ── the venue this gig is performed in (venue → dispatch wiring) ────────────
+  /**
+   * The slug of the venue that confines this gig's chairs. When set, runGig resolves it against
+   * `venues` and calls `resolveAndRealize` BEFORE the first chair is invoked; ANY refusal
+   * (unknown-venue, credential-breach, ceiling-empty, wildcard-door, install-digest-mismatch,
+   * standing-without-cadence) fails the gig closed — nothing is sealed, no chair runs — exactly as
+   * an unresolvable tool grant rejects. The resulting room is threaded onto every chair's
+   * `AgentInvocationContext.realization`, so the spawn is confined by construction. Absent = a
+   * venue-less dispatch, byte-identical to every run before this wire existed.
+   */
+  venue?: string | undefined;
+  /** The venues this gig may name, slug → contract. A slug the map does not hold is a dead name and
+   *  fails closed with `unknown-venue`. Absent = an empty map (any named venue is a dead name). */
+  venues?: ReadonlyMap<string, Venue> | undefined;
+  /** Credential CLASSES detected present in the ambient environment, handed to the realize gauntlet:
+   *  any class present but NOT declared by the venue's `credential_surface` is a breach that fails
+   *  the gig closed. Absent = none present (deny-by-default: an empty surface admits nothing). */
+  credentialsPresent?: string[] | undefined;
 }
 
 /**
@@ -832,6 +861,34 @@ export async function runGig(
   // Both halves of reuse need it at t=0 — it is the field that decides whether two runs are
   // the same pipeline, and a gate that fires after the money is spent is not a gate.
   const genome_hash = genomeHash(standard);
+
+  // ── VENUE → DISPATCH WIRE ──────────────────────────────────────────────────────────────────
+  // When the gig names a venue, resolve + realize it ONCE, BEFORE any chair is invoked. The room is
+  // an ENFORCED performance space: `resolveAndRealize` runs the ordered gauntlet (dead name, wildcard
+  // door, standing-without-cadence, install-digest, credential-breach, per-seat ceiling) and returns
+  // a fail-closed refusal on the first breach. A refusal ABORTS the gig here — no chair spawns,
+  // nothing is sealed, no ledger row is written — exactly as an unresolvable tool grant rejects.
+  // The successful room is threaded onto every chair's ctx (below) so the spawn is confined by
+  // construction, and torn down at each chair's lifecycle end.
+  let gigRealization: RealizationOk | undefined;
+  let gigVenue: Venue | undefined;
+  if (deps.venue !== undefined) {
+    const realization = resolveAndRealize(deps.venue, {
+      venues: new Map(deps.venues ?? []),
+      seats: standard.agents.map((agent) => ({ agent })),
+      ambientEnv: {},
+      ...(deps.credentialsPresent ? { credentialsPresent: deps.credentialsPresent } : {}),
+      gigId: gig_id,
+    });
+    if (!realization.ok) {
+      throw new RuntimeError(
+        `venue "${deps.venue}" refused this gig fail-closed: ${realization.refusal.code} — ${realization.refusal.detail}`,
+      );
+    }
+    gigRealization = realization;
+    // realize() only returns ok once the slug resolved, so the venue is present in the map.
+    gigVenue = deps.venues?.get(deps.venue);
+  }
 
   // Hash the gig input LAZILY. Three callers want it now (#196's provenance backfill, the
   // resume identity, and the reuse key) but a hostile or circular payload must not be
@@ -2033,6 +2090,10 @@ export async function runGig(
     } catch (e) {
       settleChairCost(p, false);
       throw e;
+    } finally {
+      // Venue → dispatch wire: tear the room down at the chair lifecycle end. `teardown()` is
+      // idempotent and a no-op when no venue was named, so a venue-less gig is unaffected.
+      gigRealization?.teardown();
     }
   }
 
@@ -2140,6 +2201,10 @@ export async function runGig(
           // itself, so an invoker can kill its child and shape what it asks the model for.
           ...(deps.signal ? { signal: deps.signal } : {}),
           ...(deps.depth ? { depth: deps.depth } : {}),
+          // The venue → dispatch wire: thread the realized room onto the chair's ctx ONLY when a
+          // venue resolved, so the invoker narrows the spawn by construction; both fields stay
+          // absent otherwise (the venue-less path is unchanged).
+          ...(gigRealization && gigVenue ? { realization: gigRealization, venue: gigVenue } : {}),
           onEvent: (ev) => { sink.fold(ev); emit({ type: "agent_event", phase: phaseName, role: chair.role, event: ev }); },
         });
       } finally {

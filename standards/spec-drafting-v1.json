@@ -1,0 +1,101 @@
+{
+  "slug": "spec-drafting-v1",
+  "domain": "spec-drafting",
+  "agent_slugs": [
+    "grounder",
+    "contract-definer",
+    "red-spec-drafter",
+    "spec-reviewer"
+  ],
+  "phases": [
+    {
+      "name": "ground",
+      "chairs": [
+        {
+          "role": "ground",
+          "agent_slug": "grounder",
+          "depends_on": [],
+          "input_contract": [],
+          "output_contract": [
+            "grounding-dossier"
+          ],
+          "required_skills": []
+        }
+      ],
+      "intent": "A lineage pass before anyone fixes a contract: our own codebase, tests, records and backlog designs (the callsites, what is declared-but-unenforced), plus internet prior art on how comparable systems build this subsystem AND, separately, how to verify a contract formally (property-based, deterministic algebra, model-based). Everything cited; nothing recalled. The synthesis is what makes the spec buildable rather than invented."
+    },
+    {
+      "name": "define-contract",
+      "chairs": [
+        {
+          "role": "define-contract",
+          "agent_slug": "contract-definer",
+          "depends_on": [
+            "ground"
+          ],
+          "input_contract": [
+            "grounding-dossier"
+          ],
+          "output_contract": [
+            "subsystem-contract"
+          ],
+          "required_skills": []
+        }
+      ],
+      "intent": "Fix what the subsystem MUST be: the complete set of obligations, the machine-statable invariants that must hold (each naming how it is checked), and the failure modes that must fail closed. Exhaustive, not sampled — an omitted invariant is a hole the tests cannot cover, and a hole is how a system does B while claiming A through Z."
+    },
+    {
+      "name": "draft-red-spec",
+      "chairs": [
+        {
+          "role": "draft-red-spec",
+          "agent_slug": "red-spec-drafter",
+          "depends_on": [
+            "ground",
+            "define-contract"
+          ],
+          "input_contract": [
+            "grounding-dossier",
+            "subsystem-contract"
+          ],
+          "output_contract": [
+            "red-spec"
+          ],
+          "required_skills": []
+        }
+      ],
+      "intent": "Write the spec AS red tests: for every contract invariant, a real running assertion against the real callsite, failing today because the enforcement is absent, using the verification method the grounding chose (property-based/axiomatic where universal). The coverage_map binds every invariant to its test; uncovered must be empty. No implementation ships — only the falsifiable contract."
+    },
+    {
+      "name": "review",
+      "chairs": [
+        {
+          "role": "review",
+          "agent_slug": "spec-reviewer",
+          "depends_on": [
+            "define-contract",
+            "draft-red-spec"
+          ],
+          "input_contract": [
+            "subsystem-contract",
+            "red-spec"
+          ],
+          "output_contract": [
+            "change-verdict"
+          ],
+          "required_skills": []
+        }
+      ],
+      "intent": "The gate that stops a spec from lying: read the tests, not the coverage_map's word. Refuse on a single uncovered invariant, one tautological test that passes regardless of the implementation, or one pending placeholder. A passing review means every claim in the contract has a failing test that proves it."
+    }
+  ],
+  "status": "active",
+  "input_types": [],
+  "output_types": [
+    "grounding-dossier",
+    "subsystem-contract",
+    "red-spec",
+    "change-verdict"
+  ],
+  "description": "Draft a buildable spec for a subsystem/contract. A buildable spec is not prose — it is comprehensive RED tests: real running assertions, one or more per contract invariant, failing because the enforcement does not exist yet, with a coverage map that leaves nothing uncovered. Four seats, seam-separated so a spec cannot certify itself: the grounder runs a lineage pass (our codebase + internet prior art, including how to verify formally); the contract-definer fixes the exhaustive contract; the red-spec-drafter writes a real red test for every invariant using the grounded verification method; the reviewer refuses on a single uncovered invariant, one tautological test, or one pending placeholder. Output is consolidated deterministically into a red PR for human review. The implementation standard is a separate pipeline that turns these red tests green."
+}

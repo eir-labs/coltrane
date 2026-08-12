@@ -1,0 +1,76 @@
+{
+  "slug": "red-spec",
+  "version": 1,
+  "extends": "Artifact",
+  "domain": "spec-drafting",
+  "status": "active",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "spec_doc": {
+        "type": "string",
+        "description": "The written spec (path added by the diffs)."
+      },
+      "diffs": {
+        "type": "array",
+        "description": "Per-path unified diffs: the RED test files (real assertions, failing because unimplemented) and the spec doc.",
+        "items": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string"
+            },
+            "patch": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "path",
+            "patch"
+          ]
+        }
+      },
+      "coverage_map": {
+        "type": "array",
+        "description": "EVERY subsystem-contract invariant mapped to the red test that verifies it: each {invariant_id, test_name, test_file}.",
+        "items": {
+          "type": "object",
+          "properties": {
+            "invariant_id": {
+              "type": "string"
+            },
+            "test_name": {
+              "type": "string"
+            },
+            "test_file": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "invariant_id",
+            "test_name",
+            "test_file"
+          ]
+        }
+      },
+      "testing_method": {
+        "type": "string",
+        "description": "The axiomatic/property-based approach + engine used (e.g. fast-check property tests), grounded in method_findings."
+      },
+      "uncovered": {
+        "type": "array",
+        "description": "Contract invariants with no red test — MUST be empty.",
+        "items": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  "required_fields": [
+    "validation_criteria",
+    "input_refs",
+    "diffs",
+    "coverage_map",
+    "testing_method"
+  ]
+}

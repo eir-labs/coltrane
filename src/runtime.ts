@@ -1553,6 +1553,74 @@ export async function runGig(
       // chairs unblocked by this batch.
       for (const ch of ready) remaining.delete(ch.role);
     }
+
+    // ── EXAMINE⇄AMEND ─────────────────────────────────────────────────────────────
+    // The verify seat's verdict is not the last word when the standard budgets examine
+    // rounds. If a VERIFY chair in this phase sealed a FAILING verdict (the one canonical
+    // fail signal every Verdict carries: pass === false), re-run the maker(s) it judged —
+    // the AMEND, with the failing verdict fed back so the fix targets what actually failed —
+    // and re-verify, up to max_examine_rounds, stopping the instant the verdict passes.
+    // Rounds spent without a pass leave the last, failing verdict standing: the loop iterates
+    // to green, it never launders red into green. depends_on chairs read their inputs from
+    // producedByRole, so replacing the maker's record there is what makes the re-verify judge
+    // the amended artifact rather than the original.
+    const examineRounds = standard.max_examine_rounds ?? 0;
+    if (examineRounds > 0) {
+      const allChairs = standard.phases.flatMap((p) => p.chairs);
+      const phaseNameOf = (role: string): string =>
+        standard.phases.find((p) => p.chairs.some((c) => c.role === role))?.name ?? phase.name;
+      const primitivesOf = (slug: string | undefined): readonly string[] =>
+        standard.agents.find((a) => a.slug === slug)?.primitives ?? [];
+      const dropFromProduced = (recs: readonly OutputRecord[]): void => {
+        for (const r of recs) {
+          const idx = produced.indexOf(r);
+          if (idx >= 0) produced.splice(idx, 1);
+        }
+      };
+      const failingVerdict = (role: string): OutputRecord | undefined =>
+        (producedByRole.get(role) ?? []).find(
+          (r) =>
+            (deps.outputs.coreTypeOf(r.domain_type) ?? "") === "Verdict" &&
+            (r.data as { pass?: boolean }).pass === false,
+        );
+
+      for (const vch of phase.chairs) {
+        if (!primitivesOf(vch.agent_slug).includes("VERIFY")) continue;
+        let verdict = failingVerdict(vch.role);
+        if (!verdict) continue; // no verdict, or it passed — nothing to amend
+        const makers = vch.depends_on
+          .map((role) => allChairs.find((c) => c.role === role))
+          .filter((c): c is Chair => !!c && primitivesOf(c.agent_slug).includes("CREATE"));
+        if (makers.length === 0) continue; // nothing to re-run — a verify with no maker to amend
+
+        for (let round = 1; round <= examineRounds && verdict; round++) {
+          checkpoint();
+          emit({ type: "phase_start", phase: `${phase.name}:amend#${round}`, roles: [...makers.map((m) => m.role), vch.role] });
+          const feedback = verdict;
+          // AMEND: each maker re-runs with the failing verdict fed in as an extra input, so
+          // the seat that built the change fixes the exact thing the verify caught.
+          for (const mk of makers) {
+            const prep = prepareChair(mk, phaseNameOf(mk.role));
+            if (!prep.inputs.includes(feedback)) prep.inputs.push(feedback);
+            const recs = await invokeAndWriteChair(prep);
+            dropFromProduced(producedByRole.get(mk.role) ?? []);
+            producedByRole.set(mk.role, recs);
+            produced.push(...recs);
+            noteCheckpointRole(mk.role, phaseNameOf(mk.role), recs);
+          }
+          // RE-VERIFY the amended artifact.
+          const vprep = prepareChair(vch, phase.name);
+          const vrecs = await invokeAndWriteChair(vprep);
+          dropFromProduced(producedByRole.get(vch.role) ?? []);
+          producedByRole.set(vch.role, vrecs);
+          produced.push(...vrecs);
+          noteCheckpointRole(vch.role, phase.name, vrecs);
+          if (budget) budget.settled_usd = usage.total_cost_usd;
+          saveCheckpoint();
+          verdict = failingVerdict(vch.role); // undefined once it passes → loop ends
+        }
+      }
+    }
   }
 
   // Stage 1 — synchronous pre-invocation prep. Resolves the agent, checks the

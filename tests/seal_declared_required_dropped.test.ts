@@ -258,8 +258,14 @@ describe("#227 — the genome's declared required fields are dropped, not absent
     // (extends Judgment), fix-spec (extends Plan), class-sweep, fix-verification (extend
     // Verdict). All 8 declare their required fields in `required_fields`, so they join
     // `checked` and none appears in the `lossy` census.
+    //
+    // 60 → 63: the spec-drafting-v1 set added 3 types — grounding-dossier (extends
+    // Interpretation), subsystem-contract (extends Judgment), red-spec (extends Artifact) —
+    // the lineage dossier, the falsifiable contract, and the buildable RED spec that the
+    // spec-drafting pipeline produces. All 3 declare their required fields in `required_fields`,
+    // so they join `checked` and none appears in the `lossy` census.
     expect(checked).toHaveLength(genome.domain_types.size);
-    expect(checked.length).toBe(60);
+    expect(checked.length).toBe(63);
   });
 });
 

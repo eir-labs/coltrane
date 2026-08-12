@@ -643,7 +643,9 @@ export function composeStandard(def: {
   // validated PhaseDef) and `input_types` (the deduped standard-input set). Every other declared
   // field (eval_slugs / output_types / max_examine_rounds / description + anything added later to
   // StandardSchema) rides through automatically, so composition can't silently drop a sealed field —
-  // the bug this whole change closes. The engine doesn't yet ENFORCE max_examine_rounds (separate task).
+  // the bug this whole change closes. max_examine_rounds IS enforced by the runtime now — the
+  // examine⇄amend loop in runGig re-runs the maker and re-verifies until a VERIFY chair passes or
+  // the rounds are spent (see the EXAMINE⇄AMEND block in runtime.ts).
   const std: Standard = { ...def, phases, input_types: [...standardInputs] };
   return std;
 }

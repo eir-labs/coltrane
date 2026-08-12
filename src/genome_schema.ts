@@ -183,9 +183,11 @@ export const StandardSchema = z.object({
   eval_slugs: z.array(z.string()).readonly().optional(),
   input_types: z.array(z.string()).readonly().optional(),
   output_types: z.array(z.string()).readonly().optional(),
-  // TODO(#194): plumbed end-to-end but NOT yet enforced — the runtime doesn't read this K-cap.
-  // A consumer reading it from the schema must not assume enforcement until #194 (the caller-driven
-  // examine⇄amend driver) lands. Tracked, non-blocking.
+  // ENFORCED (#194): the runtime reads this K-cap. When a VERIFY chair seals a failing verdict
+  // (pass === false), runGig re-runs the maker(s) it judged with the verdict fed back and
+  // re-verifies, up to this many rounds, stopping the instant the verdict passes — and never
+  // laundering a red verdict green when the rounds are spent. See the EXAMINE⇄AMEND block in
+  // runtime.ts; the contract is tests/examine_amend_loop.test.ts.
   max_examine_rounds: z.number().optional(),
   description: z.string().optional(),
 });

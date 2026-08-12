@@ -2154,7 +2154,16 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
             data: { new_version, evolved: sealed.agent, next_def: nextDef, content_hash: sealed.content_hash, effective_hash: sealed.effective_hash, cascade_check: { agents_affected: [], standards_affected } },
           };
         }
-        return { ok: true, requires_approval: approval, data: { new_version, cascade_check: { agents_affected: [], standards_affected: [] } } };
+        // Nothing actionable matched: neither a (base, next) pair nor a persistable
+        // (slug, changes) edit. Fail LOUDLY — returning ok:true here would report an evolve
+        // that wrote nothing, the silent no-op a caller reads as "evolved". The common cause
+        // is field edits placed at the top level instead of inside a `changes` object.
+        return {
+          ok: false, requires_approval: approval,
+          error: evolveSlug
+            ? `agent_evolve "${evolveSlug}" applied nothing: wrap the field edits in a \`changes\` object (e.g. {slug, changes:{identity, method, allowed_tools}}). Top-level fields are ignored.`
+            : "agent_evolve needs either a (base, next) pair or a (slug, changes) edit; got neither.",
+        };
       }
       case "access_grant_check": {
         // Real validation: TTL (is the grant live?) + optional plan-scope check

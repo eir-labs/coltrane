@@ -94,13 +94,17 @@ describe("failure mode: recorder under sustained append load (10K entries)", () 
         expect(d / firstDelta, `non-linear growth detected: deltas=${deltas.join(",")}`).toBeLessThan(2);
       }
 
-      // contract 3: RSS growth bounded
+      // contract 3: RSS GROWTH bounded — the real invariant is "appending 10K entries does not
+      // accumulate memory" (no leak), which is the DELTA, not the absolute RSS. Absolute RSS
+      // depends on the runner's baseline (node heap, loaded modules) and is not what this test
+      // guards; asserting it flaked at ~201MB on a loaded CI box while growth was ~1.4MB. A leak
+      // would show as tens-to-hundreds of MB of growth, which 50MB still catches with headroom.
       const rssGrowthMb = (endRss - startRss) / 1024 / 1024;
       const endRssMb = endRss / 1024 / 1024;
       expect(
-        endRssMb,
-        `endRss=${endRssMb.toFixed(1)}MB, growth=${rssGrowthMb.toFixed(1)}MB`,
-      ).toBeLessThan(200);
+        rssGrowthMb,
+        `growth=${rssGrowthMb.toFixed(1)}MB (endRss=${endRssMb.toFixed(1)}MB, startRss=${(startRss / 1024 / 1024).toFixed(1)}MB)`,
+      ).toBeLessThan(50);
 
       // contract 4: full re-parse succeeds and returns N entries
       const parsed = parseRecorderJsonl(ledgerPath);

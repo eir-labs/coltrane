@@ -79,6 +79,27 @@ describe("agent_evolve (slug, changes) cascade", () => {
   });
 });
 
+// agent_evolve must never report success while persisting nothing. A caller who puts field
+// edits at the TOP LEVEL (identity/method/allowed_tools) instead of inside a `changes` object
+// used to get ok:true with the file untouched — a silent no-op the caller reads as "evolved".
+describe("agent_evolve — misuse fails loudly, never a silent no-op success", () => {
+  it("a slug with top-level field edits but no `changes` object does NOT report success", async () => {
+    const { deps, dir } = makeDeps();
+    const before = readFileSync(join(dir, "agents", "summarizer.json"), "utf8");
+    // The natural-but-wrong shape: fields at top level, no `changes` wrapper.
+    const r = await dispatchTool(
+      "agent_evolve",
+      { slug: "summarizer", identity: "a rewritten identity", method: "1. do X\n2. do Y\n3. do Z" },
+      deps,
+    );
+    // The bug: this returned ok:true and wrote nothing. It must fail loudly and name `changes`.
+    expect(r.ok).toBe(false);
+    expect(String((r as { error?: unknown }).error ?? "")).toMatch(/changes/i);
+    // and the file is byte-for-byte unchanged — no partial or ghost write.
+    expect(readFileSync(join(dir, "agents", "summarizer.json"), "utf8")).toBe(before);
+  });
+});
+
 // #204 — the cascade re-composes each binding standard to type-check it, but it threaded only
 // eval_slugs, silently dropping the standard's input_types (the gig contract, #156/#177). An ENTRY
 // chair reads its input_contract from those gig inputs, NOT from an upstream chair — so the cascade

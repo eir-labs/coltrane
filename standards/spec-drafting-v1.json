@@ -5,7 +5,8 @@
     "grounder",
     "contract-definer",
     "red-spec-drafter",
-    "spec-reviewer"
+    "spec-reviewer",
+    "spec-publisher"
   ],
   "phases": [
     {
@@ -64,7 +65,7 @@
           "required_skills": []
         }
       ],
-      "intent": "Write the spec AS red tests: for every contract invariant, a real running assertion against the real callsite, failing today because the enforcement is absent, using the verification method the grounding chose (property-based/axiomatic where universal). The coverage_map binds every invariant to its test; uncovered must be empty. No implementation ships — only the falsifiable contract."
+      "intent": "Write the spec AS red tests, directly into the working tree: for every contract invariant, a real running assertion against the real callsite, failing today because the enforcement is absent, using the verification method the grounding chose (property-based/axiomatic where universal). The files land on disk and the red-spec is the real captured diff; the coverage_map binds every invariant to its test; uncovered must be empty. No implementation ships — only the falsifiable contract."
     },
     {
       "name": "review",
@@ -87,15 +88,37 @@
         }
       ],
       "intent": "The gate that stops a spec from lying: read the tests, not the coverage_map's word. Refuse on a single uncovered invariant, one tautological test that passes regardless of the implementation, or one pending placeholder. A passing review means every claim in the contract has a failing test that proves it."
+    },
+    {
+      "name": "publish-red-spec",
+      "chairs": [
+        {
+          "role": "publish-red-spec",
+          "agent_slug": "spec-publisher",
+          "depends_on": [
+            "draft-red-spec",
+            "review"
+          ],
+          "input_contract": [
+            "red-spec",
+            "change-verdict"
+          ],
+          "output_contract": [
+            "pull-request"
+          ],
+          "required_skills": []
+        }
+      ],
+      "intent": "Open the RED spec as one pull request for a human to approve. The red-spec-drafter has already written the failing tests into the working tree and the reviewer has judged the spec good; commit exactly what is on disk to a fresh non-main branch, push it, and open exactly one PR whose body states plainly that CI is red by design — the failing tests ARE the contract, and the implementation pipeline turns this same branch green. The gate is the spec-review verdict (the spec's quality), never the test run. A failed review is not published — it is surfaced as a caveat and the seat stops. The human approves the contract on GitHub before anyone builds against it."
     }
   ],
-  "status": "active",
   "input_types": [],
   "output_types": [
     "grounding-dossier",
     "subsystem-contract",
     "red-spec",
-    "change-verdict"
+    "change-verdict",
+    "pull-request"
   ],
-  "description": "Draft a buildable spec for a subsystem/contract. A buildable spec is not prose — it is comprehensive RED tests: real running assertions, one or more per contract invariant, failing because the enforcement does not exist yet, with a coverage map that leaves nothing uncovered. Four seats, seam-separated so a spec cannot certify itself: the grounder runs a lineage pass (our codebase + internet prior art, including how to verify formally); the contract-definer fixes the exhaustive contract; the red-spec-drafter writes a real red test for every invariant using the grounded verification method; the reviewer refuses on a single uncovered invariant, one tautological test, or one pending placeholder. Output is consolidated deterministically into a red PR for human review. The implementation standard is a separate pipeline that turns these red tests green."
+  "description": "Draft a buildable spec for a subsystem/contract AND publish it as a RED pull request for human approval. A buildable spec is not prose — it is comprehensive RED tests: real running assertions, one or more per contract invariant, failing because the enforcement does not exist yet, with a coverage map that leaves nothing uncovered. Five seats, seam-separated so a spec cannot certify itself: the grounder runs a lineage pass (our codebase + internet prior art, including how to verify formally); the contract-definer fixes the exhaustive contract; the red-spec-drafter WRITES a real red test for every invariant directly into the working tree using the grounded verification method; the reviewer refuses on a single uncovered invariant, one tautological test, or one pending placeholder; and the spec-publisher opens exactly one PR whose CI is red by design — the failing tests ARE the buildable contract, gated on the review of the spec's quality, not the test run. This is the deliberate human-approval handoff: a person approves the contract on GitHub, then the implementation pipeline (a separate standard) takes this same branch and turns it green."
 }

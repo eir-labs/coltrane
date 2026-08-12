@@ -52,12 +52,20 @@ const planType: DomainType = {
   schema: { properties: { value: { type: "string" } } },
   required_fields: [],
 };
+const ctxType: DomainType = {
+  slug: "ctx",
+  extends: "Signal",
+  domain: "test",
+  schema: { properties: { value: { type: "string" } } },
+  required_fields: [],
+};
 
 function setup() {
   const registry = createRegistry();
   registry.registerType(artifactType);
   registry.registerType(verdictType);
   registry.registerType(planType);
+  registry.registerType(ctxType);
   const outputs = createOutputStore(registry);
   const ledger = new MemoryLedger();
   return { outputs, ledger };
@@ -181,5 +189,51 @@ describe("examine⇄amend loop enforces max_examine_rounds", () => {
     expect(makerCalls).toBe(1);
     expect(verifyCalls).toBe(1);
     expect(res.status).toBe("complete");
+  });
+
+  it("amends only the ARTIFACT-producing seat — a multi-primitive agent's plan seat is not re-run", async () => {
+    // The realistic shape: ONE agent (like the quartet's bill) seats both the plan chair and the
+    // write chair — its primitives are [PLAN, CREATE]. The amend must re-run only the seat that
+    // produced the ARTIFACT the verdict judged (write), never the plan seat, whose plan is settled
+    // for the run. Keying the amend on the agent's CREATE primitive would wrongly re-run both.
+    const root = testAgent({ slug: "root2", primitives: ["SENSE"], input_types: [], output_types: ["ctx"] });
+    const builder = testAgent({ slug: "builder", primitives: ["PLAN", "CREATE"], input_types: ["ctx", "plan-in"], output_types: ["plan-in", "artifact"] });
+    const verifier = testAgent({ slug: "verifier2", primitives: ["VERIFY"], input_types: ["artifact"], output_types: ["verdict"] });
+    const std = composeStandard({
+      slug: "amend-precise",
+      domain: "test",
+      agents: [root, builder, verifier],
+      max_examine_rounds: 2,
+      phases: [
+        { name: "sense", chairs: [chair("sense", "root2", { output_contract: ["ctx"] })] },
+        { name: "plan", chairs: [chair("plan", "builder", { depends_on: ["sense"], input_contract: ["ctx"], output_contract: ["plan-in"] })] },
+        { name: "make", chairs: [chair("make", "builder", { depends_on: ["plan"], input_contract: ["plan-in"], output_contract: ["artifact"] })] },
+        { name: "check", chairs: [chair("check", "verifier2", { depends_on: ["plan", "make"], input_contract: ["artifact"], output_contract: ["verdict"] })] },
+      ] as PhaseDef[],
+    });
+
+    let planCalls = 0;
+    let writeCalls = 0;
+    let verifyCalls = 0;
+    const invoke: AgentInvoker = ({ agent, inputs }) => {
+      if (agent.slug === "root2") return { ...coreInvariantFields("Signal"), value: "ctx" };
+      if (agent.slug === "verifier2") {
+        verifyCalls++;
+        return { ...coreInvariantFields("Verdict"), pass: verifyCalls >= 2, value: `v#${verifyCalls}` };
+      }
+      // builder seats both plan and write — the write seat is the one consuming plan-in.
+      if (inputs.some((i) => i.domain_type === "plan-in")) {
+        writeCalls++;
+        return { ...coreInvariantFields("Artifact"), value: `art#${writeCalls}` };
+      }
+      planCalls++;
+      return { ...coreInvariantFields("Plan"), value: `plan#${planCalls}` };
+    };
+
+    await runGig(std, {}, { ...setup(), invoke });
+
+    expect(writeCalls).toBe(2); // initial + one amend
+    expect(planCalls).toBe(1); // the plan seat is settled — never re-run by the amend
+    expect(verifyCalls).toBe(2);
   });
 });

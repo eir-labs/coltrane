@@ -117,6 +117,12 @@ export const EXTERNAL_SUBSTRATE: Record<string, string> = {
   // floor ENFORCES retrieval discipline + a real grant on it. The cage is the isolated tree, not
   // the absence of write tools.
   "code-implementer": "filesystem (the isolated working tree it writes the change into and captures the diff from)",
+  // The spec-publisher (spec-drafting-v1's terminal seat): its substrate is git and GitHub — it
+  // commits the RED spec the red-spec-drafter wrote and opens one PR, every fact it seals (branch,
+  // commit sha, PR url and number) coming from a git or gh call in the run. The PR's CI is red by
+  // design; the gate on publishing is the spec-review verdict, not the test run. Declared external
+  // so the floor ENFORCES retrieval discipline + a real grant on it, exactly as for pr-publisher.
+  "spec-publisher": "git + GitHub (gh CLI) — the branch it pushes and the RED-spec PR it opens",
 };
 
 /** Agents that act through tools (grants required) even where retrieval isn't the job. */

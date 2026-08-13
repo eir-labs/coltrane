@@ -545,6 +545,29 @@ function isOutputWriteToolName(name: string): boolean {
  * Returns the blob shape the runtime already consumes (a key per domain_type, or the bare data for
  * a lone single-output write), so executeChair seals it through its one boundary unchanged.
  */
+/** A child that exited non-zero, carrying the stdout it produced before dying.
+ *
+ *  The stream is not incidental to the error — for a chair stopped by its tool budget it holds
+ *  validated payloads, and discarding it destroys work the engine had already adjudicated as good.
+ *  Exported because the injected-run seam (`opts.run`) is how tests reproduce a non-zero exit. */
+export class ChildExitError extends Error {
+  constructor(
+    message: string,
+    readonly stdout: string,
+  ) {
+    super(message);
+    this.name = "ChildExitError";
+  }
+}
+
+/** The result subtype the CLI reports when `--max-turns` cut the run off.
+ *
+ *  This is the ONE non-success subtype whose stream is still worth reading, and the distinction is
+ *  the whole of the policy: a budget stop says "the agent was interrupted", while every other error
+ *  subtype says "what the agent produced is unreliable". Writes survive the first and must not
+ *  survive the second. */
+const BUDGET_STOP_SUBTYPE = "error_max_turns";
+
 export function captureOutputWrites(
   stdout: string,
   sealTypes: readonly string[],
@@ -901,18 +924,43 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
       // ONE invocation only — on the output_write path the agent self-corrects a rejected write
       // WITHIN this single run (each output_write rejection returns in-band and it calls again),
       // and on the text path there is a single answer. Either way, the invoker never re-prompts.
-      const stdout = customRun
-        ? await customRun(bin, baseArgs, spawnBounds, childEnv)
-        : await spawnStreaming(
-            bin, [...baseArgs, "--output-format", "stream-json", "--verbose"], spawnBounds,
-            ctx.onEvent, ctx.signal, abortGraceMs, promptViaStdin(prompt) ? prompt : undefined,
-            childEnv,
-          );
+      // A chair stopped by its TOOL BUDGET is not a chair that failed. `--max-turns` cuts the run
+      // off mid-flight, and everything it had already written through the in-band boundary was
+      // adjudicated against the full seal predicate at the moment of writing — those are validated
+      // payloads, not the partial reasoning the error subtypes exist to catch. Discarding them
+      // destroyed real work and billed for it: one observed sweep landed nine sealed lineage-hits,
+      // satisfied its output_contract, and was reported as a failure with nothing kept.
+      //
+      // So the budget stop is caught HERE, and only here: the stream is recovered, and the decision
+      // about whether anything survives is left to the seal path below, which is the only place that
+      // knows what passed. Every other non-zero exit still propagates untouched.
+      let stdout: string;
+      let budgetStopped = false;
+      try {
+        stdout = customRun
+          ? await customRun(bin, baseArgs, spawnBounds, childEnv)
+          : await spawnStreaming(
+              bin, [...baseArgs, "--output-format", "stream-json", "--verbose"], spawnBounds,
+              ctx.onEvent, ctx.signal, abortGraceMs, promptViaStdin(prompt) ? prompt : undefined,
+              childEnv,
+            );
+      } catch (e) {
+        const recoverable =
+          seal !== undefined &&
+          e instanceof ChildExitError &&
+          finalText(e.stdout).errorSubtype === BUDGET_STOP_SUBTYPE;
+        if (!recoverable) throw e;
+        stdout = (e as ChildExitError).stdout;
+        budgetStopped = true;
+      }
       const outcome = finalText(stdout);
       // #223 — the child reported an error result. `subtype` catches a run that did not complete;
       // `is_error` catches an API-error payload riding subtype "success". The CLI exits 0 for both,
       // so without this the partial reasoning seals as if it had succeeded. Applies to both paths.
-      if (outcome.errorSubtype !== undefined) {
+      // A recovered budget stop reaches here with its subtype still set; that is expected and is
+      // not an error for the seal path. The text path gets no such reprieve — its payload IS the
+      // final answer text, and a truncated run's text is exactly the partial reasoning this guards.
+      if (outcome.errorSubtype !== undefined && !budgetStopped) {
         throw new Error(
           `claude ended with result subtype "${outcome.errorSubtype}" — the run did not ` +
             `complete, so any text it emitted is partial reasoning, not an answer`,
@@ -935,8 +983,27 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
         if (Object.keys(blob).length === 0) {
           throw new ModelOutputContractError(
             a.slug,
-            `no output_write call passed the write boundary for [${sealTypes.join(", ")}]`,
+            budgetStopped
+              ? `ran out of tool budget (max_tool_calls) before any output_write passed the write ` +
+                `boundary for [${sealTypes.join(", ")}] — nothing was salvageable`
+              : `no output_write call passed the write boundary for [${sealTypes.join(", ")}]`,
           );
+        }
+        // The stop is REPORTED, never swallowed. What survived is real and sealed; what the agent
+        // would have gone on to find is unknown, and a caller reading this chair's output as a
+        // complete sweep would be reading a truncation as a finding.
+        if (budgetStopped) {
+          ctx.onEvent?.({
+            type: "budget_stop",
+            raw: {
+              agent: a.slug,
+              max_tool_calls: a.max_tool_calls,
+              sealed_types: Object.keys(blob),
+              note:
+                "the chair exhausted its tool budget; the outputs it had already passed through " +
+                "the write boundary were kept, and the sweep is TRUNCATED, not complete",
+            },
+          } as AgentStreamEvent);
         }
         return blob;
       }
@@ -1059,7 +1126,11 @@ function spawnStreaming(
       const tail = buf.trim();
       buf = "";
       forwardLine(tail);
-      if (code !== 0) reject(new Error(`claude exited ${code}: ${stderr.slice(0, 500)}`));
+      // The stdout travels WITH the failure. A non-zero exit used to discard it, which threw away
+      // the one thing a budget-stopped chair leaves behind: output_write calls that already passed
+      // the engine's write boundary. Whether those are recoverable is a decision for the caller,
+      // which knows the seal mode and the result subtype; it cannot make it without the stream.
+      if (code !== 0) reject(new ChildExitError(`claude exited ${code}: ${stderr.slice(0, 500)}`, stdout));
       else resolve(stdout);
     });
   });

@@ -802,6 +802,22 @@ export function buildInvokerArgs(
   if (opts.max_tool_calls !== undefined) args.push("--max-turns", String(opts.max_tool_calls));
   // the cage floor: no ambient MCP servers leak into the spawn, ever.
   args.push("--mcp-config", mcpConfigPath, "--strict-mcp-config");
+  // The OTHER half of that floor, and it was missing. A seat's cwd is a freshly cloned repository
+  // (drain-loop.sh clones per gig and runs the engine inside it), so anything the repo carries is
+  // untrusted input. Verified against the CLI rather than assumed:
+  //
+  //   .claude/settings.json  hooks EXECUTE — arbitrary commands, no model in the loop
+  //   CLAUDE.md              is obeyed — repo text becomes instructions in the seat's context
+  //
+  // Both are real today and both stop with `--setting-sources user`, confirmed by running it.
+  //
+  // `user` and not `user,project`: project settings are exactly the untrusted half. Coltrane loses
+  // nothing by excluding them — an agent's identity, method and constraints come from the GENOME,
+  // loaded from the store, never from a file in the working tree. A repo that could redefine the
+  // agent reading it would be editing the genome through the back door.
+  //
+  // This is what makes one gig's write to a repo stop being every later gig's execution.
+  args.push("--setting-sources", "user");
   if (opts.allowed_tools && opts.allowed_tools.length > 0) args.push("--allowedTools", opts.allowed_tools.join(","));
   if (opts.disallowed_tools && opts.disallowed_tools.length > 0) args.push("--disallowedTools", opts.disallowed_tools.join(","));
   return args;

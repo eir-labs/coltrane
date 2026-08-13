@@ -55,3 +55,23 @@ describe("blast-radius cage: makeClaudeInvoker (seam, injectable spawn)", () => 
     expect(sawArgs).toContain("--strict-mcp-config");
   });
 });
+
+describe("the cage floor: a cloned repository cannot configure the seat that reads it", () => {
+  // A seat's cwd is a freshly cloned repo — drain-loop.sh clones per gig and runs the engine inside
+  // it — so everything the repo carries is untrusted input. Verified against the CLI (2.1.x) rather
+  // than assumed: without this flag, `.claude/settings.json` hooks EXECUTE (arbitrary commands, no
+  // model in the loop) and CLAUDE.md is obeyed as instructions.
+  //
+  // That turned one gig's write access into every later gig's code execution — a persistent
+  // compromise whose carrier is a file, so no credential scoping can see it.
+  it("loads user settings only, never the working tree's", () => {
+    const args = buildInvokerArgs("prompt", "/tmp/cfg.json", {});
+    const i = args.indexOf("--setting-sources");
+    expect(i, "--setting-sources must be passed on every spawn").toBeGreaterThan(-1);
+    // `project` and `local` are precisely the untrusted halves. Coltrane loses nothing by excluding
+    // them: an agent's identity, method and constraints come from the genome in the store, never
+    // from a file in the working tree. A repo that could redefine the agent reading it would be
+    // editing the genome through the back door.
+    expect(args[i + 1]).toBe("user");
+  });
+});

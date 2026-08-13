@@ -204,10 +204,16 @@ export async function runCli(argv: readonly string[], io: CliIO): Promise<number
     const baseUrl = process.env["COLTRANE_STORE_URL"];
     const anonKey = process.env["COLTRANE_STORE_ANON"];
     const agentToken = process.env["COLTRANE_AGENT_TOKEN"];
-    // VENUE MODE. A drain key is org-scoped and bound to one box, and names no player. Preferred
+    // VENUE MODE. A drain key is org-scoped, bound to one venue, and names no player. Preferred
     // when present: the store then mints a credential per claim, scoped to that gig's acting_for,
-    // so the box holds nothing between gigs. FLY_APP_NAME is accepted because Fly sets it in every
-    // machine for free, which makes the common deployment need no extra configuration at all.
+    // so the drain holds nothing between gigs.
+    //
+    // FLY_APP_NAME is the default because Fly sets it in every machine for free, so the common
+    // deployment configures nothing. Note it is per-APP: every machine in an app shares it, so
+    // scaling to two machines gives both the same venue identity. Intended — the venue is the room
+    // and a room may hold more than one stage; the store leases `for update skip locked`, so two
+    // machines take different gigs. Per-machine binding would be FLY_MACHINE_ID, and would mean
+    // re-minting a key every time a machine is replaced.
     const drainKey = process.env["COLTRANE_DRAIN_KEY"];
     const instance = process.env["COLTRANE_INSTANCE"] ?? process.env["FLY_APP_NAME"];
     const venueMode = Boolean(drainKey && instance);
@@ -219,7 +225,7 @@ export async function runCli(argv: readonly string[], io: CliIO): Promise<number
       line(io, "dispatched to its org and runs each as that gig's own acting_for.");
       if (drainKey && !instance) {
         line(io, "");
-        line(io, "COLTRANE_DRAIN_KEY is set but no instance is named — the key is bound to one box");
+        line(io, "COLTRANE_DRAIN_KEY is set but no instance is named — the key is bound to one venue");
         line(io, "and the store cannot tell which. Set COLTRANE_INSTANCE to the Fly app name.");
       }
       return 2;

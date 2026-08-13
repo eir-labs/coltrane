@@ -124,6 +124,9 @@ type FetchCall = { url: string; body: Record<string, unknown> };
 
 function mockStore(opts: {
   claim: unknown;
+  /** What `coltrane_drain_claim` answers in VENUE mode. Distinct from `claim` on purpose: a test
+   *  that stubs one and exercises the other should fail, not silently fall through. */
+  venueClaim?: unknown;
   failResult?: boolean;
   park?: boolean | "absent";
   /** What `coltrane_mcp_gig_outputs` answers — the gig's drained rows. Default: none. */
@@ -138,6 +141,9 @@ function mockStore(opts: {
     calls.push({ url: u, body });
     if (u.endsWith("/rest/v1/rpc/coltrane_mcp_claim")) {
       return new Response(JSON.stringify(opts.claim), { status: 200 });
+    }
+    if (u.endsWith("/rest/v1/rpc/coltrane_drain_claim")) {
+      return new Response(JSON.stringify(opts.venueClaim ?? null), { status: 200 });
     }
     if (u.endsWith("/rest/v1/rpc/coltrane_mcp_gig_outputs")) {
       return new Response(JSON.stringify(opts.drained ?? []), { status: 200 });
@@ -549,5 +555,95 @@ describe("failGig", () => {
   it("reports whether the store recorded the failure", async () => {
     mockStore({ claim: null, failResult: true });
     expect(await failGig(CTX, CLAIM.gig_id, "boom")).toBe(true);
+  });
+});
+
+describe("venue mode — the drain is a bandstand, not a musician", () => {
+  /** A fresh context per test: these deliberately MUTATE ctx.agentToken, which is the property
+   *  under test, so sharing one would leak state between cases. */
+  const venueCtx = (): WorkerContext => ({
+    baseUrl: "https://store.example",
+    anonKey: "anon-key",
+    agentToken: "",            // empty by design — the credential arrives WITH the work
+    drainKey: "dk_venue_secret",
+    instance: "coltrane-drain-eugene-studio",
+    worker: "test-worker",
+  });
+
+  it("claims through coltrane_drain_claim and adopts the credential the store minted", async () => {
+    const ctx = venueCtx();
+    const calls = mockStore({ claim: null, venueClaim: { ...CLAIM, token: "ctk_pergig_001" } });
+    const got = await claimNextGig(ctx);
+
+    expect(got?.gig_id).toBe(CLAIM.gig_id);
+    // The venue path, not the player path. If this ever flips, the chair filter comes back and
+    // gigs dispatched by other players silently stop being visible.
+    const venue = calls.find((c) => c.url.includes("coltrane_drain_claim"));
+    expect(venue, "venue mode must claim through coltrane_drain_claim").toBeDefined();
+    expect(venue!.body["p_key"]).toBe("dk_venue_secret");
+    expect(venue!.body["p_instance"]).toBe("coltrane-drain-eugene-studio");
+    expect(calls.some((c) => c.url.includes("coltrane_mcp_claim"))).toBe(false);
+    // Identity followed the work.
+    expect(ctx.agentToken).toBe("ctk_pergig_001");
+  });
+
+  it("CLEARS the credential when the gig is over — the property this design leads with", async () => {
+    const ctx = venueCtx();
+    mockStore({ claim: null, venueClaim: { ...CLAIM, token: "ctk_pergig_002" } });
+    const invoke = vi.fn(async () => sealableSignal);
+
+    const res = await workOnce(ctx, { makeInvoke: () => invoke as unknown as AgentInvoker });
+    expect(res.claimed).toBe(true);
+
+    // Not "the process exits soon" and not "the loop re-execs" — both are the CALLER's shape.
+    // A drain between gigs must hold nothing that opens a door, and that has to be true of this
+    // function, or it stops being true the day workOnce learns to loop internally.
+    expect(ctx.agentToken).toBe("");
+  });
+
+  it("clears the credential even when the run FAILS — after the failure is recorded", async () => {
+    const ctx = venueCtx();
+    const calls = mockStore({ claim: null, venueClaim: { ...CLAIM, token: "ctk_pergig_003" } });
+    const invoke = vi.fn(async () => { throw new Error("the model never came back"); });
+
+    const res = await workOnce(ctx, { makeInvoke: () => invoke as unknown as AgentInvoker });
+    expect(res.claimed).toBe(true);
+    if (!res.claimed) throw new Error("unreachable");
+    expect(res.status).toBe("failed");
+
+    // Ordering matters and is the reason the clear sits in `finally` rather than before the return:
+    // failGig speaks through this very credential, so clearing early would turn every failed run
+    // into an unrecordable one.
+    const fail = calls.find((c) => c.url.includes("coltrane_mcp_gig_fail"));
+    expect(fail, "the failure must still be recorded").toBeDefined();
+    expect(fail!.body["p_bearer"]).toBe("ctk_pergig_003");
+    expect(ctx.agentToken).toBe("");
+  });
+
+  it("refuses a gig the store leased without minting, and says the row stays leased", async () => {
+    const ctx = venueCtx();
+    mockStore({ claim: null, venueClaim: { ...CLAIM } });   // a gig, no token
+    await expect(claimNextGig(ctx)).rejects.toThrow(/minted no credential/);
+  });
+
+  it("player mode refuses an EMPTY bearer rather than presenting one", async () => {
+    // The downstream half of the CLI's guard: a drain key that reaches the worker without an
+    // instance falls out of venue mode, and this path must fail closed rather than ask the store
+    // to authenticate nothing.
+    const ctx: WorkerContext = { ...venueCtx(), instance: undefined as unknown as string };
+    mockStore({ claim: CLAIM });
+    await expect(claimNextGig(ctx)).rejects.toThrow(/no instance reached the worker/);
+  });
+
+  it("leaves player mode alone: a token and no drain key still claims the old way", async () => {
+    const ctx: WorkerContext = { ...CTX };
+    const calls = mockStore({ claim: CLAIM });
+    const got = await claimNextGig(ctx);
+
+    expect(got?.gig_id).toBe(CLAIM.gig_id);
+    expect(calls.some((c) => c.url.includes("coltrane_mcp_claim"))).toBe(true);
+    expect(calls.some((c) => c.url.includes("coltrane_drain_claim"))).toBe(false);
+    // A player's token is its identity, not a per-gig loan — it must survive the claim untouched.
+    expect(ctx.agentToken).toBe("ctk_test000");
   });
 });

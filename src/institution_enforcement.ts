@@ -456,3 +456,27 @@ export function checkInstitutionAdmissibility(doc: InstitutionDocument): Admissi
   for (const chair of chairs) checkChair(chair, offenders);
   return { admitted: offenders.length === 0, offenders };
 }
+
+/**
+ * The STATIC half of evaluability, reused by the committed-work layer so acceptance and law share
+ * one grammar rather than minting a second: a LawCheck is evaluable when its predicate parses and
+ * every free variable it references is declared in `inputs`. This is exactly the undeclared-variable
+ * refusal checkLaw applies — a predicate naming a variable it never declares can never reduce to a
+ * decision, so an UNMARKED commitment carrying one must be refused (silence must not pass a stated
+ * intention off as a checkable commitment). Total: returns false on a predicate that does not parse.
+ */
+export function lawCheckIsEvaluable(check: LawCheck): boolean {
+  let ast: SExpr;
+  try {
+    ast = parse(check.predicate);
+  } catch {
+    return false;
+  }
+  const vars = new Set<string>();
+  const ops = new Set<string>();
+  collectSymbols(ast, vars, ops, false);
+  for (const v of vars) {
+    if (!Object.prototype.hasOwnProperty.call(check.inputs, v)) return false;
+  }
+  return true;
+}

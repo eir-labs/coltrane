@@ -20,9 +20,10 @@
 // third application of that one bar. The variance reads the SAME ledger chain (GigUsage.total_cost_usd)
 // the rest of the engine settles against.
 
-import { z } from "zod";
-import type { AdmissibilityResult, LawCheck } from "./institution_enforcement.js";
+import type { AdmissibilityResult, AdmissibilityOffender, LawCheck } from "./institution_enforcement.js";
+import { lawCheckIsEvaluable } from "./institution_enforcement.js";
 import type { GigLedgerEntry } from "./ledger.js";
+import { DrawSchema, ResourceSchema, BookingSchema, TourSchema } from "./genome_schema.js";
 
 // ── The committed-work objects (TS shape; the strict Zod schemas below are the runtime gate) ─────
 
@@ -188,18 +189,89 @@ export type CommitmentTransition =
  *  - discharge → the debtor delivers the consequent; active → satisfied.
  * STUB: throws until implemented.
  */
-export function applyCommitmentOp(_rec: CommitmentRecord, _op: CommitmentOp): CommitmentTransition {
-  throw new Error(
-    "applyCommitmentOp: the party-constrained commitment lifecycle is an unbuilt seam — " +
-      "cancel(debtor-only), release(creditor-only), delegate/assign(stay-live), detach(automatic)",
-  );
+export function applyCommitmentOp(rec: CommitmentRecord, op: CommitmentOp): CommitmentTransition {
+  const refuse = (reason: string): CommitmentTransition => ({ ok: false, reason });
+  const withLog = (patch: Partial<CommitmentRecord>, entry: CommitmentOpEntry): CommitmentTransition => ({
+    ok: true,
+    next: { ...rec, ...patch, log: [...rec.log, entry] },
+  });
+  // A substitution keeps the commitment LIVE: if it is already in a live state it stays there,
+  // otherwise it is brought back to `active` (the substitute now owes/holds a live commitment).
+  const stayLive = (): CommitmentState => (LIVE_STATES.has(rec.state) ? rec.state : "active");
+
+  switch (op.kind) {
+    case "cancel":
+      // DEBTOR-only. A creditor's cancel is refused in every state.
+      if (op.by !== "debtor") return refuse("cancel is the debtor's act; a creditor may not cancel");
+      return withLog({ state: "cancelled" }, { op: "cancel", by: op.by });
+
+    case "release":
+      // CREDITOR-only. A debtor's release is refused in every state.
+      if (op.by !== "creditor") return refuse("release is the creditor's act; a debtor may not release");
+      return withLog({ state: "released" }, { op: "release", by: op.by });
+
+    case "delegate": {
+      // The debtor substitutes a new debtor and stays live; the ORIGINAL debtor is APPENDED as the
+      // residual (recorded, never overwritten).
+      if (op.by !== "debtor") return refuse("delegate substitutes the debtor and is the debtor's act");
+      if (!op.substitute) return refuse("delegate needs a substitute debtor");
+      return withLog(
+        { debtor: op.substitute, state: stayLive() },
+        { op: "delegate", by: op.by, residual_debtor: rec.debtor },
+      );
+    }
+
+    case "assign": {
+      // The creditor substitutes a new creditor and stays live.
+      if (op.by !== "creditor") return refuse("assign substitutes the creditor and is the creditor's act");
+      if (!op.substitute) return refuse("assign needs a substitute creditor");
+      return withLog({ creditor: op.substitute, state: stayLive() }, { op: "assign", by: op.by });
+    }
+
+    case "detach":
+      // AUTOMATIC — no party performs it. Given the antecedent holds, conditional → active.
+      if (op.by !== undefined) return refuse("detach is automatic; no party may perform it");
+      if (rec.state !== "conditional") {
+        return refuse(`detach applies only to a conditional commitment, not ${rec.state}`);
+      }
+      return withLog({ state: "active" }, { op: "detach" });
+
+    case "discharge":
+      // The debtor delivers the consequent: active → satisfied.
+      if (op.by !== "debtor") return refuse("discharge is the debtor delivering the consequent");
+      if (rec.state !== "active") return refuse(`discharge applies to an active commitment, not ${rec.state}`);
+      return withLog({ state: "satisfied" }, { op: "discharge", by: op.by });
+
+    case "create":
+      // Records the commitment's creation without changing its state. `by` is optional on create
+      // (a commitment may be recorded without naming an actor), so it is omitted when absent rather
+      // than written as an explicit `undefined` — the log entry never carries a hollow party field.
+      return withLog({}, op.by === undefined ? { op: "create" } : { op: "create", by: op.by });
+
+    default: {
+      // Exhaustiveness: the CommitmentOpKind set is closed, so this is unreachable at runtime and a
+      // compile error if a new kind is added without a case.
+      const _never: never = op.kind;
+      return refuse(`unknown commitment op ${String(_never)}`);
+    }
+  }
 }
 
 // ── Capacity / draws — per-unit over-commitment with NO conversion, ever ──────────────────────────
 
-/** A per-unit tally of a set of draws — the vector the over-commitment check sums over. STUB. */
-export function tallyDrawsPerUnit(_draws: readonly Draw[]): Map<string, number> {
-  throw new Error("tallyDrawsPerUnit: per-unit draw accounting is an unbuilt seam");
+/** A per-unit tally of a set of draws — the vector the over-commitment check sums over. Units are
+ *  OPAQUE and NON-CONVERTIBLE, so each distinct unit is its own bucket; nothing offsets across them. */
+export function tallyDrawsPerUnit(draws: readonly Draw[]): Map<string, number> {
+  const tally = new Map<string, number>();
+  for (const d of draws) tally.set(d.unit, (tally.get(d.unit) ?? 0) + d.quantity);
+  return tally;
+}
+
+/** The per-(resource, unit) join key. A draw is bound to a resource by slug AND to a unit; the two
+ *  together are the axis over-commitment is summed on — never a cross-unit total. ` ` cannot
+ *  appear in a slug or unit, so the composite key is unambiguous. */
+function drawKey(resource_slug: string, unit: string): string {
+  return `${resource_slug} ${unit}`;
 }
 
 /**
@@ -211,8 +283,53 @@ export function tallyDrawsPerUnit(_draws: readonly Draw[]): Map<string, number> 
  *  - a draw on a NON-TRANSFERABLE holding held by an org other than the tour's accountable org.
  * STUB: throws until implemented.
  */
-export function checkTourCapacity(_tour: Tour, _resources: readonly Resource[]): AdmissibilityResult {
-  throw new Error("checkTourCapacity: per-unit, no-conversion over-commitment is an unbuilt seam");
+export function checkTourCapacity(tour: Tour, resources: readonly Resource[]): AdmissibilityResult {
+  const offenders: AdmissibilityOffender[] = [];
+  const add = (ref: string, reason: string): void => {
+    offenders.push({ kind: "law", ref, reason });
+  };
+
+  // Resources indexed by slug. A resource holds exactly ONE unit; a draw naming that slug in a
+  // different unit does not draw a held unit (there is no conversion to the held one).
+  const bySlug = new Map<string, Resource>();
+  for (const r of resources) bySlug.set(r.slug, r);
+
+  // Sum every draw across all bookings, bucketed by (resource_slug, unit) so no unit offsets another.
+  const drawn = new Map<string, { resource_slug: string; unit: string; total: number }>();
+  for (const b of tour.bookings) {
+    for (const d of b.draws) {
+      const key = drawKey(d.resource_slug, d.unit);
+      const cur = drawn.get(key);
+      if (cur) cur.total += d.quantity;
+      else drawn.set(key, { resource_slug: d.resource_slug, unit: d.unit, total: d.quantity });
+    }
+  }
+
+  for (const { resource_slug, unit, total } of drawn.values()) {
+    const r = bySlug.get(resource_slug);
+    // A draw against a resource the genome does not declare — a dead name, failing closed.
+    if (!r) {
+      add(resource_slug, `draw names undeclared resource "${resource_slug}" (dead name)`);
+      continue;
+    }
+    // A NON-TRANSFERABLE holding of an org other than the tour's accountable org is unreachable —
+    // checked before unit/quantity so a locked holding is refused for the right reason.
+    if (r.holder !== tour.org_slug && !r.transferable) {
+      add(resource_slug, `non-transferable holding of "${r.holder}" is unreachable by org "${tour.org_slug}"`);
+      continue;
+    }
+    // A draw in a unit the holder does not hold — no conversion from the held unit to this one.
+    if (r.unit !== unit) {
+      add(resource_slug, `draw in unit "${unit}" but resource "${resource_slug}" holds "${r.unit}" — no conversion`);
+      continue;
+    }
+    // Per-unit over-commitment: the sum of draws in this unit exceeds the declared quantity.
+    if (total > r.quantity) {
+      add(resource_slug, `over-committed: ${total} "${unit}" drawn against ${r.quantity} held`);
+    }
+  }
+
+  return { admitted: offenders.length === 0, offenders };
 }
 
 // ── Admissibility — the same bar a third time ─────────────────────────────────────────────────────
@@ -239,10 +356,75 @@ export interface TourDocument {
  *  - any institution / chair / northstar / resource slug the genome cannot resolve.
  * STUB: throws until implemented.
  */
-export function checkTourAdmissibility(_doc: TourDocument): AdmissibilityResult {
-  throw new Error(
-    "checkTourAdmissibility: the third application of the admissibility bar is an unbuilt seam",
-  );
+export function checkTourAdmissibility(doc: TourDocument): AdmissibilityResult {
+  const offenders: AdmissibilityOffender[] = [];
+  const add = (ref: string, reason: string): void => {
+    offenders.push({ kind: "law", ref, reason });
+  };
+
+  // (1) The tour must be a well-formed Tour — STRICT. An ill-formed tour (unknown key, missing
+  //     field, a smuggled THIRD key on an acceptance) is a refusal, never a throw: the checker is
+  //     TOTAL, so a shapeless document returns a value.
+  const tourParse = TourSchema.safeParse(doc.tour);
+  if (!tourParse.success) {
+    for (const issue of tourParse.error.issues) {
+      add("tour", `${issue.path.join(".") || "(root)"}: ${issue.message}`);
+    }
+    return { admitted: false, offenders };
+  }
+  const tour = tourParse.data as unknown as Tour;
+
+  // (2) Resources the draws name — each validated, an invalid one recorded and dropped.
+  const resources: Resource[] = [];
+  (doc.resources ?? []).forEach((raw, i) => {
+    const rp = ResourceSchema.safeParse(raw);
+    if (!rp.success) {
+      add(`resource[${i}]`, rp.error.issues.map((x) => x.message).join("; "));
+      return;
+    }
+    resources.push(rp.data as unknown as Resource);
+  });
+
+  // (3) The chairs the tour resolves against, indexed by id. A responsible_chair or an
+  //     accountable_office the genome cannot resolve is a dead name, failing closed.
+  const chairIds = new Set<string>();
+  for (const c of doc.chairs ?? []) {
+    const rec = c as Record<string, unknown>;
+    if (typeof rec.id === "string") chairIds.add(rec.id);
+  }
+  if (!chairIds.has(tour.responsible_chair)) {
+    add("tour", `responsible_chair "${tour.responsible_chair}" resolves to no chair`);
+  }
+
+  // (4) Institution slug resolution — if an institution is supplied it must be the one the tour names.
+  const inst = doc.institution as Record<string, unknown> | undefined;
+  if (inst && typeof inst.slug === "string" && inst.slug !== tour.institution_slug) {
+    add("tour", `institution_slug "${tour.institution_slug}" does not resolve to institution "${String(inst.slug)}"`);
+  }
+
+  // (5) Per booking: the accountable office resolves; the acceptance is evaluable OR the booking is
+  //     explicitly declared-tier (an UNMARKED, unevaluable commitment is refused — silence must not
+  //     pass a stated intention off as a checkable commitment); every served north star is one the
+  //     tour actually declares.
+  const declaredNorthstars = new Set(tour.northstar_slugs);
+  for (const b of tour.bookings) {
+    if (!chairIds.has(b.accountable_office)) {
+      add(b.slug, `accountable_office "${b.accountable_office}" resolves to no chair`);
+    }
+    if (b.tier !== "declared" && !lawCheckIsEvaluable(b.acceptance)) {
+      add(b.slug, "acceptance references an input it never declares and the booking is not marked declared-tier");
+    }
+    for (const ns of b.served_northstars) {
+      if (!declaredNorthstars.has(ns)) {
+        add(b.slug, `serves north star "${ns}" the tour does not declare`);
+      }
+    }
+  }
+
+  // (6) Capacity — per-unit over-commitment, dead-name and cross-org-transfer refusals, no conversion.
+  offenders.push(...checkTourCapacity(tour, resources).offenders);
+
+  return { admitted: offenders.length === 0, offenders };
 }
 
 // ── Variance — the missing NUMERATOR, read FROM the chain ─────────────────────────────────────────
@@ -261,57 +443,70 @@ export interface Variance {
 }
 
 /**
- * Compute a booking's variance by READING the booking → gig → settlement chain (never assembling it
+ * Compute a booking's variance by READING the booking → gig → spend chain (never assembling it
  * by hand): for each gig id the booking settled against, read its ledger entry's usage.total_cost_usd
- * and sum. STUB: throws until implemented.
+ * and sum.
  */
-export function computeVariance(_booking: Booking, _ledger: readonly GigLedgerEntry[]): Variance {
-  throw new Error("computeVariance: the booking→gig→settlement variance reader is an unbuilt seam");
+export function computeVariance(booking: Booking, ledger: readonly GigLedgerEntry[]): Variance {
+  const ids = booking.settled_gig_ids ?? [];
+  const own = new Set(ids);
+  // Sum usage.total_cost_usd over ONLY the gigs this booking settled against, reading each row from
+  // the supplied ledger — never assembling the number by hand, never looking off-repo. A row with no
+  // usage payload contributes nothing (its spend is unknown, not zero-by-assertion).
+  let settled = 0;
+  for (const entry of ledger) {
+    if (own.has(entry.gig_id) && entry.usage) settled += entry.usage.total_cost_usd;
+  }
+  // `amount` absence is "no numerator" — an honest null, NOT zero and NOT a throw.
+  const hasNumerator = booking.amount !== undefined;
+  const committed = hasNumerator ? booking.amount! : null;
+  const variance = hasNumerator ? booking.amount! - settled : null;
+  return {
+    booking_slug: booking.slug,
+    committed,
+    settled,
+    variance,
+    has_numerator: hasNumerator,
+    settled_gig_ids: ids,
+  };
 }
 
 // ── The two visibilities, and the two reports — set differences over data the objects already carry ─
 
-/** Unpromised work: gig ids that no booking settled against. Allowed, but VISIBLE. STUB. */
+/** Unpromised work: gig ids that no booking settled against. Allowed, but VISIBLE — a set difference
+ *  of all gig ids minus every id any booking promised. */
 export function unpromisedGigs(
-  _allGigIds: readonly string[],
-  _bookings: readonly Booking[],
+  allGigIds: readonly string[],
+  bookings: readonly Booking[],
 ): string[] {
-  throw new Error("unpromisedGigs: the unpromised-work visibility query is an unbuilt seam");
+  const promised = new Set<string>();
+  for (const b of bookings) for (const id of b.settled_gig_ids ?? []) promised.add(id);
+  return allGigIds.filter((id) => !promised.has(id));
 }
 
-/** Undispatched bookings: still-live commitments that settled against no gig. VISIBLE, not dropped. STUB. */
-export function undispatchedBookings(_bookings: readonly Booking[]): Booking[] {
-  throw new Error("undispatchedBookings: the unfulfilled-commitment query is an unbuilt seam");
+/** Undispatched bookings: still-live commitments that settled against no gig — VISIBLE, not dropped.
+ *  A booking already discharged/cancelled/released is not "undispatched", so the query keeps only the
+ *  ones whose lifecycle is still live AND that carry no settled gig. */
+export function undispatchedBookings(bookings: readonly Booking[]): Booking[] {
+  return bookings.filter(
+    (b) => LIVE_STATES.has(b.lifecycle.state) && (b.settled_gig_ids ?? []).length === 0,
+  );
 }
 
-/** Report A: north stars a tour names but no booking serves — directions nobody is funding. STUB. */
-export function northstarsWithNoBooking(_tour: Tour): string[] {
-  throw new Error("northstarsWithNoBooking: report A (unfunded directions) is an unbuilt seam");
+/** Report A: north stars a tour names but no booking serves — directions nobody is funding. */
+export function northstarsWithNoBooking(tour: Tour): string[] {
+  const served = new Set<string>();
+  for (const b of tour.bookings) for (const ns of b.served_northstars) served.add(ns);
+  return tour.northstar_slugs.filter((ns) => !served.has(ns));
 }
 
-/** Report B: bookings serving no north star — spend with no stated direction. STUB. */
-export function bookingsServingNoNorthstar(_tour: Tour): Booking[] {
-  throw new Error("bookingsServingNoNorthstar: report B (undirected spend) is an unbuilt seam");
+/** Report B: bookings serving no north star — spend with no stated direction. */
+export function bookingsServingNoNorthstar(tour: Tour): Booking[] {
+  return tour.bookings.filter((b) => b.served_northstars.length === 0);
 }
 
-// ── The strict Zod schemas — the runtime gate (the GREEN change promotes these into the single Zod
-//    source in src/genome_schema.ts and re-exports them here). Authored as UNBUILT stubs: `.parse`
-//    of even a valid fixture throws, so the shape invariants are RED because the object does not
-//    exist yet — not because of a type error. ─────────────────────────────────────────────────────
+// ── The strict Zod schemas — the runtime gate. Promoted into the single Zod source in
+//    src/genome_schema.ts (per CLAUDE.md) and RE-EXPORTED here, so the tests import them from this
+//    file unchanged while the shape lives in exactly one place. ───────────────────────────────────
 
-function unbuiltSchema<T>(name: string): z.ZodType<T> {
-  const detonate = (): never => {
-    throw new Error(
-      `${name} is an unbuilt seam — the binding middle place object is not implemented yet`,
-    );
-  };
-  return {
-    parse: detonate,
-    safeParse: detonate,
-  } as unknown as z.ZodType<T>;
-}
-
-export const DrawSchema = unbuiltSchema<Draw>("DrawSchema");
-export const ResourceSchema = unbuiltSchema<Resource>("ResourceSchema");
-export const BookingSchema = unbuiltSchema<Booking>("BookingSchema");
-export const TourSchema = unbuiltSchema<Tour>("TourSchema");
+export { DrawSchema, ResourceSchema, BookingSchema, TourSchema };

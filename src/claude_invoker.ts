@@ -812,6 +812,42 @@ export function buildInvokerArgs(
 // seam (inject `run` to test the cage args + parse without the CLI). When a
 // parent_session_id is provided, every spawned MCP server in this child receives it via
 // env so the recorder seals the parent → child lineage edge on the child's first turn.
+/**
+ * Names a seat must never see, whatever else it inherits.
+ *
+ * A DENY-list, deliberately, even though deny-lists are the weaker construction — the allowlist in
+ * `SeatRealization.env` is the real control and this exists only for the paths that do not reach
+ * it. A floor is worth having precisely because it protects the case nobody remembered to declare.
+ *
+ * The rule for adding a name: would possession of this let the holder act AS THE BOX, rather than
+ * as the work the box was given? `COLTRANE_DRAIN_KEY` is the clearest case — it is the venue's
+ * whole identity. `CLAUDE_CODE_OAUTH_TOKEN` deliberately is NOT here: a seat is a `claude -p`
+ * process and that is how it authenticates to run at all.
+ */
+const BOX_CREDENTIAL_ENV = [
+  "COLTRANE_DRAIN_KEY",        // the venue's identity: claims gigs, reads the org's whole Vault
+  "COLTRANE_DRAIN_URL",        // paired with it; together they are the provisioning endpoint
+  "COLTRANE_PROVISIONER_KEY",  // mints drain keys — strictly more authority than the drain key
+  "SUPABASE_SERVICE_ROLE_KEY", // bypasses RLS entirely
+  "SUPABASE_SECRET_KEY",
+  "FLY_API_TOKEN",             // creates and destroys machines
+  "GITHUB_APP_PRIVATE_KEY_B64",
+] as const;
+
+/** Everything except the box's own credentials. Returns a plain object, so the spawn is given an
+ *  explicit environment rather than inheriting one — the difference matters when a new secret is
+ *  added to the container and nobody revisits this file. */
+export function withoutBoxCredentials(env: NodeJS.ProcessEnv): Record<string, string> {
+  const denied = new Set<string>(BOX_CREDENTIAL_ENV);
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(env)) {
+    if (v === undefined) continue;
+    if (denied.has(k)) continue;
+    out[k] = v;
+  }
+  return out;
+}
+
 export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker {
   const bin = opts.bin ?? "claude";
   // Injected run (tests) short-circuits the spawn: plain mode, returns the JSON blob directly.
@@ -894,6 +930,21 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
       effectiveAllowed = venueEffectiveTools(ctx.agent, ctx.venue);
       const seat = ctx.realization.seats.find((s) => s.agent_slug === ctx.agent.slug);
       childEnv = seat?.env ?? {};
+    } else {
+      // THE FLOOR BENEATH THE ALLOWLIST. Above is deny-by-default and is the right answer — but it
+      // only engages when a gig names a venue, and the drain names none (worker.ts passes no
+      // `venue` to runGig). So on the live path every seat inherited process.env WHOLESALE.
+      //
+      // On a Fly drain that env holds COLTRANE_DRAIN_KEY, because Fly surfaces secrets to the whole
+      // container and start.sh filters only the vault half. Seats are `claude -p` with Bash. So
+      // `env | grep COLTRANE_DRAIN_KEY` from inside any seat yields the credential that IS the box:
+      // it reads the org's entire Vault through coltrane_venue_provision, and under the proposed
+      // git-credential design it would mint GitHub tokens too.
+      //
+      // That makes "the drain presents its key" mean "anything running inside the drain presents
+      // its key" — which is not an authenticator at all. Stripping here does not fix the
+      // authenticator, but it removes the credential from the reach of the untrusted thing.
+      childEnv = withoutBoxCredentials(process.env);
     }
     // WIRE THE IN-BAND SEAL. A model chair on the output_write-seal path must be able to CALL
     // output_write regardless of what it declared in allowed_tools — the seal is engine mechanism,

@@ -53,8 +53,23 @@ import type { LoadedGenome } from "./loader.js";
 export interface WorkerContext {
   baseUrl: string;
   anonKey: string;
-  /** The seated agent's ctk_ capability token — claim/genome/fail all speak through it. */
+  /**
+   * The ctk_ capability token every RPC speaks through.
+   *
+   * In VENUE MODE this starts EMPTY and is filled in by each claim. That is the point: a drain is
+   * a bandstand, not a musician, and between gigs it should hold no credential at all.
+   */
   agentToken: string;
+  /**
+   * The venue's own credential — org-scoped, bound to `instance`, naming no player. When both this
+   * and `instance` are set, claims go through `coltrane_drain_claim` and the store hands back a
+   * token scoped to the claimed gig's `acting_for`, expiring with the lease.
+   *
+   * Absent, the worker claims the old way: as one player, using a token chosen at boot.
+   */
+  drainKey?: string;
+  /** The box this drain key is bound to. A key presented from anywhere else is refused. */
+  instance?: string;
   /** Lease label recorded on the claimed row (defaults to worker:<acting_for> store-side). */
   worker?: string;
 }
@@ -264,9 +279,44 @@ async function workerRpc(ctx: WorkerContext, fn: string, body: Record<string, un
   return text ? (JSON.parse(text) as unknown) : null;
 }
 
-/** Atomically claim the oldest runnable gig (queued, or running with an expired lease) the
- *  seated agent's chair contract authorizes. Null means the queue holds nothing for us. */
+/**
+ * Atomically claim the oldest runnable gig (queued, or running with an expired lease). Null means
+ * the queue holds nothing for us.
+ *
+ * TWO MODES, and the difference is who is asking.
+ *
+ * VENUE (drainKey + instance): the box authenticates as itself and claims ANY gig dispatched to its
+ * org, then receives a credential minted for THAT GIG's `acting_for`, expiring with the lease. This
+ * is the correct shape — a gig is dispatched to a venue and the chart names who plays. It also
+ * removes a real defect: `coltrane_mcp_claim` filters the queue by the CLAIMER's chairs, though
+ * authority was already settled at dispatch and recorded in `acting_for`. A gig legitimately
+ * dispatched by steve-2 was simply invisible to a box booted as steve-1, and the queue merely
+ * LOOKED empty.
+ *
+ * PLAYER (agentToken only): the historical path, unchanged. A player claims what its own chairs
+ * authorize, which is right for a player — it was only ever wrong for a drain forced to be one.
+ *
+ * The venue path REPLACES ctx.agentToken on every claim. The previous gig's credential is dropped
+ * the moment the next one is taken, so a compromised drain holds exactly one gig's authority and
+ * only until that lease expires.
+ */
 export async function claimNextGig(ctx: WorkerContext): Promise<ClaimedGig | null> {
+  if (ctx.drainKey && ctx.instance) {
+    const out = await workerRpc(ctx, "coltrane_drain_claim", {
+      p_key: ctx.drainKey,
+      p_instance: ctx.instance,
+    });
+    if (!out) return null;
+    const claim = out as ClaimedGig & { token?: string };
+    if (!claim.token) {
+      // Fail loudly. Continuing with a stale or empty bearer would fail later, deeper, and as
+      // something that reads like an authorization bug rather than a store that did not mint.
+      throw new Error("coltrane_drain_claim returned a gig without a credential");
+    }
+    ctx.agentToken = claim.token;
+    return claim;
+  }
+
   const out = await workerRpc(ctx, "coltrane_mcp_claim", {
     p_bearer: ctx.agentToken,
     p_worker: ctx.worker ?? null,

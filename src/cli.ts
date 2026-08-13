@@ -204,15 +204,33 @@ export async function runCli(argv: readonly string[], io: CliIO): Promise<number
     const baseUrl = process.env["COLTRANE_STORE_URL"];
     const anonKey = process.env["COLTRANE_STORE_ANON"];
     const agentToken = process.env["COLTRANE_AGENT_TOKEN"];
-    if (!baseUrl || !anonKey || !agentToken) {
-      line(io, "work needs COLTRANE_STORE_URL, COLTRANE_STORE_ANON and COLTRANE_AGENT_TOKEN in the environment");
+    // VENUE MODE. A drain key is org-scoped and bound to one box, and names no player. Preferred
+    // when present: the store then mints a credential per claim, scoped to that gig's acting_for,
+    // so the box holds nothing between gigs. FLY_APP_NAME is accepted because Fly sets it in every
+    // machine for free, which makes the common deployment need no extra configuration at all.
+    const drainKey = process.env["COLTRANE_DRAIN_KEY"];
+    const instance = process.env["COLTRANE_INSTANCE"] ?? process.env["FLY_APP_NAME"];
+    const venueMode = Boolean(drainKey && instance);
+
+    if (!baseUrl || !anonKey || (!venueMode && !agentToken)) {
+      line(io, "work needs COLTRANE_STORE_URL and COLTRANE_STORE_ANON, plus EITHER a venue credential");
+      line(io, "(COLTRANE_DRAIN_KEY with COLTRANE_INSTANCE or FLY_APP_NAME) OR a player token");
+      line(io, "(COLTRANE_AGENT_TOKEN). A drain should hold the venue credential: it claims any gig");
+      line(io, "dispatched to its org and runs each as that gig's own acting_for.");
+      if (drainKey && !instance) {
+        line(io, "");
+        line(io, "COLTRANE_DRAIN_KEY is set but no instance is named — the key is bound to one box");
+        line(io, "and the store cannot tell which. Set COLTRANE_INSTANCE to the Fly app name.");
+      }
       return 2;
     }
     const res = await workOnce(
       {
         baseUrl,
         anonKey,
-        agentToken,
+        // Empty in venue mode, and deliberately so: the credential arrives with the work.
+        agentToken: agentToken ?? "",
+        ...(venueMode ? { drainKey: drainKey!, instance: instance! } : {}),
         ...(typeof flags["worker"] === "string" ? { worker: flags["worker"] } : {}),
       },
       {

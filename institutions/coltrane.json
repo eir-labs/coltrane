@@ -14,11 +14,10 @@
           "predicate": "(=> (and (is-agent actor) (not (human-governor actor)) (= action \"merge-main\")) deny)",
           "inputs": {
             "actor": "principal",
-            "action": "action-kind",
-            "target_branch": "branch-name"
+            "action": "action-kind"
           }
         },
-        "content_hash": "sha256:7519ba7320e92e29c4b911e579f91b4c93894cfb5d79935213c02727efc5ddbb"
+        "content_hash": "sha256:b6fc83599d08906b5a17c4df4fd62fc6613a8c6769de696e07f1822589c0edf4"
       },
       {
         "attributes": "any seated agent proposing a change",
@@ -102,12 +101,14 @@
         {
           "attributes": "the change-author",
           "aim": "open every change as a pull request on a non-main branch",
-          "deontic": "obliged"
+          "deontic": "obliged",
+          "tier": "declared"
         },
         {
           "attributes": "the change-author",
           "aim": "merge its own pull request, or any change, into the protected main line",
-          "deontic": "forbidden"
+          "deontic": "forbidden",
+          "tier": "declared"
         }
       ]
     },
@@ -124,12 +125,14 @@
         {
           "attributes": "the human-governor",
           "aim": "review the open pull request and confirm its continuous-integration result is green before merging",
-          "deontic": "obliged"
+          "deontic": "obliged",
+          "tier": "declared"
         },
         {
           "attributes": "the human-governor",
           "aim": "delegate the merge decision to a model agent, or let the office be held by one",
-          "deontic": "forbidden"
+          "deontic": "forbidden",
+          "tier": "declared"
         }
       ]
     }

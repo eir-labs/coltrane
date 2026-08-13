@@ -53,8 +53,31 @@ import type { LoadedGenome } from "./loader.js";
 export interface WorkerContext {
   baseUrl: string;
   anonKey: string;
-  /** The seated agent's ctk_ capability token — claim/genome/fail all speak through it. */
+  /**
+   * The ctk_ capability token every RPC speaks through.
+   *
+   * In VENUE MODE this starts EMPTY and is filled in by each claim. That is the point: a drain is
+   * a bandstand, not a musician, and between gigs it should hold no credential at all.
+   */
   agentToken: string;
+  /**
+   * The venue's own credential — org-scoped, bound to `instance`, naming no player. When both this
+   * and `instance` are set, claims go through `coltrane_drain_claim` and the store hands back a
+   * token scoped to the claimed gig's `acting_for`, expiring with the lease.
+   *
+   * Absent, the worker claims the old way: as one player, using a token chosen at boot.
+   */
+  drainKey?: string;
+  /**
+   * The venue this drain key is bound to. Presented from anywhere else, the key is refused.
+   *
+   * This is the Fly APP, not the machine: FLY_APP_NAME is shared by every machine in an app, so
+   * scaling to two machines gives both the same instance identity. That is intended — the venue is
+   * the room, and a room may hold more than one stage. Claims stay disjoint because the store leases
+   * `for update skip locked`. Per-MACHINE binding would be FLY_MACHINE_ID, and would mean
+   * re-provisioning a key every time a machine is replaced.
+   */
+  instance?: string;
   /** Lease label recorded on the claimed row (defaults to worker:<acting_for> store-side). */
   worker?: string;
 }
@@ -264,9 +287,66 @@ async function workerRpc(ctx: WorkerContext, fn: string, body: Record<string, un
   return text ? (JSON.parse(text) as unknown) : null;
 }
 
-/** Atomically claim the oldest runnable gig (queued, or running with an expired lease) the
- *  seated agent's chair contract authorizes. Null means the queue holds nothing for us. */
+/**
+ * Atomically claim the oldest runnable gig (queued, or running with an expired lease). Null means
+ * the queue holds nothing for us.
+ *
+ * TWO MODES, and the difference is who is asking.
+ *
+ * VENUE (drainKey + instance): the box authenticates as itself and claims ANY gig dispatched to its
+ * org, then receives a credential minted for THAT GIG's `acting_for`, expiring with the lease. This
+ * is the correct shape — a gig is dispatched to a venue and the chart names who plays. It also
+ * removes a real defect: `coltrane_mcp_claim` filters the queue by the CLAIMER's chairs, though
+ * authority was already settled at dispatch and recorded in `acting_for`. A gig legitimately
+ * dispatched by steve-2 was simply invisible to a box booted as steve-1, and the queue merely
+ * LOOKED empty.
+ *
+ * PLAYER (agentToken only): the historical path, unchanged. A player claims what its own chairs
+ * authorize, which is right for a player — it was only ever wrong for a drain forced to be one.
+ *
+ * The venue path REPLACES ctx.agentToken on every claim. The previous gig's credential is dropped
+ * the moment the next one is taken, so a compromised drain holds exactly one gig's authority and
+ * only until that lease expires.
+ */
 export async function claimNextGig(ctx: WorkerContext): Promise<ClaimedGig | null> {
+  if (ctx.drainKey && ctx.instance) {
+    const out = await workerRpc(ctx, "coltrane_drain_claim", {
+      p_key: ctx.drainKey,
+      p_instance: ctx.instance,
+    });
+    if (!out) return null;
+    const claim = out as ClaimedGig & { token?: string };
+    if (!claim.token) {
+      // Fail loudly. Continuing with a stale or empty bearer would fail later, deeper, and as
+      // something that reads like an authorization bug rather than a store that did not mint.
+      //
+      // KNOWN CONSEQUENCE, accepted: the store has already leased the row, so it sits `running`
+      // until the lease expires (30 minutes) before anything can reclaim it. Releasing it here is
+      // not possible — every release RPC speaks through the credential that was not minted. A store
+      // that claims without minting is broken in a way a worker cannot repair, and stalling one row
+      // for one lease window is the correct price for not proceeding unauthenticated.
+      throw new Error(
+        `coltrane_drain_claim leased ${claim.gig_id} but minted no credential; the row stays leased ` +
+          `until its lease expires`,
+      );
+    }
+    ctx.agentToken = claim.token;
+    return claim;
+  }
+
+  // Fail closed HERE, not only at the CLI door. If a drain key survives to this point but the
+  // instance was lost anywhere downstream of the CLI guard, venue mode is skipped and this path
+  // would otherwise present an empty bearer to the store — which is exactly the shape of the bug
+  // this whole change exists to prevent.
+  if (!ctx.agentToken) {
+    throw new Error(
+      ctx.drainKey
+        ? "venue mode was requested but no instance reached the worker, and player mode has no token — " +
+          "set COLTRANE_INSTANCE (or FLY_APP_NAME) so the drain key can be presented"
+        : "no credential: claiming needs a venue drain key with an instance, or a player agent token",
+    );
+  }
+
   const out = await workerRpc(ctx, "coltrane_mcp_claim", {
     p_bearer: ctx.agentToken,
     p_worker: ctx.worker ?? null,
@@ -872,5 +952,16 @@ export async function workOnce(ctx: WorkerContext, deps: WorkOnceDeps): Promise<
       log(`could not record failure (lease will expire): ${fe instanceof Error ? fe.message : String(fe)}`);
     }
     return { claimed: true, gig_id: claim.gig_id, status: "failed", error: message };
+  } finally {
+    // In venue mode the credential arrived WITH the work and must not outlive it.
+    //
+    // Without this, "a drain between gigs holds nothing that opens a door" is a property of the
+    // CALLER's shape rather than of this function: workOnce is one-shot today and the drain loop
+    // re-execs, so the token dies with the process by accident. If workOnce ever loops internally —
+    // an obvious optimisation, since the claim → run → drain cycle above it already IS a loop — that
+    // accident stops holding silently, and nothing here would notice.
+    //
+    // AFTER the catch, deliberately: failGig still speaks through this token.
+    if (ctx.drainKey) ctx.agentToken = "";
   }
 }

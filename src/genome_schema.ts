@@ -538,6 +538,50 @@ export const GENOME_ATTRIBUTIONS: readonly SchemaAttributionOutput[] = [
       retrieved_at: "2026-08-13",
     },
   },
+  {
+    subject: "BookingSchema",
+    relation: "descends-from",
+    what_taken:
+      "The ENCUMBRANCE as the accounting object that sits between the appropriation ceiling and the " +
+      "expenditure — a commitment that reserves declared capacity against a future outlay and is " +
+      "reported against fund balance before any cash moves. A Booking IS that reservation leg: the " +
+      "genome held the ceiling (ChartBudgetEnvelope) and the expenditure (GigLedgerEntry) and omitted " +
+      "the encumbrance, which is the leg this schema adds. The unit discipline (a draw is per-unit, " +
+      "never converted) is the fund-accounting rule that a reservation is held in the terms it was " +
+      "declared in.",
+    citation: {
+      authors: ["Governmental Accounting Standards Board"],
+      year: 2009,
+      title:
+        "GASB Statement No. 54: Fund Balance Reporting and Governmental Fund Type Definitions (encumbrance and fund-balance reservation)",
+      venue: "Governmental Accounting Standards Board",
+      locator: "Statement No. 54",
+      url: "https://www.gasb.org/page/document?pageId=/standards-and-guidance/pronouncements/summary-statement-no-54.html",
+      evidence_grade: "archive",
+      retrieved_at: "2026-08-13",
+    },
+  },
+  {
+    subject: "applyCommitmentOp",
+    relation: "descends-from",
+    what_taken:
+      "The social-commitment algebra C(debtor, creditor, antecedent, consequent) and its operation " +
+      "set — create, detach, discharge, cancel, delegate, assign, release — with the load-bearing " +
+      "party constraints: cancel is the debtor's act and release the creditor's, and the two never " +
+      "collapse into one value. applyCommitmentOp is that state machine, and the lifecycle is a " +
+      "party-constrained transition function rather than a status field precisely because the source " +
+      "treats who-may-act as constitutive of the commitment, not incidental to it.",
+    citation: {
+      authors: ["Singh, M.P.", "Chopra, A.K.", "Desai, N."],
+      year: 2009,
+      title: "Commitment-Based Service-Oriented Architecture",
+      venue: "IEEE Computer",
+      locator: "42(11): 72–79",
+      doi: "10.1109/MC.2009.347",
+      evidence_grade: "archive",
+      retrieved_at: "2026-08-13",
+    },
+  },
 ];
 
 // Slugs NAME identities; LOOKUPS go by id. The instance store assigns each institutional
@@ -977,3 +1021,139 @@ function jsonTypeOf(schema: z.ZodTypeAny): JsonType {
 export function zodToMcpProps(schema: z.ZodObject<z.ZodRawShape>): Record<string, JsonType> {
   return Object.fromEntries(Object.entries(schema.shape).map(([k, v]) => [k, jsonTypeOf(v as z.ZodTypeAny)]));
 }
+
+// ── The committed-work objects — Tour / Booking / Resource, the binding middle place ──────────────
+//
+// The strict runtime gate for src/committed_work.ts, promoted into the single Zod source per
+// CLAUDE.md. committed_work.ts re-exports these four names, so the TS interfaces there and this
+// gate cannot drift. REUSE, not invention: a Booking's `acceptance` is exactly
+// InstitutionalLawCheckSchema (the ONE predicate form, decided by the same evaluate()); its `tier`
+// is NormPairSchema's declared|enforced enum, referenced by `.shape.tier` so the vocabulary is
+// declared exactly ONCE in the tree (never a second z.enum). No stake / payout / heat / witness /
+// currency field appears — the sole money field is `amount`, optional (no numerator is not a
+// second tier).
+
+/** The closed commitment lifecycle state set as a Zod enum — the runtime mirror of committed_work.ts's
+ *  CommitmentState union. Kept here (not imported from committed_work) so the schema source has no
+ *  import cycle back onto the file that re-exports it. */
+const CommitmentStateSchema = z.enum([
+  "conditional",
+  "active",
+  "pending",
+  "satisfied",
+  "violated",
+  "expired",
+  "cancelled",
+  "released",
+]);
+const CommitmentPartySchema = z.enum(["debtor", "creditor"]);
+const CommitmentOpKindSchema = z.enum([
+  "create",
+  "detach",
+  "discharge",
+  "cancel",
+  "release",
+  "delegate",
+  "assign",
+]);
+
+/** One append-only lifecycle log entry. A delegate carries the residual debtor it substituted out. */
+const CommitmentOpEntrySchema = z
+  .object({
+    op: CommitmentOpKindSchema,
+    by: CommitmentPartySchema.optional(),
+    residual_debtor: z.string().optional(),
+  })
+  .strict();
+
+/** The live commitment record: current state, its two parties, and the append-only operation log. */
+const CommitmentRecordSchema = z
+  .object({
+    state: CommitmentStateSchema,
+    debtor: z.string(),
+    creditor: z.string(),
+    log: z.array(CommitmentOpEntrySchema).default([]),
+  })
+  .strict();
+
+/** How a Resource REFILLS, expressed in the resource's OWN unit — a monthly seat renews, a one-off
+ *  purchase does not, a rate-based capacity decays. `quantity` is a magnitude in the SAME unit the
+ *  Resource declares; `per_period` is the cadence it renews over (absent for a one-off). NOTHING
+ *  here converts between units — replenishment is a quantity-over-time in one unit, never a rate
+ *  table that would smuggle an exchange rate in. */
+export const ReplenishmentSchema = z
+  .object({
+    kind: z.enum(["renewing", "one_off", "rate_based"]),
+    /** The magnitude that refills each period, in the Resource's OWN unit. Zero for a pure one-off. */
+    quantity: z.number(),
+    /** The cadence the quantity renews over (e.g. "monthly", "2026-Q3"). Absent for a one-off. */
+    per_period: z.string().optional(),
+  })
+  .strict();
+
+/** One draw against declared capacity — UNIT-TAGGED. A booking draws a VECTOR of these; over-commitment
+ *  is checked per unit with NO exchange rate anywhere. */
+export const DrawSchema = z
+  .object({
+    resource_slug: z.string(),
+    unit: z.string(),
+    quantity: z.number(),
+  })
+  .strict();
+
+/** Capacity as its OWN class. A holding of some opaque, non-convertible `unit` by a `holder` (an
+ *  organization slug), for a `period`, transferable across organizations or not. `replenishment` is
+ *  OPTIONAL and describes how the holding refills IN ITS OWN UNIT — one Resource definition serves a
+ *  renewing, one-off, or rate-based holding without a parallel ledger that could disagree. */
+export const ResourceSchema = z
+  .object({
+    slug: z.string(),
+    holder: z.string(),
+    quantity: z.number(),
+    unit: z.string(),
+    period: z.string(),
+    transferable: z.boolean(),
+    replenishment: ReplenishmentSchema.optional(),
+  })
+  .strict();
+
+/** One commitment in the binding middle place: the four load-bearing fields (aim, period,
+ *  accountable_office, acceptance) plus its draws, lifecycle and served north stars. `amount` is
+ *  OPTIONAL — a real commitment can have no price. `acceptance` and `antecedent` reuse the ONE
+ *  predicate form; `tier` reuses NormPairSchema's enum. */
+export const BookingSchema = z
+  .object({
+    slug: z.string(),
+    aim: z.string(),
+    amount: z.number().optional(),
+    period: z.string(),
+    accountable_office: z.string(),
+    acceptance: InstitutionalLawCheckSchema,
+    draws: z.array(DrawSchema).default([]),
+    served_northstars: z.array(z.string()).default([]),
+    tier: NormPairSchema.shape.tier,
+    lifecycle: CommitmentRecordSchema,
+    settled_gig_ids: z.array(z.string()).optional(),
+    antecedent: InstitutionalLawCheckSchema.optional(),
+  })
+  .strict();
+
+/** The institution-visible aggregation — it REFERENCES an institution (the constraint) and an
+ *  organization (the accountable player) by slug; it does NOT live inside InstitutionSchema. */
+export const TourSchema = z
+  .object({
+    slug: z.string(),
+    institution_slug: z.string(),
+    org_slug: z.string(),
+    responsible_chair: z.string(),
+    period: z.string(),
+    northstar_slugs: z.array(z.string()).default([]),
+    bookings: z.array(BookingSchema).default([]),
+  })
+  .strict();
+
+export type ReplenishmentOutput = z.output<typeof ReplenishmentSchema>;
+export type DrawOutput = z.output<typeof DrawSchema>;
+export type ResourceOutput = z.output<typeof ResourceSchema>;
+export type BookingOutput = z.output<typeof BookingSchema>;
+export type TourOutput = z.output<typeof TourSchema>;

@@ -48,9 +48,9 @@ change promotes the three Zod schemas into the single Zod source in `src/genome_
 | O6 | capacity is its own class | `ResourceSchema` (holder, quantity, unit, period, transferable) | `schema_shape.test.ts` INV13 |
 | O7 | a draw is a vector; over-commitment per unit, no conversion | `checkTourCapacity(tour, resources)`; `Draw[]` | `resource_draw_capacity.test.ts` INV15, INV16 |
 | O8 | a non-transferable holding of another org is unreachable | `checkTourCapacity` cross-org rule | `resource_draw_capacity.test.ts` INV17, INV18 |
-| O9 | `checkTourAdmissibility` — pure, explicit, collect-all/refuse-once, NOT wired into `loadGenome` | `checkTourAdmissibility(doc)` → `AdmissibilityResult` | `tour_admissibility.test.ts` INV19, INV23 |
+| O9 | `checkTourAdmissibility` — pure, explicit, collect-all/refuse-once, WIRED into `loadGenome` via `loadTours` (fails closed at load) | `checkTourAdmissibility(doc)` → `AdmissibilityResult` | `tour_admissibility.test.ts` INV19, INV23 |
 | O10 | refuse an unmarked/unevaluable commitment; refuse an undeclared-resource draw; reuse the tier vocab | `checkTourAdmissibility`; `Booking.tier` (`NormPairSchema` enum) | `tour_admissibility.test.ts` INV20, INV21, INV22 |
-| O11 | variance from the booking → gig → settlement chain, read not assembled | `computeVariance(booking, ledger)` reads `GigUsage.total_cost_usd` | `variance_and_reports.test.ts` INV24, INV25 |
+| O11 | variance from the booking → gig → spend chain, read not assembled | `computeVariance(booking, ledger)` reads `GigUsage.total_cost_usd` | `variance_and_reports.test.ts` INV24, INV25 |
 | O12 | unpromised work and undispatched bookings both visible | `unpromisedGigs`, `undispatchedBookings` | `variance_and_reports.test.ts` INV26, INV27 |
 | O13 | two reports as set-difference queries | `northstarsWithNoBooking`, `bookingsServingNoNorthstar` | `variance_and_reports.test.ts` INV28, INV29 |
 | O14 | no stake / economics — the absence IS the spec | forbidden-field-name guard over the seam + worked tour | `economics_additive_worked.test.ts` INV30 |
@@ -71,6 +71,28 @@ change promotes the three Zod schemas into the single Zod source in `src/genome_
    responsibility is RECORDED, not overwritten (INV8).
 5. **amount × tier**: `amount` absence is simply "no variance numerator", NOT a second tier — the
    acceptance axis is the only checkable-property tier (INV32).
+
+## Stated non-goals — doors closed on purpose, not gaps left open
+
+Two absences below READ like gaps that a later change would be tempted to "fix." They are not
+gaps; they are the design, stated here so the door stays shut.
+
+- **No exchange rate, no unit conversion — ever.** A draw is a vector of unit-tagged quantities and
+  over-commitment is checked strictly PER UNIT. When capacity is tight across two bookings drawing
+  DIFFERENT units, this layer gives no way to rank them, and that is correct: ranking incommensurable
+  units is a judgement a chair makes, not arithmetic. A conversion table would hide a policy inside
+  a rate and let a spend in one unit silently free capacity in another — the exact failure the
+  per-unit rule (INV16) exists to refuse. There is deliberately no rate anywhere in this layer, and
+  none is to be added. A cross-unit ranking, if one is ever wanted, is a chair's explicit decision
+  recorded as its own object, never a hidden coefficient in this arithmetic.
+
+- **Replenishment is a quantity over time in the resource's OWN unit.** A `Resource` may carry an
+  optional `replenishment` — a monthly seat renews, a one-off purchase does not, a rate-based
+  capacity decays — so ONE declared-capacity definition serves every kind of holding rather than a
+  parallel ledger growing elsewhere that could disagree about the same organization. It stays inside
+  the same non-convertible-unit discipline as everything else: the refill magnitude is stated in the
+  resource's own unit and the cadence is a period, and NOTHING here converts between units. A
+  replenishment is not, and must not become, a rate that translates one unit into another.
 
 ## Testing method and the durable guards
 

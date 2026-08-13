@@ -29,6 +29,8 @@ import type {
   ForebearOutput,
   LineageEdgeOutput,
   NorthstarOutput,
+  TourOutput,
+  ResourceOutput,
 } from "./genome_schema.js";
 import {
   InstitutionSchema,
@@ -40,8 +42,11 @@ import {
   ForebearSchema,
   LineageEdgeSchema,
   NorthstarSchema,
+  TourSchema,
+  ResourceSchema,
 } from "./genome_schema.js";
 import { checkInstitutionAdmissibility } from "./institution_enforcement.js";
+import { checkTourAdmissibility } from "./committed_work.js";
 
 /** The multi-section institution document as it lives on disk (shape per institutions/quartet.json).
  *  Each present section is validated LOSS-FREE against its already-authored per-section schema in
@@ -205,4 +210,110 @@ function validateSections(parsed: unknown): InstitutionDocumentSections {
     sink[key] = arr.data;
   }
   return out;
+}
+
+// ── The TOURS loader — the point at which checkTourAdmissibility is INVOKED on the load path ───────
+//
+// checkTourAdmissibility, like checkInstitutionAdmissibility before #341, is a pure function with no
+// production callsite: without this reader it is exercised ONLY by tests, so an inadmissible tour
+// authored into the genome (or arriving from a store) would load silently. This reader closes that
+// gap the same way institutions do — read tours/*.json, validate, resolve each tour against its
+// institution (the chairs its offices name, the resources its draws name), invoke the admissibility
+// gate FAIL-CLOSED, and drop an inadmissible/malformed document out as one "tour"-kind load_error
+// while the rest of the genome loads.
+
+/** A tour document as it lives on disk: the tour plus the resources its draws name. */
+export interface LoadedTour {
+  slug: string;
+  document: { tour: TourOutput; resources: ResourceOutput[] };
+}
+
+/**
+ * Read every tours/*.json under `root`, validate the tour + resources against their schemas, resolve
+ * each tour against its institution from the ALREADY-LOADED institutions map (its chairs, so an
+ * accountable office / responsible chair is checked against real chairs), and invoke
+ * checkTourAdmissibility fail-closed. An admitted tour is carried keyed by slug; a malformed,
+ * schema-invalid, inadmissible, unresolved-institution, or duplicate-slug document drops out as one
+ * "tour" load_error. TOTAL — it never throws for a tour reason.
+ */
+export function loadTours(
+  root: string,
+  institutions: ReadonlyMap<string, LoadedInstitution>,
+): { tours: Map<string, LoadedTour>; load_errors: LoadError[] } {
+  const tours = new Map<string, LoadedTour>();
+  const load_errors: LoadError[] = [];
+  const dir = join(root, "tours");
+  if (!existsSync(dir)) return { tours, load_errors };
+
+  const slug_paths = new Map<string, string>();
+
+  for (const name of readdirSync(dir)) {
+    if (extname(name) !== ".json") continue;
+    const path = join(dir, name);
+    if (!statSync(path).isFile()) continue;
+
+    let raw: string;
+    try {
+      raw = readFileSync(path, "utf-8");
+    } catch (e) {
+      load_errors.push({ kind: "tour", path, slug: null, error: `failed to read ${path}: ${e instanceof Error ? e.message : String(e)}` });
+      continue;
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (e) {
+      load_errors.push({ kind: "tour", path, slug: null, error: `malformed JSON at ${path}: ${e instanceof Error ? e.message : String(e)}` });
+      continue;
+    }
+
+    const doc = parsed !== null && typeof parsed === "object" ? (parsed as Record<string, unknown>) : {};
+    const tourParse = TourSchema.safeParse(doc.tour);
+    if (!tourParse.success) {
+      load_errors.push({ kind: "tour", path, slug: readRawSlug({ institution: doc.tour }), error: `tour section invalid — ${zodWhy(tourParse.error.issues)}` });
+      continue;
+    }
+    const tour = tourParse.data;
+    const slug = tour.slug;
+
+    const resourcesParse = z.array(ResourceSchema).safeParse(doc.resources ?? []);
+    if (!resourcesParse.success) {
+      load_errors.push({ kind: "tour", path, slug, error: `resources section invalid — ${zodWhy(resourcesParse.error.issues)}` });
+      continue;
+    }
+    const resources = resourcesParse.data;
+
+    if (slug_paths.has(slug)) {
+      load_errors.push({ kind: "tour", path, slug, error: `duplicate tour slug "${slug}" (first seen in ${slug_paths.get(slug)})` });
+      continue;
+    }
+
+    // Resolve the institution the tour references. An unresolved institution is a dead name — fail closed.
+    const loadedInst = institutions.get(tour.institution_slug);
+    if (!loadedInst) {
+      load_errors.push({ kind: "tour", path, slug, error: `tour "${slug}" references institution "${tour.institution_slug}" the genome does not hold` });
+      continue;
+    }
+
+    // Admissibility, fail-closed. The chairs come from the resolved institution (offices resolve
+    // against real chairs); northstars are the institution's if it carries any, else empty (a tour's
+    // served north stars are checked against the tour's own declared set, not the institution doc).
+    const verdict = checkTourAdmissibility({
+      tour,
+      resources,
+      institution: loadedInst.document.institution,
+      chairs: loadedInst.document.chairs ?? [],
+      northstars: loadedInst.document.northstars ?? [],
+    });
+    if (!verdict.admitted) {
+      const detail = verdict.offenders.map((o) => `${o.ref}: ${o.reason}`).join(" | ");
+      load_errors.push({ kind: "tour", path, slug, error: `tour "${slug}" is inadmissible — ${detail}` });
+      continue;
+    }
+
+    tours.set(slug, { slug, document: { tour, resources } });
+    slug_paths.set(slug, path);
+  }
+
+  return { tours, load_errors };
 }

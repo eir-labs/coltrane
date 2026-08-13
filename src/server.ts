@@ -3230,6 +3230,13 @@ export function bootstrapServerDeps(genomeRoot?: string): ServerDeps {
       sealVia: "output_write",
       // per-chair wall-clock bound; COLTRANE_CHAIR_TIMEOUT_MS overrides for slow deployments
       ...(process.env["COLTRANE_CHAIR_TIMEOUT_MS"] ? { timeout_ms: Number(process.env["COLTRANE_CHAIR_TIMEOUT_MS"]) } : {}),
+      // The reserve grant (#329) had no reachable caller: it was built, tested, and set by nothing,
+      // so a chair that spent its budget still died silently at the cap. This is the operator-level
+      // door to it. Absent = no reserve, which is the prior behaviour exactly — an extension nobody
+      // asked for is spend nobody authorised. The DURABLE fix is a per-chair `turn_reserve` declared
+      // in the standard (PR #331), because a budget is a property of the work rather than of the
+      // player; this env is the deployment-level stopgap until that lands, not a substitute for it.
+      ...(process.env["COLTRANE_TURN_RESERVE"] ? { turn_reserve: Number(process.env["COLTRANE_TURN_RESERVE"]) } : {}),
     }),
     model_version: process.env["COLTRANE_MODEL"] ?? "claude-cli-default",
     skills: genome.skills, // ← skill substrate — runGig resolves agent.skill_slugs into prompt

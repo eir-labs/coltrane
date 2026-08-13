@@ -121,8 +121,21 @@ describe("attribution relations must be able to say what a lineage pass FINDS", 
   });
 
   it("attribution relations are NOT the capability vocabulary", () => {
-    // Pinned so a later tidy-up does not "simplify" these back into one enum and silently widen
-    // what a cap can scope. LineageEdgeTypeSchema stays the grant vocabulary.
+    // Pinned so a later tidy-up does not "simplify" these back into one enum. The first version of
+    // this comment gave a CATEGORY reason — "anchored-in says nothing about a paper, diverges-from
+    // says nothing as a permission" — which is a matter of taste a future reader may reasonably
+    // disagree with. The real reason is PRIVILEGE, verified against the production store:
+    //
+    //   `coltrane_caps_cover` matches a capability grant on `cap->>'edge_type' = p_edge_type`, and
+    //   `coltrane_can_traverse` gates authority through it. edge_type IS the key a grant is scoped
+    //   by. Merging the vocabularies therefore makes `{"grant": "informed-by"}` an expressible
+    //   capability scope — the vocabulary describing how one idea relates to another would extend
+    //   the vocabulary deciding what an agent may traverse.
+    //
+    // So this is an access-control boundary wearing the shape of a naming preference. LineageEdgeTypeSchema
+    // stays the grant vocabulary; AttributionRelationSchema stays scholarly; and the store-side
+    // `coltrane_lineage_edge.edge_type` CHECK constraint must NOT be widened to admit the scholarly
+    // terms either — it needs a separate column or table, for this reason and not for tidiness.
     const attribution = new Set(AttributionRelationSchema.options as readonly string[]);
     expect(attribution.has("aligns-with"), "attribution cannot express a non-descent alignment").toBe(true);
     expect(attribution.has("anchored-in"), "the capability term leaked into the scholarly vocabulary").toBe(false);

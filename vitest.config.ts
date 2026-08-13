@@ -45,6 +45,11 @@ export default defineConfig({
       COLTRANE_LEDGER_PATH: join(tmpdir(), "coltrane-test-ledger", "ledger.jsonl"),
       COLTRANE_MIRROR_DIR: join(tmpdir(), "coltrane-test-mirror"),
     },
+    // #328 — the env above keeps the checkout clean but pointed every file at ONE ledger and ONE
+    // mirror, so both grew across the run and `system_health`'s full scan of them became a function
+    // of suite progress rather than of the test. This narrows the same protection to per-file, so a
+    // scan is bounded by its own file's writes. See the setup file for the measurements.
+    setupFiles: ["tests/_support/isolate_audit_spine.ts"],
     // tests/honest_broker/** is delegated to its own config (#262): those two specs boot a
     // subprocess MCP server over stdio, and their config declares testTimeout 120_000 +
     // singleFork for that reason. Running them here handed them vitest's 5s default and the

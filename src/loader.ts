@@ -22,6 +22,30 @@ export interface CoreTypeRecord {
 // output type (the schema defaults them), so the `slug@version` key + status reads stay sound.
 export type DomainTypeRecord = DomainTypeOutput;
 
+/**
+ * The domain-type index, keyed by `slug@version` (the on-disk identity) but with a bare-slug
+ * fallback: `get("lineage-record")` / `has("lineage-record")` resolve to that slug's
+ * highest-version record when no exact key matches. A key containing "@" is looked up verbatim
+ * only — asking for `@1` after the type has moved to `@2` honestly misses, so a version bump is
+ * never papered over (there is no v1 TYPE once a record is bumped, only sealed v1 records).
+ * Iteration (values/keys/entries/size) is left untouched, so it stays canonical — one entry per
+ * stored key — and registry reconstruction, which folds `domain_types.values()`, is unaffected.
+ */
+export class DomainTypeMap extends Map<string, DomainTypeRecord> {
+  override get(key: string): DomainTypeRecord | undefined {
+    const direct = super.get(key);
+    if (direct !== undefined || key.includes("@")) return direct;
+    let best: DomainTypeRecord | undefined;
+    for (const rec of super.values()) {
+      if (rec.slug === key && (best === undefined || rec.version > best.version)) best = rec;
+    }
+    return best;
+  }
+  override has(key: string): boolean {
+    return this.get(key) !== undefined;
+  }
+}
+
 // On-disk shapes for the remaining three definition classes. Agents are AgentDef-shaped
 // (validated through defineAgent). A standard file references its agents by slug (DRY —
 // agents are authored once under agents/) and is composed through composeStandard.
@@ -252,7 +276,7 @@ export function loadGenome(
   for (const f of domainRead.parse_failures) {
     load_errors.push({ kind: "domain_type", path: f.path, slug: null, error: f.error });
   }
-  const domain_types = new Map<string, DomainTypeRecord>();
+  const domain_types = new DomainTypeMap();
   const domain_type_paths = new Map<string, string>();
   for (const { path, data: d } of domainRead.files) {
     try {
@@ -578,7 +602,7 @@ export function loadLayeredGenome(roots: readonly string[]): LoadedGenome {
   if (roots.length === 0) {
     throw new GenomeLoadError("loadLayeredGenome requires at least one root");
   }
-  const domain_types = new Map<string, DomainTypeRecord>();
+  const domain_types = new DomainTypeMap();
   const agents = new Map<string, Agent>();
   const standards = new Map<string, Standard>();
   const skills = new Map<string, SkillRecord>();

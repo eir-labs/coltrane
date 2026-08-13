@@ -81,6 +81,14 @@ export interface AgentInvocationContext {
   // documented "skim first" cost practice had no mechanism behind it. Absent = the agent's
   // own profile stands.
   depth?: Depth | undefined;
+  // Item 1 — the seated CHAIR's turn floor and reserve ceiling, threaded here from the chair
+  // record (exactly as `depth` is). The invoker resolves `--max-turns` chair > agent > engine
+  // default from `turn_budget` (absent falls through to the agent's max_tool_calls; 0 is a
+  // deliberate hard floor), and takes its reserve turns from `turn_reserve` (already capped by
+  // the runtime to what the gig pool can back) ahead of the invoker-level opts.turn_reserve.
+  // Absent on both = the pre-chair-budget behaviour, unchanged.
+  turn_budget?: number | undefined;
+  turn_reserve?: number | undefined;
   // ── the venue this chair is confined to (venue → dispatch wiring) ──────────────
   // When the gig names a venue, runGig resolves it, calls resolveAndRealize BEFORE this
   // invocation, and threads the resulting room here. The Claude invoker reads BOTH to confine
@@ -128,6 +136,10 @@ export type GigProgressEvent =
   // AND content_sha — so this channel is the only place the difference is observable live.
   | { type: "skills_unresolved"; phase: string; role: string; agent: string; missing: string[] }
   | { type: "agent_event"; phase: string; role: string; event: AgentStreamEvent }
+  // Item 3 — the reactive budget observable. Surfaces `agent_state` at the parent when a seated
+  // chair crosses into (`yielding`) or back out of (`active`/`depleted`) a reserve draw, so the
+  // transition is operator-observable and no longer a term that lives only in a comment + a union.
+  | { type: "budget_state"; phase: string; role: string; agent_state: BudgetState["agent_state"] }
   // ── reuse (checkpoint/resume + the chair-level cache) ───────────────────────
   // A run that skipped work must SAY which and why, live. A silent saving is
   // indistinguishable from a bug — and from a chair that quietly failed to run.
@@ -391,6 +403,14 @@ export interface BudgetInput {
   base_cost?: number;
   /** per-byte multiplier on consumed-input size, in append units. Default 0.1. */
   k?: number;
+  /**
+   * Item 2 — the gig-scoped reserve pool: a quantity of overflow turns a budget-exhausted chair
+   * may draw, capped per-chair at its own `turn_reserve` (no theft). This dispatch-payload value
+   * is the PRIMARY source; it overrides a standard-level `reserve_pool` default deterministically
+   * (no max/sum). Absent → the standard default → 0. ORTHOGONAL to the append-unit accounting
+   * above: a draw moves `pool_remaining` only, never `spent`/`balance`.
+   */
+  pool?: number;
 }
 
 /**
@@ -431,6 +451,36 @@ export interface BudgetState {
    * 0 when no invoker reported cost (stubbed invokers, skill-only gigs).
    */
   settled_usd: number;
+  /**
+   * Item 2 — the gig reserve pool's remaining turns. Seeded from
+   * `deps.budget.pool ?? standard.reserve_pool ?? 0`, decremented by each GRANTED draw, never
+   * increased (v0 is strict draw-down, no preemption/reclaim). Never negative — a chair is only
+   * ever offered `min(own reserve, pool_remaining − pool_reserved)`, so conservation holds.
+   */
+  pool_remaining: number;
+  /**
+   * Item 2 — the attributable draw ledger: one record per chair that reached for its reserve,
+   * so starvation (a `denied` draw) is a recorded, visible state and never a silent no-op.
+   */
+  draws: DrawRecord[];
+}
+
+/**
+ * Item 2 — one chair's attempt to draw from the gig reserve pool. A GRANT names the turns the
+ * pool actually lent and what it held afterward; a `denied` draw records a chair that declared a
+ * reserve the empty pool could not extend — starvation made visible, per INV12/F3.
+ */
+export interface DrawRecord {
+  /** The drawing chair's role, so every draw is attributable (INV13/F6). */
+  role?: string;
+  /** The phase the drawing chair sat in. */
+  phase?: string;
+  /** Turns the pool actually lent this chair (0 for a denied draw). */
+  granted: number;
+  /** What the pool held AFTER this draw settled — non-increasing across grants (INV11). */
+  pool_remaining_after: number;
+  /** True when the chair declared a reserve but the pool was dry — a recorded starvation. */
+  denied?: boolean;
 }
 
 /** One chair that did not run, and what stood in for it. */
@@ -1097,6 +1147,10 @@ export async function runGig(
 
   // Budget state. When deps.budget is undefined, enforcement is OFF (back-compat).
   // When present, we track an in-memory BudgetState mirroring budget-state.json.
+  // Item 2 — the gig reserve pool opens from the dispatch value, then the standard default, then 0.
+  // Dispatch wins deterministically (no max/sum) so an operator's per-run pool is authoritative.
+  const poolOpening =
+    deps.budget?.pool ?? (standard as { reserve_pool?: number }).reserve_pool ?? 0;
   const budget: BudgetState | null = deps.budget
     ? {
         opening: deps.budget.opening,
@@ -1110,6 +1164,8 @@ export async function runGig(
         k: deps.budget.k ?? 0.1,
         unit: "append-units",
         settled_usd: 0,
+        pool_remaining: poolOpening,
+        draws: [],
       }
     : null;
   // #232 — cost RESERVED by chairs that passed the gate but have not settled. `prepareChair`
@@ -1118,6 +1174,11 @@ export async function runGig(
   // released (never charged) when it fails or when a later sibling trips the gate and the
   // batch is abandoned before a single invoker is called.
   let reserved = 0;
+  // Item 2 — reserve-pool turns OFFERED to prepared-but-not-yet-settled chairs. Mirrors `reserved`
+  // above: prepareChair increments it synchronously so a parallel batch can never over-lend the
+  // pool (each chair is offered min(own reserve, pool_remaining − pool_reserved)); a granted draw
+  // converts the hold into a real pool_remaining decrement, an ungranted one releases it.
+  let poolReserved = 0;
 
   // Resolve agent-by-slug once.
   const agentBySlug = new Map(standard.agents.map((a) => [a.slug, a]));
@@ -1712,6 +1773,12 @@ export async function runGig(
     /** #232 — append-unit cost RESERVED for this chair at prep. Settled to `spent` only on
      *  success; released without charge otherwise. Absent when no budget is enforced. */
     cost?: number;
+    /** Item 2 — the reserve turns OFFERED to this chair, `min(chair.turn_reserve, pool free)`,
+     *  computed at prep and threaded as `ctx.turn_reserve`. The runtime holds this against the
+     *  pool (`poolReserved`) so a parallel batch cannot over-lend; the hold is released after the
+     *  invocation and converted into a real `pool_remaining` decrement iff the chair actually drew.
+     *  Absent when no budget is enforced. */
+    offered_reserve?: number;
     /** Who the sealed record names as producer, and under which domain. Resolved at prep so
      *  the reuse key and the seal agree by construction rather than by two parallel derivations. */
     producer_slug: string;
@@ -2054,10 +2121,27 @@ export async function runGig(
       reservedCost = cost;
     }
 
+    // Item 2 — offer this chair its pool share, capped to what the pool can back RIGHT NOW.
+    // `min(own reserve, pool_remaining − poolReserved)` is the no-theft/conservation law made
+    // algebra: a chair is never offered more than its own declared reserve, nor more than the
+    // pool still holds after every sibling already prepared. The hold is taken synchronously here
+    // (prep is sequential per batch) so even a parallel batch cannot over-lend; it is released and
+    // settled after the invocation in `executeChair`. Only a chair that DECLARED a reserve draws
+    // from the pool — a chair that declared none leaves `offered_reserve` undefined so the invoker
+    // still falls through to its opts-level reserve (the env/house floor) instead of a shadowing 0.
+    // A reuse HIT does no invocation, so it draws nothing. Skipped when no budget is enforced.
+    let offeredReserve: number | undefined;
+    if (budget && !lookup?.hit && chair.turn_reserve !== undefined) {
+      const free = Math.max(0, budget.pool_remaining - poolReserved);
+      offeredReserve = Math.min(chair.turn_reserve, free);
+      poolReserved += offeredReserve;
+    }
+
     return {
       chair, phaseName, agent, primitive, domain_type, output_specs, inputs, skills,
       missing_skills: missing, producer_slug: agent.slug, domain,
       ...(reservedCost !== undefined ? { cost: reservedCost } : {}),
+      ...(offeredReserve !== undefined ? { offered_reserve: offeredReserve } : {}),
       ...(lookup ? { reuse_key: lookup.key } : {}),
       ...(lookup?.hit ? { reuse_hit: lookup.hit } : {}),
     };
@@ -2073,6 +2157,26 @@ export async function runGig(
     if (!succeeded) return;
     budget.spent += p.cost;
     budget.balance = budget.opening - budget.spent + budget.credit;
+  }
+
+  // Item 2 — settle a chair's reserve-pool draw exactly once, after its invocation ends (success or
+  // failure). Releases the prep-time hold on `poolReserved`, then: on a GRANT, decrements
+  // `pool_remaining` by the turns actually lent (capped at what the pool holds — theft is
+  // impossible) and appends an attributable draw; on a DENIAL, records a visible starvation draw so
+  // an empty pool is never a silent no-op. Called from the invoke try (landed) and catch (failed)
+  // arms — one path per invocation, never both.
+  function settlePoolDraw(
+    p: PreparedChair, role: string, phaseName: string, granted: number | undefined, denied: boolean,
+  ): void {
+    if (!budget) return;
+    poolReserved -= p.offered_reserve ?? 0;
+    if (granted !== undefined) {
+      const lent = Math.min(granted, budget.pool_remaining);
+      budget.pool_remaining -= lent;
+      budget.draws.push({ role, phase: phaseName, granted: lent, pool_remaining_after: budget.pool_remaining });
+    } else if (denied) {
+      budget.draws.push({ role, phase: phaseName, granted: 0, pool_remaining_after: budget.pool_remaining, denied: true });
+    }
   }
 
   // Stage 2 — actual invocation + post-invocation output_contract check + write.
@@ -2192,6 +2296,10 @@ export async function runGig(
       // try for the same reason: a chair killed by #250's abort still started, and still cost.
       const sink = makeUsageSink();
       startedInvocations++;
+      // Item 2/3 — this invocation's reserve-draw lifecycle, captured in the onEvent closure so
+      // the pool draw is attributed to THIS chair/phase (the raw event need not carry the role).
+      let drewGranted: number | undefined; // set when budget_reserve_granted fires — the turns lent
+      let deniedDraw = false;              // set when budget_reserve_denied fires — a starved chair
       try {
         data = await deps.invoke({
           agent, phase: phaseName, gig_id, inputs, gig_input: gigInput, skills,
@@ -2201,12 +2309,63 @@ export async function runGig(
           // itself, so an invoker can kill its child and shape what it asks the model for.
           ...(deps.signal ? { signal: deps.signal } : {}),
           ...(deps.depth ? { depth: deps.depth } : {}),
+          // Item 1 — the seated chair's turn floor and its pool-capped reserve reach the invoker,
+          // which resolves --max-turns chair > agent > engine default and takes its reserve turns
+          // from here. The reserve is the pool-capped `offered_reserve` when a budget is enforced,
+          // else the chair's RAW `turn_reserve` (no pool to cap against). Both stay absent when the
+          // chair declares neither (the pre-chair-budget path).
+          ...(chair.turn_budget !== undefined ? { turn_budget: chair.turn_budget } : {}),
+          ...((p.offered_reserve ?? chair.turn_reserve) !== undefined
+            ? { turn_reserve: p.offered_reserve ?? chair.turn_reserve }
+            : {}),
           // The venue → dispatch wire: thread the realized room onto the chair's ctx ONLY when a
           // venue resolved, so the invoker narrows the spawn by construction; both fields stay
           // absent otherwise (the venue-less path is unchanged).
           ...(gigRealization && gigVenue ? { realization: gigRealization, venue: gigVenue } : {}),
-          onEvent: (ev) => { sink.fold(ev); emit({ type: "agent_event", phase: phaseName, role: chair.role, event: ev }); },
+          onEvent: (ev) => {
+            // Item 2/3 — intercept the reserve-draw events BEFORE forwarding them opaquely. A grant
+            // puts the GIG into `yielding` (D1: yielding iff a seated chair is drawing reserve) and
+            // records the turns lent; a denial marks a starved chair. The mutation is synchronous
+            // and non-throwing, per the onEvent contract.
+            if (budget) {
+              if (ev.type === "budget_reserve_granted") {
+                const raw = ev.raw as Record<string, unknown> | undefined;
+                const turns = typeof raw?.["reserve_turns"] === "number" ? (raw["reserve_turns"] as number) : (p.offered_reserve ?? 0);
+                drewGranted = turns;
+                budget.agent_state = "yielding";
+                emit({ type: "budget_state", phase: phaseName, role: chair.role, agent_state: "yielding" });
+              } else if (ev.type === "budget_reserve_denied") {
+                deniedDraw = true;
+              }
+            }
+            sink.fold(ev);
+            emit({ type: "agent_event", phase: phaseName, role: chair.role, event: ev });
+          },
         });
+        // Item 2/3 — the chair LANDED. Settle the pool draw and clear the observable back to a
+        // solvent state (yielding → active); the gig-end transition to `settled` still follows.
+        if (budget) {
+          settlePoolDraw(p, chair.role, phaseName, drewGranted, deniedDraw);
+          if (drewGranted !== undefined && budget.agent_state === "yielding") {
+            budget.agent_state = "active";
+            emit({ type: "budget_state", phase: phaseName, role: chair.role, agent_state: "active" });
+          }
+        }
+      } catch (e) {
+        // Item 2/3 — the chair FAILED. A chair that drew its reserve and never landed spent the
+        // reserve (and the pool it drew from) without closing out → the gig moves to `depleted`
+        // (INV16 exit). The pool draw still settles so conservation and attribution hold on the
+        // failure path too; a non-drawing failure leaves the state to the existing machinery.
+        if (budget) {
+          settlePoolDraw(p, chair.role, phaseName, drewGranted, deniedDraw);
+          if (drewGranted !== undefined) {
+            budget.agent_state = "depleted";
+            budget.depleted_agent ??= agent.slug;
+            budget.depleted_at ??= new Date().toISOString();
+            emit({ type: "budget_state", phase: phaseName, role: chair.role, agent_state: "depleted" });
+          }
+        }
+        throw e;
       } finally {
         if (sink.attributed()) attributedInvocations++;
       }

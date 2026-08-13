@@ -212,5 +212,8 @@ export function gigEventLogLine(gig_id: string, ev: GigProgressEvent): string | 
       return ev.event.type === "tool_use"
         ? JSON.stringify({ ...base, ev: "tool_use", role: ev.role, tool: ev.event.tool })
         : null;
+    // Item 3 — the reactive budget observable: a chair crossing into/out of a reserve draw.
+    case "budget_state":
+      return JSON.stringify({ ...base, ev: "budget_state", phase: ev.phase, role: ev.role, agent_state: ev.agent_state });
   }
 }

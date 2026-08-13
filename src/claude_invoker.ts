@@ -827,7 +827,14 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
   const sealViaOutputWrite = opts.sealVia === "output_write";
   // A reserve is a grant, so an absent or nonsensical one grants nothing rather than defaulting to
   // some house number — an extension the author did not ask for is spend they did not authorise.
-  const reserveTurns = Number.isFinite(opts.turn_reserve) && (opts.turn_reserve ?? 0) > 0 ? Math.floor(opts.turn_reserve!) : 0;
+  // Item 1/2 — resolve per invocation: the seated chair's own `ctx.turn_reserve` (already capped by
+  // the runtime to what the gig pool can back) takes precedence; `opts.turn_reserve` remains the
+  // last fallback so a chair that declares none still reaches the pinned invoker-level reserve path
+  // (chair_turn_reserve.test.ts). `0` is a real value — a starved chair — not a fall-through.
+  const resolveReserveTurns = (ctxReserve: number | undefined): number => {
+    const chosen = ctxReserve ?? opts.turn_reserve;
+    return Number.isFinite(chosen) && (chosen ?? 0) > 0 ? Math.floor(chosen!) : 0;
+  };
   // The core type each domain type extends — the `core_type` the agent must pass to output_write.
   const coreTypeOf = (slug: string): string => {
     if ((CORE_TYPES as readonly string[]).includes(slug)) return slug;
@@ -952,11 +959,17 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
     writeFileSync(cfgPath, JSON.stringify({ mcpServers: enriched }));
     try {
       const a = ctx.agent;
-      // #237 — a shallow run depth tightens the turn cap; it never widens the agent's own.
+      // Item 1 — the effective turn budget resolves chair > agent > engine default. The seated
+      // chair's `turn_budget` (threaded onto the ctx by the runtime) beats the player's own
+      // `max_tool_calls`; ABSENT falls through to the agent tier (and then, via `undefined`, to the
+      // CLI default — no explicit --max-turns), but `0` is a DELIBERATE hard floor that does NOT
+      // fall through. `??` keeps that distinction: `0 ?? x === 0`, `undefined ?? x === x`.
+      const resolved = ctx.turn_budget ?? a.max_tool_calls;
+      // #237 — a shallow run depth tightens the turn cap; it never widens the resolved value.
       const depthCap = ctx.depth ? DEPTH_MAX_TOOL_CALLS[ctx.depth] : undefined;
       const maxToolCalls = depthCap === undefined
-        ? a.max_tool_calls
-        : Math.min(depthCap, a.max_tool_calls ?? depthCap);
+        ? resolved
+        : Math.min(depthCap, resolved ?? depthCap);
       // Run ONE invocation and return the child's raw stdout. Custom run (tests): the returned
       // string IS the transcript (a bare JSON blob on the text path, a stream-json transcript on
       // the output_write path). Default: stream-json so the child's tool calls / reasoning are
@@ -1016,6 +1029,10 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
       // Once. The continuation names what already sealed so the chair does not redo it, and says
       // plainly that nothing follows — a chair that believes another extension is coming will spend
       // this one reaching rather than landing.
+      // Item 1/2 — the reserve turns for THIS chair: its own pool-capped `ctx.turn_reserve` if set,
+      // else the invoker-level opts floor. `0` means the gig pool had nothing to lend (or no reserve
+      // was declared) — an empty pool, not a grant.
+      const reserveTurns = resolveReserveTurns(ctx.turn_reserve);
       if (budgetStopped && reserveTurns > 0 && seal !== undefined) {
         const sealedSoFar = captureOutputWrites(stdout, sealTypes);
         const already = Object.keys(sealedSoFar);
@@ -1042,6 +1059,15 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
         sealStdout = `${stdout}\n${second.stdout}`;
         stdout = second.stdout;
         budgetStopped = second.budgetStopped;
+      } else if (budgetStopped && reserveTurns === 0 && seal !== undefined) {
+        // Item 2 (O9/INV19/F7) — the chair hit its budget and the gig pool had nothing to extend it
+        // (`ctx.turn_reserve` resolved to 0). The keep-sealed-writes behaviour below is UNCHANGED —
+        // everything written past the boundary still seals — but the starvation is no longer silent:
+        // a visible denial marks that a budget-stopped chair was offered no reserve to draw.
+        ctx.onEvent?.({
+          type: "budget_reserve_denied",
+          raw: { agent: a.slug, requested: 0, pool_remaining: 0 },
+        } as AgentStreamEvent);
       }
       const outcome = finalText(stdout);
       // #223 — the child reported an error result. `subtype` catches a run that did not complete;

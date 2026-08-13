@@ -159,6 +159,15 @@ export const ChairSchema = z.object({
    *  value that fills it. An institution-bound `required` slot on a skill the seated agent holds
    *  and nothing here (or on the institutional chair) fills is refused at compose. */
   supplies: z.record(z.unknown()).optional(),
+  /** Item 1 — the turn floor is a property of the WORK (this chair), not the player (its agent).
+   *  The guaranteed `--max-turns` for whoever is seated here, resolved chair > agent > engine
+   *  default. Optional so every shipped chair parses unchanged; 0 is a deliberate hard floor,
+   *  distinct from absent (which falls through to the agent's max_tool_calls). */
+  turn_budget: z.number().int().nonnegative().optional(),
+  /** Item 2 — this chair's elasticity ceiling on the shared gig pool: the most reserve turns it may
+   *  ever draw when it hits its budget, even when the pool holds more (no theft). Optional and
+   *  non-negative. */
+  turn_reserve: z.number().int().nonnegative().optional(),
 });
 export const PhaseSchema = z.object({ name: z.string(), chairs: z.array(ChairSchema) });
 /** Lifecycle status, shared by domain types and standards (#203). */
@@ -189,6 +198,10 @@ export const StandardSchema = z.object({
   // laundering a red verdict green when the rounds are spent. See the EXAMINE⇄AMEND block in
   // runtime.ts; the contract is tests/examine_amend_loop.test.ts.
   max_examine_rounds: z.number().optional(),
+  /** Item 2 — an OPTIONAL standard-level default for the gig-scoped reserve pool (Item 2). The
+   *  dispatch payload's `budget.pool` overrides this deterministically when both are present
+   *  (no max/sum). Optional and non-negative so every shipped standard parses unchanged. */
+  reserve_pool: z.number().int().nonnegative().optional(),
   description: z.string().optional(),
 });
 export type StandardInput = z.input<typeof StandardSchema>;

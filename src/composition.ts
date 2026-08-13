@@ -78,6 +78,13 @@ export interface Chair {
   /** The human seat: an approval office held by a person. No agent, no skill; the runtime
    *  PARKS at this chair until the incumbent's verdict is supplied, then seals it. */
   human?: boolean;
+  /** Item 1 — the chair-scoped turn floor (the resolved `--max-turns` for whoever is seated here),
+   *  carried from ChairSchema through the `...ch` spread into the runtime Chair. Optional; 0 is a
+   *  deliberate hard floor distinct from absent. */
+  turn_budget?: number;
+  /** Item 2 — this chair's ceiling on the shared gig reserve pool: the most reserve turns it may
+   *  draw when it hits its budget, capped again at run to what the pool holds. */
+  turn_reserve?: number;
 }
 
 export interface PhaseDef {

@@ -159,6 +159,18 @@ export const ChairSchema = z.object({
    *  value that fills it. An institution-bound `required` slot on a skill the seated agent holds
    *  and nothing here (or on the institutional chair) fills is refused at compose. */
   supplies: z.record(z.unknown()).optional(),
+  /** The guaranteed turn floor, declared on the WORK (the chair) rather than the player (the
+   *  agent's `max_tool_calls`). Resolves chair > agent > engine default at invocation. OPTIONAL
+   *  so every existing chair record parses byte-equivalent — a Zod object DROPS an undeclared key,
+   *  so the field must be declared here to be RETAINED. A non-negative INTEGER: a negative or
+   *  non-integer cap fails closed at load, never reaching resolution. 0 is a deliberate hard floor,
+   *  parsed as 0 and kept DISTINCT from absent (which falls through to the agent tier). */
+  turn_budget: z.number().int().nonnegative().optional(),
+  /** The per-chair elasticity ceiling on the shared per-gig reserve pool: the most this chair may
+   *  ever draw when it exhausts its budget — no theft even when the pool is larger. Same additive,
+   *  fail-closed, integer discipline as `turn_budget`. May be declared WITHOUT `turn_budget`: the
+   *  budget then falls through the resolution tiers while the reserve still bounds the draw. */
+  turn_reserve: z.number().int().nonnegative().optional(),
 });
 export const PhaseSchema = z.object({ name: z.string(), chairs: z.array(ChairSchema) });
 /** Lifecycle status, shared by domain types and standards (#203). */
@@ -190,6 +202,11 @@ export const StandardSchema = z.object({
   // runtime.ts; the contract is tests/examine_amend_loop.test.ts.
   max_examine_rounds: z.number().optional(),
   description: z.string().optional(),
+  /** The DEFAULT gig-level reserve pool: a per-gig quantity of turns a budget-exhausted chair may
+   *  draw from, capped per chair by its own `turn_reserve`. The DISPATCH payload's `pool` (on the
+   *  budget input) is the primary source and OVERRIDES this default deterministically when both are
+   *  present (no max, no sum). Optional + non-negative integer, additive like the chair fields. */
+  reserve_pool: z.number().int().nonnegative().optional(),
 });
 export type StandardInput = z.input<typeof StandardSchema>;
 export type StandardOutput = z.output<typeof StandardSchema>;

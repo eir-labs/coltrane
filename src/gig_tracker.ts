@@ -203,6 +203,10 @@ export function gigEventLogLine(gig_id: string, ev: GigProgressEvent): string | 
     case "gig_resumed": return JSON.stringify({ ...base, ev: "gig_resumed", from: ev.from_gig_id, roles: ev.roles, outputs: ev.outputs });
     case "chair_skipped": return JSON.stringify({ ...base, ev: "chair_skipped", phase: ev.phase, role: ev.role, why: ev.reason, from_gig: ev.source_gig_id, sealed: ev.output_types });
     case "reuse_rejected": return JSON.stringify({ ...base, ev: "reuse_rejected", phase: ev.phase, role: ev.role, reason: ev.reason, detail: ev.detail });
+    // #turn-budget — the operator-facing budget agent_state read, emitted at the reserve-draw
+    // intercept. Surfaced live so a watcher sees a chair cross into (yielding) and land out of
+    // (active) its reserve as it happens, not only in the final manifest.
+    case "budget_state": return JSON.stringify({ ...base, ev: "budget_state", phase: ev.phase, role: ev.role, agent_state: ev.agent_state, pool_remaining: ev.pool_remaining });
     case "gig_complete": return JSON.stringify({ ...base, ev: "gig_complete", outputs: ev.outputs });
     case "gig_awaiting_approval": return JSON.stringify({ ...base, ev: "gig_awaiting_approval", phase: ev.phase, role: ev.role });
     case "gig_failed": return JSON.stringify({ ...base, ev: "gig_failed", error: ev.error });

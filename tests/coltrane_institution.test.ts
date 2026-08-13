@@ -49,7 +49,7 @@ describe("institutions/coltrane.json — the Coltrane institution's first laws",
   const laws = InstitutionSchema.parse(doc.institution).laws;
 
   it("carries exactly the three dev-loop laws", () => {
-    expect(laws).toHaveLength(3);
+    expect(laws).toHaveLength(4);
   });
 
   it("every law's check is machine-invocable: a non-empty predicate over typed inputs", () => {

@@ -260,11 +260,89 @@ export const LineageRecordRefSchema = z.object({
 });
 export type LineageRecordRefOutput = z.output<typeof LineageRecordRefSchema>;
 
+/** A CITATION of external published work, shaped so it can be checked rather than admired.
+ *
+ *  The genome had no way to say "this schema class implements that paper." `ForebearSchema` is
+ *  person-shaped (it carries a working disposition taken from a named figure, not a bibliographic
+ *  record) and `LineageEdgeSchema.source` is `z.record(z.unknown())`, so a presence check on it
+ *  passes on `{}`. The gate in `default_genome_quartet.test.ts` already states the bar — "an
+ *  uncited attribution is a claim, not a record" — but had no shape able to enforce it.
+ *
+ *  The refinement below is the citation's analogue of `InstitutionalLawCheckSchema`: an
+ *  institutional law is authorable only if it reduces to an evaluable predicate over typed inputs,
+ *  and a citation stands only if it reduces to a resolvable identifier. Prose that cannot be
+ *  checked does not get to be a record — same refusal, same grounds, both enforced at authorship.
+ *
+ *  `evidence_grade` types the distinction the diplomatics tradition draws and this codebase had
+ *  only ever narrated: ARCHIVE — the primary was fetched, and `retrieved_at` says when — versus
+ *  ATTESTATION — someone declared it. The grade is recorded and never laundered upward. */
+export const CitationSchema = z
+  .object({
+    /** Author names as cited, e.g. "Crawford, S.E.S.". At least one — an anonymous citation is a rumour. */
+    authors: z.array(z.string()).min(1),
+    year: z.number().int(),
+    title: z.string(),
+    /** Journal, publisher, or conference. */
+    venue: z.string(),
+    /** Volume/issue/pages or equivalent, e.g. "89(3): 582–600". */
+    locator: z.string().optional(),
+    doi: z.string().optional(),
+    url: z.string().optional(),
+    /** ARCHIVE = the primary was fetched. ATTESTATION = it was declared. Never laundered upward. */
+    evidence_grade: z.enum(["archive", "attestation"]),
+    /** When the primary was fetched. An archive-grade claim is a claim about a fetch that happened. */
+    retrieved_at: z.string().optional(),
+  })
+  .strict()
+  .refine((c) => Boolean(c.doi ?? c.url), {
+    message: "a citation with no resolvable identifier (doi or url) is prose, not a citation",
+  });
+
+/** How a genome schema class stands to the published work behind it.
+ *
+ *  Deliberately NOT `LineageEdgeTypeSchema`. That enum is the CAPABILITY vocabulary — "Caps grant
+ *  these" — and widening it to fit scholarship would widen what a capability grant can scope. The
+ *  two are different acts: `anchored-in` says nothing about a paper, `diverges-from` says nothing
+ *  as a permission. This enum mirrors the `lineage-map` domain type's relations exactly, so a
+ *  lineage pass's connection becomes an attribution with no translation step and no finding that
+ *  the genome cannot write down.
+ *
+ *  `diverges-from` is load-bearing, not decorative: this codebase HAS a deliberate divergence
+ *  (chair obligations are stated and never verified, against Fuller's congruence principle), and a
+ *  vocabulary that can only express descent would force that either into silence or into a false
+ *  claim of alignment. */
+export const AttributionRelationSchema = z.enum([
+  "descends-from",
+  "aligns-with",
+  "diverges-from",
+  "supersedes",
+  "informed-by",
+]);
+
+/** Binds one genome schema class to the published work behind it. `what_taken` keeps
+ *  `ForebearSchema`'s word: an attribution names what was taken, not merely what was read. */
+export const SchemaAttributionSchema = z
+  .object({
+    /** The attributed schema class, by its exported name, e.g. "InstitutionalLawSchema". */
+    subject: z.string(),
+    relation: AttributionRelationSchema,
+    what_taken: z.string(),
+    citation: CitationSchema,
+  })
+  .strict();
+export type AttributionRelation = z.output<typeof AttributionRelationSchema>;
+export type CitationOutput = z.output<typeof CitationSchema>;
+export type SchemaAttributionOutput = z.output<typeof SchemaAttributionSchema>;
+
 /** An institutional LAW as an invocable, machine-checkable contract rather than prose.
  *
- *  Follows Crawford & Ostrom's ADICO grammar — Attributes (who it binds), Deontic
- *  (permitted | obliged | forbidden), aIm (the action or state governed), Conditions (when it
- *  applies), Or-else (the consequence on breach) — the deontic operator drawn from deontic logic.
+ *  Descends from Crawford, S.E.S. & Ostrom, E. (1995), "A Grammar of Institutions," American
+ *  Political Science Review 89(3): 582–600, doi:10.2307/2082975 — the ADICO grammar: Attributes
+ *  (who it binds), Deontic (permitted | obliged | forbidden), aIm (the action or state governed),
+ *  Conditions (when it applies), Or-else (the consequence on breach). Or-else is the slot that
+ *  separates a RULE (ADICO) from a norm (ADIC) and a strategy (AIC), which is why it is required
+ *  here: a statement with no consequence on breach is not a law in this genome. The formal
+ *  attribution is carried as data in GENOME_ATTRIBUTIONS below, not only in this comment.
  *  `check` is the machine-checkable surface: a normalized, serializable predicate an evaluator can
  *  invoke plus the typed inputs it reads (design-by-contract). The evaluator that RUNS the
  *  predicate is a follow-on; this is the shape it consumes. STRICT: an ADICO record with an unknown
@@ -296,7 +374,14 @@ export const InstitutionalLawSchema = z
  *  change-request specifies for obligations: who it binds (`attributes`) and the action or state
  *  governed (`aim`), with `deontic` defaulting to `obliged` (an obligation is obliged unless it
  *  says otherwise). Not the full law: conditions / or_else / check are institution-level, not a
- *  burden every chair obligation carries. */
+ *  burden every chair obligation carries.
+ *
+ *  The pair is I/O logic's — Makinson, D. & van der Torre, L. (2000), "Input/Output Logics,"
+ *  Journal of Philosophical Logic 29(4): 383–408, doi:10.1023/A:1004748624537 — which writes a norm
+ *  as (a, x): body `a` the input condition (here the chair and its situation) and head `x` the
+ *  deontic output, read O(x|a), "x is obligatory given a." That is why obligations can drop the
+ *  law's other three slots without becoming prose: the pair is already the complete normative unit.
+ *  Formal attribution in GENOME_ATTRIBUTIONS below. */
 export const NormPairSchema = z
   .object({
     attributes: z.string(),
@@ -307,6 +392,128 @@ export const NormPairSchema = z
 export type DeonticOperator = z.output<typeof DeonticSchema>;
 export type InstitutionalLawOutput = z.output<typeof InstitutionalLawSchema>;
 export type NormPairOutput = z.output<typeof NormPairSchema>;
+
+/** Where a genome schema class implements published prior art, the attribution lives HERE as data
+ *  — parseable, dereferenceable, and gradeable — rather than only as a name-drop in a comment a
+ *  reader must take on faith. Both entries below were fetched from publisher/registry on the
+ *  recorded date, which is what earns them `archive` rather than `attestation`.
+ *
+ *  Additive and read-only: nothing in dispatch or hashing consumes this, so an entry here moves no
+ *  genome_hash. It is a record of descent, held to the same bar as any other record in this repo. */
+export const GENOME_ATTRIBUTIONS: readonly SchemaAttributionOutput[] = [
+  {
+    subject: "InstitutionalLawSchema",
+    relation: "descends-from",
+    what_taken:
+      "The five-slot ADICO grammar — Attributes / Deontic / aIm / Conditions / Or-else — as the " +
+      "decomposition an institutional statement must survive to be authorable, and the source's " +
+      "own rule/norm/strategy distinction, which is why Or-else is a required field rather than an " +
+      "optional one: a statement carrying no consequence on breach is not a rule.",
+    citation: {
+      authors: ["Crawford, S.E.S.", "Ostrom, E."],
+      year: 1995,
+      title: "A Grammar of Institutions",
+      venue: "American Political Science Review",
+      locator: "89(3): 582–600",
+      doi: "10.2307/2082975",
+      evidence_grade: "archive",
+      retrieved_at: "2026-08-13",
+    },
+  },
+  {
+    subject: "DeonticSchema",
+    relation: "descends-from",
+    what_taken:
+      "The three deontic operators themselves — permitted / obliged / forbidden — as the closed set " +
+      "a normative statement's modality is drawn from. The schema is an enum rather than a free " +
+      "string because the source treats these as an exhaustive modal vocabulary, not a sample of one.",
+    citation: {
+      authors: ["von Wright, G.H."],
+      year: 1951,
+      title: "Deontic Logic",
+      venue: "Mind",
+      locator: "LX(237): 1–15",
+      doi: "10.1093/mind/LX.237.1",
+      evidence_grade: "archive",
+      retrieved_at: "2026-08-13",
+    },
+  },
+  {
+    subject: "InstitutionSchema",
+    relation: "aligns-with",
+    what_taken:
+      "The rule of recognition: an institution's validity criterion is itself a rule the institution " +
+      "holds, not an external fact about it. Our analogue is that a law is admitted only by parsing " +
+      "against InstitutionalLawSchema — the schema IS this institution's recognition rule, and " +
+      "composition is where it is applied. ALIGNS-WITH, not descends-from: the schema was not built " +
+      "from the source, and the correspondence was drawn by a lineage pass reading both.",
+    citation: {
+      authors: ["Hart, H.L.A."],
+      year: 1961,
+      title: "The Concept of Law",
+      venue: "Oxford University Press",
+      url: "https://archive.org/details/conceptoflaw0000hart",
+      evidence_grade: "archive",
+      retrieved_at: "2026-08-13",
+    },
+  },
+  {
+    subject: "InstitutionalChairSchema",
+    relation: "diverges-from",
+    what_taken:
+      "The congruence principle — that official action must match declared rule, and that persistent " +
+      "mismatch is a defect in legality itself. We diverge KNOWINGLY: a chair's `obligations` are " +
+      "stated and `composeStandard` verifies none of them, and `preferred_skills` is soft down to its " +
+      "names. This entry exists so the divergence is recorded rather than discovered. Enforcing chair " +
+      "obligations would change the institution's design and must be an explicit decision, not a " +
+      "tidy-up. Sealed as such by lineage-record 03cacf6a.",
+    citation: {
+      authors: ["Fuller, L.L."],
+      year: 1964,
+      title: "The Morality of Law",
+      venue: "Yale University Press",
+      url: "https://archive.org/details/moralityoflaw0000full",
+      evidence_grade: "archive",
+      retrieved_at: "2026-08-13",
+    },
+  },
+  {
+    subject: "InstitutionalChairSchema.caps",
+    relation: "aligns-with",
+    what_taken:
+      "The three-element model — formal rules, informal constraints, and the ENFORCEMENT " +
+      "CHARACTERISTICS that decide whether either means anything. The third element is the one our " +
+      "layer operationalizes: caps resolve to providers at dispatch and a dead name fails closed, " +
+      "which is enforcement moved to the earliest moment rather than left to after-the-fact review.",
+    citation: {
+      authors: ["North, D.C."],
+      year: 1990,
+      title: "Institutions, Institutional Change and Economic Performance",
+      venue: "Cambridge University Press",
+      doi: "10.1017/CBO9780511808678",
+      evidence_grade: "archive",
+      retrieved_at: "2026-08-13",
+    },
+  },
+  {
+    subject: "NormPairSchema",
+    relation: "descends-from",
+    what_taken:
+      "The norm as a pair (a, x) — input condition and deontic output, read O(x|a) — which is the " +
+      "warrant for a chair obligation being a complete normative unit while carrying only " +
+      "`attributes` and `aim`, rather than a law with three slots missing.",
+    citation: {
+      authors: ["Makinson, D.", "van der Torre, L."],
+      year: 2000,
+      title: "Input/Output Logics",
+      venue: "Journal of Philosophical Logic",
+      locator: "29(4): 383–408",
+      doi: "10.1023/A:1004748624537",
+      evidence_grade: "archive",
+      retrieved_at: "2026-08-13",
+    },
+  },
+];
 
 // Slugs NAME identities; LOOKUPS go by id. The instance store assigns each institutional
 // identity a stable uuid; references and RLS key on the id, never the slug.

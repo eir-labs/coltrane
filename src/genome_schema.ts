@@ -387,6 +387,14 @@ export const NormPairSchema = z
     attributes: z.string(),
     aim: z.string(),
     deontic: DeonticSchema.default("obliged"),
+    /** ADDITIVE, OPTIONAL obligation-tier mark. An obligation states whether it is a stated norm or
+     *  a verified rule: "declared" says there is no runtime verifier, "enforced" claims a verifier
+     *  backs it. ABSENT-parses-fine, so every pre-existing file round-trips byte-equivalent (a Zod
+     *  object drops an undeclared key, so the field must be declared HERE to be retained). The
+     *  admissibility check (checkInstitutionAdmissibility in institution_enforcement.ts) refuses an
+     *  UNMARKED obligation — the marking is how a document states its enforced/declared split
+     *  rather than leaving silence to pass a norm off as a rule. */
+    tier: z.enum(["declared", "enforced"]).optional(),
   })
   .strict();
 export type DeonticOperator = z.output<typeof DeonticSchema>;

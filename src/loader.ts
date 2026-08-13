@@ -8,7 +8,7 @@ import { SkillSchema, EvalSchema, DomainTypeSchema, VenueSchema, ChartSchema, ve
 import { composeChart, chartEntrySeedTypes, type Chart, type Venue } from "./chart.js";
 import type { Primitive } from "./core_types.js";
 import { CANONICAL_CORE_TYPES } from "./canonical_core_types.js";
-import type { LoadedInstitution } from "./institution_loader.js";
+import { loadInstitutions, type LoadedInstitution } from "./institution_loader.js";
 
 export interface CoreTypeRecord {
   slug: string;
@@ -539,12 +539,16 @@ export function loadGenome(
     );
   }
 
-  // RED SEAM: institutions/ is not yet read. loadInstitutions (institution_loader.ts) is the reader
-  // the GREEN change wires in HERE — after the agents/standards/venues/charts maps above exist, per
-  // the load-ordering obligation — invoking checkInstitutionAdmissibility fail-closed and pushing an
-  // "institution"-kind LoadError per refused document. Until then this carries an empty map, so the
-  // field exists (the tree compiles) while every institution invariant reds from a failing assertion.
-  const institutions: ReadonlyMap<string, LoadedInstitution> = new Map<string, LoadedInstitution>();
+  // institutions/ — read LAST, after the agents/standards/venues/charts/organization maps exist:
+  // institutions reference those, so the reader sits after every one of them (the venues-before-charts
+  // ordering, one level out). loadInstitutions validates each present section against its per-section
+  // Zod schema and invokes checkInstitutionAdmissibility fail-closed; a malformed / schema-invalid /
+  // inadmissible / duplicate-slug document drops out as one "institution"-kind LoadError while the rest
+  // of the genome loads. It is TOTAL — it never throws for an institution reason, so one bad document
+  // cannot DoS the other classes.
+  const institutionRead = loadInstitutions(root);
+  load_errors.push(...institutionRead.load_errors);
+  const institutions: ReadonlyMap<string, LoadedInstitution> = institutionRead.institutions;
   return { core_types, domain_types, agents, standards, skills, evals, charts, venues, institutions, load_errors };
 }
 

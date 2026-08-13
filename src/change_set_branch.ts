@@ -40,35 +40,38 @@ export const IMPLEMENTATION_STANDARD = "software-change-pr-v1";
  * decorative, rides alongside for humans, and is OUTSIDE the key.
  */
 export function deriveChangeSetBranch(originatingGigId: string, slug?: string): string {
-  void originatingGigId;
-  void slug;
-  throw new Error(STUB);
+  // The full gig id is the SOLE key segment; the slug, when present, rides in a SEPARATE ref
+  // component after it, so parsing (which reads only the first segment after the prefix) ignores it.
+  const key = `${CHANGE_SET_BRANCH_PREFIX}${originatingGigId}`;
+  return slug ? `${key}/${slug}` : key;
 }
 
 /** Parse the ORIGINATING gig id back out of a change-set branch name (the slug is ignored). */
 export function parseOriginatingGig(branchName: string): string {
-  void branchName;
-  throw new Error(STUB);
+  // Strip the namespace, then take the FIRST path component: that is the key. A trailing slug is a
+  // later component and is dropped. A gig UUID carries no "/", so it survives the split whole.
+  const rest = branchName.slice(CHANGE_SET_BRANCH_PREFIX.length);
+  return rest.split("/")[0]!;
 }
 
 /** Whether a name is a well-formed change-set branch (prefix + a parseable originating gig id). */
 export function isChangeSetBranch(branchName: string): boolean {
-  void branchName;
-  throw new Error(STUB);
+  if (!branchName.startsWith(CHANGE_SET_BRANCH_PREFIX)) return false;
+  return parseOriginatingGig(branchName).length > 0;
 }
 
 // ── Publish targets: both PRs target the change-set branch, never the protected main line ───────
 
 /** The base branch the RED spec PR targets: the change-set branch derived from the originating gig. */
 export function specPrBase(originatingGigId: string): string {
-  void originatingGigId;
-  throw new Error(STUB);
+  return deriveChangeSetBranch(originatingGigId);
 }
 
 /** The base branch the GREEN implementation PR targets: the SAME change-set branch it branched from. */
 export function implPrBase(changeSetBranch: string): string {
-  void changeSetBranch;
-  throw new Error(STUB);
+  // The implementation branches FROM and targets the SAME change-set branch — an identity, not a
+  // re-derivation, so `implPrBase(specPrBase(g)) === specPrBase(g)` holds structurally.
+  return changeSetBranch;
 }
 
 // ── Idempotent create: a resumed gig re-publishing must not fork a second branch nor clobber ────
@@ -85,9 +88,10 @@ export function ensureChangeSetBranch(
   branch: string,
   existingBranches: readonly string[],
 ): CreateOutcome {
-  void branch;
-  void existingBranches;
-  throw new Error(STUB);
+  // Present ⇒ reuse (never fork a second, never clobber/force-reset the first); absent ⇒ create.
+  return existingBranches.includes(branch)
+    ? { created: false, reused: true, branch }
+    : { created: true, reused: false, branch };
 }
 
 // ── Dead-branch preflight: a PR naming a base that does not exist is refused, sealed nothing ────
@@ -105,9 +109,9 @@ export function assertBasePublishable(
   base: string,
   remoteBranches: readonly string[],
 ): PublishGate {
-  void base;
-  void remoteBranches;
-  throw new Error(STUB);
+  // A base absent from the remote is a DEAD NAME — refused before any PR is sealed, the same
+  // fail-closed altitude as a dead tool-grant. Present ⇒ the publish may proceed.
+  return remoteBranches.includes(base) ? { ok: true } : { ok: false, refusal: "dead-branch", base };
 }
 
 // ── Implementation branch: CARRIED in the change-request, never inferred from the working tree ──
@@ -130,9 +134,13 @@ export function resolveImplementationBranch(
   req: ChangeRequestBranchCarrier,
   workingTreeBranch: string,
 ): BranchResolution {
-  void req;
+  // The branch is CARRIED in the change-request. The working tree is NEVER consulted (inference is
+  // how a run lands on the wrong branch silently), so `workingTreeBranch` is deliberately unused.
   void workingTreeBranch;
-  throw new Error(STUB);
+  if (req.change_set_branch === undefined || req.change_set_branch.length === 0) {
+    return { ok: false, refusal: "branch-absent-but-expected" };
+  }
+  return { ok: true, branch: req.change_set_branch };
 }
 
 // ── Trigger seam: RED-spec-merged → enqueue software-change-pr-v1, idempotent on the branch ─────
@@ -158,16 +166,25 @@ export interface EnqueuedImplementation {
  * second time — the branch already carries an in-flight implementation gig.
  */
 export class ChangeSetTrigger {
+  /** Enqueued implementations keyed on the change-set branch — the idempotency key, not the delivery id. */
+  private readonly byBranch = new Map<string, EnqueuedImplementation>();
+
   /** Handle one 'RED spec PR merged into the change-set branch' event. */
   handle(event: RedSpecMergedEvent): void {
-    void event;
-    throw new Error(STUB);
+    // At-most-once ENQUEUE keyed on the branch: once a branch carries an in-flight implementation,
+    // every later delivery — a duplicate id or a fresh delivery of the same logical event — is a
+    // no-op. The queue's atomic claim/lease is what gives at-most-once RUN; this guards the enqueue.
+    if (this.byBranch.has(event.change_set_branch)) return;
+    this.byBranch.set(event.change_set_branch, {
+      standard: IMPLEMENTATION_STANDARD,
+      change_request: { change_set_branch: event.change_set_branch },
+    });
   }
 
   /** The implementation gigs enqueued for a change-set branch — 0 or exactly 1. */
   enqueued(changeSetBranch: string): readonly EnqueuedImplementation[] {
-    void changeSetBranch;
-    throw new Error(STUB);
+    const one = this.byBranch.get(changeSetBranch);
+    return one ? [one] : [];
   }
 }
 
@@ -199,27 +216,52 @@ export interface RetirementRecord {
  * the branch is retired at most once, and every retirement is RECORDED, never silent.
  */
 export class ChangeSetBranchMachine {
+  private _state: ChangeSetState = "none";
+  private readonly _retirements: RetirementRecord[] = [];
+
   constructor(private readonly changeSetBranch: string) {
     void this.changeSetBranch;
   }
 
   state(): ChangeSetState {
-    throw new Error(STUB);
+    return this._state;
   }
 
   /** Apply a command; return the merge attempts it performed (so a test can assert their targets). */
   apply(cmd: LifecycleCommand): readonly MergeAttempt[] {
-    void cmd;
-    throw new Error(STUB);
+    switch (cmd.kind) {
+      case "create":
+        // Creating the branch is not a merge — it produces no MergeAttempt.
+        return [];
+      case "merge-red":
+        // The RED spec PR merges INTO the change-set branch — NEVER the protected main line.
+        this._state = "red";
+        return [{ action: "merge-red", target_branch: this.changeSetBranch }];
+      case "merge-green":
+        // The GREEN implementation PR merges INTO the change-set branch — again never main.
+        this._state = "green";
+        return [{ action: "merge-green", target_branch: this.changeSetBranch }];
+      case "promote-to-main":
+        // The ONLY main-targeting merge: the final change-set→main PR, merged by the governor on
+        // green CI. It is not a red merge, so it composes with Law C rather than contradicting it.
+        return [{ action: "promote-to-main", target_branch: PROTECTED_MAIN_LINE }];
+      case "retire":
+        // At-most-once, and always RECORDED — a second retire is a no-op, never a silent delete.
+        if (this._retirements.length === 0) {
+          this._retirements.push({ branch: this.changeSetBranch, by: cmd.by });
+          this._state = "retired";
+        }
+        return [];
+    }
   }
 
   /** How many times this branch has been retired (must never exceed 1). */
   retiredCount(): number {
-    throw new Error(STUB);
+    return this._retirements.length;
   }
 
   /** The recorded retirement events — length must equal retiredCount(); a silent retire is refused. */
   retirementLog(): readonly RetirementRecord[] {
-    throw new Error(STUB);
+    return this._retirements;
   }
 }

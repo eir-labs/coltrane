@@ -1,11 +1,14 @@
 // THE BINDING MIDDLE PLACE — committed work as a first-class genome object.
 //
-// STATUS: RED-SPEC SEAM. Every symbol below is a STUB whose body throws, authored exactly as
-// src/institution_enforcement.ts was before its bodies were filled. The signatures, the closed
-// state set, the party vocabulary and the Result codomains are the FIXED SEAM the red spec pins;
-// the GREEN change fills the bodies WITHOUT touching them. The suite therefore COMPILES (tsc is
-// clean), so every red assertion fails because the ENFORCEMENT is absent (a throw / an unbuilt
-// schema), never because a file fails to typecheck.
+// STATUS: IMPLEMENTED. The bodies are filled and the suite is green; `checkTourAdmissibility` is
+// invoked on the load path rather than left a pure function. This header previously read
+// "RED-SPEC SEAM. Every symbol below is a STUB whose body throws" and stayed that way through the
+// GREEN change — a status line describing a state the file had left, which is the same defect this
+// layer exists to refuse one level down. Corrected rather than deleted, because how it happened is
+// worth keeping: the seam was authored first, deliberately, so the suite would COMPILE and every
+// red assertion would fail on ABSENT ENFORCEMENT (a throw) rather than on a type error. That
+// technique was right and is why the signatures, the closed state set, the party vocabulary and the
+// Result codomains survived the implementation untouched.
 //
 // The sealed lineage-record `lineage-record-committed-future-work-eb1f7b05` located the omission:
 // Coltrane implements the INTENTION (NorthstarSchema) and the SETTLED ACTUAL (GigLedgerEntry) and
@@ -38,12 +41,31 @@ export interface Draw {
 /** Capacity as its OWN class, separate from commitment. A holding of some `unit` by a `holder`
  *  (an organization slug), for a `period`, that either may or may not be lent across organizations.
  *  `unit` is a free string treated as OPAQUE and NON-CONVERTIBLE — the precedent is BudgetState.unit
- *  ("append-units", "NOT dollars, and nothing converts between the two"). */
+ *  ("append-units", "NOT dollars, and nothing converts between the two").
+ *
+ *  `period` IS THE DISCRETIZATION, and that is the load-bearing reason it is REQUIRED rather than
+ *  optional. A Resource is not a running balance; it is *this much, over this window*. Capacity is
+ *  derived once at declaration and stored as a commitment for that window — so a capacity that is
+ *  continuous underneath (a decaying rate, a regenerating credit) is sampled at declaration and the
+ *  decay governs the NEXT period's declaration, never a live read inside this one. That is what
+ *  makes this a budget, and it is consistent with a layer whose whole subject is committed work:
+ *  a commitment is a stored fact even when computed from something continuous.
+ *
+ *  Two things break the moment `period` becomes optional, so do not make it so for the convenience
+ *  of a one-off holding (give that a window and be done):
+ *    1. a periodless Resource is a RUNNING BALANCE, and `quantity` stops meaning a declared
+ *       commitment and starts meaning a live level;
+ *    2. a live level is an ORACLE. `can_cover(X)` asked repeatedly binary-searches the exact
+ *       balance, which is precisely what a banded, quantized projection exists to prevent. Your own
+ *       holdings you know exactly and no oracle exists; the leak appears only across an institution
+ *       wall — and that is why the band belongs on the exchange contract that crosses the wall,
+ *       never on this shape, which is quantity-typed to its holder by design. */
 export interface Resource {
   slug: string;
   holder: string;
   quantity: number;
   unit: string;
+  /** REQUIRED. See the note above: this field is the discretization, not a label. */
   period: string;
   transferable: boolean;
 }

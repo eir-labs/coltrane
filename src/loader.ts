@@ -8,7 +8,7 @@ import { SkillSchema, EvalSchema, DomainTypeSchema, VenueSchema, ChartSchema, ve
 import { composeChart, chartEntrySeedTypes, type Chart, type Venue } from "./chart.js";
 import type { Primitive } from "./core_types.js";
 import { CANONICAL_CORE_TYPES } from "./canonical_core_types.js";
-import { loadInstitutions, type LoadedInstitution } from "./institution_loader.js";
+import { loadInstitutions, loadTours, type LoadedInstitution, type LoadedTour } from "./institution_loader.js";
 
 export interface CoreTypeRecord {
   slug: string;
@@ -59,7 +59,7 @@ export type EvalRecord = EvalOutput;
 // gate around core_types still hard-throws — that's the minimum the system
 // needs to function. Anything past that softens.
 export interface LoadError {
-  readonly kind: "domain_type" | "agent" | "standard" | "skill" | "eval" | "chart" | "venue" | "institution" | "manifest";
+  readonly kind: "domain_type" | "agent" | "standard" | "skill" | "eval" | "chart" | "venue" | "institution" | "tour" | "manifest";
   readonly path: string;
   readonly slug: string | null;
   readonly error: string;
@@ -89,6 +89,10 @@ export interface LoadedGenome {
   // out of scope here, need not carry it yet; loadGenome always populates it (empty until the
   // reader in institution_loader.ts is wired). This is the field institutions/ gains a reader for.
   institutions?: ReadonlyMap<string, LoadedInstitution>;
+  // The tours/ class — a slug-keyed map of validated, ADMITTED committed-work tours. OPTIONAL for the
+  // same reason as institutions (a store backing need not carry it yet); loadGenome always populates
+  // it. This is where checkTourAdmissibility gains a production callsite off the load path.
+  tours?: ReadonlyMap<string, LoadedTour>;
   // Rob #129 — per-definition load failures recorded here instead of throwing.
   load_errors: LoadError[];
   // Genome extension (docs/genome-extension.md): when this genome was resolved from
@@ -549,7 +553,16 @@ export function loadGenome(
   const institutionRead = loadInstitutions(root);
   load_errors.push(...institutionRead.load_errors);
   const institutions: ReadonlyMap<string, LoadedInstitution> = institutionRead.institutions;
-  return { core_types, domain_types, agents, standards, skills, evals, charts, venues, institutions, load_errors };
+
+  // tours/ — read AFTER institutions, because a tour resolves against its institution's chairs and
+  // is gated by checkTourAdmissibility fail-closed. An inadmissible tour drops out as one "tour"
+  // load_error exactly as an inadmissible institution does; the shipped tours/coltrane.json is
+  // admissible, so this adds no error to a clean genome.
+  const tourRead = loadTours(root, institutions);
+  load_errors.push(...tourRead.load_errors);
+  const tours: ReadonlyMap<string, LoadedTour> = tourRead.tours;
+
+  return { core_types, domain_types, agents, standards, skills, evals, charts, venues, institutions, tours, load_errors };
 }
 
 /**

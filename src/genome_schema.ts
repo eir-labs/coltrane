@@ -298,18 +298,39 @@ export const CitationSchema = z
     message: "a citation with no resolvable identifier (doi or url) is prose, not a citation",
   });
 
-/** Binds one genome schema class to the published work it descends from. `relation` reuses the
- *  existing typed lineage-edge vocabulary rather than minting a second one, and `what_taken` keeps
+/** How a genome schema class stands to the published work behind it.
+ *
+ *  Deliberately NOT `LineageEdgeTypeSchema`. That enum is the CAPABILITY vocabulary — "Caps grant
+ *  these" — and widening it to fit scholarship would widen what a capability grant can scope. The
+ *  two are different acts: `anchored-in` says nothing about a paper, `diverges-from` says nothing
+ *  as a permission. This enum mirrors the `lineage-map` domain type's relations exactly, so a
+ *  lineage pass's connection becomes an attribution with no translation step and no finding that
+ *  the genome cannot write down.
+ *
+ *  `diverges-from` is load-bearing, not decorative: this codebase HAS a deliberate divergence
+ *  (chair obligations are stated and never verified, against Fuller's congruence principle), and a
+ *  vocabulary that can only express descent would force that either into silence or into a false
+ *  claim of alignment. */
+export const AttributionRelationSchema = z.enum([
+  "descends-from",
+  "aligns-with",
+  "diverges-from",
+  "supersedes",
+  "informed-by",
+]);
+
+/** Binds one genome schema class to the published work behind it. `what_taken` keeps
  *  `ForebearSchema`'s word: an attribution names what was taken, not merely what was read. */
 export const SchemaAttributionSchema = z
   .object({
     /** The attributed schema class, by its exported name, e.g. "InstitutionalLawSchema". */
     subject: z.string(),
-    relation: LineageEdgeTypeSchema,
+    relation: AttributionRelationSchema,
     what_taken: z.string(),
     citation: CitationSchema,
   })
   .strict();
+export type AttributionRelation = z.output<typeof AttributionRelationSchema>;
 export type CitationOutput = z.output<typeof CitationSchema>;
 export type SchemaAttributionOutput = z.output<typeof SchemaAttributionSchema>;
 
@@ -395,6 +416,81 @@ export const GENOME_ATTRIBUTIONS: readonly SchemaAttributionOutput[] = [
       venue: "American Political Science Review",
       locator: "89(3): 582–600",
       doi: "10.2307/2082975",
+      evidence_grade: "archive",
+      retrieved_at: "2026-08-13",
+    },
+  },
+  {
+    subject: "DeonticSchema",
+    relation: "descends-from",
+    what_taken:
+      "The three deontic operators themselves — permitted / obliged / forbidden — as the closed set " +
+      "a normative statement's modality is drawn from. The schema is an enum rather than a free " +
+      "string because the source treats these as an exhaustive modal vocabulary, not a sample of one.",
+    citation: {
+      authors: ["von Wright, G.H."],
+      year: 1951,
+      title: "Deontic Logic",
+      venue: "Mind",
+      locator: "LX(237): 1–15",
+      doi: "10.1093/mind/LX.237.1",
+      evidence_grade: "archive",
+      retrieved_at: "2026-08-13",
+    },
+  },
+  {
+    subject: "InstitutionSchema",
+    relation: "aligns-with",
+    what_taken:
+      "The rule of recognition: an institution's validity criterion is itself a rule the institution " +
+      "holds, not an external fact about it. Our analogue is that a law is admitted only by parsing " +
+      "against InstitutionalLawSchema — the schema IS this institution's recognition rule, and " +
+      "composition is where it is applied. ALIGNS-WITH, not descends-from: the schema was not built " +
+      "from the source, and the correspondence was drawn by a lineage pass reading both.",
+    citation: {
+      authors: ["Hart, H.L.A."],
+      year: 1961,
+      title: "The Concept of Law",
+      venue: "Oxford University Press",
+      url: "https://archive.org/details/conceptoflaw0000hart",
+      evidence_grade: "archive",
+      retrieved_at: "2026-08-13",
+    },
+  },
+  {
+    subject: "InstitutionalChairSchema",
+    relation: "diverges-from",
+    what_taken:
+      "The congruence principle — that official action must match declared rule, and that persistent " +
+      "mismatch is a defect in legality itself. We diverge KNOWINGLY: a chair's `obligations` are " +
+      "stated and `composeStandard` verifies none of them, and `preferred_skills` is soft down to its " +
+      "names. This entry exists so the divergence is recorded rather than discovered. Enforcing chair " +
+      "obligations would change the institution's design and must be an explicit decision, not a " +
+      "tidy-up. Sealed as such by lineage-record 03cacf6a.",
+    citation: {
+      authors: ["Fuller, L.L."],
+      year: 1964,
+      title: "The Morality of Law",
+      venue: "Yale University Press",
+      url: "https://archive.org/details/moralityoflaw0000full",
+      evidence_grade: "archive",
+      retrieved_at: "2026-08-13",
+    },
+  },
+  {
+    subject: "InstitutionalChairSchema.caps",
+    relation: "aligns-with",
+    what_taken:
+      "The three-element model — formal rules, informal constraints, and the ENFORCEMENT " +
+      "CHARACTERISTICS that decide whether either means anything. The third element is the one our " +
+      "layer operationalizes: caps resolve to providers at dispatch and a dead name fails closed, " +
+      "which is enforcement moved to the earliest moment rather than left to after-the-fact review.",
+    citation: {
+      authors: ["North, D.C."],
+      year: 1990,
+      title: "Institutions, Institutional Change and Economic Performance",
+      venue: "Cambridge University Press",
+      doi: "10.1017/CBO9780511808678",
       evidence_grade: "archive",
       retrieved_at: "2026-08-13",
     },

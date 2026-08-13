@@ -17,11 +17,17 @@
 // citation only if it reduces to a resolvable identifier. Same refusal, same grounds — prose that
 // cannot be checked does not get to stand as a record.
 import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
+  AttributionRelationSchema,
   CitationSchema,
   SchemaAttributionSchema,
   GENOME_ATTRIBUTIONS,
 } from "../src/genome_schema.js";
+
+const REPO_ROOT = fileURLToPath(new URL("..", import.meta.url));
 
 const findFor = (subject: string) => GENOME_ATTRIBUTIONS.find((a) => a.subject === subject);
 
@@ -73,6 +79,54 @@ describe("CitationSchema — a citation is resolvable or it is prose", () => {
 
   it("is STRICT — an unknown field fails rather than riding along unvalidated", () => {
     expect(() => CitationSchema.parse({ ...crawfordOstrom, vibes: "good" })).toThrow();
+  });
+});
+
+describe("attribution relations must be able to say what a lineage pass FINDS", () => {
+  // The defect this pins, found by running the thing: a lineage pass over the institutional layer
+  // drew 10 edges — 1 descends-from, 7 aligns-with, 1 informed-by, 1 diverges-from — and only the
+  // single descends-from could be written into GENOME_ATTRIBUTIONS, because `relation` reused
+  // LineageEdgeTypeSchema ("anchored-in" | "produced-by" | "evolved-from" | "descends-from").
+  //
+  // That enum is the CAPABILITY vocabulary — its own comment reads "Caps grant these" — so widening
+  // it to fit scholarship would widen what a capability grant can scope. The two are different acts:
+  // "anchored-in" is meaningless for a paper, "diverges-from" is meaningless as a permission. They
+  // get different enums, and this is the invariant that keeps the scholarly one adequate.
+  const lineageMapRelations = (): string[] => {
+    const doc = JSON.parse(readFileSync(join(REPO_ROOT, "domain_types", "lineage-map.json"), "utf8")) as unknown;
+    const found: string[] = [];
+    const walk = (n: unknown): void => {
+      if (Array.isArray(n)) return n.forEach(walk);
+      if (n && typeof n === "object") {
+        for (const [k, v] of Object.entries(n as Record<string, unknown>)) {
+          if (k === "enum" && Array.isArray(v) && v.includes("descends-from")) found.push(...(v as string[]));
+          else walk(v);
+        }
+      }
+    };
+    walk(doc);
+    return found;
+  };
+
+  it("every relation the lineage-map type can emit is expressible as an attribution", () => {
+    const emitted = lineageMapRelations();
+    expect(emitted.length, "lineage-map declares no relation enum — this guard is reading the wrong field").toBeGreaterThan(0);
+    const expressible = new Set(AttributionRelationSchema.options as readonly string[]);
+    const unexpressible = emitted.filter((r) => !expressible.has(r));
+    expect(
+      unexpressible,
+      `a lineage pass can find ${JSON.stringify(unexpressible)} and the genome has no way to record it. ` +
+        "Findings that cannot be written down are findings the next reader has to rediscover.",
+    ).toEqual([]);
+  });
+
+  it("attribution relations are NOT the capability vocabulary", () => {
+    // Pinned so a later tidy-up does not "simplify" these back into one enum and silently widen
+    // what a cap can scope. LineageEdgeTypeSchema stays the grant vocabulary.
+    const attribution = new Set(AttributionRelationSchema.options as readonly string[]);
+    expect(attribution.has("aligns-with"), "attribution cannot express a non-descent alignment").toBe(true);
+    expect(attribution.has("anchored-in"), "the capability term leaked into the scholarly vocabulary").toBe(false);
+    expect(attribution.has("produced-by"), "the capability term leaked into the scholarly vocabulary").toBe(false);
   });
 });
 

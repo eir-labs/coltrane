@@ -332,15 +332,42 @@ function asRecord(v: unknown): Record<string, unknown> {
 
 /** Walk a parsed predicate, partitioning symbols into operators (head position) and free variables
  *  (operand position, excluding the verdict atoms allow/deny and string literals). */
-function collectSymbols(node: SExpr, vars: Set<string>, ops: Set<string>, isHead: boolean): void {
+/** Operators that BIND their first argument: `(forall x collection body)` introduces `x` for the
+ *  body's extent. Without this the binder reads as a free variable, and a well-formed law is
+ *  refused for referencing an input it was never supposed to declare — which is how the first real
+ *  run of the admissibility check reported two correct quartet laws as broken. Knowing `forall` as
+ *  an operator is not the same as knowing it as a binder. */
+const BINDING_OPERATORS = new Set(["forall", "exists"]);
+
+function collectSymbols(
+  node: SExpr,
+  vars: Set<string>,
+  ops: Set<string>,
+  isHead: boolean,
+  bound: ReadonlySet<string> = new Set(),
+): void {
   if (node.kind === "list") {
     if (node.items.length === 0) return;
-    for (let i = 0; i < node.items.length; i++) collectSymbols(node.items[i]!, vars, ops, i === 0);
+    const head = node.items[0];
+    // A binding form: item[1] is the variable it introduces, in scope for everything after it. The
+    // binder itself is never a free variable and never an input the law must declare.
+    if (head?.kind === "sym" && BINDING_OPERATORS.has(head.name) && node.items[1]?.kind === "sym") {
+      const inner = new Set(bound);
+      inner.add(node.items[1].name);
+      ops.add(head.name);
+      // Skip items[0] (the operator, already recorded) and items[1] (the binder, not a reference).
+      for (let i = 2; i < node.items.length; i++) collectSymbols(node.items[i]!, vars, ops, false, inner);
+      return;
+    }
+    for (let i = 0; i < node.items.length; i++) collectSymbols(node.items[i]!, vars, ops, i === 0, bound);
     return;
   }
   if (node.kind === "sym") {
     if (isHead) ops.add(node.name);
-    else if (!VERDICT_ATOMS.has(node.name)) vars.add(node.name);
+    // A symbol bound by an enclosing quantifier is a reference to that binding, not a free
+    // variable. Everything else still is — the fix must narrow the false positive, not grant
+    // amnesty to genuinely undeclared names appearing inside a quantifier body.
+    else if (!VERDICT_ATOMS.has(node.name) && !bound.has(node.name)) vars.add(node.name);
   }
   // string literals are values, not names
 }

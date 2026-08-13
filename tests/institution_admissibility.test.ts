@@ -122,14 +122,46 @@ describe("institution-document admissibility — a document may not overclaim it
     expect(result.offenders.length, "collect-all must not stop at the first offender").toBeGreaterThanOrEqual(2);
   });
 
-  it("I16 ADMISSIBILITY-NOT-IN-LOADER: quartet.json is inadmissible yet still loads via the schemas", () => {
-    // quartet.json's obligations are unmarked and some laws are not fact-decidable → inadmissible.
-    const admissibility = checkInstitutionAdmissibility({ institution: quartet.institution, chairs: quartet.chairs });
-    expect(admissibility.admitted, "quartet.json overclaims and must be refused by admissibility").toBe(false);
-    // Yet the loader-equivalent (the section schemas) still parses it whole — loading is separate.
-    expect(() => InstitutionSchema.parse(quartet.institution)).not.toThrow();
-    for (const chair of quartet.chairs) {
+  it("I16 ADMISSIBILITY-IS-NOT-SCHEMA-VALIDITY: an inadmissible document still parses", () => {
+    // AMENDED by governor decision. This assertion originally read "quartet.json is inadmissible yet
+    // still loads", using a SHIPPED file as its example of an overclaiming document. Two problems
+    // with that: it pinned a defect in our own genome as intended behaviour, and it made a general
+    // invariant depend on one of our documents staying broken. quartet.json has since been fixed —
+    // its 17 obligations are marked declared-tier, and the two laws reported as referencing
+    // undeclared variables were never broken at all (the checker mistook `forall`'s binder for a
+    // free variable; see tests/institution_admissibility_gate.test.ts).
+    //
+    // The invariant the test was really for survives intact and is stated here on a SYNTHETIC
+    // document: admissibility and schema validity are different bars. A document can be structurally
+    // well-formed and still claim more enforcement than it has, which is precisely why the
+    // admissibility check exists as something separate from `.parse()`.
+    const overclaiming = {
+      institution: { slug: "overclaim", name: "Overclaim", kind: "institution" as const, laws: [] },
+      chairs: [
+        {
+          slug: "c",
+          institution_slug: "overclaim",
+          role: "a-role",
+          function: "JUDGE",
+          mission: "m",
+          // An obligation neither verified nor marked declared-tier: silence passing for a rule.
+          obligations: [{ attributes: "the incumbent", aim: "do the thing", deontic: "obliged" as const }],
+        },
+      ],
+    };
+    const admissibility = checkInstitutionAdmissibility(overclaiming);
+    expect(admissibility.admitted, "an unmarked, unverified obligation must be refused").toBe(false);
+    // Yet the section schemas still parse it whole — parsing is structure, admissibility is claim.
+    expect(() => InstitutionSchema.parse(overclaiming.institution)).not.toThrow();
+    for (const chair of overclaiming.chairs) {
       expect(() => InstitutionalChairSchema.parse(chair)).not.toThrow();
+    }
+  });
+
+  it("I16b: every SHIPPED institution document is now admissible — the defect was fixed, not pinned", () => {
+    for (const [name, doc] of [["quartet.json", quartet], ["coltrane.json", coltrane]] as const) {
+      const r = checkInstitutionAdmissibility({ institution: doc.institution, chairs: doc.chairs });
+      expect(r.admitted, `${name} offenders: ${JSON.stringify(r.offenders)}`).toBe(true);
     }
   });
 

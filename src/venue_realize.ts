@@ -26,7 +26,14 @@ export type RefusalCode =
   | "install-digest-mismatch"
   | "standing-without-cadence"
   | "wildcard-door"
-  | "unknown-venue";
+  | "unknown-venue"
+  // THE VENUE'S WALLS — two new fail-closed breaches join the ordered gauntlet:
+  //   `isolation-floor-unmet` when the host's declared capability profile cannot provide every
+  //   capability the venue's isolation floor demands (never a silent downgrade wall→convention), and
+  //   `port-exhausted` when the venue's declared port need cannot be satisfied against the ports
+  //   already held (a collision is an allocation refusal, not a race).
+  | "isolation-floor-unmet"
+  | "port-exhausted";
 
 /** One seat to realize in the room. */
 export interface RealizeSeat {
@@ -45,6 +52,14 @@ export interface RealizeOpts {
   installsPresent?: { ref: string; digest: string }[];
   /** Scopes the per-gig isolation handle. */
   gigId: string;
+  /** The declared capability profile of the host the realizer runs on (macOS dev host, Linux
+   *  namespaces, Fly microVM). The realizer verifies the venue's isolation floor against THIS —
+   *  it is a declared profile, not a runtime probe, so the suite stays host-independent. Absent =>
+   *  a bare host that offers only the WORKTREE convention (no namespaces). */
+  hostProfile?: HostCapabilityProfile;
+  /** Ports already held by concurrent realizations. Allocation must be disjoint from these or refuse
+   *  `port-exhausted`; absent => none held. */
+  portsHeld?: number[];
 }
 
 /** One seat as realized: its slug, the tools the room actually advertises for it (grants ∩
@@ -87,6 +102,13 @@ export interface RealizationOk extends RealizationSurface {
   provisioned_credentials: string[];
   responsible_chair?: string;
   lifecycle: RealizedLifecycle;
+  /** The private write boundary this gig holds: a path, the strategy that built it, and whether it
+   *  is ephemeral. Deny-by-default — absent workspace on the contract still yields a private
+   *  ephemeral WORKTREE here, never the host's cwd. Undefined until the walls seam is implemented. */
+  workspace?: RealizedWorkspace;
+  /** The concrete ports the realizer assigned this gig from the venue's declared need. Disjoint from
+   *  any other concurrent gig's. Undefined until the walls seam is implemented. */
+  ports?: number[];
 }
 
 /** A fail-closed refusal — one named breach, no partial room. Carries the same observable surface
@@ -231,4 +253,102 @@ export function resolveAndRealize(
     return refuse("unknown-venue", `no venue is registered under slug "${slug}" — a dead name fails closed`);
   }
   return realize(venue, opts);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────────
+// THE VENUE'S WALLS — the realization SEAM (RED). A venue declares WHAT MUST BE TRUE of the room; the
+// realizer decides HOW to build it and VERIFIES it, with more than one strategy behind the one
+// contract. These signatures/return types are authored so the tree COMPILES (tsc --noEmit clean);
+// the bodies THROW so every RED assertion reds because the enforcement is ABSENT — never because a
+// symbol is missing or a type mismatches, exactly as src/institution_enforcement.ts staged its seam.
+// A later implementation gig fills the bodies (and threads workspace + ports into `realize`'s OK
+// object and onto the gig ctx in src/runtime.ts); OUT OF SCOPE here: the CONTAINER and microVM
+// realizers, and network-namespace egress enforcement (named as the follow-on).
+// ─────────────────────────────────────────────────────────────────────────────────────────────────
+
+/** One orthogonal isolation capability a floor may demand. Mirrors `IsolationCapabilitySchema`. */
+export type IsolationCapability =
+  | "filesystem-boundary"
+  | "network-namespace"
+  | "pid-namespace"
+  | "distinct-credential-surface";
+
+/** The strategies behind the one contract. WORKTREE and SANDBOXED-PROCESS are the two this repo can
+ *  honestly exercise; CONTAINER (and, later, microVM) are the specified-but-stubbed seam. */
+export type RealizationStrategy = "worktree" | "sandboxed-process" | "container" | "microvm";
+
+/** The declared capability profile of the host the realizer runs on — a DECLARED profile, not a
+ *  runtime probe, so the suite stays host-independent. `capabilities` is what walls this host can
+ *  provide; `strategies` is which strategies it can build. */
+export interface HostCapabilityProfile {
+  /** e.g. "macos-dir" | "linux-namespaces" | "fly-microvm". */
+  id: string;
+  capabilities: IsolationCapability[];
+  strategies: RealizationStrategy[];
+}
+
+/** A realized private write boundary: the path the gig may write within, the strategy that built the
+ *  wall, and whether it is ephemeral. */
+export interface RealizedWorkspace {
+  path: string;
+  strategy: RealizationStrategy;
+  ephemeral: boolean;
+}
+
+/** A venue's declared bind-port need, mirrored from `VenuePortsSchema`. */
+export interface PortNeed {
+  count?: number;
+  range?: [number, number];
+  named?: string[];
+}
+
+/** The isolation capabilities a strategy provides. WORKTREE provides none of the hard walls (it is
+ *  isolation by convention); SANDBOXED-PROCESS provides filesystem/network/pid boundaries via Linux
+ *  namespaces; CONTAINER adds a distinct credential surface. RED: unimplemented. */
+export function strategyCapabilities(_strategy: RealizationStrategy): IsolationCapability[] {
+  throw new Error(
+    "NOT IMPLEMENTED: strategyCapabilities — the strategy→capability map is the venue-walls seam (RED)",
+  );
+}
+
+/** Choose the cheapest strategy the host can build whose capabilities are a superset of the declared
+ *  floor. Returns null when NO available strategy satisfies the floor — the caller must then refuse
+ *  `isolation-floor-unmet`, never downgrade. RED: unimplemented. */
+export function selectStrategy(
+  _floor: IsolationCapability[],
+  _host: HostCapabilityProfile,
+): RealizationStrategy | null {
+  throw new Error(
+    "NOT IMPLEMENTED: selectStrategy — floor-vs-host strategy selection is the venue-walls seam (RED)",
+  );
+}
+
+/** True IFF `writePath` resolves strictly within `workspacePath` — the containment predicate that
+ *  makes a workspace a boundary. Must reject `../` traversal, absolute escapes, and symlink-as-string
+ *  escapes, not just prefix-match. RED: unimplemented. */
+export function isContained(_workspacePath: string, _writePath: string): boolean {
+  throw new Error(
+    "NOT IMPLEMENTED: isContained — workspace containment is the venue-walls seam (RED)",
+  );
+}
+
+/** A sealed change-set's diff may touch ONLY paths within the declared workspace — the best-effort
+ *  post-run guard that makes files a produced artifact bounded by the workspace rather than an
+ *  ambient side effect (the WORKTREE strategy's convention made checkable). True IFF every touched
+ *  path is contained. RED: unimplemented. */
+export function sealTouchesOnlyWorkspace(_workspacePath: string, _touchedPaths: string[]): boolean {
+  throw new Error(
+    "NOT IMPLEMENTED: sealTouchesOnlyWorkspace — seal-containment is the venue-walls seam (RED)",
+  );
+}
+
+/** Assign concrete ports for a declared need, disjoint from `held`. Refuses (ok:false) on exhaustion
+ *  — a collision is an allocation refusal, not a race. RED: unimplemented. */
+export function allocatePorts(
+  _need: PortNeed,
+  _held: number[],
+): { ok: true; ports: number[] } | { ok: false } {
+  throw new Error(
+    "NOT IMPLEMENTED: allocatePorts — port allocation is the venue-walls seam (RED)",
+  );
 }

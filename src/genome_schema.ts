@@ -891,6 +891,60 @@ const InstallPinSchema = z.string().regex(
   "an install must be digest-pinned (…sha256:<64 hex>): a version range names a family of rooms, not one room, so an unpinned install makes the venue's identity meaningless",
 );
 
+/** The isolation CAPABILITIES a room may demand of its realization — an ORTHOGONAL set, each
+ *  independently demandable. Orthogonal rather than an ordered ladder because macOS can offer a
+ *  private directory (a filesystem-boundary by convention) but no namespaces at all, so a single
+ *  ladder would conflate independent walls. A realization strategy satisfies the declared floor IFF
+ *  it provides EVERY demanded capability; a host that cannot provide one REFUSES to realize (the
+ *  `isolation-floor-unmet` refusal) rather than silently downgrade the wall to a convention. */
+export const IsolationCapabilitySchema = z.enum([
+  "filesystem-boundary",
+  "network-namespace",
+  "pid-namespace",
+  "distinct-credential-surface",
+]);
+
+/** Where a seated chair may write, and how strong the wall around it must be. Deny-by-default like
+ *  every access-shaped field on this class: an ABSENT workspace yields a private ephemeral tree (the
+ *  WORKTREE strategy — a per-gig directory, ~300ms), NEVER the host's cwd. `isolation_floor` states
+ *  WHAT MUST BE TRUE of the room; the realizer decides HOW (worktree | sandboxed-process | container)
+ *  and FAILS CLOSED when the host cannot meet the floor.
+ *
+ *  The WORKTREE strategy is isolation BY CONVENTION, adequate only for a trusted single-operator
+ *  host, and its limits are stated here rather than discovered: git worktrees SHARE one .git object
+ *  store and one ref namespace (and share config, hooks and stash — a hook installed from a worktree
+ *  runs for the parent, `git gc` in one runs for the whole repo); the PROCESS TABLE is shared; PORTS
+ *  are shared; and there is NO filesystem boundary — nothing prevents a process writing outside the
+ *  worktree. A declared floor demanding filesystem-boundary / network-namespace / pid-namespace is
+ *  what turns that convention into a wall, on a host that can provide it. This is why 'works locally'
+ *  (a macOS dev host: no namespaces, so WORKTREE) and 'works on drain' (a Fly microVM: a real Linux
+ *  kernel, so a hard floor is meetable) may LEGITIMATELY diverge — a declared property of the venue,
+ *  not a surprise found at 2am. */
+export const VenueWorkspaceSchema = z
+  .object({
+    isolation_floor: z.array(IsolationCapabilitySchema).default([]),
+  })
+  .strict();
+
+/** What ports the room's gig needs to BIND — a thing `doors` structurally cannot express, because a
+ *  HostSchema is an ORIGIN (what a chair may REACH), never a bind port. The realizer ASSIGNS concrete
+ *  ports from this need and tells the gig which it holds, so two gigs that each want :3000 get
+ *  DIFFERENT assigned ports (or the second is refused, `port-exhausted`) — a collision is an
+ *  allocation refusal, not a race whose symptom is a green test hitting the FIRST gig's server.
+ *  Allocation is needed EVEN where a network namespace makes collision impossible: the namespace
+ *  prevents the clash, but a service must still learn its own port and something must still route to
+ *  it. Deny-by-default: an absent port need allocates nothing. */
+export const VenuePortsSchema = z
+  .object({
+    /** Ask for N free ports; the realizer picks which. */
+    count: z.number().int().nonnegative().optional(),
+    /** Or constrain them to an inclusive [lo, hi] range. */
+    range: z.tuple([z.number().int(), z.number().int()]).optional(),
+    /** Or name the services that each need a port, learned by name at run time. */
+    named: z.array(z.string()).default([]),
+  })
+  .strict();
+
 export const VenueSchema = z
   .object({
     slug: z.string(),
@@ -915,6 +969,11 @@ export const VenueSchema = z
      *  a field material could occupy: a room that declares nothing here is a room where finding a
      *  credential is a breach rather than a configuration difference. */
     credential_surface: z.array(z.string()).default([]),
+    /** Where a seated chair may write and how strong the wall is. Deny-by-default: absent ⇒ a
+     *  private ephemeral tree, never the host's cwd. */
+    workspace: VenueWorkspaceSchema.optional(),
+    /** The gig's bind-port need, assigned by the realizer. Deny-by-default: absent ⇒ none allocated. */
+    ports: VenuePortsSchema.optional(),
     lifecycle: VenueLifecycleSchema.default({}),
     /** The accountable office: an institutional chair id (the office, not its incumbent). One named
      *  duty-holder answers for the room and for what it permits. */

@@ -568,6 +568,32 @@ export class ChildExitError extends Error {
  *  survive the second. */
 const BUDGET_STOP_SUBTYPE = "error_max_turns";
 
+/** Rewrite `--max-turns` to the reserve. The continuation gets the EXTENSION as its whole budget,
+ *  not a second full allowance — otherwise the grant silently doubles the chair's cost ceiling. */
+function withMaxTurns(args: readonly string[], turns: number): string[] {
+  const out = [...args];
+  const i = out.indexOf("--max-turns");
+  if (i >= 0 && i + 1 < out.length) out[i + 1] = String(turns);
+  else out.push("--max-turns", String(turns));
+  return out;
+}
+
+/** Swap the prompt a built arg list carries.
+ *
+ *  `-p` is a boolean flag with the prompt as a POSITIONAL that follows it — except on the
+ *  large-prompt path, where the positional is dropped and the text goes to stdin instead. A
+ *  continuation has to replace whichever form is in play, and the two are not interchangeable:
+ *  editing only the stdin text would re-send the ORIGINAL prompt to a small-prompt chair, which
+ *  reads as the engine ignoring its own grant. */
+function withPrompt(args: readonly string[], prompt: string): string[] {
+  const out = [...args];
+  const i = out.indexOf("-p");
+  if (i < 0) return out;
+  const positionalFollows = i + 1 < out.length && !out[i + 1]!.startsWith("-");
+  if (positionalFollows) out[i + 1] = prompt;
+  return out;
+}
+
 export function captureOutputWrites(
   stdout: string,
   sealTypes: readonly string[],
@@ -666,6 +692,23 @@ export interface SpawnBounds {
 export interface ClaudeInvokerOptions {
   bin?: string | undefined; // default "claude"
   model?: string | undefined; // passed to --model if set
+  /**
+   * Turns granted ONCE, as a reserve, to a chair that exhausted its declared turn budget.
+   *
+   * `--max-turns` is a hard CLI bound with no callback, so without this a chair learns its budget
+   * only by dying at it — cut off mid-reach, before it can write the boundary record that says what
+   * it did NOT get to. The reserve turns that silent truncation into a stated one: the chair is told
+   * it is in reserve, how many turns remain, and what it already sealed, and is asked to close out.
+   *
+   * It cannot be delivered in-band. A chair's tools are typically HOST tools (WebSearch, WebFetch)
+   * that the child's own coltrane server never sees, so the engine surface cannot count turns. The
+   * parent sees every turn in the stream, and its only channel into a running child is a new
+   * invocation — hence a continuation rather than a signal.
+   *
+   * ONE extension, never a loop: an unbounded "just a bit more" is not a budget. Unset = the prior
+   * behaviour exactly (keep whatever passed the write boundary, grant nothing).
+   */
+  turn_reserve?: number | undefined;
   registry?: Registry | undefined; // to resolve the output type's schema into the prompt
   // The MCP servers the cage permits the spawn to load. Empty = no MCP tools at all.
   // With --strict-mcp-config, ONLY these load — never the host's ambient servers.
@@ -782,6 +825,9 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
   const resolutionEnabled = opts.toolProviders !== undefined || opts.mcpServerConfigs !== undefined;
   const abortGraceMs = opts.abort_grace_ms ?? DEFAULT_ABORT_GRACE_MS;
   const sealViaOutputWrite = opts.sealVia === "output_write";
+  // A reserve is a grant, so an absent or nonsensical one grants nothing rather than defaulting to
+  // some house number — an extension the author did not ask for is spend they did not authorise.
+  const reserveTurns = Number.isFinite(opts.turn_reserve) && (opts.turn_reserve ?? 0) > 0 ? Math.floor(opts.turn_reserve!) : 0;
   // The core type each domain type extends — the `core_type` the agent must pass to output_write.
   const coreTypeOf = (slug: string): string => {
     if ((CORE_TYPES as readonly string[]).includes(slug)) return slug;
@@ -934,24 +980,68 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
       // So the budget stop is caught HERE, and only here: the stream is recovered, and the decision
       // about whether anything survives is left to the seal path below, which is the only place that
       // knows what passed. Every other non-zero exit still propagates untouched.
-      let stdout: string;
-      let budgetStopped = false;
-      try {
-        stdout = customRun
-          ? await customRun(bin, baseArgs, spawnBounds, childEnv)
+      const runOnce = async (args: readonly string[], text: string): Promise<string> =>
+        customRun
+          ? await customRun(bin, [...args], spawnBounds, childEnv)
           : await spawnStreaming(
-              bin, [...baseArgs, "--output-format", "stream-json", "--verbose"], spawnBounds,
-              ctx.onEvent, ctx.signal, abortGraceMs, promptViaStdin(prompt) ? prompt : undefined,
+              bin, [...args, "--output-format", "stream-json", "--verbose"], spawnBounds,
+              ctx.onEvent, ctx.signal, abortGraceMs, promptViaStdin(text) ? text : undefined,
               childEnv,
             );
-      } catch (e) {
-        const recoverable =
-          seal !== undefined &&
-          e instanceof ChildExitError &&
-          finalText(e.stdout).errorSubtype === BUDGET_STOP_SUBTYPE;
-        if (!recoverable) throw e;
-        stdout = (e as ChildExitError).stdout;
-        budgetStopped = true;
+
+      /** Run, and hand back the stream even when the child died on its turn cap. */
+      const runTolerantOfBudgetStop = async (
+        args: readonly string[],
+        text: string,
+      ): Promise<{ stdout: string; budgetStopped: boolean }> => {
+        try {
+          return { stdout: await runOnce(args, text), budgetStopped: false };
+        } catch (e) {
+          const recoverable =
+            seal !== undefined &&
+            e instanceof ChildExitError &&
+            finalText(e.stdout).errorSubtype === BUDGET_STOP_SUBTYPE;
+          if (!recoverable) throw e;
+          return { stdout: (e as ChildExitError).stdout, budgetStopped: true };
+        }
+      };
+
+      let { stdout, budgetStopped } = await runTolerantOfBudgetStop(baseArgs, prompt);
+      // Every stream whose writes count toward the seal. Diverges from `stdout` only when a reserve
+      // was granted, which is the one case where a chair's output spans more than one invocation.
+      let sealStdout = stdout;
+
+      // THE RESERVE GRANT. The chair spent its declared budget; rather than losing whatever it was
+      // mid-way through, it is told where it stands and given a bounded extension to close out.
+      // Once. The continuation names what already sealed so the chair does not redo it, and says
+      // plainly that nothing follows — a chair that believes another extension is coming will spend
+      // this one reaching rather than landing.
+      if (budgetStopped && reserveTurns > 0 && seal !== undefined) {
+        const sealedSoFar = captureOutputWrites(stdout, sealTypes);
+        const already = Object.keys(sealedSoFar);
+        ctx.onEvent?.({
+          type: "budget_reserve_granted",
+          raw: { agent: a.slug, reserve_turns: reserveTurns, sealed_before_grant: already },
+        } as AgentStreamEvent);
+        const continuation =
+          `You reached your turn budget and were stopped mid-run. You are now in RESERVE: ` +
+          `${reserveTurns} turns remain and this is the LAST extension — it will not be extended ` +
+          `again, so land the work rather than reaching for more.\n\n` +
+          (already.length > 0
+            ? `Already sealed through the write boundary, do NOT redo: [${already.join(", ")}].\n\n`
+            : `Nothing sealed yet.\n\n`) +
+          `Close out now: seal what you already have, and state plainly what you did NOT reach so ` +
+          `the record shows the boundary instead of implying coverage.\n\n${prompt}`;
+        const reserveArgs = withPrompt(withMaxTurns(baseArgs, reserveTurns), continuation);
+        const second = await runTolerantOfBudgetStop(reserveArgs, continuation);
+        // Two streams, two different questions, and conflating them is a bug: the OUTCOME (did the
+        // run complete?) is the last pass's to answer, while the WRITES are cumulative — the first
+        // pass's payloads passed the boundary too, and a continuation that sealed nothing must not
+        // erase them. Concatenating for both would let the first pass's error_max_turns result event
+        // outrank the second's success and fail a run that finished.
+        sealStdout = `${stdout}\n${second.stdout}`;
+        stdout = second.stdout;
+        budgetStopped = second.budgetStopped;
       }
       const outcome = finalText(stdout);
       // #223 — the child reported an error result. `subtype` catches a run that did not complete;
@@ -979,7 +1069,7 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
         // validate-mode) and whose rejection it corrected in-band. Capture the payloads that
         // PASSED; the runtime (executeChair) then seals them through its own boundary exactly once.
         // A chair that got nothing past the boundary produced nothing — fail here, legibly.
-        const blob = captureOutputWrites(stdout, sealTypes);
+        const blob = captureOutputWrites(sealStdout, sealTypes);
         if (Object.keys(blob).length === 0) {
           throw new ModelOutputContractError(
             a.slug,

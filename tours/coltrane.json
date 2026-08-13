@@ -1,0 +1,72 @@
+{
+  "_comment": "Coltrane's OWN roadmap as the worked-example Tour. This repo does committed work, so its roadmap IS a tour. Every commitment here carries NO amount — Coltrane's tour genuinely has none ('ship the evaluator' is a real commitment with a real acceptance condition and no price). This is NOT hedging: the money path is fully public and exercised with synthetic values in tests/committed_work fixtures, so a fork runs a funded tour on day one. What is absent from THIS example is fake numbers, not the mechanism. Slugs resolve against institutions/coltrane.json (org eir-labs; chairs coltrane.chair.human-governor and coltrane.chair.change-author).",
+  "tour": {
+    "slug": "coltrane-roadmap",
+    "institution_slug": "coltrane",
+    "org_slug": "eir-labs",
+    "responsible_chair": "coltrane.chair.human-governor",
+    "period": "2026-H2",
+    "northstar_slugs": [
+      "model-the-domain-before-the-work",
+      "treat-inference-as-scarce"
+    ],
+    "bookings": [
+      {
+        "slug": "ship-the-binding-middle-place",
+        "aim": "land the Tour/Booking/Resource objects and the tour-admissibility checker on main behind a green pull request",
+        "period": "2026-H2",
+        "accountable_office": "coltrane.chair.change-author",
+        "acceptance": {
+          "predicate": "(=> (= ci_result \"green\") allow)",
+          "inputs": { "ci_result": "ci-status" }
+        },
+        "tier": "enforced",
+        "draws": [
+          { "resource_slug": "engine-dev-seat", "unit": "max-seat-hours", "quantity": 40 }
+        ],
+        "served_northstars": ["model-the-domain-before-the-work"],
+        "lifecycle": {
+          "state": "active",
+          "debtor": "coltrane.chair.change-author",
+          "creditor": "eir-labs",
+          "log": []
+        }
+      },
+      {
+        "slug": "wire-variance-into-the-audit-surface",
+        "aim": "surface promised-versus-delivered variance from the ledger chain, once the middle place has landed",
+        "period": "2026-H2",
+        "accountable_office": "coltrane.chair.change-author",
+        "acceptance": {
+          "predicate": "(=> (= ci_result \"green\") allow)",
+          "inputs": { "ci_result": "ci-status" }
+        },
+        "tier": "enforced",
+        "antecedent": {
+          "predicate": "(= prior_booking_state \"satisfied\")",
+          "inputs": { "prior_booking_state": "commitment-state" }
+        },
+        "draws": [
+          { "resource_slug": "engine-dev-seat", "unit": "max-seat-hours", "quantity": 20 }
+        ],
+        "served_northstars": ["treat-inference-as-scarce"],
+        "lifecycle": {
+          "state": "conditional",
+          "debtor": "coltrane.chair.change-author",
+          "creditor": "eir-labs",
+          "log": []
+        }
+      }
+    ]
+  },
+  "resources": [
+    {
+      "slug": "engine-dev-seat",
+      "holder": "eir-labs",
+      "quantity": 200,
+      "unit": "max-seat-hours",
+      "period": "2026-H2",
+      "transferable": true
+    }
+  ]
+}

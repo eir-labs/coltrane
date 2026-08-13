@@ -8,6 +8,7 @@ import { SkillSchema, EvalSchema, DomainTypeSchema, VenueSchema, ChartSchema, ve
 import { composeChart, chartEntrySeedTypes, type Chart, type Venue } from "./chart.js";
 import type { Primitive } from "./core_types.js";
 import { CANONICAL_CORE_TYPES } from "./canonical_core_types.js";
+import type { LoadedInstitution } from "./institution_loader.js";
 
 export interface CoreTypeRecord {
   slug: string;
@@ -58,7 +59,7 @@ export type EvalRecord = EvalOutput;
 // gate around core_types still hard-throws — that's the minimum the system
 // needs to function. Anything past that softens.
 export interface LoadError {
-  readonly kind: "domain_type" | "agent" | "standard" | "skill" | "eval" | "chart" | "venue" | "manifest";
+  readonly kind: "domain_type" | "agent" | "standard" | "skill" | "eval" | "chart" | "venue" | "institution" | "manifest";
   readonly path: string;
   readonly slug: string | null;
   readonly error: string;
@@ -83,6 +84,11 @@ export interface LoadedGenome {
   // is the arrangement itself.
   charts: Map<string, Chart>;
   venues: Map<string, Venue>;
+  // The institutions/ class — a slug-keyed map of validated, ADMITTED institution documents.
+  // OPTIONAL on the interface so the store backing (genome_store.ts reconstructGenome), which is
+  // out of scope here, need not carry it yet; loadGenome always populates it (empty until the
+  // reader in institution_loader.ts is wired). This is the field institutions/ gains a reader for.
+  institutions?: ReadonlyMap<string, LoadedInstitution>;
   // Rob #129 — per-definition load failures recorded here instead of throwing.
   load_errors: LoadError[];
   // Genome extension (docs/genome-extension.md): when this genome was resolved from
@@ -533,7 +539,13 @@ export function loadGenome(
     );
   }
 
-  return { core_types, domain_types, agents, standards, skills, evals, charts, venues, load_errors };
+  // RED SEAM: institutions/ is not yet read. loadInstitutions (institution_loader.ts) is the reader
+  // the GREEN change wires in HERE — after the agents/standards/venues/charts maps above exist, per
+  // the load-ordering obligation — invoking checkInstitutionAdmissibility fail-closed and pushing an
+  // "institution"-kind LoadError per refused document. Until then this carries an empty map, so the
+  // field exists (the tree compiles) while every institution invariant reds from a failing assertion.
+  const institutions: ReadonlyMap<string, LoadedInstitution> = new Map<string, LoadedInstitution>();
+  return { core_types, domain_types, agents, standards, skills, evals, charts, venues, institutions, load_errors };
 }
 
 /**

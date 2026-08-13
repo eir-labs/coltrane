@@ -8,6 +8,7 @@ import { SkillSchema, EvalSchema, DomainTypeSchema, VenueSchema, ChartSchema, ve
 import { composeChart, chartEntrySeedTypes, type Chart, type Venue } from "./chart.js";
 import type { Primitive } from "./core_types.js";
 import { CANONICAL_CORE_TYPES } from "./canonical_core_types.js";
+import { loadInstitutions, type LoadedInstitution } from "./institution_loader.js";
 
 export interface CoreTypeRecord {
   slug: string;
@@ -58,7 +59,7 @@ export type EvalRecord = EvalOutput;
 // gate around core_types still hard-throws — that's the minimum the system
 // needs to function. Anything past that softens.
 export interface LoadError {
-  readonly kind: "domain_type" | "agent" | "standard" | "skill" | "eval" | "chart" | "venue" | "manifest";
+  readonly kind: "domain_type" | "agent" | "standard" | "skill" | "eval" | "chart" | "venue" | "institution" | "manifest";
   readonly path: string;
   readonly slug: string | null;
   readonly error: string;
@@ -83,6 +84,11 @@ export interface LoadedGenome {
   // is the arrangement itself.
   charts: Map<string, Chart>;
   venues: Map<string, Venue>;
+  // The institutions/ class — a slug-keyed map of validated, ADMITTED institution documents.
+  // OPTIONAL on the interface so the store backing (genome_store.ts reconstructGenome), which is
+  // out of scope here, need not carry it yet; loadGenome always populates it (empty until the
+  // reader in institution_loader.ts is wired). This is the field institutions/ gains a reader for.
+  institutions?: ReadonlyMap<string, LoadedInstitution>;
   // Rob #129 — per-definition load failures recorded here instead of throwing.
   load_errors: LoadError[];
   // Genome extension (docs/genome-extension.md): when this genome was resolved from
@@ -533,7 +539,17 @@ export function loadGenome(
     );
   }
 
-  return { core_types, domain_types, agents, standards, skills, evals, charts, venues, load_errors };
+  // institutions/ — read LAST, after the agents/standards/venues/charts/organization maps exist:
+  // institutions reference those, so the reader sits after every one of them (the venues-before-charts
+  // ordering, one level out). loadInstitutions validates each present section against its per-section
+  // Zod schema and invokes checkInstitutionAdmissibility fail-closed; a malformed / schema-invalid /
+  // inadmissible / duplicate-slug document drops out as one "institution"-kind LoadError while the rest
+  // of the genome loads. It is TOTAL — it never throws for an institution reason, so one bad document
+  // cannot DoS the other classes.
+  const institutionRead = loadInstitutions(root);
+  load_errors.push(...institutionRead.load_errors);
+  const institutions: ReadonlyMap<string, LoadedInstitution> = institutionRead.institutions;
+  return { core_types, domain_types, agents, standards, skills, evals, charts, venues, institutions, load_errors };
 }
 
 /**

@@ -40,7 +40,7 @@ import { CANONICAL_CORE_TYPES } from "./canonical_core_types.js";
  *  refused BY THE STORE, loudly, with the store's own message. That refusal is the honest state —
  *  the class passes through the port it is supposed to pass through and the missing half says so
  *  itself, rather than the engine pretending the class does not exist. */
-export type GenomeClass = "agent" | "standard" | "skill" | "domain_type" | "chart" | "venue";
+export type GenomeClass = "agent" | "standard" | "skill" | "domain_type" | "chart" | "venue" | "institution";
 
 /** Where definitions live. load() yields the loader's genome shape; upsert() persists one
  *  definition of a class. The file impl writes genome files; the PostgREST impl rides the
@@ -67,6 +67,7 @@ const CLASS_SUBDIR: Record<GenomeClass, string> = {
   domain_type: "domain_types",
   chart: "charts",
   venue: "venues",
+  institution: "institutions",
 };
 
 /** Local-dev backing: the existing loader/writer, behavior identical. load() is
@@ -118,6 +119,12 @@ const Q = {
   skills: "coltrane_skills?select=slug,name,description,skill_md,tier,input_type,output_type,status",
   charts: "coltrane_charts?select=slug,definition",
   venues: "coltrane_venues?select=slug,definition",
+  // The institution row rides the SAME {slug, definition} envelope charts and venues use, where
+  // `definition` IS the multi-section file document the loader validates — so file and store backings
+  // cannot drift (spec ITEM 4). The store backing / fetch is NOT built here (envelope string only);
+  // the reconstruction has no institution branch yet, exactly as it had none for charts/venues before
+  // their tables landed.
+  institutions: "coltrane_institution?select=slug,definition",
 } as const;
 
 type Row = Record<string, unknown>;

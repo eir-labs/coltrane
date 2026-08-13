@@ -78,6 +78,14 @@ export interface Chair {
   /** The human seat: an approval office held by a person. No agent, no skill; the runtime
    *  PARKS at this chair until the incumbent's verdict is supplied, then seals it. */
   human?: boolean;
+  /** The guaranteed turn floor for THIS seat (mirrors genome_schema `ChairSchema.turn_budget`).
+   *  Threaded onto the invocation and resolved chair > agent.max_tool_calls > engine default; the
+   *  `...ch` spread in composeStandard carries it into the runtime Chair. Absent → the agent's own
+   *  `max_tool_calls` stands; 0 is a deliberate hard floor distinct from absent. */
+  turn_budget?: number;
+  /** The per-chair ceiling on draws from the gig reserve pool (mirrors `ChairSchema.turn_reserve`).
+   *  A chair never draws more than this even when the pool is larger. */
+  turn_reserve?: number;
 }
 
 export interface PhaseDef {
@@ -224,6 +232,9 @@ export function composeStandard(def: {
   output_types?: readonly string[];
   max_examine_rounds?: number;
   description?: string;
+  /** The standard's DEFAULT reserve pool (#turn-budget). Rides through the loss-free `...def`
+   *  spread into the runtime Standard; the dispatch payload's `pool` overrides it at runGig. */
+  reserve_pool?: number;
 }): Standard {
   const agentBySlug = new Map(def.agents.map((a) => [a.slug, a]));
 

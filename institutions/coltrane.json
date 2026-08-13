@@ -49,6 +49,20 @@
           }
         },
         "content_hash": "sha256:c4c2b5fe59fdad6b299a43b60b4d61dfff9c848fe578d72ebf3d932fd5d15b13"
+      },
+      {
+        "attributes": "a change-set branch keyed by its originating gig, off the protected main line",
+        "deontic": "permitted",
+        "aim": "stand deliberately red between the spec merge and the implementation merge on a change-set branch, off the protected line",
+        "conditions": "while the target branch is a change-set branch and is not the protected main line",
+        "or_else": "not applicable — a permission, not an obligation",
+        "check": {
+          "predicate": "(=> (not (= target_branch \"main\")) allow)",
+          "inputs": {
+            "target_branch": "branch-name"
+          }
+        },
+        "content_hash": "sha256:f465a9f3e76a5288dd993ef1b8228993feea04a47af8f3c99462cc4edcb238a5"
       }
     ],
     "sovereign": true,

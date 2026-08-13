@@ -1956,6 +1956,34 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
           data: { status, aborted, cancellable: aborted, cleanup_result: { reason } },
         };
       }
+      case "gig_cancel": {
+        // gig_cancel stops a QUEUED gig — one in the org gig table that no drain worker has
+        // claimed yet — so no worker ever claims it. That queue is a HOSTED concept: the store's
+        // gig table. A LOCAL surface has no queue (a local gig_dispatch runs immediately, tracked
+        // in gig_runs), so there is nothing here to cancel. The hosted seam (deps.cancelGig) is
+        // intercepted in callSurfaceTool before this handler is reached; reaching this switch is a
+        // NON-hosted call. Two honest answers:
+        //   * a live RUNNING gig is the wrong door — cancel is pre-claim; a running gig is stopped
+        //     by gig_abort. Fail closed and say so.
+        //   * otherwise there is no local queue to cancel from — a typed hosted-only explanation.
+        const gid = String(args["gig_id"] ?? "");
+        const live = gid.length > 0 ? deps.gig_runs?.get(gid) : undefined;
+        if (live && live.status === "running") {
+          return {
+            ok: false, requires_approval: approval,
+            error:
+              `gig "${gid}" is already running — gig_cancel only stops a QUEUED gig before a worker ` +
+              "claims it. Use gig_abort to stop a running gig.",
+          };
+        }
+        return {
+          ok: false, requires_approval: approval,
+          error:
+            "gig_cancel stops a QUEUED gig in the org gig table before a drain worker claims it. " +
+            "A local surface has no queue — cancel over the hosted store (coltrane_gig_cancel for a " +
+            "member, coltrane_mcp_gig_cancel for an agent token).",
+        };
+      }
       case "gig_approve": {
         // Approval is a MEMBER act whose authority lives in the STORE (the coltrane_gig_approve RPC
         // is member-JWT-only; an agent token is refused there — the enforcement belongs store-side,
@@ -2898,6 +2926,12 @@ export interface ToolSurfaceDeps extends ServerDeps {
    *  passes through, the store authorizes (an agent token is refused there). Without it, hosted
    *  gig_approve is an honest typed error. */
   approveGig?: ((args: Record<string, unknown>) => Promise<Record<string, unknown>>) | undefined;
+  /** Hosted gig cancel: cancel a QUEUED gig before a drain worker claims it (e.g.
+   *  postgrestCancelGig(ctx) → coltrane_gig_cancel for a member, or rpcCancelGig(ctx) →
+   *  coltrane_mcp_gig_cancel for an agent token). Parallel to queueGig — the engine passes
+   *  through, the store authorizes and refuses a claimed/running row. Without it, hosted
+   *  gig_cancel is an honest typed error. */
+  cancelGig?: ((args: Record<string, unknown>) => Promise<Record<string, unknown>>) | undefined;
   /** Hosted genome persistence: a successful define/compose/register also upserts through
    *  this store (the governed RPC), or the definition evaporates at end-of-request. */
   store?: GenomeStore | undefined;
@@ -2993,6 +3027,28 @@ async function callSurfaceTool(
           "hosted approval goes through the member RPC (coltrane_gig_approve) — a member act the store " +
           "authorizes, never the engine. Wire deps.approveGig (parallel to deps.queueGig) to approve the " +
           "parked gig over the wire.",
+      };
+    }
+    if (slug === "gig_cancel") {
+      // Cancelling a QUEUED gig reaches the org gig table, never a local run — so hosted cancel
+      // is a pure pass-through to the store's cancel RPC (member JWT → coltrane_gig_cancel;
+      // agent token → coltrane_mcp_gig_cancel). The store cancels only a queued row and REFUSES
+      // a claimed/running one — that refusal, naming gig_abort, surfaces as a failed cancel.
+      if (deps.cancelGig) {
+        try {
+          const data = await deps.cancelGig(args);
+          return { ok: true, data };
+        } catch (e) {
+          return { ok: false, error: e instanceof Error ? e.message : String(e) };
+        }
+      }
+      return {
+        ok: false,
+        hosted_unsupported: true,
+        error:
+          "hosted cancel goes through the cancel RPC (coltrane_gig_cancel for a member, " +
+          "coltrane_mcp_gig_cancel for an agent token) — the gig table is the queue and the store " +
+          "authorizes. Wire deps.cancelGig (parallel to deps.queueGig) to cancel the queued gig over the wire.",
       };
     }
   }

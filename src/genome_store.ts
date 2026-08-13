@@ -547,3 +547,66 @@ export function postgrestQueueGig(
     return { gig_id: JSON.parse(text) as string, status: "queued" };
   };
 }
+
+/** The hosted gig-cancel seam for createToolSurface: cancel one QUEUED run through the
+ *  member-authenticated coltrane_gig_cancel RPC AS THE CALLER (member JWT — RLS + org
+ *  membership decide). The RPC cancels only a queued row and RAISES on a claimed/running/
+ *  terminal one, so a running gig fails closed (the store points the caller at gig_abort).
+ *  Shape mirrors postgrestQueueGig's member dispatch path. */
+export function postgrestCancelGig(
+  ctx: PostgrestContext,
+): (args: Record<string, unknown>) => Promise<Record<string, unknown>> {
+  return async (args) => {
+    const res = await fetch(`${ctx.baseUrl}/rest/v1/rpc/coltrane_gig_cancel`, {
+      method: "POST",
+      headers: {
+        apikey: ctx.anonKey,
+        Authorization: `Bearer ${ctx.bearer}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ p_gig: args["gig_id"] }),
+    });
+    const text = await res.text();
+    if (!res.ok) {
+      let message = text || `store error ${res.status}`;
+      try {
+        const parsed = JSON.parse(text) as { message?: string };
+        if (parsed.message) message = parsed.message;
+      } catch { /* keep the raw text */ }
+      throw new Error(message);
+    }
+    return { gig_id: JSON.parse(text) as string, status: "cancelled" };
+  };
+}
+
+/** The agent-token gig-cancel seam: cancel one QUEUED run through the security-definer
+ *  coltrane_mcp_gig_cancel RPC, where the token's org + may_dispatch list scope what it may
+ *  reach. Like postgrestCancelGig, the RPC cancels only a queued row and RAISES on a
+ *  claimed/running/terminal one. Same return shape so a host can swap them by bearer class. */
+export function rpcCancelGig(
+  ctx: { baseUrl: string; anonKey: string; agentToken: string },
+): (args: Record<string, unknown>) => Promise<Record<string, unknown>> {
+  return async (args) => {
+    const res = await fetch(`${ctx.baseUrl}/rest/v1/rpc/coltrane_mcp_gig_cancel`, {
+      method: "POST",
+      headers: {
+        apikey: ctx.anonKey,
+        // The ctk bearer is NOT a JWT: it authenticates inside the definer RPC via the body;
+        // the transport rides the anon key.
+        Authorization: `Bearer ${ctx.anonKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ p_bearer: ctx.agentToken, p_gig: args["gig_id"] }),
+    });
+    const text = await res.text();
+    if (!res.ok) {
+      let message = text || `store error ${res.status}`;
+      try {
+        const parsed = JSON.parse(text) as { message?: string };
+        if (parsed.message) message = parsed.message;
+      } catch { /* keep the raw text */ }
+      throw new Error(message);
+    }
+    return { gig_id: JSON.parse(text) as string, status: "cancelled" };
+  };
+}

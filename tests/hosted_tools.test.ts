@@ -17,8 +17,9 @@ const CTX_JWT: HostedToolContext = {
 const CTX_CTK: HostedToolContext = { ...CTX_JWT, bearer: "ctk_abc123" };
 
 describe("the surface", () => {
-  it("defines exactly the six hosted tools", () => {
+  it("defines exactly the seven hosted tools", () => {
     expect(HOSTED_TOOLS.map((t) => t.name).sort()).toEqual([
+      "cancel_gig",
       "dispatch_gig",
       "gig_outputs",
       "gig_status",
@@ -87,5 +88,25 @@ describe("handler routing by bearer class", () => {
     const out = await hostedToolByName("roster").handler({}, CTX_CTK);
     expect(out.isError).toBe(true);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("an agent token cancels a queued gig through the definer RPC", async () => {
+    await hostedToolByName("cancel_gig").handler({ gig_id: "g1" }, CTX_CTK);
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("https://store.example/rest/v1/rpc/coltrane_mcp_gig_cancel");
+    const body = JSON.parse(init.body as string) as Record<string, unknown>;
+    expect(body["p_bearer"]).toBe("ctk_abc123");
+    expect(body["p_gig"]).toBe("g1");
+  });
+
+  it("a member JWT cancels a queued gig through coltrane_gig_cancel, riding its own token", async () => {
+    await hostedToolByName("cancel_gig").handler({ gig_id: "g1" }, CTX_JWT);
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("https://store.example/rest/v1/rpc/coltrane_gig_cancel");
+    const headers = init.headers as Record<string, string>;
+    expect(headers["Authorization"]).toBe(`Bearer ${CTX_JWT.bearer}`);
+    const body = JSON.parse(init.body as string) as Record<string, unknown>;
+    expect(body["p_gig"]).toBe("g1");
+    expect(body["p_bearer"]).toBeUndefined(); // the JWT authenticates via the header
   });
 });

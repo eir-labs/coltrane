@@ -203,6 +203,26 @@ export const HOSTED_TOOLS: HostedTool[] = [
       return out.isError ? out : ok({ gig_id: JSON.parse(out.text), status: "queued" });
     },
   },
+  {
+    name: "cancel_gig",
+    title: "Cancel a queued gig",
+    description:
+      "Cancel one QUEUED run before a drain worker claims it, so no worker ever runs it. Only a queued gig can be cancelled — a running gig is stopped with gig_abort, and the store refuses a claimed/running/terminal row. Members cancel as themselves; agent tokens are scoped to their org.",
+    paramsJsonSchema: {
+      type: "object",
+      properties: { gig_id: { type: "string" } },
+      required: ["gig_id"],
+    },
+    async handler(args, ctx) {
+      const gig = String(args["gig_id"] ?? "");
+      if (isAgentBearer(ctx.bearer)) {
+        const out = await rpc(ctx, "coltrane_mcp_gig_cancel", { p_bearer: ctx.bearer, p_gig: gig }, false);
+        return out.isError ? out : ok({ gig_id: JSON.parse(out.text), status: "cancelled" });
+      }
+      const out = await rpc(ctx, "coltrane_gig_cancel", { p_gig: gig }, true);
+      return out.isError ? out : ok({ gig_id: JSON.parse(out.text), status: "cancelled" });
+    },
+  },
 ];
 
 export function hostedToolByName(name: string): HostedTool {

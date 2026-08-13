@@ -155,6 +155,13 @@ export const MCP_TOOLS: readonly MCPToolDef[] = [
   // `aborted` now means "this call delivered a cancellation to a live run", not "we looked at
   // the stores and guessed"; `cancellable` says whether this server could reach the run at all.
   { slug: "gig_abort",                     category: "run", input_schema: obj({ gig_id: "string", reason: "string" }), output_schema: obj({ status: "string", aborted: "boolean", cancellable: "boolean", cleanup_result: "object" }) },
+  // gig_cancel stops a QUEUED gig — one dispatched into the org gig table but not yet claimed by
+  // a drain worker — so no worker ever claims it. It is the counterpart to gig_abort, which
+  // targets a RUNNING gig; a queued row is exactly the window gig_abort reports not_found for.
+  // Cancel FAILS CLOSED on a running/claimed gig, naming gig_abort. Hosted routes to
+  // deps.cancelGig (member JWT → coltrane_gig_cancel; agent token → coltrane_mcp_gig_cancel);
+  // the local surface has no queue, so it answers with a typed hosted-only explanation.
+  { slug: "gig_cancel",                    category: "run", input_schema: obj({ gig_id: "string" }), output_schema: obj({ gig_id: "string", status: "string" }) },
   // Approval is a MEMBER act — the web console does it, and this is the same act over MCP so a
   // human on an MCP client can approve a parked gig over the wire. `verdict` is the Judgment the
   // human seat seals. The tool is a pure pass-through to the store's member-JWT-only

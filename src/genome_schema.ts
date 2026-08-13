@@ -1111,6 +1111,29 @@ export const ResourceSchema = z
     holder: z.string(),
     quantity: z.number(),
     unit: z.string(),
+    /**
+     * REQUIRED, and it must stay required — this field is what makes a Resource a BUDGET rather
+     * than a running balance, and the difference is load-bearing.
+     *
+     * A Resource is "this much, over this window". Capacity is settled ONCE, at declaration, and
+     * held as a commitment for the window; anything continuous underneath it — a decaying holding,
+     * a replenishing one — determines the NEXT declaration rather than being read live inside this
+     * one. That is what a budget is, and it is consistent with a layer whose subject is committed
+     * work: a commitment is a stored fact even when it was computed from something continuous.
+     *
+     * WHAT BREAKS IF THIS GOES OPTIONAL. The tempting change is a one-off holding that "has no
+     * window" — it feels like it should not need one. But a quantity with no window is a running
+     * balance, and a running balance is continuously readable: ask `checkTourCapacity` enough
+     * times with varying draws and binary search recovers the holder's exact remaining capacity.
+     *
+     * For units whose magnitude is private — a pair's earned standing, an org's runway — that is an
+     * arbitrary-precision oracle reconstructed from an admissibility check that was never meant to
+     * answer it. The window is what stops it: within a period the answer is a fixed declared number
+     * the holder chose to commit, not a live reading of what they have.
+     *
+     * So a one-off holding still declares its window. It is not bureaucracy; it is the reason the
+     * check can be offered at all.
+     */
     period: z.string(),
     transferable: z.boolean(),
     replenishment: ReplenishmentSchema.optional(),

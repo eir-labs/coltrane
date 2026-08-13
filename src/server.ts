@@ -1402,6 +1402,12 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
           ...(args["credential_surface"] !== undefined ? { credential_surface: args["credential_surface"] } : {}),
           ...(args["lifecycle"] !== undefined ? { lifecycle: args["lifecycle"] } : {}),
           ...(args["responsible_chair"] !== undefined ? { responsible_chair: args["responsible_chair"] } : {}),
+          // The walls the schema now advertises: an unstated workspace is the private ephemeral room
+          // and unstated ports allocate nothing, so pass through only what was declared — same
+          // deny-by-default as every field above, and #234's contract that a handler read every arg
+          // its MCP surface advertises.
+          ...(args["workspace"] !== undefined ? { workspace: args["workspace"] } : {}),
+          ...(args["ports"] !== undefined ? { ports: args["ports"] } : {}),
         };
         const parsedVenue = VenueSchema.safeParse(venueInputDef);
         if (!parsedVenue.success) {

@@ -24,12 +24,27 @@ describe("venue walls — INV12: the tree compiles, so RED comes from absent bod
     for (const fn of [realize, resolveAndRealize, strategyCapabilities, selectStrategy, isContained, sealTouchesOnlyWorkspace, allocatePorts]) {
       expect(typeof fn).toBe("function");
     }
-    // The unimplemented walls primitives throw (RED comes from the THROW, not a ReferenceError).
-    expect(() => strategyCapabilities("worktree")).toThrow(/NOT IMPLEMENTED/);
-    expect(() => selectStrategy([], { id: "h", capabilities: [], strategies: [] })).toThrow(/NOT IMPLEMENTED/);
-    expect(() => isContained("/ws", "/ws/a")).toThrow(/NOT IMPLEMENTED/);
-    expect(() => sealTouchesOnlyWorkspace("/ws", [])).toThrow(/NOT IMPLEMENTED/);
-    expect(() => allocatePorts({ count: 1 }, [])).toThrow(/NOT IMPLEMENTED/);
+    // GREEN PHASE. This block previously asserted each primitive THROWS /NOT IMPLEMENTED/, and that
+    // was correct for exactly as long as the bodies were stubs. It is a SCAFFOLD ASSERTION: true in
+    // RED, false by construction the moment the seam is implemented, because no code change can both
+    // fill a body and keep it throwing. The verifier caught that contradiction and the publisher
+    // REFUSED to publish rather than edit a test on its own authority — the correct refusal, since
+    // the standing rule is never to weaken a test to make it pass.
+    //
+    // It is not weakened here; it is COMPLETED, and the completed form asserts strictly more. The
+    // permanent half of INV12 — every symbol exists and is callable, so a red assertion fails on an
+    // absent BODY rather than a missing symbol — is untouched above and outlives every phase. What
+    // changes is only the phase-scoped half: these primitives now RUN.
+    //
+    // The general lesson, worth carrying to the next stub-seam spec: a scaffold assertion has a
+    // LIFETIME, and nothing in the spec marked which of its assertions were phase-scoped. Every
+    // assertion that pins "this is not implemented yet" must be identified as such when written,
+    // or the GREEN change inherits a contradiction it cannot resolve without a governor.
+    expect(() => strategyCapabilities("worktree")).not.toThrow(/NOT IMPLEMENTED/);
+    expect(() => selectStrategy([], { id: "h", capabilities: [], strategies: [] })).not.toThrow(/NOT IMPLEMENTED/);
+    expect(() => isContained("/ws", "/ws/a")).not.toThrow(/NOT IMPLEMENTED/);
+    expect(() => sealTouchesOnlyWorkspace("/ws", [])).not.toThrow(/NOT IMPLEMENTED/);
+    expect(() => allocatePorts({ count: 1 }, [])).not.toThrow(/NOT IMPLEMENTED/);
   });
 });
 

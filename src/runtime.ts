@@ -10,7 +10,7 @@ import { executeSkillAsync } from "./skill_subprocess.js";
 import { loadSkillPackage } from "./skills.js";
 import { resolveModel } from "./claude_invoker.js";
 import { resolveAgentGrants, type ToolProviderRegistry } from "./tool_providers.js";
-import { resolveAndRealize, type Realization, type RealizationOk } from "./venue_realize.js";
+import { resolveAndRealize, type Realization, type RealizationOk, type HostCapabilityProfile } from "./venue_realize.js";
 import type { Venue } from "./chart.js";
 
 // core type → the process primitive that produces it (reverse of PRIMITIVE_OUTPUT_TYPE).
@@ -371,6 +371,13 @@ export interface RunDeps {
    *  any class present but NOT declared by the venue's `credential_surface` is a breach that fails
    *  the gig closed. Absent = none present (deny-by-default: an empty surface admits nothing). */
   credentialsPresent?: string[] | undefined;
+  /** The DECLARED capability profile of the host this dispatch runs on (a macOS dev host, a Linux
+   *  namespaces host, a Fly microVM). The realizer verifies the venue's `workspace.isolation_floor`
+   *  against THIS — a declared profile, never a runtime probe — and ABORTS the gig closed
+   *  (`isolation-floor-unmet`) when the host cannot meet the floor, never a silent downgrade. Absent =
+   *  a bare host offering only the worktree convention, so any hard floor aborts here. This is why
+   *  'works locally' and 'works on drain' may legitimately diverge — a declared property of the venue. */
+  hostProfile?: HostCapabilityProfile | undefined;
 }
 
 /**
@@ -929,6 +936,7 @@ export async function runGig(
       seats: standard.agents.map((agent) => ({ agent })),
       ambientEnv: {},
       ...(deps.credentialsPresent ? { credentialsPresent: deps.credentialsPresent } : {}),
+      ...(deps.hostProfile ? { hostProfile: deps.hostProfile } : {}),
       gigId: gig_id,
     });
     if (!realization.ok) {

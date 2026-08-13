@@ -14,6 +14,8 @@
 // intersection — so runtime enforcement and the compose-time R10 check share one oracle and cannot
 // drift. The invariant is OBSERVABLE (canReach/canAccept), the mechanism (namespace vs proxy vs
 // container) is left to a lower layer, exactly as the RED spec leaves it open.
+import { tmpdir } from "node:os";
+import { join, resolve, sep } from "node:path";
 import { venueEffectiveTools, type Venue } from "./chart.js";
 import type { Agent } from "./composition.js";
 import { venueDefect } from "./genome_schema.js";
@@ -141,6 +143,16 @@ const refuse = (code: RefusalCode, detail: string): RealizationRefusal => ({
   teardown: () => {},
 });
 
+/** The default host when a caller declares no `hostProfile`: a bare host offering ONLY the WORKTREE
+ *  convention — a filesystem boundary by directory convention, and none of the namespaced walls. An
+ *  absent profile therefore realizes a private worktree and REFUSES any floor demanding a hard wall,
+ *  which is the deny-by-default reading of "the host offers only the worktree convention". */
+const BARE_HOST: HostCapabilityProfile = {
+  id: "bare",
+  capabilities: ["filesystem-boundary"],
+  strategies: ["worktree"],
+};
+
 /**
  * Realize a Venue contract into an enforced, observable performance space.
  *
@@ -193,6 +205,38 @@ export function realize(venue: Venue, opts: RealizeOpts): Realization {
     );
   }
 
+  // (d.1) isolation-floor — the venue declares WHAT MUST BE TRUE of the room's walls; the realizer
+  //       picks the cheapest strategy the DECLARED host can build whose capabilities are a superset of
+  //       the demanded floor, and FAILS CLOSED (`isolation-floor-unmet`) when none can — never a
+  //       silent downgrade wall→convention. Absent floor (no workspace, or an empty one) is met by the
+  //       worktree convention; absent hostProfile => a bare host that offers only that convention. Both
+  //       floor and port are ROOM-level and sit BEFORE the per-seat ceiling, so the room's own
+  //       soundness is judged before any seat's ceiling is (INV11).
+  const floor = venue.workspace?.isolation_floor ?? [];
+  const host = opts.hostProfile ?? BARE_HOST;
+  const strategy = selectStrategy(floor, host);
+  if (strategy === null) {
+    return refuse(
+      "isolation-floor-unmet",
+      `venue "${venue.slug}" demands isolation floor [${floor.join(", ")}] but host "${host.id}" can build no strategy that provides every demanded capability — a wall the host cannot raise is refused, never downgraded to convention`,
+    );
+  }
+
+  // (d.2) port need — assign concrete bind ports disjoint from any concurrent gig's (`portsHeld`); an
+  //       unsatisfiable need is an allocation REFUSAL (`port-exhausted`), not a race whose symptom is a
+  //       green test hitting the FIRST gig's server. Deny-by-default: an absent port need allocates none.
+  let assignedPorts: number[] | undefined;
+  if (venue.ports !== undefined) {
+    const allocation = allocatePorts(venue.ports, opts.portsHeld ?? []);
+    if (!allocation.ok) {
+      return refuse(
+        "port-exhausted",
+        `venue "${venue.slug}" cannot be assigned ports disjoint from [${(opts.portsHeld ?? []).join(", ")}] — a collision is an allocation refusal, not a race`,
+      );
+    }
+    assignedPorts = allocation.ports;
+  }
+
   // (e) ceiling — apply the equipment ceiling through the shared oracle, per seat. An agent that
   //     grants something but whose grants ∩ equipment is empty refuses fail-closed; an agent that
   //     grants nothing realizes with an empty tool set (deny-by-default, not a breach).
@@ -217,6 +261,17 @@ export function realize(venue: Venue, opts: RealizeOpts): Realization {
   const isolation_handle = `venue:${venue.slug}:gig:${opts.gigId}:${++realizeCounter}`;
   let torn = false;
 
+  // The private write boundary this gig holds. Deny-by-default: even an absent `workspace` on the
+  // contract yields a private ephemeral tree here — NEVER `process.cwd()` — built by the strategy the
+  // floor selected (`worktree` when no hard wall was demanded). The per-call `realizeCounter` makes the
+  // path distinct across gigs and non-nesting (two paths differ in the counter segment, so neither is a
+  // prefix of the other), which is the workspace half of the per-gig isolation invariant.
+  const workspace: RealizedWorkspace = {
+    path: join(tmpdir(), "coltrane-venues", `${venue.slug}-gig-${realizeCounter}`),
+    strategy,
+    ephemeral: true,
+  };
+
   const lifecycle: RealizedLifecycle =
     venue.lifecycle.rebuild_cadence !== undefined
       ? { policy: venue.lifecycle.policy, rebuild_cadence: venue.lifecycle.rebuild_cadence }
@@ -230,10 +285,12 @@ export function realize(venue: Venue, opts: RealizeOpts): Realization {
     canAccept: (origin: string): boolean => ingress.includes(origin),
     isolation_handle,
     lifecycle,
+    workspace,
     tornDown: (): boolean => torn,
     teardown: (): void => {
       torn = true;
     },
+    ...(assignedPorts !== undefined ? { ports: assignedPorts } : {}),
     ...(venue.responsible_chair !== undefined ? { responsible_chair: venue.responsible_chair } : {}),
   };
   return ok;
@@ -295,60 +352,98 @@ export interface RealizedWorkspace {
   ephemeral: boolean;
 }
 
-/** A venue's declared bind-port need, mirrored from `VenuePortsSchema`. */
+/** A venue's declared bind-port need, mirrored from `VenuePortsSchema`. Every field is optional AND
+ *  admits `undefined`: the venue's `ports` is `z.output<VenuePortsSchema>` whose optional members are
+ *  `number | undefined` / `[number, number] | undefined`, and under `exactOptionalPropertyTypes` a bare
+ *  `count?: number` would NOT accept that. Widening to `| undefined` here (rather than deriving the type,
+ *  which would make `named` required and break the `allocatePorts({ count })` test literals) keeps this
+ *  interface assignable from BOTH `venue.ports` and a hand-built `{ count }` need. */
 export interface PortNeed {
-  count?: number;
-  range?: [number, number];
-  named?: string[];
+  count?: number | undefined;
+  range?: [number, number] | undefined;
+  named?: string[] | undefined;
 }
 
-/** The isolation capabilities a strategy provides. WORKTREE provides none of the hard walls (it is
- *  isolation by convention); SANDBOXED-PROCESS provides filesystem/network/pid boundaries via Linux
- *  namespaces; CONTAINER adds a distinct credential surface. RED: unimplemented. */
-export function strategyCapabilities(_strategy: RealizationStrategy): IsolationCapability[] {
-  throw new Error(
-    "NOT IMPLEMENTED: strategyCapabilities — the strategy→capability map is the venue-walls seam (RED)",
-  );
+/** The isolation capabilities each strategy provides — the fixed strategy→wall map. WORKTREE provides
+ *  ONLY `filesystem-boundary`, and that only BY CONVENTION: a per-gig directory a cooperating process
+ *  stays within, not a kernel mount namespace (a hostile process can still write outside it — see the
+ *  worktree limits stated on `VenueWorkspaceSchema`). It provides none of the namespaced walls.
+ *  SANDBOXED-PROCESS adds the Linux network + pid namespaces; CONTAINER adds a distinct credential
+ *  surface. MICROVM provides every capability. The map is total over the four strategies so a host's
+ *  declared capability set is exactly the union of the capabilities of the strategies it can build. */
+const STRATEGY_CAPABILITIES: Record<RealizationStrategy, IsolationCapability[]> = {
+  worktree: ["filesystem-boundary"],
+  "sandboxed-process": ["filesystem-boundary", "network-namespace", "pid-namespace"],
+  container: ["filesystem-boundary", "network-namespace", "pid-namespace", "distinct-credential-surface"],
+  microvm: ["filesystem-boundary", "network-namespace", "pid-namespace", "distinct-credential-surface"],
+};
+
+export function strategyCapabilities(strategy: RealizationStrategy): IsolationCapability[] {
+  return [...STRATEGY_CAPABILITIES[strategy]];
 }
+
+/** Cheapest-first ordering: a worktree (~300ms, no walls) before a sandboxed process before a
+ *  container before a microVM. `selectStrategy` returns the FIRST in this order the host can build
+ *  that satisfies the floor, so a met floor is realized as cheaply as it honestly can be. */
+const STRATEGY_ORDER: RealizationStrategy[] = ["worktree", "sandboxed-process", "container", "microvm"];
 
 /** Choose the cheapest strategy the host can build whose capabilities are a superset of the declared
  *  floor. Returns null when NO available strategy satisfies the floor — the caller must then refuse
- *  `isolation-floor-unmet`, never downgrade. RED: unimplemented. */
+ *  `isolation-floor-unmet`, never downgrade. */
 export function selectStrategy(
-  _floor: IsolationCapability[],
-  _host: HostCapabilityProfile,
+  floor: IsolationCapability[],
+  host: HostCapabilityProfile,
 ): RealizationStrategy | null {
-  throw new Error(
-    "NOT IMPLEMENTED: selectStrategy — floor-vs-host strategy selection is the venue-walls seam (RED)",
-  );
+  for (const strategy of STRATEGY_ORDER) {
+    if (!host.strategies.includes(strategy)) continue; // the host cannot build this strategy
+    const provided = new Set(strategyCapabilities(strategy));
+    if (floor.every((c) => provided.has(c))) return strategy; // superset of the floor — satisfies it
+  }
+  return null; // no buildable strategy provides the whole floor — the caller must refuse, not downgrade
 }
 
 /** True IFF `writePath` resolves strictly within `workspacePath` — the containment predicate that
  *  makes a workspace a boundary. Must reject `../` traversal, absolute escapes, and symlink-as-string
- *  escapes, not just prefix-match. RED: unimplemented. */
-export function isContained(_workspacePath: string, _writePath: string): boolean {
-  throw new Error(
-    "NOT IMPLEMENTED: isContained — workspace containment is the venue-walls seam (RED)",
-  );
+ *  escapes, not just prefix-match. */
+export function isContained(workspacePath: string, writePath: string): boolean {
+  // `resolve` normalizes `..` traversal and returns an absolute path, so a traversal or absolute
+  // escape lands OUTSIDE the root and a prefix-collision (`/work/gig-1-evil` vs `/work/gig-1`) is
+  // rejected because the boundary check requires the path separator right after the root — never a
+  // bare `startsWith` prefix match.
+  const root = resolve(workspacePath);
+  const target = resolve(writePath);
+  return target === root || target.startsWith(root + sep);
 }
 
 /** A sealed change-set's diff may touch ONLY paths within the declared workspace — the best-effort
  *  post-run guard that makes files a produced artifact bounded by the workspace rather than an
  *  ambient side effect (the WORKTREE strategy's convention made checkable). True IFF every touched
- *  path is contained. RED: unimplemented. */
-export function sealTouchesOnlyWorkspace(_workspacePath: string, _touchedPaths: string[]): boolean {
-  throw new Error(
-    "NOT IMPLEMENTED: sealTouchesOnlyWorkspace — seal-containment is the venue-walls seam (RED)",
-  );
+ *  path is contained. */
+export function sealTouchesOnlyWorkspace(workspacePath: string, touchedPaths: string[]): boolean {
+  // One out-of-bounds path refuses the WHOLE seal — a change-set is contained only if every path it
+  // touches is contained, so a single leaked path is not silently dropped from an otherwise-clean diff.
+  return touchedPaths.every((p) => isContained(workspacePath, p));
 }
 
-/** Assign concrete ports for a declared need, disjoint from `held`. Refuses (ok:false) on exhaustion
- *  — a collision is an allocation refusal, not a race. RED: unimplemented. */
+/** The default allocation window when a need names no `range`: the unprivileged ephemeral band. */
+const DEFAULT_PORT_LO = 1024;
+const DEFAULT_PORT_HI = 65535;
+
+/** Assign concrete ports for a declared need, disjoint from `held`. Refuses (`ok:false`) on
+ *  exhaustion — a collision is an allocation refusal, not a race. */
 export function allocatePorts(
-  _need: PortNeed,
-  _held: number[],
+  need: PortNeed,
+  held: number[],
 ): { ok: true; ports: number[] } | { ok: false } {
-  throw new Error(
-    "NOT IMPLEMENTED: allocatePorts — port allocation is the venue-walls seam (RED)",
-  );
+  const [lo, hi] = need.range ?? [DEFAULT_PORT_LO, DEFAULT_PORT_HI];
+  // How many ports the need asks for: an explicit `count`, else one per `named` service, else none.
+  const count = need.count ?? need.named?.length ?? 0;
+  const heldSet = new Set(held);
+  const ports: number[] = [];
+  for (let p = lo; p <= hi && ports.length < count; p++) {
+    if (!heldSet.has(p)) ports.push(p); // disjoint from every port a concurrent gig already holds
+  }
+  // Fewer free ports in the window than asked for is an honest REFUSAL, never an overlapping assignment.
+  if (ports.length < count) return { ok: false };
+  return { ok: true, ports };
 }

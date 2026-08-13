@@ -71,7 +71,7 @@ const runPoolGig = async (opts: {
   const invoke: AgentInvoker = (c) => {
     const idx = Number((c.phase.match(/\d+$/) ?? ["0"])[0]);
     const declared = opts.reserves[idx]!;
-    const off = (c as Record<string, unknown>)["turn_reserve"] as number | undefined;
+    const off = (c as unknown as Record<string, unknown>)["turn_reserve"] as number | undefined;
     offered[idx] = off;
     // The chair hit its declared turn_budget and reaches for its reserve. If the runtime offered it
     // turns, that is a GRANT; if it declared a reserve but the pool is dry, that is a DENIED draw —

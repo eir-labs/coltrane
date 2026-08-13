@@ -7,7 +7,32 @@ signals a breaking change and a **patch** signals an additive or internal one.
 `package.json`'s `version` — `tests/version_identity.test.ts` enforces that, and also that
 the MCP handshake reports the constant rather than a hardcoded literal.
 
-## Unreleased
+## 0.8.1
+
+### Added
+
+- **The drain is a venue, not a player.** A drain worker held ONE player's capability token, chosen
+  at boot and carried for its whole life. The store's own columns said otherwise —
+  `coltrane_gigs.lease_worker` is `text`, a venue handle, while `acting_for` is the agent — and the
+  mismatch had teeth: `coltrane_agent_may_run` was consulted twice, once at dispatch (the
+  dispatcher) and again at claim (the claimer). The second is not defence in depth. Authority was
+  settled at dispatch and recorded in `acting_for`, so re-filtering the queue by whoever holds the
+  worker's token made a gig legitimately dispatched by one player INVISIBLE to a box booted as
+  another. The queue did not error; it merely looked empty, which is the worst way for this to fail.
+
+  Venue mode: with `COLTRANE_DRAIN_KEY` and an instance (`COLTRANE_INSTANCE`, defaulting to
+  `FLY_APP_NAME`), `claimNextGig` authenticates as the BOX through `coltrane_drain_claim` and
+  receives a credential minted for that gig's own `acting_for`, expiring with the lease. Identity
+  becomes a consequence of the work rather than a choice made at boot. `ctx.agentToken` starts empty
+  and is cleared in a `finally` after each run — after the catch, because `failGig` speaks through
+  that same credential — so a drain between gigs holds nothing that opens a door, and one
+  compromised mid-gig holds exactly one gig's authority until the lease expires.
+
+  Player mode is unchanged and remains the default when no drain key is present: the chair filter
+  was never wrong for a player claiming work, only for a drain forced to be one. Additive, hence a
+  patch. Store side: `eir-labs/coltrane-ui#19`.
+
+## 0.8.0
 
 ### Added
 

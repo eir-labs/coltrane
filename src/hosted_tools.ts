@@ -181,6 +181,14 @@ export const HOSTED_TOOLS: HostedTool[] = [
         mode: { type: "string", enum: ["rehearsal", "studio", "live"] },
         input: { type: "object" },
         org_slug: { type: "string", description: "Disambiguates when you belong to several orgs carrying the standard." },
+        acting_for: {
+          type: "string",
+          description:
+            "The player whose authority this work carries — the identity a drain will run it as. " +
+            "Must be a SEATED member: the genome read the run needs is gated on seating, so an " +
+            "unseated name produces a gig that can only fail. Omit to act as yourself, which " +
+            "requires that you are seated.",
+        },
       },
       required: ["standard_slug", "mode", "input"],
     },
@@ -197,7 +205,16 @@ export const HOSTED_TOOLS: HostedTool[] = [
       const out = await rpc(
         ctx,
         "coltrane_gig_dispatch",
-        { p_standard: args["standard_slug"], p_mode: args["mode"], p_input: args["input"] ?? {}, p_org_slug: args["org_slug"] ?? null },
+        {
+          p_standard: args["standard_slug"],
+          p_mode: args["mode"],
+          p_input: args["input"] ?? {},
+          p_org_slug: args["org_slug"] ?? null,
+          // WHO ACTS, as distinct from who asked. Without this the store defaults to the caller,
+          // and a caller who holds no chair produces a gig that fails at genome load thirty minutes
+          // later on a drain — which is exactly what the first real gig did.
+          p_acting_for: args["acting_for"] ?? null,
+        },
         true,
       );
       return out.isError ? out : ok({ gig_id: JSON.parse(out.text), status: "queued" });

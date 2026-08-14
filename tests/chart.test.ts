@@ -698,6 +698,7 @@ describe("runChart — a gate between movements parks the performance", () => {
     vi.stubGlobal("fetch", fetchMock);
     process.env["COLTRANE_DRAIN_URL"] = "https://drain.example";
     process.env["COLTRANE_DRAIN_KEY"] = "cdk_test";
+    process.env["COLTRANE_STORE_ANON"] = "anon_test";
     try {
       await runChart(plan(gated()), {}, deps(bench(), counting().invoke));
       const bodies = fetchMock.mock.calls.map((call) => String((call[1] as RequestInit | undefined)?.body ?? ""));
@@ -705,6 +706,7 @@ describe("runChart — a gate between movements parks the performance", () => {
     } finally {
       delete process.env["COLTRANE_DRAIN_URL"];
       delete process.env["COLTRANE_DRAIN_KEY"];
+      delete process.env["COLTRANE_STORE_ANON"];
       vi.unstubAllGlobals();
     }
   });

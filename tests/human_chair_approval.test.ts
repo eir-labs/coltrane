@@ -86,18 +86,20 @@ describe("runtime — an unapproved human chair PARKS the gig", () => {
     vi.stubGlobal("fetch", fetchMock);
     process.env["COLTRANE_DRAIN_URL"] = "https://drain.example";
     process.env["COLTRANE_DRAIN_KEY"] = "cdk_test";
+    process.env["COLTRANE_STORE_ANON"] = "anon_test";
     try {
       await runGig(std(), {}, deps() as never);
       await new Promise((r) => setImmediate(r));
       const calls = fetchMock.mock.calls as unknown as [string, RequestInit][];
-      const call = calls.find(([u]) => String(u).includes("coltrane_gigs"));
+      const call = calls.find(([u]) => String(u).includes("coltrane_drain_upsert_gig"));
       expect(call, "parked gig must drain its header").toBeDefined();
       const body = JSON.parse(call![1].body as string) as Record<string, unknown>;
-      expect(body["status"]).toBe("awaiting_approval");
+      expect((body["p_gig"] as Record<string, unknown>)["status"]).toBe("awaiting_approval");
     } finally {
       vi.unstubAllGlobals();
       delete process.env["COLTRANE_DRAIN_URL"];
       delete process.env["COLTRANE_DRAIN_KEY"];
+      delete process.env["COLTRANE_STORE_ANON"];
     }
   });
 });

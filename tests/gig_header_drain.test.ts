@@ -52,29 +52,50 @@ describe("drainGigHeader — fire-and-forget to the drain service", () => {
     vi.stubGlobal("fetch", fetchMock);
     process.env["COLTRANE_DRAIN_URL"] = "https://drain.example";
     process.env["COLTRANE_DRAIN_KEY"] = "cdk_test";
+    process.env["COLTRANE_STORE_ANON"] = "anon_test";
     fetchMock.mockClear();
   });
   afterEach(() => {
     vi.unstubAllGlobals();
     delete process.env["COLTRANE_DRAIN_URL"];
     delete process.env["COLTRANE_DRAIN_KEY"];
+    delete process.env["COLTRANE_STORE_ANON"];
   });
 
-  it("POSTs the header to the sink's gig table path with merge semantics", async () => {
+  // THIS LAW USED TO PIN THE WRONG THING. It asserted a direct POST to
+  // /rest/v1/coltrane_gigs with `Authorization: Bearer <drain key>` — which is precisely the request
+  // PostgREST answers 401, because a drain key is an application credential and PostgREST has never
+  // heard of it. The law passed for years by mocking fetch and checking the URL, so it could not
+  // have caught the auth failure it was encoding.
+  //
+  // The write path is the definer RPC, which authenticates the drain key against coltrane_drain_key
+  // and needs the PROJECT key as `apikey` — two credentials, each in its own place.
+  it("goes through coltrane_drain_upsert_gig, with each credential in its proper place", async () => {
     await drainGigHeader(REC);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
-    expect(url).toBe("https://drain.example/rest/v1/coltrane_gigs");
+    expect(url).toBe("https://drain.example/rest/v1/rpc/coltrane_drain_upsert_gig");
     const headers = init.headers as Record<string, string>;
-    expect(headers["Authorization"]).toBe("Bearer cdk_test");
-    expect(headers["Prefer"]).toContain("merge-duplicates");
+    // The PROJECT key opens PostgREST. The drain key is not one and must not be sent as one.
+    expect(headers["apikey"]).toBe("anon_test");
+    expect(headers["Authorization"]).toBeUndefined();
     const body = JSON.parse(init.body as string) as Record<string, unknown>;
-    expect(body["id"]).toBe(REC.gig_id);
-    expect(body["status"]).toBe("completed");
+    // The drain key rides in the body, where the definer function reads it.
+    expect(body["p_token"]).toBe("cdk_test");
+    const gig = body["p_gig"] as Record<string, unknown>;
+    expect(gig["id"]).toBe(REC.gig_id);
+    expect(gig["status"]).toBe("completed");
+  });
+
+  it("refuses to reach the store without a project key, instead of sending the drain key as one", async () => {
+    delete process.env["COLTRANE_STORE_ANON"];
+    await expect(drainGigHeader(REC)).rejects.toThrow(/COLTRANE_STORE_ANON is required/);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("is a silent no-op when the drain is not configured", async () => {
     delete process.env["COLTRANE_DRAIN_KEY"];
+    delete process.env["COLTRANE_STORE_ANON"];
     await drainGigHeader(REC);
     expect(fetchMock).not.toHaveBeenCalled();
   });
@@ -89,12 +110,14 @@ describe("runGig drains a FAILED header — the sink learns the truth either way
     vi.stubGlobal("fetch", fetchMock);
     process.env["COLTRANE_DRAIN_URL"] = "https://drain.example";
     process.env["COLTRANE_DRAIN_KEY"] = "cdk_test";
+    process.env["COLTRANE_STORE_ANON"] = "anon_test";
     fetchMock.mockClear();
   });
   afterEach(() => {
     vi.unstubAllGlobals();
     delete process.env["COLTRANE_DRAIN_URL"];
     delete process.env["COLTRANE_DRAIN_KEY"];
+    delete process.env["COLTRANE_STORE_ANON"];
   });
 
   it("a chair failure produces one failed-header POST carrying the error", async () => {
@@ -124,11 +147,12 @@ describe("runGig drains a FAILED header — the sink learns the truth either way
     // fire-and-forget: give the drained header its microtask
     await new Promise((r) => setImmediate(r));
     const calls = fetchMock.mock.calls as unknown as [string, RequestInit][];
-    const call = calls.find(([u]) => String(u).includes("coltrane_gigs"));
+    const call = calls.find(([u]) => String(u).includes("coltrane_drain_upsert_gig"));
     expect(call, "failed run must drain a header").toBeDefined();
     const body = JSON.parse(call![1].body as string) as Record<string, unknown>;
-    expect(body["id"]).toBe("22222222-2222-2222-2222-222222222222");
-    expect(body["status"]).toBe("failed");
-    expect((body["manifest"] as Record<string, unknown>)["error"]).toMatch(/boom in the chair/);
+    const gig = body["p_gig"] as Record<string, unknown>;
+    expect(gig["id"]).toBe("22222222-2222-2222-2222-222222222222");
+    expect(gig["status"]).toBe("failed");
+    expect((gig["manifest"] as Record<string, unknown>)["error"]).toMatch(/boom in the chair/);
   });
 });

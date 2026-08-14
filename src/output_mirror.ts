@@ -175,10 +175,12 @@ export function createOutputMirror(mirrorRoot: string): OutputMirror {
       // REMOTE, credential-gated. Fire-and-forget: a finished gig is not failed because a
       // remote append could not be reached. OSS with no credential never enters this path.
       if (remoteConfigured()) {
+        // ALWAYS warned, not gated behind COLTRANE_DRAIN_DEBUG. A remote append that fails is not
+        // a cosmetic loss: the gig header never completes, its lease expires, and the store hands
+        // the same work to the next drain — which runs it and pays for it again. Silence here buys
+        // a tidy log and costs an unbounded loop, which is the wrong trade in every direction.
         void drainRemote(rec).catch((e) => {
-          if (process.env["COLTRANE_DRAIN_DEBUG"]) {
-            console.warn(`[output_mirror] remote drain failed: ${e instanceof Error ? e.message : String(e)}`);
-          }
+          console.warn(`[output_mirror] remote drain FAILED — this gig will be re-run: ${e instanceof Error ? e.message : String(e)}`);
         });
       }
     },
@@ -276,21 +278,49 @@ async function drainRemote(rec: OutputRecord): Promise<void> {
   }
 }
 
+/**
+ * PostgREST's own gate, which is NOT the drain credential.
+ *
+ * A Supabase project rejects any request without a valid project `apikey`, whatever else it
+ * carries. The drain key is an APPLICATION credential — it authenticates inside a SECURITY DEFINER
+ * function, against `coltrane_drain_key`, and PostgREST has never heard of it.
+ *
+ * Conflating the two is what made every drained result vanish: the mirror posted straight at
+ * `/rest/v1/coltrane_outputs` with the drain key as `apikey`, PostgREST answered 401, and the
+ * failure was swallowed unless COLTRANE_DRAIN_DEBUG happened to be set. The gig stayed `running`,
+ * its lease expired, and the work was reclaimed and paid for again — silently, forever.
+ */
+function storeApiKey(): string {
+  const k = process.env["COLTRANE_STORE_ANON"] ?? process.env["COLTRANE_DRAIN_ANON"] ?? "";
+  if (!k) {
+    throw new Error(
+      "COLTRANE_STORE_ANON is required to reach the store: the drain key authenticates inside the " +
+        "definer RPC, it is not a project API key",
+    );
+  }
+  return k;
+}
+
+/** POST a definer RPC with both credentials in their proper places. */
+async function drainRpc(fn: string, body: Record<string, unknown>): Promise<Response> {
+  const base = (process.env["COLTRANE_DRAIN_URL"] ?? "").replace(/\/$/, "");
+  if (!base) throw new Error("COLTRANE_DRAIN_KEY is set but COLTRANE_DRAIN_URL (project base) is missing");
+  return fetch(`${base}/rest/v1/rpc/${fn}`, {
+    method: "POST",
+    headers: { apikey: storeApiKey(), "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
 async function drainViaPostgrest(rec: OutputRecord, key: string): Promise<void> {
   const base = (process.env["COLTRANE_DRAIN_URL"] ?? "").replace(/\/$/, "");
   if (!base) throw new Error("COLTRANE_DRAIN_KEY is set but COLTRANE_DRAIN_URL (project base) is missing");
-  // TIER 1 — the metadata+data row into `coltrane_outputs` (columns already exist in the schema).
-  const rowRes = await fetch(`${base}/rest/v1/coltrane_outputs`, {
-    method: "POST",
-    headers: {
-      apikey: key,
-      Authorization: `Bearer ${key}`,
-      "Content-Type": "application/json",
-      Prefer: "resolution=merge-duplicates,return=minimal",
-    },
-    body: JSON.stringify(drainBody(rec)),
-  });
-  if (!rowRes.ok) throw new Error(`coltrane_outputs POST ${rowRes.status}`);
+  // TIER 1 — through the definer RPC, which is the surface built for exactly this. Writing the
+  // table directly required the drain key to BE a project API key; it is not, and never was.
+  const rowRes = await drainRpc("coltrane_drain_ingest", { p_token: key, p_rows: [drainBody(rec)] });
+  if (!rowRes.ok) {
+    throw new Error(`coltrane_drain_ingest ${rowRes.status}: ${(await rowRes.text()).slice(0, 200)}`);
+  }
   // TIER 2 — the payload artifact into Storage, content-addressed by sha (idempotent upsert).
   const bucket = process.env["COLTRANE_DRAIN_BUCKET"] ?? "coltrane-artifacts";
   const objectPath = `${rec.gig_id}/${rec.content_sha}.json`;
@@ -404,19 +434,10 @@ export async function drainGigHeader(rec: GigHeaderRecord): Promise<void> {
   if (!remoteConfigured()) return;
   const key = process.env["COLTRANE_DRAIN_KEY"];
   if (key) {
-    const base = (process.env["COLTRANE_DRAIN_URL"] ?? "").replace(/\/$/, "");
-    if (!base) throw new Error("COLTRANE_DRAIN_KEY is set but COLTRANE_DRAIN_URL (drain service base) is missing");
-    const res = await fetch(`${base}/rest/v1/coltrane_gigs`, {
-      method: "POST",
-      headers: {
-        apikey: key,
-        Authorization: `Bearer ${key}`,
-        "Content-Type": "application/json",
-        Prefer: "resolution=merge-duplicates,return=minimal",
-      },
-      body: JSON.stringify(gigHeaderBody(rec)),
-    });
-    if (!res.ok) throw new Error(`coltrane_gigs POST ${res.status}`);
+    const res = await drainRpc("coltrane_drain_upsert_gig", { p_token: key, p_gig: gigHeaderBody(rec) });
+    if (!res.ok) {
+      throw new Error(`coltrane_drain_upsert_gig ${res.status}: ${(await res.text()).slice(0, 200)}`);
+    }
     return;
   }
   const pgConn = process.env["COLTRANE_DRAIN_PG"];

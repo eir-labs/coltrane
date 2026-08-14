@@ -40,6 +40,7 @@ import { createOutputStore, type OutputStore } from "./outputs.js";
 import { MemoryLedger } from "./ledger.js";
 import { rpcGenomeStore } from "./genome_store.js";
 import { prepareWorkspace } from "./workspace.js";
+import { engineToolProviders, drainBudget, drainTimeoutMs } from "./run_deps.js";
 import { createOutputMirror } from "./output_mirror.js";
 import { PRIMITIVE_OUTPUT_TYPE } from "./core_types.js";
 import { sha256Hex, canonJson, outputContentHash, CANONICAL_FORM_VERSION } from "./canonical_form.js";
@@ -847,6 +848,9 @@ export async function workOnce(ctx: WorkerContext, deps: WorkOnceDeps): Promise<
   // stranded temp directory.
   const cwdBefore = process.cwd();
   let workspace: Awaited<ReturnType<typeof prepareWorkspace>> = null;
+  // Declared out here so the finally can clear it: a timer left armed keeps the process alive past
+  // a finished gig, which on a drain means the loop's next claim waits on nothing.
+  let deadline: ReturnType<typeof setTimeout> | undefined;
 
   try {
     workspace = await prepareWorkspace({
@@ -914,12 +918,43 @@ export async function workOnce(ctx: WorkerContext, deps: WorkOnceDeps): Promise<
       }
     }
     const human = approvalWiring(claim.approvals, standard, checkpoint?.roles.map((r) => r.role) ?? []);
+
+    // ENFORCEMENT PARITY WITH THE SERVER PATH. These four were absent, and every absence turned a
+    // control OFF for the one path that runs queued work with nobody watching: no spend ceiling, no
+    // grant resolution (so a dead tool name reached the spawn instead of failing closed), and no way
+    // to stop a run. tests/run_deps_parity pins them so the two call sites cannot drift again.
+    //
+    // mcpServerConfigs is EMPTY, deliberately, and is not read from the working tree: the drain's
+    // cwd is a freshly cloned repository, so honouring a `.mcp.json` there would let a repo declare
+    // servers for the seat reading it. Present enables resolution; empty makes any grant naming a
+    // server other than the engine's own fail closed.
+    const aborter = new AbortController();
+    deadline = setTimeout(() => aborter.abort(), drainTimeoutMs());
+    // unref so a finished gig exits promptly instead of waiting out its own timeout.
+    if (typeof deadline === "object" && "unref" in deadline) deadline.unref();
+
     const run = (resume: boolean): ReturnType<typeof runGig> => runGig(standard, claim.input, {
       outputs,
       ledger,
       invoke,
       gig_id: claim.gig_id, // ← the run IS the queue row; the drained header completes it
       skills: genome.skills,
+      budget: drainBudget(claim.input),
+      toolProviders: engineToolProviders(),
+      mcpServerConfigs: {},
+      signal: aborter.signal,
+      // Which model actually ran, so a drained gig's record is as complete as a dispatched one's.
+      // Passed unconditionally, as the server does: undefined is a truthful "not configured", and a
+      // conditional spread would make the wire invisible to anything reading the call site.
+      model_version: process.env["COLTRANE_MODEL"],
+      evals: genome.evals,
+      // EMPTY, and explicitly so rather than by omission. Store-loaded skills carry no local package
+      // dir by construction — there is no code half to point at — so a skill-BACKED chair fails at
+      // prep with the runtime's own "no skill_dir is registered" error. That was already true when
+      // this was absent; declaring it says the drain HAS no local dirs, instead of leaving a reader
+      // to infer whether the wire was considered. An absence and an empty map behave identically
+      // here; only one of them is a statement.
+      skill_dirs: new Map<string, string>(),
       // Store-loaded skills carry no local package dir (no code half) by construction, so
       // no skill_dirs: a skill-BACKED chair in a store standard fails precisely at prep
       // with the runtime's own "no skill_dir is registered" error, not a confabulated run.
@@ -990,6 +1025,7 @@ export async function workOnce(ctx: WorkerContext, deps: WorkOnceDeps): Promise<
     try {
       process.chdir(cwdBefore);
     } catch { /* the original cwd is gone; nothing useful left to do about it here */ }
+    if (deadline) clearTimeout(deadline);
     workspace?.cleanup();
     // Hand the git credential back. GitHub fixes installation tokens at an hour and the lease that
     // justified this one is thirty minutes, so a finished gig otherwise leaves a live credential

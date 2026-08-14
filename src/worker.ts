@@ -39,6 +39,7 @@ import { loadRegistry, type Registry } from "./registry.js";
 import { createOutputStore, type OutputStore } from "./outputs.js";
 import { MemoryLedger } from "./ledger.js";
 import { rpcGenomeStore } from "./genome_store.js";
+import { prepareWorkspace } from "./workspace.js";
 import { createOutputMirror } from "./output_mirror.js";
 import { PRIMITIVE_OUTPUT_TYPE } from "./core_types.js";
 import { sha256Hex, canonJson, outputContentHash, CANONICAL_FORM_VERSION } from "./canonical_form.js";
@@ -90,6 +91,12 @@ export interface ClaimedGig {
   mode: string;
   input: Record<string, unknown>;
   acting_for: string;
+  /**
+   * The repository this gig works in, named by the STORE from a governed column — never by the gig.
+   * Null when the organization declares none, which is a normal answer: such gigs do not touch a
+   * working tree. Only venue mode carries this; the player path leaves it undefined.
+   */
+  repo_url?: string | null;
   /**
    * The human seat's verdicts, keyed by chair role — present on a RE-claim of a gig that
    * parked. The approve RPC writes them onto the row's manifest and re-queues it; the claim
@@ -828,7 +835,32 @@ export async function workOnce(ctx: WorkerContext, deps: WorkOnceDeps): Promise<
   if (!claim) return { claimed: false };
   log(`claimed ${claim.gig_id} (${claim.standard_slug}, ${claim.mode}) as ${claim.acting_for}`);
 
+  // THE WORKING TREE IS OBTAINED AFTER THE CLAIM, and that ordering is the point. The shell used to
+  // clone first, from a REPO_URL fixed at provisioning, which made a per-gig fact a per-box one and
+  // pinned every gig of an organization to one repository. Here the store names it on the claim and
+  // the credential is minted against this gig's live lease — so a drain between gigs holds no git
+  // credential at all, and no repository is reachable that the store did not name.
+  //
+  // The cwd is changed rather than threaded through runGig: `coltrane work` claims once, runs once
+  // and exits, so there is exactly one gig per process and nothing else to disturb. Restored in the
+  // finally regardless, because a process that outlived its assumption would be worse than a
+  // stranded temp directory.
+  const cwdBefore = process.cwd();
+  let workspace: Awaited<ReturnType<typeof prepareWorkspace>> = null;
+
   try {
+    workspace = await prepareWorkspace({
+      repoUrl: claim.repo_url,
+      gigId: claim.gig_id,
+      drainKey: ctx.drainKey,
+      instance: ctx.instance,
+      endpoint: process.env["COLTRANE_GIT_CREDENTIALS_URL"],
+    });
+    if (workspace) {
+      process.chdir(workspace.dir);
+      log(`working tree ready: ${claim.repo_url}`);
+    }
+
     const genome = await rpcGenomeStore(ctx).load();
     const standard = genome.standards.get(claim.standard_slug);
     if (!standard) {
@@ -953,6 +985,19 @@ export async function workOnce(ctx: WorkerContext, deps: WorkOnceDeps): Promise<
     }
     return { claimed: true, gig_id: claim.gig_id, status: "failed", error: message };
   } finally {
+    // Restored BEFORE the temp directory is removed: deleting the directory a process is standing
+    // in leaves it with an invalid cwd, and every later relative path resolves from nowhere.
+    try {
+      process.chdir(cwdBefore);
+    } catch { /* the original cwd is gone; nothing useful left to do about it here */ }
+    workspace?.cleanup();
+    // Hand the git credential back. GitHub fixes installation tokens at an hour and the lease that
+    // justified this one is thirty minutes, so a finished gig otherwise leaves a live credential
+    // behind for the remainder. Not a security control — a compromised drain declines to call it —
+    // but in the ordinary case a four-minute run stops holding one fifty-six minutes early.
+    // Deliberately not awaited: the gig is drained and its result must not wait on GitHub.
+    void workspace?.revoke();
+
     // In venue mode the credential arrived WITH the work and must not outlive it.
     //
     // Without this, "a drain between gigs holds nothing that opens a door" is a property of the

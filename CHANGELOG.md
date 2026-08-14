@@ -7,6 +7,17 @@ signals a breaking change and a **patch** signals an additive or internal one.
 `package.json`'s `version` — `tests/version_identity.test.ts` enforces that, and also that
 the MCP handshake reports the constant rather than a hardcoded literal.
 
+## 0.9.2
+
+### Added
+
+- **`dispatch_gig` can name the player whose authority the work carries.** The store learned this in
+  `eir-labs/coltrane-ui#31`; the tool had no field for it. The first gig dispatched through this
+  tool was claimed by the drain and failed at `genome load (agent token): agent eugene holds no seat
+  in this organization` — `acting_for` defaulted to the human who dispatched, and the genome read is
+  gated on seating, so the gig was unrunnable from the moment it was created. `acting_for` now rides
+  through to `p_acting_for`; the store enforces that it names a SEATED member.
+
 ## 0.9.1
 
 ### Fixed

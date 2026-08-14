@@ -99,3 +99,54 @@ describe("the clone itself", () => {
     expect(() => cloneInto(missing, "t")).toThrow(/clone of .* failed/);
   });
 });
+
+describe("handing the credential back", () => {
+  it("calls GitHub's only early-revocation path, authenticated with the token itself", async () => {
+    const calls: Array<{ url: string; method: string; auth: string }> = [];
+    vi.stubGlobal("fetch", vi.fn(async (u: string, init: RequestInit) => {
+      calls.push({
+        url: String(u),
+        method: String(init?.method ?? ""),
+        auth: String((init?.headers as Record<string, string> | undefined)?.["authorization"] ?? ""),
+      });
+      return new Response("", { status: 204 });
+    }));
+    const origin = mkdtempSync(join(tmpdir(), "ws-rev-"));
+    execFileSync("git", ["init", "--quiet", "--bare", origin]);
+    const seed = mkdtempSync(join(tmpdir(), "ws-revseed-"));
+    execFileSync("git", ["init", "--quiet", seed]);
+    writeFileSync(join(seed, "f"), "x");
+    const g = (a: string[]) => execFileSync("git", ["-C", seed, ...a], {
+      env: { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" } });
+    g(["add", "-A"]); g(["commit", "--quiet", "-m", "s"]);
+    g(["remote", "add", "o", origin]); g(["push", "--quiet", "o", "HEAD:refs/heads/main"]);
+
+    const ws = cloneInto(origin, "ghs_token_to_hand_back");
+    await ws.revoke();
+    ws.cleanup();
+
+    expect(calls).toHaveLength(1);
+    const call = calls[0]!;
+    expect(call.url).toBe("https://api.github.com/installation/token");
+    // DELETE authenticated WITH the token is the ONLY way GitHub ends an installation token early.
+    expect(call.method).toBe("DELETE");
+    expect(call.auth).toBe("Bearer ghs_token_to_hand_back");
+  });
+
+  it("never throws — a drained gig must not fail because GitHub was unreachable", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("network down"); }));
+    const origin = mkdtempSync(join(tmpdir(), "ws-rev2-"));
+    execFileSync("git", ["init", "--quiet", "--bare", origin]);
+    const seed = mkdtempSync(join(tmpdir(), "ws-rev2seed-"));
+    execFileSync("git", ["init", "--quiet", seed]);
+    writeFileSync(join(seed, "f"), "x");
+    const g = (a: string[]) => execFileSync("git", ["-C", seed, ...a], {
+      env: { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" } });
+    g(["add", "-A"]); g(["commit", "--quiet", "-m", "s"]);
+    g(["remote", "add", "o", origin]); g(["push", "--quiet", "o", "HEAD:refs/heads/main"]);
+
+    const ws = cloneInto(origin, "t");
+    await expect(ws.revoke()).resolves.toBeUndefined();
+    ws.cleanup();
+  });
+});

@@ -991,6 +991,12 @@ export async function workOnce(ctx: WorkerContext, deps: WorkOnceDeps): Promise<
       process.chdir(cwdBefore);
     } catch { /* the original cwd is gone; nothing useful left to do about it here */ }
     workspace?.cleanup();
+    // Hand the git credential back. GitHub fixes installation tokens at an hour and the lease that
+    // justified this one is thirty minutes, so a finished gig otherwise leaves a live credential
+    // behind for the remainder. Not a security control — a compromised drain declines to call it —
+    // but in the ordinary case a four-minute run stops holding one fifty-six minutes early.
+    // Deliberately not awaited: the gig is drained and its result must not wait on GitHub.
+    void workspace?.revoke();
 
     // In venue mode the credential arrived WITH the work and must not outlive it.
     //

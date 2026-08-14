@@ -64,13 +64,17 @@ describe("trading the venue credential for a git one", () => {
 });
 
 describe("the clone itself", () => {
+  // --initial-branch=main on BOTH repos, deliberately. `git clone` checks out whatever the origin's
+  // HEAD symref names, and that follows the ambient init.defaultBranch — which differs between a
+  // developer's machine and CI. Without pinning it the clone succeeds, checks out nothing, and the
+  // failure reads as "the clone did not produce the file" rather than "we disagree about a name".
   it("clones, and leaves the token nowhere on disk", () => {
     // A real clone from a real local repository — the token path is what matters, and asserting it
     // against a mock would prove nothing about what git actually writes.
     const origin = mkdtempSync(join(tmpdir(), "ws-origin-"));
-    execFileSync("git", ["init", "--quiet", "--bare", origin]);
+    execFileSync("git", ["init", "--quiet", "--bare", "--initial-branch=main", origin]);
     const seed = mkdtempSync(join(tmpdir(), "ws-seed-"));
-    execFileSync("git", ["init", "--quiet", seed]);
+    execFileSync("git", ["init", "--quiet", "--initial-branch=main", seed]);
     writeFileSync(join(seed, "README.md"), "hello");
     const g = (args: string[]) => execFileSync("git", ["-C", seed, ...args], {
       env: { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" },
@@ -112,9 +116,9 @@ describe("handing the credential back", () => {
       return new Response("", { status: 204 });
     }));
     const origin = mkdtempSync(join(tmpdir(), "ws-rev-"));
-    execFileSync("git", ["init", "--quiet", "--bare", origin]);
+    execFileSync("git", ["init", "--quiet", "--bare", "--initial-branch=main", origin]);
     const seed = mkdtempSync(join(tmpdir(), "ws-revseed-"));
-    execFileSync("git", ["init", "--quiet", seed]);
+    execFileSync("git", ["init", "--quiet", "--initial-branch=main", seed]);
     writeFileSync(join(seed, "f"), "x");
     const g = (a: string[]) => execFileSync("git", ["-C", seed, ...a], {
       env: { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" } });
@@ -136,9 +140,9 @@ describe("handing the credential back", () => {
   it("never throws — a drained gig must not fail because GitHub was unreachable", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("network down"); }));
     const origin = mkdtempSync(join(tmpdir(), "ws-rev2-"));
-    execFileSync("git", ["init", "--quiet", "--bare", origin]);
+    execFileSync("git", ["init", "--quiet", "--bare", "--initial-branch=main", origin]);
     const seed = mkdtempSync(join(tmpdir(), "ws-rev2seed-"));
-    execFileSync("git", ["init", "--quiet", seed]);
+    execFileSync("git", ["init", "--quiet", "--initial-branch=main", seed]);
     writeFileSync(join(seed, "f"), "x");
     const g = (a: string[]) => execFileSync("git", ["-C", seed, ...a], {
       env: { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" } });

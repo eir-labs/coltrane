@@ -7,6 +7,41 @@ signals a breaking change and a **patch** signals an additive or internal one.
 `package.json`'s `version` — `tests/version_identity.test.ts` enforces that, and also that
 the MCP handshake reports the constant rather than a hardcoded literal.
 
+## 0.9.1
+
+### Fixed
+
+- **Results reach the store.** `output_mirror` posted straight at `/rest/v1/coltrane_outputs` and
+  `/rest/v1/coltrane_gigs` with `COLTRANE_DRAIN_KEY` as the project `apikey`. A drain key is an
+  APPLICATION credential — it authenticates inside a `SECURITY DEFINER` function against
+  `coltrane_drain_key`, and PostgREST has never heard of it. Every write answered 401.
+
+  Survivable while that variable was optional. Venue mode made it the CLAIMING credential, so it is
+  now always set: the mirror always fires and every write fails. The run still reports success, the
+  gig header never completes, its lease expires, and the store hands the same work to the next
+  drain — which runs it and pays for it again, unbounded and silent, because the catch only warned
+  when `COLTRANE_DRAIN_DEBUG` happened to be set.
+
+  Both paths now use the definer RPCs built for exactly this — `coltrane_drain_ingest` and
+  `coltrane_drain_upsert_gig` — with the drain key as `p_token` and the project key as `apikey`.
+  The failure warns unconditionally now, naming the consequence. Found by running a real standard
+  through the drain rather than testing the plumbing around it; four laws had pinned the broken
+  path by mocking `fetch` and asserting the URL.
+
+- **A seat never inherits the credentials that make the box the box.** `childEnv` was built only
+  when a gig named a venue, and the drain names none — so every seat spawned with `process.env`
+  inherited whole, including `COLTRANE_DRAIN_KEY`. A deny floor now applies on every path.
+
+- **A cloned repository cannot configure the seat that reads it.** Verified against the pinned CLI:
+  without `--setting-sources user`, a repo's `.claude/settings.json` hooks EXECUTE and its
+  `CLAUDE.md` is obeyed. One gig's write access became every later gig's code execution.
+
+### Added
+
+- **The working tree is obtained AFTER the claim**, from the repository the store names, with a git
+  credential minted per gig against a live lease. `REPO_URL` fixed at provisioning made a per-gig
+  fact a per-box one and pinned every gig of an organization to one repository.
+
 ## 0.8.1
 
 ### Added

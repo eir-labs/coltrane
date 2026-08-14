@@ -39,6 +39,22 @@ export interface PreparedWorkspace {
   dir: string;
   /** Idempotent. Safe to call from a `finally` that may run after a partial failure. */
   cleanup: () => void;
+  /**
+   * Hand the git credential back when the gig is done.
+   *
+   * A GitHub installation token is fixed at ONE HOUR and the lease that justified it is thirty
+   * minutes, so the git half outlives its own authority by at least 2x — and no revocation on our
+   * side can recall it. GitHub exposes exactly one way to end one early: DELETE
+   * /installation/token, authenticated WITH that token.
+   *
+   * Which means only a cooperative holder can do it. That is not a security control and must not be
+   * described as one: a compromised drain simply declines to call this. It is a hygiene measure for
+   * the ordinary case, and the ordinary case is every gig — a run that takes four minutes stops
+   * holding a live credential fifty-six minutes early.
+   *
+   * Best-effort by construction: a failure here must never fail a drained gig.
+   */
+  revoke: () => Promise<void>;
 }
 
 /**
@@ -92,6 +108,14 @@ export function cloneInto(repoUrl: string, token: string): PreparedWorkspace {
       rmSync(dir, { recursive: true, force: true });
     } catch { /* a temp dir that will not delete is not worth failing a drained gig over */ }
   };
+  const revoke = async () => {
+    try {
+      await fetch("https://api.github.com/installation/token", {
+        method: "DELETE",
+        headers: { authorization: `Bearer ${token}`, accept: "application/vnd.github+json" },
+      });
+    } catch { /* best effort: the token expires on its own within the hour regardless */ }
+  };
 
   try {
     execFileSync(
@@ -129,7 +153,7 @@ export function cloneInto(repoUrl: string, token: string): PreparedWorkspace {
     throw new Error(`clone of ${repoUrl} failed${stderr ? `: ${stderr}` : ""}`);
   }
 
-  return { dir, cleanup };
+  return { dir, cleanup, revoke };
 }
 
 /**

@@ -7,6 +7,16 @@ signals a breaking change and a **patch** signals an additive or internal one.
 `package.json`'s `version` — `tests/version_identity.test.ts` enforces that, and also that
 the MCP handshake reports the constant rather than a hardcoded literal.
 
+## 0.9.3
+
+### Fixed
+
+- **`acting_for` on the surface that is actually served.** 0.9.2 added it to `hosted_tools.ts`, but
+  the hosted endpoint mounts `tool_surface` — `MCP_TOOLS` from `src/mcp.ts`. Different surface,
+  different tool. A client had nothing to send, and the store kept answering "no acting_for was
+  named", which reads exactly like a stale client cache. Now advertised in `mcp.ts`, read in
+  `server.ts`'s case block, and forwarded as `p_acting_for` by `postgrestQueueGig`.
+
 ## 0.9.2
 
 ### Added

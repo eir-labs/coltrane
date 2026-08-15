@@ -228,17 +228,17 @@ export function createOutputMirror(mirrorRoot: string): OutputMirror {
 // ── REMOTE TIER — append-only, credential-gated. Never a service_role key (see the TODO). ──────
 //
 // Two credential shapes are accepted, whichever is present drives the write:
-//   (a) COLTRANE_DRAIN_KEY  — a per-consumer ISSUED, scoped append key. The Tier-1 row is POSTed
-//       to PostgREST (`coltrane_outputs`) and the Tier-2 payload uploaded to Storage, both with
-//       this key. Uses `fetch` only — no new npm dependency.
+//   (a) COLTRANE_DRAIN_KEY  — a per-venue ISSUED, scoped append key, presented as a bearer to the
+//       COLTRANE SERVICE, which brokers the write. The box holds this and nothing else. Uses
+//       `fetch` only — no new npm dependency.
 //   (b) COLTRANE_DRAIN_PG   — a Postgres connection string for a scoped append role. The row is
 //       written over a direct `pg` connection (a guarded dynamic import; `pg` is NOT a declared
 //       dependency, so this path is unreachable — and harmless — unless the operator both sets
-//       the env AND installs the driver).
+//       the env AND installs the driver). Self-hosted escape hatch; it writes no artifact.
 //
-// COLTRANE_DRAIN_URL is the PostgREST + Storage project base URL (deployment-supplied, no host
-// baked in here) for the (a) REST paths. COLTRANE_DRAIN_BUCKET names the Storage bucket
-// (default "coltrane-artifacts").
+// COLTRANE_DRAIN_URL is the Coltrane SERVICE ORIGIN — deployment-supplied, no host baked in here,
+// and NOT the database. See `serviceOrigin` for why that distinction is the whole design.
+// COLTRANE_DRAIN_BUCKET names the Storage bucket (default "coltrane-artifacts").
 function remoteConfigured(): boolean {
   return Boolean(process.env["COLTRANE_DRAIN_KEY"] || process.env["COLTRANE_DRAIN_PG"]);
 }
@@ -279,72 +279,116 @@ async function drainRemote(rec: OutputRecord): Promise<void> {
 }
 
 /**
- * PostgREST's own gate, which is NOT the drain credential.
+ * The Coltrane SERVICE origin — the one host this box is allowed to know.
  *
- * A Supabase project rejects any request without a valid project `apikey`, whatever else it
- * carries. The drain key is an APPLICATION credential — it authenticates inside a SECURITY DEFINER
- * function, against `coltrane_drain_key`, and PostgREST has never heard of it.
+ * WHY NOT THE DATABASE. A drain holds exactly one credential: its issued, org-scoped,
+ * instance-bound `cdk_` key. That key is an APPLICATION credential — resolved inside a SECURITY
+ * DEFINER function against `coltrane_drain_key` — and Supabase has never heard of it. So the box
+ * cannot address the project directly for anything, and every attempt to make it ends the same way:
+ * by handing the box a SECOND credential. A project key. A Storage key. Which is the exact thing
+ * the venue design exists to prevent.
  *
- * Conflating the two is what made every drained result vanish: the mirror posted straight at
- * `/rest/v1/coltrane_outputs` with the drain key as `apikey`, PostgREST answered 401, and the
- * failure was swallowed unless COLTRANE_DRAIN_DEBUG happened to be set. The gig stayed `running`,
- * its lease expired, and the work was reclaimed and paid for again — silently, forever.
+ * The app is the service seam. It exposes PostgREST- and Storage-SHAPED paths precisely so this
+ * client needs no special cases and holds nothing privileged:
+ *
+ *   POST ${origin}/rest/v1/coltrane_outputs                     the sealed output rows
+ *   POST ${origin}/rest/v1/coltrane_gigs                        the run's own header
+ *   POST ${origin}/storage/v1/object/<bucket>/<gig>/<sha>.json  the payload artifact
+ *
+ * each with `Authorization: Bearer <cdk_…>` and nothing else. The app holds the privileged halves.
+ *
+ * HOW THIS WENT WRONG, because the repair reads exactly like the defect. The original laws pinned
+ * these three requests. They answered 401 — and the diagnosis was that the SHAPE was wrong, so the
+ * row writes were moved to `/rest/v1/rpc/<definer fn>` carrying the project's anon key as `apikey`.
+ * That works, and it is worse than the bug: it routes around the service seam, puts a second
+ * credential back on the box, and strands Storage — which has no definer function to call, because
+ * Postgres cannot reach the Storage API — holding a `cdk_` key in an `apikey` header, 401 forever.
+ *
+ * The shape was never wrong. The HOST was.
  */
-function storeApiKey(): string {
-  const k = process.env["COLTRANE_STORE_ANON"] ?? process.env["COLTRANE_DRAIN_ANON"] ?? "";
-  if (!k) {
+function serviceOrigin(): string {
+  const raw = (process.env["COLTRANE_DRAIN_URL"] ?? "").replace(/\/+$/, "");
+  if (!raw) {
     throw new Error(
-      "COLTRANE_STORE_ANON is required to reach the store: the drain key authenticates inside the " +
-        "definer RPC, it is not a project API key",
+      "COLTRANE_DRAIN_KEY is set but COLTRANE_DRAIN_URL is missing — it names the Coltrane service " +
+        "that brokers this drain's writes",
     );
   }
-  return k;
+  // Provisioning seeded `<host>/rest/v1` for as long as this pointed at a database, and secrets
+  // outlive deploys. Tolerated, not blessed: every path above is built from the ORIGIN, so a suffix
+  // that survives cannot silently produce `/rest/v1/rest/v1/…` the way appending to it did.
+  const origin = raw.replace(/\/rest\/v1$/, "");
+
+  // A DIAGNOSTIC, NOT A CONTROL. A drain pointed at the project 401s on the artifact and quietly
+  // SUCCEEDS on the rows — the worst available split, and the one this deployment actually ran for
+  // days. Name it here rather than leaving it to be rediscovered from a status code.
+  let host = "";
+  try {
+    host = new URL(origin).host;
+  } catch {
+    throw new Error(`COLTRANE_DRAIN_URL is not a URL: ${origin}`);
+  }
+  if (/(^|\.)supabase\.(co|in|net)$/i.test(host)) {
+    throw new Error(
+      `COLTRANE_DRAIN_URL points at the Supabase project (${origin}). It must name the Coltrane ` +
+        "service, which brokers both halves of a write: a drain key is not a project credential, " +
+        "and Storage will refuse it.",
+    );
+  }
+  return origin;
 }
 
-/** POST a definer RPC with both credentials in their proper places. */
-async function drainRpc(fn: string, body: Record<string, unknown>): Promise<Response> {
-  const raw = (process.env["COLTRANE_DRAIN_URL"] ?? "").replace(/\/$/, "");
-  if (!raw) throw new Error("COLTRANE_DRAIN_KEY is set but COLTRANE_DRAIN_URL (project base) is missing");
-  // ONE VARIABLE, TWO CONTRACTS — which is the actual defect here. Provisioning sets
-  // COLTRANE_DRAIN_URL to `<project>/rest/v1`, and venue-provision.sh consumes it as
-  // `${base}/rpc/<fn>`. This appended `/rest/v1/rpc/` to the same value, producing
-  // `/rest/v1/rest/v1/rpc/…` and PGRST125 "Invalid path specified in request URL" — after a gig had
-  // claimed, run, called the model and sealed an output. The work was done and could not be recorded.
-  //
-  // Accepts either shape rather than asserting one, because both are already in use and a variable
-  // whose meaning depends on who reads it will drift again the moment a third caller appears.
-  const base = raw.endsWith("/rest/v1") ? raw : `${raw}/rest/v1`;
-  return fetch(`${base}/rpc/${fn}`, {
+/**
+ * POST to the service, with the drain's one credential in the one place it belongs.
+ *
+ * THE INSTANCE HEADER IS NOT DECORATION. Today the store's output sinks resolve a token hash and
+ * check a scope — and stop. They do not ask which instance is writing or which gig it is writing
+ * for, which means any live drain key can write outputs for any gig of its org, at any time,
+ * including gigs it never claimed. `coltrane_drain_repo_for_lease` — the git-credential path —
+ * already asks all three, so the store knows how; the write path simply never did.
+ *
+ * Stating it here is the half a client can do. A drain that names itself on every write lets the
+ * store gate on a live lease WITHOUT another engine release, which is the whole reason it ships
+ * ahead of the gate rather than with it. The store ignoring it today is expected.
+ *
+ * Absent when COLTRANE_INSTANCE is unset — a local `coltrane work` run holds no lease and is not
+ * pretending to.
+ */
+async function drainPost(path: string, key: string, body: unknown): Promise<Response> {
+  const instance = process.env["COLTRANE_INSTANCE"];
+  return fetch(`${serviceOrigin()}${path}`, {
     method: "POST",
-    headers: { apikey: storeApiKey(), "Content-Type": "application/json" },
+    headers: {
+      Authorization: `Bearer ${key}`,
+      "Content-Type": "application/json",
+      ...(instance ? { "X-Coltrane-Instance": instance } : {}),
+    },
     body: JSON.stringify(body),
   });
 }
 
 async function drainViaPostgrest(rec: OutputRecord, key: string): Promise<void> {
-  const base = (process.env["COLTRANE_DRAIN_URL"] ?? "").replace(/\/$/, "");
-  if (!base) throw new Error("COLTRANE_DRAIN_KEY is set but COLTRANE_DRAIN_URL (project base) is missing");
-  // TIER 1 — through the definer RPC, which is the surface built for exactly this. Writing the
-  // table directly required the drain key to BE a project API key; it is not, and never was.
-  const rowRes = await drainRpc("coltrane_drain_ingest", { p_token: key, p_rows: [drainBody(rec)] });
+  // ONE ACTION, TWO HALVES OF THE STORE. Persisting an output means a row and an artifact, because
+  // our data storage has two halves — rows for metadata, Storage for bytes. That decomposition
+  // belongs to the store, and a caller that can half-succeed at it is a caller holding the store's
+  // internals. Until the service exposes it as a single call, the row goes first so a failure can
+  // never be mistaken for a success.
+  const rowRes = await drainPost("/rest/v1/coltrane_outputs", key, [drainBody(rec)]);
   if (!rowRes.ok) {
-    throw new Error(`coltrane_drain_ingest ${rowRes.status}: ${(await rowRes.text()).slice(0, 200)}`);
+    throw new Error(`coltrane_outputs ${rowRes.status}: ${(await rowRes.text()).slice(0, 200)}`);
   }
-  // TIER 2 — the payload artifact into Storage, content-addressed by sha (idempotent upsert).
   const bucket = process.env["COLTRANE_DRAIN_BUCKET"] ?? "coltrane-artifacts";
   const objectPath = `${rec.gig_id}/${rec.content_sha}.json`;
-  const artRes = await fetch(`${base}/storage/v1/object/${bucket}/${objectPath}`, {
-    method: "POST",
-    headers: {
-      apikey: key,
-      Authorization: `Bearer ${key}`,
-      "Content-Type": "application/json",
-      "x-upsert": "true",
-    },
-    body: JSON.stringify({ content_sha: rec.content_sha, id: rec.id, data: rec.data }),
+  const artRes = await drainPost(`/storage/v1/object/${bucket}/${objectPath}`, key, {
+    content_sha: rec.content_sha,
+    id: rec.id,
+    data: rec.data,
   });
-  // A duplicate object (already uploaded for this sha) is success, not failure.
-  if (!artRes.ok && artRes.status !== 409) throw new Error(`storage POST ${artRes.status}`);
+  // Content-addressed: the same sha names the same bytes, so an object already present IS the
+  // outcome we wanted. 409 is success.
+  if (!artRes.ok && artRes.status !== 409) {
+    throw new Error(`artifact ${artRes.status}: ${(await artRes.text()).slice(0, 200)}`);
+  }
 }
 
 async function drainViaPg(rec: OutputRecord, conn: string): Promise<void> {
@@ -443,9 +487,9 @@ export async function drainGigHeader(rec: GigHeaderRecord): Promise<void> {
   if (!remoteConfigured()) return;
   const key = process.env["COLTRANE_DRAIN_KEY"];
   if (key) {
-    const res = await drainRpc("coltrane_drain_upsert_gig", { p_token: key, p_gig: gigHeaderBody(rec) });
+    const res = await drainPost("/rest/v1/coltrane_gigs", key, gigHeaderBody(rec));
     if (!res.ok) {
-      throw new Error(`coltrane_drain_upsert_gig ${res.status}: ${(await res.text()).slice(0, 200)}`);
+      throw new Error(`coltrane_gigs ${res.status}: ${(await res.text()).slice(0, 200)}`);
     }
     return;
   }

@@ -50,47 +50,68 @@ describe("drainGigHeader — fire-and-forget to the drain service", () => {
   const fetchMock = vi.fn(async () => ({ ok: true, status: 201 }) as Response);
   beforeEach(() => {
     vi.stubGlobal("fetch", fetchMock);
-    process.env["COLTRANE_DRAIN_URL"] = "https://drain.example";
+    // NOTE WHAT IS ABSENT: no COLTRANE_STORE_ANON. The write path must need the venue credential
+    // and nothing else, so the fixture withholds the second one rather than supplying it.
+    process.env["COLTRANE_DRAIN_URL"] = "https://coltrane.example";
     process.env["COLTRANE_DRAIN_KEY"] = "cdk_test";
-    process.env["COLTRANE_STORE_ANON"] = "anon_test";
     fetchMock.mockClear();
   });
   afterEach(() => {
     vi.unstubAllGlobals();
     delete process.env["COLTRANE_DRAIN_URL"];
     delete process.env["COLTRANE_DRAIN_KEY"];
-    delete process.env["COLTRANE_STORE_ANON"];
   });
 
-  // THIS LAW USED TO PIN THE WRONG THING. It asserted a direct POST to
-  // /rest/v1/coltrane_gigs with `Authorization: Bearer <drain key>` — which is precisely the request
-  // PostgREST answers 401, because a drain key is an application credential and PostgREST has never
-  // heard of it. The law passed for years by mocking fetch and checking the URL, so it could not
-  // have caught the auth failure it was encoding.
+  // THIS LAW HAS PINNED THE WRONG THING TWICE, in opposite directions, and the second time is the
+  // instructive one.
   //
-  // The write path is the definer RPC, which authenticates the drain key against coltrane_drain_key
-  // and needs the PROJECT key as `apikey` — two credentials, each in its own place.
-  it("goes through coltrane_drain_upsert_gig, with each credential in its proper place", async () => {
+  // It first asserted a POST to /rest/v1/coltrane_gigs with `Authorization: Bearer <drain key>`.
+  // In production that answered 401 — so it was rewritten to assert the definer RPC at
+  // /rest/v1/rpc/coltrane_drain_upsert_gig, carrying the project's anon key as `apikey`.
+  //
+  // That diagnosis was wrong, and this law then DEFENDED the wrong architecture. The 401 was not
+  // the shape; it was the HOST. The request was being sent to the Supabase project, which has never
+  // heard of a cdk_ key. The Coltrane app serves that exact path and accepts that exact bearer —
+  // and it is the only place that can also write the artifact, because Postgres cannot reach the
+  // Storage API. Rewriting the client to satisfy the database bought a passing row-write, a second
+  // credential on an unattended box, and a permanently 401ing artifact upload.
+  //
+  // Both versions passed by mocking fetch and asserting a URL, which is why neither could tell the
+  // difference. The law below therefore pins the property that actually distinguishes them: the
+  // request carries ONE credential, as a bearer, to a service that is not the database.
+  it("presents one credential, as a bearer, to the service", async () => {
     await drainGigHeader(REC);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
-    expect(url).toBe("https://drain.example/rest/v1/rpc/coltrane_drain_upsert_gig");
+    expect(url).toBe("https://coltrane.example/rest/v1/coltrane_gigs");
     const headers = init.headers as Record<string, string>;
-    // The PROJECT key opens PostgREST. The drain key is not one and must not be sent as one.
-    expect(headers["apikey"]).toBe("anon_test");
-    expect(headers["Authorization"]).toBeUndefined();
-    const body = JSON.parse(init.body as string) as Record<string, unknown>;
-    // The drain key rides in the body, where the definer function reads it.
-    expect(body["p_token"]).toBe("cdk_test");
-    const gig = body["p_gig"] as Record<string, unknown>;
+    expect(headers["Authorization"]).toBe("Bearer cdk_test");
+    // The box holds no project credential. If one ever appears in this header the venue design has
+    // been undone, whatever the URL says.
+    expect(headers["apikey"]).toBeUndefined();
+    const gig = JSON.parse(init.body as string) as Record<string, unknown>;
+    // The row itself, not an RPC envelope — the service unwraps nothing.
     expect(gig["id"]).toBe(REC.gig_id);
     expect(gig["status"]).toBe("completed");
   });
 
-  it("refuses to reach the store without a project key, instead of sending the drain key as one", async () => {
-    delete process.env["COLTRANE_STORE_ANON"];
-    await expect(drainGigHeader(REC)).rejects.toThrow(/COLTRANE_STORE_ANON is required/);
+  // The failure this whole change exists to make impossible. A drain pointed at the project 401s on
+  // the artifact and SUCCEEDS on the rows, so the only symptom is a missing blob — which reads like
+  // a Storage permissions problem and sent one investigation down a credential rabbit hole for two
+  // days. Refuse before the first request instead.
+  it("refuses a COLTRANE_DRAIN_URL that names the database rather than the service", async () => {
+    process.env["COLTRANE_DRAIN_URL"] = "https://abcdefgh.supabase.co";
+    await expect(drainGigHeader(REC)).rejects.toThrow(/points at the Supabase project/);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  // Secrets outlive deploys: boxes provisioned before this change carry the suffixed form. Tolerate
+  // it, and build from the origin either way — appending to it is what produced /rest/v1/rest/v1.
+  it("tolerates the legacy /rest/v1 suffix without doubling it", async () => {
+    process.env["COLTRANE_DRAIN_URL"] = "https://coltrane.example/rest/v1";
+    await drainGigHeader(REC);
+    const [url] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("https://coltrane.example/rest/v1/coltrane_gigs");
   });
 
   it("is a silent no-op when the drain is not configured", async () => {
@@ -108,16 +129,14 @@ describe("runGig drains a FAILED header — the sink learns the truth either way
   const fetchMock = vi.fn(async () => ({ ok: true, status: 201 }) as Response);
   beforeEach(() => {
     vi.stubGlobal("fetch", fetchMock);
-    process.env["COLTRANE_DRAIN_URL"] = "https://drain.example";
+    process.env["COLTRANE_DRAIN_URL"] = "https://coltrane.example";
     process.env["COLTRANE_DRAIN_KEY"] = "cdk_test";
-    process.env["COLTRANE_STORE_ANON"] = "anon_test";
     fetchMock.mockClear();
   });
   afterEach(() => {
     vi.unstubAllGlobals();
     delete process.env["COLTRANE_DRAIN_URL"];
     delete process.env["COLTRANE_DRAIN_KEY"];
-    delete process.env["COLTRANE_STORE_ANON"];
   });
 
   it("a chair failure produces one failed-header POST carrying the error", async () => {
@@ -147,10 +166,9 @@ describe("runGig drains a FAILED header — the sink learns the truth either way
     // fire-and-forget: give the drained header its microtask
     await new Promise((r) => setImmediate(r));
     const calls = fetchMock.mock.calls as unknown as [string, RequestInit][];
-    const call = calls.find(([u]) => String(u).includes("coltrane_drain_upsert_gig"));
+    const call = calls.find(([u]) => String(u).endsWith("/rest/v1/coltrane_gigs"));
     expect(call, "failed run must drain a header").toBeDefined();
-    const body = JSON.parse(call![1].body as string) as Record<string, unknown>;
-    const gig = body["p_gig"] as Record<string, unknown>;
+    const gig = JSON.parse(call![1].body as string) as Record<string, unknown>;
     expect(gig["id"]).toBe("22222222-2222-2222-2222-222222222222");
     expect(gig["status"]).toBe("failed");
     expect((gig["manifest"] as Record<string, unknown>)["error"]).toMatch(/boom in the chair/);

@@ -7,6 +7,69 @@ signals a breaking change and a **patch** signals an additive or internal one.
 `package.json`'s `version` — `tests/version_identity.test.ts` enforces that, and also that
 the MCP handshake reports the constant rather than a hardcoded literal.
 
+## 0.10.0
+
+### Changed — breaking
+
+- **`COLTRANE_DRAIN_URL` now names the Coltrane SERVICE, not the database.** A drain holds exactly
+  one credential: its issued, org-scoped `cdk_` key. That key is an *application* credential,
+  resolved inside a `SECURITY DEFINER` function — Supabase has never heard of it. So the box cannot
+  address the project directly, and every attempt to make it ends by putting a SECOND credential on
+  an unattended machine.
+
+  All three remote writes now go to the app as a plain bearer, and the app holds the privileged
+  halves:
+
+  | | |
+  |---|---|
+  | `POST ${origin}/rest/v1/coltrane_outputs` | the sealed output rows |
+  | `POST ${origin}/rest/v1/coltrane_gigs` | the run's own header |
+  | `POST ${origin}/storage/v1/object/<bucket>/<gig>/<sha>.json` | the payload artifact |
+
+  **`COLTRANE_STORE_ANON` is no longer read by the write path.** It remains required for the CLAIM
+  path (`src/cli.ts`), which still reaches PostgREST directly — a remaining inconsistency, not a
+  design.
+
+  A `COLTRANE_DRAIN_URL` pointing at a `*.supabase.co` host now throws with that explanation before
+  the first request, rather than half-working. The legacy `<host>/rest/v1` form is tolerated:
+  every path is built from the ORIGIN, so a suffix surviving a redeploy cannot produce
+  `/rest/v1/storage/v1/…` the way appending to it did.
+
+### Added
+
+- **Every drain write now names the instance it comes from**, as `X-Coltrane-Instance`, taken from
+  `COLTRANE_INSTANCE` and omitted when that is unset (a local `coltrane work` run holds no lease and
+  should not claim one).
+
+  This is groundwork the store does not yet use. Today the output sinks resolve a token hash and
+  check a scope, and stop — so any live drain key can write outputs for **any gig of its org**,
+  including gigs it never claimed. `coltrane_drain_repo_for_lease` already checks key + instance +
+  live lease, so the store knows how; the write path never asked. Shipping the header ahead of the
+  gate means the gate needs no second engine release.
+
+### Fixed
+
+- **The artifact upload has never once succeeded.** It POSTed to
+  `<project>/rest/v1/storage/v1/object/…` — a doubled path, at the wrong host, carrying a `cdk_` key
+  in an `apikey` header. Three independent faults in one request, answering 401 continuously while
+  the row half quietly succeeded. The only symptom was a missing blob, which reads like a Storage
+  permissions problem.
+
+  0.9.4 made this worse and looked like a fix: it diagnosed the 401 as a wrong *shape* and moved the
+  row writes onto `/rest/v1/rpc/<definer fn>` with the project's anon key. That bought a passing
+  row-write by routing around the service seam and adding the second credential. The shape was never
+  wrong — the host was, and the app had served both paths correctly the whole time.
+
+### Tests
+
+- `tests/drain_writes_to_the_service.test.ts` — new. Pins the property a URL assertion cannot: one
+  credential, as a bearer, to a service that is not the database. Includes the artifact-beside-REST
+  law, mutation-verified against the exact suffix bug.
+- `tests/gig_header_drain.test.ts` — this law had pinned the wrong thing twice, in opposite
+  directions, passing both times by mocking `fetch` and checking a URL. Rewritten to assert the
+  credential posture, and its fixture now WITHHOLDS `COLTRANE_STORE_ANON` so a write path that
+  starts needing it again fails here.
+
 ## 0.9.4
 
 ### Fixed

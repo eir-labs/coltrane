@@ -170,6 +170,70 @@ export const HOSTED_TOOLS: HostedTool[] = [
     },
   },
   {
+    name: "institution_browse",
+    title: "Browse institutions",
+    description:
+      "The institutions your organizations answer to, and whether each of their laws has TEETH — " +
+      "an evaluable check — or is prose. Read-only.",
+    paramsJsonSchema: {
+      type: "object",
+      properties: {
+        slug: { type: "string", description: "One institution, with its laws in full. Omit for the list." },
+      },
+    },
+    async handler(args, ctx) {
+      // A member surface, like `roster`. An agent token reads gigs and outputs; which institutions
+      // an organization answers to is a governance question, not a chair's working context.
+      if (isAgentBearer(ctx.bearer)) {
+        return err("institutions are a member surface; agent tokens read gigs and outputs");
+      }
+
+      const one = typeof args["slug"] === "string" ? String(args["slug"]) : "";
+      const out = await restGet(
+        ctx,
+        one
+          ? `coltrane_institution?select=slug,name,kind,sovereign,laws&slug=eq.${encodeURIComponent(one)}`
+          : "coltrane_institution?select=slug,name,kind,sovereign,laws&order=slug",
+      );
+      if (out.isError) return out;
+
+      type Law = { aim?: string; deontic?: string; or_else?: string; check?: { predicate?: string } };
+      type Row = { slug: string; name: string; kind: string; sovereign: boolean; laws?: Law[] };
+      const rows = JSON.parse(out.text) as Row[];
+
+      // THE DISTINCTION WORTH SURFACING. A law with a `check` is adjudicable — `evaluate()` can
+      // decide it. A law without one is a sentence: it may be the most important rule an institution
+      // has and nothing can enforce it. Counting them separately is the difference between reading
+      // a constitution and knowing which parts bind.
+      const shaped = rows.map((r) => {
+        const laws = r.laws ?? [];
+        const withTeeth = laws.filter((l) => typeof l?.check?.predicate === "string" && l.check.predicate.length > 0);
+        return {
+          slug: r.slug,
+          name: r.name,
+          kind: r.kind,
+          sovereign: r.sovereign,
+          laws_total: laws.length,
+          laws_enforceable: withTeeth.length,
+          laws_prose_only: laws.length - withTeeth.length,
+          ...(one
+            ? {
+                laws: laws.map((l) => ({
+                  aim: l.aim,
+                  deontic: l.deontic,
+                  or_else: l.or_else,
+                  enforceable: typeof l?.check?.predicate === "string" && l.check.predicate.length > 0,
+                  predicate: l?.check?.predicate,
+                })),
+              }
+            : {}),
+        };
+      });
+
+      return ok({ institutions: shaped, count: shaped.length });
+    },
+  },
+  {
     name: "dispatch_gig",
     title: "Dispatch a gig",
     description:

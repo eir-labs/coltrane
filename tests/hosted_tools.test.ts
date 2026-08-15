@@ -17,12 +17,15 @@ const CTX_JWT: HostedToolContext = {
 const CTX_CTK: HostedToolContext = { ...CTX_JWT, bearer: "ctk_abc123" };
 
 describe("the surface", () => {
-  it("defines exactly the seven hosted tools", () => {
+  // An EXACT list, not a floor. Adding a hosted tool widens what the world can ask this server to
+  // do, so it should be a line someone changed on purpose rather than a count that drifted.
+  it("defines exactly the eight hosted tools", () => {
     expect(HOSTED_TOOLS.map((t) => t.name).sort()).toEqual([
       "cancel_gig",
       "dispatch_gig",
       "gig_outputs",
       "gig_status",
+      "institution_browse",
       "list_gigs",
       "list_standards",
       "roster",

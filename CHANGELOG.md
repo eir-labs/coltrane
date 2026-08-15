@@ -7,6 +7,54 @@ signals a breaking change and a **patch** signals an additive or internal one.
 `package.json`'s `version` — `tests/version_identity.test.ts` enforces that, and also that
 the MCP handshake reports the constant rather than a hardcoded literal.
 
+## Unreleased
+
+### Added — a specification, and a suite that is red on purpose
+
+- **`SPEC-worker-contract.md`** — the contract a worker (any host running `coltrane work`) is
+  entitled to, written as five gaps. Every one was found by RUNNING the system; none came from
+  review. Each section states what is true today with references into this tree, why it is a defect,
+  the contract required, and what is deliberately left to the deployment.
+
+  1. **No MCP verb mints a venue credential.** Every deployment invents an out-of-band path, and in
+     practice those paths end at a browser. A capability with no verb is a capability an assistant
+     cannot use — and the hand-carried step is exactly what the venue credential design exists to
+     remove.
+  2. **A venue cannot declare what provides its tools, and realization does not build the room.**
+     Most of the contract already exists and is good — `VenueSchema`'s deny-by-default
+     `equipment.tools`, `credential_surface` as classes rather than material, R10's compose-time
+     ceiling, and the `resolveAndRealize` gauntlet `runGig` already calls. What is missing:
+     `equipment.tools` may name `mcp__<server>__<tool>` and nothing says what provides that server;
+     realization returns no server config, so `--mcp-config` still comes from the ambient
+     `.mcp.json` the venue never saw; and a drain realizes no room at all. Contract vocabulary here
+     follows prior art rather than inventing a shape — the implementer should follow the existing
+     `VenueSchema` grain.
+  3. **`COLTRANE_DRAIN_URL` had three readers and two meanings.** `0.10.0` settled the meaning; this
+     settles the NAME (`COLTRANE_SERVICE_URL`, with the old one demoted to a normalized legacy
+     alias), moves the check to startup, and puts the whole worker environment in one enumerated
+     table.
+  4. **Three ways to run a standard, and two credential shapes inside one of them,** with nothing
+     saying when each is correct. The mode condition is currently derived in two places; `worker.ts`
+     carries a defensive branch that exists because they might disagree.
+  5. **The claim does not filter by the venue a gig's chart already names.** `ChartSchema.venue`
+     exists and `runGig` honours it; the claim takes any queued gig of the org regardless, so a gig
+     is taken by a worker that cannot realize its room while a capable worker sits idle. Work cannot
+     be routed; the only way to make a gig run somewhere specific is to stop every other worker.
+
+- **`tests/spec_*.test.ts` — 48 laws, committed FAILING.** Five files, one per gap, each opening with
+  a banner saying so. A failure named `spec_*` is pending implementation; a failure anywhere else is
+  a regression, and the naming exists so a reader can tell them apart without reading the diff.
+
+  `npx tsc --noEmit` is clean on purpose. A static import of a module that does not exist would fail
+  this repo's vitest `globalSetup` (which builds first), and one compile error stops every band from
+  running — at which point nobody can distinguish a pending spec from a regression. The
+  not-yet-existing modules are therefore loaded through a specifier held in a `const`, so the red
+  lands at runtime on the law that needs it.
+
+- **Landing all five will be a MINOR bump** under this repo's inverted convention. Gaps 1, 2 and 5
+  are additive; Gap 3 is not — a worker whose environment names the wrong host boots today and
+  refuses afterwards, which is the point and is still a break.
+
 ## 0.10.0
 
 ### Changed — breaking

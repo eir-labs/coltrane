@@ -56,10 +56,21 @@ the MCP handshake reports the constant rather than a hardcoded literal.
      namespace, privileged mode, added capabilities, non-derived mount sources, and any credential
      reaching the room by a route other than `CredentialResolver`.
 
+     Also folded in: **device access as a capability grant, not configuration** — declared as a
+     closed enumeration by CLASS and never as a path, because a venue that can name an arbitrary
+     device path can name the raw memory device; refused when the host cannot provide the class;
+     carrying the least-privilege group membership precisely so escalating the whole room to
+     privileged is never the easy fix for a permissions error. **A venue need not be realized where
+     the worker runs** — a room may be stood up on a machine with hardware, a network position or an
+     architecture this box lacks, while the contract stays identical; the credential reaching such a
+     host is administrative on it, so it follows `src/workspace.ts`'s per-gig-against-a-live-lease
+     discipline, and every refusal holds regardless of which host executes. **Architecture is part of
+     the contract**, refused before PLAYING rather than discovered at spawn.
+
      Unlike 1–5 this was found by reading, not by running. It is pinned now because it is the only
      failure in the document that is invisible when it happens.
 
-- **`tests/spec_*.test.ts` — 68 laws, committed FAILING.** Six files, one per gap, each opening with
+- **`tests/spec_*.test.ts` — 80 laws, committed FAILING.** Six files, one per gap, each opening with
   a banner saying so. A failure named `spec_*` is pending implementation; a failure anywhere else is
   a regression, and the naming exists so a reader can tell them apart without reading the diff.
 

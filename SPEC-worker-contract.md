@@ -721,6 +721,89 @@ with extra steps. A permissive realizer is worse than no realizer.
   realization time from `credential_names` ⊆ `credential_surface`. Never from the rendered file,
   never from the genome, never inherited wholesale from the host environment.
 
+### Device access is a CAPABILITY grant wearing the costume of configuration
+
+A realizer may need to give a venue access to host hardware — a serial port, a GPIO or I2C bus, a
+camera. That is the same shape as `doors`: the venue declares what it needs, the realizer maps
+exactly that, and everything else is absent. It belongs in the contract for the same reason `doors`
+does.
+
+**The danger is that it READS as plumbing and IS root.** A venue that can name an arbitrary device
+path can name the raw memory device or a whole block device. That is a host compromise submitted as
+a hardware request, and it is the same category as the runtime-socket rule — a field that looks like
+configuration and is actually a capability grant.
+
+1. **Declared as a closed enumeration by CLASS, never as a path.** A small fixed set of names for
+   KINDS of hardware (`serial`, `gpio`, `i2c`, `spi`, `video`, `audio`), and the contract never
+   carries a path. The realizer maps a class to concrete host nodes; that mapping lives in the
+   realizer, where it is read once, rather than in every venue in the genome, where it would have to
+   be audited forever. This is the same argument as the mount-source rule, one field over.
+
+2. **A class the host cannot provide is a REFUSAL, not a silent omission.** Identical principle to
+   the substrate-mismatch law: a venue that believes it has a device and does not is worse than one
+   that is told no, because the belief is what an author reasoned against.
+
+3. **Group membership is part of the grant.** This is the practical half and it is where the
+   escalation actually happens. The device node is mapped, the process still cannot open it because
+   it is not in the owning group, and the reflexive fix is to escalate the whole room to privileged
+   mode — undoing every boundary in this section to solve a permissions problem. So the grant
+   INCLUDES the least-privilege membership needed. Spec'd explicitly, precisely so that escalating
+   is never the easy path.
+
+4. **A device grant never widens anything else.** Declaring a class must not produce privileged
+   mode, added capabilities, or a broadened device rule. Asserted on the realized configuration for
+   the ABSENCE of those, not merely for the presence of the mapping — because the failure here is
+   something extra appearing, not something missing.
+
+**Prose, not a law — hot-plug.** Access that requires the device set to CHANGE while the venue is
+running cannot be satisfied by a mapping fixed at construction. That is a host-side concern, and the
+two familiar workarounds — mapping the whole device tree, or writing a broad device rule — are the
+escape again under another name. Stated here so nobody reaches for them later believing it is a
+small exception.
+
+### A venue need not be realized where the worker runs
+
+Container runtimes generally support driving a REMOTE host, and naming that in the contract changes
+what a venue IS. The work can be realized on a machine that has something the worker does not —
+attached hardware, a particular network position, a specific architecture — while the venue contract
+stays byte-identical.
+
+This is the strongest argument for the venue abstraction, so state it plainly: **a venue is a place,
+and the place need not be the worker's own machine.** The room is declared once and stood up
+wherever the room can actually exist.
+
+Two consequences, both contract requirements rather than asides:
+
+1. **A credential that reaches a remote realization host is typically administrative on that host,**
+   which makes it the highest-value credential in the system — higher than the venue credential,
+   because it is authority over a machine rather than over an organization's queue. It therefore
+   follows the discipline `src/workspace.ts:60-89` already documents for the per-gig git credential:
+   **obtained per gig against a live lease, never held at boot,** never in the container's
+   environment, and never the same one twice. A remote-host credential fixed at provisioning is the
+   defect that whole module was written to remove, at a higher blast radius.
+
+2. **Realizing remotely weakens no other rule.** Every refusal above applies to the rendered
+   configuration regardless of which host executes it. Written down because *"it is on their machine,
+   not ours"* is exactly the reasoning that would relax it — and a privileged container on someone
+   else's host is not less privileged, only less visible.
+
+### Architecture is part of the contract
+
+A venue realized on a host whose CPU architecture does not match the images were built for fails at
+run time, confusingly, and usually on someone else's machine on their first attempt.
+
+- A venue may state the architectures it supports.
+- A realizer **refuses a host that does not match, before PLAYING**, rather than discovering it at
+  spawn. Same shape as the substrate and device refusals: the mismatch is knowable at construction,
+  so it is answered at construction.
+- A venue naming no architecture runs anywhere. Deny-by-default belongs on CAPABILITY, not on
+  portability — the same reason an unnamed venue stays claimable in Gap 5.
+
+**Prose note.** A reference implementation intended for other people to run should ship
+multi-architecture images. A single-architecture venue that silently fails on a small board is a bad
+first experience, and it will be read as the system being broken rather than as the venue being
+narrow.
+
 ### The trade-off, stated honestly
 
 Containerized realization costs image build time — once per venue version, not per gig — start
@@ -734,14 +817,20 @@ than being discovered by the first wide DAG on the first box that runs it.
 ### Left to the deployment
 
 Which realizers exist, which are installed, and what a venue's substrate name means on this host.
-The engine ships the seam, the two reference realizers, the selection rule, the refusal, and the
-security laws the renderer must satisfy.
+Also **what a device class maps to** — the concrete host nodes and the owning group behind `serial`
+or `i2c` are properties of the machine, not of the room, which is exactly why the contract names the
+class and the realizer names the nodes. Also **where** realization happens, and the credential that
+reaches a remote host.
+
+The engine ships the seam, the two reference realizers, the selection rule, every refusal, and the
+security laws the renderer must satisfy — including the ones that hold identically whether the room
+is stood up here or somewhere else.
 
 ---
 
 ## RED → GREEN
 
-**68 laws across six files, all failing.** That is the deliverable, not an accident.
+**80 laws across six files, all failing.** That is the deliverable, not an accident.
 
 | file | gap | laws |
 |---|---|---|
@@ -750,7 +839,7 @@ security laws the renderer must satisfy.
 | `tests/spec_worker_environment.test.ts` | 3 | 14 |
 | `tests/spec_worker_run_modes.test.ts` | 4 | 9 |
 | `tests/spec_venue_targeting.test.ts` | 5 | 5 |
-| `tests/spec_venue_realization_substrate.test.ts` | 6 | 20 |
+| `tests/spec_venue_realization_substrate.test.ts` | 6 | 32 |
 
 **Start with Gap 6's renderer laws.** Every other gap fails visibly — a capability is missing and
 somebody notices. A permissive realizer fails invisibly: the venue still claims the guarantee, and
@@ -760,7 +849,7 @@ there is an actual escape at the end of it.
   so. A failure whose file is named `spec_*` is pending implementation; a failure anywhere else is a
   regression. That is the whole reason for the naming convention — a reader should be able to tell
   them apart at a glance, without reading the diff. As landed: `vitest run` reports
-  **68 failed, 2626 passed**.
+  **80 failed, 2626 passed**.
 - **The imports are the specification.** Where a module or export does not exist yet, the test names
   it anyway and fails on the missing binding.
 - **`npx tsc --noEmit` is CLEAN, deliberately.** The obvious way to write these tests is a static

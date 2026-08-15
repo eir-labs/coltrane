@@ -58,6 +58,25 @@ type VenueGuarantee =
   | "reproducible_tool_surface"
   | "per_chair_isolation";
 
+/**
+ * WHERE a room is stood up. A venue is a PLACE, and the place need not be the worker's own machine
+ * — a room may be realized on a host that has something this box does not: attached hardware, a
+ * network position, a different architecture. The venue contract is byte-identical either way,
+ * which is the strongest argument the venue abstraction has.
+ *
+ * The device map lives HERE and not in the contract: which nodes `serial` means, and which group
+ * owns them, are properties of the machine rather than of the room.
+ */
+interface RealizationHost {
+  /** absent = the worker's own machine. */
+  endpoint?: string;
+  architecture: string;
+  /** device CLASS → the concrete nodes this host maps it to, and the group that owns them. */
+  devices: Readonly<Record<string, { nodes: readonly string[]; group: string }>>;
+  /** Per gig, against a live lease — never held at boot. See src/workspace.ts:60-89. */
+  credential?: (args: { gigId: string }) => Promise<string>;
+}
+
 /** The seam. Injected exactly the way `CredentialResolver` already is: the engine ships the
  *  interface, the state machine, the probe and the drift guard; a deployment supplies the
  *  implementations it has. */
@@ -68,7 +87,12 @@ interface VenueRealizer {
   realize(
     venue: unknown,
     credentialResolver: CredentialResolver,
-    opts: { gigId: string; engineServers?: Readonly<Record<string, unknown>>; probe?: (s: { slug: string }) => Promise<string[]> },
+    opts: {
+      gigId: string;
+      engineServers?: Readonly<Record<string, unknown>>;
+      probe?: (s: { slug: string }) => Promise<string[]>;
+      host?: RealizationHost;
+    },
   ): Promise<RealizationHandle>;
 }
 
@@ -79,15 +103,21 @@ interface SubstrateModule {
    *  returning a weaker one — the whole reason this gap is written down. */
   selectRealizer(venue: unknown, realizers: readonly VenueRealizer[]): VenueRealizer;
   VenueSubstrateUnavailable: new (...args: never[]) => Error;
+  /** Thrown when a HOST cannot host this venue: a device class it does not provide, an architecture
+   *  it is not. Distinct from a substrate refusal, because the fix is a different machine rather
+   *  than a different runtime. */
+  VenueHostUnsuitable: new (...args: never[]) => Error;
   /** Thrown when input would render a setting the contract may not ask for. Carries `forbidden`
    *  so the refusal names the thing, rather than being a bare throw a caller must guess at. */
   VenueRenderRefusal: new (...args: never[]) => Error;
   /** The CLOSED allowlist of contract fields the renderer may substitute. */
   COMPOSE_SUBSTITUTABLE_FIELDS: readonly string[];
+  /** The CLOSED enumeration of device KINDS a venue may ask for. Never a path. */
+  DEVICE_CLASSES: readonly string[];
   /** Renders the runtime configuration from a PARSED venue. Never from raw input. */
   renderComposeConfig(
     venue: unknown,
-    opts: { gigId: string; realizationDir: string },
+    opts: { gigId: string; realizationDir: string; host?: RealizationHost },
   ): Record<string, unknown>;
 }
 const substrate = async (): Promise<SubstrateModule> =>
@@ -119,14 +149,37 @@ const CONTAINED_ROOM = {
   lifecycle: { policy: "ephemeral" as const },
 };
 
+/** A room that needs one CLASS of hardware. It names a kind, never a path — the path is the
+ *  machine's business, and a contract that could name one could name the raw memory device. */
+const SERIAL_ROOM = {
+  ...CONTAINED_ROOM,
+  slug: "serial-room-v1",
+  devices: ["serial"],
+  architectures: ["arm64"],
+};
+
 const REALIZATION_DIR = "/realizations/gig-77777777";
 const GIG = "77777777-7777-7777-7777-777777777777";
 
+/** A host that provides one device class, on one architecture. The nodes and the owning group are
+ *  the machine's facts, supplied here the way a deployment would supply them. */
+const HOST: RealizationHost = {
+  architecture: "arm64",
+  devices: { serial: { nodes: ["/dev/ttyPLACEHOLDER0"], group: "dialout" } },
+};
+
 /** Render a parsed room, for the laws that assert on OUTPUT. */
-const renderParsed = async (room: unknown = CONTAINED_ROOM): Promise<Record<string, unknown>> => {
+const renderParsed = async (
+  room: unknown = CONTAINED_ROOM,
+  host?: RealizationHost,
+): Promise<Record<string, unknown>> => {
   const { renderComposeConfig } = await substrate();
   expect(renderComposeConfig, "the import is the specification").toBeTypeOf("function");
-  return renderComposeConfig(VenueSchema.parse(room), { gigId: GIG, realizationDir: REALIZATION_DIR });
+  return renderComposeConfig(VenueSchema.parse(room), {
+    gigId: GIG,
+    realizationDir: REALIZATION_DIR,
+    ...(host ? { host } : {}),
+  });
 };
 
 /** Every string anywhere in the rendered document — the only honest way to ask "did this leak". A
@@ -456,5 +509,232 @@ describe("GAP 6 — credentials reach the room only through the resolver", () =>
     } finally {
       if (saved === undefined) delete process.env[SENTINEL]; else process.env[SENTINEL] = saved;
     }
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+// DEVICE ACCESS IS A CAPABILITY GRANT WEARING THE COSTUME OF CONFIGURATION.
+//
+// A realizer may need to give a room a serial port, a GPIO or I2C bus, a camera. That is the same
+// shape as `doors`: the venue declares what it needs, the realizer maps exactly that, everything
+// else is absent. And it carries the same danger as the runtime-socket rule one section up — a
+// venue that can name an arbitrary device PATH can name the raw memory device or a whole block
+// device, which is a host compromise submitted as a hardware request.
+//
+// So the contract names a CLASS and never a path, and the machine's own facts — which nodes, which
+// owning group — stay with the machine.
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+describe("GAP 6 — a venue asks for a KIND of device, never a path", () => {
+  // The closed enumeration, exact rather than a floor, for the same reason the substitutable-field
+  // allowlist is exact: widening what a room may ask the host for is a line someone changed on
+  // purpose.
+  it("device classes are a closed enumeration", async () => {
+    const { DEVICE_CLASSES } = await substrate();
+    expect(DEVICE_CLASSES, "the import is the specification").toBeDefined();
+    expect([...DEVICE_CLASSES].sort()).toEqual(
+      ["audio", "gpio", "i2c", "serial", "spi", "video"].sort(),
+    );
+  });
+
+  it("VenueSchema accepts a device class and an architecture list", () => {
+    const parsed = VenueSchema.safeParse(SERIAL_ROOM);
+    expect(parsed.success, JSON.stringify(parsed.success ? {} : parsed.error.issues)).toBe(true);
+  });
+
+  // ★ A RAW PATH IS REFUSED AS A VALUE, not as an unknown key — and the distinction is the law.
+  //
+  // `.strict()` would reject `{ device_path: "/dev/mem" }` for the wrong reason: it does not know
+  // the key. That refusal proves nothing about the dangerous case, which is a path arriving through
+  // the field that legitimately exists. So the fixture uses the REAL field, and the assertion pins
+  // the branch: the issue must be on `devices`, and must name the offending value.
+  it("refuses a raw device path in the devices field — on the value, not on an unknown key", () => {
+    const parsed = VenueSchema.safeParse({ ...SERIAL_ROOM, devices: ["/dev/mem"] });
+    expect(parsed.success, "a path where a class belongs is the whole danger").toBe(false);
+    if (!parsed.success) {
+      const issues = parsed.error.issues;
+      expect(
+        issues.some((i) => i.path.includes("devices")),
+        `the refusal must be about devices, not an unrecognized key — got ${JSON.stringify(issues)}`,
+      ).toBe(true);
+      expect(JSON.stringify(issues), "and it must name what was refused").toContain("/dev/mem");
+    }
+    // Non-vacuity: the same room asking for a CLASS parses.
+    expect(VenueSchema.safeParse(SERIAL_ROOM).success, "the class form must parse").toBe(true);
+  });
+});
+
+describe("GAP 6 — a device grant maps exactly what was declared, and widens nothing", () => {
+  // Exactly the declared class's nodes and NO OTHER. "No other" is the half that matters: a mapping
+  // that quietly includes a sibling node is the same defect as a mount source that was carried
+  // rather than derived.
+  it("maps exactly the declared class's nodes, and no other device", async () => {
+    const doc = await renderParsed(SERIAL_ROOM, HOST);
+    const text = flat(doc);
+    for (const node of HOST.devices["serial"]!.nodes) {
+      expect(text, "the declared class must actually be mapped").toContain(node);
+    }
+    // Every /dev path anywhere in the document must be one the host mapped for a DECLARED class.
+    const granted = new Set(HOST.devices["serial"]!.nodes);
+    for (const m of text.matchAll(/\/dev\/[A-Za-z0-9_.-]+/g)) {
+      expect(granted.has(m[0]), `"${m[0]}" was rendered but no declared class maps it`).toBe(true);
+    }
+  });
+
+  // GROUP MEMBERSHIP IS PART OF THE GRANT, and this law exists to close the escalation path rather
+  // than to describe a nicety. In practice the node is mapped, the process still cannot open it
+  // because it is not in the owning group, and the reflexive fix is to escalate the whole room to
+  // privileged — undoing every boundary above to solve a permissions problem. Granting the
+  // least-privilege membership is what makes that escalation unnecessary, so it is spec'd.
+  it("grants the owning group, so escalating to privileged is never the easy fix", async () => {
+    const doc = flat(await renderParsed(SERIAL_ROOM, HOST));
+    expect(doc, "the least-privilege membership the device actually needs").toContain(
+      HOST.devices["serial"]!.group,
+    );
+  });
+
+  // ★ AND IT WIDENS NOTHING ELSE. Asserted for ABSENCE on the realized configuration, because the
+  // failure here is something EXTRA appearing — privileged mode, a capability, or a device rule
+  // broad enough to cover devices nobody declared. A room that got its serial port and root with it
+  // has satisfied the request and destroyed the contract.
+  it("a device grant produces no privileged mode, no capabilities, and no broad device rule", async () => {
+    const doc = flat(await renderParsed(SERIAL_ROOM, HOST));
+    expect(doc, "the reflexive escalation this whole grant exists to avoid").not.toMatch(
+      /"privileged"\s*:\s*true/i,
+    );
+    expect(doc).not.toMatch(/"cap_add"/i);
+    // A wildcard cgroup rule ("c *:* rwm") or the whole device tree is the escape under another name.
+    expect(doc, "a wildcard device rule grants every device, declared or not").not.toMatch(
+      /[abc]\s+\*:\*\s+r?w?m?/i,
+    );
+    expect(doc, "mapping the whole device tree is the same escape").not.toMatch(/"\/dev:\/dev"|\/dev:\/dev/);
+  });
+
+  // A class the host does not provide is a REFUSAL, not a silent omission. Identical principle to
+  // the substrate-mismatch law: a venue that believes it has a device and does not is worse than
+  // one that is told no, because the belief is what the author reasoned against.
+  it("refuses a device class the host does not provide, and reaches no room", async () => {
+    const { dockerComposeRealizer, VenueHostUnsuitable } = await substrate();
+    expect(dockerComposeRealizer, "the import is the specification").toBeTypeOf("function");
+    expect(VenueHostUnsuitable, "the import is the specification").toBeTypeOf("function");
+    const room = VenueSchema.parse({ ...SERIAL_ROOM, devices: ["gpio"] });
+    const probe = vi.fn(async () => ["search"]);
+    await expect(
+      dockerComposeRealizer().realize(room, noCredentials, { gigId: GIG, engineServers, probe, host: HOST }),
+      "a host without the device cannot host this room",
+    ).rejects.toThrow(VenueHostUnsuitable);
+    expect(probe, "and it must refuse before probing anything").not.toHaveBeenCalled();
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+// A VENUE NEED NOT BE REALIZED WHERE THE WORKER RUNS. A room may be stood up on a machine that has
+// something this box does not — attached hardware, a network position, an architecture — while the
+// contract stays identical. That is the strongest argument the venue abstraction has, and it comes
+// with two obligations.
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+describe("GAP 6 — realizing somewhere else weakens nothing", () => {
+  const REMOTE: RealizationHost = {
+    ...HOST,
+    endpoint: "realization-host.example",
+    credential: async () => "placeholder-host-credential",
+  };
+
+  // ★ EVERY REFUSAL HOLDS REGARDLESS OF WHICH HOST EXECUTES. Written as its own law because "it is
+  // on their machine, not ours" is exactly the reasoning that would relax it — and a privileged
+  // container on someone else's host is not less privileged, only less visible.
+  it("every forbidden setting stays forbidden when the host is remote", async () => {
+    const doc = flat(await renderParsed(SERIAL_ROOM, REMOTE));
+    expect(doc).not.toMatch(/docker\.sock|containerd\.sock|podman\.sock/i);
+    expect(doc).not.toMatch(/"network_mode"\s*:\s*"host"/i);
+    expect(doc).not.toMatch(/"pid"\s*:\s*"host"/i);
+    expect(doc).not.toMatch(/"privileged"\s*:\s*true/i);
+    expect(doc).not.toMatch(/"cap_add"/i);
+    // …and the venue-derived content is the SAME room it would be locally. The contract does not
+    // change because the place did.
+    expect(doc, "the declared server travels unchanged").toContain("notes");
+    expect(doc, "so does the declared credential class").toContain("notes-token");
+  });
+
+  // ★ THE HIGHEST-VALUE CREDENTIAL IN THE SYSTEM. A credential that drives a remote realization host
+  // is typically administrative ON that host — higher value than the venue credential, because it is
+  // authority over a machine rather than over an organization's queue. So it follows the discipline
+  // src/workspace.ts:60-89 already documents for the per-gig git credential: obtained per gig,
+  // against a live lease, never held at boot and never the same one twice.
+  it("obtains a remote host credential per gig, never at boot, and never renders it", async () => {
+    const { dockerComposeRealizer } = await substrate();
+    expect(dockerComposeRealizer, "the import is the specification").toBeTypeOf("function");
+    const credential = vi.fn(async () => "placeholder-host-credential");
+    const realizer = dockerComposeRealizer();
+    const room = VenueSchema.parse(SERIAL_ROOM);
+    const host: RealizationHost = { ...HOST, endpoint: "realization-host.example", credential };
+    const probe = async () => ["search"];
+
+    const first = await realizer.realize(room, noCredentials, { gigId: GIG, engineServers, probe, host });
+    expect(credential, "the credential is fetched for the gig, not read at boot").toHaveBeenCalledTimes(1);
+    expect(credential).toHaveBeenCalledWith({ gigId: GIG });
+    await first.teardown();
+
+    const secondGig = "88888888-8888-8888-8888-888888888888";
+    const second = await realizer.realize(room, noCredentials, { gigId: secondGig, engineServers, probe, host });
+    expect(credential, "a second gig gets its own, never the first one again").toHaveBeenCalledTimes(2);
+    expect(credential).toHaveBeenLastCalledWith({ gigId: secondGig });
+    await second.teardown();
+
+    // And it never lands in the rendered configuration, for the same reason no other credential does.
+    expect(flat(await renderParsed(SERIAL_ROOM, host)), "host authority must not be written to a file")
+      .not.toContain("placeholder-host-credential");
+  });
+
+  // A LOCAL realization asks for no host credential at all. Otherwise the "per gig" law above could
+  // be satisfied by a realizer that always fetches one, which would put an administrative credential
+  // on the path of every run that never needed one.
+  it("asks for no host credential when the room is realized here", async () => {
+    const { dockerComposeRealizer } = await substrate();
+    expect(dockerComposeRealizer, "the import is the specification").toBeTypeOf("function");
+    const credential = vi.fn(async () => "placeholder-host-credential");
+    // No endpoint: this IS the worker's own machine.
+    const local: RealizationHost = { ...HOST, credential };
+    const handle = await dockerComposeRealizer().realize(VenueSchema.parse(SERIAL_ROOM), noCredentials, {
+      gigId: GIG, engineServers, probe: async () => ["search"], host: local,
+    });
+    expect(credential, "no remote host, no administrative credential").not.toHaveBeenCalled();
+    await handle.teardown();
+  });
+});
+
+describe("GAP 6 — architecture is part of the contract", () => {
+  // A venue realized on a host of the wrong architecture fails at run time, confusingly, and usually
+  // on someone else's machine on their first attempt. The mismatch is knowable at construction, so
+  // it is answered at construction — the same shape as the substrate and device refusals.
+  it("refuses a host whose architecture the venue does not support, before PLAYING", async () => {
+    const { dockerComposeRealizer, VenueHostUnsuitable } = await substrate();
+    expect(dockerComposeRealizer, "the import is the specification").toBeTypeOf("function");
+    const room = VenueSchema.parse(SERIAL_ROOM); // supports arm64
+    const wrong: RealizationHost = { ...HOST, architecture: "amd64" };
+    const probe = vi.fn(async () => ["search"]);
+    await expect(
+      dockerComposeRealizer().realize(room, noCredentials, { gigId: GIG, engineServers, probe, host: wrong }),
+    ).rejects.toThrow(VenueHostUnsuitable);
+    expect(probe, "refuse before standing anything up").not.toHaveBeenCalled();
+    // Non-vacuity: the matching host realizes, or the law passes by refusing always.
+    const ok = await dockerComposeRealizer().realize(room, noCredentials, {
+      gigId: GIG, engineServers, probe: async () => ["search"], host: HOST,
+    });
+    expect(ok.state).toBe("PLAYING");
+    await ok.teardown();
+  });
+
+  // A venue naming no architecture runs anywhere. Deny-by-default belongs on CAPABILITY, not on
+  // portability — the same reason an unnamed venue stays claimable in Gap 5, and the same reason a
+  // venue naming no substrate is realizable by whatever the deployment supplies.
+  it("a venue naming no architecture is realizable on any host", async () => {
+    const { dockerComposeRealizer } = await substrate();
+    expect(dockerComposeRealizer, "the import is the specification").toBeTypeOf("function");
+    const anywhere = VenueSchema.parse(CONTAINED_ROOM); // declares no architectures
+    const handle = await dockerComposeRealizer().realize(anywhere, noCredentials, {
+      gigId: GIG, engineServers, probe: async () => ["search"], host: { ...HOST, architecture: "amd64" },
+    });
+    expect(handle.state).toBe("PLAYING");
+    await handle.teardown();
   });
 });

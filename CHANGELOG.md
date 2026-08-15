@@ -12,7 +12,7 @@ the MCP handshake reports the constant rather than a hardcoded literal.
 ### Added — a specification, and a suite that is red on purpose
 
 - **`SPEC-worker-contract.md`** — the contract a worker (any host running `coltrane work`) is
-  entitled to, written as five gaps. Every one was found by RUNNING the system; none came from
+  entitled to, written as six gaps. Gaps 1–5 were found by RUNNING the system; none came from
   review. Each section states what is true today with references into this tree, why it is a defect,
   the contract required, and what is deliberately left to the deployment.
 
@@ -40,8 +40,26 @@ the MCP handshake reports the constant rather than a hardcoded literal.
      exists and `runGig` honours it; the claim takes any queued gig of the org regardless, so a gig
      is taken by a worker that cannot realize its room while a capable worker sits idle. Work cannot
      be routed; the only way to make a gig run somewhere specific is to stop every other worker.
+  6. **What a venue is realized ON is unspecified** — the other half of #2. Realization targets a
+     node subprocess and the containerization question is deferred with "room left for a future
+     field", but that room is not a NAMED INTERFACE: nothing declares which substrate a venue needs,
+     nothing declares which a host provides, so nothing can refuse the mismatch. The failure mode is
+     silent degradation — a venue that requires isolation, realized on a substrate that cannot
+     provide it, runs and believes it is isolated. Contract: a `VenueRealizer` seam injected the way
+     `CredentialResolver` already is, two reference realizers (local-process and Docker Compose) so
+     the seam is proven by use, selection that refuses rather than degrades, and guarantees a
+     realizer may only claim if it can keep them.
 
-- **`tests/spec_*.test.ts` — 48 laws, committed FAILING.** Five files, one per gap, each opening with
+     The renderer laws are the sharp end. Rendering a runtime configuration from contract data is
+     code generation from data: a closed allowlist of substitutable fields, parsed-schema input
+     only, and an individual refusal for the container runtime socket, host networking, the host PID
+     namespace, privileged mode, added capabilities, non-derived mount sources, and any credential
+     reaching the room by a route other than `CredentialResolver`.
+
+     Unlike 1–5 this was found by reading, not by running. It is pinned now because it is the only
+     failure in the document that is invisible when it happens.
+
+- **`tests/spec_*.test.ts` — 68 laws, committed FAILING.** Six files, one per gap, each opening with
   a banner saying so. A failure named `spec_*` is pending implementation; a failure anywhere else is
   a regression, and the naming exists so a reader can tell them apart without reading the diff.
 
@@ -51,7 +69,7 @@ the MCP handshake reports the constant rather than a hardcoded literal.
   not-yet-existing modules are therefore loaded through a specifier held in a `const`, so the red
   lands at runtime on the law that needs it.
 
-- **Landing all five will be a MINOR bump** under this repo's inverted convention. Gaps 1, 2 and 5
+- **Landing all six will be a MINOR bump** under this repo's inverted convention. Gaps 1, 2, 5 and 6
   are additive; Gap 3 is not — a worker whose environment names the wrong host boots today and
   refuses afterwards, which is the point and is still a break.
 

@@ -1,14 +1,18 @@
 # The worker contract — a RED specification
 
 A **worker** is any host that runs `coltrane work`: a container, a laptop, a CI runner. This
-document is the contract such a host is entitled to, written as five gaps and the laws that close
+document is the contract such a host is entitled to, written as six gaps and the laws that close
 them.
 
-Every gap here was found by RUNNING the system. None came from review. That distinction is the
-reason the document exists: each one is cheap to describe and was expensive to find, because each
-failed as something else — a Storage permissions problem, a stale client cache, an empty queue, a
-tool the model "chose not to use". The point of writing them down is that the next person meets the
-refusal instead of the symptom.
+Gaps 1–5 were found by RUNNING the system. None came from review. That distinction is the reason the
+document exists: each one is cheap to describe and was expensive to find, because each failed as
+something else — a Storage permissions problem, a stale client cache, an empty queue, a tool the
+model "chose not to use". The point of writing them down is that the next person meets the refusal
+instead of the symptom.
+
+Gap 6 is the exception, and says so. It was found by reading Gap 2 back and asking what the room is
+realized ON. It has not failed in production, which is the argument for pinning it now rather than
+later: its failure mode is the only one in this document that is INVISIBLE when it happens.
 
 The suite in `tests/spec_*.test.ts` is the falsifiable half of this document. It is committed
 **failing on purpose**. See [RED → GREEN](#red--green) before assuming CI is broken.
@@ -587,9 +591,157 @@ argument, the worker's declaration of what it can realize, and the shared predic
 
 ---
 
+## Gap 6 — the realization substrate is unspecified, and it is the other half of Gap 2
+
+Gap 2 says a venue cannot declare what provides its tools and that nothing builds the room from the
+contract. That is half the hole. The other half: **what a venue is realized ON is entirely
+unspecified.**
+
+### What is true today
+
+Realization targets a node subprocess, and the containerization question is explicitly deferred —
+"isolation is a node subprocess by construction; a future venue field is left room for". Leaving
+room is the right call at design time and the wrong state to stay in, because the room is not a
+named interface. Nothing declares which substrate a venue needs, nothing declares which substrates a
+host can provide, and therefore nothing can refuse the mismatch.
+
+### Why it is a defect
+
+A substrate that is implicit is a substrate that leaks into the contract. The moment a second one
+exists, every venue silently means "on whatever this host happens to be", and the guarantees a
+venue's author believed they were writing down become properties of the box that read them.
+
+The failure mode is specific and it is the reason this is spec'd now rather than later: **silent
+degradation.** A venue that requires isolation, realized on a substrate that cannot provide it,
+runs — and believes it is isolated. That is strictly worse than a refusal, because a refusal is
+visible and a false guarantee is not.
+
+### The contract
+
+**1. `VenueRealizer` is a named seam, injected the way `CredentialResolver` already is.**
+
+```ts
+export interface VenueRealizer {
+  readonly substrate: string;                 // what this realizer builds on
+  readonly guarantees: readonly VenueGuarantee[];
+  available(): boolean;                       // can THIS host run it, right now?
+  realize(venue, credentialResolver, opts): Promise<RealizationHandle>;
+}
+```
+
+The engine ships the interface, the state machine, the probe and the drift guard (all Gap 2). WHICH
+substrate realizes a venue is a deployment choice. The engine has no opinion.
+
+**2. Two realizers ship, so the seam is proven by use rather than asserted.** A one-implementation
+interface is a hardcoded strategy with extra indirection; the second implementation is what
+demonstrates nothing leaked.
+
+- **`localProcessRealizer`** — today's behaviour, and the baseline: a per-gig temporary directory,
+  node subprocesses, the empty room traversing with zero children. It **must keep working with no
+  container runtime and no daemon present.** Every guarantee it cannot keep, it does not claim.
+- **`dockerComposeRealizer`** — the reference containerized implementation.
+
+**3. Selection is per venue and per deployment, and a mismatch REFUSES.** A venue may name the
+substrate it requires; a deployment supplies the realizers it has. When a venue requires a substrate
+no available realizer provides, selection throws `VenueSubstrateUnavailable`, naming what was
+required and what is available. **It never falls back to a weaker realizer.** This is the whole
+reason the gap is worth writing down.
+
+**4. Guarantees are declared, and a realizer may only claim what it can keep.**
+
+```ts
+type VenueGuarantee =
+  | "withholds_capabilities"       // the seat cannot reach tools the host holds
+  | "isolated_filesystem"          // per-realization tree, not a shared one
+  | "network_policy_doors"         // `doors` enforced at a network boundary
+  | "reproducible_tool_surface"    // identical environment every run
+  | "per_chair_isolation";         // two chairs in a phase cannot collide
+```
+
+A realizer claiming a guarantee it cannot keep is worse than one claiming none, for exactly the
+reason above: the claim is what a venue author reasons against.
+
+### What containerized realization buys — as properties, not as advocacy
+
+These are the properties a realizer may guarantee, written so a realizer can be JUDGED against them.
+None of this argues for a particular runtime; it argues for the guarantees being nameable.
+
+1. **Capability withholding becomes structural.** Today a working tree is obtained by cloning with a
+   per-gig credential, and the credential is protected by careful process-level handling.
+   `src/workspace.ts:44-56` is admirably candid that this is cooperation, not control: the revoke
+   step "is not a security control and must not be described as one: a compromised drain simply
+   declines to call this." A realizer that mounts the TREE while withholding the git binary, the
+   remote and the network converts a cooperative boundary into a structural one. The host clones and
+   the host commits; the seat receives a directory and returns a patch.
+
+2. **Concurrency without collision.** A phase with several chairs shares one working tree today, and
+   nothing prevents two seats writing the same path. Per-chair realization makes that impossible by
+   construction rather than by scheduling luck.
+
+3. **Outputs as diffs — which the genome ALREADY requires.** This is the strongest evidence that the
+   substrate is being brought into line with the types rather than the reverse:
+
+   - `domain_types/change-set.json` requires `diffs`, typed as an array of `{path, patch}`, described
+     as "per-path patch content, in unified-diff form".
+   - `domain_types/red-spec.json` requires the identical shape.
+
+   Both output contracts were written as *"a patch someone else applies"*, never *"I mutated your
+   tree"*. The runtime simply never enforced it. And the counter-example proves the rule:
+   `domain_types/pull-request.json` requires `branch`, `commit_sha` and `pr_url` and carries no
+   `diffs` at all — it is a separate, downstream type held by a seat whose whole job is to push. The
+   types already separate producing a change from applying one. The substrate has not.
+
+4. **`doors` become enforceable.** Kernel-level network enforcement of the doors allowlist is
+   currently out of scope, with doors enforced at the MCP-server layer the way the browser cage
+   passes `--allowed-origins` (`src/playwright_cage.ts`). A realizer with a real network boundary can
+   enforce `doors` as a network policy. That is the difference between enforcement and cooperation,
+   and it is why it is a named guarantee rather than a footnote.
+
+5. **Tool-surface reproducibility.** A venue's declared servers plus its digest-pinned `installs`
+   become a content-addressed environment that is identical every run. That is the actual meaning of
+   "a consistent tool surface", and it is the property Gap 2 exists to obtain.
+
+### The security rules — the dangerous part, and the most important laws in the suite
+
+A containerized realizer **renders a runtime configuration from contract data.** That is code
+generation from data. If any part of the input is reachable by a gig, it is remote code execution
+with extra steps. A permissive realizer is worse than no realizer.
+
+- **Render from a fixed template with a CLOSED ALLOWLIST of substitutable fields.** Never merge
+  arbitrary keys from the contract into the rendered configuration. `COMPOSE_SUBSTITUTABLE_FIELDS`
+  is an exact list, and a field not on it contributes nothing, whatever it is called.
+- **The renderer accepts only the PARSED schema object, never raw input.** `VenueSchema` is already
+  `.strict()` — that is the enforcement point, and handing the renderer unparsed input walks around
+  it. Refuse.
+- **A container runtime socket must never be mounted into a venue.** It is a one-line escape and the
+  single most common way this design fails. It is its own law with a real assertion.
+- **Equally refused, each with its own law:** host networking, host PID namespace, privileged mode,
+  added capabilities, and any mount whose source is not derived from an allowlisted field.
+- **Credentials reach the realized environment only through `CredentialResolver`,** bound at
+  realization time from `credential_names` ⊆ `credential_surface`. Never from the rendered file,
+  never from the genome, never inherited wholesale from the host environment.
+
+### The trade-off, stated honestly
+
+Containerized realization costs image build time — once per venue version, not per gig — start
+latency, and a runtime dependency the local realizer does not have. That is why the local realizer
+is the baseline and must keep working with nothing installed.
+
+And per-chair parallel realization multiplies substrate resources by the WIDTH of a phase. A
+concurrency ceiling therefore belongs in the contract, where an author sets it deliberately, rather
+than being discovered by the first wide DAG on the first box that runs it.
+
+### Left to the deployment
+
+Which realizers exist, which are installed, and what a venue's substrate name means on this host.
+The engine ships the seam, the two reference realizers, the selection rule, the refusal, and the
+security laws the renderer must satisfy.
+
+---
+
 ## RED → GREEN
 
-**48 laws across five files, all failing.** That is the deliverable, not an accident.
+**68 laws across six files, all failing.** That is the deliverable, not an accident.
 
 | file | gap | laws |
 |---|---|---|
@@ -598,18 +750,23 @@ argument, the worker's declaration of what it can realize, and the shared predic
 | `tests/spec_worker_environment.test.ts` | 3 | 14 |
 | `tests/spec_worker_run_modes.test.ts` | 4 | 9 |
 | `tests/spec_venue_targeting.test.ts` | 5 | 5 |
+| `tests/spec_venue_realization_substrate.test.ts` | 6 | 20 |
+
+**Start with Gap 6's renderer laws.** Every other gap fails visibly — a capability is missing and
+somebody notices. A permissive realizer fails invisibly: the venue still claims the guarantee, and
+there is an actual escape at the end of it.
 
 - **CI is expected to be red until these are implemented.** Every file opens with a banner saying
   so. A failure whose file is named `spec_*` is pending implementation; a failure anywhere else is a
   regression. That is the whole reason for the naming convention — a reader should be able to tell
   them apart at a glance, without reading the diff. As landed: `vitest run` reports
-  **48 failed, 2626 passed**.
+  **68 failed, 2626 passed**.
 - **The imports are the specification.** Where a module or export does not exist yet, the test names
   it anyway and fails on the missing binding.
 - **`npx tsc --noEmit` is CLEAN, deliberately.** The obvious way to write these tests is a static
   import of a module that is not there, and it is wrong here: this repo's vitest `globalSetup` runs
   `npm run build` first, so ONE compile error stops every band from running and nobody can tell a
-  pending spec from a regression. So the two not-yet-existing modules are loaded through a specifier
+  pending spec from a regression. So the not-yet-existing modules are loaded through a specifier
   held in a `const`. tsc stays clean; the red lands at runtime, on the law that needs the module,
   naming it. Each law fails on its own line with its own message rather than taking the file down at
   link time.
@@ -618,7 +775,7 @@ argument, the worker's declaration of what it can realize, and the shared predic
   changing it belongs in a diff to this document first — the laws are downstream of the reasoning,
   not a substitute for it.
 - **Done looks like:** `npm run verify` green, `SPEC-worker-contract.md` still accurate, and the
-  five `spec_*` files unchanged except where the spec itself changed with an argument attached.
+  six `spec_*` files unchanged except where the spec itself changed with an argument attached.
 
 Each law states the property, not the implementation. Where a law reads source text
 (the environment-completeness law), it does so for the same reason
@@ -626,7 +783,7 @@ Each law states the property, not the implementation. Where a law reads source t
 code does, and nothing but the code can testify to the second half.
 
 Under this repo's inverted semver — while the major is `0`, **minor = breaking**, **patch =
-additive** — landing all five is a **minor** bump. Gaps 1, 2 and 5 are additive; Gap 3 is not. A
+additive** — landing all six is a **minor** bump. Gaps 1, 2, 5 and 6 are additive; Gap 3 is not. A
 worker whose environment names the wrong host boots today and refuses afterwards, which is the whole
 point and is still a break.
 

@@ -7,6 +7,18 @@ signals a breaking change and a **patch** signals an additive or internal one.
 `package.json`'s `version` — `tests/version_identity.test.ts` enforces that, and also that
 the MCP handshake reports the constant rather than a hardcoded literal.
 
+## 0.9.4
+
+### Fixed
+
+- **The drain can record what it ran.** `COLTRANE_DRAIN_URL` carries two contracts: provisioning
+  sets it to `<project>/rest/v1`, and `venue-provision.sh` consumes it as `${base}/rpc/<fn>`.
+  0.9.1's write-back appended `/rest/v1/rpc/` to the same value, producing `/rest/v1/rest/v1/rpc/…`
+  and `PGRST125 Invalid path specified in request URL` — after a gig had claimed, run, called the
+  model and sealed an output. The work was done and could not be recorded. Both shapes are now
+  accepted, because a variable whose meaning depends on its reader drifts again the moment a third
+  caller appears.
+
 ## 0.9.3
 
 ### Fixed

@@ -303,9 +303,18 @@ function storeApiKey(): string {
 
 /** POST a definer RPC with both credentials in their proper places. */
 async function drainRpc(fn: string, body: Record<string, unknown>): Promise<Response> {
-  const base = (process.env["COLTRANE_DRAIN_URL"] ?? "").replace(/\/$/, "");
-  if (!base) throw new Error("COLTRANE_DRAIN_KEY is set but COLTRANE_DRAIN_URL (project base) is missing");
-  return fetch(`${base}/rest/v1/rpc/${fn}`, {
+  const raw = (process.env["COLTRANE_DRAIN_URL"] ?? "").replace(/\/$/, "");
+  if (!raw) throw new Error("COLTRANE_DRAIN_KEY is set but COLTRANE_DRAIN_URL (project base) is missing");
+  // ONE VARIABLE, TWO CONTRACTS — which is the actual defect here. Provisioning sets
+  // COLTRANE_DRAIN_URL to `<project>/rest/v1`, and venue-provision.sh consumes it as
+  // `${base}/rpc/<fn>`. This appended `/rest/v1/rpc/` to the same value, producing
+  // `/rest/v1/rest/v1/rpc/…` and PGRST125 "Invalid path specified in request URL" — after a gig had
+  // claimed, run, called the model and sealed an output. The work was done and could not be recorded.
+  //
+  // Accepts either shape rather than asserting one, because both are already in use and a variable
+  // whose meaning depends on who reads it will drift again the moment a third caller appears.
+  const base = raw.endsWith("/rest/v1") ? raw : `${raw}/rest/v1`;
+  return fetch(`${base}/rpc/${fn}`, {
     method: "POST",
     headers: { apikey: storeApiKey(), "Content-Type": "application/json" },
     body: JSON.stringify(body),

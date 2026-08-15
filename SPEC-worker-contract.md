@@ -804,6 +804,144 @@ multi-architecture images. A single-architecture venue that silently fails on a 
 first experience, and it will be read as the system being broken rather than as the venue being
 narrow.
 
+### Teardown is not enough — realization must be RECONCILED
+
+The design puts `teardown()` in a `finally`. That is correct and it is insufficient, in a way that is
+invisible in week one and load-bearing in month six: **`finally` does not run when the process is
+killed.** A worker that is SIGKILLed, OOM-killed, or whose host dies leaves behind everything it
+realized. Every crash leaks, and on a long-lived worker the leak accumulates until something fills.
+
+The engine already knows this shape. `src/worker.ts:330-339` accepts that a store which leases
+without minting strands a row until the lease expires, and says so rather than pretending otherwise;
+`reapWorkerState` (`src/worker.ts:181`) exists because local checkpoint state outlives the process
+that wrote it. Realized environments are the same category of debris with a larger blast radius.
+
+So cleanup is not the model. **Reconciliation is:**
+
+1. **Every artifact a realizer creates is LABELLED** — isolated environments, networks, volumes,
+   temporary directories — with the gig it was created for and the worker instance that created it.
+   An unlabelled artifact is indistinguishable from something a human made on purpose, and nothing
+   may safely collect it.
+
+2. **A realizer exposes a SWEEP:** given the set of currently-live gigs, collect every labelled
+   artifact belonging to no live gig. Reconciliation against observed state, not a list of things
+   this process happens to remember creating — because the process that created them is precisely the
+   one that died.
+
+3. **A worker sweeps at STARTUP, before claiming.** Startup is the moment after a crash. Sweeping
+   there is what turns "every crash leaks" into "every crash leaks until the next boot".
+
+**The live set is host-wide, and that is what makes an unconditional startup sweep safe.** Two
+workers sharing a host must never garbage-collect each other: a sweep spares any artifact whose gig
+is live, INCLUDING one created by a different live instance. Without that rule an unconditional
+startup sweep is a footgun that deletes a peer's running work, and the feature is worse than its
+absence. It is a law below for that reason.
+
+### What accumulates outside the per-gig lifecycle
+
+Three things are not per-gig, so no teardown covers them:
+
+- **Build cache** — grows across venue versions and is typically the largest consumer.
+- **Unreferenced build artifacts** left behind by venue-version churn.
+- **Logs** — commonly unbounded by default, so one talkative process fills a disk and takes the
+  worker with it.
+
+Contract:
+
+- **A realizer declares a RETENTION POLICY** — a ceiling on cached build artifacts and on
+  unreferenced environments — and the worker applies it on a stated cadence. A policy whose ceiling
+  is "unlimited" is not a policy; the whole point is that a bound EXISTS, not that any particular
+  number is right. (Same argument as `DEFAULT_DRAIN_OPENING` in `src/run_deps.ts:47`: an unattended
+  box that can consume without limit is the one thing it must not be.)
+- **Every rendered configuration carries a log bound.** A rendered configuration without one is a
+  defect, and it is a law.
+
+  **The bound comes from the realizer's retention policy, NOT from the venue** — deliberately, and
+  this is a small, argued departure from "log bounds are allowlisted fields". `COMPOSE_SUBSTITUTABLE_FIELDS`
+  is the list of VENUE fields the renderer may substitute; putting the log bound on it would let a
+  room raise its own ceiling, which is the one thing a ceiling must not permit. It is rendered
+  because it must always be present, and it is realizer-sourced because a venue may not widen it —
+  the same posture `equipment` already takes as a ceiling rather than a grant.
+
+A worker that dies of a full disk has failed at its one job, and every mechanism here is cheaper than
+that incident.
+
+### Minimal footprint is a CONSEQUENCE of the contract, not a separate effort
+
+This is the structural argument, and it is one of the strongest available for Gap 2.
+
+**With no venue contract in force, a worker needs exactly ONE prepared environment.** That environment
+must therefore be the union of everything any gig might need — every tool, every runtime, every
+heavyweight dependency of every skill in the genome — because nothing tells it which subset this
+particular work requires. Every gig then carries the cost of every capability it never invokes. That
+is not a packaging mistake anyone made; it is the only design reachable when nothing declares what a
+given piece of work needs.
+
+**The venue contract is what makes minimality possible at all.** A venue declares its providers
+(`mcp_servers`) and its digest-pinned `installs`; the environment built from it contains those and
+nothing else. So reducing footprint is not a separate optimisation effort that competes with this
+work — it is a consequence of the work. Gap 2 is the enabling change; smaller environments are what
+falls out.
+
+**Shared floors, small deltas.** Realized environments should be composed so the shared portion is
+large and the venue-specific portion is small, with construction ordered so volatile content lands
+last. Where the substrate supports content-addressed sharing of common portions, N venues over a
+common floor cost `floor + Σ(deltas)` rather than `N × environment`. A realizer SHOULD therefore
+compose from a small set of pinned, verified floors rather than building each venue from nothing.
+
+### Two resources, two mechanisms — do not conflate them
+
+Implementers routinely optimise the wrong one, so state it flatly:
+
+| resource | scales with | lever |
+|---|---|---|
+| storage, cold-start acquisition | environment SIZE | minimality, shared floors, content addressing |
+| memory | number of running PROCESSES | the concurrency ceiling |
+
+An environment of any size running one process holds roughly that one process's memory. **Shrinking
+environments does not reduce memory pressure and must not be sold as if it does.**
+
+This is where the concurrency ceiling noted above earns its place in the contract: per-chair
+realization multiplies substrate resources by the WIDTH of a phase, and the ceiling is the only lever
+that touches memory. Composition is the storage lever; the ceiling is the memory lever. They are not
+substitutes.
+
+### The cost model, so the trade is chosen rather than discovered
+
+Qualitative and relative — no benchmarks are invented here, and none should be quoted from here.
+
+- **Starting from a warm, locally-present environment is cheap** relative to the work a gig does. It
+  is not the dominant cost, and an implementer who attacks it first will be optimising noise.
+- **BUILDING is expensive, and is amortised by content addressing.** The identity of a built
+  environment should be a function of the VENUE CONTRACT'S HASH, so an unchanged contract rebuilds
+  nothing. This is the payoff of the digest-pinned `installs` already in the design: pinning is what
+  makes the hash mean something, and the hash is what makes the rebuild unnecessary. The two were
+  always one mechanism.
+- **The dominant per-gig cost is PROVIDER READINESS** — the probe waiting for each declared server to
+  answer. Name it as the deliberate trade it is: latency bought for the guarantee that a granted tool
+  RESPONDS before any model is invoked. Gap 2 exists to buy exactly that, and paying for it in
+  seconds at construction is the point, not a regression to be tuned away.
+- **A filesystem shared with the host can be markedly slower than one that is not.** Prefer copying
+  the working tree in, or a managed volume, over sharing the host's directory.
+
+  And note the coincidence, because it is not one: the seat should not be writing the host's checkout
+  anyway — that is the diffs-not-mutations property `change-set` and `red-spec` already require. The
+  fast path and the correct path are the same path. When that happens it is usually a sign the
+  decomposition is right.
+
+### The warm-start tension — named, not resolved
+
+The largest available latency win is keeping declared providers warm ACROSS gigs. It is also the
+largest isolation compromise available, and standing-venue caching is already out of scope.
+
+The middle position, spec'd as a constraint rather than a plan: **warm what carries no isolation
+cost — the cached portions of a BUILT environment — and never the running environment itself.** A
+provider process that survives a gig has seen a previous gig's work, which is exactly what per-gig
+realization exists to prevent.
+
+Recorded as an open question below with that constraint attached, so a later implementer cannot
+mistake the isolation cost for an oversight.
+
 ### The trade-off, stated honestly
 
 Containerized realization costs image build time — once per venue version, not per gig — start
@@ -830,7 +968,7 @@ is stood up here or somewhere else.
 
 ## RED → GREEN
 
-**80 laws across six files, all failing.** That is the deliverable, not an accident.
+**88 laws across six files, all failing.** That is the deliverable, not an accident.
 
 | file | gap | laws |
 |---|---|---|
@@ -839,7 +977,7 @@ is stood up here or somewhere else.
 | `tests/spec_worker_environment.test.ts` | 3 | 14 |
 | `tests/spec_worker_run_modes.test.ts` | 4 | 9 |
 | `tests/spec_venue_targeting.test.ts` | 5 | 5 |
-| `tests/spec_venue_realization_substrate.test.ts` | 6 | 32 |
+| `tests/spec_venue_realization_substrate.test.ts` | 6 | 40 |
 
 **Start with Gap 6's renderer laws.** Every other gap fails visibly — a capability is missing and
 somebody notices. A permissive realizer fails invisibly: the venue still claims the guarantee, and
@@ -849,7 +987,7 @@ there is an actual escape at the end of it.
   so. A failure whose file is named `spec_*` is pending implementation; a failure anywhere else is a
   regression. That is the whole reason for the naming convention — a reader should be able to tell
   them apart at a glance, without reading the diff. As landed: `vitest run` reports
-  **80 failed, 2626 passed**.
+  **88 failed, 2626 passed**.
 - **The imports are the specification.** Where a module or export does not exist yet, the test names
   it anyway and fails on the missing binding.
 - **`npx tsc --noEmit` is CLEAN, deliberately.** The obvious way to write these tests is a static
@@ -892,6 +1030,14 @@ Honest gaps, listed so nobody mistakes silence for a decision.
 - **Anything below the realization boundary.** Containerization, kernel-level enforcement of
   `doors`, hermetic install execution, standing-venue caching across gigs. Named in Gap 2 as out of
   scope so the implementer does not widen the change into them.
+- **Keeping declared providers warm across gigs.** The largest available latency win and the largest
+  isolation compromise, so it is left open WITH ITS CONSTRAINT ATTACHED: warm the cached portions of
+  a built environment, never the running environment itself. A provider process that survives a gig
+  has seen a previous gig's work, which is what per-gig realization exists to prevent. The cost is
+  named here so a later implementer cannot mistake it for an oversight.
+- **The retention cadence, and every number in it.** The spec requires that a bound EXISTS and that a
+  realizer declares one. Which ceiling, and how often it is applied, is a deployment's to set — the
+  same posture `COLTRANE_DRAIN_OPENING` already takes.
 - **The store schema.** No column names, no RPC signatures, no migration. The engine names
   arguments and their meaning; the store's shape is the deployment's.
 - **Who may mint a venue credential.** Deliberately absent from the engine. The engine refuses a

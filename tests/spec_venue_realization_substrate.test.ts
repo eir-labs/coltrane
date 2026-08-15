@@ -42,12 +42,31 @@ const VENUE_REALIZER = "../src/venue_realizer.js";
 
 type CredentialResolver = (names: readonly string[]) => Promise<Record<string, string>>;
 
+/** One thing a realizer created. LABELLED, because an unlabelled artifact is indistinguishable
+ *  from something a human made on purpose and nothing may safely collect it. */
+interface RealizedArtifact {
+  kind: string;
+  id: string;
+  labels: { gig_id: string; instance: string };
+}
+
 interface RealizationHandle {
   state: string;
   mcpServerConfigs: Readonly<Record<string, unknown>>;
   configPath: string;
+  /** Everything this realization created, so a sweep has something to reconcile against. */
+  artifacts: readonly RealizedArtifact[];
   teardown(): Promise<void> | void;
   tornDown(): boolean;
+}
+
+/** A ceiling on what survives outside the per-gig lifecycle. A policy whose ceiling is unlimited is
+ *  not a policy — the point is that a bound EXISTS, not that any number is right. */
+interface RetentionPolicy {
+  max_cached_build_artifacts: number;
+  max_unreferenced_environments: number;
+  /** How often the worker applies it. Never "never". */
+  cadence: string;
 }
 
 /** The properties a realizer may CLAIM — and may only claim if it can keep them. */
@@ -84,6 +103,7 @@ interface VenueRealizer {
   readonly substrate: string;
   readonly guarantees: readonly VenueGuarantee[];
   available(): boolean;
+  readonly retention: RetentionPolicy;
   realize(
     venue: unknown,
     credentialResolver: CredentialResolver,
@@ -92,8 +112,13 @@ interface VenueRealizer {
       engineServers?: Readonly<Record<string, unknown>>;
       probe?: (s: { slug: string }) => Promise<string[]>;
       host?: RealizationHost;
+      /** How many chairs this realization is for — checked against the venue's ceiling. */
+      chairs?: number;
     },
   ): Promise<RealizationHandle>;
+  /** RECONCILIATION, not cleanup: collect every labelled artifact belonging to no live gig.
+   *  `liveGigs` is HOST-WIDE, which is what makes an unconditional startup sweep safe. */
+  sweep(opts: { liveGigs: readonly string[] }): Promise<readonly RealizedArtifact[]>;
 }
 
 interface SubstrateModule {
@@ -114,6 +139,13 @@ interface SubstrateModule {
   COMPOSE_SUBSTITUTABLE_FIELDS: readonly string[];
   /** The CLOSED enumeration of device KINDS a venue may ask for. Never a path. */
   DEVICE_CLASSES: readonly string[];
+  /** Thrown when a realization would exceed the venue's declared concurrency ceiling. */
+  VenueConcurrencyRefused: new (...args: never[]) => Error;
+  /** The identity of the environment built from a venue — a function of the CONTRACT'S hash, so an
+   *  unchanged contract rebuilds nothing. The payoff of digest-pinned installs. */
+  environmentIdentity(venue: unknown): string;
+  /** The identity of the shared floor a venue composes over, so N venues cost floor + Σ(deltas). */
+  floorIdentity(venue: unknown): string;
   /** Renders the runtime configuration from a PARSED venue. Never from raw input. */
   renderComposeConfig(
     venue: unknown,
@@ -736,5 +768,195 @@ describe("GAP 6 — architecture is part of the contract", () => {
     });
     expect(handle.state).toBe("PLAYING");
     await handle.teardown();
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+// TEARDOWN IS NOT ENOUGH. `finally` does not run when the process is KILLED — SIGKILL, the OOM
+// killer, a host that dies — so every crash leaks everything the worker realized, and on a
+// long-lived box the leak accumulates until something fills.
+//
+// The engine already knows this shape: src/worker.ts:330 accepts a row stranded by a store that
+// leased without minting and says so rather than pretending otherwise, and reapWorkerState
+// (src/worker.ts:181) exists because local checkpoint state outlives the process that wrote it.
+// Realized environments are the same debris with a larger blast radius.
+//
+// So the model is RECONCILIATION, not cleanup: label everything, then collect what belongs to no
+// live gig — reconciling against observed state rather than a list the dead process was holding.
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+describe("GAP 6 — realization is reconciled, because a killed worker runs no finally", () => {
+  const realizeFor = async (gigId: string, host: RealizationHost = HOST) => {
+    const { dockerComposeRealizer } = await substrate();
+    expect(dockerComposeRealizer, "the import is the specification").toBeTypeOf("function");
+    return dockerComposeRealizer().realize(VenueSchema.parse(SERIAL_ROOM), noCredentials, {
+      gigId, engineServers, probe: async () => ["search"], host,
+    });
+  };
+
+  // Everything, labelled with both. The GIG says what it belongs to; the INSTANCE says who made it,
+  // which is what lets a human tell a leaked artifact from a deliberate one — and an unlabelled
+  // artifact is indistinguishable from something somebody made on purpose, so nothing may collect it.
+  it("every realized artifact carries the gig and the instance that created it", async () => {
+    const handle = await realizeFor(GIG);
+    expect(handle.artifacts.length, "a realization that records nothing cannot be reconciled")
+      .toBeGreaterThan(0);
+    for (const a of handle.artifacts) {
+      expect(a.labels.gig_id, `${a.kind} must say which gig it belongs to`).toBe(GIG);
+      expect(a.labels.instance, `${a.kind} must say who created it`).toBeTruthy();
+    }
+    await handle.teardown();
+  });
+
+  // THE CRASH-RECOVERY CASE, and the whole reason a sweep exists. An artifact whose gig is over —
+  // including one a PRIOR instance of this worker left behind when it was killed — is collected.
+  // Reconciling against the live set rather than against anything this process remembers is what
+  // makes that possible, because the process that created it is precisely the one that died.
+  it("a sweep collects an artifact whose gig is not live, including a dead instance's", async () => {
+    const { dockerComposeRealizer } = await substrate();
+    expect(dockerComposeRealizer, "the import is the specification").toBeTypeOf("function");
+    const realizer = dockerComposeRealizer();
+    const dead = "dddddddd-dddd-dddd-dddd-dddddddddddd";
+    await realizer.realize(VenueSchema.parse(SERIAL_ROOM), noCredentials, {
+      gigId: dead, engineServers, probe: async () => ["search"], host: HOST,
+    });
+    // No teardown: this is the killed-worker case, which is the only case that matters here.
+    const collected = await realizer.sweep({ liveGigs: [] });
+    expect(
+      collected.some((a) => a.labels.gig_id === dead),
+      "an artifact belonging to no live gig is exactly what a sweep is for",
+    ).toBe(true);
+  });
+
+  // ★ AND IT SPARES A LIVE GIG'S WORK, INCLUDING A PEER'S. Two workers sharing a host must never
+  // garbage-collect each other. This is the law that makes an unconditional startup sweep SAFE —
+  // and without it the feature is a footgun that deletes a peer's running work, which is strictly
+  // worse than leaking. The live set is host-wide for exactly this reason.
+  it("a sweep spares a live gig, even one realized by a different instance on the same host", async () => {
+    const { dockerComposeRealizer } = await substrate();
+    expect(dockerComposeRealizer, "the import is the specification").toBeTypeOf("function");
+    const realizer = dockerComposeRealizer();
+    const peerGig = "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee";
+    const peer = await realizer.realize(VenueSchema.parse(SERIAL_ROOM), noCredentials, {
+      gigId: peerGig, engineServers, probe: async () => ["search"], host: HOST,
+    });
+    // Sweeping as somebody else, with the peer's gig live.
+    const collected = await realizer.sweep({ liveGigs: [peerGig] });
+    expect(
+      collected.some((a) => a.labels.gig_id === peerGig),
+      "collecting a peer's live work is worse than leaking; the sweep must spare it",
+    ).toBe(false);
+    await peer.teardown();
+  });
+
+  // A BOUND EXISTS. Build cache, unreferenced build artifacts and logs are not per-gig, so no
+  // teardown covers them — and the build cache is typically the largest consumer on the box. The
+  // argument is DEFAULT_DRAIN_OPENING's (src/run_deps.ts:47): an unattended box that can consume
+  // without limit is the one thing it must not be. The point is that a ceiling exists, not that any
+  // particular number is right.
+  it("a realizer declares a retention policy with real ceilings and a real cadence", async () => {
+    const { dockerComposeRealizer, localProcessRealizer } = await substrate();
+    expect(dockerComposeRealizer, "the import is the specification").toBeTypeOf("function");
+    for (const r of [localProcessRealizer(), dockerComposeRealizer()]) {
+      const p = r.retention;
+      for (const n of [p.max_cached_build_artifacts, p.max_unreferenced_environments]) {
+        expect(Number.isFinite(n), `${r.substrate}: "unlimited" is not a retention policy`).toBe(true);
+        expect(n, `${r.substrate}: a ceiling of zero would collect what is in use`).toBeGreaterThan(0);
+      }
+      expect(p.cadence, `${r.substrate}: a policy applied never is not applied`).toBeTruthy();
+    }
+  });
+
+  // LOGS ARE BOUNDED IN THE RENDERED CONFIGURATION. Unbounded by default is the common case, so one
+  // talkative process fills a disk and takes the worker with it — and a worker that dies of a full
+  // disk has failed at its one job.
+  //
+  // NOTE THE SOURCING, which is deliberate: the bound comes from the realizer's retention policy and
+  // is NOT a venue-substitutable field. Putting it on COMPOSE_SUBSTITUTABLE_FIELDS would let a room
+  // raise its own ceiling, which is the one thing a ceiling must not permit — the same posture
+  // `equipment` already takes as a ceiling rather than a grant.
+  it("every rendered configuration carries a log bound", async () => {
+    const doc = flat(await renderParsed(SERIAL_ROOM, HOST));
+    expect(doc, "a rendered configuration with no log bound is a defect").toMatch(
+      /"(logging|log_driver|log_opt|max-size|max_size)"/i,
+    );
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+// RESOURCE DISCIPLINE IS A CONTRACT PROPERTY, not an optimisation pass.
+//
+// With no venue contract in force a worker needs exactly ONE prepared environment, so that
+// environment must be the union of everything any gig might need — every tool, every runtime, every
+// heavyweight dependency of every skill — because nothing tells it which subset THIS work requires.
+// Every gig then pays for every capability it never invokes. That is not a packaging mistake; it is
+// the only design reachable when nothing declares what a piece of work needs.
+//
+// The venue contract is what makes minimality possible at all, which makes it one of the strongest
+// arguments for Gap 2: smaller environments are a CONSEQUENCE of the contract, not a separate effort.
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+describe("GAP 6 — the environment is a function of the contract", () => {
+  // BUILDING IS THE EXPENSIVE PART, and content addressing is what amortises it: if the identity of
+  // a built environment is a function of the CONTRACT'S hash, an unchanged contract rebuilds
+  // nothing. This is the payoff of the digest-pinned `installs` already in the design — pinning is
+  // what makes the hash mean something, and the hash is what makes the rebuild unnecessary. They
+  // were always one mechanism.
+  it("environment identity follows the contract: unchanged rebuilds nothing, changed rebuilds", async () => {
+    const { environmentIdentity } = await substrate();
+    expect(environmentIdentity, "the import is the specification").toBeTypeOf("function");
+    const a = VenueSchema.parse(SERIAL_ROOM);
+    const b = VenueSchema.parse({ ...SERIAL_ROOM });
+    expect(environmentIdentity(a), "the same contract is the same environment").toBe(environmentIdentity(b));
+    const changed = VenueSchema.parse({
+      ...SERIAL_ROOM,
+      mcp_servers: [{ ...SERIAL_ROOM.mcp_servers[0]!, command: ["notes-mcp", "--stdio", "--verbose"] }],
+    });
+    expect(environmentIdentity(changed), "a changed contract is a different environment")
+      .not.toBe(environmentIdentity(a));
+  });
+
+  // SHARED FLOORS, SMALL DELTAS. Composed so the shared portion is large and the venue-specific part
+  // small, N venues over a common floor cost floor + Σ(deltas) rather than N × environment. The
+  // law-able form of that is the precondition for it: two venues declaring the same floor must
+  // resolve to the SAME floor identity — otherwise sharing is not possible at all — while their own
+  // identities differ, or they are not two venues.
+  it("two venues on one floor share a floor identity, and differ in their deltas", async () => {
+    const { floorIdentity, environmentIdentity } = await substrate();
+    expect(floorIdentity, "the import is the specification").toBeTypeOf("function");
+    expect(environmentIdentity, "the import is the specification").toBeTypeOf("function");
+    const one = VenueSchema.parse({ ...SERIAL_ROOM, slug: "one-room-v1", floor: "base-v1" });
+    const two = VenueSchema.parse({
+      ...SERIAL_ROOM, slug: "two-room-v1", floor: "base-v1", devices: [], architectures: ["arm64"],
+    });
+    expect(floorIdentity(one), "a shared floor is what makes sharing possible").toBe(floorIdentity(two));
+    expect(environmentIdentity(one), "…and the deltas are still two different rooms")
+      .not.toBe(environmentIdentity(two));
+  });
+
+  // THE MEMORY LEVER, and it is not the same lever as the storage one. Storage and cold-start
+  // acquisition scale with environment SIZE; memory scales with the number of running PROCESSES. An
+  // environment of any size running one process holds roughly that one process's memory — so
+  // shrinking environments does not reduce memory pressure and must not be sold as if it does.
+  //
+  // Per-chair realization multiplies substrate resources by the WIDTH of a phase, so the ceiling
+  // belongs in the contract, where an author sets it deliberately rather than discovering it with
+  // the first wide DAG on the first box that runs it.
+  it("a venue declares a concurrency ceiling, and exceeding it is refused", async () => {
+    const { dockerComposeRealizer, VenueConcurrencyRefused } = await substrate();
+    expect(dockerComposeRealizer, "the import is the specification").toBeTypeOf("function");
+    expect(VenueConcurrencyRefused, "the import is the specification").toBeTypeOf("function");
+    const bounded = VenueSchema.safeParse({ ...SERIAL_ROOM, max_concurrent_chairs: 2 });
+    expect(bounded.success, "the ceiling belongs in the contract").toBe(true);
+    const realizer = dockerComposeRealizer();
+    const room = bounded.success ? bounded.data : undefined;
+    await expect(
+      realizer.realize(room, noCredentials, { gigId: GIG, engineServers, probe: async () => ["search"], host: HOST, chairs: 3 }),
+      "a phase wider than the room may hold is refused, not quietly served",
+    ).rejects.toThrow(VenueConcurrencyRefused);
+    // Non-vacuity: at the ceiling it realizes.
+    const ok = await realizer.realize(room, noCredentials, {
+      gigId: GIG, engineServers, probe: async () => ["search"], host: HOST, chairs: 2,
+    });
+    expect(ok.state).toBe("PLAYING");
+    await ok.teardown();
   });
 });

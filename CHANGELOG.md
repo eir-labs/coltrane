@@ -67,10 +67,29 @@ the MCP handshake reports the constant rather than a hardcoded literal.
      discipline, and every refusal holds regardless of which host executes. **Architecture is part of
      the contract**, refused before PLAYING rather than discovered at spawn.
 
+     And two themes the spec had missed entirely. **Teardown is not enough**: `finally` does not run
+     when a process is KILLED, so every crash leaks everything the worker realized. Realization is
+     therefore RECONCILED — every artifact labelled with its gig and instance, a sweep that collects
+     what belongs to no live gig, run at startup because startup is the moment after a crash, and a
+     host-wide live set so two workers sharing a box never garbage-collect each other. Plus the
+     things no teardown covers: a bounded retention policy for build cache and unreferenced
+     environments, and a log bound in every rendered configuration — realizer-sourced, not
+     venue-substitutable, because a room may not raise its own ceiling.
+
+     **Minimal footprint is a CONSEQUENCE of the venue contract, not a separate effort** — with
+     nothing declaring what a gig needs, one prepared environment must be the union of everything any
+     gig might need, and every gig pays for capabilities it never invokes. Shared floors and small
+     deltas; environment identity as a function of the contract's hash, so an unchanged contract
+     rebuilds nothing (the payoff of digest-pinned installs). And the distinction implementers get
+     wrong: storage scales with environment SIZE, memory with the number of running PROCESSES — so
+     the concurrency ceiling is the memory lever and composition is the storage lever, and shrinking
+     environments must not be sold as reducing memory pressure. The dominant per-gig cost is named
+     as provider readiness: latency deliberately bought for the guarantee Gap 2 exists to provide.
+
      Unlike 1–5 this was found by reading, not by running. It is pinned now because it is the only
      failure in the document that is invisible when it happens.
 
-- **`tests/spec_*.test.ts` — 80 laws, committed FAILING.** Six files, one per gap, each opening with
+- **`tests/spec_*.test.ts` — 88 laws, committed FAILING.** Six files, one per gap, each opening with
   a banner saying so. A failure named `spec_*` is pending implementation; a failure anywhere else is
   a regression, and the naming exists so a reader can tell them apart without reading the diff.
 

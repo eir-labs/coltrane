@@ -594,10 +594,10 @@ argument, the worker's declaration of what it can realize, and the shared predic
 | file | gap | laws |
 |---|---|---|
 | `tests/spec_venue_credential_mint.test.ts` | 1 | 10 |
-| `tests/spec_venue_realization.test.ts` | 2 | 9 |
+| `tests/spec_venue_realization.test.ts` | 2 | 10 |
 | `tests/spec_worker_environment.test.ts` | 3 | 14 |
 | `tests/spec_worker_run_modes.test.ts` | 4 | 9 |
-| `tests/spec_venue_targeting.test.ts` | 5 | 6 |
+| `tests/spec_venue_targeting.test.ts` | 5 | 5 |
 
 - **CI is expected to be red until these are implemented.** Every file opens with a banner saying
   so. A failure whose file is named `spec_*` is pending implementation; a failure anywhere else is a

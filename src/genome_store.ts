@@ -540,6 +540,11 @@ export function postgrestQueueGig(
         p_mode: args["mode"] ?? "live",
         p_input: args["input"] ?? {},
         p_org_slug: args["org_slug"] ?? null,
+        // WHO ACTS, as distinct from who asked. The store requires a SEATED player: the genome read
+        // a run needs is gated on seating, so an unseated name — or none, from an unseated human —
+        // produces a gig that can only fail at genome load, thirty minutes later, on a drain.
+        // That is exactly what the first real gig did.
+        p_acting_for: args["acting_for"] ?? null,
       }),
     });
     const text = await res.text();

@@ -716,6 +716,15 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         // EXACTLY ONE of standard_slug / chart_slug. A single-standard dispatch IS the degenerate
         // one-movement chart, so naming both names two performances and naming neither names none;
         // the refinement lives in one place (dispatchTarget) and is shared with the CLI.
+        // WHO ACTS, as distinct from who asked. Read here so the wire is visible in the handler
+        // rather than riding anonymously inside `args` — #234's law refuses an argument advertised
+        // and never read, and it is right to: this one decides whose authority a gig carries, which
+        // is the identity a drain later runs it as. The store enforces that it names a SEATED
+        // player; an unseated one produces a gig that can only fail at genome load.
+        const actingFor =
+          args["acting_for"] === undefined || args["acting_for"] === null ? undefined : String(args["acting_for"]);
+        void actingFor; // forwarded to the queue seam via `args` below; named here to be legible.
+
         const target = dispatchTarget({
           standard_slug: args["standard_slug"] === undefined || args["standard_slug"] === null ? undefined : String(args["standard_slug"]),
           chart_slug: args["chart_slug"] === undefined || args["chart_slug"] === null ? undefined : String(args["chart_slug"]),

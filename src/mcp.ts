@@ -143,7 +143,7 @@ export const MCP_TOOLS: readonly MCPToolDef[] = [
   // (dispatchTarget, src/chart.ts). A chart dispatch's reply carries the ARRANGEMENT's manifest —
   // chart_hash, the per-movement roll-up, cumulative spend against the envelope — where a standard
   // dispatch carries the run's.
-  { slug: "gig_dispatch",                  category: "run", input_schema: obj({ standard_slug: "string", chart_slug: "string", input: "object", depth: "string", wait: "boolean", budget: "object", resume_gig_id: "string", reuse: "boolean", approvals: "object", approved_by: "string" }), output_schema: obj({ gig_id: "string", status: "string", awaiting: "object", depth: "string", manifest: "object", resumed_from: "string", reuse: "boolean", resume_refused: "boolean", drift: "array" }) },
+  { slug: "gig_dispatch",                  category: "run", input_schema: obj({ standard_slug: "string", chart_slug: "string", acting_for: "string", input: "object", depth: "string", wait: "boolean", budget: "object", resume_gig_id: "string", reuse: "boolean", approvals: "object", approved_by: "string" }), output_schema: obj({ gig_id: "string", status: "string", awaiting: "object", depth: "string", manifest: "object", resumed_from: "string", reuse: "boolean", resume_refused: "boolean", drift: "array" }) },
   // `skipped_chairs` / `resumed_from` / `reuse_rejected` are the ASYNC path's only report of a
   // saving — the manifest never reaches a caller who dispatched without `wait`.
   // `awaiting` names the human chair a parked run stopped at. On the async path — the DEFAULT

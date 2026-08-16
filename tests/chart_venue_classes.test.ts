@@ -24,7 +24,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 
-import { VenueSchema, venueDefect, ChartSchema, zodToMcpProps } from "../src/genome_schema.js";
+import { VenueSchema, VenueObjectSchema, venueDefect, ChartSchema, zodToMcpProps } from "../src/genome_schema.js";
 import { composeChart, venueEffectiveTools, chartEntrySeedTypes, type Venue } from "../src/chart.js";
 import { loadGenome, loadLayeredGenome } from "../src/loader.js";
 import { MCP_TOOLS } from "../src/mcp.js";
@@ -409,7 +409,9 @@ describe("chart_define / chart_browse — the arrangement is authored through th
 describe("venue_define / venue_browse — the room is authored through the genome's mouth", () => {
   it("venue_define's input_schema is GENERATED from VenueSchema", () => {
     const props = Object.keys(((MCP_TOOLS.find((t) => t.slug === "venue_define")!.input_schema) as { properties: object }).properties);
-    expect(props.sort()).toEqual(Object.keys(zodToMcpProps(VenueSchema)).sort());
+    // `VenueObjectSchema` — the inner `ZodObject` the advertised surface is generated from. `VenueSchema`
+    // now carries the cross-field `.superRefine` (a `ZodEffects`) and has no `.shape` to advertise.
+    expect(props.sort()).toEqual(Object.keys(zodToMcpProps(VenueObjectSchema)).sort());
   });
 
   it("defines a venue and makes it resolvable in-session", async () => {

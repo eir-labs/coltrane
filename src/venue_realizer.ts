@@ -12,7 +12,9 @@
 // fields CONTAIN. Rendering a runtime configuration from contract data is code generation from data,
 // and if any part of the input is reachable by a gig, a permissive renderer is remote code execution
 // with extra steps.
-import { existsSync } from "node:fs";
+import { existsSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { VenueSchema, DEVICE_CLASSES, type VenueOutput } from "./genome_schema.js";
 import { sha256Hex, canonStructuralJson } from "./canonical_form.js";
 
@@ -135,6 +137,50 @@ export class VenueRenderRefusal extends Error {
     this.name = "VenueRenderRefusal";
     this.forbidden = args.forbidden;
     this.field = args.field;
+  }
+}
+
+/** Gap 2's bidirectional probe, direction one: a tool the CONTRACT grants that the server does not
+ *  actually advertise. "Granted but unprovided" caught at realization instead of at first use. Carries
+ *  the bare tool and the server so the refusal names both — the remediation is to add the tool to the
+ *  server or drop the grant, which is a different fix from a server that is too wide. */
+export class VenueRealizationError extends Error {
+  readonly state: string;
+  readonly missingGrant: string;
+  readonly serverSlug: string;
+  constructor(args: { state: string; missingGrant: string; serverSlug: string; message?: string }) {
+    super(
+      args.message ??
+        `venue realization failed in state ${args.state}: server "${args.serverSlug}" does not advertise ` +
+          `granted tool "${args.missingGrant}" — a tool the contract grants that the server cannot supply is ` +
+          `"granted but unprovided", refused here rather than discovered mid-run on a box nobody is watching`,
+    );
+    this.name = "VenueRealizationError";
+    this.state = args.state;
+    this.missingGrant = args.missingGrant;
+    this.serverSlug = args.serverSlug;
+  }
+}
+
+/** Gap 2's bidirectional probe, direction two: the server advertises MORE than the contract declared.
+ *  A ceiling the thing beneath it can quietly exceed is not a ceiling — the exact intersection R10
+ *  enforces at compose time. NON-OVERLAPPING fields with `VenueRealizationError` on purpose: the two
+ *  mismatches demand different remediation, and one merged error would make the direction ambiguous. */
+export class VenueContractViolation extends Error {
+  readonly state: string;
+  readonly extraTool: string;
+  readonly serverSlug: string;
+  constructor(args: { state: string; extraTool: string; serverSlug: string; message?: string }) {
+    super(
+      args.message ??
+        `venue contract violation in state ${args.state}: server "${args.serverSlug}" advertises ` +
+          `"${args.extraTool}", which the contract does not grant — a server wider than the contract is a ` +
+          `violation, not a bonus, for the same reason equipment.tools is a ceiling and never a floor`,
+    );
+    this.name = "VenueContractViolation";
+    this.state = args.state;
+    this.extraTool = args.extraTool;
+    this.serverSlug = args.serverSlug;
   }
 }
 
@@ -331,6 +377,81 @@ function buildMcpConfigs(v: VenueOutput, opts: RealizeOpts): Promise<Record<stri
     }
     return configs;
   })();
+}
+
+/** The Gap 2 entry: builds the spawn's MCP environment STRICTLY from the venue contract, verifies it
+ *  in both directions before anything is committed, and writes the per-gig config the spawn is pointed
+ *  at. The map is the venue's declared servers plus the engine entries and NOTHING the venue did not
+ *  declare — the ambient `.mcp.json` `readMcpServerConfigs` builds at bootstrap is never read here,
+ *  neither to add a server nor to override one, because a drain's cwd is an untrusted clone and a clone
+ *  that can declare MCP servers for the seat reading it is command execution under the seat. The
+ *  realized map is precisely what a tool grant is failed closed against, so preflight and spawn read
+ *  one stable object rather than two copies that agree today. */
+export async function realizeVenue(
+  venue: unknown,
+  credentialResolver: CredentialResolver,
+  opts: RealizeOpts,
+): Promise<RealizationHandle> {
+  const v: VenueOutput = VenueSchema.parse(venue);
+
+  // Credentials reach the room only through the resolver, and only the names the contract listed —
+  // never the whole surface, never a name the contract did not ask for. The schema already guarantees
+  // each named credential is a member of credential_surface.
+  const requested = v.mcp_servers.flatMap((s) => s.credential_names);
+  await credentialResolver(requested);
+
+  // Engine entries first; declared servers added below. The ambient map is never a source.
+  const configs: Record<string, unknown> = { ...(opts.engineServers ?? {}) };
+
+  // THE PROBE VERIFIES IN BOTH DIRECTIONS, BEFORE ANYTHING SPAWNS. A room with no declared servers
+  // reaches neither branch, so it probes nothing and stands up zero child processes — the empty room
+  // stays free.
+  for (const server of v.mcp_servers) {
+    const prefix = `mcp__${server.slug}__`;
+    const granted = v.equipment.tools.filter((t) => t.startsWith(prefix)).map((t) => t.slice(prefix.length));
+    const advertised = opts.probe ? await opts.probe({ slug: server.slug }) : [];
+
+    // Direction one: a granted tool the server does not advertise — "granted but unprovided".
+    for (const g of granted) {
+      if (!advertised.includes(g)) {
+        throw new VenueRealizationError({ state: "VERIFIED", missingGrant: g, serverSlug: server.slug });
+      }
+    }
+    // Direction two: the server is WIDER than the contract — a ceiling quietly exceeded.
+    for (const a of advertised) {
+      if (!granted.includes(a)) {
+        throw new VenueContractViolation({ state: "VERIFIED", extraTool: a, serverSlug: server.slug });
+      }
+    }
+
+    configs[server.slug] =
+      server.command.length > 0
+        ? { command: server.command[0], args: server.command.slice(1) }
+        : { url: server.url };
+  }
+
+  // The per-gig config file the spawn is actually pointed at. Its content IS the realized map, so the
+  // handle and the file cannot state two different things (the drift Gap 3 is entirely about). Keyed
+  // to the gig so concurrent gigs never collide on one shared path.
+  const configPath = join(tmpdir(), `coltrane-venue-${opts.gigId}.mcp.json`);
+  writeFileSync(configPath, JSON.stringify({ mcpServers: configs }));
+
+  let torn = false;
+  return {
+    state: "PLAYING",
+    // A single stable object reference — the SAME value on repeated access, so preflight and spawn
+    // resolve against one map rather than two copies.
+    mcpServerConfigs: configs,
+    configPath,
+    artifacts: [],
+    teardown() {
+      torn = true;
+      if (existsSync(configPath)) rmSync(configPath);
+    },
+    tornDown() {
+      return torn;
+    },
+  };
 }
 
 function makeHandle(

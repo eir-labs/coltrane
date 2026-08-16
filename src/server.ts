@@ -1429,6 +1429,17 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
           ...(args["credential_surface"] !== undefined ? { credential_surface: args["credential_surface"] } : {}),
           ...(args["lifecycle"] !== undefined ? { lifecycle: args["lifecycle"] } : {}),
           ...(args["responsible_chair"] !== undefined ? { responsible_chair: args["responsible_chair"] } : {}),
+          // The worker-contract fields, passed through by the same rule: only what was stated, so the
+          // schema keeps ownership of every default (an unstated `mcp_servers`/`devices`/`architectures`
+          // is the EMPTY list, an unstated `substrate`/`floor`/`max_concurrent_chairs` the deployment
+          // default). Read here so a room authored through this tool actually carries its substrate,
+          // and so the advertised schema and the handler stay one statement of the same fact (#234).
+          ...(args["substrate"] !== undefined ? { substrate: args["substrate"] } : {}),
+          ...(args["mcp_servers"] !== undefined ? { mcp_servers: args["mcp_servers"] } : {}),
+          ...(args["devices"] !== undefined ? { devices: args["devices"] } : {}),
+          ...(args["architectures"] !== undefined ? { architectures: args["architectures"] } : {}),
+          ...(args["max_concurrent_chairs"] !== undefined ? { max_concurrent_chairs: args["max_concurrent_chairs"] } : {}),
+          ...(args["floor"] !== undefined ? { floor: args["floor"] } : {}),
         };
         const parsedVenue = VenueSchema.safeParse(venueInputDef);
         if (!parsedVenue.success) {

@@ -1,0 +1,206 @@
+{
+  "slug": "worker-contract-v3",
+  "movements": [
+    {
+      "movement_id": "gap2-realize-venue",
+      "standard_slug": "software-change-pr-v1",
+      "runtime_fills": {
+        "change-request": {
+          "source": "SPEC-worker-contract.md Gap 2; tests/spec_venue_realization.test.ts (9 of 10 laws still red)",
+          "requested_by": "eugene",
+          "repository": "eir-labs/coltrane",
+          "request_text": "Close tests/spec_venue_realization.test.ts, extending src/venue_realizer.ts which already exists and holds Gap 6 green at 40/40. Do not rewrite that module; add to it.\n\nA VENUE MUST DECLARE WHAT PROVIDES ITS TOOLS. VenueSchema already accepts mcp_servers. Add the cross-field rules: a venue granting an mcp server it does not declare is refused naming the slug; each transport requires the field it needs (a command for stdio, a url for sse); a credential_name the room's credential_surface does not declare is refused. Change the Zod schema and let the generated MCP input_schema and the loader check follow — and then make sure the venue_define HANDLER reads whatever you add, because tests/advertised_args_are_read.test.ts enforces that a tool never advertises an argument it never reads, and that law already caught this exact omission once on this branch.\n\nrealizeVenue BUILDS FROM THE CONTRACT AND NOTHING ELSE. The empty room traverses with no probe and no declared servers — zero child processes. The realized map holds the declared servers plus the engine entries with credentials resolved through CredentialResolver, and holds nothing the venue did not declare. The ambient .mcp.json is NEVER merged, whether it would add a server or override one; src/server.ts:1123 states in one line that the config comes from ambient, and that is the line this closes. The realized map is what fails a tool grant closed.\n\nTHE PROBE VERIFIES IN BOTH DIRECTIONS BEFORE ANYTHING SPAWNS: a granted tool the server does not advertise fails realization naming grant and server; a server WIDER than the contract is a violation, not a bonus. Two named error classes with non-overlapping fields — VenueRealizationError (.state, .missingGrant, .serverSlug) and VenueContractViolation (.state, .extraTool, .serverSlug) — because the two demand different remediation and collapsing them makes the law ambiguous.\n\nALREADY ANSWERED, do not re-investigate: assertToolGrantsResolvable at src/tool_providers.ts:153 ALREADY takes four parameters, the fourth being mcpServerConfigs with a default. No signature change is needed.\n\nYOU OWN THE HOLLOW DEMONSTRATION — it is your obligation, not the verifier's, because it requires Edit and a verify seat holds no write grant by design. Before you seal: stub your new surface to its emptiest form (a realizeVenue that always resolves to PLAYING, and separately one that always throws), re-run this file, and record law by law which ones still pass. Restore your real implementation and re-confirm. Report the survivor list IN THE CHANGE-SET. A law that passes against a hollow implementation is not evidence, and on this branch that measurement found 32 of Gap 6's 40 laws passing against a renderer that emitted nothing.",
+          "target_paths": [
+            "src/venue_realizer.ts",
+            "src/genome_schema.ts",
+            "src/server.ts",
+            "src/tool_providers.ts",
+            "tests/spec_venue_realization.test.ts"
+          ],
+          "acceptance_criteria": [
+            "npx vitest run tests/spec_venue_realization.test.ts reports 10 passed, 0 failed.",
+            "npx vitest run tests/spec_venue_realization_substrate.test.ts still reports 40 passed, 0 failed — measured in this run, not assumed from the previous band.",
+            "npx vitest run tests/advertised_args_are_read.test.ts reports 0 failed. Any schema field added must be read by its handler.",
+            "The change-set CONTAINS the hollow demonstration: the stub used, the law-by-law survivor list, and confirmation the real implementation was restored. A change-set without it is incomplete and the verdict should say so rather than infer the demonstration happened.",
+            "git diff --stat origin/main -- tests/spec_venue_realization.test.ts shows no change: this law file is not edited.",
+            "npx vitest run shows no failure outside spec_*-named files. Report exact totals against this branch's baseline of 47 failed / 2672 passed. After this movement 57 of 88 laws are green."
+          ],
+          "out_of_scope": [
+            "Gaps 1, 3, 4 and 5 — later movements of this same chart.",
+            "Editing any spec_* test file, or SPEC-worker-contract.md.",
+            "Rewriting the Gap 6 surface in src/venue_realizer.ts — it is green; extend it.",
+            "Kernel-level enforcement of doors.",
+            "Starting a real container."
+          ]
+        }
+      },
+      "seatings": []
+    },
+    {
+      "movement_id": "gap3-worker-environment",
+      "standard_slug": "software-change-pr-v1",
+      "runtime_fills": {
+        "change-request": {
+          "source": "SPEC-worker-contract.md Gap 3; tests/spec_worker_environment.test.ts (14 laws)",
+          "requested_by": "eugene",
+          "repository": "eir-labs/coltrane",
+          "request_text": "Create src/worker_env.ts and close tests/spec_worker_environment.test.ts. This is the one gap in the specification that is a BREAK rather than an addition: a worker whose environment names the wrong host boots today and refuses afterwards, which is the point.\n\nONE VARIABLE HAD THREE READERS AND TWO MEANINGS. COLTRANE_DRAIN_URL's own comment said 'ONE VARIABLE, TWO CONTRACTS' and the count was already wrong. Pointed at the database, rows wrote and the artifact 401'd forever, so the only symptom was a missing blob; repointed at the service, boot-time provisioning broke against a 307. Export WORKER_ENV_CONTRACT as one enumerated table where every variable names its host, its role and its meaning; COLTRANE_SERVICE_URL is canonical and COLTRANE_DRAIN_URL survives only as a normalized legacy alias. Two hosts are two variables, with exactly one always-required url per host.\n\nA LEGACY SHAPE NORMALIZES, IT NEVER APPENDS: normalizeWorkerEnv strips a legacy path suffix rather than building on top of it, maps the legacy name onto the canonical one, treats the hosting provider's app name as a legacy alias of the instance, and is IDEMPOTENT — applying it twice changes nothing.\n\nA MISCONFIGURED WORKER REFUSES AT STARTUP IN ITS OWN VOICE: assertWorkerEnv accepts a complete venue environment and a complete player environment, names the required variable that is absent, refuses an environment where the store and the service name the same host, refuses a service url that names the managed database BEFORE the first request, refuses a legacy alias contradicting the canonical name, and refuses a url-shaped variable that is not a url.\n\nTHE COMPLETENESS LAW READS SOURCE TEXT, and that is deliberate: every process.env double-bracket read across the worker path (worker.ts, cli.ts, output_mirror.ts, workspace.ts, run_deps.ts, worker_env.ts) must appear in WORKER_ENV_CONTRACT. It reads code for the same reason tests/advertised_args_are_read.test.ts does — the property is a declaration matching what the code does, and only the code can testify to the second half. Enumerate those reads before you write the table.\n\nYOU OWN THE HOLLOW DEMONSTRATION: WORKER_ENV_CONTRACT={} , normalizeWorkerEnv=identity, assertWorkerEnv=noop. Run each against the file, record which laws still pass, restore, re-confirm, and report the survivors in the change-set.",
+          "target_paths": [
+            "src/worker_env.ts",
+            "src/worker.ts",
+            "src/cli.ts",
+            "src/output_mirror.ts",
+            "src/workspace.ts",
+            "src/run_deps.ts",
+            "tests/spec_worker_environment.test.ts"
+          ],
+          "acceptance_criteria": [
+            "npx vitest run tests/spec_worker_environment.test.ts reports 14 passed, 0 failed.",
+            "The change-set contains the hollow demonstration with its law-by-law survivor list and confirmation of restore.",
+            "The completeness law is satisfied against the REAL source: state how many process.env reads were enumerated and from which files.",
+            "npx vitest run shows no failure outside spec_*-named files, and tests/spec_venue_realization.test.ts and tests/spec_venue_realization_substrate.test.ts stay green — measured. After this movement 71 of 88 laws are green.",
+            "The CHANGELOG records this as a BREAKING change under the repo's inverted semver: a worker whose environment names the wrong host boots today and refuses after."
+          ],
+          "out_of_scope": [
+            "Gaps 1, 4 and 5.",
+            "Editing any spec_* test file or SPEC-worker-contract.md.",
+            "Moving the claim path behind the service seam — the specification names it as direction and does not settle it.",
+            "Deciding how long the legacy alias is tolerated — a release decision the document leaves to the changelog."
+          ]
+        }
+      },
+      "seatings": []
+    },
+    {
+      "movement_id": "gap4-run-modes",
+      "standard_slug": "software-change-pr-v1",
+      "runtime_fills": {
+        "change-request": {
+          "source": "SPEC-worker-contract.md Gap 4; tests/spec_worker_run_modes.test.ts (9 laws)",
+          "requested_by": "eugene",
+          "repository": "eir-labs/coltrane",
+          "request_text": "Extend src/worker_env.ts with workerCredentialMode and close tests/spec_worker_run_modes.test.ts.\n\nTHE DEFECT IS THE DERIVATION, NOT THE CHOICE. cli.ts:219 computes venueMode, worker.ts:320 re-derives it, and worker.ts:345 carries a defensive branch that exists only because the two might disagree. One function answers which mode a worker is in, carries the fields the answer needs, and owns the refusal text the CLI prints.\n\nFour cases, as a discriminated union: a venue credential with an instance is venue mode with its fields included; venue wins when both credentials are present; a player token alone is player mode; the hosting provider's app name still supplies the instance; a venue key with NO instance refuses even when a player token is present, naming COLTRANE_INSTANCE; no credential at all is a refusal that says what is missing.\n\nTHE CLI ASKS THE FUNCTION RATHER THAN DECIDING AGAIN: runCli prints the mode's own refusal text instead of deriving it inline. CliIO and runCli keep their shape. THE CLAIM ROUTES BY THE SAME ANSWER: a venue answer builds a venue claim, a player answer builds a player claim, and the defensive branch that existed because two derivations might disagree is deleted — two independent computations of one fact is the defect the single-sourcing law exists to catch.\n\nYOU OWN THE HOLLOW DEMONSTRATION: a workerCredentialMode always returning {mode:'none', why:''}, and a runCli that prints nothing. Record survivors, restore, report in the change-set.",
+          "target_paths": [
+            "src/worker_env.ts",
+            "src/cli.ts",
+            "src/worker.ts",
+            "tests/spec_worker_run_modes.test.ts"
+          ],
+          "acceptance_criteria": [
+            "npx vitest run tests/spec_worker_run_modes.test.ts reports 9 passed, 0 failed.",
+            "tests/spec_worker_environment.test.ts still reports 14 passed — measured, since this movement extends the same module.",
+            "The defensive branch at worker.ts:345 is GONE, and the change-set says where the single derivation now lives.",
+            "The change-set contains the hollow demonstration with survivors named and restore confirmed.",
+            "npx vitest run shows no failure outside spec_*-named files. After this movement 80 of 88 laws are green.",
+            "The change-set carries the deprecation recommendations the specification asks for."
+          ],
+          "out_of_scope": [
+            "Gaps 1 and 5.",
+            "Editing any spec_* test file or SPEC-worker-contract.md.",
+            "Settling whether an instance name is per-app or per-machine — the specification explicitly declines to settle it."
+          ]
+        }
+      },
+      "seatings": []
+    },
+    {
+      "movement_id": "gap5-venue-targeting",
+      "standard_slug": "software-change-pr-v1",
+      "runtime_fills": {
+        "change-request": {
+          "source": "SPEC-worker-contract.md Gap 5; tests/spec_venue_targeting.test.ts (5 laws)",
+          "requested_by": "eugene",
+          "repository": "eir-labs/coltrane",
+          "request_text": "Close tests/spec_venue_targeting.test.ts. ChartSchema.venue exists and runGig honours it, but the claim takes any queued row of the org regardless — so a gig is taken by a worker that cannot realize its room while a capable worker sits idle.\n\nSurface the venue on the queued row: gig_dispatch advertises a venue property in MCP_TOOLS; postgrestQueueGig forwards p_venue in the RPC body and sends explicit p_venue = null when nothing names a room, never an omitted key; rpcQueueGig does the same. Remember tests/advertised_args_are_read.test.ts — an advertised argument must be read.\n\nShare ONE pure predicate: venueMayClaim(gigVenue, realizable). An UNNAMED gig stays claimable by anyone, so targeting never becomes mandatory routing; a named gig is claimable only by a worker that can build that room. claimNextGig applies it and carries venue on the result. The venue check is ADDITIVE to the existing venue/player claim branching — those tests must still pass.\n\nYOU OWN THE HOLLOW DEMONSTRATION: venueMayClaim always true, and a queue seam that omits p_venue. Record survivors, restore, report in the change-set.",
+          "target_paths": [
+            "src/worker.ts",
+            "src/genome_store.ts",
+            "src/mcp.ts",
+            "src/server.ts",
+            "tests/spec_venue_targeting.test.ts"
+          ],
+          "acceptance_criteria": [
+            "npx vitest run tests/spec_venue_targeting.test.ts reports 5 passed, 0 failed.",
+            "The existing claimNextGig venue/player tests still pass — measured, since this changes that function.",
+            "The change-set contains the hollow demonstration with survivors named and restore confirmed.",
+            "npx vitest run shows no failure outside spec_*-named files. After this movement 85 of 88 laws are green.",
+            "State plainly that an unnamed gig remains claimable by any worker, and point at the law that holds it."
+          ],
+          "out_of_scope": [
+            "Gap 1.",
+            "Editing any spec_* test file or SPEC-worker-contract.md.",
+            "Pinning a gig to a venue INSTANCE — the specification names it a different question with a different answer and does not settle it."
+          ]
+        }
+      },
+      "seatings": []
+    },
+    {
+      "movement_id": "gap1-credential-mint",
+      "standard_slug": "software-change-pr-v1",
+      "runtime_fills": {
+        "change-request": {
+          "source": "SPEC-worker-contract.md Gap 1; tests/spec_venue_credential_mint.test.ts (10 laws)",
+          "requested_by": "eugene",
+          "repository": "eir-labs/coltrane",
+          "request_text": "Create src/venue_credential.ts and close tests/spec_venue_credential_mint.test.ts, the last gap.\n\nTo stand up a worker you need an org-scoped, instance-bound key plus a set of environment variables, and the engine ships no verb producing either — so every deployment invents an out-of-band path, and in practice those end at a human reading a value off a screen. A flow requiring that cannot be driven by an MCP invocation, and the MCP surface is how an assistant operates this engine.\n\nvenue_credential_mint(org_slug, instance) returns the COMPLETE worker environment, with the two hosts distinct, and names the credential classes it provisioned in the room contract's own vocabulary — not a parallel scheme. It refuses an incomplete grant rather than forwarding it. It REFUSES A GIG-SCOPED CREDENTIAL by name and without reaching the backend: a gig credential expires with one gig's lease and a venue credential outlives every gig, so letting the first mint the second turns the narrowest credential in the system into the broadest. When no minting backend is wired it answers with a typed refusal following the shape deps.queueGig / approveGig / cancelGig already use. Export VENUE_CREDENTIAL_REFUSALS naming exactly three refusals, each a reason a mint cannot proceed.\n\nTHERE IS NO READ-BACK VERB. The credential is answered once and is never retrievable. Do not add one.\n\nAuthorization stays entirely store-side. The engine refuses a gig-scoped credential because that is a structural fact about credential scope, not a policy; who may mint is a question the engine must not answer for deployments it cannot see.\n\nYOU OWN THE HOLLOW DEMONSTRATION: a handler always returning {ok:true}, one always returning {ok:false}, and VENUE_CREDENTIAL_REFUSALS=[]. Record survivors, restore, report in the change-set.",
+          "target_paths": [
+            "src/venue_credential.ts",
+            "src/mcp.ts",
+            "src/server.ts",
+            "tests/spec_venue_credential_mint.test.ts"
+          ],
+          "acceptance_criteria": [
+            "npx vitest run tests/spec_venue_credential_mint.test.ts reports 10 passed, 0 failed.",
+            "npx vitest run tests/spec_*.test.ts reports 88 passed, 0 failed — the whole specification, every gap.",
+            "npx vitest run reports zero failures across the entire suite, and npx tsc --noEmit is clean.",
+            "The change-set contains the hollow demonstration with survivors named and restore confirmed.",
+            "Confirm no read-back verb was added, and that the six spec_* law files are unedited apart from the anchor amendment already committed on this branch.",
+            "The CHANGELOG records the whole worker contract as a minor bump under inverted semver: Gaps 1, 2, 5 and 6 additive, Gap 3 breaking."
+          ],
+          "out_of_scope": [
+            "Editing any spec_* test file or SPEC-worker-contract.md.",
+            "Deciding WHO may mint — deliberately absent from the engine.",
+            "Any store schema: no column names, no RPC signatures, no migration. The engine names arguments and their meaning; the store's shape is the deployment's.",
+            "A read-back verb, in any form."
+          ]
+        }
+      },
+      "seatings": []
+    }
+  ],
+  "edges": [],
+  "approval_gates": [
+    {
+      "gate_id": "gap2-landed",
+      "after_movement": "gap2-realize-venue",
+      "before_movement": "gap3-worker-environment",
+      "chair": "quartet.chair.responsible-officer",
+      "prompt": "Read the change-verdict and the PR. Check the HOLLOW DEMONSTRATION is present IN THE CHANGE-SET with a law-by-law survivor list — it is the implementer's obligation now, because the verify seat holds no write grant and cannot run it. A change-set without it is incomplete; a survivor list of zero laws means it was not run honestly. Confirm Gap 6 is still 40/40 measured in this run, and that any new schema field is actually read by venue_define's handler."
+    },
+    {
+      "gate_id": "gap3-landed",
+      "after_movement": "gap3-worker-environment",
+      "before_movement": "gap4-run-modes",
+      "chair": "quartet.chair.responsible-officer",
+      "prompt": "Gap 3 is the BREAKING one. Read the verdict and confirm the CHANGELOG says so under inverted semver. Check the completeness law was satisfied against real source — how many process.env reads were enumerated, from which files — rather than against a hand-written list, and that the hollow demonstration is in the change-set."
+    },
+    {
+      "gate_id": "gap4-landed",
+      "after_movement": "gap4-run-modes",
+      "before_movement": "gap5-venue-targeting",
+      "chair": "quartet.chair.responsible-officer",
+      "prompt": "Confirm the defensive branch at worker.ts:345 is gone and one derivation answers the mode question — two independent computations of one fact is the defect this gap exists to close, so a change that adds a function without deleting the second derivation has not fixed it. Hollow demonstration in the change-set."
+    },
+    {
+      "gate_id": "gap5-landed",
+      "after_movement": "gap5-venue-targeting",
+      "before_movement": "gap1-credential-mint",
+      "chair": "quartet.chair.responsible-officer",
+      "prompt": "Confirm an unnamed gig stays claimable by any worker — targeting must not become mandatory routing. Confirm the existing claim tests still pass. Hollow demonstration in the change-set. The next movement is the last gap, and its acceptance is the whole specification at 88 passed."
+    }
+  ],
+  "budget_envelope": {
+    "total_usd": 300
+  }
+}

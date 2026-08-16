@@ -173,6 +173,17 @@ export const MCP_TOOLS: readonly MCPToolDef[] = [
   // enforcement belongs); hosted routes to deps.approveGig, non-hosted has no local run to
   // approve (a local run takes its verdicts through gig_dispatch's `approvals`).
   { slug: "gig_approve",                   category: "run", input_schema: obj({ gig_id: "string", role: "string", verdict: "object" }), output_schema: obj({ gig_id: "string", role: "string", status: "string", approved: "boolean" }) },
+  // venue_credential_mint — the verb that stands up a worker without a browser. `org_slug` scopes
+  // the credential and `instance` binds it to one host; a key with an org and no instance is the
+  // org's whole authority with nothing to bind it to. The answer carries the COMPLETE worker
+  // environment (`env`, canonical names only) — not just the key — so a caller never assembles the
+  // rest by hand or infers which URL names which host (that inference is Gap 3). `credential_classes`
+  // names what was provisioned in `VenueSchema.credential_surface` vocabulary, so a `realize` room
+  // contract can be checked against the grant before a gig is dispatched. The engine ships the schema
+  // and its refusals; a deployment wires the minting backend (deps.mintVenueCredential). There is
+  // deliberately NO read-back verb (see the venue_credential_* exact-list law) and NO authorization
+  // policy in the engine — who may mint lives in the store.
+  { slug: "venue_credential_mint",         category: "run", input_schema: obj({ org_slug: "string", instance: "string" }), output_schema: obj({ instance: "string", env: "object", credential_classes: "array", expires_at: nullable("string") }) },
   // #234 — `gig_id`, `agent_slug` and `phase` were read by the handler and advertised nowhere.
   // This one had teeth: a skill prompt written against this schema omits `gig_id`, the handler
   // defaults it to "", and the sealed output lands in the store attached to NO gig. A live run

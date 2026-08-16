@@ -44,6 +44,12 @@ import { isDepth, DEPTHS, type Depth } from "./pricing.js";
 import type { ToolProvider } from "./tool_providers.js";
 import { ENGINE_MCP_SERVER } from "./tool_providers.js";
 import type { ToolHook, ToolCallContext, PreOutcome } from "./hooks.js";
+import {
+  gigScopeRefusal,
+  missingWorkerEnv,
+  type CallerIdentity,
+  type VenueCredentialGrant,
+} from "./venue_credential.js";
 import { composeStandard, defineAgent, CompositionError, type Standard, type Agent, type AgentDef, type PhaseDef } from "./composition.js";
 import { PRIMITIVE_OUTPUT_TYPE, type Primitive } from "./core_types.js";
 import { proposeTypeChange, type DomainTypeDef } from "./type_versioning.js";
@@ -200,6 +206,12 @@ export interface ToolResult {
   // audit row did not land; the caller must be able to tell that from an ordinary rejection,
   // because the two demand opposite responses (retry vs. don't).
   audit_write_failed?: boolean;
+  // A machine-readable refusal code (distinct from the prose `error`), for a fail-closed answer
+  // that names exactly one reason a call could not proceed — the shape RefusalCode in
+  // src/venue_realize.ts:23 uses. A caller branches on this; the `error` teaches a human. Note this
+  // is NOT `hosted_unsupported`: that flag means "hosted surface, local-process tool", a different
+  // condition, and conflating the two is how a name comes to mean two things.
+  refusal?: string;
 }
 
 /** Build a governance row. Every governance act names WHAT it was about (`subject_slug`) and
@@ -2926,6 +2938,26 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
           },
         };
       }
+      case "venue_credential_mint": {
+        // NOT the live path — minting is intercepted in callSurfaceTool (which holds the caller
+        // identity and the deps.mintVenueCredential backend that dispatchTool never receives).
+        // This block exists so the verb's advertised schema has a matching handler reading exactly
+        // its two arguments, and so it must live INSIDE this case body, not before the label:
+        // tests/advertised_args_are_read.test.ts slices each case's body from its own label to the
+        // next one, so any argument-read text placed above this label would be attributed to the
+        // PRECEDING case (learning_synthesize) — a control reported against a tool that never took
+        // it. Reaching this block at runtime means the surface interception was bypassed — answer
+        // honestly rather than pretend a mint happened.
+        const org_slug = String(args["org_slug"] ?? "");
+        const instance = String(args["instance"] ?? "");
+        return {
+          ok: false, refusal: "no_backend", requires_approval: approval,
+          error:
+            `venue_credential_mint is served by the tool surface (createToolSurface), which wires the ` +
+            `caller and the deps.mintVenueCredential backend; the bare dispatcher cannot mint for ` +
+            `org "${org_slug}" instance "${instance}". Call it through the surface.`,
+        };
+      }
       default:
         return { ok: false, not_implemented: true, requires_approval: approval, error: `"${slug}" has no v0 handler` };
     }
@@ -2981,6 +3013,18 @@ export interface ToolSurfaceDeps extends ServerDeps {
   /** Hosted genome persistence: a successful define/compose/register also upserts through
    *  this store (the governed RPC), or the definition evaporates at end-of-request. */
   store?: GenomeStore | undefined;
+  /** Who is calling, as the transport authenticated them. The engine reads exactly ONE thing off
+   *  this — whether the caller presented a gig-scoped credential — for the venue_credential_mint
+   *  escalation refusal, which is a credential-SCOPE fact, not an authorization principal. Every
+   *  other who-may-mint question belongs to the store. Absent on a bare surface (a test, a local
+   *  process): no gig scope to refuse. */
+  caller?: CallerIdentity | undefined;
+  /** Deployment-wired venue credential minting: mint an org-scoped, instance-bound worker
+   *  environment (the coltrane_venue_credential_mint backend a deployment stands up). Parallel to
+   *  queueGig — the engine ships the verb, its schema, its shape validation and its refusals; the
+   *  deployment ships the backend. Without it, venue_credential_mint is an honest typed refusal
+   *  (`no_backend`) — the verb still answers, it never throws. */
+  mintVenueCredential?: ((args: { org_slug: string; instance: string }) => Promise<VenueCredentialGrant>) | undefined;
 }
 
 export interface SurfaceTool {
@@ -3031,6 +3075,68 @@ async function callSurfaceTool(
   args: Record<string, unknown>,
   deps: ToolSurfaceDeps,
 ): Promise<SurfaceToolResult> {
+  if (slug === "venue_credential_mint") {
+    // The engine half of the venue credential: shape validation and the three refusals around
+    // whatever backend a deployment injects. This fires for ALL callers, not only hosted, because
+    // its refusals are structural facts about the credential — not a hosted-transport concern.
+    //
+    // (a) A gig-scoped caller may NOT mint a venue credential. This is decided from caller identity
+    //     alone, BEFORE the backend is reached, because the escalation (a one-lease gig token
+    //     minting an org-scoped key that outlives every gig) is a credential-scope fact no store-side
+    //     gate catches. A refused mint must never touch the backend.
+    const escalation = gigScopeRefusal(deps.caller);
+    if (escalation) {
+      return {
+        ok: false,
+        refusal: escalation,
+        error:
+          "a gig-scoped credential may not mint a venue credential: a gig token is issued to one " +
+          "agent for one gig and expires with that gig's lease, while a venue credential is " +
+          "org-scoped and outlives every gig. Mint from a member or venue credential instead.",
+      };
+    }
+    // (b) No backend wired → the verb answers honestly rather than throwing, naming the seam to
+    //     wire (the same shape gig_dispatch/gig_approve/gig_cancel use when their store seams are
+    //     absent). A caller that cannot tell "minting is unwired here" from "your request was bad"
+    //     retries the wrong thing forever.
+    if (!deps.mintVenueCredential) {
+      return {
+        ok: false,
+        refusal: "no_backend",
+        error:
+          "no minting backend is wired on this surface — venue_credential_mint ships its schema " +
+          "and refusals, but a deployment supplies the credential. Wire deps.mintVenueCredential " +
+          "(parallel to deps.queueGig) to stand up the worker environment.",
+      };
+    }
+    // (c) Mint, then check the grant is COMPLETE. A backend that answers with a half-set is refused,
+    //     not forwarded — handing an incomplete environment back moves the assembly problem to the
+    //     caller while looking like success, which is the failure this verb exists to end.
+    let grant: VenueCredentialGrant;
+    try {
+      grant = await deps.mintVenueCredential({
+        org_slug: String(args["org_slug"] ?? ""),
+        instance: String(args["instance"] ?? ""),
+      });
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : String(e) };
+    }
+    const missing = missingWorkerEnv(grant.env);
+    if (missing.length) {
+      return {
+        ok: false,
+        refusal: "incomplete_env",
+        error:
+          `the minted grant is missing required worker environment: ${missing.join(", ")}. A grant ` +
+          "that is not complete is refused, not returned — a half-set moves the assembly problem to " +
+          "the caller while looking like success.",
+      };
+    }
+    // (d) The class names pass through UNCHANGED — the engine does not validate class vocabulary
+    //     (that is the room contract's job, checked by realize before dispatch). The grant is the
+    //     answer, returned exactly once; the engine does not persist it and there is no read-back.
+    return { ok: true, data: grant };
+  }
   if (deps.hosted) {
     const blocked = HOSTED_BLOCKED[slug];
     if (blocked) return { ok: false, hosted_unsupported: true, error: blocked };

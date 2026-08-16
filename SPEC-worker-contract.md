@@ -721,6 +721,36 @@ with extra steps. A permissive realizer is worse than no realizer.
   realization time from `credential_names` ⊆ `credential_surface`. Never from the rendered file,
   never from the genome, never inherited wholesale from the host environment.
 
+#### Every absence law carries its own presence anchor — and this was found by measurement
+
+The rules above are all stated as ABSENCES: the rendered configuration must not contain a socket, a
+host network, a host PID namespace, a privileged flag, an added capability, an underived mount. An
+absence is satisfied by a document that contains nothing at all.
+
+That is not a hypothetical. It was measured against the first implementation of this section, by
+stubbing `renderComposeConfig` to `return {}` and running the file: **32 of the 40 laws passed, and
+all six escape laws were among them.** A renderer that emitted nothing satisfied eighty percent of
+the suite written to constrain it — including every law this document calls the sharpest in it. The
+absence checks were real; the thing they were checking was not.
+
+So each law asserting an absence over a rendered document **must first pin that a real document was
+rendered**, and the anchor must be structural rather than incidental: a compose document has
+services, and the room is one of them, named by a `slug` that is on `COMPOSE_SUBSTITUTABLE_FIELDS`
+and therefore cannot appear from a renderer that emits nothing. The same requirement applies to any
+law whose assertion sits INSIDE a loop over rendered values — the mount-source law is the sharpest
+case, because a zero-length collection runs the body zero times and reports a pass having examined
+nothing.
+
+This is the document's own argument about allowlists, one level outward. An allowlist over field
+NAMES says nothing about what those fields CONTAIN; an assertion over a rendered document says
+nothing until something establishes the document exists. Both halves are needed, and for the same
+reason.
+
+With the anchors in place the same `return {}` stub is caught by **16 laws rather than 8**. That
+number is the measure of the section, and a later implementer changing these laws should re-run the
+stub rather than trust the count of passing tests: a law that survives a renderer emitting nothing
+is not evidence about a renderer that emits something.
+
 ### Device access is a CAPABILITY grant wearing the costume of configuration
 
 A realizer may need to give a venue access to host hardware — a serial port, a GPIO or I2C bus, a

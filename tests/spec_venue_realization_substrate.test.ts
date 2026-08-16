@@ -218,6 +218,39 @@ const renderParsed = async (
  *  forbidden setting only has to appear once, anywhere, to be the whole boundary. */
 const flat = (doc: unknown): string => JSON.stringify(doc);
 
+/**
+ * ★ THE NON-VACUITY ANCHOR, and it is not decoration.
+ *
+ * Every escape law below asserts an ABSENCE, and an absence is satisfied by a document containing
+ * nothing at all. MEASURED, not theorised: with `renderComposeConfig` stubbed to `return {}`, this
+ * file reported 32 passed / 8 failed — a renderer that emits nothing satisfied EIGHTY PERCENT of
+ * its own laws, including every single one of the six escape laws this section calls the sharpest
+ * in the suite. The absence checks were real and the thing they checked was not.
+ *
+ * So each such law now pins that a REAL document was rendered before asking what is missing from
+ * it. The anchor is structural rather than a string match: a compose document has services, and a
+ * room is one of them. `slug` is on `COMPOSE_SUBSTITUTABLE_FIELDS`, so a renderer that emits
+ * nothing cannot produce it, and a renderer that emits the wrong thing does not name this room.
+ *
+ * This is the same argument the section already makes about field-name allowlists — an allowlist
+ * over names says nothing about values — turned one level outward: an assertion over a document
+ * says nothing until something asserts the document exists.
+ */
+const renderedDoc = async (
+  room: unknown = CONTAINED_ROOM,
+  host?: RealizationHost,
+): Promise<string> => {
+  const doc = await renderParsed(room, host);
+  const services = (doc as { services?: Record<string, unknown> }).services;
+  expect(services, "non-vacuity: a rendered configuration has services, or nothing below is a test").toBeDefined();
+  expect(Object.keys(services ?? {}).length, "…and at least one of them is the room").toBeGreaterThan(0);
+  const s = flat(doc);
+  expect(s, "non-vacuity: the rendered document must name THIS room").toContain(
+    (room as { slug: string }).slug,
+  );
+  return s;
+};
+
 describe("GAP 6 — the substrate is a named, injectable seam with two implementations", () => {
   // TWO IMPLEMENTATIONS OR IT IS NOT A SEAM. A one-implementation interface is a hardcoded strategy
   // with extra indirection; the second implementation is what demonstrates nothing leaked into the
@@ -395,7 +428,7 @@ describe("GAP 6 — the renderer emits only from a closed allowlist", () => {
   // reach the runtime's own socket can start a second container with the host filesystem mounted —
   // this is not "a risky option", it is the end of the boundary.
   it("never emits a container runtime socket", async () => {
-    const doc = flat(await renderParsed());
+    const doc = await renderedDoc();
     expect(doc, "a runtime socket inside the room is the end of the room").not.toMatch(/docker\.sock/i);
     expect(doc).not.toMatch(/containerd\.sock|podman\.sock|\/var\/run\/docker/i);
   });
@@ -403,7 +436,7 @@ describe("GAP 6 — the renderer emits only from a closed allowlist", () => {
   // Host networking erases `doors` completely: a room whose network boundary it does not control has
   // no boundary, and `network_policy_doors` would be a guarantee claimed and not kept.
   it("never emits host networking", async () => {
-    const doc = flat(await renderParsed());
+    const doc = await renderedDoc();
     expect(doc).not.toMatch(/"network_mode"\s*:\s*"host"/i);
     expect(doc).not.toMatch(/--network[= ]host/i);
   });
@@ -411,7 +444,7 @@ describe("GAP 6 — the renderer emits only from a closed allowlist", () => {
   // Host PID namespace makes every process on the box visible and signalable from inside the room —
   // including the drain holding the venue credential this gig was minted against.
   it("never emits the host PID namespace", async () => {
-    const doc = flat(await renderParsed());
+    const doc = await renderedDoc();
     expect(doc).not.toMatch(/"pid"\s*:\s*"host"/i);
   });
 
@@ -419,14 +452,14 @@ describe("GAP 6 — the renderer emits only from a closed allowlist", () => {
   // CEILING (src/chart.ts:273) — a realizer that quietly hands back more than the ceiling has
   // inverted the one property the venue class exists to provide.
   it("never emits privileged mode", async () => {
-    const doc = flat(await renderParsed());
+    const doc = await renderedDoc();
     expect(doc).not.toMatch(/"privileged"\s*:\s*true/i);
   });
 
   // Added capabilities are the same defect at a finer granularity, and the finer one is the one that
   // survives review because it looks specific and modest.
   it("never emits added capabilities", async () => {
-    const doc = flat(await renderParsed());
+    const doc = await renderedDoc();
     expect(doc).not.toMatch(/"cap_add"/i);
     expect(doc).not.toMatch(/"capabilities"\s*:\s*\{\s*"add"/i);
     expect(doc).not.toMatch(/SYS_ADMIN|CAP_SYS_/i);
@@ -449,6 +482,11 @@ describe("GAP 6 — the renderer emits only from a closed allowlist", () => {
       if (node && typeof node === "object") { Object.values(node).forEach(walk); }
     };
     walk(doc);
+    // NON-VACUITY, and this law is the sharpest instance of the problem in the file: the assertion
+    // below lives INSIDE a loop, so a renderer emitting no mounts at all runs the body zero times
+    // and passes without ever being examined. Measured under a `return {}` stub, it did exactly
+    // that. A room mounts its own workspace, so the collection is never legitimately empty.
+    expect(sources.length, "a rendered room mounts its workspace — an empty set proves nothing").toBeGreaterThan(0);
     for (const s of sources) {
       expect(
         s.startsWith(REALIZATION_DIR),
@@ -518,7 +556,7 @@ describe("GAP 6 — credentials reach the room only through the resolver", () =>
   // for the same reason src/genome_schema.ts defines the surface as a list of names and never a
   // field material could occupy.
   it("renders the credential class, never the credential", async () => {
-    const doc = flat(await renderParsed());
+    const doc = await renderedDoc();
     expect(doc, "the class is the contract's own vocabulary and may appear").toContain("notes-token");
     // The resolver has not been called at render time, so no value can legitimately be present.
     // Asserted on value SHAPES rather than one string, so the law survives a rename of the fixture.
@@ -534,7 +572,7 @@ describe("GAP 6 — credentials reach the room only through the resolver", () =>
     const saved = process.env[SENTINEL];
     process.env[SENTINEL] = "sentinel-value-that-must-not-be-rendered";
     try {
-      const doc = flat(await renderParsed());
+      const doc = await renderedDoc();
       expect(doc, "a host environment passthrough hands the room the drain's own credentials")
         .not.toContain("sentinel-value-that-must-not-be-rendered");
       expect(doc).not.toContain(SENTINEL);
@@ -629,7 +667,13 @@ describe("GAP 6 — a device grant maps exactly what was declared, and widens no
   // broad enough to cover devices nobody declared. A room that got its serial port and root with it
   // has satisfied the request and destroyed the contract.
   it("a device grant produces no privileged mode, no capabilities, and no broad device rule", async () => {
-    const doc = flat(await renderParsed(SERIAL_ROOM, HOST));
+    // Anchored: every assertion here is an ABSENCE, and a room that rendered nothing satisfies all
+    // of them while granting no device either. The mapping must be present for its non-widening to
+    // mean anything.
+    const doc = await renderedDoc(SERIAL_ROOM, HOST);
+    expect(doc, "the grant must actually be present for its narrowness to be a finding").toContain(
+      HOST.devices["serial"]!.nodes[0]!,
+    );
     expect(doc, "the reflexive escalation this whole grant exists to avoid").not.toMatch(
       /"privileged"\s*:\s*true/i,
     );

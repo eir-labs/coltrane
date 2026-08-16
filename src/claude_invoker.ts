@@ -642,7 +642,22 @@ export function captureOutputWrites(
 // this bound one wedged child wedges the whole server. SIGKILL, not SIGTERM: a
 // signal-trapping child can't outlive its budget. Long enough for a tool-using chair
 // (a capped search agent runs minutes), far below an operator-visible hang.
-export const DEFAULT_CHAIR_TIMEOUT_MS = 10 * 60_000;
+//
+// RAISED FROM TEN MINUTES, from measurement rather than preference. A reading seat over a
+// 1000-line specification and its test suite was killed here twice, both times mid
+// `output_write` — the bound was cutting the WRITE, not the reading, and the two sibling seats
+// that survived cleared it by 57s and 85s. A seat that dies at the wall seals nothing and, worse,
+// reports no usage, so the spend is real and the ledger never sees it. Ten minutes was under the
+// honest cost of a chair that reads a corpus and then writes a structured document about it.
+//
+// Twenty and not more: `tests/invoker_timeout.test.ts` fences this value between five and twenty
+// minutes on the argument that the default must stay "far below an operator-visible hang", and
+// that band is a deliberate guard rather than an accident. This sits at its ceiling. A deployment
+// that genuinely needs longer has the per-chair override (`COLTRANE_CHAIR_TIMEOUT_MS`) and does
+// not need the shipped default moved. Note the cost of raising it: `src/runtime.ts:1135` observes
+// that a standard with P sequential phases can burn P x this value after `gig_abort` returns, so
+// doubling the bound doubles that worst-case drag.
+export const DEFAULT_CHAIR_TIMEOUT_MS = 20 * 60_000;
 
 // How long a cancelled chair child gets to shut down politely before it is killed outright.
 // SIGTERM first (a `claude` child spawns its own MCP servers; a cooperative exit gives it a

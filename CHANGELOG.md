@@ -7,6 +7,102 @@ signals a breaking change and a **patch** signals an additive or internal one.
 `package.json`'s `version` — `tests/version_identity.test.ts` enforces that, and also that
 the MCP handshake reports the constant rather than a hardcoded literal.
 
+## Unreleased
+
+### Added — a specification, and a suite that is red on purpose
+
+- **`SPEC-worker-contract.md`** — the contract a worker (any host running `coltrane work`) is
+  entitled to, written as six gaps. Gaps 1–5 were found by RUNNING the system; none came from
+  review. Each section states what is true today with references into this tree, why it is a defect,
+  the contract required, and what is deliberately left to the deployment.
+
+  1. **No MCP verb mints a venue credential.** Every deployment invents an out-of-band path, and in
+     practice those paths end at a browser. A capability with no verb is a capability an assistant
+     cannot use — and the hand-carried step is exactly what the venue credential design exists to
+     remove.
+  2. **A venue cannot declare what provides its tools, and realization does not build the room.**
+     Most of the contract already exists and is good — `VenueSchema`'s deny-by-default
+     `equipment.tools`, `credential_surface` as classes rather than material, R10's compose-time
+     ceiling, and the `resolveAndRealize` gauntlet `runGig` already calls. What is missing:
+     `equipment.tools` may name `mcp__<server>__<tool>` and nothing says what provides that server;
+     realization returns no server config, so `--mcp-config` still comes from the ambient
+     `.mcp.json` the venue never saw; and a drain realizes no room at all. Contract vocabulary here
+     follows prior art rather than inventing a shape — the implementer should follow the existing
+     `VenueSchema` grain.
+  3. **`COLTRANE_DRAIN_URL` had three readers and two meanings.** `0.10.0` settled the meaning; this
+     settles the NAME (`COLTRANE_SERVICE_URL`, with the old one demoted to a normalized legacy
+     alias), moves the check to startup, and puts the whole worker environment in one enumerated
+     table.
+  4. **Three ways to run a standard, and two credential shapes inside one of them,** with nothing
+     saying when each is correct. The mode condition is currently derived in two places; `worker.ts`
+     carries a defensive branch that exists because they might disagree.
+  5. **The claim does not filter by the venue a gig's chart already names.** `ChartSchema.venue`
+     exists and `runGig` honours it; the claim takes any queued gig of the org regardless, so a gig
+     is taken by a worker that cannot realize its room while a capable worker sits idle. Work cannot
+     be routed; the only way to make a gig run somewhere specific is to stop every other worker.
+  6. **What a venue is realized ON is unspecified** — the other half of #2. Realization targets a
+     node subprocess and the containerization question is deferred with "room left for a future
+     field", but that room is not a NAMED INTERFACE: nothing declares which substrate a venue needs,
+     nothing declares which a host provides, so nothing can refuse the mismatch. The failure mode is
+     silent degradation — a venue that requires isolation, realized on a substrate that cannot
+     provide it, runs and believes it is isolated. Contract: a `VenueRealizer` seam injected the way
+     `CredentialResolver` already is, two reference realizers (local-process and Docker Compose) so
+     the seam is proven by use, selection that refuses rather than degrades, and guarantees a
+     realizer may only claim if it can keep them.
+
+     The renderer laws are the sharp end. Rendering a runtime configuration from contract data is
+     code generation from data: a closed allowlist of substitutable fields, parsed-schema input
+     only, and an individual refusal for the container runtime socket, host networking, the host PID
+     namespace, privileged mode, added capabilities, non-derived mount sources, and any credential
+     reaching the room by a route other than `CredentialResolver`.
+
+     Also folded in: **device access as a capability grant, not configuration** — declared as a
+     closed enumeration by CLASS and never as a path, because a venue that can name an arbitrary
+     device path can name the raw memory device; refused when the host cannot provide the class;
+     carrying the least-privilege group membership precisely so escalating the whole room to
+     privileged is never the easy fix for a permissions error. **A venue need not be realized where
+     the worker runs** — a room may be stood up on a machine with hardware, a network position or an
+     architecture this box lacks, while the contract stays identical; the credential reaching such a
+     host is administrative on it, so it follows `src/workspace.ts`'s per-gig-against-a-live-lease
+     discipline, and every refusal holds regardless of which host executes. **Architecture is part of
+     the contract**, refused before PLAYING rather than discovered at spawn.
+
+     And two themes the spec had missed entirely. **Teardown is not enough**: `finally` does not run
+     when a process is KILLED, so every crash leaks everything the worker realized. Realization is
+     therefore RECONCILED — every artifact labelled with its gig and instance, a sweep that collects
+     what belongs to no live gig, run at startup because startup is the moment after a crash, and a
+     host-wide live set so two workers sharing a box never garbage-collect each other. Plus the
+     things no teardown covers: a bounded retention policy for build cache and unreferenced
+     environments, and a log bound in every rendered configuration — realizer-sourced, not
+     venue-substitutable, because a room may not raise its own ceiling.
+
+     **Minimal footprint is a CONSEQUENCE of the venue contract, not a separate effort** — with
+     nothing declaring what a gig needs, one prepared environment must be the union of everything any
+     gig might need, and every gig pays for capabilities it never invokes. Shared floors and small
+     deltas; environment identity as a function of the contract's hash, so an unchanged contract
+     rebuilds nothing (the payoff of digest-pinned installs). And the distinction implementers get
+     wrong: storage scales with environment SIZE, memory with the number of running PROCESSES — so
+     the concurrency ceiling is the memory lever and composition is the storage lever, and shrinking
+     environments must not be sold as reducing memory pressure. The dominant per-gig cost is named
+     as provider readiness: latency deliberately bought for the guarantee Gap 2 exists to provide.
+
+     Unlike 1–5 this was found by reading, not by running. It is pinned now because it is the only
+     failure in the document that is invisible when it happens.
+
+- **`tests/spec_*.test.ts` — 88 laws, committed FAILING.** Six files, one per gap, each opening with
+  a banner saying so. A failure named `spec_*` is pending implementation; a failure anywhere else is
+  a regression, and the naming exists so a reader can tell them apart without reading the diff.
+
+  `npx tsc --noEmit` is clean on purpose. A static import of a module that does not exist would fail
+  this repo's vitest `globalSetup` (which builds first), and one compile error stops every band from
+  running — at which point nobody can distinguish a pending spec from a regression. The
+  not-yet-existing modules are therefore loaded through a specifier held in a `const`, so the red
+  lands at runtime on the law that needs it.
+
+- **Landing all six will be a MINOR bump** under this repo's inverted convention. Gaps 1, 2, 5 and 6
+  are additive; Gap 3 is not — a worker whose environment names the wrong host boots today and
+  refuses afterwards, which is the point and is still a break.
+
 ## 0.10.0
 
 ### Changed — breaking

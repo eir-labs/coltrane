@@ -1,0 +1,112 @@
+{
+  "slug": "spec-review-and-sequence-v0",
+  "domain": "software-change",
+  "agent_slugs": [
+    "john",
+    "miles",
+    "bill"
+  ],
+  "phases": [
+    {
+      "name": "read-the-red",
+      "intent": "Read the material. THREE SEATS SPLIT THIS PHASE AND EACH READS ONLY THE SLICE ITS OWN ROLE NAMES. This is not a suggestion about tidiness: a chair is killed at a hard wall-clock wall, and a seat that wanders outside its slice dies at that wall having sealed nothing — which costs real money the ledger never records, because a killed chair reports no usage. Read your slice, then seal. Budget most of your window for reading and keep a real margin for writing your change-context.\n\nIF YOUR ROLE IS read-the-argument: read SPEC-worker-contract.md and CHANGELOG.md, and nothing else. Report, gap by gap (there are six), what the document ARGUES: the defect it claims, the contract it proposes, what it explicitly leaves to the deployment, what it names as out of scope, and what its closing 'What this document does NOT specify' section deliberately declines to settle. Quote the document where its wording is load-bearing. You are the only seat that reads the argued half, so the judge sees the reasoning only through you.\n\nIF YOUR ROLE IS read-the-substrate-laws: read tests/spec_venue_realization_substrate.test.ts and nothing else. It is 962 lines and holds 40 of the suite's 88 laws, grouped into ten describe blocks. For each describe block, report: its laws by their own `it` text, the exports each destructures from the module under specification, and — for every law — the exact assertions it makes, distinguishing POSITIVE assertions (something must be present) from NEGATIVE ones (something must be absent), and counting each. That distinction is the most important thing you will record, because a law whose assertions are ALL negative is satisfied by an implementation that produces nothing at all. Be mechanical about it. Also record the type declarations at the top of the file (VenueRealizer, RealizationHandle, RealizedArtifact, RetentionPolicy, VenueGuarantee, RealizationHost), which are the interface being specified, and the shared fixtures and helpers the laws render through.\n\nIF YOUR ROLE IS read-the-other-laws-and-the-grain: read the other five law files — tests/spec_venue_realization.test.ts, tests/spec_worker_environment.test.ts, tests/spec_worker_run_modes.test.ts, tests/spec_venue_targeting.test.ts, tests/spec_venue_credential_mint.test.ts — and report for each the laws by their `it` text, the module and exports each expects, and what it asserts. Then, with whatever budget remains, sense the existing grain the implementation must follow: VenueSchema in src/genome_schema.ts, the realize gauntlet in src/venue_realize.ts, and the candour at src/workspace.ts lines 44-56. Skim these for SHAPE. Do not read them exhaustively; if budget runs short, the five law files matter more than the source.",
+      "chairs": [
+        {
+          "role": "read-the-argument",
+          "agent_slug": "john",
+          "depends_on": [],
+          "input_contract": [
+            "change-request"
+          ],
+          "output_contract": [
+            "change-context"
+          ],
+          "required_skills": []
+        },
+        {
+          "role": "read-the-substrate-laws",
+          "agent_slug": "john",
+          "depends_on": [],
+          "input_contract": [
+            "change-request"
+          ],
+          "output_contract": [
+            "change-context"
+          ],
+          "required_skills": []
+        },
+        {
+          "role": "read-the-other-laws-and-the-grain",
+          "agent_slug": "john",
+          "depends_on": [],
+          "input_contract": [
+            "change-request"
+          ],
+          "output_contract": [
+            "change-context"
+          ],
+          "required_skills": []
+        }
+      ]
+    },
+    {
+      "name": "judge-the-laws",
+      "intent": "Judge the suite as a contract, from the three readings handed to you. DO NOT RE-READ THE SOURCE — the reading is done and your budget is for judgment; you may open a file only to settle a specific question the readings left genuinely ambiguous. For each family of laws answer three questions. SOUND: does it assert the property the document argues for, or something narrower or wider than the argument supports. NON-VACUOUS: could an implementation that keeps none of the guarantees still pass it. Ask this concretely rather than in general — construct the smallest hollow implementation you can (a function returning an empty object, a resolver returning nothing, a filter over an empty family) and then walk EVERY law in the family INDIVIDUALLY saying whether that hollow implementation passes it. Answer at the granularity of the single `it` block, because that is the unit a filtered test run measures: a family may be non-vacuous as a whole while several of its laws pass hollow, and if an acceptance check runs only those laws the hollow implementation ships. Where a family's honesty depends on a positive assertion living in a DIFFERENT describe block, say so plainly — that anchor is one edit away from disappearing. BUILDABLE: can it be satisfied against the existing grain without weakening it. Name every law you believe is wrong by its own describe/it text and say what the document would have to argue instead. Then fix the direction for the build: what ships, what is out of scope, the stop condition, and the alternatives set aside with their reasons. Settled for the run.",
+      "chairs": [
+        {
+          "role": "judge-laws",
+          "agent_slug": "miles",
+          "depends_on": [
+            "read-the-argument",
+            "read-the-substrate-laws",
+            "read-the-other-laws-and-the-grain"
+          ],
+          "input_contract": [
+            "change-context"
+          ],
+          "output_contract": [
+            "change-decision"
+          ],
+          "required_skills": []
+        }
+      ]
+    },
+    {
+      "name": "sequence-the-bands",
+      "intent": "Settle the order the laws are made green in, from the readings and the judgment. Ordered work packages with explicit dependencies, each naming: the laws it closes by their own describe/it text, the modules and exports it creates, the files it touches, and what the closed laws report before the package lands. The security-critical family goes first where the judgment says it must — a permissive implementation is worse than an absent one, because the contract still claims the guarantee. Every package must be independently verifiable, and must be SMALL ENOUGH TO BUILD IN ONE RUN: a package whose laws cannot be run green on their own is not a package, and neither is one that could not be written and verified inside a single chair's wall-clock budget. Size the packages against that bound honestly — a package that creates a whole module with a dozen exports and closes forty laws is two packages wearing one name. Each package states a NON-VACUITY GUARD that is a DEMONSTRATION rather than an argument: name the hollow implementation, say which of that package's laws it would still pass, and require the implementer to run it and report the survivors. Do not inherit the judge's vacuity reasoning as settled — restate it as a check somebody performs. Where the judgment found a law vacuous or unsound, the package that would have closed it must carry the remedy — an amendment to the specification — rather than quietly coding to the weak law. Account for every law: each lands in a package or is listed as deferred with its reason. State the tradeoff wherever more than one ordering would have served.",
+      "chairs": [
+        {
+          "role": "sequence-bands",
+          "agent_slug": "bill",
+          "depends_on": [
+            "read-the-argument",
+            "read-the-substrate-laws",
+            "read-the-other-laws-and-the-grain",
+            "judge-laws"
+          ],
+          "input_contract": [
+            "change-context",
+            "change-decision"
+          ],
+          "output_contract": [
+            "change-plan"
+          ],
+          "required_skills": [],
+          "preferred_skills": [
+            "structure-conformance"
+          ]
+        }
+      ]
+    }
+  ],
+  "status": "active",
+  "input_types": [
+    "change-request"
+  ],
+  "output_types": [
+    "change-context",
+    "change-decision",
+    "change-plan"
+  ],
+  "description": "Review a committed RED specification and turn it into an ordered build sequence. The material is a specification document plus its falsifiable half — test files committed failing on purpose — and the question is not \"is this a good idea\" but \"are these laws sound, non-vacuous, and buildable, and in what order\". The reading is SPLIT ACROSS THREE PARALLEL SEATS because a chair has a hard wall-clock wall and a specification of this size does not fit through one: the argued half, the largest law file, and the remaining laws plus the existing source grain are read by three seats that never wait on each other. Then the seams hold as usual — the seats that READ do not judge, the seat that JUDGES does not sequence, and the seat that SEQUENCES is answerable to a decision it did not make. The output is a change-plan whose steps are work packages, each naming the laws it closes, the modules it creates, and what those laws report while the code is absent, so a later implementation run is measured against a sequence somebody argued for rather than one it invented mid-flight."
+}

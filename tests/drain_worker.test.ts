@@ -627,12 +627,20 @@ describe("venue mode — the drain is a bandstand, not a musician", () => {
   });
 
   it("player mode refuses an EMPTY bearer rather than presenting one", async () => {
-    // The downstream half of the CLI's guard: a drain key that reaches the worker without an
-    // instance falls out of venue mode, and this path must fail closed rather than ask the store
-    // to authenticate nothing.
+    // Gap 4 collapsed two credential-mode derivations into ONE (workerCredentialMode). The
+    // REFUSAL travels with it — it is not collateral of deleting the duplicate.
+    //
+    // Why this law survives the collapse: `claimNextGig` is exported, so a context can reach it
+    // without passing the CLI door, and a venue-shaped context carries an EMPTY agentToken by
+    // design (the credential arrives with the work). A drain key that lost its instance must not
+    // fall through to the player path, because that path would present the empty bearer to the
+    // store — the exact hazard spec_worker_run_modes.test.ts names in its preamble.
     const ctx: WorkerContext = { ...venueCtx(), instance: undefined as unknown as string };
-    mockStore({ claim: CLAIM });
-    await expect(claimNextGig(ctx)).rejects.toThrow(/no instance reached the worker/);
+    const calls = mockStore({ claim: CLAIM });
+    await expect(claimNextGig(ctx)).rejects.toThrow(/no instance is named/);
+    // Stronger than asserting the throw alone: it must refuse BEFORE the store is spoken to.
+    // A refusal that arrives after the request has already presented the credential is not one.
+    expect(calls.length, "no bearer may be presented at all — refuse before the request").toBe(0);
   });
 
   it("leaves player mode alone: a token and no drain key still claims the old way", async () => {

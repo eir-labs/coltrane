@@ -39,6 +39,7 @@ import { loadRegistry, type Registry } from "./registry.js";
 import { createOutputStore, type OutputStore } from "./outputs.js";
 import { MemoryLedger } from "./ledger.js";
 import { rpcGenomeStore } from "./genome_store.js";
+import { workerCredentialMode } from "./worker_env.js";
 import { prepareWorkspace } from "./workspace.js";
 import { engineToolProviders, drainBudget, drainTimeoutMs } from "./run_deps.js";
 import { createOutputMirror } from "./output_mirror.js";
@@ -317,7 +318,25 @@ async function workerRpc(ctx: WorkerContext, fn: string, body: Record<string, un
  * only until that lease expires.
  */
 export async function claimNextGig(ctx: WorkerContext): Promise<ClaimedGig | null> {
-  if (ctx.drainKey && ctx.instance) {
+  // ONE DERIVATION, and it is the same one the CLI door asks — Gap 4's whole point. This used to
+  // re-derive `ctx.drainKey && ctx.instance` here, which is the second home the specification
+  // named; the defensive branch below it existed only because two homes might disagree.
+  //
+  // The REFUSAL travels with the derivation rather than being deleted alongside the duplicate.
+  // That distinction is the amend: removing a redundant boolean is the goal, and removing a
+  // refusal is collateral. `claimNextGig` is an exported function, so a context assembled outside
+  // the CLI reaches here directly — and `venueCtx`-shaped contexts carry an EMPTY agentToken by
+  // design (the credential arrives with the work). Without this, a drain key that lost its
+  // instance falls through to the player path and presents that empty bearer to the store, which
+  // is precisely the hazard tests/spec_worker_run_modes.test.ts names in its preamble.
+  const mode = workerCredentialMode({
+    COLTRANE_DRAIN_KEY: ctx.drainKey,
+    COLTRANE_AGENT_TOKEN: ctx.agentToken,
+    COLTRANE_INSTANCE: ctx.instance,
+  });
+  if (mode.mode === "none") throw new Error(mode.why);
+
+  if (mode.mode === "venue") {
     const out = await workerRpc(ctx, "coltrane_drain_claim", {
       p_key: ctx.drainKey,
       p_instance: ctx.instance,
@@ -340,19 +359,6 @@ export async function claimNextGig(ctx: WorkerContext): Promise<ClaimedGig | nul
     }
     ctx.agentToken = claim.token;
     return claim;
-  }
-
-  // Fail closed HERE, not only at the CLI door. If a drain key survives to this point but the
-  // instance was lost anywhere downstream of the CLI guard, venue mode is skipped and this path
-  // would otherwise present an empty bearer to the store — which is exactly the shape of the bug
-  // this whole change exists to prevent.
-  if (!ctx.agentToken) {
-    throw new Error(
-      ctx.drainKey
-        ? "venue mode was requested but no instance reached the worker, and player mode has no token — " +
-          "set COLTRANE_INSTANCE (or FLY_APP_NAME) so the drain key can be presented"
-        : "no credential: claiming needs a venue drain key with an instance, or a player agent token",
-    );
   }
 
   const out = await workerRpc(ctx, "coltrane_mcp_claim", {

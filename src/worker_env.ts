@@ -28,6 +28,16 @@ export type EnvRole = "url" | "credential" | "identity" | "tuning";
 /** When a worker must have it. "venue"/"player" are the two credential modes (Gap 4). */
 export type EnvRequired = "always" | "venue" | "player" | "conditional" | "never";
 
+/**
+ * The answer to "which credential mode is this worker in", carrying what the answer needs so a call
+ * site consumes it instead of re-reading the environment and re-deciding (Gap 4). `why` is the
+ * refusal text, single-sourced: the CLI prints exactly this string.
+ */
+export type WorkerCredentialMode =
+  | { mode: "venue"; drainKey: string; instance: string }
+  | { mode: "player"; agentToken: string }
+  | { mode: "none"; why: string };
+
 export interface WorkerEnvVar {
   name: string;
   host: EnvHost;
@@ -260,6 +270,51 @@ export function normalizeWorkerEnv(env: Record<string, string | undefined>): Rec
   }
 
   return out;
+}
+
+/**
+ * Which credential mode a worker is in — the SINGLE derivation of it (Gap 4). Both the CLI door and
+ * the claim path ask this one function instead of each recomputing `drainKey && instance`; the
+ * answer carries the fields the answer needs, so no call site re-reads the environment to fill them
+ * in, and its refusal (`why`) is the refusal the CLI prints. It is the only place that decides.
+ *
+ * Reads the RAW environment for the same reason `assertWorkerEnv` does: the instance may arrive
+ * under the legacy `FLY_APP_NAME` alias, and normalizing first would drop that alias, so a
+ * venue-key-without-instance could no longer be told apart from a properly named venue.
+ *
+ * Precedence, and the reasons:
+ *   * A drain key present makes this a venue box. With an instance it is venue mode; WITHOUT one it
+ *     REFUSES — even when a player token is sitting right there. A half-configured venue that quietly
+ *     ran as a player would claim a different set of gigs under a different identity, and the operator
+ *     would see a queue that merely looked empty. Venue therefore wins over player, and its own
+ *     misconfiguration is a refusal, not a downgrade.
+ *   * A player token alone is player mode.
+ *   * Neither credential is a refusal that names BOTH doors, because either one would work.
+ */
+export function workerCredentialMode(env: Record<string, string | undefined>): WorkerCredentialMode {
+  const drainKey = env["COLTRANE_DRAIN_KEY"];
+  const agentToken = env["COLTRANE_AGENT_TOKEN"];
+  const instance = env["COLTRANE_INSTANCE"] ?? env["FLY_APP_NAME"];
+
+  if (drainKey) {
+    if (instance) return { mode: "venue", drainKey, instance };
+    return {
+      mode: "none",
+      why:
+        "COLTRANE_DRAIN_KEY is set but no instance is named — the key is bound to one venue and the " +
+        "store cannot tell which. Set COLTRANE_INSTANCE (or FLY_APP_NAME) so the drain key can be presented.",
+    };
+  }
+
+  if (agentToken) return { mode: "player", agentToken };
+
+  return {
+    mode: "none",
+    why:
+      "work needs a credential: EITHER a venue drain key (COLTRANE_DRAIN_KEY with COLTRANE_INSTANCE " +
+      "or FLY_APP_NAME) OR a player token (COLTRANE_AGENT_TOKEN). A drain should hold the venue " +
+      "credential: it claims any gig dispatched to its org and runs each as that gig's own acting_for.",
+  };
 }
 
 /**

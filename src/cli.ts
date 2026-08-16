@@ -25,6 +25,7 @@
 import { dispatchTool, bootstrapServerDeps, type ServerDeps, type ToolResult } from "./server.js";
 import { COLTRANE_VERSION } from "./version.js";
 import { workOnce } from "./worker.js";
+import { workerCredentialMode } from "./worker_env.js";
 import { makeClaudeInvoker } from "./claude_invoker.js";
 import { readFileSync } from "node:fs";
 
@@ -203,30 +204,17 @@ export async function runCli(argv: readonly string[], io: CliIO): Promise<number
   if (cmd === "work") {
     const baseUrl = process.env["COLTRANE_STORE_URL"];
     const anonKey = process.env["COLTRANE_STORE_ANON"];
-    const agentToken = process.env["COLTRANE_AGENT_TOKEN"];
-    // VENUE MODE. A drain key is org-scoped, bound to one venue, and names no player. Preferred
-    // when present: the store then mints a credential per claim, scoped to that gig's acting_for,
-    // so the drain holds nothing between gigs.
-    //
-    // FLY_APP_NAME is the default because Fly sets it in every machine for free, so the common
-    // deployment configures nothing. Note it is per-APP: every machine in an app shares it, so
-    // scaling to two machines gives both the same venue identity. Intended — the venue is the room
-    // and a room may hold more than one stage; the store leases `for update skip locked`, so two
-    // machines take different gigs. Per-machine binding would be FLY_MACHINE_ID, and would mean
-    // re-minting a key every time a machine is replaced.
-    const drainKey = process.env["COLTRANE_DRAIN_KEY"];
-    const instance = process.env["COLTRANE_INSTANCE"] ?? process.env["FLY_APP_NAME"];
-    const venueMode = Boolean(drainKey && instance);
+    // The credential mode is DERIVED IN ONE PLACE — workerCredentialMode in worker_env.ts. The CLI
+    // door asks it and prints its refusal verbatim rather than re-deriving `drainKey && instance`
+    // and composing a second error; the claim path (worker.ts) asks the same function's answer.
+    const mode = workerCredentialMode(process.env);
 
-    if (!baseUrl || !anonKey || (!venueMode && !agentToken)) {
-      line(io, "work needs COLTRANE_STORE_URL and COLTRANE_STORE_ANON, plus EITHER a venue credential");
-      line(io, "(COLTRANE_DRAIN_KEY with COLTRANE_INSTANCE or FLY_APP_NAME) OR a player token");
-      line(io, "(COLTRANE_AGENT_TOKEN). A drain should hold the venue credential: it claims any gig");
-      line(io, "dispatched to its org and runs each as that gig's own acting_for.");
-      if (drainKey && !instance) {
-        line(io, "");
-        line(io, "COLTRANE_DRAIN_KEY is set but no instance is named — the key is bound to one venue");
-        line(io, "and the store cannot tell which. Set COLTRANE_INSTANCE to the Fly app name.");
+    if (!baseUrl || !anonKey || mode.mode === "none") {
+      if (!baseUrl || !anonKey) {
+        line(io, "work needs COLTRANE_STORE_URL and COLTRANE_STORE_ANON.");
+      }
+      if (mode.mode === "none") {
+        line(io, mode.why);
       }
       return 2;
     }
@@ -235,8 +223,8 @@ export async function runCli(argv: readonly string[], io: CliIO): Promise<number
         baseUrl,
         anonKey,
         // Empty in venue mode, and deliberately so: the credential arrives with the work.
-        agentToken: agentToken ?? "",
-        ...(venueMode ? { drainKey: drainKey!, instance: instance! } : {}),
+        agentToken: mode.mode === "player" ? mode.agentToken : "",
+        ...(mode.mode === "venue" ? { drainKey: mode.drainKey, instance: mode.instance } : {}),
         ...(typeof flags["worker"] === "string" ? { worker: flags["worker"] } : {}),
       },
       {

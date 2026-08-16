@@ -1,0 +1,135 @@
+{
+  "slug": "worker-contract-docker-v2",
+  "movements": [
+    {
+      "movement_id": "band-renderer",
+      "standard_slug": "software-change-pr-v1",
+      "runtime_fills": {
+        "change-request": {
+          "source": "SPEC-worker-contract.md Gap 6, renderer half; laws in tests/spec_venue_realization_substrate.test.ts; sequenced as package P1 (split) by change-plan of gig 73ffa76e",
+          "requested_by": "eugene",
+          "repository": "eir-labs/coltrane",
+          "request_text": "BEFORE WRITING ANY FILE, resolve one open question the sequencing seat flagged: read src/tool_providers.ts around line 153 and confirm the current arity of assertToolGrantsResolvable. Gap 2's drift-guard law calls it with a fourth argument (a realized mcpServerConfigs map). If it takes three today, the change is an additive optional fourth parameter that leaves every existing caller unchanged. Record what you found; a later package depends on it.\n\nTHEN build the seam and the renderer, and make these four families of tests/spec_venue_realization_substrate.test.ts green without weakening one law: 'the substrate is a named, injectable seam with two implementations' (8), 'the renderer emits only from a closed allowlist' (8), 'the renderer refuses a forbidden value smuggled through an allowed field' (2), and 'credentials reach the room only through the resolver' (2). Twenty laws. This ships first because every other gap in the specification fails visibly — a capability is missing and somebody notices — while a permissive realizer fails invisibly: the venue still claims the guarantee and there is a real escape at the end of it.\n\nExtend VenueSchema in src/genome_schema.ts first, following that file's existing grain: it is the one source every restatement derives from, so add the fields there and let the TypeScript type, the generated MCP input_schema and the loader check follow. Do not hand-edit any of the three to match. Re-run the genome regression gate after the schema change (tests/skills_agent_carried.test.ts, tests/genome_schema_drift.test.ts, tests/genome_browse_parity.test.ts, and any genome-hash stability test) before going further — a schema addition must not move a hash or reject an existing venue.\n\nThen create src/venue_realizer.ts, exporting at minimum: the VenueRealizer interface exactly as the test file's own type block declares it; localProcessRealizer and dockerComposeRealizer, each naming its own substrate and its own guarantees drawn from the closed set withholds_capabilities, isolated_filesystem, network_policy_doors, reproducible_tool_surface, per_chair_isolation; selectRealizer, which throws VenueSubstrateUnavailable naming what was required and what is available and NEVER falls back to a weaker realizer; renderComposeConfig; COMPOSE_SUBSTITUTABLE_FIELDS; and VenueRenderRefusal carrying a .forbidden field.\n\nFOUR PROPERTIES THE LAWS PIN. One: localProcessRealizer is the baseline, must work on a host with no container runtime and no daemon installed, and must claim NO guarantee it cannot keep — specifically not withholds_capabilities and not network_policy_doors, because src/workspace.ts:44-56 is already candid that process-level protection is not a security control and must not be described as one. Two: renderComposeConfig accepts only the PARSED schema object and refuses raw input — VenueSchema is already .strict() and that is the enforcement point, so handing the renderer unparsed input walks around it. Three: the renderer EMITS only from the closed allowlist, and each forbidden setting is its own law — container runtime socket, host networking, host PID namespace, privileged mode, added capabilities, and any mount whose source is not derived from the per-realization directory. Implement them individually. Four: the renderer REFUSES a forbidden value smuggled through an ALLOWLISTED field, naming the field and the value — an allowlist over field names says nothing about what those fields contain, and this is the half a naive allowlist misses. Credentials reach the room only through CredentialResolver, bound at realization time from credential_names as a subset of credential_surface: render the credential CLASS, never the material, and never inherit the host environment wholesale, which would hand the room the drain's own venue credential.",
+          "target_paths": [
+            "src/venue_realizer.ts",
+            "src/genome_schema.ts",
+            "src/venue_realize.ts",
+            "src/workspace.ts",
+            "src/tool_providers.ts",
+            "tests/spec_venue_realization_substrate.test.ts"
+          ],
+          "acceptance_criteria": [
+            "npx vitest run tests/spec_venue_realization_substrate.test.ts -t 'the substrate is a named, injectable seam with two implementations' reports 8 passed, 0 failed.",
+            "npx vitest run tests/spec_venue_realization_substrate.test.ts -t 'the renderer emits only from a closed allowlist' reports 8 passed, 0 failed.",
+            "npx vitest run tests/spec_venue_realization_substrate.test.ts -t 'the renderer refuses a forbidden value smuggled through an allowed field' reports 2 passed, 0 failed.",
+            "npx vitest run tests/spec_venue_realization_substrate.test.ts -t 'credentials reach the room only through the resolver' reports 2 passed, 0 failed.",
+            "THE HOLLOW DEMONSTRATION, which is a check you RUN and not an argument you make. Temporarily replace renderComposeConfig's body with `return {}` and re-run the four families above. Report, law by law, which ones still pass. Then restore the real implementation and confirm the counts above again. A law that passes under the stub proves nothing about the implementation, and counting it as green is exactly the hollow-green this repository forbids. KNOWN BASELINE, established by counting assertions in the committed source: five of the eight laws under 'the renderer emits only from a closed allowlist' have ZERO positive assertions ('never emits a container runtime socket', 'never emits host networking', 'never emits the host PID namespace', 'never emits privileged mode', 'never emits added capabilities'), the mount-source law's only assertion sits inside a loop that does not execute on an empty collection, and 'refuses raw input' asserts toBeTruthy which {} satisfies. Expect roughly eight survivors. If you measure materially fewer, say why; if you measure more, that is a finding. This baseline is given so the demonstration is a verification and not a discovery.",
+            "git diff --stat 3237650db7553430e29640e95d62cf651bbe6748 -- tests/spec_venue_realization_substrate.test.ts tests/spec_venue_realization.test.ts tests/spec_worker_environment.test.ts tests/spec_worker_run_modes.test.ts tests/spec_venue_targeting.test.ts tests/spec_venue_credential_mint.test.ts SPEC-worker-contract.md produces NO output. The six law files and the specification are byte-identical to what PR #379 landed: no it.skip, no relaxed matcher, no deleted assertion, no specifier converted back to a static import.",
+            "npx tsc --noEmit exits clean.",
+            "npx vitest run produces no failure in any file NOT named spec_*. Report the exact failed/passed totals from the real run and compare them to the recorded baseline of 89 failed / 2630 passed on this branch. The remaining Gap 6 laws and Gaps 1-5 stay red; that is expected and is not a regression.",
+            "State whether localProcessRealizer was demonstrated to work with no container runtime present, and if that could not be established on this machine, say so plainly rather than asserting it.",
+            "Report the arity of assertToolGrantsResolvable as found, since the next packages depend on it."
+          ],
+          "out_of_scope": [
+            "Device classes, device grants, architecture, remote realization hosts, reconciliation and retention, and the environment-identity and concurrency laws — all the next movement's work.",
+            "Gap 2's realizeVenue state machine and the tools/list probe — the movement after that.",
+            "Gaps 1, 3, 4 and 5 entirely.",
+            "Editing any spec_* test file or SPEC-worker-contract.md.",
+            "Kernel-level enforcement of doors: the specification names it out of scope, and a realizer may CLAIM network_policy_doors only if it actually enforces it.",
+            "Actually starting a container. These laws assert on declared guarantees and on the rendered configuration document; running one is a later step and must not be attempted here."
+          ]
+        }
+      },
+      "seatings": []
+    },
+    {
+      "movement_id": "band-realizer",
+      "standard_slug": "software-change-pr-v1",
+      "runtime_fills": {
+        "change-request": {
+          "source": "SPEC-worker-contract.md Gap 6, realizer half; the remaining 20 laws of tests/spec_venue_realization_substrate.test.ts",
+          "requested_by": "eugene",
+          "repository": "eir-labs/coltrane",
+          "request_text": "On the seam and renderer the previous movement landed, close the remaining twenty laws of tests/spec_venue_realization_substrate.test.ts: 'a venue asks for a KIND of device, never a path' (3), 'a device grant maps exactly what was declared, and widens nothing' (4), 'architecture is part of the contract' (2), 'realizing somewhere else weakens nothing' (3), 'realization is reconciled, because a killed worker runs no finally' (5), and 'the environment is a function of the contract' (3).\n\nDEVICES ARE A CAPABILITY GRANT WEARING THE COSTUME OF CONFIGURATION, and that is the whole reason they are spec'd this way: a venue that can name an arbitrary device path can name the raw memory device or a whole block device, which is a host compromise submitted as a hardware request. Export DEVICE_CLASSES as an exact closed list — serial, gpio, i2c, spi, video, audio — extend VenueSchema to accept a device class and an architecture list, and refuse a raw device path ON THE VALUE, not on an unknown key. That distinction IS the law: a .strict() schema rejecting an unknown key would pass the test for the wrong reason. The class-to-node mapping belongs in the realizer, never in the contract, so it is audited once rather than in every venue in the genome forever. A grant maps exactly the declared class's nodes and GRANTS THE OWNING GROUP — this is the practical half and where escalation actually happens, because the node is mapped, the process still cannot open it, and the reflexive fix is to escalate the whole room to privileged, undoing every boundary the previous movement built in order to solve a permissions problem. A device grant WIDENS NOTHING ELSE: assert on the realized configuration for the ABSENCE of privileged mode, of added capabilities, and of any broadened device rule, because the failure here is something extra appearing rather than something missing. A class the host cannot provide is a REFUSAL reaching no room, throwing VenueHostUnsuitable. Do not reach for either hot-plug workaround — mapping the whole device tree, or a broad device rule — the specification names both as the escape under another name.\n\nA ROOM NEED NOT BE REALIZED WHERE THE WORKER RUNS. The contract stays byte-identical when the host is remote, every forbidden setting stays forbidden, and the host credential is obtained PER GIG against a live lease — never at boot, never rendered into the configuration — following the discipline src/workspace.ts already sets.\n\nRECONCILIATION, NOT CLEANUP, because a killed worker runs no finally. Every realized artifact carries the gig and the instance that created it; a sweep collects artifacts belonging to no LIVE gig, where the live set is HOST-WIDE so two workers on one box never garbage-collect each other; a realizer declares a retention policy with real ceilings and a real cadence, never 'never'; and every rendered configuration carries a log bound.",
+          "target_paths": [
+            "src/venue_realizer.ts",
+            "src/genome_schema.ts",
+            "src/workspace.ts",
+            "tests/spec_venue_realization_substrate.test.ts"
+          ],
+          "acceptance_criteria": [
+            "npx vitest run tests/spec_venue_realization_substrate.test.ts reports 40 passed, 0 failed — the whole file, this movement's twenty plus the previous movement's twenty.",
+            "The previous movement's twenty laws are re-run and reported individually. A schema change is exactly the kind of edit that silently breaks a renderer allowlist, so their continued green is a claim that must be measured, not assumed.",
+            "THE HOLLOW DEMONSTRATION, run again for this movement's families: stub the device-mapping and reconciliation surfaces to no-ops, re-run the six families above, and report which laws still pass. Restore afterwards. Any law surviving the stub is reported as surviving rather than counted as green.",
+            "git diff --stat 3237650db7553430e29640e95d62cf651bbe6748 -- tests/ SPEC-worker-contract.md produces NO output: the law files and the specification are byte-identical to PR #379's state.",
+            "npx tsc --noEmit exits clean, and npx vitest run shows no failure outside spec_*-named files. Report exact totals from the real run.",
+            "The device-class-to-node mapping is shown to live in the realizer and not in any venue in the genome — state where it lives."
+          ],
+          "out_of_scope": [
+            "Gap 2's realizeVenue state machine, mcp_servers declarations and the tools/list probe — the next movement.",
+            "Gaps 1, 3, 4 and 5.",
+            "Editing any spec_* test file or SPEC-worker-contract.md.",
+            "Hot-plug device support, and both of its familiar workarounds.",
+            "Starting a real container."
+          ]
+        }
+      },
+      "seatings": []
+    },
+    {
+      "movement_id": "band-gap2-realize-venue",
+      "standard_slug": "software-change-pr-v1",
+      "runtime_fills": {
+        "change-request": {
+          "source": "SPEC-worker-contract.md Gap 2; laws in tests/spec_venue_realization.test.ts; sequenced as package P2 by change-plan of gig 73ffa76e",
+          "requested_by": "eugene",
+          "repository": "eir-labs/coltrane",
+          "request_text": "Close the ten laws of tests/spec_venue_realization.test.ts, extending the same src/venue_realizer.ts module the previous two movements built — this package is ordered here because it shares that module path and adds to the schema fields already in place.\n\nA VENUE MUST BE ABLE TO DECLARE WHAT PROVIDES ITS TOOLS. Add mcp_servers to VenueSchema: a venue granting an mcp server it does not declare is refused, naming the slug; each transport requires the field it needs (a command for stdio, a url for sse); and a credential_name the room's credential_surface does not declare is refused. Follow the schema's existing grain and let the generated surfaces follow rather than hand-editing them.\n\nTHEN realizeVenue BUILDS THE ENVIRONMENT FROM THE CONTRACT AND NOTHING ELSE. The empty room traverses the machine with no probe and no declared servers — zero child processes, which is the property that must survive the introduction of a substrate seam. The realized map holds the declared servers plus the engine entries, with declared credentials resolved through CredentialResolver, and it holds NOTHING the venue did not declare. The ambient .mcp.json is NEVER merged, whether it would introduce a server or override one; today src/server.ts:1123 states in one line that the config comes from ambient, and that is the line this closes. The realized map is what fails a tool grant closed.\n\nTHE PROBE VERIFIES THE ROOM IN BOTH DIRECTIONS, BEFORE ANYTHING SPAWNS: a granted tool the server does not advertise fails realization naming both grant and server, and a server WIDER than the contract is a violation rather than a bonus. Two distinct named error classes with non-overlapping fields — VenueRealizationError (.state, .missingGrant, .serverSlug) and VenueContractViolation (.state, .extraTool, .serverSlug) — because the two cases demand different remediation and collapsing them into one type makes the law ambiguous. Use the assertToolGrantsResolvable arity the first movement reported; if it takes three parameters today, add an optional fourth additively so every existing caller is unchanged.",
+          "target_paths": [
+            "src/venue_realizer.ts",
+            "src/genome_schema.ts",
+            "src/tool_providers.ts",
+            "src/server.ts",
+            "tests/spec_venue_realization.test.ts"
+          ],
+          "acceptance_criteria": [
+            "npx vitest run tests/spec_venue_realization.test.ts reports 10 passed, 0 failed.",
+            "npx vitest run tests/spec_venue_realization_substrate.test.ts still reports 40 passed, 0 failed — measured, not assumed.",
+            "THE HOLLOW DEMONSTRATION for this movement: a realizeVenue that always resolves to PLAYING, and one that always throws, are each run against the ten laws and the surviving laws reported. Restore afterwards.",
+            "The ambient-exclusion law is shown to be exercised against a real temporary directory containing a real .mcp.json, so that it tests exclusion rather than absence.",
+            "git diff --stat 3237650db7553430e29640e95d62cf651bbe6748 -- tests/ SPEC-worker-contract.md produces NO output.",
+            "npx tsc --noEmit exits clean, and npx vitest run shows no failure outside spec_*-named files. Report exact totals. After this movement 50 of the 88 laws are green; Gaps 1, 3, 4 and 5 stay red and that is expected.",
+            "State whether assertToolGrantsResolvable needed a signature change and, if so, that every existing caller is unchanged."
+          ],
+          "out_of_scope": [
+            "Gaps 1, 3, 4 and 5 — a later chart, in the sequenced order P3 Gap 3, P4 Gap 4, P5 Gap 5, P6 Gap 1.",
+            "Editing any spec_* test file or SPEC-worker-contract.md.",
+            "Kernel-level enforcement of doors.",
+            "Starting a real container."
+          ]
+        }
+      },
+      "seatings": []
+    }
+  ],
+  "edges": [],
+  "approval_gates": [
+    {
+      "gate_id": "renderer-landed",
+      "after_movement": "band-renderer",
+      "before_movement": "band-realizer",
+      "chair": "quartet.chair.responsible-officer",
+      "prompt": "Read the change-verdict and open the pull request. Do not approve on the pass counts alone — they are the weakest evidence here. Read the HOLLOW DEMONSTRATION first: the verdict must report, law by law, which of the four families still passed with renderComposeConfig stubbed to return {}. Roughly eight survivors is the expected baseline and confirms the demonstration was actually run; a report of zero survivors means it was not run honestly, and that is a reason to refuse. Then confirm the six law files and SPEC-worker-contract.md are byte-identical to PR #379, that localProcessRealizer claims neither withholds_capabilities nor network_policy_doors, and that the renderer refuses a forbidden value smuggled through an allowed field rather than only refusing forbidden field names. The next movement mounts host devices through this renderer — if the allowlist and the value-level refusal are not genuinely closed, a device grant is the escape they exist to prevent. This is the gate where a permissive renderer must be caught."
+    },
+    {
+      "gate_id": "realizer-landed",
+      "after_movement": "band-realizer",
+      "before_movement": "band-gap2-realize-venue",
+      "chair": "quartet.chair.responsible-officer",
+      "prompt": "Read the change-verdict and the pull request. Confirm the whole substrate file reports 40 passed and that the previous movement's twenty were re-measured rather than assumed — a schema change is the classic way an allowlist quietly breaks. Confirm a device grant produces no privileged mode, no added capabilities and no broadened device rule, asserted for ABSENCE, since the failure mode here is something extra appearing. Confirm the class-to-node mapping lives in the realizer and not in any venue. The next movement extends the same module into Gap 2's realizeVenue, so it inherits whatever this one got wrong."
+    }
+  ],
+  "budget_envelope": {
+    "total_usd": 150
+  }
+}

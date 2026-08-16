@@ -626,17 +626,21 @@ describe("venue mode — the drain is a bandstand, not a musician", () => {
     await expect(claimNextGig(ctx)).rejects.toThrow(/minted no credential/);
   });
 
-  it("no longer re-derives the mode: a drain key without an instance is not venue-claimed here", async () => {
-    // WAS "the downstream half of the CLI's guard". Gap 4 collapses the two credential-mode
-    // derivations to ONE — workerCredentialMode (src/worker_env.ts). That single derivation refuses
-    // a drain key without an instance at the CLI door, so this ctx is never built in the real flow,
-    // and the worker no longer carries a second copy of that refusal. A malformed ctx assembled by
-    // hand now simply routes by the fields it was handed: no instance means no venue claim.
+  it("player mode refuses an EMPTY bearer rather than presenting one", async () => {
+    // Gap 4 collapsed two credential-mode derivations into ONE (workerCredentialMode). The
+    // REFUSAL travels with it — it is not collateral of deleting the duplicate.
+    //
+    // Why this law survives the collapse: `claimNextGig` is exported, so a context can reach it
+    // without passing the CLI door, and a venue-shaped context carries an EMPTY agentToken by
+    // design (the credential arrives with the work). A drain key that lost its instance must not
+    // fall through to the player path, because that path would present the empty bearer to the
+    // store — the exact hazard spec_worker_run_modes.test.ts names in its preamble.
     const ctx: WorkerContext = { ...venueCtx(), instance: undefined as unknown as string };
     const calls = mockStore({ claim: CLAIM });
-    await claimNextGig(ctx);
-    expect(calls.some((c) => c.url.includes("coltrane_drain_claim")), "no instance ⇒ not a venue claim").toBe(false);
-    expect(calls.some((c) => c.url.includes("coltrane_mcp_claim")), "routes by the handed fields, one derivation upstream").toBe(true);
+    await expect(claimNextGig(ctx)).rejects.toThrow(/no instance is named/);
+    // Stronger than asserting the throw alone: it must refuse BEFORE the store is spoken to.
+    // A refusal that arrives after the request has already presented the credential is not one.
+    expect(calls.length, "no bearer may be presented at all — refuse before the request").toBe(0);
   });
 
   it("leaves player mode alone: a token and no drain key still claims the old way", async () => {

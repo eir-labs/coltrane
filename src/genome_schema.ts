@@ -935,6 +935,25 @@ const InstallPinSchema = z.string().regex(
   "an install must be digest-pinned (…sha256:<64 hex>): a version range names a family of rooms, not one room, so an unpinned install makes the venue's identity meaningless",
 );
 
+/** The CLOSED set of device KINDS a room may ask a host for — a class, never a path. A contract that
+ *  could name a raw device path could name the raw memory device (`/dev/mem`) or a whole block
+ *  device, which is a host compromise submitted as a hardware request; the concrete nodes are the
+ *  machine's business, mapped from the class at realization. Validated at the VALUE level so a path
+ *  is refused by name (on `devices`), not merely as an unknown key. */
+export const VenueDeviceClassSchema = z.enum(["audio", "gpio", "i2c", "serial", "spi", "video"]);
+export const DEVICE_CLASSES = VenueDeviceClassSchema.options;
+
+/** One MCP server a room stands up: a slug, a transport, the launch command, and which credential
+ *  CLASSES it needs (never material). Modelled on what a room declares and deliberately NOT
+ *  `.strict()`, so a future transport-specific field is an addition rather than a breaking change —
+ *  the sub-schema is inferred from the contract's own shape, not a formally frozen surface. */
+export const VenueMcpServerSchema = z.object({
+  slug: z.string(),
+  transport: z.string(),
+  command: z.array(z.string()).default([]),
+  credential_names: z.array(z.string()).default([]),
+});
+
 export const VenueSchema = z
   .object({
     slug: z.string(),
@@ -963,6 +982,31 @@ export const VenueSchema = z
     /** The accountable office: an institutional chair id (the office, not its incumbent). One named
      *  duty-holder answers for the room and for what it permits. */
     responsible_chair: z.string().optional(),
+    /** WHICH SUBSTRATE this room requires — a free string a deployment matches its available
+     *  realizers against (e.g. "container"). A FREE string, not a closed enum: the set of substrates
+     *  is a deployment fact rather than a genome one, and freezing it here would over-constrain
+     *  substrates the contract has not yet named. Absent means the deployment's default — deny-by-
+     *  default belongs on CAPABILITY, not on portability, so a room that names no substrate runs on
+     *  whatever is supplied, the same lean an unnamed venue takes on targeting. */
+    substrate: z.string().optional(),
+    /** The MCP servers the room stands up. Each names credential CLASSES, never material — the same
+     *  discipline `credential_surface` takes, restated at the server that consumes them. */
+    mcp_servers: z.array(VenueMcpServerSchema).default([]),
+    /** The device CLASSES the room needs — a kind (`serial`, `gpio`…), never a path. The machine
+     *  maps a class to concrete nodes and the owning group; a contract that could name a node could
+     *  name the raw memory device, so the value is pinned to the closed enumeration. */
+    devices: z.array(VenueDeviceClassSchema).default([]),
+    /** The architectures this room supports (e.g. `arm64`). Absent means any: portability is not
+     *  capability, so an unnamed architecture is realizable on any host rather than none. */
+    architectures: z.array(z.string()).default([]),
+    /** A ceiling on how many chairs may realize against this room at once. Per-chair realization
+     *  multiplies substrate resources by the WIDTH of a phase, and memory scales with running
+     *  processes, so the bound belongs in the contract where an author sets it deliberately rather
+     *  than discovering it with the first wide DAG on the first box that runs it. */
+    max_concurrent_chairs: z.number().int().positive().optional(),
+    /** The shared FLOOR this room composes over, so N rooms cost floor + Σ(deltas) rather than
+     *  N × environment. A label two rooms share to declare they build on the same base. */
+    floor: z.string().optional(),
   })
   .strict();
 

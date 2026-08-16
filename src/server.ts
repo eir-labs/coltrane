@@ -27,7 +27,7 @@ import { runSkillFixtures, executeSkill, loadFixtures } from "./skill_subprocess
 import { evolveSkill } from "./skills.js";
 import { sealAgentDefinition, sealDefinition, sealSkillPackage, recordIdentity } from "./genome_writer.js";
 import {
-  createOutputStore, defaultOutputsPersistDir,
+  createOutputStore, defaultOutputsPersistDir, performanceRoot,
   type OutputStore, type OutputRecord, type TraceDirection, type TraceMissingNode, type TraceRecordNode,
 } from "./outputs.js";
 import { createOutputMirror, defaultMirrorDir, outputPreview, mirrorStorageRef, type OutputMirror, type OutputMeta } from "./output_mirror.js";
@@ -1210,8 +1210,23 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         // Prefer the live state map (async runs). Falls back to the ledger/outputs read for a
         // synchronously-completed gig (or one from a prior server lifetime, not in the map).
         const live = deps.gig_runs?.get(gid);
+        // A MOVEMENT SEALS UNDER ITS OWN ID, so a raw `===` can never match a chart's records: a
+        // movement runs as `<performance>.m.<movement_id>` (src/chart.ts `movementGigId`), and the
+        // id an operator holds — the one `gig_dispatch` returned — is the performance's. Resolve
+        // through `performanceRoot`, which src/outputs.ts:142-147 declares the ONE owner of that
+        // scheme, rather than re-deriving the separator here; that second copy is the drift the
+        // note there warns about, and it is what `output_trace` already had to fix (#248,
+        // tests/cross_movement_trace.test.ts). A plain gig id is its own root, so a
+        // single-standard run is unmoved, and a shared PREFIX is not a root — the infix carries
+        // dots on both sides precisely so a uuid cannot be mistaken for a parent of another.
+        // BOTH READINGS RESOLVE, and the exact match is not redundant: asking about a MOVEMENT's
+        // own id must keep naming its own records, and `performanceRoot(<perf>.m.<mv>)` is
+        // `<perf>`, which would not equal the movement id the caller asked about. A root-only
+        // predicate trades one false negative for another.
+        const ofPerformance = (o: OutputRecord): boolean =>
+          o.gig_id === gid || performanceRoot(o.gig_id) === gid;
         if (live) {
-          const outs = deps.outputs.all().filter((o) => o.gig_id === gid);
+          const outs = deps.outputs.all().filter(ofPerformance);
           return {
             ok: true, requires_approval: approval,
             data: {
@@ -1247,7 +1262,10 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
             },
           };
         }
-        const outs = deps.outputs.all().filter((o) => o.gig_id === gid);
+        // The non-live path is the DAMAGING one: `status` and `phases_complete` below are derived
+        // from this list, so an unresolved chart id did not merely omit the records — it answered
+        // "unknown" and "0 phases" about a performance that had demonstrably done work.
+        const outs = deps.outputs.all().filter(ofPerformance);
         const entry = deps.ledger.query({ kind: "gig", gig_id: gid })[0];
         return {
           ok: true, requires_approval: approval,
@@ -1411,6 +1429,17 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
           ...(args["credential_surface"] !== undefined ? { credential_surface: args["credential_surface"] } : {}),
           ...(args["lifecycle"] !== undefined ? { lifecycle: args["lifecycle"] } : {}),
           ...(args["responsible_chair"] !== undefined ? { responsible_chair: args["responsible_chair"] } : {}),
+          // The worker-contract fields, passed through by the same rule: only what was stated, so the
+          // schema keeps ownership of every default (an unstated `mcp_servers`/`devices`/`architectures`
+          // is the EMPTY list, an unstated `substrate`/`floor`/`max_concurrent_chairs` the deployment
+          // default). Read here so a room authored through this tool actually carries its substrate,
+          // and so the advertised schema and the handler stay one statement of the same fact (#234).
+          ...(args["substrate"] !== undefined ? { substrate: args["substrate"] } : {}),
+          ...(args["mcp_servers"] !== undefined ? { mcp_servers: args["mcp_servers"] } : {}),
+          ...(args["devices"] !== undefined ? { devices: args["devices"] } : {}),
+          ...(args["architectures"] !== undefined ? { architectures: args["architectures"] } : {}),
+          ...(args["max_concurrent_chairs"] !== undefined ? { max_concurrent_chairs: args["max_concurrent_chairs"] } : {}),
+          ...(args["floor"] !== undefined ? { floor: args["floor"] } : {}),
         };
         const parsedVenue = VenueSchema.safeParse(venueInputDef);
         if (!parsedVenue.success) {

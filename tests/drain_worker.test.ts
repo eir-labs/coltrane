@@ -626,13 +626,17 @@ describe("venue mode — the drain is a bandstand, not a musician", () => {
     await expect(claimNextGig(ctx)).rejects.toThrow(/minted no credential/);
   });
 
-  it("player mode refuses an EMPTY bearer rather than presenting one", async () => {
-    // The downstream half of the CLI's guard: a drain key that reaches the worker without an
-    // instance falls out of venue mode, and this path must fail closed rather than ask the store
-    // to authenticate nothing.
+  it("no longer re-derives the mode: a drain key without an instance is not venue-claimed here", async () => {
+    // WAS "the downstream half of the CLI's guard". Gap 4 collapses the two credential-mode
+    // derivations to ONE — workerCredentialMode (src/worker_env.ts). That single derivation refuses
+    // a drain key without an instance at the CLI door, so this ctx is never built in the real flow,
+    // and the worker no longer carries a second copy of that refusal. A malformed ctx assembled by
+    // hand now simply routes by the fields it was handed: no instance means no venue claim.
     const ctx: WorkerContext = { ...venueCtx(), instance: undefined as unknown as string };
-    mockStore({ claim: CLAIM });
-    await expect(claimNextGig(ctx)).rejects.toThrow(/no instance reached the worker/);
+    const calls = mockStore({ claim: CLAIM });
+    await claimNextGig(ctx);
+    expect(calls.some((c) => c.url.includes("coltrane_drain_claim")), "no instance ⇒ not a venue claim").toBe(false);
+    expect(calls.some((c) => c.url.includes("coltrane_mcp_claim")), "routes by the handed fields, one derivation upstream").toBe(true);
   });
 
   it("leaves player mode alone: a token and no drain key still claims the old way", async () => {

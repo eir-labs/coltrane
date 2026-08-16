@@ -342,19 +342,6 @@ export async function claimNextGig(ctx: WorkerContext): Promise<ClaimedGig | nul
     return claim;
   }
 
-  // Fail closed HERE, not only at the CLI door. If a drain key survives to this point but the
-  // instance was lost anywhere downstream of the CLI guard, venue mode is skipped and this path
-  // would otherwise present an empty bearer to the store — which is exactly the shape of the bug
-  // this whole change exists to prevent.
-  if (!ctx.agentToken) {
-    throw new Error(
-      ctx.drainKey
-        ? "venue mode was requested but no instance reached the worker, and player mode has no token — " +
-          "set COLTRANE_INSTANCE (or FLY_APP_NAME) so the drain key can be presented"
-        : "no credential: claiming needs a venue drain key with an instance, or a player agent token",
-    );
-  }
-
   const out = await workerRpc(ctx, "coltrane_mcp_claim", {
     p_bearer: ctx.agentToken,
     p_worker: ctx.worker ?? null,

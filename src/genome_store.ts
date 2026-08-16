@@ -506,6 +506,11 @@ export function rpcQueueGig(
         p_standard: args["standard_slug"],
         p_mode: args["mode"] ?? "live",
         p_input: args["input"] ?? {},
+        // The room the chart names, carried NULL-not-absent for the same reason p_acting_for is
+        // (postgrestQueueGig below): an omitted key and an explicit null say different things to a
+        // store. Both bearer-class seams must carry it, or a control's behaviour would depend on
+        // how the caller logged in.
+        p_venue: args["venue"] ?? null,
       }),
     });
     const text = await res.text();
@@ -545,6 +550,10 @@ export function postgrestQueueGig(
         // produces a gig that can only fail at genome load, thirty minutes later, on a drain.
         // That is exactly what the first real gig did.
         p_acting_for: args["acting_for"] ?? null,
+        // The venue the chart names, NULL-not-absent exactly as p_acting_for above: an unnamed room
+        // is the statement "I have no opinion", not an absent key. Carried on both bearer-class
+        // seams (rpcQueueGig too) so targeting behaves the same regardless of how one logged in.
+        p_venue: args["venue"] ?? null,
       }),
     });
     const text = await res.text();

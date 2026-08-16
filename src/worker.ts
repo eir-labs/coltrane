@@ -83,6 +83,13 @@ export interface WorkerContext {
   instance?: string;
   /** Lease label recorded on the claimed row (defaults to worker:<acting_for> store-side). */
   worker?: string;
+  /**
+   * The venue slugs this box can stand up — every room whose ceiling, doors and credential surface
+   * it can realize. A gig whose claim payload names a room NOT in this set is refused at the claim
+   * (`venueMayClaim`), so work is not run in a room this box cannot build. Undefined or empty means
+   * "the default room only": a named gig is not this worker's to take, deny-by-default.
+   */
+  realizableVenues?: readonly string[];
 }
 
 /** The claim RPC's payload: everything the worker needs to run the row it now leases. */
@@ -99,6 +106,12 @@ export interface ClaimedGig {
    * working tree. Only venue mode carries this; the player path leaves it undefined.
    */
   repo_url?: string | null;
+  /**
+   * The room the gig's chart named, carried onto the claim so the run can REALIZE that room rather
+   * than infer it from the fact that nothing refused. Null when the gig named none (claimable by
+   * anyone); undefined on the player path, which does not carry it.
+   */
+  venue?: string | null;
   /**
    * The human seat's verdicts, keyed by chair role — present on a RE-claim of a gig that
    * parked. The approve RPC writes them onto the row's manifest and re-queues it; the claim
@@ -297,6 +310,26 @@ async function workerRpc(ctx: WorkerContext, fn: string, body: Record<string, un
 }
 
 /**
+ * The ONE oracle for "may this worker take a gig aimed at this room" — total and pure, so the
+ * claim path, the worker-side check and any future store-side gate implement one rule rather than
+ * three that can drift.
+ *
+ *  - Unnamed (`null`/`undefined` gigVenue): open to ANY worker, including one that declares no
+ *    realizable rooms. This is the law that stops targeting from becoming mandatory routing — an
+ *    unnamed gig must stay claimable by anyone or a queue with no matching worker silently stalls.
+ *  - Named: open only to a worker whose `realizable` set includes that room. Deny-by-default —
+ *    undefined or an empty realizable set with a named room is `false`, the same way an absent
+ *    venue field means the empty room a worker declaring nothing can still stand up.
+ */
+export function venueMayClaim(
+  gigVenue: string | null | undefined,
+  realizable: readonly string[] | undefined,
+): boolean {
+  if (gigVenue === null || gigVenue === undefined) return true;
+  return realizable !== undefined && realizable.includes(gigVenue);
+}
+
+/**
  * Atomically claim the oldest runnable gig (queued, or running with an expired lease). Null means
  * the queue holds nothing for us.
  *
@@ -357,6 +390,17 @@ export async function claimNextGig(ctx: WorkerContext): Promise<ClaimedGig | nul
           `until its lease expires`,
       );
     }
+    // ADDITIVE to the single credential-mode derivation above — it reads the claim the store already
+    // handed back, never a second derivation of anything. Placed BEFORE the credential is replaced,
+    // so a refused claim never updates the worker's token. The refusal names BOTH the gig's room and
+    // this worker's realizable set so the operator learns which is misconfigured; the leased row
+    // stays running until its lease expires, the same accepted price as the no-mint case above.
+    if (!venueMayClaim(claim.venue, ctx.realizableVenues)) {
+      throw new Error(
+        `claimed gig ${claim.gig_id} names venue "${claim.venue}", which this worker cannot realize ` +
+          `(realizable: ${JSON.stringify(ctx.realizableVenues ?? [])}); the row stays leased until its lease expires`,
+      );
+    }
     ctx.agentToken = claim.token;
     return claim;
   }
@@ -365,7 +409,17 @@ export async function claimNextGig(ctx: WorkerContext): Promise<ClaimedGig | nul
     p_bearer: ctx.agentToken,
     p_worker: ctx.worker ?? null,
   });
-  return (out as ClaimedGig | null) ?? null;
+  const claim = (out as ClaimedGig | null) ?? null;
+  // Deny-by-default on the player path too, not scoped to venue mode: SPEC item 4 refuses a claim
+  // naming a room this worker cannot realize with no reference to how the worker logged in. Same
+  // shared oracle, same both-slugs refusal.
+  if (claim && !venueMayClaim(claim.venue, ctx.realizableVenues)) {
+    throw new Error(
+      `claimed gig ${claim.gig_id} names venue "${claim.venue}", which this worker cannot realize ` +
+        `(realizable: ${JSON.stringify(ctx.realizableVenues ?? [])})`,
+    );
+  }
+  return claim;
 }
 
 /**

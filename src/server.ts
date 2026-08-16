@@ -724,6 +724,14 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         const actingFor =
           args["acting_for"] === undefined || args["acting_for"] === null ? undefined : String(args["acting_for"]);
         void actingFor; // forwarded to the queue seam via `args` below; named here to be legible.
+        // WHERE it plays, as distinct from what it plays. Read here for the same reason acting_for
+        // is: the queue seam forwards it via `args`, but #234's law refuses an argument advertised
+        // and never read — a targeting field the schema names but the handler never touches is a
+        // filter a caller cannot tell does nothing. Naming it makes the wire visible; an unnamed
+        // gig carries `undefined` here and stays claimable by any worker.
+        const venue =
+          args["venue"] === undefined || args["venue"] === null ? undefined : String(args["venue"]);
+        void venue; // forwarded to the queue seam via `args` below; named here to be legible.
 
         const target = dispatchTarget({
           standard_slug: args["standard_slug"] === undefined || args["standard_slug"] === null ? undefined : String(args["standard_slug"]),

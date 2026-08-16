@@ -9,6 +9,30 @@ the MCP handshake reports the constant rather than a hardcoded literal.
 
 ## Unreleased
 
+### Changed — breaking
+
+- **Gap 3 realized: the worker environment is one enumerated contract, and a worker pointed at the
+  wrong host now REFUSES at startup.** `src/worker_env.ts` exports `WORKER_ENV_CONTRACT` — one table
+  where every variable names its host, its role and its meaning — together with `normalizeWorkerEnv`
+  and `assertWorkerEnv`. `COLTRANE_SERVICE_URL` is now the canonical name of the service host;
+  `COLTRANE_DRAIN_URL` survives only as a normalized legacy alias of it, and `FLY_APP_NAME` as a
+  legacy alias of `COLTRANE_INSTANCE`. Two hosts are two variables, with exactly one always-required
+  url per host.
+
+  This is a BREAK, not an addition, and that is the point: a worker whose environment names the
+  wrong host boots today and refuses afterwards. `assertWorkerEnv` refuses — before the first
+  request — an absent required variable (naming it), a store and service that name the same host, a
+  service url that names the managed database, a legacy alias that contradicts the canonical name,
+  and a url-shaped variable that is not a url. `normalizeWorkerEnv` strips a legacy `/rest/v1`
+  suffix rather than appending to it and is idempotent.
+
+  How long `COLTRANE_DRAIN_URL` is tolerated as an alias is deferred to a future release decision;
+  it is read and normalized here, not yet removed. `tests/spec_worker_environment.test.ts` (14 laws)
+  is now green, and its completeness law holds the table to the real source: every
+  `process.env["…"]` read across `worker.ts`, `cli.ts`, `output_mirror.ts`, `workspace.ts`,
+  `run_deps.ts` and `worker_env.ts` appears in the contract.
+
+
 ### Added — a specification, and a suite that is red on purpose
 
 - **`SPEC-worker-contract.md`** — the contract a worker (any host running `coltrane work`) is

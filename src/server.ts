@@ -17,7 +17,7 @@ import {
 } from "./mcp.js";
 import { createRegistry, loadRegistry, domainTypeDefect, type Registry, type DomainType } from "./registry.js";
 import { loadGenome, resolveGenome, type SkillRecord, type EvalRecord, type LoadError } from "./loader.js";
-import { SkillSchema, AgentSchema, StandardSchema, DomainTypeSchema, ChartSchema, VenueSchema, venueDefect } from "./genome_schema.js";
+import { SkillSchema, AgentSchema, StandardSchema, DomainTypeSchema, ChartSchema, VenueSchema, VenueObjectSchema, venueDefect } from "./genome_schema.js";
 import {
   composeChart, runChart, chartHash, chartEntrySeedTypes, dispatchTarget,
   type Chart, type Venue, type ChartPlan, type ChartResult, type ResolvedMovement,
@@ -3015,7 +3015,7 @@ const HOSTED_UPSERT: Readonly<Record<string, { cls: GenomeClass; keys: readonly 
   // class travels the port it is supposed to travel, and the missing half announces itself instead
   // of the engine quietly declining to try. (Store-side work: two tables + two upsert branches.)
   chart_define: { cls: "chart", keys: Object.keys(ChartSchema.shape) },
-  venue_define: { cls: "venue", keys: Object.keys(VenueSchema.shape) },
+  venue_define: { cls: "venue", keys: Object.keys(VenueObjectSchema.shape) },
 };
 
 async function callSurfaceTool(

@@ -1,5 +1,5 @@
 import type { ChangeClass } from "./type_versioning.js";
-import { zodToMcpProps, AgentSchema, StandardSchema, SkillSchema, DomainTypeSchema, ChartSchema, VenueSchema } from "./genome_schema.js";
+import { zodToMcpProps, AgentSchema, StandardSchema, SkillSchema, DomainTypeSchema, ChartSchema, VenueObjectSchema } from "./genome_schema.js";
 
 export type MCPCategory =
   | "understand"
@@ -94,7 +94,11 @@ export const MCP_TOOLS: readonly MCPToolDef[] = [
   // `validation_result` carries the STRUCTURED violation list (rule + detail + where), not a
   // boolean: a chart is refused for one named reason at one named place.
   { slug: "chart_define",                  category: "build", input_schema: obj(zodToMcpProps(ChartSchema)), output_schema: obj({ chart_id: "string", chart_hash: "string", validation_result: "object" }) },
-  { slug: "venue_define",                  category: "build", input_schema: obj(zodToMcpProps(VenueSchema)), output_schema: obj({ venue_id: "string", validation_result: "object" }) },
+  // `VenueObjectSchema`, not `VenueSchema`: the advertised surface is generated from the inner
+  // `ZodObject`'s `.shape`, which the `.superRefine`-wrapped `VenueSchema` (a `ZodEffects`) no longer
+  // exposes. The cross-field rules the refinement adds are enforced at safeParse in the handler, not
+  // advertised as arguments — so the two stay one statement of the same fact (#234).
+  { slug: "venue_define",                  category: "build", input_schema: obj(zodToMcpProps(VenueObjectSchema)), output_schema: obj({ venue_id: "string", validation_result: "object" }) },
   // #239 — `basis`/`sample_size` say WHERE the estimate came from (a measured mean of real runs,
   // the standard's real structure, or a per-slug guess). estimated_duration_ms is the key the
   // handler actually returns; the old `estimated_duration` was never present on a response.

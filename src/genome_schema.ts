@@ -951,10 +951,14 @@ export const VenueMcpServerSchema = z.object({
   slug: z.string(),
   transport: z.string(),
   command: z.array(z.string()).default([]),
+  /** The endpoint an over-the-wire transport (e.g. `sse`) connects to. Absent for a `stdio` server,
+   *  which is reached by its `command` instead — the per-transport requirement is stated once, in the
+   *  cross-field rule on `VenueSchema`, so both doors (the loader and venue_define) enforce it. */
+  url: z.string().optional(),
   credential_names: z.array(z.string()).default([]),
 });
 
-export const VenueSchema = z
+export const VenueObjectSchema = z
   .object({
     slug: z.string(),
     /** Exactly one owning institution. The institution is the duty holder; the office below is the
@@ -1010,17 +1014,86 @@ export const VenueSchema = z
   })
   .strict();
 
+/**
+ * The venue contract, with the cross-field MCP rules a single field cannot state.
+ *
+ * The inner `VenueObjectSchema` above is a plain `ZodObject` — it retains `.shape`, which
+ * `zodToMcpProps(VenueObjectSchema)` (the advertised MCP surface) and `Object.keys(...shape)` (the
+ * hosted-write key list) both need. `VenueSchema` wraps it in a `.superRefine`, which is a
+ * `ZodEffects` that has NEITHER — so those two consumers read the inner object while every
+ * `.parse`/`.safeParse` caller (the loader, `venue_define`, the realizer) gets the cross-field rules
+ * for free. The three rules below are the ones a room could otherwise author "granted but
+ * unprovided": a tool naming a server the room never declared, a transport missing the field that
+ * makes it reachable, or a server needing a credential the surface does not admit. Each is refused at
+ * PARSE, moving the discovery from a box nobody is watching to the author's own terminal.
+ */
+export const VenueSchema = VenueObjectSchema.superRefine((venue, ctx) => {
+  const declaredSlugs = new Set(venue.mcp_servers.map((s) => s.slug));
+
+  // Rule 1 — every `mcp__<slug>__<tool>` grant must name a DECLARED server. R10 checks the tool-NAME
+  // intersection at compose time, a different question; nothing there says what provides the server.
+  for (const tool of venue.equipment.tools) {
+    const m = /^mcp__(.+?)__/.exec(tool);
+    if (m && !declaredSlugs.has(m[1]!)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["mcp_servers"],
+        message:
+          `venue "${venue.slug}" grants tool "${tool}" from mcp server "${m[1]!}", which it does not declare ` +
+          `in mcp_servers — a granted server with no declaration is "granted but unprovided", discovered ` +
+          `at use on a box nobody is watching. Declare the "${m[1]!}" server, or drop the grant.`,
+      });
+    }
+  }
+
+  venue.mcp_servers.forEach((server, i) => {
+    // Rule 2 — each transport owes the one field that makes it reachable: a command for stdio, a url
+    // for sse. A declaration that cannot be acted on is not a declaration.
+    if (server.transport === "stdio" && server.command.length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["mcp_servers", i, "command"],
+        message: `mcp server "${server.slug}" uses transport "stdio" but declares no command — a stdio server is reached by the command that launches it`,
+      });
+    }
+    if (server.transport === "sse" && !server.url) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["mcp_servers", i, "url"],
+        message: `mcp server "${server.slug}" uses transport "sse" but declares no url — an sse server is reached by the url it connects to`,
+      });
+    }
+
+    // Rule 3 — every credential a server names must be a member of the room's credential_surface.
+    // realize() already treats a credential class present-but-undeclared as a breach, so a server
+    // needing an unlisted credential would stand up a box every room then refuses.
+    for (const cred of server.credential_names) {
+      if (!venue.credential_surface.includes(cred)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["mcp_servers", i, "credential_names"],
+          message:
+            `mcp server "${server.slug}" needs credential "${cred}", which venue "${venue.slug}" does not admit ` +
+            `in credential_surface — an unlisted credential is a breach, not a default. Add "${cred}" to credential_surface.`,
+        });
+      }
+    }
+  });
+});
+
 export type VenueInput = z.input<typeof VenueSchema>;
 export type VenueOutput = z.output<typeof VenueSchema>;
 
 /**
- * Cross-field venue rules — the ones a single field cannot state.
+ * The one cross-field venue rule that is NOT a parse error — the lifecycle snowflake below.
  *
- * A separate function rather than a `.superRefine`, on purpose and by the existing idiom
- * (`domainTypeDefect` in src/registry.ts): the MCP write-surface is generated from
- * `zodToMcpProps(VenueSchema)`, which needs a plain `ZodObject` with a `.shape`, and a refined
- * schema is a `ZodEffects` that has neither. So both doors — the loader and `venue_define` — call
- * `VenueSchema.safeParse` and then this, and a rule enforced at one door is enforced at both.
+ * The MCP cross-field rules (a granted server must be declared, a transport owes its reachability
+ * field, a credential must be in the surface) now live on `VenueSchema.superRefine`, so
+ * `VenueSchema.safeParse` catches them directly; the split into `VenueObjectSchema` (which keeps the
+ * `.shape` that `zodToMcpProps(VenueObjectSchema)` and `Object.keys(...shape)` need) is what let those
+ * rules move onto the schema without breaking the advertised surface. This function remains for the
+ * lifecycle rule, kept out of the schema so its teaching message stays a full paragraph rather than a
+ * ZodIssue string; both doors — the loader and `venue_define` — call `safeParse` and then this.
  *
  * Returns the teaching message, or null when the venue is sound.
  */

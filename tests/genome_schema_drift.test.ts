@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { MCP_TOOLS } from "../src/mcp.js";
 import { loadGenome } from "../src/loader.js";
 import { defineAgent, type AgentDef } from "../src/composition.js";
-import { AgentSchema, StandardSchema, SkillSchema, DomainTypeSchema, ChartSchema, VenueSchema, zodToMcpProps } from "../src/genome_schema.js";
+import { AgentSchema, StandardSchema, SkillSchema, DomainTypeSchema, ChartSchema, VenueObjectSchema, zodToMcpProps } from "../src/genome_schema.js";
 
 const REPO = fileURLToPath(new URL("..", import.meta.url));
 const schemaProps = (slug: string): string[] => {
@@ -101,7 +101,9 @@ describe("drift · litmus — MCP write-surfaces stay generated from the schema"
     ["standard_compose", StandardSchema],
     ["skill_define", SkillSchema],
     ["chart_define", ChartSchema],
-    ["venue_define", VenueSchema],
+    // `VenueObjectSchema` — the inner `ZodObject` `venue_define`'s surface is generated from; the
+    // `.superRefine`-wrapped `VenueSchema` is a `ZodEffects` with no `.shape` for `zodToMcpProps`.
+    ["venue_define", VenueObjectSchema],
   ] as const) {
     it(`${tool} advertises exactly ${"" /* keep label short */}its schema's fields`, () => {
       expect(schemaProps(tool).sort()).toEqual(Object.keys(zodToMcpProps(schema)).sort());

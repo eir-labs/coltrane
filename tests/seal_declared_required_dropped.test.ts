@@ -264,8 +264,13 @@ describe("#227 — the genome's declared required fields are dropped, not absent
     // the lineage dossier, the falsifiable contract, and the buildable RED spec that the
     // spec-drafting pipeline produces. All 3 declare their required fields in `required_fields`,
     // so they join `checked` and none appears in the `lossy` census.
+    //
+    // 63 → 64: `woodshed-record` (extends Interpretation) — the record of solitary practice,
+    // added because the genome typed the bandstand and not the practice room. It declares its
+    // required fields in `required_fields` (question, iterations, corrections, still_open), so
+    // it joins `checked` and does not appear in the `lossy` census.
     expect(checked).toHaveLength(genome.domain_types.size);
-    expect(checked.length).toBe(63);
+    expect(checked.length).toBe(64);
   });
 });
 

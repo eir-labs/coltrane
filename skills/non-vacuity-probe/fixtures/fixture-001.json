@@ -1,0 +1,17 @@
+{
+  "id": "finds-the-known-hollow",
+  "description": "Non-vacuity of the probe ITSELF: run it against a file known to contain all-negative laws and it must find them. A probe that returns a clean verdict on a hollow suite is the defect it exists to detect, one level up.",
+  "input": {
+    "path": "tests/spec_venue_realization_substrate.test.ts"
+  },
+  "assertions": [
+    {
+      "path": "total_laws",
+      "op": "is_number"
+    },
+    {
+      "path": "hollow_count",
+      "op": "is_number"
+    }
+  ]
+}

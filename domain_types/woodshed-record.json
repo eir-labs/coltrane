@@ -1,0 +1,149 @@
+{
+  "slug": "woodshed-record",
+  "version": 1,
+  "extends": "Interpretation",
+  "domain": "learning",
+  "status": "active",
+  "schema": {
+    "type": "object",
+    "description": "The record of solitary practice — one worker, alone, producing nothing shippable, where the only output is that the worker got better. Carries NO acceptance criteria and NO pass field: a practice session with declared criteria is a gig wearing a woodshed costume. Jazz pedagogy states the separation directly — 'leave the woodshed behind and view practice activities as relatively exclusive of performance, trusting that practicing will demonstrate a meaningful effect as it organically evolves' — which is also an instruction NOT to gate practice on demonstrated transfer into later work. The stop-criterion has two halves and both are load-bearing: an objective floor that is necessary and never sufficient (a player drills a phrase through all twelve keys, at several tempos, across the range), and a felt judgment that closes it (the material is in the hands when it can be reached without conscious effort). A floor can be automated; a stop cannot. Above all this type carries FAULT ATTRIBUTION, because routing a correction to the wrong destination is the expensive failure: an engine defect written into a player's ledger becomes permanent superstition, carried at inference cost by a player it never belonged to.",
+    "properties": {
+      "question": {
+        "type": "string",
+        "description": "What was being worked out. A question, not a criterion — nobody knew the answer, which is why this was a woodshed and not a gig."
+      },
+      "iterations": {
+        "type": "array",
+        "description": "The attempts, in order, including and especially the wrong ones. A record that keeps only its final state has thrown away its entire product.",
+        "items": {
+          "type": "object",
+          "properties": {
+            "attempt": {
+              "type": "string"
+            },
+            "outcome": {
+              "type": "string",
+              "description": "What actually happened, measured rather than assumed."
+            },
+            "wrong_because": {
+              "type": "string",
+              "description": "Absent when the attempt held. Present is the normal case and is not a failure of the session."
+            },
+            "cost": {
+              "type": "string",
+              "description": "What the error actually cost — rounds, dollars, wall-clock, a wrong claim made to someone. An error whose cost is unrecorded cannot be prioritized against any other, and cost is the filter that makes improvement self-selecting."
+            }
+          },
+          "required": [
+            "attempt",
+            "outcome"
+          ]
+        }
+      },
+      "corrections": {
+        "type": "array",
+        "description": "The reductions. Many incidents collapse to few corrections, and the collapse IS the work — this is what survives compaction into a player's ledger. The incident list does not travel; the disposition does.",
+        "items": {
+          "type": "object",
+          "properties": {
+            "correction": {
+              "type": "string",
+              "description": "Stated as a disposition the next session can hold, not as a rule to remember."
+            },
+            "from_iterations": {
+              "type": "array",
+              "items": {
+                "type": "number"
+              }
+            },
+            "fault": {
+              "type": "string",
+              "enum": [
+                "player",
+                "engine",
+                "criterion",
+                "encode-this"
+              ],
+              "description": "THE LOAD-BEARING FIELD. player to that player's ledger; engine to an issue against the substrate; criterion to an amendment of the standard that asked for something unsatisfiable; encode-this to a minted skill, because the thing keeps being re-derived."
+            },
+            "attributed_to": {
+              "type": "string"
+            },
+            "routed": {
+              "type": "string",
+              "description": "Where it actually landed — a ledger entry, an issue number, a diff. Absent means the correction has not been delivered and the record is not finished."
+            }
+          },
+          "required": [
+            "correction",
+            "fault"
+          ]
+        }
+      },
+      "encode": {
+        "type": "array",
+        "description": "Techniques worth minting as skills because they were re-derived rather than recalled.",
+        "items": {
+          "type": "object",
+          "properties": {
+            "skill": {
+              "type": "string"
+            },
+            "why": {
+              "type": "string",
+              "description": "What its absence cost in this session."
+            },
+            "code_half": {
+              "type": "string",
+              "description": "The deterministic part, or an honest statement that there is none. A technique that can run without inference should."
+            }
+          },
+          "required": [
+            "skill",
+            "why"
+          ]
+        }
+      },
+      "sufficiency": {
+        "type": "array",
+        "description": "THE OBJECTIVE FLOOR — necessary, never sufficient. The checkable conditions actually met, each with how it was measured. A jazz player's floor is the phrase in all twelve keys at several tempos; a skill's floor is its fixtures passing. Clearing the floor does not end a session, and that asymmetry is the point.",
+        "items": {
+          "type": "object",
+          "properties": {
+            "condition": {
+              "type": "string"
+            },
+            "met": {
+              "type": "boolean"
+            },
+            "measured_by": {
+              "type": "string",
+              "description": "How it was established. An unmeasured condition is a claim."
+            }
+          },
+          "required": [
+            "condition",
+            "met"
+          ]
+        }
+      },
+      "heard_by": {
+        "type": "string",
+        "description": "Who judged the thing was in the hands. A NAME, never a rubric. The stop-criterion of practice is felt — reachable without conscious effort — and formalizing it would turn this into a gig. Absent means the session is still open."
+      },
+      "still_open": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "What was not resolved. Required and may be empty, on the same argument as a verdict's inferred_not_run: an absent list is a claim that nothing was left open."
+      }
+    }
+  },
+  "required_fields": [
+    "question",
+    "iterations",
+    "corrections",
+    "still_open"
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "slug": "non-vacuity-probe",
+  "version": 1,
+  "skill_type": "verification",
+  "input_type": "test-target",
+  "output_type": "test-verdict",
+  "determinism_ratio": 0.85,
+  "permission": {
+    "tier": 0
+  },
+  "description": "Ask whether a suite of laws can be fooled by an implementation that produces NOTHING. Earned, not theorised: a committed suite of 40 laws governing what a generated configuration must never contain was measured against a function returning an empty object, and 32 passed — including every one of the six laws its own specification called the sharpest. Every assertion was real; the thing they asserted about was absent. Two hollow-passable shapes, and this finds both: a law whose assertions are ALL negative, since an absence over an empty document is satisfied by producing nothing; and an assertion INSIDE a loop over a discovered collection with no non-empty guard, since an empty collection runs the body zero times and reports a pass having examined nothing. The second is the one that hides. The code half counts; the model half is consulted only for remedies and for borderline calls, which is why the iterables are always reported rather than only a classification."
+}

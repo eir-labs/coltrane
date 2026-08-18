@@ -1,0 +1,14 @@
+{
+  "slug": "room-probe-chart-v1",
+  "movements": [
+    {
+      "movement_id": "probe",
+      "standard_slug": "room-probe-v1",
+      "runtime_fills": {},
+      "seatings": []
+    }
+  ],
+  "edges": [],
+  "approval_gates": [],
+  "venue": "engine-room-v1"
+}

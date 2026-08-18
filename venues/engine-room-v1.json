@@ -1,0 +1,30 @@
+{
+  "slug": "engine-room-v1",
+  "institution_slug": "quartet",
+  "description": "A room that serves coltrane's own MCP server from inside the container, equipping exactly one tool. NOTE ON THE COMMAND FIELD, which is not what it appears: the containerized emission does not run this command. Every stdio server in a realized room is reached as `docker exec … node /app/dist/src/server_entry.js` regardless of what the contract declares — and declaring that real path here is REFUSED by the renderer's value scan as an absolute host path outside the per-realization directory. So the honest declaration is unrepresentable and this placeholder stands in its place. That contradiction between the contract field and the emission is a known defect, recorded here rather than papered over.",
+  "flavor": "engine-read",
+  "equipment": {
+    "tools": [
+      "type_browse"
+    ]
+  },
+  "installs": [],
+  "credential_surface": [],
+  "lifecycle": {
+    "policy": "ephemeral"
+  },
+  "responsible_chair": "quartet.chair.responsible-officer",
+  "substrate": "container",
+  "mcp_servers": [
+    {
+      "slug": "coltrane",
+      "transport": "stdio",
+      "command": [
+        "coltrane-server"
+      ],
+      "credential_names": []
+    }
+  ],
+  "devices": [],
+  "architectures": []
+}

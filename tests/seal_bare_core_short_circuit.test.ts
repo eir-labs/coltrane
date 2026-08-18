@@ -228,6 +228,12 @@ describe("#227 — the real genome's bare-core agents", () => {
     ).toEqual([
       { slug: "delivery-finalizer", core: "Verdict" },
       { slug: "event-clusterer", core: "Interpretation" },
+      // room-prober binds bare Signal DELIBERATELY: it exists to answer one question — can a seated
+      // chair reach an MCP server running inside a realized room — and the answer is two values
+      // (a count and a slug) that no domain type in this genome models. Signal carries a declared
+      // substance floor in core_types/Signal.json, so it lands in the enforced bucket and the reds
+      // below hold it to that floor like every other bare-core binding.
+      { slug: "room-prober", core: "Signal" },
       { slug: "solution-developer", core: "Artifact" },
       { slug: "synthesis-writer", core: "Artifact" },
     ]);

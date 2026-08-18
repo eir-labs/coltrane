@@ -120,6 +120,44 @@ const refuse = (code: RefusalCode, detail: string): RealizationRefusal => ({
 });
 
 /**
+ * The env keys a seat may carry from the ambient environment — the minimum a process needs to
+ * EXECUTE: PATH so the OS can locate its binary, HOME so the binary can resolve its own config. An
+ * explicit ALLOWLIST, not a deny-list: a key absent from this list never reaches the seat, so a
+ * credential added to the container later is excluded by default rather than by anyone remembering
+ * to strip it. This is the deny-by-default posture held unconditionally — it does not depend on the
+ * completeness of any strip-list (`withoutBoxCredentials`'s `BOX_CREDENTIAL_ENV` is a floor for the
+ * paths that never reach here, not the control).
+ *
+ * Why it is not `[]`: the seat env was `{}` (deny EVERYTHING), which is airtight but unspawnable —
+ * a `claude -p` child with no PATH cannot find its binary and dies with `spawn claude ENOENT`
+ * (measured, gig 87cffa2c), so no venue-confined seat ever ran. `['PATH','HOME']` is the
+ * minimum-viable widening: enough to start, no credential material.
+ *
+ * Why USER is admitted: on a macOS host with no `~/.claude/.credentials.json`, Claude auth is
+ * keychain-backed (a `Claude Code-credentials` keychain entry), and the keychain lookup needs USER
+ * to resolve the account. Measured: `claude -p` under {PATH,HOME} exits 1 with 'Not logged in ·
+ * Please run /login'; under {PATH,HOME,USER} it exits 0 and reaches the MCP server (gig 4506b567).
+ * On a Linux drain, credentials are file-based under HOME, so PATH+HOME already suffices and this
+ * key is inert. USER is a USERNAME, not a credential — admitting it carries no secret material, so
+ * the deny-by-default posture is unweakened; the allowlist grows by exactly one non-secret key.
+ */
+export const SEAT_ENV_ALLOWLIST = ["PATH", "HOME", "USER"] as const;
+
+/**
+ * Build a seat's env as the allowlisted subset of the ambient environment. Only keys in
+ * `SEAT_ENV_ALLOWLIST` that are present with a defined value are carried; every other key — every
+ * credential, every undeclared ambient var — is omitted. Never inherits `ambientEnv` wholesale.
+ */
+function seatEnv(ambientEnv: Record<string, string>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const key of SEAT_ENV_ALLOWLIST) {
+    const value = ambientEnv[key];
+    if (value !== undefined) out[key] = value;
+  }
+  return out;
+}
+
+/**
  * Realize a Venue contract into an enforced, observable performance space.
  *
  * The failure modes are an ORDERED gauntlet: the first breach returns a refusal before any success
@@ -184,9 +222,12 @@ export function realize(venue: Venue, opts: RealizeOpts): Realization {
         `agent "${seat.agent.slug}" grants [${grants.join(", ")}] but none lie within venue "${venue.slug}" equipment — the room narrows it to nothing`,
       );
     }
-    // env is a default-deny map: nothing from the ambient environment leaks into a seat. No test
-    // pins seat.env values; the strictest posture is the safe one until a spec names otherwise.
-    seats.push({ agent_slug: seat.agent.slug, effective_tools, env: {} });
+    // env is the ALLOWLISTED subset of the ambient environment (SEAT_ENV_ALLOWLIST): the minimum a
+    // process needs to EXECUTE, and nothing else. `env: {}` was the stricter posture but it is
+    // UNSPAWNABLE — a child with no PATH dies with `spawn claude ENOENT` (measured, gig 87cffa2c),
+    // so no venue-confined seat ever started. Every credential and undeclared ambient var stays out
+    // by default; this widening only admits PATH/HOME.
+    seats.push({ agent_slug: seat.agent.slug, effective_tools, env: seatEnv(opts.ambientEnv) });
   }
 
   // The room is sound. Build the observable realization with per-call isolation and idempotent

@@ -17,11 +17,14 @@
 // Scope: this asserts the constructed spawn ARGS/ENV the child would receive (the injected-run
 // seam short-circuits before a real process) — NOT realize() in isolation (tests/venue/ owns
 // that) and NOT real OS sandboxing.
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect } from "vitest";
+import { spawnSync } from "node:child_process";
+import { basename, dirname, delimiter } from "node:path";
 import fc from "fast-check";
 import { venueEffectiveTools, type Venue } from "../../src/chart.js";
-import { realize, type Realization } from "../../src/venue_realize.js";
+import { realize, SEAT_ENV_ALLOWLIST, type Realization } from "../../src/venue_realize.js";
 import { makeClaudeInvoker } from "../../src/claude_invoker.js";
+import type { ToolProvider, ToolProviderRegistry } from "../../src/tool_providers.js";
 import { testAgent } from "../_support/agents.js";
 import type { Agent } from "../../src/composition.js";
 import type { AgentInvocationContext } from "../../src/runtime.js";
@@ -41,11 +44,18 @@ const room = (tools: string[], credential_surface: string[] = []): Venue =>
 async function driveSpawn(
   agent: Agent,
   venue: Venue | undefined,
+  ambientEnv: Record<string, string> = {},
+  // Supplying either map flips the invoker into resolution-ON mode (#185): bare in-house slugs are
+  // renamed to the mcp__<server>__<tool> names their server advertises. Omitted → resolution OFF,
+  // the legacy pass-through the INV1..INV10 laws below deliberately exercise.
+  resolution?: { toolProviders?: ToolProviderRegistry; mcpServerConfigs?: Record<string, unknown> },
 ): Promise<{ allowedTools: string[] | undefined; childEnv: Record<string, string> | undefined; runCalled: boolean }> {
   let sawArgs: string[] = [];
   let sawEnv: Record<string, string> | undefined;
   let runCalled = false;
   const invoke = makeClaudeInvoker({
+    ...(resolution?.toolProviders !== undefined ? { toolProviders: resolution.toolProviders } : {}),
+    ...(resolution?.mcpServerConfigs !== undefined ? { mcpServerConfigs: resolution.mcpServerConfigs } : {}),
     // The wire feeds the constructed child env as the 4th arg (today it is called with 3 → undefined).
     run: (_bin, args, _bounds, env?: Record<string, string>) => {
       runCalled = true;
@@ -55,7 +65,7 @@ async function driveSpawn(
     },
   });
   const realization: Realization | undefined =
-    venue === undefined ? undefined : realize(venue, { seats: [{ agent }], ambientEnv: {}, gigId: "g1" });
+    venue === undefined ? undefined : realize(venue, { seats: [{ agent }], ambientEnv, gigId: "g1" });
   const ctx = { agent, gig_input: {}, inputs: [], realization, venue } as unknown as AgentInvocationContext;
   await invoke(ctx);
   const i = sawArgs.indexOf("--allowedTools");
@@ -132,28 +142,146 @@ describe("spawn reflects venue realization — the tool ceiling (INV1,2,3,9)", (
   });
 });
 
-describe("spawn reflects venue realization — the child env allowlist (INV4,5)", () => {
-  const INJECTED = ["COLTRANE_TEST_OPENAI_KEY", "COLTRANE_TEST_AWS_SECRET", "COLTRANE_TEST_UNDECLARED_TOKEN"];
-  beforeEach(() => { for (const k of INJECTED) process.env[k] = "leak-me"; });
-  afterEach(() => { for (const k of INJECTED) delete process.env[k]; });
+describe("spawn reflects venue realization — the venue path RESOLVES advertised names (#204)", () => {
+  // Resolution ON: an in-house engine tool granted by BARE slug is bridged through the engine's own
+  // MCP server, so the spawn must advertise it as `mcp__coltrane__<tool>` — the name the server
+  // actually exposes. The two in-house tools below both resolve to the `coltrane` engine server.
+  const inHouse = (tool: string): ToolProvider => ({ tool, kind: "in_house", server: "coltrane" });
+  const PROVIDERS: ToolProviderRegistry = new Map<string, ToolProvider>([
+    ["type_browse", inHouse("type_browse")],
+    ["type_extend", inHouse("type_extend")],
+  ]);
+  // The engine server's --mcp-config entry must be PRESENT under its slug, else resolveToolGrants
+  // keeps the bare name (the "no engine-server config → no regression" branch, tool_providers.ts:108).
+  const MCP_CONFIGS: Record<string, unknown> = { coltrane: { command: "node", args: ["server_entry.js"] } };
+  const withResolution = { toolProviders: PROVIDERS, mcpServerConfigs: MCP_CONFIGS };
 
-  it("INV5 — an undeclared ambient secret is ABSENT from the constructed child env", async () => {
-    // A venue whose surface declares SOME class but not the injected token: the token is undeclared
-    // and must not reach the child. RED today — no env is constructed/passed to the seam at all, so
-    // the child would inherit the full process.env including the injected secret.
-    const agent = testAgent({ slug: "p", primitives: ["SENSE"], allowed_tools: ["Read"] });
-    const venue = room(["Read"], ["vercel-token"]); // surface is non-empty but excludes the injected secret
-    const { childEnv } = await driveSpawn(agent, venue);
-    expect(childEnv).toBeDefined(); // an explicit allowlist object, not undefined (== full inherit)
-    expect(childEnv!["COLTRANE_TEST_UNDECLARED_TOKEN"]).toBeUndefined();
+  it("advertises the RESOLVED name for a bare in-house slug the venue equips (fails pre-patch)", async () => {
+    // The exact defect gig 11744aa5 sealed. Agent grants bare `type_browse`; the room equips it.
+    // Pre-patch (claude_invoker.ts venue branch) does `effectiveAllowed = venueEffectiveTools(...)`,
+    // OVERWRITING the resolved names with the raw grant strings — so --allowedTools carries bare
+    // `type_browse` and the resolved `mcp__coltrane__type_browse` is ABSENT, the server advertises
+    // only the namespaced name, and the call is DENIED ('Claude requested permissions to use
+    // mcp__coltrane__type_browse, but you haven't granted it yet.'). Post-patch narrows THEN resolves.
+    const agent = testAgent({ slug: "prober", primitives: ["SENSE"], allowed_tools: ["type_browse"] });
+    const venue = room(["type_browse"]);
+    const { allowedTools } = await driveSpawn(agent, venue, {}, withResolution);
+    const advertised = new Set(allowedTools ?? []);
+    expect(advertised.has("mcp__coltrane__type_browse")).toBe(true); // the name the server advertises
+    expect(advertised.has("type_browse")).toBe(false); // the bare slug the server never matches
   });
 
-  it("INV4 — an EMPTY credential_surface admits ZERO ambient credentials into the child env", async () => {
-    // Deny-by-default: an empty surface is a subset floor — no ambient credential-shaped var may
-    // appear in the constructed child env. RED today (full process.env inherited).
+  it("the ceiling did NOT widen — a granted-but-UNEQUIPPED tool is absent in BOTH bare and mcp__ form", async () => {
+    // The narrow-then-rename guard. Agent grants two in-house tools; the room equips only one. If a
+    // future edit ever RENAMED-THEN-WIDENED (resolved the full grant set instead of the narrowed one),
+    // the unequipped `type_extend` would reappear as `mcp__coltrane__type_extend`. Asserting BOTH forms
+    // absent — with resolution ON, so the mcp__ form is the one a widen regression would actually emit —
+    // fails loudly on that regression while passing on the correct narrow-then-rename path.
+    const agent = testAgent({ slug: "prober", primitives: ["SENSE"], allowed_tools: ["type_browse", "type_extend"] });
+    const venue = room(["type_browse"]); // equips type_browse, NOT type_extend
+    const { allowedTools } = await driveSpawn(agent, venue, {}, withResolution);
+    const advertised = new Set(allowedTools ?? []);
+    expect(advertised.has("mcp__coltrane__type_browse")).toBe(true); // the equipped tool survives, resolved
+    expect(advertised.has("type_extend")).toBe(false); // unequipped: never in bare form
+    expect(advertised.has("mcp__coltrane__type_extend")).toBe(false); // and never renamed-then-widened in
+  });
+});
+
+describe("spawn reflects venue realization — the seat env admits USER (macOS keychain auth)", () => {
+  it("SEAT_ENV_ALLOWLIST admits USER from the ambient env, credential-shaped vars stay absent, grows by exactly one key", () => {
+    // Defect 2. macOS Claude auth is keychain-backed and the lookup needs USER; under {PATH,HOME}
+    // `claude -p` exits 1 'Not logged in', under {PATH,HOME,USER} it exits 0 (gig 4506b567). USER is a
+    // USERNAME not a credential, so admitting it does not weaken deny-by-default. Pre-patch the
+    // allowlist is ['PATH','HOME'], so seat.env.USER is undefined and this FAILS.
     const agent = testAgent({ slug: "p", primitives: ["SENSE"], allowed_tools: ["Read"] });
-    const { childEnv } = await driveSpawn(agent, room(["Read"], []));
+    const ambientEnv: Record<string, string> = {
+      PATH: process.env["PATH"] ?? "/usr/bin",
+      HOME: process.env["HOME"] ?? "/tmp",
+      USER: "seat-runner",
+      COLTRANE_TEST_KEYCHAIN_TOKEN: "leak-me", // credential-shaped decoy: must NOT be admitted
+    };
+    const r = realize(room(["Read"]), { seats: [{ agent }], ambientEnv, gigId: "g-user" });
+    if (!r.ok) throw new Error("realize refused a sound room");
+    const seat = r.seats.find((s) => s.agent_slug === "p")!;
+    expect(seat.env["USER"]).toBe("seat-runner"); // admitted from the ambient env
+    expect(seat.env["COLTRANE_TEST_KEYCHAIN_TOKEN"]).toBeUndefined(); // credential-shaped → still denied
+    // The allowlist grew by EXACTLY one non-secret key over the prior ['PATH','HOME'].
+    expect([...SEAT_ENV_ALLOWLIST].sort()).toEqual(["HOME", "PATH", "USER"]);
+  });
+});
+
+describe("spawn reflects venue realization — the seat env EXECUTES (INV-EXEC)", () => {
+  it("INV-EXEC — the constructed seat env can actually RUN a binary (no spawn ENOENT)", () => {
+    // The law the empty-env posture could never satisfy. Take the env the invoker hands the spawn —
+    // SeatRealization.env, built by realize() from the ambient env — and RUN a real OS process
+    // through it. Before the allowlist fix seat.env is `{}`: no PATH, so the OS cannot locate the
+    // binary and spawnSync fails with ENOENT — the EXACT failure measured on gig 87cffa2c. Asserting
+    // the env merely CONTAINS a PATH key would be the same could-not-fail shape the old INV4/INV5
+    // were; this executes, because "the env looks right" is precisely what a dead seat's env also
+    // looked like. The binary is spawned by BARE NAME so lookup goes through seat.env's PATH (an
+    // absolute path would resolve without PATH and make the law a tautology); the ambient PATH is
+    // seeded with the node binary's own directory so it resolves once PATH survives the allowlist.
+    const nodeBin = basename(process.execPath); // bare name → resolved via the seat env's PATH
+    const agent = testAgent({ slug: "p", primitives: ["SENSE"], allowed_tools: ["Read"] });
+    const ambientEnv: Record<string, string> = {
+      PATH: `${dirname(process.execPath)}${delimiter}${process.env["PATH"] ?? ""}`,
+      HOME: process.env["HOME"] ?? "/tmp",
+      COLTRANE_TEST_EXEC_SECRET: "leak-me", // a credential-shaped decoy that must not survive
+    };
+    const r = realize(room(["Read"]), { seats: [{ agent }], ambientEnv, gigId: "g-exec" });
+    if (!r.ok) throw new Error("realize refused a sound room");
+    const seat = r.seats.find((s) => s.agent_slug === "p")!;
+    const res = spawnSync(nodeBin, ["-e", ""], { env: seat.env });
+    // Found through the seat env's PATH (not ENOENT) and ran to a clean exit.
+    expect((res.error as NodeJS.ErrnoException | undefined)?.code).not.toBe("ENOENT");
+    expect(res.error).toBeUndefined();
+    expect(res.status).toBe(0);
+    // Deny-by-default survives the widening that made the seat spawnable: the decoy never reached it.
+    expect(seat.env["COLTRANE_TEST_EXEC_SECRET"]).toBeUndefined();
+  });
+});
+
+describe("spawn reflects venue realization — the child env allowlist (INV4,5)", () => {
+  // The credential-shaped vars carried IN THE AMBIENT ENV the room is realized against — the filter
+  // must drop every one of them while keeping the allowlisted PATH/HOME.
+  const CREDS = ["COLTRANE_TEST_OPENAI_KEY", "COLTRANE_TEST_AWS_SECRET", "COLTRANE_TEST_UNDECLARED_TOKEN"];
+  const ambient = (): Record<string, string> => ({
+    PATH: process.env["PATH"] ?? "/usr/bin",
+    HOME: process.env["HOME"] ?? "/tmp",
+    ...Object.fromEntries(CREDS.map((k) => [k, "leak-me"])),
+  });
+
+  // WHY these no longer assert emptiness. The old INV4/INV5 realized against `ambientEnv: {}` and
+  // asserted the child env EXCLUDED credentials. An allowlist filter over `{}` yields `{}` no matter
+  // what the filter is, so the exclusion held VACUOUSLY — a law that could not fail — while the seat
+  // carried no PATH and could not spawn at all (`spawn claude ENOENT`, gig 87cffa2c). Realizing
+  // against a NON-EMPTY ambient env carrying credential-shaped vars makes the filter do real work:
+  // it must both KEEP the allowlisted PATH/HOME (so the seat can execute) AND DROP the credentials
+  // (deny-by-default). Emptiness satisfied the absence assertion by carrying nothing; the allowlist
+  // satisfies it by carrying only what a process needs to run.
+
+  it("INV5 — an undeclared ambient secret is ABSENT from the child env, while PATH/HOME survive", async () => {
+    // A venue whose surface declares SOME class but not the injected token: the token is undeclared
+    // and must not reach the child, yet the allowlisted PATH/HOME must — or the seat cannot spawn.
+    const agent = testAgent({ slug: "p", primitives: ["SENSE"], allowed_tools: ["Read"] });
+    const venue = room(["Read"], ["vercel-token"]); // surface is non-empty but excludes the injected secret
+    const env = ambient();
+    const { childEnv } = await driveSpawn(agent, venue, env);
+    expect(childEnv).toBeDefined(); // an explicit allowlist object, not undefined (== full inherit)
+    expect(childEnv!["COLTRANE_TEST_UNDECLARED_TOKEN"]).toBeUndefined(); // undeclared → filtered out
+    expect(childEnv!["PATH"]).toBe(env.PATH); // allowlisted → carried, so the seat can execute
+    expect(childEnv!["HOME"]).toBe(env.HOME);
+  });
+
+  it("INV4 — an EMPTY credential_surface admits ZERO ambient credentials, PATH/HOME still present", async () => {
+    // Deny-by-default: an empty surface is a subset floor — no ambient credential-shaped var may
+    // appear in the child env — but the allowlisted execute-minimum is not a credential and stays.
+    const agent = testAgent({ slug: "p", primitives: ["SENSE"], allowed_tools: ["Read"] });
+    const env = ambient();
+    const { childEnv } = await driveSpawn(agent, room(["Read"], []), env);
     expect(childEnv).toBeDefined();
-    for (const k of INJECTED) expect(childEnv![k]).toBeUndefined();
+    for (const k of CREDS) expect(childEnv![k]).toBeUndefined(); // none survive the allowlist
+    expect(childEnv!["PATH"]).toBe(env.PATH); // still spawnable
+    expect(childEnv!["HOME"]).toBe(env.HOME);
   });
 });

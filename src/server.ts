@@ -742,14 +742,18 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         const actingFor =
           args["acting_for"] === undefined || args["acting_for"] === null ? undefined : String(args["acting_for"]);
         void actingFor; // forwarded to the queue seam via `args` below; named here to be legible.
-        // WHERE it plays, as distinct from what it plays. Read here for the same reason acting_for
-        // is: the queue seam forwards it via `args`, but #234's law refuses an argument advertised
-        // and never read — a targeting field the schema names but the handler never touches is a
-        // filter a caller cannot tell does nothing. Naming it makes the wire visible; an unnamed
-        // gig carries `undefined` here and stays claimable by any worker.
+        // WHERE it plays, as distinct from what it plays. This is a CEILING, and the whole design is
+        // fail-closed — so the one outcome the contract forbids is proceeding as if no venue was
+        // asked. It is threaded into BOTH runGig calls below (the sync and async paths) via the same
+        // conditional-spread trio the chart path uses (server.ts:935-941), so `runGig`'s own venue
+        // block either realizes the room or refuses fail-closed. It used to be read into this local
+        // and then DISCARDED (`void venue`, with a comment claiming the queue seam forwarded it — it
+        // did not for a local run): gig a77f6f7f dispatched room-probe-v1 with a named venue and got
+        // NO room, NO refusal, and a 'complete' status whose output was byte-identical to the
+        // venue-less control. An unnamed gig carries `undefined` here and is threaded to nothing —
+        // the venue-less path stays byte-identical.
         const venue =
           args["venue"] === undefined || args["venue"] === null ? undefined : String(args["venue"]);
-        void venue; // forwarded to the queue seam via `args` below; named here to be legible.
 
         const target = dispatchTarget({
           standard_slug: args["standard_slug"] === undefined || args["standard_slug"] === null ? undefined : String(args["standard_slug"]),
@@ -1086,6 +1090,13 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
               outputs: deps.outputs, ledger: deps.ledger, invoke: deps.invoke,
               model_version: deps.model_version, skills: deps.skills, skill_dirs: deps.skill_dirs, evals: deps.evals, budget,
               toolProviders: deps.toolProviders, mcpServerConfigs: deps.mcpServerConfigs, // dispatch preflight resolves against the invoker's environment
+              // THE ROOM THIS DISPATCH NAMED, threaded so runGig realizes it or refuses fail-closed —
+              // the same conditional-spread trio the chart path uses (server.ts:935-941). `venue` is
+              // threaded only when non-empty so runGig's `deps.venue !== undefined` gate is never
+              // tripped by an absent one; `venues`/`venueRealizer` come from bootstrap (ServerDeps).
+              ...(venue ? { venue } : {}),
+              ...(deps.venues ? { venues: deps.venues } : {}),
+              ...(deps.venueRealizer ? { venueRealizer: deps.venueRealizer } : {}),
               ...(depth ? { depth } : {}), ...reuseWiring, ...humanWiring,
             });
             return {
@@ -1162,6 +1173,12 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
           outputs: deps.outputs, ledger: deps.ledger, invoke: deps.invoke,
           model_version: deps.model_version, skills: deps.skills, skill_dirs: deps.skill_dirs, evals: deps.evals, budget,
           toolProviders: deps.toolProviders, mcpServerConfigs: deps.mcpServerConfigs, // dispatch preflight resolves against the invoker's environment
+          // Same venue trio as the sync path above — the DEFAULT dispatch mode must honour a named
+          // room too, or the fix covers only the deterministic wait:true test path and leaves the
+          // path the product actually dispatches through discarding the venue.
+          ...(venue ? { venue } : {}),
+          ...(deps.venues ? { venues: deps.venues } : {}),
+          ...(deps.venueRealizer ? { venueRealizer: deps.venueRealizer } : {}),
           gig_id: gigId, onProgress, signal: controller.signal, ...(depth ? { depth } : {}), ...reuseWiring, ...humanWiring,
         });
         // A REFUSED resume must be answered in THIS reply, not discovered later by polling. The

@@ -967,7 +967,13 @@ export async function runGig(
     const realization = resolveAndRealize(deps.venue, {
       venues: new Map(deps.venues ?? []),
       seats: standard.agents.map((agent) => ({ agent })),
-      ambientEnv: {},
+      // The ambient container environment realize() filters to each seat's allowlisted env
+      // (SEAT_ENV_ALLOWLIST — PATH/HOME). Passing `{}` here was the other half of the ENOENT
+      // measured on gig 87cffa2c: even a correct allowlist has nothing to admit when the caller
+      // feeds it an empty env, so every venue-confined seat spawned with no PATH and died. The
+      // allowlist is what makes handing realize() the whole process.env safe — it carries PATH/HOME
+      // through and drops every credential (COLTRANE_DRAIN_KEY et al.), never inheriting wholesale.
+      ambientEnv: process.env as Record<string, string>,
       ...(deps.credentialsPresent ? { credentialsPresent: deps.credentialsPresent } : {}),
       gigId: gig_id,
     });

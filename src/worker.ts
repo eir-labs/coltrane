@@ -51,6 +51,7 @@ import {
 } from "./reuse.js";
 import type { Standard, Chair } from "./composition.js";
 import type { LoadedGenome } from "./loader.js";
+import type { VenueRealizer } from "./venue_realizer.js";
 
 /** Where the org store is, and who is working. */
 export interface WorkerContext {
@@ -283,6 +284,16 @@ export interface WorkOnceDeps {
   makeInvoke(registry: Registry, genome: LoadedGenome): AgentInvoker;
   /** Progress line sink (CLI wires stderr); silent by default. */
   log?(line: string): void;
+  /**
+   * The SUBSTRATE realizer a venue-named claim's room is stood up on — supplied by the SAME bootstrap
+   * that populates `WorkerContext.realizableVenues`, so the realizer and the room-declaration it
+   * builds come from one place. Threaded into `runGig` beside the claim's `venue` when the room
+   * declares `mcp_servers` (mirroring the server's chart path). Absent = this box builds no room's
+   * substrate; a venue-named claim whose room declares servers then fails closed rather than running
+   * the room unbuilt (see `workOnce`). Injected, never constructed here — building a docker-backed
+   * factory inside `workOnce` would pull substrate the drain does not own into the claim path.
+   */
+  venueRealizer?: VenueRealizer;
 }
 
 async function workerRpc(ctx: WorkerContext, fn: string, body: Record<string, unknown>): Promise<unknown> {
@@ -993,11 +1004,42 @@ export async function workOnce(ctx: WorkerContext, deps: WorkOnceDeps): Promise<
     // unref so a finished gig exits promptly instead of waiting out its own timeout.
     if (typeof deadline === "object" && "unref" in deadline) deadline.unref();
 
+    // ── THE ROOM THE GIG NAMED, carried into the run (SITE 2 — the drain half of the venue wire) ──
+    // `venueMayClaim` already gated the CLAIM on this room being one this box can stand up
+    // (claimNextGig); threading it into runGig is the OTHER half of that coherence — a box that
+    // claimed a gig BECAUSE it declared the room must actually stand the room up, not run the gig
+    // venue-less. Before this, workOnce passed ZERO venue fields, so a worker refused work for rooms
+    // it could not build and then built no room for the ones it could: the targeting layer was fully
+    // implemented and the thing it targeted for was never connected.
+    //
+    // Fail-closed is the only permitted alternative to realization. A venue-less claim is the open
+    // room, wholly unchanged. A DEAD room name fails closed inside runGig (resolveAndRealize refuses
+    // an unknown venue) and is recorded as a failed gig by the catch below. And a room that declares
+    // mcp_servers this worker has no realizer to stand up is refused HERE rather than run with its
+    // servers unbuilt — gating on a room and then not building it is the defect. What must never
+    // happen is proceeding as if no venue was asked: that is exactly what gig a77f6f7f did on the
+    // server path, and the production drain path must not repeat it.
+    const gigVenue = claim.venue ? genome.venues.get(claim.venue) : undefined;
+    if (claim.venue && gigVenue && gigVenue.mcp_servers.length > 0 && !deps.venueRealizer) {
+      throw new Error(
+        `claimed gig ${claim.gig_id} names venue "${claim.venue}", whose declared mcp_servers need a ` +
+          `realizer this worker was not given — refusing rather than running the room unbuilt`,
+      );
+    }
+    const venueWiring = claim.venue
+      ? {
+          venue: claim.venue,
+          venues: genome.venues,
+          ...(deps.venueRealizer ? { venueRealizer: deps.venueRealizer } : {}),
+        }
+      : {};
+
     const run = (resume: boolean): ReturnType<typeof runGig> => runGig(standard, claim.input, {
       outputs,
       ledger,
       invoke,
       gig_id: claim.gig_id, // ← the run IS the queue row; the drained header completes it
+      ...venueWiring,
       skills: genome.skills,
       budget: drainBudget(claim.input),
       toolProviders: engineToolProviders(),

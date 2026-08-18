@@ -44,9 +44,9 @@
 // first, and one compile error would stop every band from running — at which point nobody could
 // tell a pending spec from a regression).
 import { describe, it, expect, vi } from "vitest";
-import { mkdtempSync, writeFileSync, readFileSync, existsSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync, readdirSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { VenueSchema } from "../src/genome_schema.js";
 import { assertToolGrantsResolvable, ENGINE_MCP_SERVER, type ToolProvider, type ToolProviderRegistry } from "../src/tool_providers.js";
 
@@ -126,11 +126,15 @@ const NOTES_ROOM = {
   institution_slug: "quartet",
   equipment: { tools: ["mcp__notes__search", "mcp__notes__read"] },
   credential_surface: ["notes-token"],
+  // The declared command IS what the containerized chair docker-execs (buildMcpConfigs derives the
+  // argv from it), so it names the compiled engine at the room image's WORKDIR — an in-image
+  // absolute path, representable now that renderComposeConfig scans command tokens in the room-image
+  // namespace. The local-process path uses the same tokens as `{command: cmd[0], args: cmd.slice(1)}`.
   mcp_servers: [
     {
       slug: "notes",
       transport: "stdio" as const,
-      command: ["notes-mcp", "--stdio"],
+      command: ["node", "/app/dist/src/server_entry.js"],
       credential_names: ["notes-token"],
     },
   ],
@@ -145,6 +149,20 @@ const NOTES_ROOM = {
 const NO_DAEMON = { run: () => {} };
 
 const noCredentials: CredentialResolver = async () => ({});
+
+/** Recursively collect every file under `dir` whose bytes contain `needle` — the only honest way to
+ *  ask "is this credential readable from the host filesystem". A path the realizer already removed
+ *  simply contributes nothing. */
+function filesContaining(dir: string, needle: string): string[] {
+  if (!existsSync(dir)) return [];
+  const hits: string[] = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) hits.push(...filesContaining(full, needle));
+    else if (entry.isFile() && readFileSync(full, "utf8").includes(needle)) hits.push(full);
+  }
+  return hits;
+}
 
 describe("GAP 2 — a venue declares what provides its tools", () => {
   // The declaration itself. VenueSchema is .strict(), so today this key is REJECTED rather than
@@ -393,16 +411,20 @@ describe("GAP 2 — a chair reaches a tool inside the containerized room", () =>
       command: "docker",
       // ABSOLUTE. The room service's working_dir is the workspace, so a relative entry path
       // resolves under the mount and node cannot find it — measured against a live room, not read.
-      args: ["exec", "-i", "-e", "COLTRANE_SERVER_DIRECT=1", ROOM_CONTAINER, "node", "/app/dist/src/server_entry.js"],
+      // COLTRANE_GENOME=/app rides beside COLTRANE_SERVER_DIRECT=1: cwd is the empty workspace, so
+      // without an explicit root the in-room engine resolves its genome to nothing and serves count:0.
+      args: ["exec", "-i", "-e", "COLTRANE_SERVER_DIRECT=1", "-e", "COLTRANE_GENOME=/app", ROOM_CONTAINER, "node", "/app/dist/src/server_entry.js"],
     });
     await handle.teardown();
   });
 
-  // ★ THE SILENT-RELAY GUARD. Without COLTRANE_SERVER_DIRECT=1, dist/src/server_entry.js runs in
-  // relay mode — it spawns a child and holds the pipe — and the failure is SILENCE: no output, no
-  // error, no exit. It cost a debugging cycle to find. Every containerized emission must carry the
-  // flag, so this law holds the presence of the exact string on the path that would otherwise hang.
-  it("every containerized emission carries COLTRANE_SERVER_DIRECT=1", async () => {
+  // ★ THE SILENT-RELAY GUARD, AND THE EMPTY-GENOME GUARD BESIDE IT. Without COLTRANE_SERVER_DIRECT=1,
+  // dist/src/server_entry.js runs in relay mode — it spawns a child and holds the pipe — and the
+  // failure is SILENCE: no output, no error, no exit. Without COLTRANE_GENOME=/app the engine that
+  // does start resolves its genome root to cwd, which is the empty workspace, and serves count:0. Both
+  // flags are load-bearing and both are asserted here, on the one path that would otherwise hang or
+  // stand up an engine that knows nothing — so a future edit cannot drop either without a red law.
+  it("every containerized emission carries COLTRANE_SERVER_DIRECT=1 and COLTRANE_GENOME=/app", async () => {
     const { dockerComposeRealizer } = await containerModule();
     expect(dockerComposeRealizer, "the import is the specification").toBeTypeOf("function");
     const handle = await dockerComposeRealizer(NO_DAEMON).realize(NOTES_ROOM, noCredentials, {
@@ -413,6 +435,9 @@ describe("GAP 2 — a chair reaches a tool inside the containerized room", () =>
     const notes = handle.mcpServerConfigs["notes"] as { args?: readonly string[] };
     expect(notes.args ?? [], "omitting the flag selects relay mode, whose failure is silence").toContain(
       "COLTRANE_SERVER_DIRECT=1",
+    );
+    expect(notes.args ?? [], "omitting the genome root leaves the in-room engine on an empty workspace").toContain(
+      "COLTRANE_GENOME=/app",
     );
     await handle.teardown();
   });
@@ -433,5 +458,175 @@ describe("GAP 2 — a chair reaches a tool inside the containerized room", () =>
       "sleep",
       "infinity",
     ]);
+  });
+
+  // ── THE DECLARED COMMAND IS WHAT THE CHAIR RUNS ──────────────────────────────────────────────
+  //
+  // Side A of the contradiction: the emission used to hardcode `node /app/dist/src/server_entry.js`
+  // for EVERY declared stdio server and discard `server.command` — so a venue could declare one
+  // server and silently get coltrane's engine under its slug. The chair argv now DERIVES from the
+  // declared command. Non-vacuity is the whole point of the second realization: two venues declaring
+  // DISTINCT commands must emit DISTINCT argvs, or the declaration is not load-bearing.
+  it("the containerized chair argv is derived from the declared command", async () => {
+    const { dockerComposeRealizer } = await containerModule();
+    expect(dockerComposeRealizer, "the import is the specification").toBeTypeOf("function");
+
+    // A second containerized venue declaring a DISTINCT in-image command — same slug, so the two
+    // emissions are compared under one key. Both paths live under /app (the room image), so both are
+    // representable; what must differ is the command tail the chair execs.
+    const ALT_ROOM = {
+      ...NOTES_ROOM,
+      slug: "notes-room-alt",
+      mcp_servers: [{ ...NOTES_ROOM.mcp_servers[0], command: ["node", "/app/dist/src/alt_entry.js"] }],
+    };
+
+    const notes = await dockerComposeRealizer(NO_DAEMON).realize(NOTES_ROOM, noCredentials, {
+      gigId: CONTAINERIZED_GIG,
+      engineServers,
+      probe: async () => ["search", "read"],
+    });
+    const alt = await dockerComposeRealizer(NO_DAEMON).realize(ALT_ROOM, noCredentials, {
+      gigId: CONTAINERIZED_GIG,
+      engineServers,
+      probe: async () => ["search", "read"],
+    });
+    try {
+      const notesArgs = (notes.mcpServerConfigs["notes"] as { args: string[] }).args;
+      const altArgs = (alt.mcpServerConfigs["notes"] as { args: string[] }).args;
+
+      // Each carries EXACTLY its own declared command as the exec tail.
+      expect(notesArgs.slice(-2), "the emitted tail is the venue's own declared command").toEqual([
+        "node",
+        "/app/dist/src/server_entry.js",
+      ]);
+      expect(altArgs.slice(-2), "a distinct declaration emits a distinct command").toEqual([
+        "node",
+        "/app/dist/src/alt_entry.js",
+      ]);
+      // NON-VACUITY: distinct declared command ⇒ distinct emitted argv. If these were equal the
+      // declaration would still be discarded — the exact Side-A defect, restated as a property.
+      expect(notesArgs, "the declared command influences the emission").not.toEqual(altArgs);
+
+      // The two load-bearing -e flags survive the derivation (spec at :409-425): a chair in the room
+      // still runs direct-mode against a real genome.
+      expect(notesArgs, "COLTRANE_SERVER_DIRECT=1 rides regardless of the command").toContain(
+        "COLTRANE_SERVER_DIRECT=1",
+      );
+      expect(notesArgs, "COLTRANE_GENOME=/app rides regardless of the command").toContain("COLTRANE_GENOME=/app");
+    } finally {
+      await notes.teardown();
+      await alt.teardown();
+    }
+  });
+
+  // ── THE SHIPPED VENUE DECLARES WHAT IT RUNS ──────────────────────────────────────────────────
+  //
+  // Both sides of the contradiction, measured against the fixture the live law consumes. Pre-change,
+  // realizing engine-room-v1 with the honest absolute path threw VenueRenderRefusal (Side B, the scan
+  // refused /app…), and even rendered, the emission ignored server.command (Side A, declared !=
+  // emitted). This asserts the single fact that both halves violated: the command the venue declares
+  // is the command the chair docker-execs.
+  it("the shipped engine-room-v1 declares the command its chair actually runs", async () => {
+    const { dockerComposeRealizer } = await containerModule();
+    expect(dockerComposeRealizer, "the import is the specification").toBeTypeOf("function");
+
+    const shipped = JSON.parse(
+      readFileSync(new URL("../venues/engine-room-v1.json", import.meta.url), "utf8"),
+    ) as { mcp_servers: Array<{ slug: string; command: string[] }> };
+    const server = shipped.mcp_servers[0]!;
+    const declared = server.command;
+
+    // Non-vacuity: the shipped declaration is a real in-image absolute path, not a placeholder — the
+    // very thing the pre-change scan refused. A `["coltrane-server"]` placeholder would pass a naive
+    // "declared == emitted" check trivially while running nothing, so this guards against the revert.
+    expect(declared.some((t) => t.startsWith("/app")), "the shipped command names the in-image engine").toBe(true);
+
+    const handle = await dockerComposeRealizer(NO_DAEMON).realize(shipped, noCredentials, {
+      gigId: "bbbbbbbb-1111-2222-3333-444444444444",
+      engineServers,
+    });
+    try {
+      const emitted = handle.mcpServerConfigs[server.slug] as { command: string; args: string[] };
+      expect(emitted.command, "a containerized stdio server is reached by docker").toBe("docker");
+      // DECLARED == EMITTED: the exec tail is exactly the command the contract declares.
+      expect(emitted.args.slice(-declared.length), "the chair execs the venue's own declared command").toEqual(
+        declared,
+      );
+    } finally {
+      await handle.teardown();
+    }
+  });
+});
+
+// ── THE CREDENTIAL IS NEVER READABLE FROM THE HOST WHILE THE ROOM RUNS ──────────────────────────
+//
+// A compose file-secret is a BIND MOUNT: the material must stay on the host for the room's whole
+// life, where a seat running as the invoking user — which holds Bash and can derive the path from
+// the gig id — can read off disk exactly what src/claude_invoker.ts's withoutBoxCredentials strips
+// from the environment. The fix delivers the material INTO the container instead (docker cp into the
+// created-but-not-started room), so nothing readable from the host holds it while the room runs.
+//
+// These two laws run under NO_DAEMON on purpose: the exposure is the HOST-SIDE write, which happened
+// before `compose up` and needs no daemon to prove — so the property is checkable in every ordinary
+// `npx vitest run` and fails cleanly on the pre-fix commit.
+describe("GAP 2 — a resolved credential is never readable from the host filesystem", () => {
+  // A KNOWN SENTINEL is what the resolver returns for the declared class. While the handle is live,
+  // scan the whole realization directory and assert the sentinel is in NO file.
+  //
+  // ★ FAILS AGAINST THE PRE-FIX CODE, which wrote the sentinel to <realizationDir>/secrets/<class>
+  // at mode 0600 (the compose file-secret source) — so the scan finds it there and the law is red.
+  it("no file under the realization directory holds the resolved material while the room is up", async () => {
+    const { dockerComposeRealizer } = await containerModule();
+    expect(dockerComposeRealizer, "the import is the specification").toBeTypeOf("function");
+    const SENTINEL = "SENTINEL-CREDENTIAL-VALUE-must-never-touch-the-host-a1b2c3d4e5";
+    const resolve: CredentialResolver = async () => ({ "notes-token": SENTINEL });
+    const handle = await dockerComposeRealizer(NO_DAEMON).realize(NOTES_ROOM, resolve, {
+      gigId: "cccccccc-1111-2222-3333-444444444444",
+      engineServers,
+      probe: async () => ["search", "read"],
+    });
+    try {
+      // configPath is the compose.yaml the realizer wrote; its directory IS the realization dir.
+      const realizationDir = dirname(handle.configPath);
+      const hits = filesContaining(realizationDir, SENTINEL);
+      expect(
+        hits,
+        `the resolved credential must not be readable from the host — found in: ${hits.join(", ") || "(none)"}`,
+      ).toEqual([]);
+    } finally {
+      await handle.teardown();
+    }
+  });
+
+  // THE KILLED-WORKER CASE, which sweep() does not cover (it reconciles containers/networks against
+  // an in-process Map, never host directories — src/venue_realizer.ts) and teardown cannot be relied
+  // on for. Same setup, but WITHOUT teardown: after realize() returns, the sentinel must still be
+  // absent from the host.
+  //
+  // ★ FAILS AGAINST THE PRE-FIX CODE for the same reason — the 0600 secret file persists under the
+  // host tmpdir because teardown was the only thing that removed it.
+  it("survives the killed-worker case: nothing on the host holds the material after realize with no teardown", async () => {
+    const { dockerComposeRealizer } = await containerModule();
+    expect(dockerComposeRealizer, "the import is the specification").toBeTypeOf("function");
+    const SENTINEL = "SENTINEL-KILLED-WORKER-must-not-persist-on-disk-d4e5f6a7b8";
+    const resolve: CredentialResolver = async () => ({ "notes-token": SENTINEL });
+    const handle = await dockerComposeRealizer(NO_DAEMON).realize(NOTES_ROOM, resolve, {
+      gigId: "cccccccc-5555-6666-7777-888888888888",
+      engineServers,
+      probe: async () => ["search", "read"],
+    });
+    // Deliberately NO teardown() — this is the hard-killed drain that runs no finally.
+    const realizationDir = dirname(handle.configPath);
+    try {
+      const hits = filesContaining(realizationDir, SENTINEL);
+      expect(
+        hits,
+        `a killed worker must leave no host-readable credential — found in: ${hits.join(", ") || "(none)"}`,
+      ).toEqual([]);
+    } finally {
+      // Cleanup only, NOT teardown(): remove the leftover realization dir so the test leaves no
+      // debris, without invoking the lifecycle path the law just proved must not be depended on.
+      rmSync(realizationDir, { recursive: true, force: true });
+    }
   });
 });

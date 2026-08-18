@@ -1,0 +1,32 @@
+{
+  "slug": "engine-room-v1",
+  "institution_slug": "quartet",
+  "description": "A room serving coltrane's own MCP server from inside the container, equipping two read-only tools. It exists to make one claim checkable by execution: a seated chair is answered from INSIDE the room, not by the host engine. The proof is self-referential and lives in the sealed output rather than in an operator's event log — the room image is built from the repo genome, so an agent authored after the image was built is ABSENT from the room's roster while present on the host. A seat that browses the roster and cannot find itself is reading the room's genome; one that finds itself was answered by the host. The stdio server declares the command the room actually runs: `node /app/dist/src/server_entry.js`, the compiled engine at the room image's WORKDIR — the containerized emission execs exactly this into the held room.",
+  "flavor": "engine-read",
+  "equipment": {
+    "tools": [
+      "type_browse",
+      "agent_browse"
+    ]
+  },
+  "installs": [],
+  "credential_surface": [],
+  "lifecycle": {
+    "policy": "ephemeral"
+  },
+  "responsible_chair": "quartet.chair.responsible-officer",
+  "substrate": "container",
+  "mcp_servers": [
+    {
+      "slug": "coltrane",
+      "transport": "stdio",
+      "command": [
+        "node",
+        "/app/dist/src/server_entry.js"
+      ],
+      "credential_names": []
+    }
+  ],
+  "devices": [],
+  "architectures": []
+}

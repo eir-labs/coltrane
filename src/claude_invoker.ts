@@ -947,10 +947,11 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
     }
     // VENUE CONFINEMENT BY CONSTRUCTION. When the dispatch path resolved a room for this chair
     // (ctx.realization + ctx.venue both threaded by runGig), the spawn reflects the realization:
-    //  - `--allowedTools` carries EXACTLY venueEffectiveTools(agent, venue) — the SAME shared oracle
-    //    the compose-time R10 check refuses against (src/chart.ts), never a re-inlined intersection
-    //    and never the un-intersected grant, so runtime enforcement and compose-time refusal cannot
-    //    drift.
+    //  - `--allowedTools` carries venueEffectiveTools(agent, venue) — the SAME shared oracle the
+    //    compose-time R10 check refuses against (src/chart.ts), never a re-inlined intersection and
+    //    never the un-intersected grant, so runtime enforcement and compose-time refusal cannot
+    //    drift — with each surviving grant RESOLVED to the name its server advertises (#204). The
+    //    intersection is unchanged; only the advertised name is (narrow-then-rename, never widen).
     //  - the child env is the realization's deny-by-default allowlist (SeatRealization.env, `{}` when
     //    the surface admits nothing), so an undeclared ambient credential never reaches the child.
     // Narrowed BEFORE the in-band-seal block below, so the engine's own output_write grant — engine
@@ -958,7 +959,22 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
     // either field → the un-narrowed path above stands and no child env is constructed (INV10).
     let childEnv: Record<string, string> | undefined;
     if (ctx.realization && ctx.venue) {
-      effectiveAllowed = venueEffectiveTools(ctx.agent, ctx.venue);
+      // NARROW then RENAME. venueEffectiveTools is the shared oracle R10 refuses against; it returns
+      // the agent's RAW grant strings intersected with the room's equipment — so the CEILING decision
+      // stays on raw grants and cannot drift from the compose-time check. But those raw strings are
+      // still bare in-house slugs; advertising them un-resolved reopens #204 (a seat granting bare
+      // `type_browse` advertises `type_browse` while the engine server advertises
+      // `mcp__coltrane__type_browse`, so the call is DENIED — measured, gig 11744aa5). Resolve the
+      // ALREADY-NARROWED list so only the ADVERTISED name changes; the intersection is untouched, so
+      // the ceiling narrows, it never widens. Resolution off → keep the raw narrowed list (INV1/INV10).
+      const narrowed = venueEffectiveTools(ctx.agent, ctx.venue);
+      effectiveAllowed = resolutionEnabled
+        ? resolveAgentGrants(
+            { ...ctx.agent, allowed_tools: narrowed },
+            opts.toolProviders ?? EMPTY_TOOL_REGISTRY,
+            opts.mcpServerConfigs ?? {},
+          ).effectiveAllowed
+        : narrowed;
       const seat = ctx.realization.seats.find((s) => s.agent_slug === ctx.agent.slug);
       childEnv = seat?.env ?? {};
     } else {

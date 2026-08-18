@@ -1,0 +1,28 @@
+{
+  "slug": "room-probe-v1",
+  "domain": "venue",
+  "agent_slugs": [
+    "room-prober"
+  ],
+  "phases": [
+    {
+      "name": "probe",
+      "chairs": [
+        {
+          "role": "probe",
+          "agent_slug": "room-prober",
+          "depends_on": [],
+          "input_contract": [],
+          "output_contract": [
+            "Signal"
+          ],
+          "required_skills": []
+        }
+      ]
+    }
+  ],
+  "output_types": [
+    "Signal"
+  ],
+  "description": "One seat, one tool, one question: can a chair reach an MCP server running inside the realized room? Deliberately the thinnest standard that can carry that question — a single SENSE phase whose seat holds only type_browse — because everything interesting lives in the venue, not here. Dispatched WITHOUT a venue it is answered by the host engine; dispatched WITH a containerized venue it must be answered from inside the container or not at all. The difference between those two runs is the whole experiment."
+}

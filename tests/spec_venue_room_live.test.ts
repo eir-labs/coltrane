@@ -83,6 +83,63 @@ describe.skipIf(!HAVE_DOCKER)("a realized room is a place that exists", () => {
     }
   }, 240_000);
 
+  it("a chair in the room reaches a real genome — type_browse over the emitted transport answers >0 types", async () => {
+    const { dockerComposeRealizer } = await realizer();
+    const gigId = "livelaw03-0000-0000-0000-000000000003";
+    const handle = await dockerComposeRealizer().realize(NOTES_ROOM, noCredentials, { gigId });
+    try {
+      const cfg = handle.mcpServerConfigs["notes"] as { command: string; args: string[] };
+      expect(cfg?.command, "the engine emits a transport for the declared server").toBe("docker");
+
+      // The room the emitted config names must be RUNNING first. A zero count below can only mean
+      // "loaded an empty genome" — never "never reached the engine" — if the engine was demonstrably
+      // reachable, so this and the serverInfo check below are the non-vacuity guard.
+      const named = cfg.args.find((a) => a.includes("room"))!;
+      const state = spawnSync("docker", ["inspect", "-f", "{{.State.Status}}", named], { encoding: "utf8" });
+      expect(state.stdout.trim(), "the room must be running to be exec'd into").toBe("running");
+
+      // Drive the EMITTED transport verbatim: initialize, the initialized notification, then a real
+      // tools/call of type_browse. THE DURABLE DISCRIMINATOR IS THE PATH, NOT THE NUMBER. Before the
+      // fix the room answered count:0 and the host answered 64; after it, both answer the same roster,
+      // so a host-vs-room count gap evaporates with the defect it caught. What durably proves in-room
+      // execution is that this call travels the `docker exec` invocation INTO the room — and count>0
+      // proves the in-room engine loaded a real genome rather than the empty workspace.
+      const send = (m: unknown): string => JSON.stringify(m);
+      const input =
+        [
+          send({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "law", version: "1" } } }),
+          send({ jsonrpc: "2.0", method: "notifications/initialized" }),
+          send({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "type_browse", arguments: {} } }),
+        ].join("\n") + "\n";
+      const spoke = spawnSync(cfg.command, cfg.args, { input, encoding: "utf8", timeout: 90_000 });
+
+      // NON-VACUITY: the engine answered initialize, so it was reached. A zero count therefore means
+      // the in-room genome was empty — exactly the defect this law exists to catch — not a dead pipe.
+      expect(spoke.stdout, "the emitted transport carries a live MCP server").toContain("serverInfo");
+
+      // The tool result is wrapped as result.content[0].text holding {ok,...,data:{types,stats:{count}}}
+      // (src/server.ts CallToolRequest handler); newline-delimited JSON-RPC, one message per line.
+      type RpcReply = { id?: number; result?: { content?: Array<{ text?: string }> } };
+      const messages = spoke.stdout
+        .split("\n")
+        .filter((l) => l.trim().length > 0)
+        .map((l): RpcReply | undefined => { try { return JSON.parse(l) as RpcReply; } catch { return undefined; } })
+        .filter((m): m is RpcReply => m !== undefined);
+      const reply = messages.find((m) => m.id === 2 && m.result !== undefined);
+      expect(reply, "the room answered the type_browse tools/call over the emitted transport").toBeTruthy();
+
+      const text = reply!.result!.content?.[0]?.text ?? "";
+      const payload = JSON.parse(text) as { data?: { stats?: { count?: number } } };
+      const count = payload.data?.stats?.count;
+      expect(
+        typeof count === "number" ? count : -1,
+        "an in-room engine on a real genome answers >0 types; the empty workspace answers 0 — this is the criterion that fails against the pre-fix code",
+      ).toBeGreaterThan(0);
+    } finally {
+      await handle.teardown();
+    }
+  }, 240_000);
+
   it("teardown leaves nothing of the room behind", async () => {
     const { dockerComposeRealizer } = await realizer();
     const gigId = "livelaw02-0000-0000-0000-000000000002";

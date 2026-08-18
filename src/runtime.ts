@@ -11,6 +11,7 @@ import { loadSkillPackage } from "./skills.js";
 import { resolveModel } from "./claude_invoker.js";
 import { resolveAgentGrants, type ToolProviderRegistry } from "./tool_providers.js";
 import { resolveAndRealize, type Realization, type RealizationOk } from "./venue_realize.js";
+import type { VenueRealizer, RealizationHandle, CredentialResolver } from "./venue_realizer.js";
 import type { Venue } from "./chart.js";
 
 // core type → the process primitive that produces it (reverse of PRIMITIVE_OUTPUT_TYPE).
@@ -89,6 +90,15 @@ export interface AgentInvocationContext {
   // deny-by-default allowlist. Absent on both fields = a venue-less dispatch, unnarrowed.
   realization?: Realization | undefined;
   venue?: Venue | undefined;
+  // ── the SUBSTRATE the room was realized on (substrate → spawn wiring) ──────────
+  // When the gig's venue declares mcp_servers AND a VenueRealizer is supplied on RunDeps, runGig
+  // realizes the SUBSTRATE (not just the policy `realization` above) and threads the resulting
+  // RealizationHandle.mcpServerConfigs here — an MCP server slug → its realized transport
+  // (a `docker exec` stdio config for the containerized realizer). The Claude invoker merges these
+  // into the per-chair mcp-config so the spawn reaches the servers running INSIDE the room, not
+  // merely the policy layer. Absent = a venue with no declared servers, or no realizer wired: the
+  // spawn reaches only the deployment's base + grant-resolved servers, exactly as before.
+  substrateMcpConfigs?: Readonly<Record<string, unknown>> | undefined;
   // #turn-budget — the seated chair's turn budget, threaded from the chair (exactly as `depth`
   // is). The invoker resolves `--max-turns` as ctx.turn_budget ?? agent.max_tool_calls ?? engine
   // default. Absent = the agent's own cap stands; 0 is a deliberate hard floor, not a fall-through.
@@ -371,6 +381,29 @@ export interface RunDeps {
    *  any class present but NOT declared by the venue's `credential_surface` is a breach that fails
    *  the gig closed. Absent = none present (deny-by-default: an empty surface admits nothing). */
   credentialsPresent?: string[] | undefined;
+  /**
+   * The SUBSTRATE seam (substrate → dispatch wiring). When supplied AND the resolved venue declares
+   * `mcp_servers`, runGig realizes the substrate (a real room) alongside the policy `realization`:
+   * it calls `venueRealizer.realize(venue, credentialResolver, { gigId })`, threads the returned
+   * handle's `mcpServerConfigs` onto every chair's `AgentInvocationContext.substrateMcpConfigs` so
+   * the spawn reaches the servers running inside the room, and tears the handle down in the same
+   * finally block that tears down the policy realization.
+   *
+   * ABSENT = the substrate is skipped entirely: a venue-named gig still runs the policy gauntlet and
+   * confines its chairs by construction, exactly as before this wire existed — the room is opt-in on
+   * the deployment supplying an implementation, never mandatory. The engine ships the interface
+   * (src/venue_realizer.ts); the deployment supplies `dockerComposeRealizer()`/`localProcessRealizer()`
+   * and tests supply the daemon-free substitute (a realizer with an injected `run` seam).
+   */
+  venueRealizer?: VenueRealizer | undefined;
+  /**
+   * How the substrate realizer binds credentials into the room. Passed as the required positional
+   * `credentialResolver` argument to `venueRealizer.realize()`. Absent → `async () => ({})`, an empty
+   * resolver: the interface is satisfied without a new mandatory field, and a class the resolver does
+   * not supply reaches the room as an empty secret that fails at the service that reads it — the
+   * direction a missing credential should fail. The deployment supplies the real resolver.
+   */
+  credentialResolver?: CredentialResolver | undefined;
 }
 
 /**
@@ -923,6 +956,13 @@ export async function runGig(
   // construction, and torn down at each chair's lifecycle end.
   let gigRealization: RealizationOk | undefined;
   let gigVenue: Venue | undefined;
+  // The SUBSTRATE half of the wire. The policy realization above CONFINES a venue-named gig — it
+  // intersects the tool ceiling and refuses a breach — but stands up no room. Without this the
+  // container substrate (src/venue_realizer.ts) was unreachable from dispatch: a venue-named gig got
+  // NO ROOM, only paper confinement. When the resolved venue declares mcp_servers AND a realizer is
+  // wired, the substrate is realized here, ONCE, before any chair — and torn down beside the policy
+  // layer in the finally block below.
+  let gigSubstrate: RealizationHandle | undefined;
   if (deps.venue !== undefined) {
     const realization = resolveAndRealize(deps.venue, {
       venues: new Map(deps.venues ?? []),
@@ -939,6 +979,20 @@ export async function runGig(
     gigRealization = realization;
     // realize() only returns ok once the slug resolved, so the venue is present in the map.
     gigVenue = deps.venues?.get(deps.venue);
+
+    // Realize the SUBSTRATE only when the venue actually declares servers AND a realizer is supplied.
+    // A venue with no mcp_servers has nothing to stand up (the empty room stays free), and an absent
+    // realizer is the opt-out that keeps every pre-wire caller byte-identical. credentialResolver
+    // defaults to an empty async resolver — realize() takes it as a required positional, so undefined
+    // would throw at credential-resolution time; the empty default satisfies the interface without a
+    // new mandatory field. A bring-up failure propagates like a policy refusal: no chair spawns.
+    if (deps.venueRealizer && gigVenue && gigVenue.mcp_servers.length > 0) {
+      gigSubstrate = await deps.venueRealizer.realize(
+        gigVenue,
+        deps.credentialResolver ?? (async () => ({})),
+        { gigId: gig_id },
+      );
+    }
   }
 
   // Hash the gig input LAZILY. Three callers want it now (#196's provenance backfill, the
@@ -2315,6 +2369,10 @@ export async function runGig(
           // venue resolved, so the invoker narrows the spawn by construction; both fields stay
           // absent otherwise (the venue-less path is unchanged).
           ...(gigRealization && gigVenue ? { realization: gigRealization, venue: gigVenue } : {}),
+          // The substrate → spawn wire: when the room was actually stood up, hand the chair the
+          // realized transports (docker-exec stdio configs) so the invoker points the spawn at the
+          // servers INSIDE the room. Absent otherwise — the substrate-less path is unchanged.
+          ...(gigSubstrate ? { substrateMcpConfigs: gigSubstrate.mcpServerConfigs } : {}),
           onEvent: (ev) => {
             sink.fold(ev);
             emit({ type: "agent_event", phase: phaseName, role: chair.role, event: ev });
@@ -2803,6 +2861,18 @@ export async function runGig(
     } catch (te) {
       if (process.env["COLTRANE_DRAIN_DEBUG"]) {
         console.error(`[venue] teardown failed for gig ${gig_id}: ${te instanceof Error ? te.message : String(te)}`);
+      }
+    }
+    // BOTH LAYERS ARE TORN DOWN, INDEPENDENTLY. The substrate handle (a real compose project, for the
+    // container realizer) gets its OWN try/catch, NOT the policy teardown's: a shared one would let a
+    // throwing substrate teardown skip the policy teardown (or vice versa), and a room that outlives
+    // its gig is the leak this wire exists to close. Best-effort like the policy teardown — a throw
+    // here must not replace the gig's outcome, only surface on the drain-debug channel.
+    try {
+      await gigSubstrate?.teardown();
+    } catch (te) {
+      if (process.env["COLTRANE_DRAIN_DEBUG"]) {
+        console.error(`[venue] substrate teardown failed for gig ${gig_id}: ${te instanceof Error ? te.message : String(te)}`);
       }
     }
   }

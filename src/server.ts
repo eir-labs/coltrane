@@ -40,6 +40,7 @@ import { standardSimulate } from "./simulate.js";
 import { runGig, BudgetExhausted, GigAborted, ResumeRefused, partialGigUsage, partialBudgetState, type AgentInvoker } from "./runtime.js";
 import { createCheckpointStore, createReuseStore, type CheckpointStore, type ReuseStore } from "./reuse.js";
 import { makeClaudeInvoker, killLiveChairChildren } from "./claude_invoker.js";
+import { dockerComposeRealizer, type VenueRealizer } from "./venue_realizer.js";
 import { isDepth, DEPTHS, type Depth } from "./pricing.js";
 import type { ToolProvider } from "./tool_providers.js";
 import { ENGINE_MCP_SERVER } from "./tool_providers.js";
@@ -117,6 +118,11 @@ export interface ServerDeps {
   /** The loaded ROOMS. Consulted wherever a chart names a venue: composeChart's ceiling rule needs
    *  the room to resolve, and an unresolvable ceiling fails closed. */
   venues?: Map<string, Venue> | undefined;
+  /** The SUBSTRATE realizer a venue-with-mcp_servers gig is stood up on. Bootstrap constructs the
+   *  containerized realizer (`dockerComposeRealizer()`, real docker by default) and threads it into
+   *  the chart-path runGig deps beside `venue`, so a chart whose room declares servers gets a real
+   *  room, not paper confinement. Absent → the substrate is skipped (the pre-wire behaviour). */
+  venueRealizer?: VenueRealizer | undefined;
   invoke?: AgentInvoker | undefined;
   model_version?: string | undefined;
   // §13/skills — passed through to runGig so each invocation can resolve its
@@ -928,6 +934,11 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
             // on paper.
             ...(chartDef.venue ? { venue: chartDef.venue } : {}),
             ...(deps.venues ? { venues: deps.venues } : {}),
+            // The substrate seam, carried beside the room the arrangement named: when that room
+            // declares mcp_servers, runGig stands it up on this realizer and threads its transports
+            // onto each chair's spawn. Absent = the substrate is skipped (server-less venues, or a
+            // bare deps without a realizer wired).
+            ...(deps.venueRealizer ? { venueRealizer: deps.venueRealizer } : {}),
             ...(depth ? { depth } : {}), ...reuseWiring, ...humanWiring,
           };
           /** The ARRANGEMENT's manifest. A chart has no single genome_hash or run_fingerprint — it
@@ -3378,6 +3389,12 @@ export function bootstrapServerDeps(genomeRoot?: string): ServerDeps {
     standards: genome.standards, // ← gig_dispatch can now resolve file-defined standards
     charts: genome.charts,   // ← gig_dispatch resolves a chart_slug; chart_browse lists them
     venues: genome.venues,   // ← the ceiling a chart's venue imposes has to resolve to something
+    // The production construction of a realizer — the wire from dispatch to the container substrate.
+    // A venue-with-mcp_servers gig is stood up on this (real docker by default; the seam's `run` is
+    // the daemon-free test substitute). Before this, dockerComposeRealizer was defined and reachable
+    // from nowhere in src/, so a venue-named gig got no room. runGig only realizes when the venue
+    // declares servers, so wiring it here changes no server-less venue's behaviour.
+    venueRealizer: dockerComposeRealizer(),
     invoke: makeClaudeInvoker({
       registry,
       model: process.env["COLTRANE_MODEL"],

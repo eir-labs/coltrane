@@ -1017,8 +1017,12 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
     const extractOpts = extractOptionsForChair(sealTypes, schema);
     // per-gig mcp-config: only the deployment-permitted servers (empty by default).
     const cfgPath = join(tmpdir(), `coltrane-mcp-${randomUUID()}.json`);
-    // the base map (opts.mcpServers) + the per-agent servers its grants resolved to (#185).
-    const servers = { ...(opts.mcpServers ?? {}), ...resolvedMcpServers };
+    // the base map (opts.mcpServers) + the per-agent servers its grants resolved to (#185) + the
+    // SUBSTRATE transports the room was realized on (ctx.substrateMcpConfigs). The room's servers
+    // come last so a realized docker-exec transport for a venue's declared server wins over any
+    // grant-resolved entry of the same slug — the spawn reaches the server running INSIDE the room,
+    // not merely the policy layer. Absent substrate = the prior two-way merge exactly.
+    const servers = { ...(opts.mcpServers ?? {}), ...resolvedMcpServers, ...(ctx.substrateMcpConfigs ?? {}) };
     const parent = opts.parent_session_id;
     // Per-server env additions: parent_session_id into every server (so children seal lineage), and
     // COLTRANE_OUTPUT_WRITE_MODE=validate into the ENGINE server on the output_write-seal path — so

@@ -1,11 +1,12 @@
 {
   "slug": "engine-room-v1",
   "institution_slug": "quartet",
-  "description": "A room that serves coltrane's own MCP server from inside the container, equipping exactly one tool. NOTE ON THE COMMAND FIELD, which is not what it appears: the containerized emission does not run this command. Every stdio server in a realized room is reached as `docker exec … node /app/dist/src/server_entry.js` regardless of what the contract declares — and declaring that real path here is REFUSED by the renderer's value scan as an absolute host path outside the per-realization directory. So the honest declaration is unrepresentable and this placeholder stands in its place. That contradiction between the contract field and the emission is a known defect, recorded here rather than papered over.",
+  "description": "A room serving coltrane's own MCP server from inside the container, equipping two read-only tools. It exists to make one claim checkable by execution: a seated chair is answered from INSIDE the room, not by the host engine. The proof is self-referential and lives in the sealed output rather than in an operator's event log — the room image is built from the repo genome, so an agent authored after the image was built is ABSENT from the room's roster while present on the host. A seat that browses the roster and cannot find itself is reading the room's genome; one that finds itself was answered by the host. NOTE ON THE COMMAND FIELD: the containerized emission does not run it. Every stdio server in a realized room is reached as `docker exec … node /app/dist/src/server_entry.js`, and declaring that real path here is refused by the renderer's value scan as an absolute host path — so the honest declaration is unrepresentable and this placeholder stands in for it. That contradiction is a known defect, recorded rather than papered over.",
   "flavor": "engine-read",
   "equipment": {
     "tools": [
-      "type_browse"
+      "type_browse",
+      "agent_browse"
     ]
   },
   "installs": [],

@@ -44,9 +44,9 @@
 // first, and one compile error would stop every band from running — at which point nobody could
 // tell a pending spec from a regression).
 import { describe, it, expect, vi } from "vitest";
-import { mkdtempSync, writeFileSync, readFileSync, existsSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync, readdirSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { VenueSchema } from "../src/genome_schema.js";
 import { assertToolGrantsResolvable, ENGINE_MCP_SERVER, type ToolProvider, type ToolProviderRegistry } from "../src/tool_providers.js";
 
@@ -149,6 +149,20 @@ const NOTES_ROOM = {
 const NO_DAEMON = { run: () => {} };
 
 const noCredentials: CredentialResolver = async () => ({});
+
+/** Recursively collect every file under `dir` whose bytes contain `needle` — the only honest way to
+ *  ask "is this credential readable from the host filesystem". A path the realizer already removed
+ *  simply contributes nothing. */
+function filesContaining(dir: string, needle: string): string[] {
+  if (!existsSync(dir)) return [];
+  const hits: string[] = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) hits.push(...filesContaining(full, needle));
+    else if (entry.isFile() && readFileSync(full, "utf8").includes(needle)) hits.push(full);
+  }
+  return hits;
+}
 
 describe("GAP 2 — a venue declares what provides its tools", () => {
   // The declaration itself. VenueSchema is .strict(), so today this key is REJECTED rather than
@@ -540,6 +554,79 @@ describe("GAP 2 — a chair reaches a tool inside the containerized room", () =>
       );
     } finally {
       await handle.teardown();
+    }
+  });
+});
+
+// ── THE CREDENTIAL IS NEVER READABLE FROM THE HOST WHILE THE ROOM RUNS ──────────────────────────
+//
+// A compose file-secret is a BIND MOUNT: the material must stay on the host for the room's whole
+// life, where a seat running as the invoking user — which holds Bash and can derive the path from
+// the gig id — can read off disk exactly what src/claude_invoker.ts's withoutBoxCredentials strips
+// from the environment. The fix delivers the material INTO the container instead (docker cp into the
+// created-but-not-started room), so nothing readable from the host holds it while the room runs.
+//
+// These two laws run under NO_DAEMON on purpose: the exposure is the HOST-SIDE write, which happened
+// before `compose up` and needs no daemon to prove — so the property is checkable in every ordinary
+// `npx vitest run` and fails cleanly on the pre-fix commit.
+describe("GAP 2 — a resolved credential is never readable from the host filesystem", () => {
+  // A KNOWN SENTINEL is what the resolver returns for the declared class. While the handle is live,
+  // scan the whole realization directory and assert the sentinel is in NO file.
+  //
+  // ★ FAILS AGAINST THE PRE-FIX CODE, which wrote the sentinel to <realizationDir>/secrets/<class>
+  // at mode 0600 (the compose file-secret source) — so the scan finds it there and the law is red.
+  it("no file under the realization directory holds the resolved material while the room is up", async () => {
+    const { dockerComposeRealizer } = await containerModule();
+    expect(dockerComposeRealizer, "the import is the specification").toBeTypeOf("function");
+    const SENTINEL = "SENTINEL-CREDENTIAL-VALUE-must-never-touch-the-host-a1b2c3d4e5";
+    const resolve: CredentialResolver = async () => ({ "notes-token": SENTINEL });
+    const handle = await dockerComposeRealizer(NO_DAEMON).realize(NOTES_ROOM, resolve, {
+      gigId: "cccccccc-1111-2222-3333-444444444444",
+      engineServers,
+      probe: async () => ["search", "read"],
+    });
+    try {
+      // configPath is the compose.yaml the realizer wrote; its directory IS the realization dir.
+      const realizationDir = dirname(handle.configPath);
+      const hits = filesContaining(realizationDir, SENTINEL);
+      expect(
+        hits,
+        `the resolved credential must not be readable from the host — found in: ${hits.join(", ") || "(none)"}`,
+      ).toEqual([]);
+    } finally {
+      await handle.teardown();
+    }
+  });
+
+  // THE KILLED-WORKER CASE, which sweep() does not cover (it reconciles containers/networks against
+  // an in-process Map, never host directories — src/venue_realizer.ts) and teardown cannot be relied
+  // on for. Same setup, but WITHOUT teardown: after realize() returns, the sentinel must still be
+  // absent from the host.
+  //
+  // ★ FAILS AGAINST THE PRE-FIX CODE for the same reason — the 0600 secret file persists under the
+  // host tmpdir because teardown was the only thing that removed it.
+  it("survives the killed-worker case: nothing on the host holds the material after realize with no teardown", async () => {
+    const { dockerComposeRealizer } = await containerModule();
+    expect(dockerComposeRealizer, "the import is the specification").toBeTypeOf("function");
+    const SENTINEL = "SENTINEL-KILLED-WORKER-must-not-persist-on-disk-d4e5f6a7b8";
+    const resolve: CredentialResolver = async () => ({ "notes-token": SENTINEL });
+    const handle = await dockerComposeRealizer(NO_DAEMON).realize(NOTES_ROOM, resolve, {
+      gigId: "cccccccc-5555-6666-7777-888888888888",
+      engineServers,
+      probe: async () => ["search", "read"],
+    });
+    // Deliberately NO teardown() — this is the hard-killed drain that runs no finally.
+    const realizationDir = dirname(handle.configPath);
+    try {
+      const hits = filesContaining(realizationDir, SENTINEL);
+      expect(
+        hits,
+        `a killed worker must leave no host-readable credential — found in: ${hits.join(", ") || "(none)"}`,
+      ).toEqual([]);
+    } finally {
+      // Cleanup only, NOT teardown(): remove the leftover realization dir so the test leaves no
+      // debris, without invoking the lifecycle path the law just proved must not be depended on.
+      rmSync(realizationDir, { recursive: true, force: true });
     }
   });
 });

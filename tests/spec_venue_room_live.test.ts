@@ -53,6 +53,19 @@ const NOTES_ROOM = {
 
 const noCredentials = async () => ({});
 
+/** A room that DECLARES a credential class, so delivery can be proven end to end. `notes-token` is a
+ *  placeholder class (this repo is public); the resolver binds a KNOWN SENTINEL to it. */
+const CREDENTIALED_ROOM = {
+  slug: "credentialed-room-v1",
+  institution_slug: "quartet",
+  equipment: { tools: ["mcp__notes__search"] },
+  credential_surface: ["notes-token"],
+  mcp_servers: [
+    { slug: "notes", transport: "stdio" as const, command: ["node", "/app/dist/src/server_entry.js"], credential_names: ["notes-token"] },
+  ],
+  lifecycle: { policy: "ephemeral" as const },
+};
+
 async function realizer() {
   return await import("../src/venue_realizer.js");
 }
@@ -138,6 +151,49 @@ describe.skipIf(!HAVE_DOCKER)("a realized room is a place that exists", () => {
         typeof count === "number" ? count : -1,
         "an in-room engine on a real genome answers >0 types; the empty workspace answers 0 — this is the criterion that fails against the pre-fix code",
       ).toBeGreaterThan(0);
+    } finally {
+      await handle.teardown();
+    }
+  }, 240_000);
+
+  // ★ THE DELIVERY GUARD. The host-filesystem laws (tests/spec_venue_realization.test.ts) prove the
+  // credential is NOT readable from the host; this proves the fix did not close that exposure by
+  // BREAKING delivery. Stand a room up with a declared credential class, confirm the room is running
+  // (non-vacuity — a read from a dead container proves nothing), then read the material from INSIDE
+  // the container. Delivery is now `docker cp` into the created-but-not-started room, not a compose
+  // file-secret; this law fails if that copy stops landing a readable /run/secrets/<class>.
+  //
+  // Read via `docker exec cat /run/secrets/<class>` rather than an MCP tool: the motivating venue
+  // ci-deploy-room-v1 carries no mcp_servers a tool-read could ride, so the file path is the general
+  // channel. /run/secrets/<class> is where a compose file-secret landed and where the fix preserves
+  // the copy, so a reader in the room is unchanged by the delivery move.
+  it("a declared credential is delivered into the room and readable there — delivery survives the fix", async () => {
+    const { dockerComposeRealizer } = await realizer();
+    const gigId = "livelaw04-0000-0000-0000-000000000004";
+    const SENTINEL = "live-credential-sentinel-9f3a7c";
+    const resolve = async () => ({ "notes-token": SENTINEL });
+    const handle = await dockerComposeRealizer().realize(CREDENTIALED_ROOM, resolve, { gigId });
+    try {
+      const cfg = handle.mcpServerConfigs["notes"] as { command: string; args: string[] };
+      expect(cfg?.command, "the engine emits a transport for the declared server").toBe("docker");
+
+      // NON-VACUITY: the room the emitted config names must be RUNNING first, or a failed read below
+      // would pass for the wrong reason (a dead container reads nothing either).
+      const room = cfg.args.find((a) => a.includes("room"))!;
+      const state = spawnSync("docker", ["inspect", "-f", "{{.State.Status}}", room], { encoding: "utf8" });
+      expect(state.stdout.trim(), "the room must be running to prove its credential is readable inside").toBe(
+        "running",
+      );
+
+      // The material must be present and readable from INSIDE the container — the room reading its own
+      // credential. Closing the host exposure by breaking delivery would fail exactly here.
+      const read = spawnSync("docker", ["exec", room, "cat", "/run/secrets/notes-token"], { encoding: "utf8" });
+      expect(read.status, "docker exec cat /run/secrets/notes-token — the credential must exist inside the room").toBe(
+        0,
+      );
+      expect(read.stdout, "the room still reads its declared credential after the exposure is closed").toContain(
+        SENTINEL,
+      );
     } finally {
       await handle.teardown();
     }

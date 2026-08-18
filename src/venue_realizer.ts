@@ -12,7 +12,7 @@
 // fields CONTAIN. Rendering a runtime configuration from contract data is code generation from data,
 // and if any part of the input is reachable by a gig, a permissive renderer is remote code execution
 // with extra steps.
-import { existsSync, writeFileSync, rmSync, mkdirSync } from "node:fs";
+import { existsSync, writeFileSync, rmSync, mkdirSync, mkdtempSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -347,13 +347,17 @@ export function renderComposeConfig(
   // correct — class present, material absent, no forbidden setting. The defect lived one step later,
   // in how Compose INTERPRETS it. Verifying the artifact is not verifying the behaviour.
   //
-  // So credentials are declared as SECRETS. A secret is a file at /run/secrets/<class>, never an
-  // interpolated string: shell parameter-expansion semantics stop being part of the threat model,
-  // the value is absent from `docker inspect` and from the container's environment, and the class
-  // name is a filename rather than something a shell parses. The material is bound by the resolver
-  // at realization; nothing here reads a value.
-  const secretNames = [...v.credential_surface];
-
+  // So credential CLASSES are DECLARED (in the room metadata below and on each server) and never
+  // interpolated: a class name is data the contract owns, so shell parameter-expansion semantics stop
+  // being part of the threat model at all. The MATERIAL is in neither this document nor a host
+  // bind-mount. The earlier mechanism wrote each resolved value to `<realizationDir>/secrets/<class>`
+  // and declared it as a compose file-secret — but a compose file-secret is a BIND MOUNT, not a copy:
+  // measured, deleting the host file makes the in-room read fail immediately, so the material had to
+  // stay on the host for the room's ENTIRE life, where a seat running as the invoking user could read
+  // it off disk (defeating withoutBoxCredentials, which strips the same value from the environment).
+  // So this document no longer declares a file-backed secret at all; dockerComposeRealizer copies the
+  // material straight into the container's own filesystem at realization (`docker cp` into the
+  // created-but-not-started room), and nothing readable from the host holds it while the room runs.
   const room: Record<string, unknown> = {
     image: v.floor ? `coltrane/floor:${v.floor}` : "coltrane/room:ephemeral",
     working_dir: workspace,
@@ -367,9 +371,9 @@ export function renderComposeConfig(
     command: ["sleep", "infinity"],
     // Source AND target derived from the realization dir; no absolute path in the document is not.
     volumes: [`${workspace}:${workspace}:rw`],
-    // The room is granted the classes it may READ, by name. No environment entry carries a
-    // credential: a secret arrives as a file the realizer binds, never as an interpolated string.
-    ...(secretNames.length > 0 ? { secrets: secretNames } : {}),
+    // No `secrets:` reference and no environment entry carries a credential — the material is copied
+    // into this container's own filesystem at realization (see dockerComposeRealizer), not bound from
+    // a host file. The classes the room may READ are declared in `x-coltrane-room.credential_classes`.
     // An internal network, never host networking: the room's network boundary stays the room's.
     networks: ["room-net"],
     // A log bound from the realizer, NOT a venue-substitutable field — a room may not raise its own
@@ -428,7 +432,9 @@ export function renderComposeConfig(
       image: v.floor ? `coltrane/floor:${v.floor}` : "coltrane/room:ephemeral",
       ...(s.command.length > 0 ? { command: s.command } : {}),
       networks: ["room-net"],
-      ...(s.credential_names.length > 0 ? { secrets: [...s.credential_names] } : {}),
+      // The classes this server may read are declared in `x-coltrane-room.mcp_servers[].credential_names`;
+      // the material is copied into this container's filesystem at realization, never bound from a host
+      // file — so there is no `secrets:` reference here either.
       logging: { driver: "json-file", options: { "max-size": "10m", "max-file": "3" } },
       labels: {
         "coltrane.managed": "true",
@@ -444,16 +450,10 @@ export function renderComposeConfig(
     name: projectName,
     services: { room, ...serverServices },
     networks: { "room-net": { internal: true } },
-    // Each class is declared as a file the realizer writes under the per-realization directory —
-    // derived, never carried from the contract, and never an interpolated string. The material is
-    // written at realization from the resolver and is absent from this document.
-    ...(secretNames.length > 0
-      ? {
-          secrets: Object.fromEntries(
-            secretNames.map((cls) => [cls, { file: `${realizationDir}/secrets/${cls}` }]),
-          ),
-        }
-      : {}),
+    // No top-level `secrets:` block. A compose file-secret needs a host-file source, and that source
+    // is a bind mount that keeps the material readable on the host for the room's whole life — the
+    // exact exposure this realizer now closes by copying the material into the container instead. The
+    // credential CLASSES stay declared, in `x-coltrane-room` above; only the material's delivery moved.
   };
 }
 
@@ -506,6 +506,59 @@ export function composeProjectName(realizationDir: string): string {
 
 export function roomContainerName(realizationDir: string): string {
   return `${composeProjectName(realizationDir)}-room-1`;
+}
+
+/** The container docker compose names for a declared SERVER service — same `{project}-{service}-1`
+ *  default as the room, with the server's slug as the service. The credential-delivery step copies
+ *  each server's own classes into this container, mirroring where the prior compose file-secret was
+ *  mounted, so a server that reads /run/secrets/<class> is unchanged by the delivery move. */
+export function serverContainerName(realizationDir: string, slug: string): string {
+  return `${composeProjectName(realizationDir)}-${slug}-1`;
+}
+
+/** Deliver resolved credential material INTO a container's own filesystem, never onto a host
+ *  bind-mount. Each class becomes a file at `/run/secrets/<class>` inside `container`, copied there by
+ *  `docker cp` — which, into a container that has been CREATED but not yet STARTED, is a real copy
+ *  (measured: copy a file in, delete the host copy, start the container, the file is still there),
+ *  unlike a compose file-secret, which is a bind mount that keeps the material on the host for the
+ *  room's whole life.
+ *
+ *  The staging directory lives OUTSIDE the realization directory and is removed in the `finally`
+ *  BEFORE `docker compose start`, so the material is on the host only during the created-not-running
+ *  window and is gone before any process in the room — or any seat reading the host as the invoking
+ *  user — could observe it while the room runs. This is the property the change exists for; it also
+ *  covers the killed-worker case, because after realize() returns nothing on the host holds the value
+ *  whether or not teardown ever runs.
+ *
+ *  Mode 0o444, not 0o600: `docker cp` does not reliably reassign ownership to the container user (uid
+ *  1000, USER node), and a 0600 root-owned copy read back "Permission denied" inside the room. Making
+ *  the copy world-readable makes the in-room read depend on the file mode rather than on whichever uid
+ *  the copy lands as — and inside the container, where only the room's own processes can see it, that
+ *  is simply the room reading its own credential. */
+function deliverCredentialFiles(
+  run: ComposeRunner,
+  container: string,
+  classes: readonly string[],
+  material: Record<string, string>,
+): void {
+  if (classes.length === 0) return;
+  const staging = mkdtempSync(join(tmpdir(), "coltrane-cred-stage-"));
+  try {
+    const secretsDir = join(staging, "secrets");
+    mkdirSync(secretsDir);
+    for (const cls of classes) {
+      // A class the resolver did not supply gets an EMPTY file, never a value inherited from the host
+      // environment — an empty credential fails at the service that reads it, the right direction for
+      // a missing secret to fail.
+      writeFileSync(join(secretsDir, cls), material[cls] ?? "", { mode: 0o444 });
+    }
+    // `/run` exists in the room image; copying the `secrets` directory INTO it yields
+    // `/run/secrets/<class>` — the same path the compose file-secret used, so the in-room reader is
+    // unchanged and only the delivery mechanism moved off the host.
+    run(["cp", secretsDir, `${container}:/run`], 120_000);
+  } finally {
+    rmSync(staging, { recursive: true, force: true });
+  }
 }
 
 /** Builds the spawn's MCP map. `roomContainer` names the substrate: absent = the local-process path,
@@ -809,35 +862,54 @@ export function dockerComposeRealizer(opts?: { run?: ComposeRunner }): VenueReal
       });
 
       mkdirSync(join(realizationDir, "workspace"), { recursive: true });
-      mkdirSync(join(realizationDir, "secrets"), { recursive: true });
-      // A file per declared class, mode 0600. A class the resolver did not supply gets an EMPTY
-      // file, never a value inherited from the host environment: an empty credential fails at the
-      // service that reads it, which is the direction a missing secret should fail.
-      //
-      // OPEN, AND STATED RATHER THAN LEFT TO BE DISCOVERED: this material is on disk from here
-      // until teardown removes the directory, and a KILLED WORKER RUNS NO TEARDOWN — the same hole
-      // `sweep` exists to close for containers and networks. sweep does not yet collect realization
-      // directories, so a hard-killed drain leaves a 0600 credential file under the host tmpdir
-      // until something reaps it. The residue is real; it is not a claim this realizer keeps.
-      for (const cls of v.credential_surface) {
-        writeFileSync(join(realizationDir, "secrets", cls), material[cls] ?? "", { mode: 0o600 });
-      }
+      // NO host secrets directory and no per-class file on the host. The former mechanism wrote each
+      // resolved credential to <realizationDir>/secrets/<class> at mode 0600 and declared it as a
+      // compose file-secret — but a compose file-secret is a BIND MOUNT, not a copy. Measured: stand
+      // the room up, read /run/secrets/<class> inside it, delete the host file, read again — the read
+      // fails IMMEDIATELY. So the material had to remain on the host for the room's ENTIRE life, where
+      // a seat runs as the invoking user, holds Bash, and can derive the path from the gig id: the
+      // filesystem readable exactly what withoutBoxCredentials strips from the environment. And a
+      // killed worker runs no teardown, so the 0600 file then persisted under the host tmpdir
+      // indefinitely. The material is instead copied straight into the container's own filesystem
+      // below (docker cp into the created-but-not-started room), so nothing readable from the host
+      // holds it while the room runs, and nothing is left behind if this worker is killed.
 
       const composePath = join(realizationDir, "compose.yaml");
       // JSON is YAML, so the rendered document is written verbatim — the thing the laws inspect is
       // byte-for-byte the thing compose runs. No second serialization to drift from the first.
       writeFileSync(composePath, JSON.stringify(doc, null, 2));
 
+      const roomContainer = roomContainerName(realizationDir);
       try {
-        run(["compose", "-f", composePath, "up", "-d"], 180_000);
+        // CREATE → DELIVER → START, three steps where there used to be one `up -d`: the credential
+        // has to land AFTER the container filesystem exists and BEFORE the room's processes run. A
+        // `docker cp` into a CREATED-but-not-yet-STARTED container is a real copy into the container's
+        // own filesystem, unlike the bind mount a compose file-secret would have been.
+        run(["compose", "-f", composePath, "create"], 180_000);
+        // The room reads the whole surface it was granted; each server reads only the classes it
+        // declared. Both are copied straight into the container filesystem at /run/secrets/<class>.
+        deliverCredentialFiles(run, roomContainer, v.credential_surface, material);
+        for (const s of v.mcp_servers) {
+          deliverCredentialFiles(run, serverContainerName(realizationDir, s.slug), s.credential_names, material);
+        }
+        run(["compose", "-f", composePath, "start"], 120_000);
       } catch (e) {
+        // The new intermediate state: a container CREATED but never STARTED (a failed cp or start).
+        // Remove it so the create→start split cannot turn a stand-up failure into an orphaned
+        // container or network. `down` is best-effort — the stand-up already failed — and the throw
+        // below is the report the caller acts on.
+        try {
+          run(["compose", "-f", composePath, "down", "-v", "--remove-orphans"], 120_000);
+        } catch {
+          /* best-effort: the reap is a courtesy on an already-failed stand-up, not a guarantee */
+        }
+        rmSync(realizationDir, { recursive: true, force: true });
         const err = e as { stderr?: Buffer };
         throw new VenueHostUnsuitable(
           `venue "${v.slug}" could not be stood up: ${err.stderr?.toString().trim() ?? String(e)}`,
         );
       }
 
-      const roomContainer = roomContainerName(realizationDir);
       const configs = await buildMcpConfigs(v, opts, roomContainer);
       const artifacts: RealizedArtifact[] = [
         { kind: "compose-project", id: `compose-${opts.gigId}-${ARTIFACT_SEQ++}`, labels: { gig_id: opts.gigId, instance: INSTANCE } },

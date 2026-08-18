@@ -223,10 +223,29 @@ export function floorIdentity(venue: unknown): string {
  *  start a second container with the host filesystem mounted. */
 const RUNTIME_SOCKET = /docker\.sock|containerd\.sock|podman\.sock|\/var\/run\/docker/i;
 
+/** The room image's engine root — `WORKDIR /app` in Dockerfile.room, where the compiled engine and
+ *  the base genome live. An absolute path under here is a path in the ROOM IMAGE's filesystem, NOT a
+ *  host path: naming a binary here names where it lives INSIDE the image the venue declared, which
+ *  the contract is entitled to do; it is not an arbitrary host path to mount or expose. */
+const ROOM_IMAGE_ROOT = "/app";
+
+/** Which filesystem namespace an absolute path in `value` names. A COMMAND token of a containerized
+ *  server names the ROOM IMAGE (`room-image`); every other field — and every path that becomes a
+ *  mount source or an exposure — names the HOST (`host`). The two are different trust domains, and
+ *  the defect this distinction fixes was conflating them: the scan treated `/app` as a host path and
+ *  so refused the only honest command a containerized stdio server could declare. */
+type PathNamespace = "host" | "room-image";
+
 /** A single value about to be emitted through an allowlisted field, checked for what an allowlist
- *  over field NAMES cannot see. A runtime socket anywhere, or an absolute host path not derived from
- *  the per-realization directory, is refused by NAME. */
-function assertValueRenderable(field: string, value: string, realizationDir: string): void {
+ *  over field NAMES cannot see. A runtime socket anywhere is refused in BOTH namespaces; an absolute
+ *  path is refused as a host path unless it is derived from the per-realization directory or, in the
+ *  room-image namespace, lives under the room image's engine root. */
+function assertValueRenderable(
+  field: string,
+  value: string,
+  realizationDir: string,
+  namespace: PathNamespace = "host",
+): void {
   if (RUNTIME_SOCKET.test(value)) {
     throw new VenueRenderRefusal({
       forbidden: value,
@@ -236,17 +255,40 @@ function assertValueRenderable(field: string, value: string, realizationDir: str
         `inside the room is the end of the room, allowlisted field or not`,
     });
   }
-  // An absolute host path outside the realization dir has exactly one meaning — see the host —
-  // whichever field it arrived in. Paths derived from the per-realization directory are the only
-  // absolute paths a room may name.
-  if (value.startsWith("/") && !value.startsWith(realizationDir)) {
-    throw new VenueRenderRefusal({
-      forbidden: value,
-      field,
-      message:
-        `field "${field}" carries the absolute host path "${value}", which is outside the ` +
-        `per-realization directory — an arbitrary host path chosen by whoever wrote the contract`,
-    });
+  if (value.startsWith("/")) {
+    // TWO NAMESPACES, AND THE CONFLATION FIXED AT ITS SITE. A path derived from the per-realization
+    // directory is always allowed — it is the room's own workspace. Beyond that:
+    //   host namespace  — an absolute path is a HOST path with exactly one meaning (see the host),
+    //                     whichever field it arrived in, and is refused. This is the protection the
+    //                     contract must not be able to defeat by naming an arbitrary mount source or
+    //                     exposure; the law that pins it is
+    //                     tests/spec_venue_realization_substrate.test.ts:540-556 ("refuses an
+    //                     absolute host path outside the realization directory"), left UNMODIFIED.
+    //   room-image ns   — a COMMAND token of a containerized server names WHERE A BINARY LIVES INSIDE
+    //                     the room image the venue declared. A path under the image's engine root
+    //                     (/app, Dockerfile.room WORKDIR) is representable: it is not a host path at
+    //                     all, so refusing it forced venues to ship a placeholder command nothing
+    //                     runs. Any OTHER absolute path — /etc, a mount source — is still a host path
+    //                     even in a command token, and still refused here.
+    //
+    // DIRECTION 1 (honour the declared command) chosen over Direction 2 (refuse a command for a
+    // containerized stdio server at authoring time): it leaves VenueSchema Rule 2 (a stdio server
+    // owes a command) unchanged, keeps the compose-service `command` source intact, and fixes the
+    // host/room-image conflation at the exact predicate where it lived rather than burying the root
+    // cause under a schema gate. The RUNTIME_SOCKET guard above still covers BOTH namespaces: a
+    // docker.sock inside a room still escapes the container, so it is refused even as a command token.
+    const underRealizationDir = value.startsWith(realizationDir);
+    const underRoomImage =
+      namespace === "room-image" && (value === ROOM_IMAGE_ROOT || value.startsWith(`${ROOM_IMAGE_ROOT}/`));
+    if (!underRealizationDir && !underRoomImage) {
+      throw new VenueRenderRefusal({
+        forbidden: value,
+        field,
+        message:
+          `field "${field}" carries the absolute host path "${value}", which is outside the ` +
+          `per-realization directory — an arbitrary host path chosen by whoever wrote the contract`,
+      });
+    }
   }
 }
 
@@ -273,7 +315,10 @@ export function renderComposeConfig(
   for (const server of v.mcp_servers) {
     assertValueRenderable("mcp_servers", server.slug, realizationDir);
     assertValueRenderable("mcp_servers", server.transport, realizationDir);
-    for (const token of server.command) assertValueRenderable("mcp_servers", token, realizationDir);
+    // Command tokens name the ROOM IMAGE: an in-image absolute path (under /app) is where the server
+    // binary lives inside the image the venue declared, so it is representable — while a host path or
+    // a runtime socket smuggled through the same field is still refused. See assertValueRenderable.
+    for (const token of server.command) assertValueRenderable("mcp_servers", token, realizationDir, "room-image");
     for (const cls of server.credential_names) assertValueRenderable("credential_names", cls, realizationDir);
   }
 
@@ -483,24 +528,36 @@ function buildMcpConfigs(
       if (opts.probe) await opts.probe({ slug: server.slug });
       if (roomContainer && server.transport === "stdio") {
         // The proven path: `docker exec -i -e COLTRANE_SERVER_DIRECT=1 -e COLTRANE_GENOME=/app
-        // <container> node dist/src/server_entry.js` speaks MCP over stdio into the running room — no
-        // published port, no HTTP server, no network. sse ({url}) servers keep their existing handling.
+        // <container> <server.command…>` speaks MCP over stdio into the running room — no published
+        // port, no HTTP server, no network. sse ({url}) servers keep their existing handling.
+        //
+        // THE DECLARED COMMAND IS WHAT RUNS. It is appended verbatim after the two -e flags, so a
+        // venue declaring `['node','/app/dist/src/server_entry.js']` gets exactly that exec'd into its
+        // room, and a venue declaring a different server gets a different one. This path formerly
+        // hardcoded `node /app/dist/src/server_entry.js` and DISCARDED whatever the contract declared
+        // — a venue could name a server the room would never run, and coltrane's own engine answered
+        // under any slug. renderComposeConfig already scans every command token; it now scans them in
+        // the room-image namespace (see assertValueRenderable), so an in-image absolute path is
+        // representable and the token is validated before it reaches here.
+        //
+        // ★ WHY THE DECLARED COMMAND NAMES AN ABSOLUTE /app PATH, AND WHY THE TWO -e FLAGS RIDE
+        // ALONGSIDE IT REGARDLESS OF WHAT THE COMMAND IS:
+        //   · ABSOLUTE, not `dist/src/server_entry.js` — the room service sets `working_dir` to the
+        //     WORKSPACE, so a relative entry path resolves against the mounted (empty) work directory
+        //     and node dies with "Cannot find module …/workspace/dist/src/server_entry.js". /app is
+        //     where the room image puts the compiled engine (Dockerfile.room WORKDIR). This is now the
+        //     venue author's contract to keep; the shipped engine-room-v1 declares exactly it.
+        //   · COLTRANE_SERVER_DIRECT=1 — emitted UNCONDITIONALLY, never gated on the command string:
+        //     without it dist/src/server_entry.js runs in RELAY mode and the failure is SILENCE. A
+        //     command that does not read the flag is unharmed; over-inclusion beats the silent hang.
+        //   · COLTRANE_GENOME=/app — makes the room serve a REAL genome. bootstrapServerDeps
+        //     (src/server.ts) resolves the genome root as `genomeRoot ?? COLTRANE_GENOME ?? cwd()`;
+        //     cwd is the empty workspace, so without this the in-room engine loads nothing and
+        //     type_browse answers count:0 against 64 on the host. Naming the root explicitly loads it
+        //     without moving the seat's correct working directory — root and working dir stay distinct.
         configs[server.slug] = {
           command: "docker",
-          // TWO -e flags, and the second is why a chair in the room can DO anything. ABSOLUTE entry
-          // path, not `dist/src/server_entry.js`: the room service sets `working_dir` to the WORKSPACE
-          // — that is the point of a workspace — so a relative path resolves against the mounted work
-          // directory and node dies with "Cannot find module …/workspace/dist/src/server_entry.js".
-          // /app is where the room image puts the compiled engine (Dockerfile.room WORKDIR).
-          //
-          // ★ COLTRANE_GENOME=/app IS WHAT MAKES THE ROOM SERVE A REAL GENOME. bootstrapServerDeps
-          // (src/server.ts) resolves the genome root as `genomeRoot ?? COLTRANE_GENOME ?? cwd()`. cwd
-          // is the workspace (working_dir, above), which is EMPTY, so without this flag the in-room
-          // engine loads nothing and type_browse answers count:0 against 64 on the host. Dockerfile.room
-          // copies the genome to /app, so naming the root EXPLICITLY — rather than moving working_dir or
-          // emitting `-w /app` — loads it without touching the seat's correct working directory: the
-          // genome root and the working directory are two different things and are kept that way here.
-          args: ["exec", "-i", "-e", "COLTRANE_SERVER_DIRECT=1", "-e", "COLTRANE_GENOME=/app", roomContainer, "node", "/app/dist/src/server_entry.js"],
+          args: ["exec", "-i", "-e", "COLTRANE_SERVER_DIRECT=1", "-e", "COLTRANE_GENOME=/app", roomContainer, ...server.command],
         };
         continue;
       }

@@ -40,10 +40,13 @@ const NOTES_ROOM = {
   institution_slug: "quartet",
   equipment: { tools: ["mcp__notes__search"] },
   credential_surface: [],
-  // The room holds; this server is exec'd into it. Its command never runs as the service's own
-  // process under the docker-exec topology, so `sleep infinity` is the honest placeholder.
+  // The room service HOLDS with its own `sleep infinity` (renderComposeConfig, the `room` service),
+  // a concern distinct from this server command. This command is what the chair docker-execs INTO the
+  // held room — the emitted argv now derives from it — so it must name a process that actually serves
+  // MCP: the compiled engine at the room image's WORKDIR. A `sleep infinity` here would make the chair
+  // exec a non-server and the initialize/type_browse laws below would get no serverInfo.
   mcp_servers: [
-    { slug: "notes", transport: "stdio" as const, command: ["sleep", "infinity"], credential_names: [] },
+    { slug: "notes", transport: "stdio" as const, command: ["node", "/app/dist/src/server_entry.js"], credential_names: [] },
   ],
   lifecycle: { policy: "ephemeral" as const },
 };

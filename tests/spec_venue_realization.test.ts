@@ -126,11 +126,15 @@ const NOTES_ROOM = {
   institution_slug: "quartet",
   equipment: { tools: ["mcp__notes__search", "mcp__notes__read"] },
   credential_surface: ["notes-token"],
+  // The declared command IS what the containerized chair docker-execs (buildMcpConfigs derives the
+  // argv from it), so it names the compiled engine at the room image's WORKDIR — an in-image
+  // absolute path, representable now that renderComposeConfig scans command tokens in the room-image
+  // namespace. The local-process path uses the same tokens as `{command: cmd[0], args: cmd.slice(1)}`.
   mcp_servers: [
     {
       slug: "notes",
       transport: "stdio" as const,
-      command: ["notes-mcp", "--stdio"],
+      command: ["node", "/app/dist/src/server_entry.js"],
       credential_names: ["notes-token"],
     },
   ],
@@ -440,5 +444,102 @@ describe("GAP 2 — a chair reaches a tool inside the containerized room", () =>
       "sleep",
       "infinity",
     ]);
+  });
+
+  // ── THE DECLARED COMMAND IS WHAT THE CHAIR RUNS ──────────────────────────────────────────────
+  //
+  // Side A of the contradiction: the emission used to hardcode `node /app/dist/src/server_entry.js`
+  // for EVERY declared stdio server and discard `server.command` — so a venue could declare one
+  // server and silently get coltrane's engine under its slug. The chair argv now DERIVES from the
+  // declared command. Non-vacuity is the whole point of the second realization: two venues declaring
+  // DISTINCT commands must emit DISTINCT argvs, or the declaration is not load-bearing.
+  it("the containerized chair argv is derived from the declared command", async () => {
+    const { dockerComposeRealizer } = await containerModule();
+    expect(dockerComposeRealizer, "the import is the specification").toBeTypeOf("function");
+
+    // A second containerized venue declaring a DISTINCT in-image command — same slug, so the two
+    // emissions are compared under one key. Both paths live under /app (the room image), so both are
+    // representable; what must differ is the command tail the chair execs.
+    const ALT_ROOM = {
+      ...NOTES_ROOM,
+      slug: "notes-room-alt",
+      mcp_servers: [{ ...NOTES_ROOM.mcp_servers[0], command: ["node", "/app/dist/src/alt_entry.js"] }],
+    };
+
+    const notes = await dockerComposeRealizer(NO_DAEMON).realize(NOTES_ROOM, noCredentials, {
+      gigId: CONTAINERIZED_GIG,
+      engineServers,
+      probe: async () => ["search", "read"],
+    });
+    const alt = await dockerComposeRealizer(NO_DAEMON).realize(ALT_ROOM, noCredentials, {
+      gigId: CONTAINERIZED_GIG,
+      engineServers,
+      probe: async () => ["search", "read"],
+    });
+    try {
+      const notesArgs = (notes.mcpServerConfigs["notes"] as { args: string[] }).args;
+      const altArgs = (alt.mcpServerConfigs["notes"] as { args: string[] }).args;
+
+      // Each carries EXACTLY its own declared command as the exec tail.
+      expect(notesArgs.slice(-2), "the emitted tail is the venue's own declared command").toEqual([
+        "node",
+        "/app/dist/src/server_entry.js",
+      ]);
+      expect(altArgs.slice(-2), "a distinct declaration emits a distinct command").toEqual([
+        "node",
+        "/app/dist/src/alt_entry.js",
+      ]);
+      // NON-VACUITY: distinct declared command ⇒ distinct emitted argv. If these were equal the
+      // declaration would still be discarded — the exact Side-A defect, restated as a property.
+      expect(notesArgs, "the declared command influences the emission").not.toEqual(altArgs);
+
+      // The two load-bearing -e flags survive the derivation (spec at :409-425): a chair in the room
+      // still runs direct-mode against a real genome.
+      expect(notesArgs, "COLTRANE_SERVER_DIRECT=1 rides regardless of the command").toContain(
+        "COLTRANE_SERVER_DIRECT=1",
+      );
+      expect(notesArgs, "COLTRANE_GENOME=/app rides regardless of the command").toContain("COLTRANE_GENOME=/app");
+    } finally {
+      await notes.teardown();
+      await alt.teardown();
+    }
+  });
+
+  // ── THE SHIPPED VENUE DECLARES WHAT IT RUNS ──────────────────────────────────────────────────
+  //
+  // Both sides of the contradiction, measured against the fixture the live law consumes. Pre-change,
+  // realizing engine-room-v1 with the honest absolute path threw VenueRenderRefusal (Side B, the scan
+  // refused /app…), and even rendered, the emission ignored server.command (Side A, declared !=
+  // emitted). This asserts the single fact that both halves violated: the command the venue declares
+  // is the command the chair docker-execs.
+  it("the shipped engine-room-v1 declares the command its chair actually runs", async () => {
+    const { dockerComposeRealizer } = await containerModule();
+    expect(dockerComposeRealizer, "the import is the specification").toBeTypeOf("function");
+
+    const shipped = JSON.parse(
+      readFileSync(new URL("../venues/engine-room-v1.json", import.meta.url), "utf8"),
+    ) as { mcp_servers: Array<{ slug: string; command: string[] }> };
+    const server = shipped.mcp_servers[0]!;
+    const declared = server.command;
+
+    // Non-vacuity: the shipped declaration is a real in-image absolute path, not a placeholder — the
+    // very thing the pre-change scan refused. A `["coltrane-server"]` placeholder would pass a naive
+    // "declared == emitted" check trivially while running nothing, so this guards against the revert.
+    expect(declared.some((t) => t.startsWith("/app")), "the shipped command names the in-image engine").toBe(true);
+
+    const handle = await dockerComposeRealizer(NO_DAEMON).realize(shipped, noCredentials, {
+      gigId: "bbbbbbbb-1111-2222-3333-444444444444",
+      engineServers,
+    });
+    try {
+      const emitted = handle.mcpServerConfigs[server.slug] as { command: string; args: string[] };
+      expect(emitted.command, "a containerized stdio server is reached by docker").toBe("docker");
+      // DECLARED == EMITTED: the exec tail is exactly the command the contract declares.
+      expect(emitted.args.slice(-declared.length), "the chair execs the venue's own declared command").toEqual(
+        declared,
+      );
+    } finally {
+      await handle.teardown();
+    }
   });
 });

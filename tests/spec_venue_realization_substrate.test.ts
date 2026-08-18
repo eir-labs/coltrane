@@ -554,6 +554,61 @@ describe("GAP 6 — the renderer refuses a forbidden value smuggled through an a
     expect(() => renderComposeConfig(smuggled, { gigId: GIG, realizationDir: REALIZATION_DIR }))
       .toThrow(VenueRenderRefusal);
   });
+
+  // ── THE TWO NAMESPACES: ROOM-IMAGE PATH ALLOWED, HOST PATH STILL REFUSED ──────────────────────
+  //
+  // The renderer conflated the host and the room-image filesystems: it treated EVERY absolute path in
+  // a command token as a host path, and so refused `/app/dist/src/server_entry.js` — the only honest
+  // command a containerized stdio server could name. That is the false refusal (Side B). The fix
+  // teaches the scan the room-image namespace for command tokens: a path under the image's engine root
+  // (/app, Dockerfile.room WORKDIR) is WHERE A BINARY LIVES INSIDE the image the venue declared, so it
+  // is representable; any OTHER absolute path — /etc, a mount source — is still a host path even in a
+  // command token; and a runtime socket is still refused in either namespace. The sibling host-path
+  // guard directly above pins the protection this must NOT weaken, and it sits one screen away on
+  // purpose — a future edit that loosens one is visibly answerable to the other.
+  it("a room-image command path renders, while a host path and a socket in that same field are still refused", async () => {
+    const { renderComposeConfig, VenueRenderRefusal } = await substrate();
+    expect(renderComposeConfig, "the import is the specification").toBeTypeOf("function");
+    expect(VenueRenderRefusal, "the import is the specification").toBeTypeOf("function");
+
+    const withCommand = (command: string[]) =>
+      VenueSchema.parse({
+        ...CONTAINED_ROOM,
+        mcp_servers: [
+          { slug: "notes", transport: "stdio" as const, command, credential_names: ["notes-token"] },
+        ],
+      });
+
+    // ROOM-IMAGE PATH ALLOWED — and a REAL document renders. Non-vacuity: a room mounts its own
+    // workspace, so a defined room service is a genuine render, not an empty pass. THIS is the clause
+    // that fails against the pre-fix scan, which refused /app… as a host path.
+    const doc = renderComposeConfig(withCommand(["node", "/app/dist/src/server_entry.js"]), {
+      gigId: GIG,
+      realizationDir: REALIZATION_DIR,
+    });
+    const services = doc["services"] as Record<string, unknown>;
+    expect(services["room"], "a room-image command must render a real room service").toBeDefined();
+
+    // HOST PATH STILL REFUSED, naming it — the protection the host-path guard above pins, unweakened.
+    let caughtEtc: unknown;
+    try {
+      renderComposeConfig(withCommand(["notes-mcp", "--root", "/etc"]), { gigId: GIG, realizationDir: REALIZATION_DIR });
+    } catch (e) { caughtEtc = e; }
+    expect(caughtEtc, "an arbitrary host path in a command token is still a host path").toBeInstanceOf(
+      VenueRenderRefusal,
+    );
+    expect((caughtEtc as Error & { forbidden?: string }).forbidden, "the refusal names the host path").toBe("/etc");
+
+    // RUNTIME SOCKET STILL REFUSED in the room namespace — a docker.sock inside a room still escapes.
+    expect(
+      () =>
+        renderComposeConfig(withCommand(["notes-mcp", "--socket", "/var/run/docker.sock"]), {
+          gigId: GIG,
+          realizationDir: REALIZATION_DIR,
+        }),
+      "the socket guard covers both namespaces",
+    ).toThrow(VenueRenderRefusal);
+  });
 });
 
 describe("GAP 6 — credentials reach the room only through the resolver", () => {

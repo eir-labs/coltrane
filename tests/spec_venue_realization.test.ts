@@ -393,16 +393,20 @@ describe("GAP 2 — a chair reaches a tool inside the containerized room", () =>
       command: "docker",
       // ABSOLUTE. The room service's working_dir is the workspace, so a relative entry path
       // resolves under the mount and node cannot find it — measured against a live room, not read.
-      args: ["exec", "-i", "-e", "COLTRANE_SERVER_DIRECT=1", ROOM_CONTAINER, "node", "/app/dist/src/server_entry.js"],
+      // COLTRANE_GENOME=/app rides beside COLTRANE_SERVER_DIRECT=1: cwd is the empty workspace, so
+      // without an explicit root the in-room engine resolves its genome to nothing and serves count:0.
+      args: ["exec", "-i", "-e", "COLTRANE_SERVER_DIRECT=1", "-e", "COLTRANE_GENOME=/app", ROOM_CONTAINER, "node", "/app/dist/src/server_entry.js"],
     });
     await handle.teardown();
   });
 
-  // ★ THE SILENT-RELAY GUARD. Without COLTRANE_SERVER_DIRECT=1, dist/src/server_entry.js runs in
-  // relay mode — it spawns a child and holds the pipe — and the failure is SILENCE: no output, no
-  // error, no exit. It cost a debugging cycle to find. Every containerized emission must carry the
-  // flag, so this law holds the presence of the exact string on the path that would otherwise hang.
-  it("every containerized emission carries COLTRANE_SERVER_DIRECT=1", async () => {
+  // ★ THE SILENT-RELAY GUARD, AND THE EMPTY-GENOME GUARD BESIDE IT. Without COLTRANE_SERVER_DIRECT=1,
+  // dist/src/server_entry.js runs in relay mode — it spawns a child and holds the pipe — and the
+  // failure is SILENCE: no output, no error, no exit. Without COLTRANE_GENOME=/app the engine that
+  // does start resolves its genome root to cwd, which is the empty workspace, and serves count:0. Both
+  // flags are load-bearing and both are asserted here, on the one path that would otherwise hang or
+  // stand up an engine that knows nothing — so a future edit cannot drop either without a red law.
+  it("every containerized emission carries COLTRANE_SERVER_DIRECT=1 and COLTRANE_GENOME=/app", async () => {
     const { dockerComposeRealizer } = await containerModule();
     expect(dockerComposeRealizer, "the import is the specification").toBeTypeOf("function");
     const handle = await dockerComposeRealizer(NO_DAEMON).realize(NOTES_ROOM, noCredentials, {
@@ -413,6 +417,9 @@ describe("GAP 2 — a chair reaches a tool inside the containerized room", () =>
     const notes = handle.mcpServerConfigs["notes"] as { args?: readonly string[] };
     expect(notes.args ?? [], "omitting the flag selects relay mode, whose failure is silence").toContain(
       "COLTRANE_SERVER_DIRECT=1",
+    );
+    expect(notes.args ?? [], "omitting the genome root leaves the in-room engine on an empty workspace").toContain(
+      "COLTRANE_GENOME=/app",
     );
     await handle.teardown();
   });

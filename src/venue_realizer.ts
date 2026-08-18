@@ -482,17 +482,25 @@ function buildMcpConfigs(
     for (const server of v.mcp_servers) {
       if (opts.probe) await opts.probe({ slug: server.slug });
       if (roomContainer && server.transport === "stdio") {
-        // The proven path: `docker exec -i -e COLTRANE_SERVER_DIRECT=1 <container> node
-        // dist/src/server_entry.js` speaks MCP over stdio into the running room — no published
-        // port, no HTTP server, no network. sse ({url}) servers are left to their existing handling.
+        // The proven path: `docker exec -i -e COLTRANE_SERVER_DIRECT=1 -e COLTRANE_GENOME=/app
+        // <container> node dist/src/server_entry.js` speaks MCP over stdio into the running room — no
+        // published port, no HTTP server, no network. sse ({url}) servers keep their existing handling.
         configs[server.slug] = {
           command: "docker",
-          // ABSOLUTE, not `dist/src/server_entry.js`. The room service sets `working_dir` to the
-          // WORKSPACE — that is the point of a workspace — so a relative path resolves against the
-          // mounted work directory and node dies with "Cannot find module …/workspace/dist/src/
-          // server_entry.js". /app is where the room image puts the compiled engine (Dockerfile.room
-          // WORKDIR), and it is not the directory the seat works in.
-          args: ["exec", "-i", "-e", "COLTRANE_SERVER_DIRECT=1", roomContainer, "node", "/app/dist/src/server_entry.js"],
+          // TWO -e flags, and the second is why a chair in the room can DO anything. ABSOLUTE entry
+          // path, not `dist/src/server_entry.js`: the room service sets `working_dir` to the WORKSPACE
+          // — that is the point of a workspace — so a relative path resolves against the mounted work
+          // directory and node dies with "Cannot find module …/workspace/dist/src/server_entry.js".
+          // /app is where the room image puts the compiled engine (Dockerfile.room WORKDIR).
+          //
+          // ★ COLTRANE_GENOME=/app IS WHAT MAKES THE ROOM SERVE A REAL GENOME. bootstrapServerDeps
+          // (src/server.ts) resolves the genome root as `genomeRoot ?? COLTRANE_GENOME ?? cwd()`. cwd
+          // is the workspace (working_dir, above), which is EMPTY, so without this flag the in-room
+          // engine loads nothing and type_browse answers count:0 against 64 on the host. Dockerfile.room
+          // copies the genome to /app, so naming the root EXPLICITLY — rather than moving working_dir or
+          // emitting `-w /app` — loads it without touching the seat's correct working directory: the
+          // genome root and the working directory are two different things and are kept that way here.
+          args: ["exec", "-i", "-e", "COLTRANE_SERVER_DIRECT=1", "-e", "COLTRANE_GENOME=/app", roomContainer, "node", "/app/dist/src/server_entry.js"],
         };
         continue;
       }

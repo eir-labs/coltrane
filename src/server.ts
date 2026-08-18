@@ -918,6 +918,16 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
             outputs: deps.outputs, ledger: deps.ledger, invoke: deps.invoke,
             model_version: deps.model_version, skills: deps.skills, skill_dirs: deps.skill_dirs, evals: deps.evals, budget,
             toolProviders: deps.toolProviders, mcpServerConfigs: deps.mcpServerConfigs, // each movement's preflight resolves against the invoker's environment
+            // THE ROOM THE ARRANGEMENT NAMED, carried into the run.
+            //
+            // Without this the venue branch in `runGig` is unreachable in production: `composeChart`
+            // checks the ceiling at AUTHORING time (R10) and `deps.venues` is passed here only so it
+            // can, but the chart's own `venue` was never threaded into the run deps — so no shipped
+            // caller ever set `deps.venue`, and `resolveAndRealize` ran for tests alone. A room that
+            // is checked when the chart is written and forgotten when it is performed is a ceiling
+            // on paper.
+            ...(chartDef.venue ? { venue: chartDef.venue } : {}),
+            ...(deps.venues ? { venues: deps.venues } : {}),
             ...(depth ? { depth } : {}), ...reuseWiring, ...humanWiring,
           };
           /** The ARRANGEMENT's manifest. A chart has no single genome_hash or run_fingerprint — it

@@ -1,0 +1,82 @@
+# The room image — what a containerized venue is realized ON.
+#
+# `renderComposeConfig` names `coltrane/room:ephemeral` as the image for a venue that declares no
+# `floor`. Until this file existed that image did not, so the rendered document referred to
+# something nobody could build: a contract naming a thing that cannot be supplied is the same defect
+# class as a tool grant with no provider, and it fails at `compose up` rather than at authoring.
+#
+# WHAT A ROOM IS FOR, and what it deliberately is not. The chair runs on the HOST; the declared MCP
+# servers run in here. A chair reaches a server with `docker exec -i` as an ordinary stdio
+# transport, which is why this image publishes no ports and why a room can be realized with
+# `--network none` and still serve tools. Proven end to end: initialize returned coltrane 0.10.0,
+# tools/list advertised 53 tools, and a tools/call of type_browse ran inside a networkless container
+# and returned 64 types.
+#
+# Multi-stage, so the build toolchain never reaches the room. The room receives production
+# dependencies and compiled output, not a compiler.
+
+# ── build ─────────────────────────────────────────────────────────────────────────────────────
+FROM node:22-alpine AS build
+WORKDIR /app
+
+# Manifests first: this layer is invalidated by a dependency change, not by a source edit, so an
+# ordinary code change does not re-resolve the tree.
+COPY package.json package-lock.json* ./
+# --ignore-scripts here too, for a different reason than the room stage: the package's `prepare` is
+# `npm run build`, and npm runs it during install — at which point `src/` has not been copied yet,
+# so tsc compiles nothing and fails. The build is invoked explicitly below, after the sources exist.
+RUN npm ci --ignore-scripts
+
+COPY tsconfig.json ./
+COPY src ./src
+RUN npm run build
+
+# ── room ──────────────────────────────────────────────────────────────────────────────────────
+FROM node:22-alpine AS room
+WORKDIR /app
+
+# PRODUCTION DEPENDENCIES ONLY. A room holding a test runner and a compiler is a larger surface than
+# the contract describes, and `equipment.tools` is a ceiling on what a seat may reach — an image that
+# quietly carries more than the room needs is the same leniency one layer down.
+ENV NODE_ENV=production
+COPY package.json package-lock.json* ./
+# --ignore-scripts, and not as a precaution: `npm ci` runs the package's own `prepare`, which is
+# `npm run build` → `tsc`. tsc is a dev dependency, so with --omit=dev the install invokes a compiler
+# it just declined to install and dies with `sh: tsc: not found`. The dist/ this stage needs is
+# copied from the build stage on the next line; nothing here should compile anything.
+RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
+
+COPY --from=build /app/dist ./dist
+
+# The base genome. A room resolves types, agents, standards and skills from these; a venue's own
+# institution genome is supplied by the deployment, never baked in here.
+COPY core_types ./core_types
+COPY domain_types ./domain_types
+COPY agents ./agents
+COPY standards ./standards
+COPY charts ./charts
+COPY venues ./venues
+COPY skills ./skills
+COPY institutions ./institutions
+
+# DIRECT MODE, NOT RELAY. `dist/src/server_entry.js` defaults to a relay that spawns a child and
+# holds the parent pipe for hot reload — correct on a developer's machine, wrong here: over
+# `docker exec` it produces NO OUTPUT AT ALL. Not an error, not a non-zero exit. Silence.
+#
+# That cost a debugging cycle to find, so it is set in the image rather than left to every caller to
+# remember. A caller that overrides it back to relay mode gets the silence, which is why this line
+# carries the reason instead of just the value.
+ENV COLTRANE_SERVER_DIRECT=1
+
+# Not root. The room's job is to hold servers, and none of them need to own the filesystem they run
+# on. `node` is already present in the base image with uid 1000.
+USER node
+
+# NO ENTRYPOINT SERVING MCP. The room HOLDS; servers are exec'd into it per connection. That is what
+# makes `docker exec -i … node dist/src/server_entry.js` an ordinary stdio transport and lets the
+# whole room run with no network, no published port, and no listening socket.
+#
+# A room with no command starts and exits, and an exited room is one nothing can be exec'd into —
+# which is exactly why the earlier render stood nothing up. The compose renderer supplies this
+# command; the default here keeps a hand-run `docker run` of this image usable for the same purpose.
+CMD ["sleep", "infinity"]

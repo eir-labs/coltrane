@@ -2174,11 +2174,19 @@ export async function runGig(
     } catch (e) {
       settleChairCost(p, false);
       throw e;
-    } finally {
-      // Venue → dispatch wire: tear the room down at the chair lifecycle end. `teardown()` is
-      // idempotent and a no-op when no venue was named, so a venue-less gig is unaffected.
-      gigRealization?.teardown();
     }
+    // THE ROOM IS NOT TORN DOWN HERE. It used to be, in this chair-level `finally`, described as
+    // "idempotent and a no-op when no venue was named". Idempotent yes; a no-op no —
+    // `src/venue_realize.ts` sets `torn = true`, and `canReach()` is `!torn && egress.includes(...)`.
+    // So the FIRST chair to finish closed the room's egress probe for every chair after it, and a
+    // multi-chair phase ran the rest of its seats against a room already reported torn down.
+    //
+    // It was invisible because nothing in the run path consults `canReach` today, and because the
+    // policy realization's teardown costs nothing. Neither excuse survives a realizer that does real
+    // work: a container torn down after chair one is gone for chair two.
+    //
+    // A room's lifetime is the GIG's, not a chair's. Teardown now runs once, at the gig boundary,
+    // on both the success and failure paths — see the `finally` on runGig's outer try.
   }
 
   async function executeChair(p: PreparedChair): Promise<OutputRecord[]> {
@@ -2776,6 +2784,27 @@ export async function runGig(
       if (process.env["COLTRANE_DRAIN_DEBUG"]) console.error(`[drain] failed-gig header ${gig_id}: ${String(de)}`);
     });
     throw e;
+  } finally {
+    // ONE ROOM, ONE GIG, ONE TEARDOWN — on both paths. A room outlives every chair that sits in it
+    // and dies with the run, which is what `lifecycle: ephemeral` means and what the chair-level
+    // teardown this replaces could not express.
+    //
+    // AWAITED, because a realizer that stands up real resources returns a promise: the interface
+    // already declares `Promise<void> | void`, and an unawaited teardown on the failure path means a
+    // process can exit with a container still running. A leak on the path that is ALREADY going
+    // badly is the worst place to have one.
+    //
+    // Best-effort by construction: a teardown that throws must not replace the gig's own outcome —
+    // a failed teardown after a successful run would turn a good gig into a bad one, and after a
+    // failed run would hide the real error behind a cleanup error. What it must never do is pass
+    // silently, so it is reported on the drain-debug channel like every other best-effort seam here.
+    try {
+      await gigRealization?.teardown();
+    } catch (te) {
+      if (process.env["COLTRANE_DRAIN_DEBUG"]) {
+        console.error(`[venue] teardown failed for gig ${gig_id}: ${te instanceof Error ? te.message : String(te)}`);
+      }
+    }
   }
 }
 

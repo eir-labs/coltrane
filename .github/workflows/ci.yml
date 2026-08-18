@@ -31,3 +31,27 @@ jobs:
           cache: "npm"
       - run: npm ci
       - run: npm run verify
+
+  # THE ROOM ACTUALLY STANDS UP. Separate from `verify` because it needs an image that is BUILT, not
+  # installed: `coltrane/room:ephemeral` is published nowhere, so every other job's host sends the
+  # compose pull to a registry and is denied. The live laws gate on the image's presence and SKIP
+  # without it — which is honest, but a law that can never run in CI is barely a law, so this job
+  # builds it and runs them for real.
+  room:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+      - run: npm ci
+      - name: build the room image
+        run: docker build -f Dockerfile.room -t coltrane/room:ephemeral .
+      - name: the emitted transport reaches a standing room
+        run: npx vitest run tests/spec_venue_room_live.test.ts
+      - name: nothing survives the run
+        run: |
+          left=$(docker ps -aq --filter 'label=coltrane.managed=true' | wc -l)
+          echo "coltrane containers left behind: $left"
+          test "$left" -eq 0

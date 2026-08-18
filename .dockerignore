@@ -1,0 +1,9 @@
+node_modules
+dist
+.git
+.coltrane
+.coltrane-cache
+dashboard-sketch
+tests
+docs
+*.log

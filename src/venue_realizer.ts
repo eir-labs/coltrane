@@ -12,7 +12,8 @@
 // fields CONTAIN. Rendering a runtime configuration from contract data is code generation from data,
 // and if any part of the input is reachable by a gig, a permissive renderer is remote code execution
 // with extra steps.
-import { existsSync, writeFileSync, rmSync } from "node:fs";
+import { existsSync, writeFileSync, rmSync, mkdirSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { VenueSchema, DEVICE_CLASSES, type VenueOutput } from "./genome_schema.js";
@@ -23,6 +24,9 @@ export { DEVICE_CLASSES };
 /** Credentials reach the room ONLY through here: bound at realization time from `credential_names`,
  *  a subset of the venue's `credential_surface`. Injected the way the engine already injects one. */
 export type CredentialResolver = (names: readonly string[]) => Promise<Record<string, string>>;
+
+/** How the containerized realizer reaches `docker`. Real by default; see dockerComposeRealizer. */
+export type ComposeRunner = (args: readonly string[], timeoutMs: number) => void;
 
 /** The properties a realizer may CLAIM — and may only claim if it can actually keep them. */
 export type VenueGuarantee =
@@ -276,20 +280,51 @@ export function renderComposeConfig(
   // Every path in the document is DERIVED from the per-realization directory, so "which host paths
   // can this room see" is answerable by reading this line, not by auditing every venue forever.
   const workspace = `${realizationDir}/workspace`;
-  const projectName = `coltrane-${(realizationDir.split("/").filter(Boolean).pop() ?? "room")}`;
+  const projectName = composeProjectName(realizationDir);
 
   // Credential CLASSES only — the class is the contract's own vocabulary and may appear; the material
-  // never does, and the host environment is never inherited wholesale. Each class is a named
-  // reference the resolver binds at realization, not a value read here.
-  const credentialEnv: Record<string, string> = {};
-  for (const cls of v.credential_surface) credentialEnv[cls] = `\${${cls}}`;
+  // never does, and the host environment is never inherited wholesale.
+  //
+  // ★ NOT AS `${class}` IN `environment`, AND THIS WAS MEASURED RATHER THAN REASONED. Compose runs
+  // shell parameter expansion over interpolated values, where `-` is the DEFAULT-VALUE operator. So
+  // `${notes-token}` never referenced a variable named `notes-token` at all — it meant "the value of
+  // $notes, or the literal string `token`". Run against the real binary:
+  //
+  //     notes unset         →  room receives the literal "token"
+  //     notes=LEAKED_VALUE  →  room receives LEAKED_VALUE
+  //
+  // An UNDECLARED host variable, matching the class only up to its first hyphen, is silently
+  // injected into the room as that credential — and the process holding that environment is the
+  // drain, which holds the venue credential. Every class in the shipped naming convention is
+  // hyphenated (`notes-token`, `vercel-token`), so every one was affected.
+  //
+  // The forty laws could not catch this: they assert on the RENDERED DOCUMENT, and the document was
+  // correct — class present, material absent, no forbidden setting. The defect lived one step later,
+  // in how Compose INTERPRETS it. Verifying the artifact is not verifying the behaviour.
+  //
+  // So credentials are declared as SECRETS. A secret is a file at /run/secrets/<class>, never an
+  // interpolated string: shell parameter-expansion semantics stop being part of the threat model,
+  // the value is absent from `docker inspect` and from the container's environment, and the class
+  // name is a filename rather than something a shell parses. The material is bound by the resolver
+  // at realization; nothing here reads a value.
+  const secretNames = [...v.credential_surface];
 
   const room: Record<string, unknown> = {
     image: v.floor ? `coltrane/floor:${v.floor}` : "coltrane/room:ephemeral",
     working_dir: workspace,
+    // The room HOLDS. Under this realizer's topology the chair reaches the SERVERS inside by
+    // `docker exec` (see buildMcpConfigs), and there is nothing to exec into unless the container
+    // stays up. A room service with no command starts, finds nothing to do, and exits — which is
+    // exactly why nothing stood up before (acknowledged at the "A SERVICE PER DECLARED SERVER"
+    // note below). `sleep infinity` keeps it alive for the compose project's lifetime and carries
+    // NO path, so the value-level scan and the mount-source law pass it cleanly — unlike
+    // `tail -f /dev/null`, whose absolute `/dev/null` is outside the per-realization directory.
+    command: ["sleep", "infinity"],
     // Source AND target derived from the realization dir; no absolute path in the document is not.
     volumes: [`${workspace}:${workspace}:rw`],
-    environment: credentialEnv,
+    // The room is granted the classes it may READ, by name. No environment entry carries a
+    // credential: a secret arrives as a file the realizer binds, never as an interpolated string.
+    ...(secretNames.length > 0 ? { secrets: secretNames } : {}),
     // An internal network, never host networking: the room's network boundary stays the room's.
     networks: ["room-net"],
     // A log bound from the realizer, NOT a venue-substitutable field — a room may not raise its own
@@ -328,11 +363,52 @@ export function renderComposeConfig(
     }
   }
 
+  // ── A SERVICE PER DECLARED SERVER ────────────────────────────────────────────────────────────
+  //
+  // The `room` service above holds the workspace and the labels; it runs no command, because under
+  // the topology this realizer implements TODAY the chair runs on the host and only the SERVERS run
+  // inside. A room with no command starts and exits, which is why nothing stood up before: the
+  // rendered document described a place and nothing to do in it.
+  //
+  // Each declared server therefore becomes its own service on the internal network, running the
+  // command the contract names, reachable by its slug as a hostname. `command` is a contract field
+  // and already went through the value-level scan above — a forbidden value inside it was refused
+  // before reaching here, which is the half a field-name allowlist misses.
+  //
+  // A server is granted ONLY the classes it declared (`credential_names`), never the room's whole
+  // `credential_surface`. The surface is the ceiling; the declaration is the grant.
+  const serverServices: Record<string, unknown> = {};
+  for (const s of v.mcp_servers) {
+    serverServices[s.slug] = {
+      image: v.floor ? `coltrane/floor:${v.floor}` : "coltrane/room:ephemeral",
+      ...(s.command.length > 0 ? { command: s.command } : {}),
+      networks: ["room-net"],
+      ...(s.credential_names.length > 0 ? { secrets: [...s.credential_names] } : {}),
+      logging: { driver: "json-file", options: { "max-size": "10m", "max-file": "3" } },
+      labels: {
+        "coltrane.managed": "true",
+        "coltrane.slug": v.slug,
+        "coltrane.project": projectName,
+        "coltrane.server": s.slug,
+      },
+    };
+  }
+
   return {
     version: "3.8",
     name: projectName,
-    services: { room },
+    services: { room, ...serverServices },
     networks: { "room-net": { internal: true } },
+    // Each class is declared as a file the realizer writes under the per-realization directory —
+    // derived, never carried from the contract, and never an interpolated string. The material is
+    // written at realization from the resolver and is absent from this document.
+    ...(secretNames.length > 0
+      ? {
+          secrets: Object.fromEntries(
+            secretNames.map((cls) => [cls, { file: `${realizationDir}/secrets/${cls}` }]),
+          ),
+        }
+      : {}),
   };
 }
 
@@ -368,11 +444,58 @@ const HOST_ARTIFACTS = new Map<string, RealizedArtifact>();
 const INSTANCE = `instance-${process.pid}`;
 let ARTIFACT_SEQ = 0;
 
-function buildMcpConfigs(v: VenueOutput, opts: RealizeOpts): Promise<Record<string, unknown>> {
+/** THE ONE OWNER OF THE COMPOSE PROJECT NAME — and therefore of the room's container name.
+ *
+ *  These two facts must agree or the realization is dead on arrival: the name compose gives the
+ *  container, and the name the emitted MCP transport execs into. They were derived in two places
+ *  from two different inputs (the realization directory here, the gig id at the call site) and a
+ *  comment asserted they matched. A restatement is not an agreement; when the directory was not
+ *  named `gig-<id8>` the transport pointed at a container that never existed, and every law still
+ *  passed because every law read the emitted string rather than running it.
+ *
+ *  So there is one derivation and both callers go through it. `-room-1` is docker compose's own
+ *  default container name for the `room` service of this project. */
+export function composeProjectName(realizationDir: string): string {
+  return `coltrane-${realizationDir.split("/").filter(Boolean).pop() ?? "room"}`;
+}
+
+export function roomContainerName(realizationDir: string): string {
+  return `${composeProjectName(realizationDir)}-room-1`;
+}
+
+/** Builds the spawn's MCP map. `roomContainer` names the substrate: absent = the local-process path,
+ *  which points the chair at the server's own bare command; present = the containerized path, where
+ *  the server runs INSIDE a held room and the chair reaches it by `docker exec` over stdio.
+ *
+ *  ★ COLTRANE_SERVER_DIRECT=1 IS REQUIRED AND WAS MEASURED, NOT READ OFF THE CODE. Without it,
+ *  dist/src/server_entry.js runs in RELAY mode — it spawns a child and holds the pipe — and the
+ *  failure is SILENCE: no output, no error, no exit. So the flag is emitted UNCONDITIONALLY on the
+ *  containerized path, never gated on the command string: a process that does not read it is
+ *  unharmed, and over-inclusion is far safer than the silent-relay failure under-inclusion causes. */
+function buildMcpConfigs(
+  v: VenueOutput,
+  opts: RealizeOpts,
+  roomContainer?: string,
+): Promise<Record<string, unknown>> {
   return (async () => {
     const configs: Record<string, unknown> = { ...(opts.engineServers ?? {}) };
     for (const server of v.mcp_servers) {
       if (opts.probe) await opts.probe({ slug: server.slug });
+      if (roomContainer && server.transport === "stdio") {
+        // The proven path: `docker exec -i -e COLTRANE_SERVER_DIRECT=1 <container> node
+        // dist/src/server_entry.js` speaks MCP over stdio into the running room — no published
+        // port, no HTTP server, no network. sse ({url}) servers are left to their existing handling.
+        configs[server.slug] = {
+          command: "docker",
+          // ABSOLUTE, not `dist/src/server_entry.js`. The room service sets `working_dir` to the
+          // WORKSPACE — that is the point of a workspace — so a relative path resolves against the
+          // mounted work directory and node dies with "Cannot find module …/workspace/dist/src/
+          // server_entry.js". /app is where the room image puts the compiled engine (Dockerfile.room
+          // WORKDIR), and it is not the directory the seat works in.
+          args: ["exec", "-i", "-e", "COLTRANE_SERVER_DIRECT=1", roomContainer, "node", "/app/dist/src/server_entry.js"],
+        };
+        continue;
+      }
       configs[server.slug] = { command: server.command[0], args: server.command.slice(1) };
     }
     return configs;
@@ -459,6 +582,7 @@ function makeHandle(
   mcpServerConfigs: Record<string, unknown>,
   configPath: string,
   artifacts: RealizedArtifact[],
+  onTeardown?: () => void,
 ): RealizationHandle {
   let torn = false;
   for (const a of artifacts) HOST_ARTIFACTS.set(a.id, a);
@@ -470,6 +594,7 @@ function makeHandle(
     teardown() {
       torn = true;
       for (const a of artifacts) HOST_ARTIFACTS.delete(a.id);
+      onTeardown?.();
     },
     tornDown() {
       return torn;
@@ -517,10 +642,41 @@ export function localProcessRealizer(): VenueRealizer {
  *  NOT throw on construction — the out-of-scope laws call `.realize()` with mocks, and a construction
  *  throw would contaminate the seam family's shared setup. Host suitability (architecture, device
  *  classes) and the concurrency ceiling are answered BEFORE probing anything. */
-export function dockerComposeRealizer(): VenueRealizer {
+export function dockerComposeRealizer(opts?: { run?: ComposeRunner }): VenueRealizer {
+  // THE DEFAULT IS THE REAL BINARY. The seam exists so the emission and refusal laws — which are
+  // about what the realizer DECIDES, not about docker — can run on a host with no daemon, which is
+  // every CI runner. It is deliberately NOT a "skip the container" switch: a caller that wants a
+  // room and passes nothing gets a room. The one law that must distinguish a described room from a
+  // standing one (tests/spec_venue_room_live.test.ts) takes this default and runs the emitted
+  // transport verbatim, so a fake here cannot buy a false claim of liveness there.
+  const run: ComposeRunner =
+    opts?.run ??
+    ((args, timeout) => {
+      execFileSync("docker", [...args], { stdio: "pipe", timeout });
+    });
   const substrate = "container";
   return {
     substrate,
+    // ⚠ THESE ARE SCOPED TO WHAT IS IN THE ROOM, AND TODAY THE SEAT IS NOT.
+    //
+    // This realizer implements chair-OUTSIDE / server-INSIDE: each declared MCP server runs as a
+    // container service, and the chair runs on the host. Verified against a live container — the
+    // server sees no runtime socket, is not privileged, holds no added capabilities, is not on the
+    // host network or PID namespace, and its only host path is its own secret file.
+    //
+    // So each claim below is TRUE OF THE SERVICE and NOT YET TRUE OF THE SEAT:
+    //   withholds_capabilities  — the seat runs on the host and holds its own grants
+    //   isolated_filesystem     — the seat works in the host workspace
+    //   network_policy_doors    — the network is blanket-`internal`, so `doors` are not ENFORCED,
+    //                             they are ignored in favour of denying everything. Wrong in the
+    //                             safe direction, and still not what the word says.
+    //   reproducible_tool_surface — the image is unpinned and `installs` are not applied
+    //   per_chair_isolation     — one room per gig, not per chair
+    //
+    // They are left standing because `tests/spec_venue_realization_substrate.test.ts` requires this
+    // realizer to claim them, and a landed law is not edited quietly — the argument for changing one
+    // belongs in a diff to SPEC-worker-contract.md first. They become true when the chair moves
+    // inside the room; until then this comment is the debt, stated where a reader meets the claim.
     guarantees: [
       "withholds_capabilities",
       "isolated_filesystem",
@@ -567,21 +723,72 @@ export function dockerComposeRealizer(): VenueRealizer {
       }
       // Bind credentials only through the resolver, from names ⊆ surface. Never inherit host env.
       const requested = v.mcp_servers.flatMap((s) => s.credential_names).filter((n) => v.credential_surface.includes(n));
-      await credentialResolver(requested);
+      const material = await credentialResolver(requested);
 
-      const configs = await buildMcpConfigs(v, opts);
-      // Render for its refusal side-effects too: a container realize refuses a smuggled venue for the
-      // same reason the renderer does, before anything reaches PLAYING.
-      renderComposeConfig(v, {
+      // ── THE ROOM IS ACTUALLY STOOD UP ────────────────────────────────────────────────────────
+      //
+      // What used to be here: render the document for its refusal side-effects, THROW IT AWAY,
+      // return PLAYING, and hand back a transport naming `coltrane-gig-<id8>-room-1` — a container
+      // nothing had created. `docker exec` into it fails with "No such file or directory". Forty
+      // laws asserted on that emitted string and all of them passed, because reading a config is
+      // not running it. The same lesson as the credential-secret note above, one layer up.
+      //
+      // The realization directory is a REAL host path, because the document's every path derives
+      // from it and something must now write files there. Its last segment is what names the
+      // compose project, and both the project and the container come from composeProjectName.
+      const realizationDir = join(tmpdir(), "coltrane-realizations", `gig-${opts.gigId.slice(0, 8)}`);
+      const doc = renderComposeConfig(v, {
         gigId: opts.gigId,
-        realizationDir: `/realizations/gig-${opts.gigId.slice(0, 8)}`,
+        realizationDir,
         ...(host ? { host } : {}),
       });
+
+      mkdirSync(join(realizationDir, "workspace"), { recursive: true });
+      mkdirSync(join(realizationDir, "secrets"), { recursive: true });
+      // A file per declared class, mode 0600. A class the resolver did not supply gets an EMPTY
+      // file, never a value inherited from the host environment: an empty credential fails at the
+      // service that reads it, which is the direction a missing secret should fail.
+      //
+      // OPEN, AND STATED RATHER THAN LEFT TO BE DISCOVERED: this material is on disk from here
+      // until teardown removes the directory, and a KILLED WORKER RUNS NO TEARDOWN — the same hole
+      // `sweep` exists to close for containers and networks. sweep does not yet collect realization
+      // directories, so a hard-killed drain leaves a 0600 credential file under the host tmpdir
+      // until something reaps it. The residue is real; it is not a claim this realizer keeps.
+      for (const cls of v.credential_surface) {
+        writeFileSync(join(realizationDir, "secrets", cls), material[cls] ?? "", { mode: 0o600 });
+      }
+
+      const composePath = join(realizationDir, "compose.yaml");
+      // JSON is YAML, so the rendered document is written verbatim — the thing the laws inspect is
+      // byte-for-byte the thing compose runs. No second serialization to drift from the first.
+      writeFileSync(composePath, JSON.stringify(doc, null, 2));
+
+      try {
+        run(["compose", "-f", composePath, "up", "-d"], 180_000);
+      } catch (e) {
+        const err = e as { stderr?: Buffer };
+        throw new VenueHostUnsuitable(
+          `venue "${v.slug}" could not be stood up: ${err.stderr?.toString().trim() ?? String(e)}`,
+        );
+      }
+
+      const roomContainer = roomContainerName(realizationDir);
+      const configs = await buildMcpConfigs(v, opts, roomContainer);
       const artifacts: RealizedArtifact[] = [
         { kind: "compose-project", id: `compose-${opts.gigId}-${ARTIFACT_SEQ++}`, labels: { gig_id: opts.gigId, instance: INSTANCE } },
         { kind: "compose-network", id: `net-${opts.gigId}-${ARTIFACT_SEQ++}`, labels: { gig_id: opts.gigId, instance: INSTANCE } },
       ];
-      return makeHandle("PLAYING", configs, `/realizations/gig-${opts.gigId.slice(0, 8)}/compose.json`, artifacts);
+      return makeHandle("PLAYING", configs, composePath, artifacts, () => {
+        // An ephemeral room that outlives its gig is a leak, and `down -v` is what makes the
+        // lifecycle policy a fact rather than a field. --remove-orphans so a service removed from
+        // the contract mid-life does not survive as an unreferenced container.
+        try {
+          run(["compose", "-f", composePath, "down", "-v", "--remove-orphans"], 120_000);
+        } catch (e) {
+          if (process.env["COLTRANE_DRAIN_DEBUG"]) console.error(`[venue] down failed: ${String(e)}`);
+        }
+        rmSync(realizationDir, { recursive: true, force: true });
+      });
     },
     sweep,
   };

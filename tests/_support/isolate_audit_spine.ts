@@ -24,6 +24,28 @@
 // A test that sets these env vars itself (tests/ledger_durability.test.ts pins the resolution rules
 // deliberately) still overrides this — assignment order gives the test the last word, which is
 // correct: this is a floor, not a ceiling.
+//
+// The OUTPUT STORE is the third leg, and it was missed the first time (#328 covered the ledger and
+// the mirror only). `bootstrapServerDeps` roots the store at `defaultOutputsPersistDir()`
+// (src/outputs.ts:366) — which is NOT genome-rooted and NOT covered by vitest.config.ts's env
+// block, so it resolved to the developer's real `$HOME/.eir/coltrane_outputs`. That directory is
+// not scoped to a run at all: it is shared by every test file, every parallel worker, and every
+// suite run since the machine was set up, and it only ever grows (measured here: 6,099 files,
+// ~100-200 added per day since June).
+//
+// `system_health` scans it in full on every call — `deps.outputs.integrity()` hydrates and then
+// re-scans `outputs/` + `refs/` (src/outputs.ts:896-939), and `deps.outputs.all()` hydrates again.
+// So the two tests that call system_health from a freshly-bootstrapped deps paid for the whole
+// accumulated history of the host: measured at 3.1-4.7s against vitest's 5s default, with a 7.1s
+// excursion under full-suite parallelism that timed both of them out in the same run
+// (tests/genome_layering.test.ts and tests/genome_reload_tool.test.ts, "Test timed out in 5000ms").
+// Pointing the store at this file's private spine drops the same two tests to 5-9ms.
+//
+// This is the same defect #328 describes, in the same shape, for the same reason — a global store
+// standing in for a per-file one — so it belongs behind the same floor rather than behind a raised
+// testTimeout. A timeout raise would keep the cost, keep the $HOME coupling, and keep the cliff:
+// the directory grows monotonically, so any fixed budget is only ever a later failure date. It is
+// also why CI never reproduced this and a developer machine does — CI starts from an empty $HOME.
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -31,3 +53,4 @@ import { join } from "node:path";
 const spine = mkdtempSync(join(tmpdir(), "coltrane-test-spine-"));
 process.env["COLTRANE_LEDGER_PATH"] = join(spine, "ledger.jsonl");
 process.env["COLTRANE_MIRROR_DIR"] = spine;
+process.env["COLTRANE_OUTPUTS_DIR"] = join(spine, "outputs");

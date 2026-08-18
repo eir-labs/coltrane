@@ -85,6 +85,28 @@ interface RealizerModule {
 const realizer = async (): Promise<RealizerModule> =>
   (await import(VENUE_REALIZER)) as unknown as RealizerModule;
 
+/** The containerized realizer and the renderer live in the same module; the laws that assert the
+ *  docker-exec channel and the room's holding command reach for them directly. */
+interface ContainerModule {
+  dockerComposeRealizer(opts?: { run?: () => void }): {
+    realize(
+      venue: unknown,
+      credentialResolver: CredentialResolver,
+      opts: {
+        gigId: string;
+        engineServers?: Readonly<Record<string, unknown>>;
+        probe?: (s: { slug: string }) => Promise<string[]>;
+      },
+    ): Promise<RealizationHandle>;
+  };
+  renderComposeConfig(
+    venue: unknown,
+    opts: { gigId: string; realizationDir: string },
+  ): Record<string, unknown>;
+}
+const containerModule = async (): Promise<ContainerModule> =>
+  (await import(VENUE_REALIZER)) as unknown as ContainerModule;
+
 const ENGINE_ENTRY = { command: "node", args: ["dist/src/server_entry.js"] };
 const engineServers = { [ENGINE_MCP_SERVER]: ENGINE_ENTRY };
 
@@ -114,6 +136,13 @@ const NOTES_ROOM = {
   ],
   lifecycle: { policy: "ephemeral" as const },
 };
+
+/** These laws are about what the realizer DECIDES — the shape it emits, the venue it refuses, the
+ *  artifacts it records. None of that is a claim about docker, and CI has no daemon, so they run
+ *  against a runner that records instead of executing. The liveness claim is not made here and
+ *  cannot be: tests/spec_venue_room_live.test.ts takes the REAL default and runs the emitted
+ *  transport verbatim against a standing room. */
+const NO_DAEMON = { run: () => {} };
 
 const noCredentials: CredentialResolver = async () => ({});
 
@@ -338,5 +367,71 @@ describe("GAP 2 — the probe verifies the room in both directions, before anyth
     expect(err.state).toBe("VERIFIED");
     expect(err.extraTool).toContain("delete_everything");
     expect(err.serverSlug).toBe("notes");
+  });
+});
+
+describe("GAP 2 — a chair reaches a tool inside the containerized room", () => {
+  // The gig whose first eight characters name the room container, per docker compose's default
+  // {projectName}-{serviceName}-1 convention: projectName is coltrane-gig-<gigId8>, the service is
+  // the fixed 'room'.
+  const CONTAINERIZED_GIG = "aaaaaaaa-1111-2222-3333-444444444444";
+  const ROOM_CONTAINER = `coltrane-gig-${CONTAINERIZED_GIG.slice(0, 8)}-room-1`;
+
+  // THE CHANNEL INTO THE ROOM. On the containerized realizer a declared stdio server no longer
+  // resolves to its bare host command — it resolves to `docker exec` over stdio into the held room,
+  // the exact shape proven by measurement against a --network none container. Nothing is published,
+  // nothing is on the network; the chair reaches the tool through the runtime it already holds.
+  it("the containerized realizer emits the docker-exec stdio shape for a declared server", async () => {
+    const { dockerComposeRealizer } = await containerModule();
+    expect(dockerComposeRealizer, "the import is the specification").toBeTypeOf("function");
+    const handle = await dockerComposeRealizer(NO_DAEMON).realize(NOTES_ROOM, noCredentials, {
+      gigId: CONTAINERIZED_GIG,
+      engineServers,
+      probe: async () => ["search", "read"],
+    });
+    expect(handle.mcpServerConfigs["notes"]).toEqual({
+      command: "docker",
+      // ABSOLUTE. The room service's working_dir is the workspace, so a relative entry path
+      // resolves under the mount and node cannot find it — measured against a live room, not read.
+      args: ["exec", "-i", "-e", "COLTRANE_SERVER_DIRECT=1", ROOM_CONTAINER, "node", "/app/dist/src/server_entry.js"],
+    });
+    await handle.teardown();
+  });
+
+  // ★ THE SILENT-RELAY GUARD. Without COLTRANE_SERVER_DIRECT=1, dist/src/server_entry.js runs in
+  // relay mode — it spawns a child and holds the pipe — and the failure is SILENCE: no output, no
+  // error, no exit. It cost a debugging cycle to find. Every containerized emission must carry the
+  // flag, so this law holds the presence of the exact string on the path that would otherwise hang.
+  it("every containerized emission carries COLTRANE_SERVER_DIRECT=1", async () => {
+    const { dockerComposeRealizer } = await containerModule();
+    expect(dockerComposeRealizer, "the import is the specification").toBeTypeOf("function");
+    const handle = await dockerComposeRealizer(NO_DAEMON).realize(NOTES_ROOM, noCredentials, {
+      gigId: CONTAINERIZED_GIG,
+      engineServers,
+      probe: async () => ["search", "read"],
+    });
+    const notes = handle.mcpServerConfigs["notes"] as { args?: readonly string[] };
+    expect(notes.args ?? [], "omitting the flag selects relay mode, whose failure is silence").toContain(
+      "COLTRANE_SERVER_DIRECT=1",
+    );
+    await handle.teardown();
+  });
+
+  // THE ROOM HOLDS. A room service with no command starts, finds nothing to do, and exits — leaving
+  // nothing to `docker exec` into. `sleep infinity` keeps the container up for the lifetime of the
+  // compose project so the channel above has something live to reach.
+  it("the rendered room service runs a holding command", async () => {
+    const { renderComposeConfig } = await containerModule();
+    expect(renderComposeConfig, "the import is the specification").toBeTypeOf("function");
+    const doc = renderComposeConfig(VenueSchema.parse(NOTES_ROOM), {
+      gigId: CONTAINERIZED_GIG,
+      realizationDir: `/realizations/gig-${CONTAINERIZED_GIG.slice(0, 8)}`,
+    });
+    const services = doc["services"] as Record<string, { command?: unknown }>;
+    expect(services["room"], "the compose document has a room service").toBeDefined();
+    expect(services["room"]!.command, "a room with no command exits, and nothing can exec into it").toEqual([
+      "sleep",
+      "infinity",
+    ]);
   });
 });

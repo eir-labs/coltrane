@@ -123,7 +123,7 @@ interface VenueRealizer {
 
 interface SubstrateModule {
   localProcessRealizer(): VenueRealizer;
-  dockerComposeRealizer(): VenueRealizer;
+  dockerComposeRealizer(opts?: { run?: () => void }): VenueRealizer;
   /** Picks the realizer a venue requires from those a deployment supplies. Throws rather than
    *  returning a weaker one — the whole reason this gap is written down. */
   selectRealizer(venue: unknown, realizers: readonly VenueRealizer[]): VenueRealizer;
@@ -156,6 +156,13 @@ const substrate = async (): Promise<SubstrateModule> =>
   (await import(VENUE_REALIZER)) as unknown as SubstrateModule;
 
 const engineServers = { [ENGINE_MCP_SERVER]: { command: "node", args: ["dist/src/server_entry.js"] } };
+/** These laws are about what the realizer DECIDES — the shape it emits, the venue it refuses, the
+ *  artifacts it records. None of that is a claim about docker, and CI has no daemon, so they run
+ *  against a runner that records instead of executing. The liveness claim is not made here and
+ *  cannot be: tests/spec_venue_room_live.test.ts takes the REAL default and runs the emitted
+ *  transport verbatim against a standing room. */
+const NO_DAEMON = { run: () => {} };
+
 const noCredentials: CredentialResolver = async () => ({});
 
 /** The empty room, in the shape venues/empty-room-v1.json already ships. */
@@ -260,7 +267,7 @@ describe("GAP 6 — the substrate is a named, injectable seam with two implement
     expect(localProcessRealizer, "the import is the specification").toBeTypeOf("function");
     expect(dockerComposeRealizer, "the import is the specification").toBeTypeOf("function");
     const local = localProcessRealizer();
-    const contained = dockerComposeRealizer();
+    const contained = dockerComposeRealizer(NO_DAEMON);
     for (const r of [local, contained]) {
       expect(typeof r.substrate, "a realizer names what it builds on").toBe("string");
       expect(r.substrate.length).toBeGreaterThan(0);
@@ -294,7 +301,7 @@ describe("GAP 6 — the substrate is a named, injectable seam with two implement
   it("the containerized realizer claims the guarantees a real boundary provides", async () => {
     const { dockerComposeRealizer } = await substrate();
     expect(dockerComposeRealizer, "the import is the specification").toBeTypeOf("function");
-    const g = dockerComposeRealizer().guarantees;
+    const g = dockerComposeRealizer(NO_DAEMON).guarantees;
     expect(g).toContain("withholds_capabilities");
     expect(g).toContain("network_policy_doors");
     expect(g).toContain("isolated_filesystem");
@@ -368,7 +375,7 @@ describe("GAP 6 — the substrate is a named, injectable seam with two implement
       await substrate();
     expect(selectRealizer, "the import is the specification").toBeTypeOf("function");
     const local = localProcessRealizer();
-    const contained = dockerComposeRealizer();
+    const contained = dockerComposeRealizer(NO_DAEMON);
     const room = VenueSchema.parse(CONTAINED_ROOM);
     const down: VenueRealizer = { ...contained, available: () => false };
     expect(() => selectRealizer(room, [local, down])).toThrow(VenueSubstrateUnavailable);
@@ -695,7 +702,7 @@ describe("GAP 6 — a device grant maps exactly what was declared, and widens no
     const room = VenueSchema.parse({ ...SERIAL_ROOM, devices: ["gpio"] });
     const probe = vi.fn(async () => ["search"]);
     await expect(
-      dockerComposeRealizer().realize(room, noCredentials, { gigId: GIG, engineServers, probe, host: HOST }),
+      dockerComposeRealizer(NO_DAEMON).realize(room, noCredentials, { gigId: GIG, engineServers, probe, host: HOST }),
       "a host without the device cannot host this room",
     ).rejects.toThrow(VenueHostUnsuitable);
     expect(probe, "and it must refuse before probing anything").not.toHaveBeenCalled();
@@ -740,7 +747,7 @@ describe("GAP 6 — realizing somewhere else weakens nothing", () => {
     const { dockerComposeRealizer } = await substrate();
     expect(dockerComposeRealizer, "the import is the specification").toBeTypeOf("function");
     const credential = vi.fn(async () => "placeholder-host-credential");
-    const realizer = dockerComposeRealizer();
+    const realizer = dockerComposeRealizer(NO_DAEMON);
     const room = VenueSchema.parse(SERIAL_ROOM);
     const host: RealizationHost = { ...HOST, endpoint: "realization-host.example", credential };
     const probe = async () => ["search"];
@@ -770,7 +777,7 @@ describe("GAP 6 — realizing somewhere else weakens nothing", () => {
     const credential = vi.fn(async () => "placeholder-host-credential");
     // No endpoint: this IS the worker's own machine.
     const local: RealizationHost = { ...HOST, credential };
-    const handle = await dockerComposeRealizer().realize(VenueSchema.parse(SERIAL_ROOM), noCredentials, {
+    const handle = await dockerComposeRealizer(NO_DAEMON).realize(VenueSchema.parse(SERIAL_ROOM), noCredentials, {
       gigId: GIG, engineServers, probe: async () => ["search"], host: local,
     });
     expect(credential, "no remote host, no administrative credential").not.toHaveBeenCalled();
@@ -789,11 +796,11 @@ describe("GAP 6 — architecture is part of the contract", () => {
     const wrong: RealizationHost = { ...HOST, architecture: "amd64" };
     const probe = vi.fn(async () => ["search"]);
     await expect(
-      dockerComposeRealizer().realize(room, noCredentials, { gigId: GIG, engineServers, probe, host: wrong }),
+      dockerComposeRealizer(NO_DAEMON).realize(room, noCredentials, { gigId: GIG, engineServers, probe, host: wrong }),
     ).rejects.toThrow(VenueHostUnsuitable);
     expect(probe, "refuse before standing anything up").not.toHaveBeenCalled();
     // Non-vacuity: the matching host realizes, or the law passes by refusing always.
-    const ok = await dockerComposeRealizer().realize(room, noCredentials, {
+    const ok = await dockerComposeRealizer(NO_DAEMON).realize(room, noCredentials, {
       gigId: GIG, engineServers, probe: async () => ["search"], host: HOST,
     });
     expect(ok.state).toBe("PLAYING");
@@ -807,7 +814,7 @@ describe("GAP 6 — architecture is part of the contract", () => {
     const { dockerComposeRealizer } = await substrate();
     expect(dockerComposeRealizer, "the import is the specification").toBeTypeOf("function");
     const anywhere = VenueSchema.parse(CONTAINED_ROOM); // declares no architectures
-    const handle = await dockerComposeRealizer().realize(anywhere, noCredentials, {
+    const handle = await dockerComposeRealizer(NO_DAEMON).realize(anywhere, noCredentials, {
       gigId: GIG, engineServers, probe: async () => ["search"], host: { ...HOST, architecture: "amd64" },
     });
     expect(handle.state).toBe("PLAYING");
@@ -832,7 +839,7 @@ describe("GAP 6 — realization is reconciled, because a killed worker runs no f
   const realizeFor = async (gigId: string, host: RealizationHost = HOST) => {
     const { dockerComposeRealizer } = await substrate();
     expect(dockerComposeRealizer, "the import is the specification").toBeTypeOf("function");
-    return dockerComposeRealizer().realize(VenueSchema.parse(SERIAL_ROOM), noCredentials, {
+    return dockerComposeRealizer(NO_DAEMON).realize(VenueSchema.parse(SERIAL_ROOM), noCredentials, {
       gigId, engineServers, probe: async () => ["search"], host,
     });
   };
@@ -858,7 +865,7 @@ describe("GAP 6 — realization is reconciled, because a killed worker runs no f
   it("a sweep collects an artifact whose gig is not live, including a dead instance's", async () => {
     const { dockerComposeRealizer } = await substrate();
     expect(dockerComposeRealizer, "the import is the specification").toBeTypeOf("function");
-    const realizer = dockerComposeRealizer();
+    const realizer = dockerComposeRealizer(NO_DAEMON);
     const dead = "dddddddd-dddd-dddd-dddd-dddddddddddd";
     await realizer.realize(VenueSchema.parse(SERIAL_ROOM), noCredentials, {
       gigId: dead, engineServers, probe: async () => ["search"], host: HOST,
@@ -878,7 +885,7 @@ describe("GAP 6 — realization is reconciled, because a killed worker runs no f
   it("a sweep spares a live gig, even one realized by a different instance on the same host", async () => {
     const { dockerComposeRealizer } = await substrate();
     expect(dockerComposeRealizer, "the import is the specification").toBeTypeOf("function");
-    const realizer = dockerComposeRealizer();
+    const realizer = dockerComposeRealizer(NO_DAEMON);
     const peerGig = "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee";
     const peer = await realizer.realize(VenueSchema.parse(SERIAL_ROOM), noCredentials, {
       gigId: peerGig, engineServers, probe: async () => ["search"], host: HOST,
@@ -900,7 +907,7 @@ describe("GAP 6 — realization is reconciled, because a killed worker runs no f
   it("a realizer declares a retention policy with real ceilings and a real cadence", async () => {
     const { dockerComposeRealizer, localProcessRealizer } = await substrate();
     expect(dockerComposeRealizer, "the import is the specification").toBeTypeOf("function");
-    for (const r of [localProcessRealizer(), dockerComposeRealizer()]) {
+    for (const r of [localProcessRealizer(), dockerComposeRealizer(NO_DAEMON)]) {
       const p = r.retention;
       for (const n of [p.max_cached_build_artifacts, p.max_unreferenced_environments]) {
         expect(Number.isFinite(n), `${r.substrate}: "unlimited" is not a retention policy`).toBe(true);
@@ -990,7 +997,7 @@ describe("GAP 6 — the environment is a function of the contract", () => {
     expect(VenueConcurrencyRefused, "the import is the specification").toBeTypeOf("function");
     const bounded = VenueSchema.safeParse({ ...SERIAL_ROOM, max_concurrent_chairs: 2 });
     expect(bounded.success, "the ceiling belongs in the contract").toBe(true);
-    const realizer = dockerComposeRealizer();
+    const realizer = dockerComposeRealizer(NO_DAEMON);
     const room = bounded.success ? bounded.data : undefined;
     await expect(
       realizer.realize(room, noCredentials, { gigId: GIG, engineServers, probe: async () => ["search"], host: HOST, chairs: 3 }),

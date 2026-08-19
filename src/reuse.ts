@@ -179,7 +179,7 @@ export function runIdentityMismatch(a: RunIdentity, b: RunIdentity): string[] {
  * `(chart_slug == standard_slug, movement_id == standard_slug, role)` with no collision.
  */
 export function checkpointRoleKey(chart_slug: string, movement_id: string | undefined, role: string): string {
-  return `${chart_slug} ${movement_id ?? chart_slug} ${role}`;
+  return `${chart_slug}\u0000${movement_id ?? chart_slug}\u0000${role}`;
 }
 
 /**

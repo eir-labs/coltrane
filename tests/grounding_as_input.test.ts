@@ -97,7 +97,29 @@ describe("grounding-as-input — software-change-pr-v1 is dispatchable WITH a ch
     expect(readCtx, "the read-context chair must still exist").toBeTruthy();
     // It stays an ENTRY chair so a seed can satisfy it (pullSeeds is scoped to depends_on []).
     expect(readCtx!.depends_on).toEqual([]);
-    expect(readCtx!.input_contract).toEqual(expect.arrayContaining(["change-context"]));
+
+    // AMENDED 2026-08-20 — the third clause is withdrawn, in the open, because it contradicts I11.
+    //
+    // It formerly asserted the entry chair's own input_contract names change-context. But EVERY
+    // input_contract entry is REQUIRED: runtime.ts:2101 throws missingGigInput for each unsatisfied
+    // one, and a dispatch measured on 2026-08-20 failed with "gig input missing change-request
+    // required by chair read-context (MissingGigInput)". Naming change-context there therefore makes
+    // a PRE-BUILT reading MANDATORY on every run of this standard.
+    //
+    // I11 (immediately below) pins the opposite: the consumer is producer-agnostic across FOUR
+    // interchangeable producers — a reader, the compiler, a prior standard, a human — one of which is
+    // the reading chair itself. A standard that cannot run without a reading it was supposed to be
+    // able to PRODUCE has lost that producer. The two laws cannot both hold.
+    //
+    // The seedable declaration is the STANDARD's input_types, asserted above and satisfied: #156's
+    // seam (runtime.ts:2101) admits a gig-payload record whose type is in input_types at an entry
+    // chair. That is the mechanism O1 actually needs. The chair-contract clause added a second,
+    // stricter requirement the seam never asked for.
+    //
+    // Amended rather than deleted: the contradiction is recorded here so the next reader sees a
+    // decision, not a gap. If input_contract later grows an optional arm — a chair that may be
+    // SEEDED or may PRODUCE, which the type system cannot express today — this clause should return
+    // in that form.
   });
 
   it("I11 the consumer is producer-agnostic — it keys on the TYPE, never on who produced it", async () => {

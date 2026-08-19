@@ -241,8 +241,19 @@ export function createRegistry(initial: DomainType[] = []): Registry {
   const types = new Map<string, DomainType>();
   for (const def of initial) types.set(def.slug, def);
 
-  function score(query: ResolveQuery): ResolveResult {
-    const candidates = [...types.values()].filter((t) => t.extends === query.extends);
+  // `exclude` names slugs that must not be scored as candidates. It exists so
+  // registerType can ask "does a DIFFERENT type duplicate this one?" — the query
+  // carries no slug, so without this a type's own prior version (same extends,
+  // domain and required_fields by construction) scores ~100 against its next
+  // version and registration is refused as a self-duplicate (the defect PR #432
+  // routed around via replaceTypes). resolveType passes nothing: its question is
+  // "what should I reuse?", where a same-slug match is a meaningful reuse target
+  // and must keep surfacing — so the exclusion is scoped to registerType's
+  // callsite, not baked into this shared closure.
+  function score(query: ResolveQuery, exclude?: ReadonlySet<string>): ResolveResult {
+    const candidates = [...types.values()].filter(
+      (t) => t.extends === query.extends && !(exclude?.has(t.slug) ?? false),
+    );
     if (candidates.length === 0) return { score: 0, action: "create", candidates: [] };
     let best = 0;
     for (const c of candidates) {
@@ -299,7 +310,14 @@ export function createRegistry(initial: DomainType[] = []): Registry {
       }
       const defect = domainTypeDefect(def);
       if (defect) throw new Error(`domain type "${def.slug}" rejected: ${defect}`);
-      const resolved = score({ extends: def.extends, domain: def.domain, required_fields: def.required_fields });
+      // Exclude the registrar's OWN slug: a type can never be a duplicate of a
+      // DIFFERENTLY-NAMED type by matching itself. Every other candidate is scored
+      // exactly as before, so a genuinely similar type under a different slug is
+      // still refused at >=80 — reuse enforcement's actual purpose is untouched.
+      const resolved = score(
+        { extends: def.extends, domain: def.domain, required_fields: def.required_fields },
+        new Set([def.slug]),
+      );
       if (resolved.score >= 80) {
         throw new Error(`reuse enforcement: an existing type scores ${resolved.score} (>=80)`);
       }

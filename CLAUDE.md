@@ -132,6 +132,29 @@ top instead of diving straight in — these are where the magic tends to hide:
 - **Leave conclusions honestly open.** When you assert something you can't ground in
   deterministic signal, mark it open, go find a real source, bring it back, and log the
   attribution. An unverifiable claim is a door, not a wall.
+- **Suspect the last inch, not the code.** This engine's mechanisms are mostly right; what fails is
+  the join between a mechanism and its caller. A field declared and never read. A safety mechanism
+  with eleven passing laws and zero standards setting it. A collector nothing calls. A class the
+  package does not ship. Every one of those passed CI, because a test proves a mechanism WORKS and
+  nothing was asking whether it is REACHED. When you finish something, ask what would fail if it
+  were silently disconnected — and if the answer is *nothing*, you have not finished.
+
+- **An absence is not an error, and that is what makes it dangerous.** The costly defects do not
+  raise; they return a legitimate-looking value. A drain that SUCCEEDS quietly writes to production.
+  A default standing in for a real value leaves nothing to grep for. An empty class is
+  indistinguishable from "none were declared". A sealed row can name a version nothing ever wrote.
+  Prefer a loud refusal to a plausible default: this repo already refuses a tool grant with no
+  provider, a skill permission it cannot enforce, and a boundary check whose term list is missing.
+  Absent must mean DECLINE, never quietly stand in.
+
+- **A rule that cannot fail is remembered, not enforced.** Prose in a brief loses to a tool grant
+  every time — measured: a laws-first ordering demanded in capitals across three dispatches was
+  ignored, and the same ordering held on the first run once the drafter's grant could not reach
+  `src/` and the builder's input contract required a sealed red-spec. When you find yourself writing
+  a longer instruction, look for the structure that makes the instruction unnecessary. And check the
+  claims a document makes about ITSELF: behaviour claims stay true because a test breaks when they
+  drift; status and inventory claims rot silently, so delete them or make them checkable.
+
 - **Look under rocks.** This substrate can do more than its clerical description — strange
   data through consistent processes finds connections nobody asked for. When you see one,
   surface it.

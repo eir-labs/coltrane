@@ -243,7 +243,9 @@ export interface GigCheckpoint {
    * producers_sha) legitimately drifts between two builds that both write `schema_version` 1.
    * When a resume then refuses on that drift, the raw before/after hashes alone do not tell an
    * operator WHICH build would have matched — they have to guess the producing version. Recording
-   * it here turns "these two 64-hex strings disagree" into "resume from a <version> build".
+   * it here lets the refusal, when the versions genuinely DIFFER, turn "these two 64-hex strings
+   * disagree" into "resume from a <version> build". When this version equals the current one the
+   * refusal names the drifted fields instead, since the version is not what moved.
    *
    * Optional for BACK-COMPAT: a checkpoint written before this field existed has none, and a
    * resume of it refuses/succeeds exactly as before, naming "(engine version unrecorded)" in

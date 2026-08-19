@@ -1440,24 +1440,38 @@ export async function runGig(
     const drift = runIdentityMismatch(cp.identity, identity(), { waiveProducers: allRemainingHuman });
     if (drift.length > 0) {
       // DIAGNOSTIC HONESTY, not a widened resume. The genome genuinely moved, so the refusal
-      // stands — but the operator's real fix is "resume from the build that wrote this", and
-      // nothing told them which build that was. `engine_version` (stamped by every build since
-      // this landed) names it; a checkpoint from before this field says so plainly rather than
-      // crash. Lead with the version + the action; the raw before/after hashes still ride in
+      // stands — but the refusal must send the operator to the thing that ACTUALLY changed, not
+      // to a guess. When the producing and current engine versions DIFFER, "resume from the build
+      // that wrote this" is that thing, and `engine_version` names it. When they are IDENTICAL the
+      // old prose ("resume from a <version> build") named a version that already matched — sending
+      // the reader to verify a correct build before they reached the drift bracket. So when the
+      // versions agree, name the fields that drifted instead, drawn from the SAME `drift` list that
+      // refused (never a second, re-derived one). The raw before/after hashes always ride in
       // `drift` for a builder who wants them.
       const cur = identity();
-      const wroteBy = cp.engine_version
-        ? `coltrane ${cp.engine_version}`
-        : "an earlier build (engine version unrecorded)";
-      const resumeAction = cp.engine_version
-        ? `Resume from a ${cp.engine_version} build, or re-dispatch cold`
-        : "Resume from the matching build, or re-dispatch cold";
-      throw new ResumeRefused(
-        gig_id,
-        `this checkpoint was written by ${wroteBy} (genome_hash ${cp.identity.genome_hash}); ` +
-          `the current build is coltrane ${COLTRANE_VERSION} (genome_hash ${cur.genome_hash}). ${resumeAction}`,
-        drift,
-      );
+      // Each drift entry reads `<field>: checkpoint="..." current="..."` — the field is the token
+      // before the first ':'. This is the authoritative list `runIdentityMismatch` already returned;
+      // it is formatted here, never recomputed, so prose and refusal answer to one computation.
+      const driftedFields = drift.map((d) => d.slice(0, d.indexOf(":")));
+      let why: string;
+      if (cp.engine_version === COLTRANE_VERSION) {
+        why =
+          `this checkpoint and the current build are both coltrane ${COLTRANE_VERSION}, but the run ` +
+          `identity moved under that same version: ${driftedFields.join(", ")} changed since the ` +
+          `checkpoint was written (raw before/after values below). Re-dispatch cold, or restore the ` +
+          `prior ${driftedFields.join("/")} to resume`;
+      } else if (cp.engine_version) {
+        why =
+          `this checkpoint was written by coltrane ${cp.engine_version} (genome_hash ${cp.identity.genome_hash}); ` +
+          `the current build is coltrane ${COLTRANE_VERSION} (genome_hash ${cur.genome_hash}). ` +
+          `Resume from a ${cp.engine_version} build, or re-dispatch cold`;
+      } else {
+        why =
+          `this checkpoint was written by an earlier build (engine version unrecorded) ` +
+          `(genome_hash ${cp.identity.genome_hash}); the current build is coltrane ${COLTRANE_VERSION} ` +
+          `(genome_hash ${cur.genome_hash}). Resume from the matching build, or re-dispatch cold`;
+      }
+      throw new ResumeRefused(gig_id, why, drift);
     }
 
     const rolesInStandard = new Set(standard.phases.flatMap((p) => p.chairs.map((c) => c.role)));

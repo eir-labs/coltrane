@@ -96,6 +96,79 @@ async function refusalMessage(cpMutate: (cp: GigCheckpoint) => void): Promise<st
   return msg;
 }
 
+// SAME-VERSION drift: the producing and current engine versions are IDENTICAL, but one identity
+// field moved under that same version (e.g. an agent edited its method → producers_sha, or a
+// retry at a different depth → depth). Resuming with the SAME pipeline holds genome_hash and every
+// other field stable, so the drift is EXACTLY what `cpMutate` forces — the refusal then has one
+// named field to point at, not a version that already matched.
+async function sameVersionRefusalMessage(cpMutate: (cp: GigCheckpoint) => void): Promise<string> {
+  const b = bench();
+  const checkpoints = createMemoryCheckpointStore();
+  await expect(runGig(pipeline(), {}, run(b, failJudgeOnce(), { checkpoints }))).rejects.toThrow(RuntimeError);
+  const cp = checkpoints.read(GIG);
+  expect(cp, "attempt 1 must have written a checkpoint").toBeDefined();
+  expect(cp!.engine_version, "a fresh checkpoint stamps the running version").toBe(COLTRANE_VERSION);
+  cpMutate(cp!);
+  checkpoints.write(cp!);
+  let msg = "";
+  try {
+    // SAME pipeline → genome_hash/producers_sha/depth all match unless cpMutate moved them.
+    await runGig(pipeline(), {}, run(bench(), invoke, { checkpoints, resume_from: GIG }));
+  } catch (e) {
+    expect(e).toBeInstanceOf(ResumeRefused);
+    msg = (e as Error).message;
+  }
+  expect(msg, "resume must have refused").not.toBe("");
+  return msg;
+}
+
+describe("a refusal at an IDENTICAL version names the field that moved, not the version", () => {
+  it("only producers_sha drifted — the prose names producers_sha and does NOT send the reader to their (matching) build", async () => {
+    const msg = await sameVersionRefusalMessage((cp) => {
+      cp.engine_version = COLTRANE_VERSION;
+      cp.identity = { ...cp.identity, producers_sha: "0".repeat(64) };
+    });
+    // The refusal points at the field that actually moved.
+    expect(msg, "names producers_sha in the prose").toContain("producers_sha");
+    // And it must NOT tell the operator to resume from the version they are already on — the exact
+    // misdirection that cost the 20-minute archaeology dig.
+    expect(msg, "does not send the reader to their already-matching build")
+      .not.toMatch(new RegExp(`Resume from a ${COLTRANE_VERSION.replace(/\./g, "\\.")} build`));
+    // Both versions are still stated so the reader can see they match.
+    expect(msg, "still names the version, once, as matching").toContain(`coltrane ${COLTRANE_VERSION}`);
+    expect(msg.toLowerCase(), "keeps the cold-dispatch escape").toContain("re-dispatch cold");
+  });
+
+  it("only depth drifted (skim→deep, same engine) — the prose names depth, not the version", async () => {
+    const msg = await sameVersionRefusalMessage((cp) => {
+      cp.engine_version = COLTRANE_VERSION;
+      cp.identity = { ...cp.identity, depth: "skim" };
+    });
+    expect(msg, "names depth in the prose").toContain("depth");
+    expect(msg, "does not send the reader to their already-matching build")
+      .not.toMatch(new RegExp(`Resume from a ${COLTRANE_VERSION.replace(/\./g, "\\.")} build`));
+    expect(msg.toLowerCase(), "keeps the cold-dispatch escape").toContain("re-dispatch cold");
+  });
+
+  it("the named fields come from the SAME drift the refusal carries — no re-derived second list", async () => {
+    let captured: ResumeRefused | undefined;
+    const b = bench();
+    const checkpoints = createMemoryCheckpointStore();
+    await expect(runGig(pipeline(), {}, run(b, failJudgeOnce(), { checkpoints }))).rejects.toThrow(RuntimeError);
+    const cp = checkpoints.read(GIG)!;
+    cp.engine_version = COLTRANE_VERSION;
+    cp.identity = { ...cp.identity, producers_sha: "0".repeat(64) };
+    checkpoints.write(cp);
+    try { await runGig(pipeline(), {}, run(bench(), invoke, { checkpoints, resume_from: GIG })); }
+    catch (e) { captured = e as ResumeRefused; }
+    // Every field named in the prose is a field the structured `drift` list actually reports —
+    // prose and refusal answer to one computation (runIdentityMismatch), not two.
+    const driftedFields = captured!.drift.map((d) => d.slice(0, d.indexOf(":")));
+    expect(driftedFields, "the authoritative drift list is the one that moved").toContain("producers_sha");
+    for (const field of driftedFields) expect(captured!.message).toContain(field);
+  });
+});
+
 describe("genome_hash drift across builds is diagnosed with the producing version", () => {
   it("a checkpoint written by build X — the refusal names X and the re-dispatch-cold action", async () => {
     const msg = await refusalMessage((cp) => { cp.engine_version = "0.7.0"; });

@@ -161,6 +161,13 @@ export function producersSha(input: {
  * asked to decide about work that is already sealed and hashed. That is the sole justification;
  * genome_hash, gig_input_sha, model_version, depth and canonical_form_version are NEVER waived,
  * because they can still describe something the remaining human chair is being asked to approve.
+ *
+ * That NEVER-WAIVED rule is about a STATED mismatch, and #19 does not touch it. When a resume
+ * omits --depth the operator stated NOTHING, so the resume gate (src/runtime.ts) compares against
+ * the depth the CHECKPOINT already recorded — it INHERITS an unstated value, it does not waive a
+ * stated one. depth stays never-waived: an EXPLICIT depth that disagrees still drives a refusal.
+ * Inheriting a value nobody contradicted is a different act from skipping a comparison that would
+ * have failed, so reading #19 as a hole in this rule is a mistake.
  */
 export function runIdentityMismatch(
   a: RunIdentity,

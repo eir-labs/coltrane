@@ -279,6 +279,70 @@ describe("resume — a mid-run failure no longer discards the phases that succee
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// The depth gate distinguishes an OMITTED flag from a DISAGREEING one (#19).
+//
+// An OMITTED --depth means "I did not say" — the checkpoint already records its depth, so its
+// value should stand and the resume proceeds. An EXPLICIT --depth that differs means "I said
+// something different", and #237 made depth shape what the model is asked for, so a skim half
+// stitched to a deep half must still refuse. Today both were refused, which made the strict case
+// indistinguishable from the lazy one. Two paired laws — mirroring the #417 scope/hold pattern —
+// pin that the gate is SCOPED to real conflict, not removed.
+describe("resume — an omitted --depth inherits the checkpoint's depth; a disagreeing one still refuses", () => {
+  // ── THE defect law (#19) ────────────────────────────────────────────────────
+  // FAILS against current code: identity() computes depth `deps.depth ?? ""`, so an omitted
+  // depth compares as "" against the checkpoint's "deep" and the resume is refused with
+  // `depth: checkpoint="deep" current=""`. That red is the defect made observable.
+  it("a resume that OMITS --depth inherits the checkpoint's recorded depth and proceeds", async () => {
+    const b = bench();
+    const checkpoints = createMemoryCheckpointStore();
+
+    // Attempt 1 at depth="deep" — phases 1,2 seal, phase 3 dies. The checkpoint records depth="deep".
+    await expect(
+      runGig(pipeline(), {}, run(b, counting({ agent: "judge", times: 1 }).invoke, { checkpoints, depth: "deep" })),
+    ).rejects.toThrow(RuntimeError);
+
+    // Attempt 2 — resume WITHOUT restating --depth. The omission must inherit "deep", not read as
+    // "" and refuse. Only the chair that failed may run; the resume must not be refused.
+    const second = counting();
+    const res = await runGig(pipeline(), {}, run(b, second.invoke, { checkpoints, resume_from: GIG }));
+
+    expect(res.status, "an unstated depth is not a disagreement — the checkpoint's depth stands").toBe("complete");
+    expect(second.calls, "scout and reader were sealed at depth=deep — only the failed judge re-runs").toEqual({ judge: 1 });
+    expect(res.resumed_from?.roles.map((r) => r.role)).toEqual(["r1", "r2"]);
+  });
+
+  // ── THE scoping law (#19) ───────────────────────────────────────────────────
+  // Proves the gate is SCOPED, not removed. An EXPLICIT depth that disagrees still refuses and
+  // names depth. A fix that inherited in BOTH cases would flip this green→red — that is its purpose.
+  it("an EXPLICIT --depth that disagrees with the checkpoint is still refused, naming depth", async () => {
+    const b = bench();
+    const checkpoints = createMemoryCheckpointStore();
+
+    // Attempt 1 at depth="deep".
+    await expect(
+      runGig(pipeline(), {}, run(b, counting({ agent: "judge", times: 1 }).invoke, { checkpoints, depth: "deep" })),
+    ).rejects.toThrow(RuntimeError);
+
+    // Attempt 2 — the operator SAYS --depth skim. That is a disagreement, not an omission: a skim
+    // half stitched to a deep half is a real defect, so the gate must still refuse and name depth.
+    const after = counting();
+    let refusal: ResumeRefused | undefined;
+    try {
+      await runGig(pipeline(), {}, run(b, after.invoke, { checkpoints, resume_from: GIG, depth: "skim" }));
+    } catch (e) {
+      refusal = e as ResumeRefused;
+    }
+    expect(refusal, "an explicit conflicting depth must still refuse").toBeInstanceOf(ResumeRefused);
+    expect(
+      refusal!.drift.some((d) => d.startsWith("depth:")),
+      "the drift names depth as the field that disagrees",
+    ).toBe(true);
+    expect(refusal!.drift).toContainEqual('depth: checkpoint="deep" current="skim"');
+    expect(after.total(), "refusing must cost nothing").toBe(0);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // The producer-identity gate is SCOPED to what still has to run.
 //
 // MEASURED CASE — gig ce902971 on the deployed instance parked with only its human APPROVE

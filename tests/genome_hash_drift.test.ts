@@ -101,7 +101,10 @@ async function refusalMessage(cpMutate: (cp: GigCheckpoint) => void): Promise<st
 // retry at a different depth → depth). Resuming with the SAME pipeline holds genome_hash and every
 // other field stable, so the drift is EXACTLY what `cpMutate` forces — the refusal then has one
 // named field to point at, not a version that already matched.
-async function sameVersionRefusalMessage(cpMutate: (cp: GigCheckpoint) => void): Promise<string> {
+async function sameVersionRefusalMessage(
+  cpMutate: (cp: GigCheckpoint) => void,
+  resumeExtra?: Partial<RunDeps>,
+): Promise<string> {
   const b = bench();
   const checkpoints = createMemoryCheckpointStore();
   await expect(runGig(pipeline(), {}, run(b, failJudgeOnce(), { checkpoints }))).rejects.toThrow(RuntimeError);
@@ -112,8 +115,10 @@ async function sameVersionRefusalMessage(cpMutate: (cp: GigCheckpoint) => void):
   checkpoints.write(cp!);
   let msg = "";
   try {
-    // SAME pipeline → genome_hash/producers_sha/depth all match unless cpMutate moved them.
-    await runGig(pipeline(), {}, run(bench(), invoke, { checkpoints, resume_from: GIG }));
+    // SAME pipeline → genome_hash/producers_sha/depth all match unless cpMutate moved them (or the
+    // caller states an explicit depth via resumeExtra — #19: an OMITTED depth now inherits the
+    // checkpoint's, so a depth CONFLICT has to be stated explicitly, not merely mutated on one side).
+    await runGig(pipeline(), {}, run(bench(), invoke, { checkpoints, resume_from: GIG, ...resumeExtra }));
   } catch (e) {
     expect(e).toBeInstanceOf(ResumeRefused);
     msg = (e as Error).message;
@@ -140,10 +145,13 @@ describe("a refusal at an IDENTICAL version names the field that moved, not the 
   });
 
   it("only depth drifted (skim→deep, same engine) — the prose names depth, not the version", async () => {
+    // #19 — the drift must be a real DISAGREEMENT, not an omission: the checkpoint reads "skim"
+    // and the resume EXPLICITLY states "deep". An unstated depth would now inherit "skim" and
+    // proceed, so the conflict is forced on both sides.
     const msg = await sameVersionRefusalMessage((cp) => {
       cp.engine_version = COLTRANE_VERSION;
       cp.identity = { ...cp.identity, depth: "skim" };
-    });
+    }, { depth: "deep" });
     expect(msg, "names depth in the prose").toContain("depth");
     expect(msg, "does not send the reader to their already-matching build")
       .not.toMatch(new RegExp(`Resume from a ${COLTRANE_VERSION.replace(/\./g, "\\.")} build`));

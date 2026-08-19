@@ -1437,7 +1437,22 @@ export async function runGig(
     const allRemainingHuman =
       remainingChairs.length > 0 &&
       remainingChairs.every((c) => c.human === true && (c.agent_slug ?? "") === "");
-    const drift = runIdentityMismatch(cp.identity, identity(), { waiveProducers: allRemainingHuman });
+    // #19 — an OMITTED --depth is not a DISAGREEMENT. When the operator states no depth,
+    // `deps.depth` is undefined and identity() resolves it to "" — collapsing "I did not say"
+    // and "I said something different" into one value that then reads as a mismatch against a
+    // checkpoint written with a stated depth. The checkpoint already records its depth (a
+    // first-class run-identity field), so an unstated depth INHERITS it: substitute the
+    // checkpoint's depth as the effective comparison value ONLY when deps.depth is undefined.
+    // An EXPLICIT depth still compares as-is, so a skim resume of a deep checkpoint still
+    // refuses (#237: depth shapes what the model is asked for; a skim half stitched to a deep
+    // half is a real defect). This never MANUFACTURES a false mismatch and it is NOT a waiver
+    // of a stated one — see the note beside the 'never waived' rule in src/reuse.ts. identity()
+    // stays a pure function of deps, so `cur = identity()` below and every non-comparison use
+    // still see the operator's actual (undefined→"") depth.
+    const current = identity();
+    const currentForGate: RunIdentity =
+      deps.depth === undefined ? { ...current, depth: cp.identity.depth } : current;
+    const drift = runIdentityMismatch(cp.identity, currentForGate, { waiveProducers: allRemainingHuman });
     if (drift.length > 0) {
       // DIAGNOSTIC HONESTY, not a widened resume. The genome genuinely moved, so the refusal
       // stands — but the refusal must send the operator to the thing that ACTUALLY changed, not

@@ -11,7 +11,8 @@
     "change-set",
     "design-brief",
     "design-definition",
-    "design-concept"
+    "design-concept",
+    "pattern-extraction"
   ],
   "output_types": [
     "change-decision",

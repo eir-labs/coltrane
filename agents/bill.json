@@ -8,12 +8,14 @@
     "change-context",
     "change-decision",
     "change-plan",
-    "design-definition"
+    "design-definition",
+    "pattern-extraction"
   ],
   "output_types": [
     "change-plan",
     "change-set",
-    "design-concept"
+    "design-concept",
+    "draft-agent-profile"
   ],
   "domain": null,
   "description": "Harmonic structure. Settles the ordered structure a piece of work will be built through, then makes the thing that structure implies. Holds no tool grant: its substrate is the upstream record.",

@@ -451,6 +451,11 @@ table.fields tr:last-child td { border-bottom: 0; }
 .adico { display: grid; grid-template-columns: 92px 1fr; gap: 3px 12px; margin: 12px 0; font-size: 13px; }
 .adico dt { color: var(--faint); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; padding-top: 2px; }
 .adico dd { margin: 0; color: var(--ink); }
+.tier { font: 600 10px/1 var(--mono); padding: 3px 6px; border-radius: 4px; margin-right: 7px;
+  letter-spacing: .04em; text-transform: uppercase; white-space: nowrap; }
+.tier-enf { color: #1f6f43; background: #e4f4ea; }
+.tier-dec { color: #6a4b8a; background: #efe9f6; }
+.tier-unm { color: #8a2b2b; background: #f7e6e6; }
 .check { background: var(--bg); border: 1px solid var(--line); border-radius: 9px; padding: 11px 13px; margin-top: 10px; }
 .check .pred { font-family: var(--mono); font-size: 12.5px; color: var(--ink); word-break: break-word; }
 .check .inputs { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 9px; }
@@ -522,6 +527,16 @@ function deonticBadge(d) {
   const cls = ['permitted','obliged','forbidden'].includes(d) ? d : 'obliged';
   return '<span class="deontic '+cls+'">'+esc(d||'—')+'</span>';
 }
+/** An obligation's TIER is the honest half of the institutional layer: "enforced" claims a verifier
+ *  exists, "declared" says plainly there is none, and UNMARKED is refused at load by
+ *  checkInstitutionAdmissibility. Rendering it is the difference between a page that shows a rule
+ *  and one that shows whether the rule has teeth. */
+function tierBadge(t) {
+  if (t === 'enforced') return '<span class="tier tier-enf" title="a verifier exists">enforced</span>';
+  if (t === 'declared') return '<span class="tier tier-dec" title="stated; no runtime verifier - and it says so">declared</span>';
+  return '<span class="tier tier-unm" title="neither verified nor marked - refused at load">UNMARKED</span>';
+}
+
 function capChip(c) {
   if (c && c.grant === 'dispatch') return '<span class="chip mono">⌁ dispatch: '+(c.standards||[]).map(esc).join(', ')+'</span>';
   if (c && c.edge_type) { const scope = c.scope ? Object.entries(c.scope).map(([k,v])=>k+'='+v).join(' ') : ''; return '<span class="chip mono">edge: '+esc(c.edge_type)+(scope?' ('+esc(scope)+')':'')+'</span>'; }
@@ -806,7 +821,7 @@ function renderInstitutions() {
       if (c.required_skills.length||c.preferred_skills.length) h += '<div class="row" style="margin-top:10px">'+c.required_skills.map(s=>'<span class="chip mono">req: '+esc(s)+'</span>').join('')+c.preferred_skills.map(s=>'<span class="chip mono">pref: '+esc(s)+'</span>').join('')+'</div>';
       if (c.caps.length) h += '<div class="evkey">caps</div><div class="row">'+c.caps.map(capChip).join('')+'</div>';
       if (c.supplies) h += '<div class="evkey">supplies</div>'+Object.entries(c.supplies).map(([k,v])=>'<div class="supplies"><b class="hash">'+esc(k)+'</b><br>'+esc(oneLine(String(v)))+'</div>').join('');
-      if (c.obligations.length) h += '<div class="evkey">obligations</div><div class="oblig">'+c.obligations.map(o=>'<div class="o">'+deonticBadge(o.deontic)+'<span class="txt">'+esc(o.aim)+'</span></div>').join('')+'</div>';
+      if (c.obligations.length) h += '<div class="evkey">obligations</div><div class="oblig">'+c.obligations.map(o=>'<div class="o">'+deonticBadge(o.deontic)+tierBadge(o.tier)+'<span class="txt">'+esc(o.aim)+'</span></div>').join('')+'</div>';
       h += '</div>';
     }
     h += '</div>';

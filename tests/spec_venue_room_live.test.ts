@@ -92,7 +92,13 @@ async function realizer() {
 describe.skipIf(!HAVE_DOCKER)("a realized room is a place that exists", () => {
   it("the container the emitted config names is RUNNING, and answers MCP over that exact command", async () => {
     const { dockerComposeRealizer } = await realizer();
-    const gigId = "livelaw01-0000-0000-0000-000000000001";
+    // EACH live room law needs a DISTINCT compose project, or one leak poisons the next. The project
+    // name derives from the gig id's FIRST 8 chars (gig-<id8>, venue_realizer.ts:910). "livelaw" is 7
+    // chars, so every "livelaw0N-…" id collapses to the SAME slice "livelaw0" — all six rooms would
+    // then share the project name coltrane-gig-livelaw0, and a container one test leaves standing
+    // makes the next test's `compose create` fail with "name already in use". So the discriminating
+    // digit sits AT index 7: "livelawN-…" → slice "livelawN", unique per test. Keep it that way.
+    const gigId = "livelaw1-0000-0000-0000-000000000001";
     const handle = await dockerComposeRealizer().realize(NOTES_ROOM, noCredentials, { gigId });
     try {
       const cfg = handle.mcpServerConfigs["notes"] as { command: string; args: string[] };
@@ -120,7 +126,7 @@ describe.skipIf(!HAVE_DOCKER)("a realized room is a place that exists", () => {
 
   it("a chair in the room reaches a real genome — type_browse over the emitted transport answers >0 types", async () => {
     const { dockerComposeRealizer } = await realizer();
-    const gigId = "livelaw03-0000-0000-0000-000000000003";
+    const gigId = "livelaw3-0000-0000-0000-000000000003"; // distinct 8-char slice → own compose project
     const handle = await dockerComposeRealizer().realize(NOTES_ROOM, noCredentials, { gigId });
     try {
       const cfg = handle.mcpServerConfigs["notes"] as { command: string; args: string[] };
@@ -188,7 +194,7 @@ describe.skipIf(!HAVE_DOCKER)("a realized room is a place that exists", () => {
   // the copy, so a reader in the room is unchanged by the delivery move.
   it("a declared credential is delivered into the room and readable there — delivery survives the fix", async () => {
     const { dockerComposeRealizer } = await realizer();
-    const gigId = "livelaw04-0000-0000-0000-000000000004";
+    const gigId = "livelaw4-0000-0000-0000-000000000004"; // distinct 8-char slice → own compose project
     const SENTINEL = "live-credential-sentinel-9f3a7c";
     const resolve = async () => ({ "notes-token": SENTINEL });
     const handle = await dockerComposeRealizer().realize(CREDENTIALED_ROOM, resolve, { gigId });
@@ -220,7 +226,7 @@ describe.skipIf(!HAVE_DOCKER)("a realized room is a place that exists", () => {
 
   it("teardown leaves nothing of the room behind", async () => {
     const { dockerComposeRealizer } = await realizer();
-    const gigId = "livelaw02-0000-0000-0000-000000000002";
+    const gigId = "livelaw2-0000-0000-0000-000000000002"; // distinct 8-char slice → own compose project
     const handle = await dockerComposeRealizer().realize(NOTES_ROOM, noCredentials, { gigId });
     const cfg = handle.mcpServerConfigs["notes"] as { command: string; args: string[] };
     const named = cfg.args.find((a) => a.includes("room"))!;
@@ -231,6 +237,82 @@ describe.skipIf(!HAVE_DOCKER)("a realized room is a place that exists", () => {
     await handle.teardown();
     const after = spawnSync("docker", ["inspect", "-f", "{{.State.Status}}", named], { encoding: "utf8" });
     expect(after.status, `${named} must not survive teardown — an ephemeral room that outlives its gig is a leak`).not.toBe(0);
+  }, 240_000);
+
+  // ★ NOT ROOT. The workspace-ownership fix (src/venue_realizer.ts) pins the room's user to the
+  // INVOKING uid:gid so the container owns its own bind-mounted workspace on Linux — direction (a).
+  // Written FIRST so that override cannot silently select root: the running container's effective uid
+  // must not be 0 whatever ownership approach ships. It is the invoking user's uid, which is the same
+  // non-root user that owns the host workspace directory — that agreement is what lets the seat write.
+  it("the room does NOT run as root — its effective uid is the non-root invoking user", async () => {
+    const { dockerComposeRealizer } = await realizer();
+    const gigId = "livelaw5-0000-0000-0000-000000000005"; // distinct 8-char slice → own compose project
+    const handle = await dockerComposeRealizer().realize(NOTES_ROOM, noCredentials, { gigId });
+    try {
+      const cfg = handle.mcpServerConfigs["notes"] as { command: string; args: string[] };
+      const room = cfg.args.find((a) => a.includes("room"))!;
+
+      // NON-VACUITY: a dead container answers no uid, so its absence would prove nothing.
+      const state = spawnSync("docker", ["inspect", "-f", "{{.State.Status}}", room], { encoding: "utf8" });
+      expect(state.stdout.trim(), "the room must be running to read its effective uid").toBe("running");
+
+      // `docker exec` with no -u runs as the container's CONFIGURED user, so `id -u` is exactly the uid
+      // a seat exec'd into this room runs as. Root is never the answer here.
+      const who = spawnSync("docker", ["exec", room, "id", "-u"], { encoding: "utf8" });
+      expect(who.status, "docker exec id -u — the running room must answer its effective uid").toBe(0);
+      const roomUid = who.stdout.trim();
+      expect(roomUid, "the room must NOT run as root (uid 0) — whatever owns the workspace, root does not").not.toBe("0");
+
+      // And it is the INVOKING user's uid: this proves direction (a) took effect (the container owns
+      // its own bind mount), not merely that the image's default `node` uid happens to be non-zero.
+      expect(roomUid, "the room runs as the invoking user, which owns its bind-mounted workspace").toBe(
+        String(process.getuid?.()),
+      );
+    } finally {
+      await handle.teardown();
+    }
+  }, 240_000);
+
+  // ★ POSTURE UNCHANGED. The ownership fix moved the room's uid; it must not have widened anything
+  // else. Asserted against the RUNNING container (docker inspect), because a rendered-document check
+  // proves only what the document says — and a uid change is exactly the kind of edit that could
+  // quietly regress posture where a document check would miss it. No runtime socket bound or mounted,
+  // not privileged, no added capabilities, not on the host network.
+  it("the room posture survives the ownership fix — no docker socket, not privileged, no cap_add, no host network", async () => {
+    const { dockerComposeRealizer } = await realizer();
+    const gigId = "livelaw6-0000-0000-0000-000000000006"; // distinct 8-char slice → own compose project
+    const handle = await dockerComposeRealizer().realize(NOTES_ROOM, noCredentials, { gigId });
+    try {
+      const cfg = handle.mcpServerConfigs["notes"] as { command: string; args: string[] };
+      const room = cfg.args.find((a) => a.includes("room"))!;
+
+      const inspect = spawnSync("docker", ["inspect", room], { encoding: "utf8" });
+      expect(inspect.status, "docker inspect — the room must exist to inspect its live posture").toBe(0);
+      // docker inspect always emits a one-element array for a single ref; index-with-`!` rather than
+      // destructure so the element narrows to defined (a bare `const [c]` is `T | undefined` under
+      // noUncheckedIndexedAccess and every access below would be a compile error).
+      const c = (JSON.parse(inspect.stdout) as Array<{
+        HostConfig: { Binds?: string[] | null; Privileged?: boolean; CapAdd?: string[] | null; NetworkMode?: string };
+        Mounts?: Array<{ Source?: string; Destination?: string }>;
+      }>)[0]!;
+
+      // No container-runtime socket anywhere it could be bound or mounted — the one-line escape.
+      const socket = /docker\.sock|containerd\.sock|podman\.sock|\/var\/run\/docker/i;
+      for (const b of c.HostConfig.Binds ?? []) {
+        expect(socket.test(b), `no runtime socket may be bound into the room: ${b}`).toBe(false);
+      }
+      for (const m of c.Mounts ?? []) {
+        expect(socket.test(`${m.Source ?? ""}:${m.Destination ?? ""}`), "no runtime socket may be mounted into the room").toBe(false);
+      }
+
+      // Not privileged, no added capabilities, not on the host network. `null` CapAdd is the default —
+      // no capability was added — and normalizes to the empty set.
+      expect(c.HostConfig.Privileged ?? false, "the room is not privileged").toBe(false);
+      expect(c.HostConfig.CapAdd ?? [], "the room adds no capabilities").toEqual([]);
+      expect(c.HostConfig.NetworkMode, "the room is not on the host network").not.toBe("host");
+    } finally {
+      await handle.teardown();
+    }
   }, 240_000);
 });
 

@@ -401,6 +401,41 @@ export function renderComposeConfig(
     },
   };
 
+  // ── WHO OWNS THE WORKSPACE. DIRECTION (a): RUN THE ROOM AS THE INVOKING USER. ──────────────────
+  //
+  // The workspace above is bind-mounted `rw` from a HOST directory the drain mkdirs, so on Linux it
+  // is owned by whoever ran the drain (uid 501 on a laptop, ~1001 on a GitHub runner). The image runs
+  // as `USER node` = uid 1000. Those uids MISMATCH, so a seat exec'd into the room could not write its
+  // own workspace on Linux — the isolation law's in-room write (spec_venue_room_live.test.ts) exited
+  // non-zero. macOS Docker Desktop translates ownership across the mount and hid it; Linux does not,
+  // so this only surfaced in CI.
+  //
+  // ★ DO NOT REINTRODUCE A chown FROM THE HOST. A NON-ROOT process on Linux CANNOT chown a file to
+  // another uid — a drain running as `runner` cannot hand its workspace to uid 1000, so any
+  // host-side `chown` works on a root drain and fails on every other one. The fix must not require
+  // the host to own the workspace to a different uid.
+  //
+  // Instead, pin the container's user to the invoking uid:gid. The container then owns its own bind
+  // mount by construction and the in-room write succeeds, WITHOUT the host chowning anything. This
+  // stays NON-ROOT (the posture that matters — asserted live by the not-root law): it is simply no
+  // longer specifically `node`. Nothing in the room/floor image depends on uid 1000 — /app and
+  // /run/secrets/<class> are world-readable (COPY lands root-owned 0644; credential files are mode
+  // 0o444), so a non-1000 uid still reads the genome and its credentials.
+  //
+  // Direction (b) — make the workspace a NAMED VOLUME so Docker creates it with the container's
+  // ownership and host-path exposure drops entirely — is the better END STATE, but it changes
+  // seat.workspace from a host absolute path to a container-relative one and its callers (notably
+  // src/claude_invoker.ts, out of scope here) were unread. It is DEFERRED as a named next step, not
+  // discarded, so committing to it does not risk a second failure outside the target surface.
+  //
+  // A drain-local fact, not a contract field: injected here on the realizer-built object rather than
+  // routed through contract data, so it bypasses COMPOSE_SUBSTITUTABLE_FIELDS without widening that
+  // allowlist. `getuid`/`getgid` are POSIX-only; where absent (non-POSIX host) the field is omitted
+  // and the image's own `USER node` stands, which is the prior behaviour.
+  const uid = process.getuid?.();
+  const gid = process.getgid?.();
+  if (uid !== undefined && gid !== undefined) room["user"] = `${uid}:${gid}`;
+
   // Devices: map EXACTLY the declared class's nodes and the owning group, and widen nothing — no
   // privileged mode, no capabilities, no wildcard device rule. Only when a host maps the class.
   if (opts.host && v.devices.length > 0) {

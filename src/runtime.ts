@@ -3,6 +3,7 @@
 // writes each typed output to the store (validated), links provenance (derived_from),
 // and records one ledger entry with a deterministic genome_hash + a run_fingerprint
 // that carries model_version + (empty, v0) eval_scores — honestly un-tempered.
+import { lineageAdoption } from "./lineage_adoption.js";
 import { randomUUID } from "node:crypto";
 import type { Standard, Agent, Chair } from "./composition.js";
 import { PRIMITIVE_OUTPUT_TYPE, CORE_TYPES } from "./core_types.js";
@@ -159,6 +160,23 @@ export type GigProgressEvent =
   // to be cryptographically identical to a skilled one — same genome_hash, run_fingerprint
   // AND content_sha — so this channel is the only place the difference is observable live.
   | { type: "skills_unresolved"; phase: string; role: string; agent: string; missing: string[] }
+  // Institutional lineage: a human chair sealing a `lineage-verdict` either grounds an
+  // institution or does not, and until now it did neither visibly. Same reasoning as
+  // `skills_unresolved` above — an adoption that happens silently is indistinguishable from
+  // one that never happened, and this is the only place the difference is observable live.
+  // The runtime DECIDES (a pure call to `lineageAdoption`) and REPORTS; it writes no genome
+  // file and touches no store. Persistence is the caller's, through the store-side home
+  // `LineageRecordRefSchema` names.
+  | {
+      type: "lineage_adoption"; phase: string; role: string;
+      /** true only when the verdict passed, was signed, and named a record. */
+      adopt: boolean;
+      /** content_sha of the lineage-record the institution would be grounded in. */
+      record_ref?: string;
+      approved_by?: string;
+      /** every applicable refusal, not just the first — see lineageAdoption. */
+      refusals?: string[];
+    }
   | { type: "agent_event"; phase: string; role: string; event: AgentStreamEvent }
   // #turn-budget — the operator-facing read of the gig's budget agent_state. Emitted at the single
   // reserve-draw intercept: `yielding` the moment a seated chair crosses into a granted reserve
@@ -1756,6 +1774,24 @@ export async function runGig(
           type: "chair_complete", phase: phase.name, role: hc.role, producer: deps.approved_by ?? "human",
           output_types: [domain_type], duration_ms: Date.now() - t0,
         });
+        // A sealed lineage-verdict either grounds an institution or does not. Decide it here,
+        // where the verdict and the record it approved are both in hand, and report the answer
+        // either way. The record the verdict targets IS the input it approved — the same set
+        // already sealed into this output's input_shas — so no lookup is invented.
+        if (domain_type === "lineage-verdict") {
+          const target = approvalInputs.find((i) => i.domain_type === "lineage-record") ?? approvalInputs[0];
+          const decision = lineageAdoption({
+            verdict: (approval ?? null) as Record<string, unknown> | null,
+            record_ref: target?.content_sha ?? "",
+            sealed_at: rec.created_at,
+          });
+          emit({
+            type: "lineage_adoption", phase: phase.name, role: hc.role,
+            adopt: decision.adopt,
+            ...(decision.ref ? { record_ref: decision.ref.record_ref, approved_by: decision.ref.approved_by ?? "" } : {}),
+            ...(decision.refusals.length ? { refusals: decision.refusals.map((r) => r.reason) } : {}),
+          });
+        }
       }
       ready = ready.filter((c) => !(c.human === true && (c.agent_slug ?? "") === ""));
       if (ready.length === 0) continue;

@@ -27,6 +27,7 @@ import { COLTRANE_VERSION } from "./version.js";
 import { workOnce } from "./worker.js";
 import { workerCredentialMode } from "./worker_env.js";
 import { makeClaudeInvoker } from "./claude_invoker.js";
+import { dockerComposeRealizer } from "./venue_realizer.js";
 import { readFileSync } from "node:fs";
 
 export interface CliIO {
@@ -238,6 +239,15 @@ export async function runCli(argv: readonly string[], io: CliIO): Promise<number
             model: process.env["COLTRANE_MODEL"],
             ...(process.env["COLTRANE_CHAIR_TIMEOUT_MS"] ? { timeout_ms: Number(process.env["COLTRANE_CHAIR_TIMEOUT_MS"]) } : {}),
           }),
+        // The SAME realizer the interactive path constructs at src/server.ts:3486 — one bootstrap,
+        // so the drain and the server cannot drift on which substrate a venue-named room is stood up
+        // on. A box's claim gate (venueMayClaim) already promised it can stand this room up; without
+        // this line workOnce would then refuse EVERY such gig with "…need a realizer this worker was
+        // not given — refusing rather than running the room unbuilt" (worker.ts:1023-1028), because
+        // nothing here supplied one. dockerComposeRealizer() is real docker by default and must not
+        // throw on construction (venue_realizer.ts:808); runGig only realizes when the venue declares
+        // mcp_servers, so a server-less venue's behaviour is unchanged.
+        venueRealizer: dockerComposeRealizer(),
         log: (l) => line(io, l),
       },
     );

@@ -200,7 +200,7 @@ has a promote tool today (evals are declared inside the standard that uses them)
 | `venues` | the institution's configured performance space: equipment (a deny-by-default tool CEILING), doors (ingress/egress origin allowlists), digest-pinned installs, credential surface, lifecycle, and the accountable office | `venue_define · venue_browse` |
 | `skills` | reusable cognitive primitives — bound into agents by slug, or CARRIED on an agent's own record (load-only + promote) | `skill_promote` |
 | `evals` | verdict shapes that judge gig outputs (load-only; declared with the standard) | _none — declared in the standard file_ |
-| `institutions` | institutional instances: an institution, its chairs (with dispatch grants), assignments, forebears, lineage edges | _file-shaped under `institutions/`, validated by the Zod schemas; no loader or MCP surface yet — `tests/default_genome_quartet.test.ts` is the gate_ |
+| `institutions` | institutional instances: an institution, its chairs (with dispatch grants), assignments, forebears, lineage edges | _file-shaped under `institutions/`, loaded by `loadInstitutions` (src/institution_loader.ts) and returned in the genome alongside every other class; TOTAL by contract — a malformed document becomes a per-file `load_error` and drops out rather than failing the load. No MCP authoring surface yet. Gates: `tests/institution_loader.test.ts` (8 laws incl. wiring + ordering) and `tests/default_genome_quartet.test.ts`_ |
 
 Discoverability parity is an invariant: every class you can author over MCP you can list
 over MCP (`type_browse · skill_browse · agent_browse · standard_browse · chart_browse ·

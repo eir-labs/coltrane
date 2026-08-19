@@ -118,6 +118,49 @@ describe("gig_dispatch — resume", () => {
     expect((manifest["skipped"] as Array<{ role: string; reason: string }>).map((s) => [s.role, s.reason])).toEqual([["s", "resume"]]);
   });
 
+  it("a human-only resume driven through the gig_dispatch surface succeeds WITHOUT --input", async () => {
+    // THE THREAD GUARD (#20). The runtime-level laws in phase_resume_and_reuse set
+    // gig_input_omitted directly on RunDeps and so stay green even if the cli.ts -> server.ts ->
+    // RunDeps thread is broken. This is the only test that fails if that thread is cut: it drives
+    // an approve-only resume through the real dispatch surface and asserts the omitted --input
+    // inherits the checkpoint's gig_input_sha instead of drifting to sha256('{}') and refusing.
+    const registry = createRegistry();
+    registry.registerType(note);
+    registry.registerType(verdictT);
+    // solo (a model chair) seals a note, then a HUMAN chair holds the gig — so after attempt 1
+    // parks, every remaining chair is human.
+    const approveStd = composeStandard({
+      slug: "approve-demo", domain: "demo",
+      agents: [testAgent({ slug: "solo", primitives: ["SENSE"], input_types: [], output_types: ["note"], domain: "demo" })],
+      phases: [
+        { name: "sense", chairs: [{ role: "s", agent_slug: "solo", depends_on: [], input_contract: [], output_contract: ["note"], required_skills: [] }] } as PhaseDef,
+        { name: "approve", chairs: [{ role: "a", human: true, agent_slug: "", depends_on: ["s"], input_contract: [], output_contract: ["call"], required_skills: [] }] } as PhaseDef,
+      ],
+    });
+    const first = counting();
+    const d: ServerDeps = {
+      registry, outputs: createOutputStore(registry), ledger: new MemoryLedger(),
+      standards: new Map([[approveStd.slug, approveStd]]), invoke: first.invoke,
+      gig_runs: new Map(), checkpoints: createMemoryCheckpointStore(),
+    };
+
+    // Attempt 1 — dispatched WITH a payload; the model chair seals, the gig parks at the human chair.
+    const r1 = await dispatchTool("gig_dispatch", { standard_slug: "approve-demo", input: { seed: "orig" }, wait: true }, d);
+    expect(r1.ok).toBe(true);
+    expect((r1.data as { status: string }).status).toBe("awaiting_approval");
+    const gid = d.outputs.all()[0]!.gig_id;
+
+    // Attempt 2 — resume WITHOUT --input. The CLI would set gig_input_omitted; here we pass it on
+    // the tool call, exactly as cli.ts does. The omitted payload must inherit the checkpoint's
+    // gig_input_sha, not refuse.
+    const second = counting();
+    d.invoke = second.invoke;
+    const r2 = await dispatchTool("gig_dispatch", { standard_slug: "approve-demo", input: {}, gig_input_omitted: true, wait: true, resume_gig_id: gid }, d);
+    expect(r2.ok, "an omitted --input on a human-only resume must not refuse").toBe(true);
+    expect((r2.data as { status: string }).status).toBe("awaiting_approval");
+    expect(second.calls, "the sealed model chair is restored, not replayed").toEqual({});
+  });
+
   it("a refused resume comes back as a refusal with the drift, not as a silent cold run", async () => {
     const checkpoints = createMemoryCheckpointStore();
     const first = counting(1);

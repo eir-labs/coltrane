@@ -91,8 +91,14 @@ export function typeShapeFingerprint(def: {
  * agent's type surface, so a resume across an edited pipeline cannot happen. The rest close
  * the holes genome_hash does not cover:
  *
- *  - `gig_input_sha` — the dispatch payload. Phases 1..4 derived from payload A followed by
- *    phase 5 consuming payload B is the same splice as a genome change, one layer down.
+ *  - `gig_input_sha` — the sha256 of the CANONICAL dispatch payload, and ONLY that hash: the
+ *    payload itself is NEVER stored in a checkpoint (nor in the ledger). A later reader must not
+ *    try to "recover the input from the checkpoint" — there is nothing to recover; the hash is a
+ *    fingerprint, not a copy. Phases 1..4 derived from payload A followed by phase 5 consuming
+ *    payload B is the same splice as a genome change, one layer down. (#20: because the payload is
+ *    absent, a resume that OMITS --input cannot re-derive it; when every remaining chair is human
+ *    the resume gate INHERITS this recorded hash instead — see the runtime resume gate and the
+ *    inheritance-vs-waiver note on `runIdentityMismatch` below.)
  *  - `model_version` — a run whose first half was produced by one model and second half by
  *    another gets ONE `run_fingerprint`, carrying only the final model. That fingerprint then
  *    misdescribes the outputs it covers. Cheap to check; usually "unknown" on both sides, so
@@ -162,12 +168,19 @@ export function producersSha(input: {
  * genome_hash, gig_input_sha, model_version, depth and canonical_form_version are NEVER waived,
  * because they can still describe something the remaining human chair is being asked to approve.
  *
- * That NEVER-WAIVED rule is about a STATED mismatch, and #19 does not touch it. When a resume
- * omits --depth the operator stated NOTHING, so the resume gate (src/runtime.ts) compares against
- * the depth the CHECKPOINT already recorded — it INHERITS an unstated value, it does not waive a
- * stated one. depth stays never-waived: an EXPLICIT depth that disagrees still drives a refusal.
- * Inheriting a value nobody contradicted is a different act from skipping a comparison that would
- * have failed, so reading #19 as a hole in this rule is a mistake.
+ * That NEVER-WAIVED rule is about a STATED mismatch, and neither #19 nor #20 touches it. Waiving
+ * skips a comparison that WOULD have failed; INHERITING substitutes the checkpoint's own recorded
+ * value for a field the operator left unstated, so the comparison a resume runs is between the
+ * checkpoint and a value it does not contradict. Two fields inherit, at the runtime resume-gate
+ * call site, never here:
+ *   - depth (#19): a resume that omits --depth compares against the depth the CHECKPOINT recorded.
+ *   - gig_input_sha (#20): a resume whose every remaining chair is human and that omits --input
+ *     compares against the gig_input_sha the CHECKPOINT recorded — because the payload is never
+ *     stored (see RunIdentity.gig_input_sha) and the remaining human chairs consume no payload.
+ * Both stay never-waived: an EXPLICIT --depth or --input that disagrees still drives a refusal, and
+ * gig_input_sha keeps gating in full the moment any remaining chair is a model chair. Inheriting a
+ * value nobody contradicted is a different act from skipping a comparison that would have failed,
+ * so reading #19 or #20 as a hole in this rule is a mistake.
  */
 export function runIdentityMismatch(
   a: RunIdentity,
@@ -241,6 +254,13 @@ export interface CheckpointRole {
 export interface GigCheckpoint {
   schema_version: number;
   gig_id: string;
+  /**
+   * The run identity a resume must match. NOTE what this does NOT contain: the dispatch payload.
+   * `identity.gig_input_sha` is a sha256 of the canonical payload and nothing else — the checkpoint
+   * stores the HASH, never the bytes. A later reader must not attempt to "recover the input from
+   * the checkpoint"; that recovery is structurally impossible. On a human-only resume that omits
+   * --input, the gate inherits this hash rather than reconstructing a payload it never kept (#20).
+   */
   identity: RunIdentity;
   /**
    * The engine build (COLTRANE_VERSION) that WROTE this checkpoint.

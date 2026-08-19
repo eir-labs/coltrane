@@ -343,6 +343,19 @@ export interface RunDeps {
    */
   resume_from?: string | undefined;
   /**
+   * #20 — the caller supplied NO --input on this (resume) dispatch. Default-false semantics:
+   * absent or false means "a value WAS supplied" (even an explicit `{}`); true means "the caller
+   * stated no payload at all". It exists for the same reason `depth?: Depth | undefined` does —
+   * an omitted value must be distinguishable from a stated one. The dispatch payload is never
+   * carried in a checkpoint (only its hash is; see src/reuse.ts RunIdentity.gig_input_sha), so an
+   * omitted --input cannot be reconstructed. Instead, on a resume whose every remaining chair is
+   * human, the gate INHERITS the checkpoint's recorded gig_input_sha rather than refusing on the
+   * drift to sha256('{}'). A SUPPLIED value is never inherited, so a disagreeing --input still
+   * gates; and while any remaining chair is a MODEL chair the gate is unchanged. worker.ts passes
+   * the real claim input and never sets this, so the gate stays fully active for worker runs.
+   */
+  gig_input_omitted?: boolean | undefined;
+  /**
    * The chair-level reuse cache. Presence IS the opt-in — the runtime never constructs one —
    * and it enables BOTH reads and writes.
    *
@@ -1449,9 +1462,26 @@ export async function runGig(
     // of a stated one — see the note beside the 'never waived' rule in src/reuse.ts. identity()
     // stays a pure function of deps, so `cur = identity()` below and every non-comparison use
     // still see the operator's actual (undefined→"") depth.
+    // #20 — an OMITTED --input is no more a DISAGREEMENT than an omitted --depth, and the same
+    // omission-vs-conflict distinction applies. A checkpoint stores ONLY identity.gig_input_sha —
+    // a hash of the canonical dispatch payload — and NEVER the payload itself (see src/reuse.ts,
+    // RunIdentity.gig_input_sha), so the omitted payload cannot be "recovered from the checkpoint";
+    // it is INHERITED. The producers already consumed the input and sealed their hashed outputs, so
+    // when every remaining chair is human — approving already-sealed work it does not read — an
+    // unstated --input inherits the checkpoint's recorded gig_input_sha. A SUPPLIED value is never
+    // substituted (deps.gig_input_omitted is false), so a disagreeing --input still drives a
+    // refusal; and while any remaining chair is a MODEL chair (allRemainingHuman false) the payload
+    // is exactly what that chair will consume, so gig_input_sha keeps gating unchanged. identity()
+    // itself stays untouched, so `cur = identity()` below and every checkpoint write still see the
+    // operator's actual (omitted→{}) payload hash — the substitution is only the comparison value.
     const current = identity();
-    const currentForGate: RunIdentity =
-      deps.depth === undefined ? { ...current, depth: cp.identity.depth } : current;
+    const inheritDepth = deps.depth === undefined;
+    const inheritGigInput = allRemainingHuman && deps.gig_input_omitted === true;
+    const currentForGate: RunIdentity = {
+      ...current,
+      ...(inheritDepth ? { depth: cp.identity.depth } : {}),
+      ...(inheritGigInput ? { gig_input_sha: cp.identity.gig_input_sha } : {}),
+    };
     const drift = runIdentityMismatch(cp.identity, currentForGate, { waiveProducers: allRemainingHuman });
     if (drift.length > 0) {
       // DIAGNOSTIC HONESTY, not a widened resume. The genome genuinely moved, so the refusal

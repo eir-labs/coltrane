@@ -871,10 +871,18 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         if (reuseOn && !deps.reuse) {
           return { ok: false, requires_approval: approval, error: `gig_dispatch: reuse was requested but this server has no reuse store wired` };
         }
+        // #20 — the CLI signals an OMITTED --input as a boolean on args, so a human-only resume can
+        // inherit the checkpoint's gig_input_sha instead of drifting to sha256('{}') and refusing.
+        // It is advertised in gig_dispatch's input_schema (src/mcp.ts): a control the handler reads
+        // must be discoverable by a caller (#234). Only true when the caller stated no payload; an
+        // explicit `{}` is a supplied value and leaves this false, so a disagreeing payload still
+        // gates (see src/runtime.ts).
+        const gigInputOmitted = args["gig_input_omitted"] === true;
         const reuseWiring = {
           ...(deps.checkpoints ? { checkpoints: deps.checkpoints } : {}),
           ...(resumeArg !== undefined ? { resume_from: resumeArg } : {}),
           ...(reuseOn && deps.reuse ? { reuse: deps.reuse } : {}),
+          ...(gigInputOmitted ? { gig_input_omitted: true } : {}),
         };
 
         // ── the human seat's door ────────────────────────────────────────────────────────

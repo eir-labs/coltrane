@@ -75,8 +75,12 @@ Options
 A dispatch that reaches a chair a HUMAN holds parks: it names the waiting chair and exits 0,
 because a gig waiting on a person is not a failed gig. Approve it on the resume —
 
-  coltrane dispatch <standard> --resume <gig> --input @orig.json \\
+  coltrane dispatch <standard> --resume <gig> \\
       --approve approve=@verdict.json --as eugene
+
+--input is NOT required on an approve-only resume: when every remaining chair is human the
+checkpoint's recorded payload stands and the omission inherits it. If you DO pass --input it is
+checked against the checkpoint, and a disagreement still refuses the resume.
 `;
 
 interface Parsed {
@@ -305,6 +309,12 @@ export async function runCli(argv: readonly string[], io: CliIO): Promise<number
       const args: Record<string, unknown> = { standard_slug: standard, input: input.value };
       if (typeof flags["depth"] === "string") args["depth"] = flags["depth"];
       if (typeof flags["resume"] === "string") args["resume_gig_id"] = flags["resume"];
+      // #20 — --input NOT supplied (the readInput(undefined) path above yields {}, which is
+      // indistinguishable from an explicit `--input {}`). Signal the omission so an approve-only
+      // resume inherits the checkpoint's recorded gig_input_sha rather than refusing on the drift
+      // to sha256('{}'). A supplied --input (even `{}`) leaves this unset, so a disagreeing payload
+      // still refuses (see src/runtime.ts #20).
+      if (typeof flags["input"] !== "string") args["gig_input_omitted"] = true;
       if (flags["reuse"] === true) args["reuse"] = true;
       if (flags["wait"] === true) args["wait"] = true;
       if (approvals.value) args["approvals"] = approvals.value;

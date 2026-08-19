@@ -147,7 +147,13 @@ export const MCP_TOOLS: readonly MCPToolDef[] = [
   // (dispatchTarget, src/chart.ts). A chart dispatch's reply carries the ARRANGEMENT's manifest —
   // chart_hash, the per-movement roll-up, cumulative spend against the envelope — where a standard
   // dispatch carries the run's.
-  { slug: "gig_dispatch",                  category: "run", input_schema: obj({ standard_slug: "string", chart_slug: "string", venue: "string", acting_for: "string", input: "object", depth: "string", wait: "boolean", budget: "object", resume_gig_id: "string", reuse: "boolean", approvals: "object", approved_by: "string" }), output_schema: obj({ gig_id: "string", status: "string", awaiting: "object", depth: "string", manifest: "object", resumed_from: "string", reuse: "boolean", resume_refused: "boolean", drift: "array" }) },
+  // #20 — `gig_input_omitted` is the caller's statement that it passed NO payload (distinct from an
+  // explicit `input: {}`). On an approve-only resume whose every remaining chair is human, an omitted
+  // payload inherits the checkpoint's recorded gig_input_sha instead of drifting to sha256('{}') and
+  // refusing; a supplied `input` leaves this false, so a disagreeing payload still gates
+  // (src/runtime.ts). The handler reads it, so #234 requires it be advertised here — it is a real
+  // control, not an internal signal, and a caller must be able to find it.
+  { slug: "gig_dispatch",                  category: "run", input_schema: obj({ standard_slug: "string", chart_slug: "string", venue: "string", acting_for: "string", input: "object", gig_input_omitted: "boolean", depth: "string", wait: "boolean", budget: "object", resume_gig_id: "string", reuse: "boolean", approvals: "object", approved_by: "string" }), output_schema: obj({ gig_id: "string", status: "string", awaiting: "object", depth: "string", manifest: "object", resumed_from: "string", reuse: "boolean", resume_refused: "boolean", drift: "array" }) },
   // `skipped_chairs` / `resumed_from` / `reuse_rejected` are the ASYNC path's only report of a
   // saving — the manifest never reaches a caller who dispatched without `wait`.
   // `awaiting` names the human chair a parked run stopped at. On the async path — the DEFAULT

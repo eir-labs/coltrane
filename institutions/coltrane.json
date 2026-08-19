@@ -63,6 +63,54 @@
           }
         },
         "content_hash": "sha256:f465a9f3e76a5288dd993ef1b8228993feea04a47af8f3c99462cc4edcb238a5"
+      },
+      {
+        "attributes": "any seated agent performing a coltrane-shaped operation — composing a standard, writing a typed output, defining an agent, registering a type",
+        "deontic": "forbidden",
+        "aim": "perform a coltrane-shaped operation through a built-in file or search surface instead of the MCP surface",
+        "conditions": "whenever the operation has a coltrane tool that performs it; reading source and editing engine TypeScript are not coltrane-shaped and are unaffected",
+        "or_else": "the operation is not seen by the genome — the work does not enter the genome: no content_sha is sealed, no ledger entry is written, no hash updates, so the change is unrecorded however correct its bytes are. Where the seat holds no such grant the surface is absent and the bypass cannot arise; where it does, this is what follows.",
+        "check": {
+          "predicate": "(=> (and (is-agent actor) (= operation \"coltrane-shaped\") (not (= surface \"mcp\"))) deny)",
+          "inputs": {
+            "actor": "principal",
+            "operation": "operation-kind",
+            "surface": "tool-surface"
+          }
+        },
+        "content_hash": "sha256:b3f747e6039cdc1224a39fc0509e4b46f5c2b75c2e8feec2b3459b85a4cc762a"
+      },
+      {
+        "attributes": "any seated agent",
+        "deontic": "forbidden",
+        "aim": "write to core_types/ or domain_types/ directly instead of using type_register or type_extend",
+        "conditions": "at all times",
+        "or_else": "the type is not registered — the work does not enter the genome: no content_sha is sealed, no ledger entry is written, no hash updates, so the change is unrecorded however correct its bytes are. Where the seat holds no such grant the surface is absent and the bypass cannot arise; where it does, this is what follows.",
+        "check": {
+          "predicate": "(=> (and (is-agent actor) (= action \"direct-write\") (= target \"type-dir\")) deny)",
+          "inputs": {
+            "actor": "principal",
+            "action": "action-kind",
+            "target": "write-target"
+          }
+        },
+        "content_hash": "sha256:d1370d7b356ab529da71576f390d712a3896a85c89a2b9a8300cb729ab99f1ca"
+      },
+      {
+        "attributes": "any seated agent adding an agent definition to the genome",
+        "deontic": "forbidden",
+        "aim": "add an agent DEFINITION by dropping a file under agents/ instead of using agent_define",
+        "conditions": "for the genome agent-definition surface (agents/*.json). NOT the base-player surface: CLAUDE.md ships Claude Code subagents as markdown under agents/players/<name>.md, and those are files by design — a law that forbade them would forbid the shipped arrangement.",
+        "or_else": "the agent is not defined — the work does not enter the genome: no content_sha is sealed, no ledger entry is written, no hash updates, so the change is unrecorded however correct its bytes are. Where the seat holds no such grant the surface is absent and the bypass cannot arise; where it does, this is what follows.",
+        "check": {
+          "predicate": "(=> (and (is-agent actor) (= action \"file-drop\") (= target \"agent-definition\")) deny)",
+          "inputs": {
+            "actor": "principal",
+            "action": "action-kind",
+            "target": "write-target"
+          }
+        },
+        "content_hash": "sha256:cc778a9b25e6914cf9c8e70d63539dd7563f3be8c3c7b4f6a693de5bae5496f2"
       }
     ],
     "sovereign": true,

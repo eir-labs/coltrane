@@ -1617,10 +1617,31 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         };
         const proposal = proposeTypeChange(base, next);
         const newFields = Object.keys(nextProps).length - Object.keys(baseProps).length;
-        // substrate seal: the new version's identity is recorded in the ledger (file
-        // materialization of versioned types follows the version-aware loader path).
+        // substrate seal: PERSIST the extended definition the way type_register does, rather
+        // than only recording its identity in the ledger. The prior `recordIdentity` path
+        // deferred file materialization to a "version-aware loader path" that does not exist —
+        // so `ok:true` named a version nothing wrote: a fresh load still resolved the old
+        // definition, and the sealed genome_mutation row asserted a state the genome did not
+        // hold. `sealDefinition` seals-before-writes and materializes a loadable file, so an
+        // `ok:true` now means the type is resolvable. The loader keys domain types by version
+        // from file CONTENT and DomainTypeMap.get returns the highest-version record, so the
+        // in-place overwrite of `domain_types/<slug>.json` at the bumped version resolves today
+        // with no versioned filename — an `@v` file would be the same defect wearing a version
+        // number. The ledger subject stays the VERSIONED identity `<slug>@v<n>` (its content
+        // hash), while the file is the bare `<slug>.json` the loader reads.
         const versioned = { ...next, version: proposal.next_version };
-        const tx = deps.genome_dir ? recordIdentity("type_extend", `${base.slug}@v${proposal.next_version}`, versioned, deps.ledger, args["reason"] != null ? { reason: args["reason"] } : undefined) : undefined;
+        const tx = deps.genome_dir
+          ? sealDefinition(
+              "type_extend",
+              `${base.slug}@v${proposal.next_version}`,
+              versioned,
+              deps.ledger,
+              deps.genome_dir,
+              "domain_types",
+              args["reason"] != null ? { reason: args["reason"] } : undefined,
+              base.slug,
+            )
+          : undefined;
         return { ok: true, requires_approval: proposal.approval_required, data: { new_version: proposal.next_version, changelog_entry: `${proposal.change_class}: +${newFields} field(s)`, change_class: proposal.change_class, effective_hash: tx?.effective_hash, content_hash: tx?.content_hash } };
       }
       case "charter_read": {

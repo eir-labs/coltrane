@@ -729,7 +729,10 @@ export function resumeStateFromDrain(args: {
     const sha = outputContentHash({
       core_type: spec.core_type,
       domain_type: row.domain_type,
-      domain_type_version: 1,
+      // The sink deliberately omits domain_type_version (see the DrainedOutput note above), so it
+      // is RE-DERIVED from the loaded genome through the store, not read off the sink row. A row
+      // sealed at v3 must therefore re-hash under 3 to match its claimed content_sha.
+      domain_type_version: outputs.typeVersionOf(row.domain_type),
       domain: spec.domain,
       primitive: spec.primitive,
       phase,
@@ -780,7 +783,10 @@ export function resumeStateFromDrain(args: {
       rec = outputs.write({
         core_type: p.spec.core_type,
         domain_type: p.row.domain_type,
-        domain_type_version: 1,
+        // The version the type held when this row was sealed, re-derived from the genome via the
+        // store — so the locally written row carries the real version (3), not the constant 1, and
+        // re-hashes to the sha the sink recorded.
+        domain_type_version: outputs.typeVersionOf(p.row.domain_type),
         domain: p.spec.domain,
         gig_id,
         agent_slug: p.row.agent_slug,

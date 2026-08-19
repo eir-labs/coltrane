@@ -2047,7 +2047,13 @@ export async function runGig(
       const sha = outputContentHash({
         core_type: spec.core_type,
         domain_type: o.domain_type,
-        domain_type_version: 1,
+        // The version the loaded genome's type carries now, re-derived through the ONE owner
+        // (typeVersionOf) rather than a constant — so the re-hash reproduces the pre-image the
+        // original seal folded. NOTE (accepted point-in-time exposure, bill-change-plan step 5):
+        // this is the CURRENT version; a cached output whose type was extended since it sealed
+        // would re-hash under the newer version and be refused as stale. Point-in-time version
+        // tracking is out of scope for this change.
+        domain_type_version: deps.outputs.typeVersionOf(o.domain_type),
         domain: a.domain,
         primitive: spec.primitive,
         phase: a.phaseName,
@@ -2742,6 +2748,10 @@ export async function runGig(
       const rec = deps.outputs.write({
         core_type: spec.core_type,
         domain_type: spec.domain_type,
+        // Stamp the REAL version the type carries at seal time, read through the ONE owner. Omitting
+        // it let outputs.write default to 1, so a record sealed against a v3 type claimed v1 — inside
+        // its content_sha pre-image, which is the record's identity.
+        domain_type_version: deps.outputs.typeVersionOf(spec.domain_type),
         domain,
         gig_id,
         agent_slug: producer_slug,

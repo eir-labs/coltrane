@@ -6,7 +6,7 @@
 // bearing: each one is a path by which an unapproved lineage could otherwise become grounding.
 
 import { describe, it, expect } from "vitest";
-import { lineageAdoption } from "../src/lineage_adoption.js";
+import { lineageAdoption, applyLineageAdoption } from "../src/lineage_adoption.js";
 
 const REF = "sha-lineage-record";
 
@@ -67,5 +67,48 @@ describe("lineageAdoption", () => {
   it("omits optional fields rather than writing undefined into them", () => {
     const r = lineageAdoption({ verdict: { pass: true, approver: "tasha" }, record_ref: REF });
     expect(Object.keys(r.ref!).sort()).toEqual(["approved_by", "record_ref"]);
+  });
+});
+
+describe("applyLineageAdoption — the middle of the chain", () => {
+  const ref = (record_ref: string, approved_by = "eugene") => ({ record_ref, approved_by, sealed_at: "2026-08-20T00:00:00.000Z" });
+
+  it("appends the reference and reports that it changed", () => {
+    const { institution, changed } = applyLineageAdoption({ slug: "studio", lineage: [] }, ref("sha-a") as never);
+    expect(changed).toBe(true);
+    expect(institution.lineage).toHaveLength(1);
+  });
+
+  it("treats an absent lineage[] as empty rather than throwing", () => {
+    const { institution, changed } = applyLineageAdoption({ slug: "studio" } as never, ref("sha-a") as never);
+    expect(changed).toBe(true);
+    expect((institution as { lineage?: unknown[] }).lineage).toHaveLength(1);
+  });
+
+  it("is IDEMPOTENT by record_ref — re-approving the same record appends nothing", () => {
+    const first = applyLineageAdoption({ slug: "studio", lineage: [] }, ref("sha-a") as never);
+    const second = applyLineageAdoption(first.institution, ref("sha-a") as never);
+    expect(second.changed).toBe(false);
+    expect(second.institution.lineage).toHaveLength(1);
+  });
+
+  it("does NOT overwrite the first seal on re-adoption — the first seal is the one that happened", () => {
+    const doc: { slug: string; lineage: { record_ref: string; approved_by: string | null }[] } = { slug: "studio", lineage: [] };
+    const first = applyLineageAdoption(doc as never, ref("sha-a", "tasha") as never);
+    const second = applyLineageAdoption(first.institution, ref("sha-a", "someone-else") as never);
+    const got = (second.institution as unknown as typeof doc).lineage[0];
+    expect(got!.approved_by).toBe("tasha");
+  });
+
+  it("does not mutate the input document", () => {
+    const before = { slug: "studio", lineage: [] as unknown[] };
+    applyLineageAdoption(before as never, ref("sha-a") as never);
+    expect(before.lineage).toHaveLength(0);
+  });
+
+  it("appends in stable order so a rendered grounding does not reshuffle", () => {
+    let doc = { slug: "studio", lineage: [] as unknown[] } as never;
+    for (const s of ["sha-a", "sha-b", "sha-c"]) doc = applyLineageAdoption(doc, ref(s) as never).institution;
+    expect((doc as { lineage: { record_ref: string }[] }).lineage.map((r) => r.record_ref)).toEqual(["sha-a", "sha-b", "sha-c"]);
   });
 });

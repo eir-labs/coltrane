@@ -85,3 +85,30 @@ export function lineageAdoption(input: {
 
   return { adopt: true, ref, refusals: [] };
 }
+
+/** Apply an adopted reference to an institution document, returning a NEW document.
+ *
+ *  The missing middle of the chain. `lineageAdoption` DECIDES and the store-side home
+ *  `coltrane_institution_lineage` PERSISTS; nothing turned the one into the other, so a passing
+ *  verdict could be correctly judged and still leave `lineage[]` empty. This is that step, and it
+ *  is pure for the same reason the decision is: the caller owns the write, whether that write is a
+ *  genome file today or a table later.
+ *
+ *  IDEMPOTENT BY `record_ref`. Re-approving the same record must not append a second reference —
+ *  a lineage[] with the same record twice would let one adoption read as two groundings, and the
+ *  count is the only thing a reader has to go on. A re-adoption of an already-present record
+ *  returns the document UNCHANGED rather than refreshing its approver or timestamp: the first
+ *  seal is the one that happened, and overwriting it would quietly rewrite who grounded the
+ *  institution and when.
+ *
+ *  Order is append-only and stable, so a rendered grounding does not reshuffle between loads. */
+export function applyLineageAdoption<T extends { lineage?: readonly LineageRecordRefOutput[] }>(
+  institution: T,
+  ref: LineageRecordRefOutput,
+): { institution: T; changed: boolean } {
+  const existing = institution.lineage ?? [];
+  if (existing.some((r) => r.record_ref === ref.record_ref)) {
+    return { institution, changed: false };
+  }
+  return { institution: { ...institution, lineage: [...existing, ref] }, changed: true };
+}

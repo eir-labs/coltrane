@@ -1,7 +1,7 @@
 {
   "name": "@eir-labs/coltrane",
   "version": "0.10.0",
-  "description": "A methodology engine — a typed substrate for defining agents, composing multi-phase standards, dispatching gigs, and sealing every output to a content-addressed ledger. Ships as an MCP server.",
+  "description": "A methodology engine \u2014 a typed substrate for defining agents, composing multi-phase standards, dispatching gigs, and sealing every output to a content-addressed ledger. Ships as an MCP server.",
   "type": "module",
   "license": "Apache-2.0",
   "author": "Eir",
@@ -76,12 +76,13 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "verify": "tsc --noEmit && vitest run && npm run test:failure-modes && npm run test:honest-broker && npm run test:security && npm run e2e:offline",
+    "verify": "tsc --noEmit && vitest run && npm run test:failure-modes && npm run test:honest-broker && npm run test:security && npm run e2e:offline && npm run test:room",
     "e2e": "npm run build && vitest run --config tests/e2e/vitest.config.ts",
     "e2e:offline": "npm run build && vitest run --config tests/e2e/vitest.offline.config.ts",
     "test:failure-modes": "vitest run --config tests/failure_modes/vitest.config.ts",
     "test:honest-broker": "vitest run --config tests/honest_broker/vitest.config.ts",
     "test:security": "vitest run --config tests/security/vitest.config.ts",
+    "test:room": "vitest run --config tests/venue_live/vitest.config.ts",
     "lint:imports": "git ls-files 'src/**/*.ts' 'src/**/*.tsx' 'src/**/*.js' 'src/**/*.mjs' 'src/**/*.cjs' 'tests/**/*.ts' 'tests/**/*.tsx' 'tests/**/*.js' 'tests/**/*.mjs' 'tests/**/*.cjs' | bash scripts/check_imports.sh"
   },
   "dependencies": {

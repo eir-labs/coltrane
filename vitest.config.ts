@@ -55,7 +55,19 @@ export default defineConfig({
     // singleFork for that reason. Running them here handed them vitest's 5s default and the
     // shared parallel pool instead — passing on luck, against the conditions their own config
     // says they need. One file, one config, run once.
-    exclude: ["tests/e2e/**", "tests/security/**", "tests/honest_broker/**", "node_modules/**", "dist/**"],
+    // spec_venue_room_live is delegated to tests/venue_live/vitest.config.ts for the same reason as
+    // honest_broker: it stands up REAL containers, one run is ~100s, and under this config's parallel
+    // pool the job reported `Tests 7 passed` and then exited 1 on a reporter RPC timeout. It is also
+    // daemon-gated, so in every job WITHOUT docker it only ever skipped here — excluding it stops the
+    // suite claiming to run a law it never ran.
+    exclude: [
+      "tests/e2e/**",
+      "tests/security/**",
+      "tests/honest_broker/**",
+      "tests/spec_venue_room_live.test.ts",
+      "node_modules/**",
+      "dist/**",
+    ],
     coverage: {
       provider: "v8",
       reporter: ["text", "lcov", "html"],

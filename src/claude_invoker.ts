@@ -610,10 +610,24 @@ function withPrompt(args: readonly string[], prompt: string): string[] {
   return out;
 }
 
+// The bound on how many records ONE chair may seal for ONE declared output type. The seal path
+// carries its own stated cap so the ledger guarantee is self-contained and auditable independently
+// of the invocation-layer `max_tool_calls` (which is owned by a different layer and can change
+// without the seal path knowing).
+//
+// The evidence and the choice: gig 8baced9d (lineage-deepen-v0, chair identify-external) made 15
+// accepted output_write calls and sealed 1 — the observed cardinality of a legitimate high-gather
+// chair is 15. The cap sits well above it (>4x headroom) so real gathering is never refused, and
+// stays FINITE so a runaway seat cannot write unbounded records — an unbounded seal path is a
+// denial-of-service on the ledger. Tune here, at the single declaration site, if real runs exceed
+// the headroom; the (cap+1)th same-type write is refused loudly (a throw the gig surfaces), never
+// dropped silently — a silent drop is exactly the "ok for a discarded record" lie this closes.
+export const MAX_SEALED_RECORDS_PER_TYPE = 64;
+
 export function captureOutputWrites(
   stdout: string,
   sealTypes: readonly string[],
-): Record<string, unknown> {
+): Record<string, unknown[]> {
   interface Write { id: string; domain_type: string; data: unknown; }
   const writes: Write[] = [];
   const errored = new Set<string>();
@@ -638,17 +652,37 @@ export function captureOutputWrites(
     }
   }
   const passed = writes.filter((w) => !w.id || !errored.has(w.id));
-  const byType = new Map<string, unknown>();
-  for (const w of passed) byType.set(w.domain_type, w.data); // last non-errored write per type wins
-  const blob: Record<string, unknown> = {};
+  // Accumulate a LIST per type — a chair may seal MANY records of one declared type (a lineage
+  // scout's whole job is gathering many external hits). The old code did `byType.set(type, data)`,
+  // a last-wins overwrite that kept one record and discarded the rest while every call had already
+  // returned ok — the discard the change request measured. Every accepted write is now kept, up to
+  // the stated cap, above which the surplus is refused loudly rather than dropped.
+  const refuse = (t: string): never => {
+    throw new Error(
+      `chair sealed more than MAX_SEALED_RECORDS_PER_TYPE (${MAX_SEALED_RECORDS_PER_TYPE}) records ` +
+        `of type "${t}" — refusing the surplus loudly. A record is being written that no seat could ` +
+        `be honestly told was kept; raise MAX_SEALED_RECORDS_PER_TYPE at its declaration site if a ` +
+        `real run legitimately gathers this many.`,
+    );
+  };
+  const byType = new Map<string, unknown[]>();
+  for (const w of passed) {
+    const list = byType.get(w.domain_type) ?? [];
+    if (list.length >= MAX_SEALED_RECORDS_PER_TYPE) refuse(w.domain_type);
+    list.push(w.data);
+    byType.set(w.domain_type, list);
+  }
+  const blob: Record<string, unknown[]> = {};
   for (const t of sealTypes) {
-    if (byType.has(t)) blob[t] = byType.get(t);
+    if (byType.has(t)) blob[t] = byType.get(t)!;
   }
   // Single-output chairs may seal with an empty/other domain_type (buildPrompt names it, but a
-  // model can still omit it). If nothing matched by name and exactly one output was sealed, that
-  // lone payload IS the single output — key it under the promised type.
+  // model can still omit it). If nothing matched by name and outputs were sealed, those payloads
+  // ARE the single output — key the FULL list under the promised type (carrying every one, not just
+  // the last, so this branch does not silently collapse the way the whole path used to).
   if (sealTypes.length === 1 && blob[sealTypes[0]!] === undefined && passed.length > 0) {
-    blob[sealTypes[0]!] = passed[passed.length - 1]!.data;
+    if (passed.length > MAX_SEALED_RECORDS_PER_TYPE) refuse(sealTypes[0]!);
+    blob[sealTypes[0]!] = passed.map((w) => w.data);
   }
   return blob;
 }

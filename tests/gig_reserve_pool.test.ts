@@ -243,10 +243,12 @@ describe("a chair stopped at its budget with an EMPTY pool keeps its writes and 
       onEvent: (ev: AgentStreamEvent) => events.push(ev),
     }) as unknown as AgentInvocationContext;
 
-    const out = (await makeClaudeInvoker({ model: "claude-sonnet-4-6", sealVia: "output_write", run })(ctx)) as Record<string, Record<string, unknown>>;
+    const out = (await makeClaudeInvoker({ model: "claude-sonnet-4-6", sealVia: "output_write", run })(ctx)) as Record<string, Array<Record<string, unknown>>>;
 
     // keep-sealed-writes still holds on the empty-pool path (must not regress the pinned behaviour).
-    expect(out["lineage-hit"]!["source"], "a budget-stopped chair lost its sealed write on the empty-pool path").toBe("Grossi et al.");
+    // The seal path now keeps a LIST of accepted writes per type; the single sealed write is its
+    // sole element.
+    expect(out["lineage-hit"]![0]!["source"], "a budget-stopped chair lost its sealed write on the empty-pool path").toBe("Grossi et al.");
     // starvation is now VISIBLE: a chair that hit its budget and the pool could not extend it says so.
     expect(
       events.some((e) => /denied|starv|no_reserve|no-grant/i.test(e.type) || (e.raw as Record<string, unknown> | undefined)?.["pool_remaining"] === 0),

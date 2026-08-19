@@ -2559,15 +2559,23 @@ export async function runGig(
     // state that cannot be reconciled. Deciding first makes a chair all-or-nothing.
     const resolved: Array<{ spec: (typeof output_specs)[number]; slice: Record<string, unknown> }> = [];
     for (const spec of output_specs) {
-      const keyed = data[spec.domain_type] as Record<string, unknown> | undefined;
-      const slice = keyed !== undefined && keyed !== null ? keyed : single ? data : undefined;
-      if (slice === undefined || slice === null) continue;
-      if (typeof slice !== "object" || slice === null) {
-        throw new RuntimeError(
-          `chair "${chair.role}" output "${spec.domain_type}" must be a JSON object, got ${typeof slice}`,
-        );
+      const keyed = data[spec.domain_type];
+      const raw = keyed !== undefined && keyed !== null ? keyed : single ? data : undefined;
+      if (raw === undefined || raw === null) continue;
+      // MULTI-RECORD SEAL. captureOutputWrites hands the runtime a LIST of records per declared type
+      // — a chair may seal MANY records of one type (gig 8baced9d's lineage scout made 15 accepted
+      // output_write calls; the old last-wins collapse sealed 1). An ARRAY here is that list, and the
+      // loop seals one record per element. A bare object is one record — the skill-backed path and
+      // the single-output fallback still hand a plain object, so single-seal chairs are untouched.
+      const slices = Array.isArray(raw) ? raw : [raw];
+      for (const slice of slices) {
+        if (typeof slice !== "object" || slice === null || Array.isArray(slice)) {
+          throw new RuntimeError(
+            `chair "${chair.role}" output "${spec.domain_type}" must be a JSON object, got ${Array.isArray(slice) ? "array" : slice === null ? "null" : typeof slice}`,
+          );
+        }
+        resolved.push({ spec, slice: slice as Record<string, unknown> });
       }
-      resolved.push({ spec, slice: slice as Record<string, unknown> });
     }
     // backfillShas refuses an ambiguous provenance field. Run it over EVERY slice up front so
     // that throw also lands before the first write, rather than midway through them.

@@ -1011,6 +1011,16 @@ export const VenueObjectSchema = z
     /** The shared FLOOR this room composes over, so N rooms cost floor + Σ(deltas) rather than
      *  N × environment. A label two rooms share to declare they build on the same base. */
     floor: z.string().optional(),
+    /** The repository whose working tree this room is populated with, so a seat running inside the
+     *  room has a real tree to edit. DECLARED here and nowhere else: a room's tree is a function of
+     *  what the venue contract states, never of how a realization was invoked or of the host's cwd —
+     *  inferring the operator's own checkout is the isolation failure this field exists to foreclose.
+     *  ABSENT means the EMPTY room, the same lean every access-shaped field above takes: a venue that
+     *  names no repository declines to populate (a read-only seat needs no tree), rather than falling
+     *  back to any ambient source. The room's tree is prepared through the SAME per-gig mechanism the
+     *  drain uses for its own clone (src/workspace.ts `prepareWorkspace`) — one mechanism, not two, so
+     *  the room and the drain cannot drift on what a working tree is. */
+    repo_url: z.string().optional(),
   })
   .strict();
 

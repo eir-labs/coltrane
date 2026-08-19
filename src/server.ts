@@ -1515,6 +1515,12 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
           ...(args["architectures"] !== undefined ? { architectures: args["architectures"] } : {}),
           ...(args["max_concurrent_chairs"] !== undefined ? { max_concurrent_chairs: args["max_concurrent_chairs"] } : {}),
           ...(args["floor"] !== undefined ? { floor: args["floor"] } : {}),
+          // The repository this room's tree is populated from, passed through by the same only-what-
+          // was-stated rule: an unstated `repo_url` is the EMPTY room the schema defaults it to. Read
+          // here so a room authored through this tool actually carries its declared repository, and so
+          // the advertised schema and the handler stay one statement of the same fact (#234) — the
+          // field a caller sees is the field the handler acts on, never advertised and silently dropped.
+          ...(args["repo_url"] !== undefined ? { repo_url: args["repo_url"] } : {}),
         };
         const parsedVenue = VenueSchema.safeParse(venueInputDef);
         if (!parsedVenue.success) {

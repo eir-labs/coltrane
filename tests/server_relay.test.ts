@@ -16,6 +16,11 @@ import {
   buildRestartError,
   buildNoChildError,
   initRequestId,
+  parseForceFlag,
+  extractRunningGigs,
+  buildRestartRefusalError,
+  buildUnresponsiveChildError,
+  PREFLIGHT_TIMEOUT_MS,
 } from "../src/server_relay.js";
 
 describe("server_relay — server_restart interception", () => {
@@ -101,15 +106,24 @@ describe("server_relay — tools/list augmentation", () => {
     expect(tools).toHaveLength(2);
   });
 
-  it("does not double-insert server_restart if the child already advertises it", () => {
+  it("replaces the child's stub server_restart with the relay's authoritative one — no double, and `force` wins", () => {
+    // The child (src/mcp.ts) advertises an argument-free server_restart stub for introspection. The
+    // relay OWNS the tool (it intercepts the call), so the client must discover the relay's schema —
+    // the one that carries the `force` restart-guard override (venue/8). augmentToolsList replaces
+    // the child's stub rather than defer to it, so exactly one entry survives and it is the relay's.
     const msg = {
       jsonrpc: "2.0" as const,
       id: 1,
-      result: { tools: [{ name: "server_restart" }, { name: "gig_dispatch" }] },
+      result: { tools: [{ name: "server_restart", inputSchema: { type: "object", properties: {} } }, { name: "gig_dispatch" }] },
     };
     augmentToolsList(msg);
-    const tools = (msg.result as { tools: { name: string }[] }).tools;
-    expect(tools.filter((t) => t.name === "server_restart")).toHaveLength(1);
+    const tools = (msg.result as { tools: { name: string; inputSchema?: { properties?: Record<string, unknown> } }[] }).tools;
+    const restarts = tools.filter((t) => t.name === "server_restart");
+    expect(restarts, "the child stub must not survive alongside the relay's entry").toHaveLength(1);
+    expect(
+      restarts[0]!.inputSchema?.properties,
+      "the surfaced schema must be the relay's, so a client can discover the `force` override",
+    ).toHaveProperty("force");
   });
 });
 
@@ -182,6 +196,72 @@ describe("server_relay — a failed swap is reportable, not silent", () => {
   it("both preserve a null id", () => {
     expect(buildRestartError(null, "why").id).toBe(null);
     expect(buildNoChildError(null, "tools/list").id).toBe(null);
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// venue/8 — the restart guard's pure helpers. The wire-level laws (a running gig
+// refuses the kill; an unresponsive child refuses too; force ledgers the abort;
+// nothing-running still restarts) live in tests/relay_restart_guard.test.ts.
+// ────────────────────────────────────────────────────────────────────────────
+describe("server_relay — restart guard: force flag is deny-by-default", () => {
+  const restartCall = (args: Record<string, unknown>) => ({
+    jsonrpc: "2.0" as const, id: 2, method: "tools/call", params: { name: "server_restart", arguments: args },
+  });
+  it("only a literal force:true unlocks the override", () => {
+    expect(parseForceFlag(restartCall({ force: true }))).toBe(true);
+  });
+  it("absent / false / non-boolean force all mean NO override — a kill stays refused by default", () => {
+    expect(parseForceFlag(restartCall({}))).toBe(false);
+    expect(parseForceFlag(restartCall({ force: false }))).toBe(false);
+    expect(parseForceFlag(restartCall({ force: "true" }))).toBe(false);
+    expect(parseForceFlag(restartCall({ force: 1 }))).toBe(false);
+    expect(parseForceFlag({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "server_restart" } })).toBe(false);
+  });
+});
+
+describe("server_relay — restart guard: reading the child's preflight answer", () => {
+  it("extracts the running gig ids the child reported", () => {
+    const msg = { jsonrpc: "2.0" as const, id: "__coltrane_relay:1", result: { running: ["8146142e", "18726459"] } };
+    expect(extractRunningGigs(msg)).toEqual(["8146142e", "18726459"]);
+  });
+  it("an empty answer is a POSITIVE 'nothing running', not a failure", () => {
+    expect(extractRunningGigs({ jsonrpc: "2.0", id: "__coltrane_relay:1", result: { running: [] } })).toEqual([]);
+  });
+  it("a wrong-shaped or null answer is read as 'reported nothing' — never trusted into a kill", () => {
+    // A null answer means the child did NOT answer; that case is handled by the caller as
+    // unresponsive (buildUnresponsiveChildError). Here we only prove the shape-reader is defensive.
+    expect(extractRunningGigs(null)).toEqual([]);
+    expect(extractRunningGigs({ jsonrpc: "2.0", id: 1, result: {} })).toEqual([]);
+    expect(extractRunningGigs({ jsonrpc: "2.0", id: 1, result: { running: "8146142e" } })).toEqual([]);
+    expect(extractRunningGigs({ jsonrpc: "2.0", id: 1, result: { running: [1, "", "ok"] } })).toEqual(["ok"]);
+  });
+});
+
+describe("server_relay — restart guard: the refusal NAMES what it saved", () => {
+  it("buildRestartRefusalError carries the id, a JSON-RPC error, and every running gig id by name", () => {
+    const resp = buildRestartRefusalError(2, ["8146142e", "18726459"]);
+    expect(resp.id).toBe(2);
+    expect(resp.result, "a refusal must not come back shaped like a success").toBeUndefined();
+    expect((resp.error as { code: number }).code).toBe(-32001);
+    const msg = (resp.error as { message: string }).message;
+    expect(msg).toMatch(/REFUSED/);
+    expect(msg, "the guard's whole point is that a killed gig stops being an absence — so the refusal names it").toContain("8146142e");
+    expect(msg).toContain("18726459");
+    expect(msg, "the override must be discoverable from the refusal itself").toContain("force");
+  });
+  it("buildUnresponsiveChildError refuses without assuming an idle child, and says no SIGTERM was sent", () => {
+    const resp = buildUnresponsiveChildError(2);
+    expect(resp.id).toBe(2);
+    expect(resp.result).toBeUndefined();
+    const msg = (resp.error as { message: string }).message;
+    expect(msg).toMatch(/REFUSED/);
+    expect(msg).toContain(String(PREFLIGHT_TIMEOUT_MS));
+    expect(msg, "assuming a silent child is idle and killing it anyway is the silent kill this guard prevents").toMatch(/no SIGTERM/i);
+  });
+  it("both preserve a null id", () => {
+    expect(buildRestartRefusalError(null, ["x"]).id).toBe(null);
+    expect(buildUnresponsiveChildError(null).id).toBe(null);
   });
 });
 

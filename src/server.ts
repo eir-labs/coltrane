@@ -6,6 +6,10 @@
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import { z } from "zod";
+// The wire names of the reserved relay↔child methods (restart guard, venue/8). Defined by the
+// relay — the relay owns the conversation — and answered by the child handlers registered below.
+import { RUNNING_GIGS_METHOD, ABORT_FOR_RESTART_METHOD } from "./server_relay.js";
 import {
   MCP_TOOLS,
   requiresApproval,
@@ -3298,6 +3302,14 @@ export function createToolSurface(deps: ToolSurfaceDeps): SurfaceTool[] {
   }));
 }
 
+// Reserved relay↔child request schemas (restart guard, venue/8). The MCP SDK keys a request
+// handler by the `method` literal in its schema; `.passthrough()` lets the full JSON-RPC envelope
+// (jsonrpc/id/params) pass validation. These carry no params — the relay asks, the child answers
+// from deps.gig_runs. Registering them as request handlers (not tools) is what keeps them off
+// tools/list, so they are invisible to Claude Code and callable only by the parent relay.
+const RunningGigsRequestSchema = z.object({ method: z.literal(RUNNING_GIGS_METHOD) }).passthrough();
+const AbortForRestartRequestSchema = z.object({ method: z.literal(ABORT_FOR_RESTART_METHOD) }).passthrough();
+
 /** Build the low-level MCP Server with ListTools + CallTool wired to the tool surface. */
 export function createColtraneServer(deps: ServerDeps, recorder?: SubthreadRecorder): Server {
   const server = new Server(
@@ -3330,6 +3342,47 @@ export function createColtraneServer(deps: ServerDeps, recorder?: SubthreadRecor
       content: [{ type: "text" as const, text: JSON.stringify(result) }],
       isError: !result.ok,
     };
+  });
+
+  // ── Restart guard (venue/8): the child's half of the relay↔child conversation ──────────────
+  // The stdio relay (src/server_relay.ts) holds NO gig state, so before it kills this child to pick
+  // up new bytes it ASKS the child what a restart would destroy. These two reserved methods answer.
+  // They are deliberately NOT MCP tools — they are not in `createToolSurface`, so they never appear
+  // in tools/list and Claude Code cannot call them; only the parent relay, over the same stdio pipe,
+  // does. That is what keeps the relay's blindness structural: it asks, the child answers from the
+  // ONE authority (deps.gig_runs), the relay acts on the answer.
+  const runningGigIds = (): string[] =>
+    [...(deps.gig_runs?.entries() ?? [])]
+      .filter(([, s]) => s.status === "running")
+      .map(([id]) => id);
+
+  // "Which gigs are running right now?" — the pre-restart check. Answering with the empty list is a
+  // POSITIVE statement ("nothing in flight, restart freely"); the relay only treats a NON-answer
+  // (timeout) as unhealthy, never an empty answer.
+  server.setRequestHandler(RunningGigsRequestSchema, async () => ({ running: runningGigIds() }));
+
+  // The FORCE path: the operator chose to restart with gigs in flight. Abort each running gig and —
+  // the whole point — LEDGER the abort BEFORE this child dies, so a killed gig is a recorded fact
+  // rather than an absence (the defect: two publish seats, gigs 8146142e / 18726459, died mid-phase
+  // with sealed outputs banked and no row saying they were killed). This reuses the EXACT sanctioned
+  // gig_abort path: mark the run, abort its controller, then governanceRow('gig_abort', …).
+  server.setRequestHandler(AbortForRestartRequestSchema, async () => {
+    const aborted: string[] = [];
+    for (const [gid, live] of deps.gig_runs?.entries() ?? []) {
+      if (live.status !== "running") continue;
+      live.abort_requested = true;
+      live.abort_reason = "server_restart override";
+      let cancelled = false;
+      if (live.controller) {
+        try { live.controller.abort(live.abort_reason); } catch { /* an already-aborted signal is fine */ }
+        cancelled = true;
+      }
+      deps.ledger.append(
+        governanceRow("gig_abort", gid, { reason: "server_restart override", status: "aborting", cancelled }, gid),
+      );
+      aborted.push(gid);
+    }
+    return { aborted };
   });
 
   return server;

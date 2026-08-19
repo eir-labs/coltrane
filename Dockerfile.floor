@@ -1,0 +1,88 @@
+# The FLOOR image — a SEAT-BEARING room, the deliberate OPPOSITE of Dockerfile.room.
+#
+# `renderComposeConfig` names `coltrane/floor:<floor>` as the image for a venue that declares a
+# `floor`. A floored room is where the CHAIR ITSELF runs (`docker exec -i -w <workspace> <container>
+# claude …`, wired in src/claude_invoker.ts), so its cwd is the room's per-realization workspace and
+# two concurrent gigs cannot share a working tree.
+#
+# ─────────────────────────────────────────────────────────────────────────────────────────────────
+# WHY THIS IS NOT Dockerfile.room, AND WHY THE TWO MUST NOT BE MERGED.
+#
+# Dockerfile.room is a CEILING: PRODUCTION DEPENDENCIES ONLY, no compiler, no test runner, no agent
+# binary — because a room holds SERVERS the chair reaches from OUTSIDE, and the smaller the surface
+# the tighter the ceiling. This file has the OPPOSITE justification: a seat-bearing floor must carry
+# the toolchain the seat needs to do work IN the room — git (to shape a change-set), the dev
+# dependencies, and the `claude` agent binary itself. A future reader tempted to unify the two images
+# would erase the room's ceiling meaning; the room is toolchain-OUT by design, this is toolchain-IN
+# by design, and that opposition is the whole point. Keep them distinct.
+#
+# CREDENTIAL MATERIAL IS NEVER BAKED IN. Auth reaches the seat the same way it reaches a server: the
+# venue's `credential_surface` is delivered by `docker cp` into the created-but-not-started container
+# at realization time (src/venue_realizer.ts deliverCredentialFiles), landing at /run/secrets/<class>
+# inside the room and never on the host filesystem while the room runs. Nothing secret is in this
+# image.
+#
+# POSTURE IS UNCHANGED FROM THE ROOM. A floored room is still realized on the internal `room-net` with
+# no docker socket, not privileged, no cap_add, and no host network — moving the seat inside widens
+# nothing. It is still narrowed by `agent.allowed_tools ∩ venue.equipment.tools`, computed before the
+# spawn is relocated.
+# ─────────────────────────────────────────────────────────────────────────────────────────────────
+
+# ── build ─────────────────────────────────────────────────────────────────────────────────────
+FROM node:22-alpine AS build
+WORKDIR /app
+
+# Manifests first, so an ordinary source edit does not re-resolve the dependency tree.
+COPY package.json package-lock.json* ./
+# --ignore-scripts: the package's `prepare` is `npm run build`, which runs before `src/` is copied.
+RUN npm ci --ignore-scripts
+
+COPY tsconfig.json ./
+COPY src ./src
+RUN npm run build
+
+# ── floor ─────────────────────────────────────────────────────────────────────────────────────
+FROM node:22-alpine AS floor
+WORKDIR /app
+
+# THE TOOLCHAIN THE ROOM DELIBERATELY EXCLUDES. git so a seat can stage and diff a change-set; the
+# FULL dependency tree (dev deps included, NOT --omit=dev) because a seat compiles and runs tests
+# in-room; the `claude` agent binary because the seat IS the agent. This is exactly the surface
+# Dockerfile.room refuses to carry — the opposite justification, stated at the top of this file.
+RUN apk add --no-cache git
+
+# Full install — dev dependencies included. Unlike the room, a seat-bearing floor needs the compiler
+# and the test runner. --ignore-scripts still, for the same prepare-runs-tsc-before-sources reason.
+COPY package.json package-lock.json* ./
+RUN npm ci --ignore-scripts && npm cache clean --force
+
+# The agent binary — the seat IS the agent, so a seat-bearing floor must carry it. Named here so the
+# image's provenance is this file. A version PIN (npm i -g @anthropic-ai/claude-code@<ver>) belongs
+# with the image-pinning lane that also applies `installs`; it is deliberately not closed here, and
+# the seat-in-room change does not depend on it.
+RUN npm i -g @anthropic-ai/claude-code && npm cache clean --force
+
+COPY --from=build /app/dist ./dist
+
+# The base genome, same as the room — a seat resolving types/agents/standards/skills in-room reads
+# these; a venue's own institution genome is supplied by the deployment, never baked in here.
+COPY core_types ./core_types
+COPY domain_types ./domain_types
+COPY agents ./agents
+COPY standards ./standards
+COPY charts ./charts
+COPY venues ./venues
+COPY skills ./skills
+COPY institutions ./institutions
+
+# DIRECT MODE, NOT RELAY — same reason as the room: over `docker exec` the relay produces silence.
+ENV COLTRANE_SERVER_DIRECT=1
+
+# Not root: uid 1000 `node` owns nothing it does not need. The per-realization workspace is mounted
+# rw and owned by the seat's own processes.
+USER node
+
+# The floor HOLDS, exactly like the room: it stays alive so the chair can be exec'd into it with the
+# workspace as cwd. The compose renderer supplies this command; the default keeps a hand-run
+# `docker run` of this image usable for the same purpose.
+CMD ["sleep", "infinity"]

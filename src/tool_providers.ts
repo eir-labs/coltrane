@@ -48,6 +48,25 @@ export function toolBaseName(grant: string): string {
   return (paren >= 0 ? grant.slice(0, paren) : grant).trim();
 }
 
+/**
+ * The host builtins to DENY for a seat whose effective allow set is `effectiveAllowed`: every
+ * HOST_BUILTINS member whose base name is absent from that set.
+ *
+ * This is the complement that makes the tool ceiling BIND by enforcement. `--allowedTools` is
+ * advisory for host builtins — a seat granted only `type_browse` still called `Bash` and `Read`,
+ * unrefused and unrecorded (gig 782e89d8, room-prober, twice) — and only `--disallowedTools`
+ * removes a builtin. So the ungranted host builtins must be enumerated into the deny list.
+ *
+ * HOST_BUILTINS stays UNEXPORTED: the 14-tool universe lives in one home, reachable only through
+ * this function, so no call site re-inlines it (the change request forbids re-inlining the oracles).
+ * Deterministic order (HOST_BUILTINS insertion order) so the emitted flag is stable.
+ */
+export function hostBuiltinDenials(effectiveAllowed: Iterable<string>): string[] {
+  const granted = new Set<string>();
+  for (const g of effectiveAllowed) granted.add(toolBaseName(g));
+  return [...HOST_BUILTINS].filter((b) => !granted.has(b));
+}
+
 export interface ResolvedGrants {
   /** MCP server slug → its --mcp-config entry, deduped across all grants that share a server. */
   mcpServers: Record<string, unknown>;

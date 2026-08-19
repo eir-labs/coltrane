@@ -75,10 +75,11 @@ describe("a chair that hits its turn budget is granted a bounded reserve", () =>
     ]);
     const out = (await makeClaudeInvoker({
       model: "claude-sonnet-4-6", sealVia: "output_write", turn_reserve: 5, run: s.run,
-    })(ctx())) as Record<string, Record<string, unknown>>;
+    })(ctx())) as Record<string, Array<Record<string, unknown>>>;
 
     expect(s.calls.length, "the chair was killed at its budget instead of being granted a reserve").toBe(2);
-    expect(out["lineage-hit"]!["source"]).toBe("sweep-boundary: did not reach Raz");
+    // The seal path keeps every accepted write per type, so BOTH passes' writes survive the merge.
+    expect(out["lineage-hit"]!.map((r) => r["source"])).toEqual(["Grossi et al.", "sweep-boundary: did not reach Raz"]);
   });
 
   it("spawns the continuation with ONLY the reserve as its turn cap", async () => {
@@ -115,20 +116,21 @@ describe("a chair that hits its turn budget is granted a bounded reserve", () =>
     ]);
     const out = (await makeClaudeInvoker({
       model: "claude-sonnet-4-6", sealVia: "output_write", turn_reserve: 5, run: s.run,
-    })(ctx())) as Record<string, Record<string, unknown>>;
+    })(ctx())) as Record<string, Array<Record<string, unknown>>>;
 
     expect(s.calls.length, "an unbounded 'just a bit more' is not a budget").toBe(2);
-    // The work still survives — the reserve pass's writes passed the boundary like any other.
-    expect(out["lineage-hit"]!["source"]).toBe("b");
+    // The work still survives — the reserve pass's writes passed the boundary like any other, and
+    // the seal path keeps every accepted record, so both passes' writes are present.
+    expect(out["lineage-hit"]!.map((r) => r["source"])).toEqual(["a", "b"]);
   });
 
   it("with NO reserve configured, behaves exactly as before — keep the writes, no continuation", async () => {
     const s = scripted([{ stdout: budgetStop(write("w1", "a")), exit1: true }]);
     const out = (await makeClaudeInvoker({
       model: "claude-sonnet-4-6", sealVia: "output_write", run: s.run,
-    })(ctx())) as Record<string, Record<string, unknown>>;
+    })(ctx())) as Record<string, Array<Record<string, unknown>>>;
 
     expect(s.calls.length, "a reserve nobody granted must not be spent").toBe(1);
-    expect(out["lineage-hit"]!["source"]).toBe("a");
+    expect(out["lineage-hit"]!.map((r) => r["source"])).toEqual(["a"]);
   });
 });

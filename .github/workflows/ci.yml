@@ -49,7 +49,7 @@ jobs:
       - name: build the room image
         run: docker build -f Dockerfile.room -t coltrane/room:ephemeral .
       - name: the emitted transport reaches a standing room
-        run: npx vitest run tests/spec_venue_room_live.test.ts
+        run: npm run test:room
       - name: nothing survives the run
         run: |
           left=$(docker ps -aq --filter 'label=coltrane.managed=true' | wc -l)

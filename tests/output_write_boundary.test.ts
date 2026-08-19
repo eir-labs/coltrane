@@ -142,9 +142,10 @@ describe("the output_write-seal invoker captures the passed payload and runs the
       run: () => { calls++; return STREAM; },
     });
     const out = await invoke(ctx());
-    // The blob the runtime seals — keyed by domain_type, carrying the payload that PASSED (not the
-    // earlier rejected one).
-    expect(out).toEqual({ report: { title: "the finding", claims: ["a"] } });
+    // The blob the runtime seals — keyed by domain_type, carrying a LIST of the payloads that PASSED
+    // (not the earlier rejected one). The seal path now keeps every accepted write per type, so the
+    // value is a list even when — as here — exactly one write passed.
+    expect(out).toEqual({ report: [{ title: "the finding", claims: ["a"] }] });
     // The heart of the governor's first rejection: the agent self-corrected WITHIN its single run.
     // The invoker did not re-invoke — so exactly one call, never the old bounded repair loop.
     expect(calls).toBe(1);

@@ -14,6 +14,13 @@
 #
 # Multi-stage, so the build toolchain never reaches the room. The room receives production
 # dependencies and compiled output, not a compiler.
+#
+# THE DELIBERATE OPPOSITE OF Dockerfile.floor — DO NOT MERGE THE TWO. This image is a CEILING: no
+# compiler, no test runner, no `claude` binary, because the chair reaches the servers in here from
+# OUTSIDE and the smaller the surface the tighter the ceiling. A SEAT-BEARING floor (Dockerfile.floor)
+# is where the chair itself runs, and it carries the opposite: git, the dev dependencies, and the
+# agent binary. Unifying them would erase this ceiling's meaning — the room is toolchain-OUT by
+# design, the floor is toolchain-IN by design, and that opposition is the point. Keep them distinct.
 
 # ── build ─────────────────────────────────────────────────────────────────────────────────────
 FROM node:22-alpine AS build

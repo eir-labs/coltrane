@@ -121,11 +121,16 @@ describe("agent matrix: prompt + cage derive correctly across all pairwise permu
     if (c.cap !== undefined) expect(flag(args, "--max-turns")).toBe(String(c.cap));
     else expect(args).not.toContain("--max-turns");
 
-    // cage: code_tool_access denial ladder
-    const denied = flag(args, "--disallowedTools") ?? "";
-    for (const t of CODE_DENIALS[c.code_access]!) expect(denied).toContain(t);
+    // cage: code_tool_access denial ladder. Tokenize the deny flag (split on comma, EXACT membership)
+    // rather than substring-match the joined string. The tool ceiling now binds by enumerating every
+    // UNGRANTED host builtin, so the deny list carries siblings whose names contain a code-tool name as
+    // a substring — MultiEdit/NotebookEdit ⊃ "Edit", BashOutput ⊃ "Bash", TodoWrite ⊃ "Write" — which
+    // would false-positive a `.toContain`. The ladder's claim is about the four CODE_TOOLS EXACTLY, so
+    // exact membership is the faithful check; extra non-code denials are outside this ladder's scope.
+    const denied = new Set((flag(args, "--disallowedTools") ?? "").split(",").filter(Boolean));
+    for (const t of CODE_DENIALS[c.code_access]!) expect(denied.has(t)).toBe(true);
     for (const t of ALL_CODE_TOOLS.filter((x) => !CODE_DENIALS[c.code_access]!.includes(x))) {
-      expect(denied).not.toContain(t);
+      expect(denied.has(t)).toBe(false);
     }
   });
 });

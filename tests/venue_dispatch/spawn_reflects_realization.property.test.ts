@@ -49,7 +49,7 @@ async function driveSpawn(
   // renamed to the mcp__<server>__<tool> names their server advertises. Omitted → resolution OFF,
   // the legacy pass-through the INV1..INV10 laws below deliberately exercise.
   resolution?: { toolProviders?: ToolProviderRegistry; mcpServerConfigs?: Record<string, unknown> },
-): Promise<{ allowedTools: string[] | undefined; childEnv: Record<string, string> | undefined; runCalled: boolean }> {
+): Promise<{ allowedTools: string[] | undefined; disallowedTools: string[] | undefined; childEnv: Record<string, string> | undefined; runCalled: boolean }> {
   let sawArgs: string[] = [];
   let sawEnv: Record<string, string> | undefined;
   let runCalled = false;
@@ -70,7 +70,9 @@ async function driveSpawn(
   await invoke(ctx);
   const i = sawArgs.indexOf("--allowedTools");
   const allowedTools = i === -1 ? undefined : (sawArgs[i + 1]?.split(",") ?? []);
-  return { allowedTools, childEnv: sawEnv, runCalled };
+  const d = sawArgs.indexOf("--disallowedTools");
+  const disallowedTools = d === -1 ? undefined : (sawArgs[d + 1]?.split(",") ?? []);
+  return { allowedTools, disallowedTools, childEnv: sawEnv, runCalled };
 }
 
 describe("spawn reflects venue realization — the tool ceiling (INV1,2,3,9)", () => {
@@ -139,6 +141,57 @@ describe("spawn reflects venue realization — the tool ceiling (INV1,2,3,9)", (
     const agent = testAgent({ slug: "free", primitives: ["SENSE"], allowed_tools: ["Read", "Bash"] });
     const { allowedTools } = await driveSpawn(agent, undefined);
     expect(new Set(allowedTools ?? [])).toEqual(new Set(["Read", "Bash"]));
+  });
+});
+
+describe("spawn reflects venue realization — the venue ceiling BINDS by denial (LAW 4, LAW 5)", () => {
+  // Siblings to INV1-INV10. Where INV1-3/9 pin the ALLOW side (advertised == grants ∩ equipment), these
+  // pin the DENY side: a granted-but-room-excluded tool must appear in --disallowedTools (so the room
+  // narrows by ENFORCEMENT, not only by the omission from --allowedTools that cannot bind), and nothing
+  // the room DOES admit may be denied. venueEffectiveTools is imported and called directly — the same
+  // shared oracle R10 refuses against — never a re-inlined intersection (INV9 discipline).
+
+  it("LAW 4 — a tool granted but NOT equipped by the room appears in --disallowedTools (RED pre-patch)", async () => {
+    // Disjoint pools guarantee the strict case, as in INV2. GRANT_ONLY are non-host-builtin in-house
+    // slugs so the ONLY thing that can put them in the deny list is the venue-exclusion path — not the
+    // host-builtin complement — which isolates the claim to the venue ceiling. RED before the fix: on
+    // the venue path the excluded tool is merely OMITTED from --allowedTools; nothing adds it to
+    // --disallowedTools, so the ceiling does not bind by enforcement.
+    const SHARED = ["Read", "Grep"], GRANT_ONLY = ["type_browse", "type_extend"], EQUIP_ONLY = ["Edit", "Glob"];
+    await fc.assert(fc.asyncProperty(
+      fc.subarray(SHARED, { minLength: 1 }), fc.subarray(GRANT_ONLY, { minLength: 1 }), fc.subarray(EQUIP_ONLY),
+      async (shared, grantOnly, equipOnly) => {
+        const grants = [...shared, ...grantOnly];
+        const equipment = [...shared, ...equipOnly];
+        const agent = testAgent({ slug: "p", primitives: ["SENSE"], allowed_tools: grants });
+        const venue = room(equipment);
+        const kept = new Set(venueEffectiveTools(agent, venue)); // the oracle, called directly
+        const excluded = grants.filter((g) => !kept.has(g));
+        const { disallowedTools } = await driveSpawn(agent, venue);
+        const deny = new Set(disallowedTools ?? []);
+        for (const g of excluded) expect(deny.has(g)).toBe(true); // granted-but-unequipped → denied
+      }), { numRuns: 200 });
+  });
+
+  it("LAW 5 — NO over-denial: no venue-effective tool is denied, and every one is still advertised", async () => {
+    // The paired guard on LAW 4: the deny synthesis must never touch a tool the room DOES admit. For any
+    // agent×venue, (venueEffectiveTools ∩ --disallowedTools) = ∅, and every effective tool is still in
+    // --allowedTools. This passes trivially pre-patch (empty deny list) and is the fix's structural
+    // defence that narrowing-by-denial never over-reaches. output_write's survival on the seal path is
+    // covered by LAW 2 in tests/invoker_cage.test.ts.
+    await fc.assert(fc.asyncProperty(toolArb, toolArb, async (grants, equip) => {
+      const agent = testAgent({ slug: "p", primitives: ["SENSE"], allowed_tools: grants });
+      const venue = room(equip);
+      const oracle = venueEffectiveTools(agent, venue);
+      if (grants.length > 0 && oracle.length === 0) return; // fail-closed case, tested elsewhere
+      const { allowedTools, disallowedTools } = await driveSpawn(agent, venue);
+      const deny = new Set(disallowedTools ?? []);
+      const adv = new Set(allowedTools ?? []);
+      for (const t of oracle) {
+        expect(deny.has(t)).toBe(false); // never denied…
+        expect(adv.has(t)).toBe(true);   // …and still advertised
+      }
+    }), { numRuns: 200 });
   });
 });
 

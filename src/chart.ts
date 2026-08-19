@@ -25,6 +25,7 @@
 // verified by a deliver-phase verdict (7/7) and approved by the governor. The ChartSchema itself
 // lives with every other genome class in src/genome_schema.ts — one Zod source, no exceptions.
 import { randomUUID } from "node:crypto";
+import { z } from "zod";
 import { ChartSchema, type ChartInput, type ChartOutput, type ChartEdgeOutput, type ChartApprovalGateOutput, type VenueOutput } from "./genome_schema.js";
 import { toolBaseName } from "./tool_providers.js";
 import type { Agent, Chair, Standard } from "./composition.js";
@@ -302,6 +303,29 @@ export function chartEntrySeedTypes(chart: Chart, standards: ReadonlyMap<string,
   return [...seeds];
 }
 
+/** When a Zod refusal carries BOTH an unrecognized key K and a missing required field F — in the
+ *  SAME object — such that F ends with K (`movement_id`.endsWith(`id`)), the author almost certainly
+ *  meant F. Return a phrase linking the two so the R0 detail can name the near-miss. Suffix
+ *  containment covers the reported pair (`id` → `movement_id`) with no string-distance dependency;
+ *  matching within one object path guards against pairing keys from two unrelated movements. */
+function describeNearMiss(issues: readonly z.ZodIssue[]): string | null {
+  const unrecognized: { key: string; parent: string }[] = [];
+  const required: { field: string; parent: string }[] = [];
+  for (const iss of issues) {
+    if (iss.code === "unrecognized_keys") {
+      for (const k of iss.keys) unrecognized.push({ key: k, parent: iss.path.join(".") });
+    } else if (iss.code === "invalid_type" && iss.received === "undefined") {
+      const field = iss.path[iss.path.length - 1];
+      if (typeof field === "string") required.push({ field, parent: iss.path.slice(0, -1).join(".") });
+    }
+  }
+  for (const u of unrecognized) {
+    const hit = required.find((r) => r.parent === u.parent && r.field !== u.key && r.field.endsWith(u.key));
+    if (hit) return `unrecognized key "${u.key}" is a near-miss for the required key "${hit.field}" — did you mean "${hit.field}"?`;
+  }
+  return null;
+}
+
 export function composeChart(input: ChartComposeInput): ChartComposition {
   const V = (v: ChartViolation[]): ChartComposition => ({ ok: false, violations: v });
 
@@ -311,7 +335,13 @@ export function composeChart(input: ChartComposeInput): ChartComposition {
   try {
     chart = ChartSchema.parse(input.chart);
   } catch (e) {
-    return V([{ rule: "R0", detail: `chart does not parse: ${e instanceof Error ? e.message : String(e)}` }]);
+    const base = `chart does not parse: ${e instanceof Error ? e.message : String(e)}`;
+    // The schema already knows the expected key. When the refusal carries an unrecognized key that
+    // is a near-miss for a missing required one (e.g. a movement keyed `id` where `movement_id` is
+    // required), name it — the refusal still stands, but the author is told which key was meant
+    // instead of being left to reconcile two unrelated Zod lines.
+    const nearMiss = e instanceof z.ZodError ? describeNearMiss(e.issues) : null;
+    return V([{ rule: "R0", detail: nearMiss ? `${base} — ${nearMiss}` : base }]);
   }
 
   // ── R1 movement_id uniqueness (and addressability) ───────────────────────────────────────────

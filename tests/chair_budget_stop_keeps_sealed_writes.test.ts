@@ -94,9 +94,11 @@ describe("a chair stopped by its TOOL BUDGET keeps what already passed the write
     ).toBeTruthy();
   });
 
-  it("keeps the LAST passing write per type, same as a clean run", async () => {
-    const out = (await invokeWith(budgetStoppedStream())(ctx())) as Record<string, Record<string, unknown>>;
-    expect(out["lineage-hit"]!["source"]).toBe("Schneider 2000");
+  it("keeps EVERY passing write per type, same as a clean run", async () => {
+    // Both writes passed the boundary before the budget stop, and the seal path now keeps every
+    // accepted record of a type (not just the last) — so both survive, in order.
+    const out = (await invokeWith(budgetStoppedStream())(ctx())) as Record<string, Array<Record<string, unknown>>>;
+    expect(out["lineage-hit"]!.map((r) => r["source"])).toEqual(["Grossi, Aldewereld & Dignum", "Schneider 2000"]);
   });
 
   it("STILL fails when the budget stop sealed nothing — an empty stop is a real failure", async () => {

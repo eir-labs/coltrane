@@ -99,6 +99,18 @@ export interface AgentInvocationContext {
   // merely the policy layer. Absent = a venue with no declared servers, or no realizer wired: the
   // spawn reaches only the deployment's base + grant-resolved servers, exactly as before.
   substrateMcpConfigs?: Readonly<Record<string, unknown>> | undefined;
+  // ── the SEAT runs INSIDE the room (seat → spawn wiring) ────────────────────────
+  // When the realized substrate is a seat-bearing room (its venue selects a `floor` image that
+  // carries the toolchain and the agent binary — Dockerfile.floor, the deliberate opposite of the
+  // production-only Dockerfile.room), runGig threads the room's per-realization workspace and its
+  // container name here. The Claude invoker then wraps the chair as
+  // `docker exec -i -w <workspace> <container> claude …`, so the seat runs INSIDE the room with the
+  // workspace as its cwd. Isolation is by construction: two concurrent gigs realize into distinct
+  // rooms with distinct workspaces, so neither seat can observe or overwrite the other's tree, and
+  // reclamation is the venue's ephemeral lifecycle rather than an operator hand-reaping worktrees.
+  // The wrap happens AFTER the confinement block that computes effective_tools, so moving the seat
+  // NARROWS it by the room and never widens it. Absent = the seat runs on the host, unchanged.
+  seatExec?: { container: string; workspace: string } | undefined;
   // #turn-budget — the seated chair's turn budget, threaded from the chair (exactly as `depth`
   // is). The invoker resolves `--max-turns` as ctx.turn_budget ?? agent.max_tool_calls ?? engine
   // default. Absent = the agent's own cap stands; 0 is a deliberate hard floor, not a fall-through.
@@ -2379,6 +2391,11 @@ export async function runGig(
           // realized transports (docker-exec stdio configs) so the invoker points the spawn at the
           // servers INSIDE the room. Absent otherwise — the substrate-less path is unchanged.
           ...(gigSubstrate ? { substrateMcpConfigs: gigSubstrate.mcpServerConfigs } : {}),
+          // The seat → spawn wire: when the substrate stood up a SEAT-BEARING room (a floor image
+          // carrying the toolchain), hand the chair the room's workspace + container so the invoker
+          // runs the seat INSIDE the room with the workspace as cwd. Absent when the room is the
+          // production-only room image (no seat runs there) — the host-spawn path is unchanged.
+          ...(gigSubstrate?.seat ? { seatExec: gigSubstrate.seat } : {}),
           onEvent: (ev) => {
             sink.fold(ev);
             emit({ type: "agent_event", phase: phaseName, role: chair.role, event: ev });
@@ -2542,15 +2559,23 @@ export async function runGig(
     // state that cannot be reconciled. Deciding first makes a chair all-or-nothing.
     const resolved: Array<{ spec: (typeof output_specs)[number]; slice: Record<string, unknown> }> = [];
     for (const spec of output_specs) {
-      const keyed = data[spec.domain_type] as Record<string, unknown> | undefined;
-      const slice = keyed !== undefined && keyed !== null ? keyed : single ? data : undefined;
-      if (slice === undefined || slice === null) continue;
-      if (typeof slice !== "object" || slice === null) {
-        throw new RuntimeError(
-          `chair "${chair.role}" output "${spec.domain_type}" must be a JSON object, got ${typeof slice}`,
-        );
+      const keyed = data[spec.domain_type];
+      const raw = keyed !== undefined && keyed !== null ? keyed : single ? data : undefined;
+      if (raw === undefined || raw === null) continue;
+      // MULTI-RECORD SEAL. captureOutputWrites hands the runtime a LIST of records per declared type
+      // — a chair may seal MANY records of one type (gig 8baced9d's lineage scout made 15 accepted
+      // output_write calls; the old last-wins collapse sealed 1). An ARRAY here is that list, and the
+      // loop seals one record per element. A bare object is one record — the skill-backed path and
+      // the single-output fallback still hand a plain object, so single-seal chairs are untouched.
+      const slices = Array.isArray(raw) ? raw : [raw];
+      for (const slice of slices) {
+        if (typeof slice !== "object" || slice === null || Array.isArray(slice)) {
+          throw new RuntimeError(
+            `chair "${chair.role}" output "${spec.domain_type}" must be a JSON object, got ${Array.isArray(slice) ? "array" : slice === null ? "null" : typeof slice}`,
+          );
+        }
+        resolved.push({ spec, slice: slice as Record<string, unknown> });
       }
-      resolved.push({ spec, slice: slice as Record<string, unknown> });
     }
     // backfillShas refuses an ambiguous provenance field. Run it over EVERY slice up front so
     // that throw also lands before the first write, rather than midway through them.

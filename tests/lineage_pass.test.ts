@@ -38,7 +38,9 @@ describe("lineage-pass — the genome loads it cleanly", () => {
 });
 
 describe("lineage domain types — extend the six, validate instances, reject malformed", () => {
-  const extendsOf = (slug: string) => genome.domain_types.get(`${slug}@1`)?.extends;
+  // Bare-slug lookup: lineage-record moved to @2 under lineage-record-typing-v1, so a hardcoded
+  // @1 no longer resolves it. The bare slug resolves each type at its current version.
+  const extendsOf = (slug: string) => genome.domain_types.get(slug)?.extends;
 
   it("the lineage types are registered, each extending the right core primitive", () => {
     expect(extendsOf("lineage-question")).toBe("Signal");
@@ -96,6 +98,9 @@ describe("lineage domain types — extend the six, validate instances, reject ma
       relation: "descends-from",
       grounding_internal: "the LineageEdgeSchema typed-edge vocabulary",
       grounding_external: "hash-tree tamper-evidence, Merkle 1987 §3",
+      // v2 (lineage-record-typing-v1, O7): the weaver's edge now REQUIRES a closed-vocab grounding
+      // strength. A well-formed edge carries it; the negatives below stay red for their own reasons.
+      strength: "dereferenceable-both-sides",
     };
     expect(
       registry.validate({ core_type: "Interpretation", domain_type: "lineage-map", data: { edges: [goodEdge] } }).valid,
@@ -128,9 +133,12 @@ describe("lineage domain types — extend the six, validate instances, reject ma
 
   it("lineage-record is the formal publishable artifact: body + inventory + connections + gap + recommendation", () => {
     const full = {
-      external_body: [{ source: "Merkle 1987", claim: "hash trees" }],
+      // v2 (lineage-record-typing-v1): external_body carries a closed reached|not-reached status,
+      // each connection carries the map edge's full shape + a closed-vocab strength. The record
+      // still validates when well-formed; the noGap negative below stays red for the missing gap.
+      external_body: [{ source: "Merkle 1987", status: "reached", note: "hash trees" }],
       internal_inventory: [{ reference: "src/genome_schema.ts" }],
-      connections: [{ internal_ref: "x", external_ref: "y", relation: "descends-from", grounding_internal: "i", grounding_external: "e" }],
+      connections: [{ internal_ref: "x", external_ref: "y", relation: "descends-from", grounding_internal: "i", grounding_external: "e", strength: "dereferenceable-both-sides" }],
       gap: "no explicit citation of Merkle in the genome",
       alignment_recommendation: "attribute the sealing discipline to the hash-tree lineage",
     };

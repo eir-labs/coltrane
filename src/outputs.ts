@@ -512,7 +512,17 @@ export function createOutputStore(registry: Registry, options?: OutputStoreOptio
    * `validateWrite` exposes it as a question. Returns the full rejection message so the two
    * paths cannot diverge in what they tell an operator, only in whether they throw.
    */
-  function checkWritable(o: { core_type: string; domain_type: string; data: Record<string, unknown> }): {
+  function checkWritable(o: {
+    core_type: string;
+    domain_type: string;
+    data: Record<string, unknown>;
+    // The ids of exactly what this record consumed. Forwarded from write() so the seal boundary
+    // can resolve the consumed lineage-map / lineage-hit records for the composition-fidelity
+    // predicate below. Absent on the `validateWrite` question path (the reuse decision, which has
+    // no run context) — the composition check is inert there, which is correct: reuse re-seals a
+    // byte-identical prior output whose composition was already checked when it was first written.
+    input_refs?: string[] | undefined;
+  }): {
     valid: boolean;
     reason?: string;
   } {
@@ -587,6 +597,88 @@ export function createOutputStore(registry: Registry, options?: OutputStoreOptio
     if (!core.valid) {
       return { valid: false, reason: `output rejected: ${o.domain_type || o.core_type} failed core-type invariant — ${core.reason}` };
     }
+    // Composition fidelity for the published lineage-record (spec lineage-record-typing-v1, O6/O7).
+    //
+    // The scribe's compose chair consumes the weaver's lineage-map AND the identify-external
+    // lineage-hits (standards/lineage-pass-v1.json). The standard says in PROSE that it "draws no
+    // new edge and introduces no new source" — but nothing checked it, so a scribe could seal an
+    // invented connection or a fabricated reached source. This is the cross-input referential
+    // predicate JSON Schema cannot express: connections(record) ⊆ edges(consumed map), and every
+    // reached external_body source ∈ the consumed hits. It lives HERE, at the one seal boundary,
+    // resolving input_refs against the store the closure already owns — a second gate elsewhere
+    // would be exactly the two-places-assert-the-same-thing drift this change closes at the type
+    // level. Each sub-check fires only when the relevant upstream was actually consumed, so a record
+    // written with no upstream map/hit (the pure-typing path, no input_refs) is a schema question
+    // and has nothing to be held against.
+    if (o.domain_type === "lineage-record" && o.input_refs && o.input_refs.length > 0) {
+      const consumed = o.input_refs
+        .map((id) => outputs.get(id))
+        .filter((r): r is OutputRecord => r !== undefined);
+      const maps = consumed.filter((r) => r.domain_type === "lineage-map");
+      const hits = consumed.filter((r) => r.domain_type === "lineage-hit");
+      const edges: Record<string, unknown>[] = maps.flatMap((m) =>
+        Array.isArray(m.data["edges"]) ? (m.data["edges"] as Record<string, unknown>[]) : [],
+      );
+      const hitSources = new Set(
+        hits.map((h) => h.data["source"]).filter((s): s is string => typeof s === "string"),
+      );
+      const connections = Array.isArray(o.data["connections"])
+        ? (o.data["connections"] as Record<string, unknown>[])
+        : [];
+      const externalBody = Array.isArray(o.data["external_body"])
+        ? (o.data["external_body"] as Record<string, unknown>[])
+        : [];
+
+      // (a) connections(record) ⊆ edges(consumed lineage-map), matched on the (internal_ref,
+      //     external_ref, relation) triple — the identity of an edge; and (a') the carried strength
+      //     must equal the drawing edge's strength (O7), so a scribe cannot upgrade a conceptual
+      //     alignment into a citation-grounded one.
+      if (maps.length > 0) {
+        for (const c of connections) {
+          const match = edges.find(
+            (e) =>
+              e["internal_ref"] === c["internal_ref"] &&
+              e["external_ref"] === c["external_ref"] &&
+              e["relation"] === c["relation"],
+          );
+          if (!match) {
+            return {
+              valid: false,
+              reason:
+                `output rejected: lineage-record connection (${String(c["internal_ref"])} → ` +
+                `${String(c["external_ref"])} [${String(c["relation"])}]) is not an edge in any consumed ` +
+                `lineage-map — the compose seat draws no new edge`,
+            };
+          }
+          if (c["strength"] !== match["strength"]) {
+            return {
+              valid: false,
+              reason:
+                `output rejected: lineage-record connection (${String(c["internal_ref"])} → ` +
+                `${String(c["external_ref"])}) carries strength "${String(c["strength"])}" but its drawing ` +
+                `map edge was drawn "${String(match["strength"])}" — the weaver draws the strength, the ` +
+                `scribe carries it through unchanged`,
+            };
+          }
+        }
+      }
+
+      // (b) every status:reached external_body source is backed by a consumed lineage-hit; a
+      //     status:not-reached entry is a named sweep boundary and needs no backing.
+      if (hits.length > 0) {
+        for (const b of externalBody) {
+          if (b["status"] === "reached" && !hitSources.has(b["source"] as string)) {
+            return {
+              valid: false,
+              reason:
+                `output rejected: lineage-record external_body "${String(b["source"])}" is marked ` +
+                `status:reached but no consumed lineage-hit reached it — a reached source must be ` +
+                `backed by a hit`,
+            };
+          }
+        }
+      }
+    }
     return { valid: true };
   }
 
@@ -635,7 +727,7 @@ export function createOutputStore(registry: Registry, options?: OutputStoreOptio
       // Every gate lives in checkWritable — one owner, so `validateWrite` (which the reuse
       // path uses to decide before it injects anything) cannot answer a different question
       // than the one this boundary actually asks.
-      const gate = checkWritable({ core_type: o.core_type, domain_type: o.domain_type, data: o.data });
+      const gate = checkWritable({ core_type: o.core_type, domain_type: o.domain_type, data: o.data, input_refs: o.input_refs });
       if (!gate.valid) throw new OutputStoreError(gate.reason ?? "output rejected");
       const domain_type_version = o.domain_type_version ?? 1;
       const rec: OutputRecord = {

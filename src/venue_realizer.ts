@@ -70,6 +70,12 @@ export interface RealizationHandle {
   artifacts: readonly RealizedArtifact[];
   teardown(): Promise<void> | void;
   tornDown(): boolean;
+  /** Present ONLY when the room is SEAT-BEARING — its venue selects a `floor` image (Dockerfile.floor)
+   *  that carries the toolchain and the agent binary, the deliberate opposite of the production-only
+   *  room image. It names the room's own container and the per-realization workspace, so the invoker
+   *  can run the chair as `docker exec -i -w <workspace> <container> claude …` INSIDE the room. Absent
+   *  on the production room image and on the local-process realizer: the seat runs on the host. */
+  seat?: { container: string; workspace: string } | undefined;
 }
 
 export interface RealizeOpts {
@@ -701,6 +707,7 @@ function makeHandle(
   configPath: string,
   artifacts: RealizedArtifact[],
   onTeardown?: () => void,
+  seat?: { container: string; workspace: string },
 ): RealizationHandle {
   let torn = false;
   for (const a of artifacts) HOST_ARTIFACTS.set(a.id, a);
@@ -717,6 +724,9 @@ function makeHandle(
     tornDown() {
       return torn;
     },
+    // Present only for a seat-bearing floor — the invoker execs the chair into this container with
+    // the workspace as cwd. Absent = the seat runs on the host (the production room image).
+    ...(seat ? { seat } : {}),
   };
 }
 
@@ -775,26 +785,34 @@ export function dockerComposeRealizer(opts?: { run?: ComposeRunner }): VenueReal
   const substrate = "container";
   return {
     substrate,
-    // ⚠ THESE ARE SCOPED TO WHAT IS IN THE ROOM, AND TODAY THE SEAT IS NOT.
+    // THESE ARE SCOPED TO WHAT IS IN THE ROOM — AND FOR A SEAT-BEARING FLOOR, THE SEAT IS NOW IN IT.
     //
-    // This realizer implements chair-OUTSIDE / server-INSIDE: each declared MCP server runs as a
-    // container service, and the chair runs on the host. Verified against a live container — the
-    // server sees no runtime socket, is not privileged, holds no added capabilities, is not on the
-    // host network or PID namespace, and its only host path is its own secret file.
+    // This realizer implements server-INSIDE always, and chair-INSIDE when the venue selects a `floor`
+    // image (Dockerfile.floor) that carries the toolchain and the agent binary. On a floored room the
+    // handle carries `seat = { container, workspace }` and the invoker runs the chair as
+    // `docker exec -i -w <workspace> <container> claude …`, so the seat's cwd IS the per-realization
+    // workspace and two concurrent gigs cannot share a working tree — the isolation the earlier
+    // hand-rolled git worktrees were reaching for, now by construction and reclaimed by the ephemeral
+    // lifecycle rather than an operator. Verified against a live container — the room sees no runtime
+    // socket, is not privileged, holds no added capabilities, is not on the host network or PID
+    // namespace, and its only host path is its own workspace mount.
     //
-    // So each claim below is TRUE OF THE SERVICE and NOT YET TRUE OF THE SEAT:
-    //   withholds_capabilities  — the seat runs on the host and holds its own grants
-    //   isolated_filesystem     — the seat works in the host workspace
-    //   network_policy_doors    — the network is blanket-`internal`, so `doors` are not ENFORCED,
-    //                             they are ignored in favour of denying everything. Wrong in the
-    //                             safe direction, and still not what the word says.
-    //   reproducible_tool_surface — the image is unpinned and `installs` are not applied
-    //   per_chair_isolation     — one room per gig, not per chair
+    // Where each claim now stands:
+    //   withholds_capabilities  — the in-room seat is still narrowed by `agent.allowed_tools ∩
+    //                             venue.equipment.tools` (computed BEFORE the spawn is relocated), so
+    //                             moving it into the room cannot widen it; the room is the ceiling.
+    //   isolated_filesystem     — the seat works in the room's own per-gig workspace, not the host tree
+    //   network_policy_doors    — the network is blanket-`internal`, so `doors.egress` is DECLARED but
+    //                             NOT enforced at a network boundary in v0: the room is egress-less and
+    //                             the change-set is sealed as an OUTPUT for a later effector to push, so
+    //                             no door is needed here. Denying everything is wrong in the safe
+    //                             direction, and this is stated honestly rather than claimed as doors.
+    //   reproducible_tool_surface — the tool SURFACE is reproducible from the contract; the image pin
+    //                             and `installs` application remain a separate lane.
+    //   per_chair_isolation     — one room per gig; per-chair rooms remain future work.
     //
-    // They are left standing because `tests/spec_venue_realization_substrate.test.ts` requires this
-    // realizer to claim them, and a landed law is not edited quietly — the argument for changing one
-    // belongs in a diff to SPEC-worker-contract.md first. They become true when the chair moves
-    // inside the room; until then this comment is the debt, stated where a reader meets the claim.
+    // The seat-bearing path activates only when a floor is named — an unfloored room keeps the chair on
+    // the host, so this is additive and the host-spawn behaviour is unchanged where no floor is set.
     guarantees: [
       "withholds_capabilities",
       "isolated_filesystem",
@@ -915,6 +933,15 @@ export function dockerComposeRealizer(opts?: { run?: ComposeRunner }): VenueReal
         { kind: "compose-project", id: `compose-${opts.gigId}-${ARTIFACT_SEQ++}`, labels: { gig_id: opts.gigId, instance: INSTANCE } },
         { kind: "compose-network", id: `net-${opts.gigId}-${ARTIFACT_SEQ++}`, labels: { gig_id: opts.gigId, instance: INSTANCE } },
       ];
+      // SEAT-BEARING ONLY. A `floor` selects a toolchain-carrying image (Dockerfile.floor) that holds
+      // the agent binary; the default `coltrane/room:ephemeral` (Dockerfile.room) deliberately does
+      // not, so a seat can only run inside a floored room. When the venue names a floor, expose the
+      // room's own container + the per-realization workspace (`working_dir` of the room service, so
+      // the seat's cwd IS this room's tree). The invoker reads this to `docker exec` the chair into
+      // the room. Absent → the chair stays on the host, exactly as before this wire existed.
+      const seat = v.floor
+        ? { container: roomContainer, workspace: join(realizationDir, "workspace") }
+        : undefined;
       return makeHandle("PLAYING", configs, composePath, artifacts, () => {
         // An ephemeral room that outlives its gig is a leak, and `down -v` is what makes the
         // lifecycle policy a fact rather than a field. --remove-orphans so a service removed from
@@ -925,7 +952,7 @@ export function dockerComposeRealizer(opts?: { run?: ComposeRunner }): VenueReal
           if (process.env["COLTRANE_DRAIN_DEBUG"]) console.error(`[venue] down failed: ${String(e)}`);
         }
         rmSync(realizationDir, { recursive: true, force: true });
-      });
+      }, seat);
     },
     sweep,
   };

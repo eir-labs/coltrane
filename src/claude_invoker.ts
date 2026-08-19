@@ -1083,6 +1083,20 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
         disallowed_tools: [...(a.disallowed_tools ?? []), ...codeToolDenials(a.code_tool_access)],
         max_tool_calls: maxToolCalls,
       });
+      // SEAT IN THE ROOM. When the substrate stood up a SEAT-BEARING room, ctx.seatExec names its
+      // container and per-realization workspace, and the chair runs INSIDE it:
+      // `docker exec -i -w <workspace> <container> claude …` — so the seat's cwd is the room's own
+      // tree and two concurrent gigs (distinct rooms, distinct workspaces) cannot share a working
+      // directory. This wraps ONLY the leaf spawn; it runs AFTER the confinement block above, so
+      // effectiveAllowed/childEnv are already computed and the room narrows the seat but never widens
+      // it. `-i` keeps stdin open so a stdin-delivered prompt flows into the in-room binary. Auth is
+      // FILE-BASED inside the room (credential_surface delivered by `docker cp` to /run/secrets),
+      // never a host keychain and never forwarded via `-e`, so no host credential enters the room.
+      // Absent → identity, and the leaf spawns on the host exactly as before.
+      const seatExec = ctx.seatExec;
+      const execBin = seatExec ? "docker" : bin;
+      const inRoom = (args: readonly string[]): string[] =>
+        seatExec ? ["exec", "-i", "-w", seatExec.workspace, seatExec.container, bin, ...args] : [...args];
       // ONE invocation only — on the output_write path the agent self-corrects a rejected write
       // WITHIN this single run (each output_write rejection returns in-band and it calls again),
       // and on the text path there is a single answer. Either way, the invoker never re-prompts.
@@ -1098,9 +1112,9 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
       // knows what passed. Every other non-zero exit still propagates untouched.
       const runOnce = async (args: readonly string[], text: string): Promise<string> =>
         customRun
-          ? await customRun(bin, [...args], spawnBounds, childEnv)
+          ? await customRun(execBin, inRoom(args), spawnBounds, childEnv)
           : await spawnStreaming(
-              bin, [...args, "--output-format", "stream-json", "--verbose"], spawnBounds,
+              execBin, inRoom([...args, "--output-format", "stream-json", "--verbose"]), spawnBounds,
               ctx.onEvent, ctx.signal, abortGraceMs, promptViaStdin(text) ? text : undefined,
               childEnv,
             );

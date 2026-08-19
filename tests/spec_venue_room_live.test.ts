@@ -19,6 +19,7 @@
  *  law that silently succeeds where it cannot run is the hollow-green this repo refuses. */
 import { describe, expect, it } from "vitest";
 import { execFileSync, spawnSync } from "node:child_process";
+import { existsSync } from "node:fs";
 
 /** A daemon is not enough: the room is realized ON `coltrane/room:ephemeral`, which is BUILT from
  *  Dockerfile.room and published nowhere. A host with docker but without that image sends compose to
@@ -34,6 +35,24 @@ function roomRealizable(): boolean {
 }
 
 const HAVE_DOCKER = roomRealizable();
+
+/** The SEAT-BEARING floor laws gate on a SECOND image: `coltrane/floor:seat`, built from
+ *  Dockerfile.floor. It is the toolchain-carrying opposite of the room image and, like the room
+ *  image, is published nowhere — so the gate is daemon AND floor image, built by the `room` CI job
+ *  alongside the room image. Without it these SKIP; they do not hollow-pass. The isolation and
+ *  reclamation proofs below drive REAL containers (docker exec / docker inspect) and never invoke
+ *  the agent binary, so they need no API key — the floor image only has to STAND UP with a per-gig
+ *  workspace, which is exactly the property under test. */
+function floorRealizable(): boolean {
+  try {
+    execFileSync("docker", ["image", "inspect", "coltrane/floor:seat"], { stdio: "ignore", timeout: 30_000 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+const HAVE_FLOOR = floorRealizable();
 
 const NOTES_ROOM = {
   slug: "notes-room-v1",
@@ -213,4 +232,97 @@ describe.skipIf(!HAVE_DOCKER)("a realized room is a place that exists", () => {
     const after = spawnSync("docker", ["inspect", "-f", "{{.State.Status}}", named], { encoding: "utf8" });
     expect(after.status, `${named} must not survive teardown — an ephemeral room that outlives its gig is a leak`).not.toBe(0);
   }, 240_000);
+});
+
+// ── THE SEAT RUNS INSIDE THE ROOM — CONCURRENCY, ISOLATION, RECLAMATION ─────────────────────────
+//
+// A seat-bearing floor (`floor: "seat"` → coltrane/floor:seat, Dockerfile.floor) is where the CHAIR
+// itself runs. These are the laws the change exists for, and they are LIVE because a rendered
+// document cannot prove that two seats do not share a working tree — only two real, concurrently
+// standing rooms can.
+const FLOOR_ROOM = {
+  slug: "seat-room-v1",
+  institution_slug: "quartet",
+  equipment: { tools: ["mcp__notes__search"] },
+  credential_surface: [],
+  floor: "seat", // selects coltrane/floor:seat — the toolchain-carrying, seat-bearing image
+  mcp_servers: [
+    { slug: "notes", transport: "stdio" as const, command: ["node", "/app/dist/src/server_entry.js"], credential_names: [] },
+  ],
+  lifecycle: { policy: "ephemeral" as const },
+};
+
+describe.skipIf(!HAVE_FLOOR)("two concurrent gigs get their own room — the seat's cwd is isolated by construction", () => {
+  it("two gigs realized CONCURRENTLY do not share a working directory, and reclamation is the venue's job", async () => {
+    // ★ WHY THIS FAILS AGAINST CURRENT (pre-change) CODE. Before this change no seat entered the
+    // room: every chair spawned on the HOST with no cwd (src/claude_invoker.ts spawn had no `cwd`),
+    // so both seats' working directory resolved to the host repository root — ONE shared tree, which
+    // is exactly the corruption measured when two gigs dispatched at once. There was also no
+    // `handle.seat` descriptor at all, so `handle.seat.workspace` below is `undefined` for both gigs
+    // and the distinct-workspace assertion cannot hold. After the change each floored room carries
+    // its own per-realization workspace as the seat's cwd, so the two are disjoint by construction.
+    const { dockerComposeRealizer } = await realizer();
+    // The realization directory is derived from the gig id's FIRST 8 chars (gig-<id8>), so the two
+    // ids must differ there or both rooms would collide on one directory — which would defeat the
+    // very isolation under test. These differ from the first character.
+    const gigA = "aaaa1111-0000-0000-0000-00000000aaaa";
+    const gigB = "bbbb2222-0000-0000-0000-00000000bbbb";
+    const realizer0 = dockerComposeRealizer();
+
+    // CONCURRENTLY — both rooms stand up at once, the very condition that corrupted one shared tree.
+    const [handleA, handleB] = await Promise.all([
+      realizer0.realize(FLOOR_ROOM, noCredentials, { gigId: gigA }),
+      realizer0.realize(FLOOR_ROOM, noCredentials, { gigId: gigB }),
+    ]);
+
+    try {
+      // The seat descriptor is present ONLY for a seat-bearing floor, and names each room's own
+      // container + workspace. Absent (or equal) is the pre-change failure.
+      expect(handleA.seat, "a floored room carries a seat descriptor — the seat runs IN the room").toBeTruthy();
+      expect(handleB.seat, "a floored room carries a seat descriptor — the seat runs IN the room").toBeTruthy();
+      expect(handleA.seat!.workspace, "each gig's seat cwd is its OWN workspace, never one shared tree").not.toBe(
+        handleB.seat!.workspace,
+      );
+      expect(handleA.seat!.container, "each gig runs in its OWN room container").not.toBe(handleB.seat!.container);
+
+      // Both rooms must be RUNNING for the cross-read proof to mean anything (a dead container reads
+      // nothing, which would pass the isolation assertion for the wrong reason).
+      for (const c of [handleA.seat!.container, handleB.seat!.container]) {
+        const state = spawnSync("docker", ["inspect", "-f", "{{.State.Status}}", c], { encoding: "utf8" });
+        expect(state.stdout.trim(), `${c} must be running`).toBe("running");
+      }
+
+      // NEITHER SEAT CAN OBSERVE OR OVERWRITE THE OTHER'S TREE. Write a marker into gig A's workspace
+      // from INSIDE room A; it must be invisible in gig B's workspace from inside room B. Two distinct
+      // host realization dirs bind-mounted into two distinct rooms make this true by construction —
+      // which is the whole point of moving the seat into the room.
+      const marker = `${handleA.seat!.workspace}/marker-A`;
+      const wrote = spawnSync("docker", ["exec", handleA.seat!.container, "sh", "-c", `echo gigA > ${marker}`], { encoding: "utf8" });
+      expect(wrote.status, "room A can write into its own workspace").toBe(0);
+
+      const seenInA = spawnSync("docker", ["exec", handleA.seat!.container, "sh", "-c", `cat ${marker}`], { encoding: "utf8" });
+      expect(seenInA.stdout.trim(), "room A observes its own write").toBe("gigA");
+
+      // Room B, reading the SAME absolute path inside ITS OWN workspace mount, sees nothing.
+      const markerInB = `${handleB.seat!.workspace}/marker-A`;
+      const seenInB = spawnSync("docker", ["exec", handleB.seat!.container, "sh", "-c", `cat ${markerInB} 2>/dev/null || echo ABSENT`], { encoding: "utf8" });
+      expect(seenInB.stdout.trim(), "room B cannot observe room A's write — the trees are disjoint").toBe("ABSENT");
+    } finally {
+      await handleA.teardown();
+      await handleB.teardown();
+    }
+
+    // RECLAMATION IS THE VENUE'S JOB, NOT AN OPERATOR'S. After both gigs end, no container, no
+    // network, and no realization directory the change created may survive — the ephemeral lifecycle
+    // reaps what it stood up. This is the property the hand-rolled worktrees never had: nobody had to
+    // remember to prune anything.
+    for (const c of [handleA.seat!.container, handleB.seat!.container]) {
+      const after = spawnSync("docker", ["inspect", "-f", "{{.State.Status}}", c], { encoding: "utf8" });
+      expect(after.status, `${c} must not survive teardown — an ephemeral room that outlives its gig is a leak`).not.toBe(0);
+    }
+    // No realization directory left behind for either gig (they live under tmpdir/coltrane-realizations).
+    for (const h of [handleA, handleB]) {
+      expect(existsSync(h.seat!.workspace), `no realization workspace may survive teardown: ${h.seat!.workspace}`).toBe(false);
+    }
+  }, 300_000);
 });

@@ -48,7 +48,14 @@ jobs:
       - run: npm ci
       - name: build the room image
         run: docker build -f Dockerfile.room -t coltrane/room:ephemeral .
-      - name: the emitted transport reaches a standing room
+      # The seat-bearing floor image (Dockerfile.floor) — its deliberate opposite. Built so the
+      # concurrency/reclamation live laws (a seat's cwd is its own room's workspace; nothing survives
+      # teardown) RUN for real rather than hollow-skipping. They drive real containers (docker exec /
+      # inspect) and never invoke the agent binary, so no API key is needed — the floor image only has
+      # to STAND UP with a per-gig workspace, which is the property under test.
+      - name: build the seat-bearing floor image
+        run: docker build -f Dockerfile.floor -t coltrane/floor:seat .
+      - name: the emitted transport reaches a standing room, and the seat's cwd is isolated
         run: npx vitest run tests/spec_venue_room_live.test.ts
       - name: nothing survives the run
         run: |

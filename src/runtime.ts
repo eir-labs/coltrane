@@ -99,6 +99,18 @@ export interface AgentInvocationContext {
   // merely the policy layer. Absent = a venue with no declared servers, or no realizer wired: the
   // spawn reaches only the deployment's base + grant-resolved servers, exactly as before.
   substrateMcpConfigs?: Readonly<Record<string, unknown>> | undefined;
+  // ── the SEAT runs INSIDE the room (seat → spawn wiring) ────────────────────────
+  // When the realized substrate is a seat-bearing room (its venue selects a `floor` image that
+  // carries the toolchain and the agent binary — Dockerfile.floor, the deliberate opposite of the
+  // production-only Dockerfile.room), runGig threads the room's per-realization workspace and its
+  // container name here. The Claude invoker then wraps the chair as
+  // `docker exec -i -w <workspace> <container> claude …`, so the seat runs INSIDE the room with the
+  // workspace as its cwd. Isolation is by construction: two concurrent gigs realize into distinct
+  // rooms with distinct workspaces, so neither seat can observe or overwrite the other's tree, and
+  // reclamation is the venue's ephemeral lifecycle rather than an operator hand-reaping worktrees.
+  // The wrap happens AFTER the confinement block that computes effective_tools, so moving the seat
+  // NARROWS it by the room and never widens it. Absent = the seat runs on the host, unchanged.
+  seatExec?: { container: string; workspace: string } | undefined;
   // #turn-budget — the seated chair's turn budget, threaded from the chair (exactly as `depth`
   // is). The invoker resolves `--max-turns` as ctx.turn_budget ?? agent.max_tool_calls ?? engine
   // default. Absent = the agent's own cap stands; 0 is a deliberate hard floor, not a fall-through.
@@ -2379,6 +2391,11 @@ export async function runGig(
           // realized transports (docker-exec stdio configs) so the invoker points the spawn at the
           // servers INSIDE the room. Absent otherwise — the substrate-less path is unchanged.
           ...(gigSubstrate ? { substrateMcpConfigs: gigSubstrate.mcpServerConfigs } : {}),
+          // The seat → spawn wire: when the substrate stood up a SEAT-BEARING room (a floor image
+          // carrying the toolchain), hand the chair the room's workspace + container so the invoker
+          // runs the seat INSIDE the room with the workspace as cwd. Absent when the room is the
+          // production-only room image (no seat runs there) — the host-spawn path is unchanged.
+          ...(gigSubstrate?.seat ? { seatExec: gigSubstrate.seat } : {}),
           onEvent: (ev) => {
             sink.fold(ev);
             emit({ type: "agent_event", phase: phaseName, role: chair.role, event: ev });

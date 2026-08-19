@@ -63,6 +63,8 @@
     "domain_types",
     "core_types",
     "institutions",
+    "tours",
+    "evals",
     "README.md",
     "LICENSE"
   ],

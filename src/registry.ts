@@ -29,7 +29,15 @@ export const RESOLVE_WEIGHTS = {
 // explicit PROJECTION of the single Zod source (genome_schema.ts DomainTypeOutput), not a third
 // hand-written restatement. The persisted record additionally carries version/status/description,
 // which the registry doesn't use; deriving the shared fields keeps them from drifting from the source.
-export type DomainType = Pick<DomainTypeOutput, "slug" | "extends" | "domain" | "schema" | "required_fields">;
+// `version` is intersected in as OPTIONAL rather than added to the Pick key list: DomainTypeOutput.version
+// is a non-optional number (genome_schema.ts, z.number().default(1)), so putting it inside the Pick would
+// force every DomainType literal — 50+ in tests, plus the type_register handler — to carry a version and
+// break compilation. Optional is strictly sufficient: the type_extend handler reads `baseDef.version ?? 1`,
+// which resolves to the real version when a builder supplied it (loadRegistry, genome_reload) and 1 for the
+// projections that legitimately don't (a freshly registered type is always v1). Carrying version lets a
+// version DECISION (proposeTypeChange: next_version = base.version + 1) read a real base version instead of
+// a hardcoded constant — the fix for PR #433 AC6, where a second extend must reach v3.
+export type DomainType = Pick<DomainTypeOutput, "slug" | "extends" | "domain" | "schema" | "required_fields"> & { version?: number };
 
 export interface ResolveQuery {
   extends: string;
@@ -414,6 +422,10 @@ export function loadRegistry(genome: LoadedGenome): Registry {
     domain: d.domain,
     schema: d.schema as Record<string, unknown>,
     required_fields: [...d.required_fields],
+    // Carry the real on-disk version into the in-memory map so a version DECISION reads it.
+    // Without this a restart re-reads every type as version-less and a subsequent extend would
+    // fall back to `?? 1`, re-bumping a v3 type to v2 (PR #433 AC6, the second-extend defect).
+    version: d.version,
   }));
   return createRegistry(defs);
 }

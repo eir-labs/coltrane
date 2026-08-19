@@ -1591,7 +1591,11 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         const nextProps = { ...baseProps, ...addProps };
         const nextRequired = extension?.schema?.required ?? baseDef.required_fields;
         const base: DomainTypeDef = {
-          slug: baseDef.slug, version: 1, extends: baseDef.extends, domain: baseDef.domain,
+          // Read the base's OWN version (widened onto DomainType) so proposeTypeChange computes
+          // next_version = base.version + 1 from reality, not a constant. `?? 1` covers the freshly
+          // registered projection that carries no version (always v1). The hardcoded 1 here forced
+          // every extend to next_version 2 — the first half of PR #433 AC6's second-extend defect.
+          slug: baseDef.slug, version: baseDef.version ?? 1, extends: baseDef.extends, domain: baseDef.domain,
           status: "active", schema: { type: "object", properties: baseProps }, required_fields: baseDef.required_fields,
         };
         // THE THIRD DOOR. `{...baseProps, ...addProps}` above is the exact merge #264 is
@@ -1642,6 +1646,23 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
               base.slug,
             )
           : undefined;
+        // Refresh the in-memory registry to match what was just sealed to disk. sealDefinition
+        // overwrites domain_types/<slug>.json at the bumped version, but the registry map still
+        // holds the pre-extend entry — so a SECOND type_extend on the same slug would re-read the
+        // stale version and compute next_version from it again (v1→v2→v2 instead of v3). That is
+        // the second half of PR #433 AC6's defect: the write became real, so the collision became
+        // real. Swap just this slug's entry (bumped version + the merged schema/required_fields
+        // just sealed) into a snapshot and replaceTypes it. replaceTypes — not registerType — is
+        // used deliberately: registerType runs reuse enforcement via score(), and an extended type
+        // scores >=80 against its own prior version (score() never inspects slug), so registerType
+        // would REFUSE it. replaceTypes is the existing bypass (genome_reload uses it) and is a
+        // sync, not authorship. See rationale in the sealed change-set re: score()'s slug-blindness.
+        const snapshot = deps.registry.listTypes().map((t) =>
+          t.slug === base.slug
+            ? { ...t, version: proposal.next_version, schema: { type: "object", properties: nextProps }, required_fields: [...nextRequired] }
+            : t,
+        );
+        deps.registry.replaceTypes(snapshot);
         return { ok: true, requires_approval: proposal.approval_required, data: { new_version: proposal.next_version, changelog_entry: `${proposal.change_class}: +${newFields} field(s)`, change_class: proposal.change_class, effective_hash: tx?.effective_hash, content_hash: tx?.content_hash } };
       }
       case "charter_read": {
@@ -1791,6 +1812,9 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
           domain: d.domain,
           schema: d.schema as Record<string, unknown>,
           required_fields: [...d.required_fields],
+          // Carry the on-disk version through the reload so a version decision reads it (mirrors
+          // loadRegistry). Editing domain_types/ and reloading must not reset a type to version-less.
+          version: d.version,
         }));
         const typeDiff = deps.registry.replaceTypes(typeDefs);
 

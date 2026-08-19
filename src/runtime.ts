@@ -33,6 +33,7 @@ import { producersSha,
   type ReuseStore, type ReuseEntry, type ReuseOutput, type RunIdentity, type PriorBudgetState,
 } from "./reuse.js";
 import type { OutputStore, OutputRecord } from "./outputs.js";
+import { checkGigConformance, type GigConformanceResult } from "./gig_conformance.js";
 import { drainGigHeader } from "./output_mirror.js";
 import { LEDGER_SCHEMA_VERSION, type Ledger, type GigUsage } from "./ledger.js";
 import type { Depth } from "./pricing.js";
@@ -612,6 +613,17 @@ export interface GigResult {
   movement_id?: string;
   genome_hash: string;
   run_fingerprint: string;
+  /**
+   * The gig-close CONFORMANCE classification — does this sealed run fit its own construction? A
+   * pure, deterministic verdict over (the standard, the sealed set) along two axes, FIT (every
+   * chair's declared output_contract is satisfied) and TIMING (every record's engine-stamped
+   * input_shas respect the declared edges). It is a CLASSIFIER that routes review, not a gate:
+   * present as a PROPERTY of the run beside `run_fingerprint`, deliberately NOT folded into it (a
+   * run containing its own grade would be self-referential) and never sealed as an output INSIDE
+   * the gig it grades. Present only on the completion path — an `awaiting_approval` return is a
+   * distinct shape whose INCOMPLETE verdict is the classifier's job to state when it is called.
+   */
+  conformance?: GigConformanceResult;
   /**
    * Records this run CONSUMED but did not produce — an earlier movement's sealed outputs, carried
    * in over a chart edge. Present only when seeds were actually read, so its absence is the claim
@@ -2909,6 +2921,10 @@ export async function runGig(
   if (budget) result.budget_state = budget;
   if (unresolved_evals.length > 0) result.unresolved_evals = unresolved_evals;
   if (unfulfilledOutputs.length > 0) result.unfulfilled_outputs = unfulfilledOutputs;
+  // The gig-close conformance classification — computed over the SETTLED produced[] (every amend
+  // round resolved, every reuse/resume row folded in) so it grades the run as it finally stands.
+  // Attached beside run_fingerprint, never folded into it and never sealed back into the gig.
+  result.conformance = checkGigConformance(standard, produced, skipped, "complete", gig_id);
   // Say what was skipped and why. The ABSENCE of these fields is itself a claim — that every
   // chair in this manifest ran — so they are present only when there is something to report,
   // and `reuse` is present whenever the cache was wired even if nothing hit (a zero-hit run is

@@ -220,4 +220,53 @@ describe("type_extend — an ok:true result must mean the extended definition is
       rmSync(dir, { recursive: true, force: true });
     }
   });
+  // ── THE SECOND EXTEND — RED. A latent defect this change RELEASES. ────────────────────────────
+  //
+  // `proposeTypeChange` computes `next_version: base.version + 1` (src/type_versioning.ts:42), but
+  // the handler builds its base with `version: 1` HARDCODED (src/server.ts:1594), discarding
+  // `baseDef.version`. So next_version is always 2 — for every type, on every call.
+  //
+  // That was INVISIBLE while nothing persisted: no type ever reached v2, so no second extend could
+  // collide. Making the write real makes the collision real. Extend twice and the second write lands
+  // at v2 again, overwriting different content at the same version — which breaks the AC2 promise
+  // from the other side: two genome_mutation rows both claim `<slug>@v2` while only the last write
+  // survives, so a sealed row again fails to resolve to the content it sealed.
+  //
+  // The five laws above cannot see it: every one extends a v1 type exactly once. This is the shape
+  // worth naming — a bug held closed by another bug, released by fixing the first.
+  //
+  // WIDER CONTEXT for whoever fixes this: version 1 is hardcoded at SIX sites (registry.ts:307,
+  // runtime.ts:2050, server.ts:492, server.ts:1594, worker.ts:732, worker.ts:783) against ONE that
+  // computes (type_versioning.ts). All 9,110 sealed outputs across 100 distinct types carry
+  // domain_type_version: 1. Fixing line 1594 turns this law green and is worth doing; it does not
+  // by itself make the type system version-aware.
+  it("AC6/RED: a second extend bumps to v3 — next_version reads the BASE's version, not a constant", async () => {
+    const dir = freshDir();
+    const deps = makeDeps(dir);
+    await registerBase(deps);
+
+    const first = await extendWithField(deps);
+    expect(first.ok, `first extend must succeed: ${first.error ?? ""}`).toBe(true);
+    expect(first.new_version, "v1 → v2").toBe(2);
+
+    const second = await dispatchTool(
+      "type_extend",
+      { slug: BASE_SLUG, fields_to_add: { compiled_at: { type: "string" } }, reason: "second extend" },
+      deps,
+    );
+    expect(second.ok, `second extend must succeed: ${second.error ?? ""}`).toBe(true);
+    expect(
+      (second.data as { new_version?: number } | undefined)?.new_version,
+      "a type already at v2 must extend to v3. If this is 2, the handler read a hardcoded base " +
+        "version (src/server.ts:1594) rather than the definition's own — two mutations then claim " +
+        "the same version and only the last write survives.",
+    ).toBe(3);
+
+    const onDisk = JSON.parse(readFileSync(join(dir, "domain_types", `${BASE_SLUG}.json`), "utf8")) as {
+      version: number; schema: { properties: Record<string, unknown> };
+    };
+    expect(onDisk.version, "on-disk version after two extends").toBe(3);
+    expect(Object.keys(onDisk.schema.properties)).toEqual(expect.arrayContaining([NEW_FIELD, "compiled_at"]));
+  });
+
 });

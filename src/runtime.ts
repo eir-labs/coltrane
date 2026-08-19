@@ -1417,7 +1417,27 @@ export async function runGig(
     // THE GATE. A resume into a moved genome would have chairs from genome B consuming sealed
     // outputs from genome A, and nothing in input_shas / genome_hash / run_fingerprint would
     // record that it happened — the manifest would describe a system that never existed.
-    const drift = runIdentityMismatch(cp.identity, identity());
+    //
+    // SCOPED RELAXATION (gig ce902971): producers_sha — the fold of every producing agent's
+    // definition — is NOT a resume gate when every chair still to run is human. Those producers
+    // already produced; their sealed, hashed outputs cannot change under a definition edit, and a
+    // producing agent's definition cannot change what a PERSON is being asked to decide. Without
+    // this, a parked gig becomes permanently unapprovable the moment any agent definition moves
+    // after it parks. This is the ONLY relaxation and its ONLY justification is 'this input cannot
+    // affect what remains to run': every other identity field still gates, and producers_sha
+    // itself still gates the moment ANY remaining chair is a model chair. The remaining-chair set
+    // is derived synchronously from data already in scope (cp.roles, standard.phases), so the gate
+    // still fires before the first await.
+    //
+    // The predicate is two-valued — a chair is human or it is a model chair. If a future
+    // non-human, agent-less chair type is introduced it MUST be re-examined here: it must not
+    // silently inherit this waiver.
+    const sealedRoles = new Set(cp.roles.map((r) => r.role));
+    const remainingChairs = standard.phases.flatMap((p) => p.chairs).filter((c) => !sealedRoles.has(c.role));
+    const allRemainingHuman =
+      remainingChairs.length > 0 &&
+      remainingChairs.every((c) => c.human === true && (c.agent_slug ?? "") === "");
+    const drift = runIdentityMismatch(cp.identity, identity(), { waiveProducers: allRemainingHuman });
     if (drift.length > 0) {
       // DIAGNOSTIC HONESTY, not a widened resume. The genome genuinely moved, so the refusal
       // stands — but the operator's real fix is "resume from the build that wrote this", and

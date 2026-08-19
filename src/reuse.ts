@@ -153,9 +153,23 @@ export function producersSha(input: {
   );
 }
 
-export function runIdentityMismatch(a: RunIdentity, b: RunIdentity): string[] {
+/**
+ * `waiveProducers` skips ONLY the `producers_sha` comparison; every other field still compares
+ * and still enters the returned set. It defaults OFF, so an unadorned call is byte-for-byte the
+ * old behaviour. The one caller that sets it (the resume gate) has first proven that every chair
+ * left to run is human — and a producing agent's definition cannot change what a person is being
+ * asked to decide about work that is already sealed and hashed. That is the sole justification;
+ * genome_hash, gig_input_sha, model_version, depth and canonical_form_version are NEVER waived,
+ * because they can still describe something the remaining human chair is being asked to approve.
+ */
+export function runIdentityMismatch(
+  a: RunIdentity,
+  b: RunIdentity,
+  opts: { waiveProducers?: boolean } = {},
+): string[] {
   const out: string[] = [];
   for (const k of Object.keys(a) as Array<keyof RunIdentity>) {
+    if (k === "producers_sha" && opts.waiveProducers) continue;
     if (a[k] !== b[k]) out.push(`${k}: checkpoint="${a[k]}" current="${b[k]}"`);
   }
   return out;

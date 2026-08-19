@@ -279,6 +279,90 @@ describe("resume — a mid-run failure no longer discards the phases that succee
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// The producer-identity gate is SCOPED to what still has to run.
+//
+// MEASURED CASE — gig ce902971 on the deployed instance parked with only its human APPROVE
+// chair left; every producing chair had already run and sealed its output. A later
+// agent-definition edit moved producers_sha, and the resume was refused on that drift — so the
+// gig was permanently unapprovable, and in general a parked gig becomes unapprovable the moment
+// any agent definition moves after it parks. A producing agent's definition cannot change what a
+// person is being asked to decide about work that is already sealed and hashed, so producer drift
+// is NOT a resume gate when every REMAINING chair is human. The relaxation touches producers_sha
+// and nothing else, and it applies ONLY while no model chair remains — the second law pins that
+// scope, because a fix that dropped producer identity unconditionally would silently mix two
+// pipelines the moment a model chair still had to run.
+describe("resume — producer-identity drift is scoped to the chairs that still have to run", () => {
+  // scout with a rewritten METHOD under a stable slug. producersSha folds whole agent definitions,
+  // so this moves producers_sha; genomeHash folds only input_types (not method), so genome_hash is
+  // unmoved. That is a producers_sha-ONLY drift — the exact shape gig ce902971 hit.
+  const driftedScout = testAgent({ slug: "scout", primitives: ["SENSE"], input_types: [], output_types: ["seed-t"], domain: "demo", method: "sense the room completely differently" });
+
+  // A line that ends on a human APPROVE chair: after r1/r2/r3 seal, only the human chair remains.
+  const approveStd = (agents: Agent[] = [scout, reader, judge]): Standard => ({
+    slug: "permits-line", domain: "demo", agents,
+    phases: [
+      { name: "p1", chairs: [{ role: "r1", agent_slug: "scout", depends_on: [], input_contract: [], output_contract: ["seed-t"], required_skills: [] }] },
+      { name: "p2", chairs: [{ role: "r2", agent_slug: "reader", depends_on: ["r1"], input_contract: ["seed-t"], output_contract: ["mid-t"], required_skills: [] }] },
+      { name: "p3", chairs: [{ role: "r3", agent_slug: "judge", depends_on: ["r2"], input_contract: ["mid-t"], output_contract: ["end-t"], required_skills: [] }] },
+      { name: "p4", chairs: [{ role: "r4", human: true, agent_slug: "", depends_on: ["r3"], input_contract: [], output_contract: ["end-t"], required_skills: [] }] },
+    ],
+  } as Standard);
+
+  // A line whose human chair sits BEFORE a model chair: parking at it leaves a model chair (r2,
+  // the reader) still to run — the state that must keep refusing on producer drift.
+  const gatedStd = (agents: Agent[] = [scout, reader, judge]): Standard => ({
+    slug: "gated-line", domain: "demo", agents,
+    phases: [
+      { name: "p1", chairs: [{ role: "r1", agent_slug: "scout", depends_on: [], input_contract: [], output_contract: ["seed-t"], required_skills: [] }] },
+      { name: "p2", chairs: [{ role: "rA", human: true, agent_slug: "", depends_on: ["r1"], input_contract: [], output_contract: ["end-t"], required_skills: [] }] },
+      { name: "p3", chairs: [{ role: "r2", agent_slug: "reader", depends_on: ["r1"], input_contract: ["seed-t"], output_contract: ["mid-t"], required_skills: [] }] },
+    ],
+  } as Standard);
+
+  // ── THE defect law (gig ce902971) ──────────────────────────────────────────
+  // FAILS against current code: the unconditional gate throws ResumeRefused on producers_sha
+  // drift even though only a human chair remains. That red is the defect made observable.
+  it("PERMITS a resume whose every remaining chair is human, despite producers_sha drift", async () => {
+    const b = bench();
+    const checkpoints = createMemoryCheckpointStore();
+
+    // Attempt 1 — all three model chairs seal, then the gig parks at the human APPROVE chair.
+    const parked = await runGig(approveStd(), {}, run(b, counting().invoke, { checkpoints }));
+    expect(parked.status).toBe("awaiting_approval");
+    expect(parked.awaiting).toEqual({ phase: "p4", role: "r4" });
+
+    // Attempt 2 — producers_sha has drifted (scout rewritten), but only the human chair remains.
+    // Its verdict is on sealed, hashed work; the producer edit cannot touch it. It must resume.
+    const after = counting();
+    const resumed = await runGig(approveStd([driftedScout, reader, judge]), {}, run(b, after.invoke, { checkpoints, resume_from: GIG }));
+    expect(resumed.status, "a producer's edit cannot change what a person is asked to approve").toBe("awaiting_approval");
+    expect(resumed.awaiting).toEqual({ phase: "p4", role: "r4" });
+    expect(after.total(), "the sealed model chairs are restored, not replayed").toBe(0);
+  });
+
+  // ── THE scoping law (gig ce902971) ─────────────────────────────────────────
+  // Proves the check is SCOPED, not removed. The SAME producers_sha-only drift still refuses
+  // while a model chair remains. A fix that dropped producer identity unconditionally would turn
+  // this green→red — that is precisely its purpose.
+  it("STILL refuses the same producers_sha drift while any remaining chair is a model chair", async () => {
+    const b = bench();
+    const checkpoints = createMemoryCheckpointStore();
+
+    // Attempt 1 — parks at the human chair with the reader (a model chair) still ahead of it.
+    const parked = await runGig(gatedStd(), {}, run(b, counting().invoke, { checkpoints }));
+    expect(parked.status).toBe("awaiting_approval");
+    expect(parked.awaiting).toEqual({ phase: "p2", role: "rA" });
+
+    // Attempt 2 — identical producers_sha drift. A model chair remains, so the gate must hold.
+    const after = counting();
+    await expect(
+      runGig(gatedStd([driftedScout, reader, judge]), {}, run(b, after.invoke, { checkpoints, resume_from: GIG })),
+    ).rejects.toThrow(/producers_sha/);
+    expect(after.total(), "refusing must cost nothing").toBe(0);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
 describe("reuse — a chair served from a prior gig's sealed output", () => {
   const withReuse = (b: Bench, invoke: AgentInvoker, gig: string, reuse: ReuseStore): RunDeps =>
     ({ outputs: b.outputs, ledger: b.ledger, invoke, gig_id: gig, reuse });

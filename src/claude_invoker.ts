@@ -11,7 +11,7 @@ import { abortReasonText, type AgentInvocationContext, type AgentInvoker, type A
 import type { Registry } from "./registry.js";
 import type { Depth, ModelTier } from "./pricing.js";
 import type { CodeToolAccess } from "./composition.js";
-import { resolveAgentGrants, ENGINE_MCP_SERVER, type ToolProviderRegistry } from "./tool_providers.js";
+import { resolveAgentGrants, hostBuiltinDenials, toolBaseName, ENGINE_MCP_SERVER, type ToolProviderRegistry } from "./tool_providers.js";
 import { venueEffectiveTools } from "./chart.js";
 import { CORE_TYPES } from "./core_types.js";
 
@@ -47,6 +47,22 @@ function codeToolDenials(access: CodeToolAccess | undefined): string[] {
     case "write": return ["Bash"];
     default: return []; // "full" or unset → no code-tool denial
   }
+}
+
+// The code tools code_tool_access affirmatively KEEPS available — the inverse of codeToolDenials over
+// the four CODE_TOOLS. This is the allow signal the host-builtin complement must respect: those four
+// tools are governed by the code_tool_access LADDER, so the complement must not re-deny one the access
+// level grants (a "full" agent keeps Read/Write/Edit/Bash even when it lists none in allowed_tools —
+// host builtins are allowed-by-default and code_tool_access is their deny layer).
+//
+// UNSET is distinct from "full": an agent that declares NO code access and grants no code tool keeps
+// NONE — that is what lets the ceiling bind on the default agent (gig 782e89d8, room-prober had no
+// code_tool_access yet reached Bash and Read). codeToolDenials returns [] for unset, so it cannot
+// carry this distinction; this function does.
+function codeToolsKept(access: CodeToolAccess | undefined): string[] {
+  if (access === undefined) return [];
+  const denied = new Set(codeToolDenials(access));
+  return CODE_TOOLS.filter((t) => !denied.has(t));
 }
 
 // Belbin cognitive-role descriptions for the Disposition layer (the agent's stance, 2
@@ -1077,10 +1093,53 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
       // string IS the transcript (a bare JSON blob on the text path, a stream-json transcript on
       // the output_write path). Default: stream-json so the child's tool calls / reasoning are
       // observable LIVE, teed to ctx.onEvent.
+      // THE TOOL CEILING BINDS BY ENFORCEMENT, not omission. `--allowedTools` does NOT remove a host
+      // builtin — a seat granted only `type_browse` still called Bash and Read, unrefused and
+      // unrecorded (gig 782e89d8, room-prober, twice) — so the deny list must ENUMERATE what the seat
+      // may not hold. Synthesize it from the EXISTING oracles (hostBuiltinDenials over HOST_BUILTINS;
+      // venueEffectiveTools for the room ceiling), never a re-inlined universe/intersection.
+      //
+      // Computed HERE, AFTER OUTPUT_WRITE_TOOL joined effectiveAllowed (see the seal-wire block above):
+      // synthesizing before that addition would deny every model chair the very tool it must call to
+      // seal, failing every gig at the last step (asserted by LAW 2).
+      //
+      // The complement is scored against effectiveAllowed PLUS the code tools code_tool_access keeps:
+      // those four are governed by the code_tool_access ladder (codeToolDenials), so the complement
+      // must not re-deny a code tool the agent's access grants.
+      const allowForComplement = [...(effectiveAllowed ?? []), ...codeToolsKept(a.code_tool_access)];
+      // (d) VENUE CEILING BY DENIAL: a tool the agent grants but the room's equipment excludes.
+      // venueEffectiveTools is the SAME shared oracle compose-time R10 refuses against (INV9) — never a
+      // re-inlined intersection — so the room narrows by enforcement, not only by the omission from
+      // --allowedTools that cannot bind. Absent a room, nothing is venue-excluded.
+      const venueExcluded = ctx.realization && ctx.venue
+        ? (() => {
+            const kept = new Set(venueEffectiveTools(a, ctx.venue!));
+            return (a.allowed_tools ?? []).filter((g) => !kept.has(g));
+          })()
+        : [];
+      // The UNION, preserving the agent's OWN declared denials (never replaced): (a) declared
+      // disallowed_tools, (b) the code_tool_access ladder, (c) the host-builtin complement, (d) the
+      // venue-excluded grants.
+      const denyUnion = [
+        ...(a.disallowed_tools ?? []),
+        ...codeToolDenials(a.code_tool_access),
+        ...hostBuiltinDenials(allowForComplement),
+        ...venueExcluded,
+      ];
+      // NO OVER-DENIAL (LAW 5, and LAW 2's structural half): nothing the seat legitimately holds may be
+      // denied — most sharply OUTPUT_WRITE_TOOL, which effectiveAllowed now carries on the seal path.
+      // Subtract the effective allow set — by exact name AND base name, so a scoped grant like
+      // `Bash(npx …)` still protects its `Bash` — then dedupe. code_tool_access-kept tools are NOT
+      // subtracted here: a venue that excludes a code tool must still deny it even under access "full".
+      const allowExact = new Set(effectiveAllowed ?? []);
+      const allowBase = new Set((effectiveAllowed ?? []).map(toolBaseName));
+      const disallowedTools = [...new Set(denyUnion)].filter(
+        (t) => !allowExact.has(t) && !allowBase.has(toolBaseName(t)),
+      );
       const baseArgs = buildInvokerArgs(prompt, cfgPath, {
         model: resolveModel(a.model_tier, opts.model),
         allowed_tools: effectiveAllowed,
-        disallowed_tools: [...(a.disallowed_tools ?? []), ...codeToolDenials(a.code_tool_access)],
+        disallowed_tools: disallowedTools,
         max_tool_calls: maxToolCalls,
       });
       // SEAT IN THE ROOM. When the substrate stood up a SEAT-BEARING room, ctx.seatExec names its

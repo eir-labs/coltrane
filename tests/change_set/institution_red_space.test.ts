@@ -32,12 +32,14 @@ const institution = InstitutionSchema.parse(doc.institution);
 const laws = institution.laws;
 
 describe("institutions/coltrane.json declares the change-set red space (I11, I12)", () => {
-  it("I11 carries a FOURTH law (the three dev-loop laws plus the red-space law)", () => {
+  it("I11 the red-space law is one of seven declared laws", () => {
     expect(
       laws,
       "the change-set branch is a deliberately-red space; an institution that permits red " +
-        "somewhere and does not say where runs an undeclared rule",
-    ).toHaveLength(4);
+        "somewhere and does not say where runs an undeclared rule. The count is seven: the three " +
+        "dev-loop laws, this red-space law, and the three tool-routing laws that declare the " +
+        "enforcement coltrane already performs.",
+    ).toHaveLength(7);
   });
 
   it("I11 the red-space law is PERMITTED, scoped to target_branch != the protected main line", () => {
@@ -87,10 +89,15 @@ describe("institutions/coltrane.json declares the change-set red space (I11, I12
 describe("the existing institution gate takes its single permitted edit (I13)", () => {
   const text = readFileSync(INSTITUTION_TEST, "utf8");
 
-  it("I13 tests/coltrane_institution.test.ts now expects four laws — and only that literal changed", () => {
-    expect(text, "the law-count assertion was not updated to four").toContain("toHaveLength(4)");
-    expect(text, "a stale toHaveLength(3) remains — the count edit is the ONLY permitted change").not.toContain(
-      "toHaveLength(3)",
+  // The literal moves with the census, and only with it. It read four when the laws were the three
+  // dev-loop laws plus the red space; it reads seven now that the three tool-routing laws are
+  // declared. The guard is not that the number never changes — it is that the count assertion is
+  // the ONLY thing that changes in that gate, so nobody quietly loosens a neighbouring assertion
+  // while updating a census.
+  it("I13 tests/coltrane_institution.test.ts expects the current law count — and only that literal changed", () => {
+    expect(text, "the law-count assertion does not match the declared census").toContain("toHaveLength(7)");
+    expect(text, "a stale count remains — the count edit is the ONLY permitted change").not.toContain(
+      "toHaveLength(4)",
     );
   });
 

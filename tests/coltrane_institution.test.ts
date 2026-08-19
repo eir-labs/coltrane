@@ -48,8 +48,15 @@ describe("institutions/coltrane.json — the Coltrane institution's first laws",
 
   const laws = InstitutionSchema.parse(doc.institution).laws;
 
-  it("carries exactly the three dev-loop laws", () => {
-    expect(laws).toHaveLength(4);
+  // SEVEN, and the count is the point: this is a census tripwire, so a law added to the
+  // institution has to be a deliberate act rather than a drive-by. Four were the dev-loop laws plus
+  // the change-set red space; three more declare the tool-routing enforcement coltrane ALREADY
+  // performs — route coltrane-shaped operations through the MCP surface, never write core_types/ or
+  // domain_types/ by hand, never add an agent definition by dropping a file in agents/. Those three
+  // were enforced in code long before they were stated here; declaring them is what makes them
+  // auditable rather than folklore.
+  it("carries exactly the seven declared laws", () => {
+    expect(laws).toHaveLength(7);
   });
 
   it("every law's check is machine-invocable: a non-empty predicate over typed inputs", () => {

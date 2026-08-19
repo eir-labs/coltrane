@@ -443,21 +443,20 @@ describe.skipIf(!HAVE_FLOOR)("two concurrent gigs get their own room — the sea
 // ── THE ROOM'S WORKSPACE IS POPULATED WITH A WORKING TREE ────────────────────────────────────────
 //
 // The concurrent law above proves TWO EMPTY workspaces are disjoint. These prove the join this change
-// exists for: a realized room's workspace CONTAINS a working tree, cloned from the venue's declared
-// `repo_url` through the SAME prepareWorkspace the drain uses — so a seat inside the room has a
+// exists for: a realized room's workspace CONTAINS a working tree, cloned from the repository the RUN
+// names (opts.repoUrl) through the SAME prepareWorkspace the drain uses — so a seat inside the room has a
 // repository to edit, and two populated rooms are still disjoint. LIVE, because only a real container
 // with a real bind-mounted clone can show a seat reading a repository file at its cwd.
 //
-// A floored venue that ALSO declares repo_url. The bare repo path is per-test (mkdtempSync), so the
-// venue is built inside each law rather than shared here.
-function flooredRepoRoom(slug: string, repoUrl: string): unknown {
+// A floored venue. The repository is NOT a venue field — it is named on the RUN and supplied through
+// `opts.repoUrl` at each realize() call below (the bare repo path is per-test, via mkdtempSync).
+function flooredRepoRoom(slug: string): unknown {
   return {
     slug,
     institution_slug: "quartet",
     equipment: { tools: ["mcp__notes__search"] },
     credential_surface: [],
     floor: "seat",
-    repo_url: repoUrl,
     mcp_servers: [
       { slug: "notes", transport: "stdio" as const, command: ["node", "/app/dist/src/server_entry.js"], credential_names: [] },
     ],
@@ -477,7 +476,7 @@ describe.skipIf(!HAVE_FLOOR)("a realized room's workspace contains a working tre
     const { origin, marker } = seedBareRepo("hello-from-the-cloned-tree-a1");
     stubGitCredential("ghs_room_token_a");
     const gigId = "treelawa-0000-0000-0000-00000000000a"; // distinct 8-char slice → own compose project
-    const handle = await dockerComposeRealizer().realize(flooredRepoRoom("tree-room-a", origin), noCredentials, {
+    const handle = await dockerComposeRealizer().realize(flooredRepoRoom("tree-room-a"), noCredentials, {
       gigId, repoUrl: origin, drainKey: "dk", instance: "box", gitCredentialsEndpoint: "https://x/api",
     });
     try {
@@ -518,10 +517,10 @@ describe.skipIf(!HAVE_FLOOR)("a realized room's workspace contains a working tre
 
     // CONCURRENTLY — the condition that corrupted one shared tree when both seats resolved to the host.
     const [handleA, handleB] = await Promise.all([
-      realizer0.realize(flooredRepoRoom("tree-room-da", a.origin), noCredentials, {
+      realizer0.realize(flooredRepoRoom("tree-room-da"), noCredentials, {
         gigId: gigA, repoUrl: a.origin, drainKey: "dk", instance: "box", gitCredentialsEndpoint: "https://x/api",
       }),
-      realizer0.realize(flooredRepoRoom("tree-room-db", b.origin), noCredentials, {
+      realizer0.realize(flooredRepoRoom("tree-room-db"), noCredentials, {
         gigId: gigB, repoUrl: b.origin, drainKey: "dk", instance: "box", gitCredentialsEndpoint: "https://x/api",
       }),
     ]);
@@ -571,7 +570,7 @@ describe.skipIf(!HAVE_FLOOR)("a realized room's workspace contains a working tre
     const SENTINEL = "ghs_populate_sentinel_e5f00d";
     stubGitCredential(SENTINEL);
     const gigId = "treelawe-0000-0000-0000-00000000000e";
-    const handle = await dockerComposeRealizer().realize(flooredRepoRoom("tree-room-e", origin), noCredentials, {
+    const handle = await dockerComposeRealizer().realize(flooredRepoRoom("tree-room-e"), noCredentials, {
       gigId, repoUrl: origin, drainKey: "dk", instance: "box", gitCredentialsEndpoint: "https://x/api",
     });
     try {

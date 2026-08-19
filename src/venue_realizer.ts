@@ -92,11 +92,14 @@ export interface RealizeOpts {
   probe?: (s: { slug: string }) => Promise<string[]>;
   host?: RealizationHost;
   chairs?: number;
-  /** WHERE the room's tree comes from — the venue's declared `repo_url`, supplied by the realization
-   *  caller, NEVER read from the host's cwd. Present → the room's workspace is populated (through
-   *  `prepareWorkspace`) with a clone of this repository, so a seat inside the room has a tree to edit.
-   *  Absent → the workspace stays the empty room, and no git credential is minted. Inferring an
-   *  ambient source is the exact failure this explicit field forecloses. */
+  /** WHERE the room's tree comes from — the repository named by the RUN, supplied by the realization
+   *  caller, NEVER a venue field and NEVER read from the host's cwd. A venue is one AT-REST room that
+   *  serves many repositories, so the repository is a per-RUN fact, threaded in here from
+   *  `RunDeps.repoUrl` (an explicit dispatch field, or the claim's governed `repo_url`). Present → the
+   *  room's workspace is populated (through `prepareWorkspace`) with a clone of this repository, so a
+   *  seat inside the room has a tree to edit. Absent → the workspace stays the empty room, and no git
+   *  credential is minted. Inferring an ambient source is the exact failure this explicit field
+   *  forecloses. */
   repoUrl?: string;
   /** The per-gig git-credential plumbing `prepareWorkspace` requires, supplied by the realization
    *  caller alongside `repoUrl` — never derived from ambient process state. The minted token only ever
@@ -948,8 +951,9 @@ export function dockerComposeRealizer(opts?: { run?: ComposeRunner; prepareWorks
       // workspace is populated the SAME way the drain populates its own, so a seat running in a room
       // has a repository to edit and two concurrent code-editing gigs get DISJOINT trees.
       //
-      // The source is `opts.repoUrl` — the venue's declared `repo_url`, supplied by the caller — and
-      // NOTHING else. It is never process.cwd() and never an ambient host path: inferring the
+      // The source is `opts.repoUrl` — the repository named by the RUN (RunDeps.repoUrl: an explicit
+      // dispatch field or the claim's governed `repo_url`), supplied by the caller — and NOTHING else.
+      // It is never a venue field, never process.cwd() and never an ambient host path: inferring the
       // operator's own checkout is precisely the isolation failure this whole change exists to
       // prevent, so an absent source declines to populate (empties the room, mints no credential)
       // rather than reaching for a default. `prepare` IS the drain's prepareWorkspace (one mechanism),

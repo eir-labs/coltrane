@@ -430,6 +430,21 @@ export interface RunDeps {
    * direction a missing credential should fail. The deployment supplies the real resolver.
    */
   credentialResolver?: CredentialResolver | undefined;
+  /**
+   * The repository this RUN operates on — the SUBJECT of work, named by the RUN and NEVER by the
+   * venue. A venue is one AT-REST room and is one-to-MANY against repositories: one room serves many
+   * repositories, so pinning the repository on the venue would mint a venue per repository. When
+   * supplied AND the resolved venue has a realizer, it is threaded into the substrate realizer as
+   * `RealizeOpts.repoUrl`, so the realized room's workspace is populated (through src/workspace.ts
+   * `prepareWorkspace`, the SAME mechanism the drain uses) with a clone of THIS repository — and two
+   * concurrent code-editing gigs against the same room get DISJOINT trees.
+   *
+   * The source is EXPLICIT: a dispatch field on the server path, the claim's governed `repo_url`
+   * column on the drain path. It is never process.cwd() and never an ambient host path — inferring the
+   * operator's own checkout is exactly the isolation failure an explicit source forecloses. ABSENT =
+   * the room declines to populate (an empty read-only workspace) and no git credential is minted.
+   */
+  repoUrl?: string | undefined;
 }
 
 /**
@@ -1023,17 +1038,35 @@ export async function runGig(
     // realize() only returns ok once the slug resolved, so the venue is present in the map.
     gigVenue = deps.venues?.get(deps.venue);
 
-    // Realize the SUBSTRATE only when the venue actually declares servers AND a realizer is supplied.
-    // A venue with no mcp_servers has nothing to stand up (the empty room stays free), and an absent
-    // realizer is the opt-out that keeps every pre-wire caller byte-identical. credentialResolver
-    // defaults to an empty async resolver — realize() takes it as a required positional, so undefined
-    // would throw at credential-resolution time; the empty default satisfies the interface without a
-    // new mandatory field. A bring-up failure propagates like a policy refusal: no chair spawns.
-    if (deps.venueRealizer && gigVenue && gigVenue.mcp_servers.length > 0) {
+    // Realize the SUBSTRATE when the venue declares servers to stand up OR the RUN names a repository
+    // to populate the room's tree with — either is a reason to build a real room. A venue with NEITHER
+    // has nothing to stand up (the empty room stays free), and an absent realizer is the opt-out that
+    // keeps every pre-wire caller byte-identical. realize() tolerates an empty mcp_servers list (its
+    // credential/compose steps iterate the servers as no-ops — the existing repo_url-declines law
+    // exercises exactly this, mcp_servers: [], and gets a handle back), so a repository-only run
+    // reaches it without an empty services list becoming fatal. credentialResolver defaults to an
+    // empty async resolver — realize() takes it as a required positional, so undefined would throw at
+    // credential-resolution time; the empty default satisfies the interface without a new mandatory
+    // field. A bring-up failure propagates like a policy refusal: no chair spawns.
+    //
+    // The repository is `deps.repoUrl` — named by the RUN, explicit at dispatch. The per-gig git
+    // credential plumbing (drainKey/instance/endpoint) is READ FROM THE AMBIENT ENVIRONMENT here, the
+    // same discipline src/workspace.ts documents: the SUBJECT of work must be explicit, but the
+    // credential that clones it is ambient plumbing, never a per-repository fact. Absent env → the
+    // populate declines on its own terms (prepareWorkspace names what it could not obtain).
+    if (deps.venueRealizer && gigVenue && (gigVenue.mcp_servers.length > 0 || deps.repoUrl)) {
       gigSubstrate = await deps.venueRealizer.realize(
         gigVenue,
         deps.credentialResolver ?? (async () => ({})),
-        { gigId: gig_id },
+        {
+          gigId: gig_id,
+          ...(deps.repoUrl ? { repoUrl: deps.repoUrl } : {}),
+          ...(process.env["COLTRANE_DRAIN_KEY"] ? { drainKey: process.env["COLTRANE_DRAIN_KEY"] } : {}),
+          ...(process.env["COLTRANE_INSTANCE"] ? { instance: process.env["COLTRANE_INSTANCE"] } : {}),
+          ...(process.env["COLTRANE_GIT_CREDENTIALS_URL"]
+            ? { gitCredentialsEndpoint: process.env["COLTRANE_GIT_CREDENTIALS_URL"] }
+            : {}),
+        },
       );
     }
   }

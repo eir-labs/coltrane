@@ -1011,16 +1011,17 @@ export const VenueObjectSchema = z
     /** The shared FLOOR this room composes over, so N rooms cost floor + Σ(deltas) rather than
      *  N × environment. A label two rooms share to declare they build on the same base. */
     floor: z.string().optional(),
-    /** The repository whose working tree this room is populated with, so a seat running inside the
-     *  room has a real tree to edit. DECLARED here and nowhere else: a room's tree is a function of
-     *  what the venue contract states, never of how a realization was invoked or of the host's cwd —
-     *  inferring the operator's own checkout is the isolation failure this field exists to foreclose.
-     *  ABSENT means the EMPTY room, the same lean every access-shaped field above takes: a venue that
-     *  names no repository declines to populate (a read-only seat needs no tree), rather than falling
-     *  back to any ambient source. The room's tree is prepared through the SAME per-gig mechanism the
-     *  drain uses for its own clone (src/workspace.ts `prepareWorkspace`) — one mechanism, not two, so
-     *  the room and the drain cannot drift on what a working tree is. */
-    repo_url: z.string().optional(),
+    // NO repository field, DELIBERATELY. A venue is a room AT REST — every field above is at-rest
+    // policy (the tool ceiling, the credential surface, the installs, the floor). The repository a run
+    // works on is the SUBJECT of that run, and it is one-to-MANY against any given room: one venue
+    // serves many repositories, so pinning a `repo_url` here would mint a venue per repository. The
+    // repository is therefore named on the RUN, not the room — explicitly at dispatch (a dispatch
+    // field threaded to `RunDeps.repoUrl`) or from the claim's governed `repo_url` column on the drain
+    // — and the realized room's workspace is populated from THAT (through src/workspace.ts
+    // `prepareWorkspace`, the same mechanism the drain uses). The legitimate worry that once lived on
+    // this field — never infer the host's cwd — is preserved by making the source explicit at
+    // dispatch, not by fixing it to the contract: a room's tree is a function of how the run was
+    // invoked, never of an at-rest venue field or of the operator's own checkout.
   })
   .strict();
 

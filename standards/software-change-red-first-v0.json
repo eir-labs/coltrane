@@ -154,11 +154,13 @@
           "agent_slug": "pr-publisher",
           "depends_on": [
             "write-change",
-            "verify-change"
+            "verify-change",
+            "draft-laws"
           ],
           "input_contract": [
             "change-set",
-            "change-verdict"
+            "change-verdict",
+            "red-spec"
           ],
           "output_contract": [
             "pull-request"
@@ -176,6 +178,6 @@
   "output_types": [
     "pull-request"
   ],
-  "description": "The governed change loop with the laws made STRUCTURAL. Identical to software-change-pr-v1 through planning, then it splits the single writing chair into two seats with disjoint powers: a law-drafting chair whose grant reaches tests/** and docs/specs/** and CANNOT touch src/, and a building chair that consumes the sealed red-spec as an input. The ordering is not requested in a brief — it is enforced twice over. By GRANT: the drafter cannot write source, so it cannot make its own laws pass. By TYPE: the builder requires a red-spec, so a phase graph seating it before the drafter fails to compose at all. Proven on its first run (gig 11686c4e): the drafter wrote its laws, RAN them, and observed 7 of 10 fail before any implementation existed; the builder sealed in 11 calls; the verifier failed the gig honestly on a full-suite failure that was not its own; the publisher shipped exactly three files with the red verdict quoted verbatim. It also carries a RESERVE POOL: measured across 663 chair runs, gathering seats died on error_max_turns with nothing sealed (read-context 12/63, identify-external 5/13 having made 56 retrievals and written none of them down). A budget-stopped chair here may draw reserve turns whose whole purpose is sealing what it already found, so exhaustion costs the tail of a run rather than all of it.",
+  "description": "The governed change loop with the laws made STRUCTURAL. Identical to software-change-pr-v1 through planning, then it splits the single writing chair into two seats with disjoint powers: a law-drafting chair whose grant reaches tests/** and docs/specs/** and CANNOT touch src/, and a building chair that consumes the sealed red-spec as an input. The ordering is not requested in a brief — it is enforced twice over. By GRANT: the drafter cannot write source, so it cannot make its own laws pass. By TYPE: the builder requires a red-spec, so a phase graph seating it before the drafter fails to compose at all. The publishing chair receives the red-spec too, because the laws and the fix are written by DIFFERENT seats and a PR carrying one without the other is the artefact a laws-first pipeline exists to prevent. Carries a reserve pool: a budget-stopped chair may draw turns whose whole purpose is sealing what it already found, so exhaustion costs the tail of a run rather than all of it.",
   "reserve_pool": 40
 }

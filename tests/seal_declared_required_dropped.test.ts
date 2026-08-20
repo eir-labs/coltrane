@@ -269,8 +269,14 @@ describe("#227 — the genome's declared required fields are dropped, not absent
     // added because the genome typed the bandstand and not the practice room. It declares its
     // required fields in `required_fields` (question, iterations, corrections, still_open), so
     // it joins `checked` and does not appear in the `lossy` census.
+    // 64 → 65: `lineage-adoption-target` (extends Signal) — WHICH institution an approved
+    // lineage-record grounds. Added because both lineage-record and lineage-verdict promise in
+    // prose that approval attaches the record to an institution, and neither carries a field to
+    // say which, so a sealed adoption named no target and the caller had to know it out of band.
+    // It declares its required fields (source, institution_slug), so it joins `checked` and does
+    // not appear in the `lossy` census.
     expect(checked).toHaveLength(genome.domain_types.size);
-    expect(checked.length).toBe(64);
+    expect(checked.length).toBe(65);
   });
 });
 

@@ -3,6 +3,7 @@
 // writes each typed output to the store (validated), links provenance (derived_from),
 // and records one ledger entry with a deterministic genome_hash + a run_fingerprint
 // that carries model_version + (empty, v0) eval_scores — honestly un-tempered.
+import { lineageAdoption } from "./lineage_adoption.js";
 import { randomUUID } from "node:crypto";
 import type { Standard, Agent, Chair } from "./composition.js";
 import { PRIMITIVE_OUTPUT_TYPE, CORE_TYPES } from "./core_types.js";
@@ -159,6 +160,25 @@ export type GigProgressEvent =
   // to be cryptographically identical to a skilled one — same genome_hash, run_fingerprint
   // AND content_sha — so this channel is the only place the difference is observable live.
   | { type: "skills_unresolved"; phase: string; role: string; agent: string; missing: string[] }
+  // Institutional lineage: a human chair sealing a `lineage-verdict` either grounds an
+  // institution or does not, and until now it did neither visibly. Same reasoning as
+  // `skills_unresolved` above — an adoption that happens silently is indistinguishable from
+  // one that never happened, and this is the only place the difference is observable live.
+  // The runtime DECIDES (a pure call to `lineageAdoption`) and REPORTS; it writes no genome
+  // file and touches no store. Persistence is the caller's, through the store-side home
+  // `LineageRecordRefSchema` names.
+  | {
+      type: "lineage_adoption"; phase: string; role: string;
+      /** true only when the verdict passed, was signed, and named a record. */
+      adopt: boolean;
+      /** content_sha of the lineage-record the institution would be grounded in. */
+      record_ref?: string;
+      /** WHICH institution it grounds. Absent on a refusal. */
+      institution_slug?: string;
+      approved_by?: string;
+      /** every applicable refusal, not just the first — see lineageAdoption. */
+      refusals?: string[];
+    }
   | { type: "agent_event"; phase: string; role: string; event: AgentStreamEvent }
   // #turn-budget — the operator-facing read of the gig's budget agent_state. Emitted at the single
   // reserve-draw intercept: `yielding` the moment a seated chair crosses into a granted reserve
@@ -430,6 +450,21 @@ export interface RunDeps {
    * direction a missing credential should fail. The deployment supplies the real resolver.
    */
   credentialResolver?: CredentialResolver | undefined;
+  /**
+   * The repository this RUN operates on — the SUBJECT of work, named by the RUN and NEVER by the
+   * venue. A venue is one AT-REST room and is one-to-MANY against repositories: one room serves many
+   * repositories, so pinning the repository on the venue would mint a venue per repository. When
+   * supplied AND the resolved venue has a realizer, it is threaded into the substrate realizer as
+   * `RealizeOpts.repoUrl`, so the realized room's workspace is populated (through src/workspace.ts
+   * `prepareWorkspace`, the SAME mechanism the drain uses) with a clone of THIS repository — and two
+   * concurrent code-editing gigs against the same room get DISJOINT trees.
+   *
+   * The source is EXPLICIT: a dispatch field on the server path, the claim's governed `repo_url`
+   * column on the drain path. It is never process.cwd() and never an ambient host path — inferring the
+   * operator's own checkout is exactly the isolation failure an explicit source forecloses. ABSENT =
+   * the room declines to populate (an empty read-only workspace) and no git credential is minted.
+   */
+  repoUrl?: string | undefined;
 }
 
 /**
@@ -1023,17 +1058,35 @@ export async function runGig(
     // realize() only returns ok once the slug resolved, so the venue is present in the map.
     gigVenue = deps.venues?.get(deps.venue);
 
-    // Realize the SUBSTRATE only when the venue actually declares servers AND a realizer is supplied.
-    // A venue with no mcp_servers has nothing to stand up (the empty room stays free), and an absent
-    // realizer is the opt-out that keeps every pre-wire caller byte-identical. credentialResolver
-    // defaults to an empty async resolver — realize() takes it as a required positional, so undefined
-    // would throw at credential-resolution time; the empty default satisfies the interface without a
-    // new mandatory field. A bring-up failure propagates like a policy refusal: no chair spawns.
-    if (deps.venueRealizer && gigVenue && gigVenue.mcp_servers.length > 0) {
+    // Realize the SUBSTRATE when the venue declares servers to stand up OR the RUN names a repository
+    // to populate the room's tree with — either is a reason to build a real room. A venue with NEITHER
+    // has nothing to stand up (the empty room stays free), and an absent realizer is the opt-out that
+    // keeps every pre-wire caller byte-identical. realize() tolerates an empty mcp_servers list (its
+    // credential/compose steps iterate the servers as no-ops — the existing repo_url-declines law
+    // exercises exactly this, mcp_servers: [], and gets a handle back), so a repository-only run
+    // reaches it without an empty services list becoming fatal. credentialResolver defaults to an
+    // empty async resolver — realize() takes it as a required positional, so undefined would throw at
+    // credential-resolution time; the empty default satisfies the interface without a new mandatory
+    // field. A bring-up failure propagates like a policy refusal: no chair spawns.
+    //
+    // The repository is `deps.repoUrl` — named by the RUN, explicit at dispatch. The per-gig git
+    // credential plumbing (drainKey/instance/endpoint) is READ FROM THE AMBIENT ENVIRONMENT here, the
+    // same discipline src/workspace.ts documents: the SUBJECT of work must be explicit, but the
+    // credential that clones it is ambient plumbing, never a per-repository fact. Absent env → the
+    // populate declines on its own terms (prepareWorkspace names what it could not obtain).
+    if (deps.venueRealizer && gigVenue && (gigVenue.mcp_servers.length > 0 || deps.repoUrl)) {
       gigSubstrate = await deps.venueRealizer.realize(
         gigVenue,
         deps.credentialResolver ?? (async () => ({})),
-        { gigId: gig_id },
+        {
+          gigId: gig_id,
+          ...(deps.repoUrl ? { repoUrl: deps.repoUrl } : {}),
+          ...(process.env["COLTRANE_DRAIN_KEY"] ? { drainKey: process.env["COLTRANE_DRAIN_KEY"] } : {}),
+          ...(process.env["COLTRANE_INSTANCE"] ? { instance: process.env["COLTRANE_INSTANCE"] } : {}),
+          ...(process.env["COLTRANE_GIT_CREDENTIALS_URL"]
+            ? { gitCredentialsEndpoint: process.env["COLTRANE_GIT_CREDENTIALS_URL"] }
+            : {}),
+        },
       );
     }
   }
@@ -1756,6 +1809,48 @@ export async function runGig(
           type: "chair_complete", phase: phase.name, role: hc.role, producer: deps.approved_by ?? "human",
           output_types: [domain_type], duration_ms: Date.now() - t0,
         });
+        // A sealed lineage-verdict either grounds an institution or does not. Decide it here,
+        // where the verdict and the record it approved are both in hand, and report the answer
+        // either way. The record the verdict targets IS the input it approved — the same set
+        // already sealed into this output's input_shas — so no lookup is invented.
+        if (domain_type === "lineage-verdict") {
+          const target = approvalInputs.find((i) => i.domain_type === "lineage-record") ?? approvalInputs[0];
+          // An ENTRY human chair (depends_on []) has no upstream outputs — the record it approves
+          // arrived in the dispatch payload. lineage-adopt-v0 is exactly that shape, and exists to
+          // be: a record composed by any standard can be brought to a seat without re-running the
+          // work that made it. Reading only from approvalInputs made the adoption blind to every
+          // record seeded that way, which is every record that standard will ever see.
+          //
+          // Found by running it, not by testing it: five integration tests passed because all of
+          // them seated the human chair downstream of a compose phase. They encoded the assumption
+          // instead of testing it.
+          //
+          // The payload record carries no content_sha — it has not been sealed by THIS gig — so the
+          // reference falls back to its id. LineageRecordRefSchema admits exactly this: record_ref
+          // is "content_sha (OR SLUG) of the sealed lineage-record". Prefer the sha when a real
+          // upstream output exists; use the slug when the record came in from outside.
+          const seeded = gigInput["lineage-record"] as Record<string, unknown> | undefined;
+          const seededId = typeof seeded?.["id"] === "string" ? (seeded["id"] as string) : "";
+          // WHICH institution this grounds. Carried by lineage-adoption-target in the payload,
+          // because the attachment is a property of the adoption ACT — one record, approved once,
+          // may be adopted into two institutions by two separate acts. Neither the record nor the
+          // verdict holds it, and both promise the attachment in prose.
+          const tgt = gigInput["lineage-adoption-target"] as Record<string, unknown> | undefined;
+          const institution_slug = typeof tgt?.["institution_slug"] === "string" ? (tgt["institution_slug"] as string) : "";
+          const decision = lineageAdoption({
+            verdict: (approval ?? null) as Record<string, unknown> | null,
+            record_ref: target?.content_sha ?? seededId,
+            sealed_at: rec.created_at,
+            institution_slug,
+          });
+          emit({
+            type: "lineage_adoption", phase: phase.name, role: hc.role,
+            adopt: decision.adopt,
+            ...(decision.ref ? { record_ref: decision.ref.record_ref, approved_by: decision.ref.approved_by ?? "" } : {}),
+            ...(decision.institution_slug ? { institution_slug: decision.institution_slug } : {}),
+            ...(decision.refusals.length ? { refusals: decision.refusals.map((r) => r.reason) } : {}),
+          });
+        }
       }
       ready = ready.filter((c) => !(c.human === true && (c.agent_slug ?? "") === ""));
       if (ready.length === 0) continue;
@@ -2047,7 +2142,13 @@ export async function runGig(
       const sha = outputContentHash({
         core_type: spec.core_type,
         domain_type: o.domain_type,
-        domain_type_version: 1,
+        // The version the loaded genome's type carries now, re-derived through the ONE owner
+        // (typeVersionOf) rather than a constant — so the re-hash reproduces the pre-image the
+        // original seal folded. NOTE (accepted point-in-time exposure, bill-change-plan step 5):
+        // this is the CURRENT version; a cached output whose type was extended since it sealed
+        // would re-hash under the newer version and be refused as stale. Point-in-time version
+        // tracking is out of scope for this change.
+        domain_type_version: deps.outputs.typeVersionOf(o.domain_type),
         domain: a.domain,
         primitive: spec.primitive,
         phase: a.phaseName,
@@ -2742,6 +2843,10 @@ export async function runGig(
       const rec = deps.outputs.write({
         core_type: spec.core_type,
         domain_type: spec.domain_type,
+        // Stamp the REAL version the type carries at seal time, read through the ONE owner. Omitting
+        // it let outputs.write default to 1, so a record sealed against a v3 type claimed v1 — inside
+        // its content_sha pre-image, which is the record's identity.
+        domain_type_version: deps.outputs.typeVersionOf(spec.domain_type),
         domain,
         gig_id,
         agent_slug: producer_slug,

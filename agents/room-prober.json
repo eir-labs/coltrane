@@ -25,5 +25,5 @@
     "agent_browse"
   ],
   "model_tier": "standard",
-  "max_tool_calls": 8
+  "max_tool_calls": 30
 }

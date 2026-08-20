@@ -54,3 +54,25 @@ const spine = mkdtempSync(join(tmpdir(), "coltrane-test-spine-"));
 process.env["COLTRANE_LEDGER_PATH"] = join(spine, "ledger.jsonl");
 process.env["COLTRANE_MIRROR_DIR"] = spine;
 process.env["COLTRANE_OUTPUTS_DIR"] = join(spine, "outputs");
+
+// ── AND THE SUITE REACHES NO REMOTE AT ALL (the fourth leg). ─────────────────────────────────────
+//
+// The three legs above root the ledger, the mirror and the output store into per-file temp dirs, so
+// a test run cannot seed the developer's CHECKOUT. It could still seed the developer's ORG STORE.
+//
+// `src/output_mirror.ts` gates its remote append on `remoteConfigured()`, which reads AMBIENT env:
+//   return Boolean(process.env["COLTRANE_DRAIN_KEY"] || process.env["COLTRANE_DRAIN_PG"]);
+// So on any box configured to drain — which is exactly the box an operator runs `npm run verify` on
+// before deploying — every persisted output fires a real POST carrying that box's real credential.
+//
+// MEASURED, not theorised: one full suite run with COLTRANE_DRAIN_KEY and COLTRANE_DRAIN_URL set
+// sent 428 requests to the configured origin — 423 rows to /rest/v1/coltrane_gigs, 4 to
+// /rest/v1/coltrane_outputs, and one artifact PUT into object storage. Every test passed. Nothing in
+// the suite reports it, because a fire-and-forget drain that SUCCEEDS is silent by design.
+//
+// Deleting the vars here is the floor, not the fix: the real repair is that remote configuration
+// should be INJECTED into the mirror rather than read from ambient process.env at persist time — the
+// same "never ambient, always declared" rule the venue contract already follows for a room's tree.
+// Until that lands, a test file that wants to exercise the drain path sets these itself and gets the
+// last word, exactly as the ledger-path note above describes.
+for (const k of ["COLTRANE_DRAIN_KEY", "COLTRANE_DRAIN_PG", "COLTRANE_DRAIN_URL"]) delete process.env[k];

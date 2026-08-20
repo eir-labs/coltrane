@@ -6,11 +6,13 @@
   ],
   "input_types": [
     "change-request",
-    "design-question"
+    "design-question",
+    "parsed-conversation-trace"
   ],
   "output_types": [
     "change-context",
-    "design-brief"
+    "design-brief",
+    "pattern-extraction"
   ],
   "domain": null,
   "description": "The exhaustive read. Acquires the material a piece of work sits in and reports what is actually there — including, with equal care, what is absent. Emits no decision.",
@@ -35,7 +37,7 @@
     "Glob",
     "Grep"
   ],
-  "max_tool_calls": 24,
+  "max_tool_calls": 120,
   "code_tool_access": "read",
   "model_tier": "standard",
   "depth_profile": "deep"

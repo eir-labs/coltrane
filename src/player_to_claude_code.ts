@@ -14,6 +14,12 @@
 // compiled agent's `tools` frontmatter field. The MCP server name in the
 // downstream consumer's .mcp.json must be "coltrane" for the refs to bind.
 
+import { isHostBuiltin, toolBaseName } from "./tool_providers.js";
+import { MCP_TOOLS } from "./mcp.js";
+
+/** Every tool slug the coltrane MCP surface advertises — the set a non-builtin must be in. */
+const COLTRANE_TOOL_SLUGS: ReadonlySet<string> = new Set(MCP_TOOLS.map((t) => t.slug));
+
 export interface Player {
   slug: string;
   display_name: string;
@@ -26,8 +32,28 @@ export interface Player {
 
 const MCP_SERVER_NAME = "coltrane";
 
-function mapToolToClaudeRef(coltraneSlug: string): string {
-  return `mcp__${MCP_SERVER_NAME}__${coltraneSlug}`;
+/**
+ * A declared tool becomes the ref the compiled agent advertises.
+ *
+ * This used to prefix EVERY entry with `mcp__coltrane__` unconditionally, which meant a player
+ * could not name a host builtin: `Read` compiled to `mcp__coltrane__Read`, a name that binds to no
+ * server and no builtin, and the spawned agent then advertised a tool it could never call. Nothing
+ * reported it, because a ref that binds to nothing simply never fires.
+ *
+ * That is the inverse of the rule the engine holds one layer down, where a grant resolving to no
+ * provider is a DEAD NAME and fails the chair closed rather than spawning it under-equipped
+ * (src/tool_providers.ts, resolveAgentGrants). So this resolves rather than assumes, and refuses
+ * rather than manufactures: a host builtin passes through bare, a coltrane tool takes the prefix,
+ * and a name that is neither throws at compile time — in the author's terminal, not on a box.
+ */
+function mapToolToClaudeRef(declared: string): string {
+  const base = toolBaseName(declared);
+  if (isHostBuiltin(base)) return declared;
+  if (COLTRANE_TOOL_SLUGS.has(base)) return `mcp__${MCP_SERVER_NAME}__${declared}`;
+  throw new Error(
+    `player declares tool "${declared}", which names neither a coltrane MCP tool nor a host ` +
+      `builtin — a grant that resolves to nothing is a dead name. Declare a real tool, or drop it.`,
+  );
 }
 
 /** Parse a player .md file body (frontmatter + body) into a Player record.

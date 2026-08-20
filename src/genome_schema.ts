@@ -313,6 +313,41 @@ export const CitationSchema = z
   .strict()
   .refine((c) => Boolean(c.doi ?? c.url), {
     message: "a citation with no resolvable identifier (doi or url) is prose, not a citation",
+  })
+  // ARCHIVE is a claim about a fetch that happened, so it must carry the evidence of that fetch.
+  // Until now `retrieved_at` was `.optional()` with no tie to the grade and no bound on its value,
+  // so `{archive}` with no timestamp parsed and `{archive, retrieved_at:"2099-01-01"}` parsed — a
+  // fetch dated 75 years out was a valid archive claim. This closes the illegal state for EVERY
+  // CitationSchema caller (not only the GENOME_ATTRIBUTIONS rows one test loops over): an archive
+  // citation MUST name when it was fetched, and that time cannot be in the future. ATTESTATION
+  // claims no fetch and is untouched — it may carry no `retrieved_at`.
+  .superRefine((c, ctx) => {
+    if (c.evidence_grade !== "archive") return;
+    if (c.retrieved_at === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["retrieved_at"],
+        message:
+          "an archive-grade citation claims the primary was fetched — it must record retrieved_at (when)",
+      });
+      return;
+    }
+    const fetchedAt = new Date(c.retrieved_at).getTime();
+    if (Number.isNaN(fetchedAt)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["retrieved_at"],
+        message: "retrieved_at is not a parseable date — an archive claim needs a real fetch time",
+      });
+      return;
+    }
+    if (fetchedAt > Date.now()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["retrieved_at"],
+        message: "retrieved_at is in the future — a fetch cannot have happened later than now",
+      });
+    }
   });
 
 /** How a genome schema class stands to the published work behind it.
@@ -556,7 +591,7 @@ export const GENOME_ATTRIBUTIONS: readonly SchemaAttributionOutput[] = [
         "GASB Statement No. 54: Fund Balance Reporting and Governmental Fund Type Definitions (encumbrance and fund-balance reservation)",
       venue: "Governmental Accounting Standards Board",
       locator: "Statement No. 54",
-      url: "https://www.gasb.org/page/document?pageId=/standards-and-guidance/pronouncements/summary-statement-no-54.html",
+      url: "https://storage.gasb.org/GASBS%2054.pdf",
       evidence_grade: "archive",
       retrieved_at: "2026-08-13",
     },
@@ -1011,6 +1046,17 @@ export const VenueObjectSchema = z
     /** The shared FLOOR this room composes over, so N rooms cost floor + Σ(deltas) rather than
      *  N × environment. A label two rooms share to declare they build on the same base. */
     floor: z.string().optional(),
+    // NO repository field, DELIBERATELY. A venue is a room AT REST — every field above is at-rest
+    // policy (the tool ceiling, the credential surface, the installs, the floor). The repository a run
+    // works on is the SUBJECT of that run, and it is one-to-MANY against any given room: one venue
+    // serves many repositories, so pinning a `repo_url` here would mint a venue per repository. The
+    // repository is therefore named on the RUN, not the room — explicitly at dispatch (a dispatch
+    // field threaded to `RunDeps.repoUrl`) or from the claim's governed `repo_url` column on the drain
+    // — and the realized room's workspace is populated from THAT (through src/workspace.ts
+    // `prepareWorkspace`, the same mechanism the drain uses). The legitimate worry that once lived on
+    // this field — never infer the host's cwd — is preserved by making the source explicit at
+    // dispatch, not by fixing it to the contract: a room's tree is a function of how the run was
+    // invoked, never of an at-rest venue field or of the operator's own checkout.
   })
   .strict();
 

@@ -67,6 +67,15 @@ interface PlayerTask {
 
 const PLAYER_TASKS: readonly PlayerTask[] = [
   {
+    // The seat that calls the tune. Its routing test is deliberately a MONITOR, not a dispatch:
+    // the smoke suite must not spawn a real gig, and "watch at inflection points" is the move
+    // that distinguishes directing from doing anyway.
+    slug: "bandleader",
+    charterKeyword: "tune",
+    task: "Report the current state of the gig with id 'demo-gig-1' — do not start any new work. Use only the coltrane MCP tools you have access to.",
+    expectedToolSlug: "gig_monitor",
+  },
+  {
     slug: "methodology-cadence-keeper",
     charterKeyword: "cadence",
     task: "Simulate the standard with slug 'demo-standard' against a mock input of {}. Use only the coltrane MCP tools you have access to.",

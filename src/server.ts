@@ -55,6 +55,7 @@ import {
   type CallerIdentity,
   type VenueCredentialGrant,
 } from "./venue_credential.js";
+import type { HireMemberResult } from "./org_hire.js";
 import { composeStandard, defineAgent, CompositionError, type Standard, type Agent, type AgentDef, type PhaseDef } from "./composition.js";
 import { PRIMITIVE_OUTPUT_TYPE, type Primitive } from "./core_types.js";
 import { proposeTypeChange, type DomainTypeDef } from "./type_versioning.js";
@@ -687,9 +688,13 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
                 `output rejected: "${domain_type || core_type}" did not satisfy its output contract`,
             );
           }
+          // Name what did NOT happen. Validation genuinely succeeded (ok:true, validated:true), but
+          // the runtime is the one sealer — this branch does NOT persist. A truthful compose chair
+          // once read `validated` as `sealed` and filed a false completion; `sealed:false` makes
+          // VALIDATED unmistakable from SEALED so no reader can launder one into the other.
           return {
             ok: true, requires_approval: approval,
-            data: { validated: true, validation_result: { valid: true } },
+            data: { validated: true, sealed: false, validation_result: { valid: true } },
           };
         }
         const rec = deps.outputs.write({
@@ -758,6 +763,13 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         // the venue-less path stays byte-identical.
         const venue =
           args["venue"] === undefined || args["venue"] === null ? undefined : String(args["venue"]);
+        // WHAT REPOSITORY it works on, as distinct from WHERE it plays. The SUBJECT of the run, named
+        // EXPLICITLY at dispatch and threaded to runGig (the same conditional-spread trio venue uses)
+        // so the realized room's workspace is populated with THIS repository — never process.cwd() or
+        // any ambient host path. A venue is at rest and serves many repositories, so the repository
+        // belongs on the RUN, not the room. Absent → the room declines to populate (empty workspace).
+        const repoUrl =
+          args["repo_url"] === undefined || args["repo_url"] === null ? undefined : String(args["repo_url"]);
 
         const target = dispatchTarget({
           standard_slug: args["standard_slug"] === undefined || args["standard_slug"] === null ? undefined : String(args["standard_slug"]),
@@ -1109,6 +1121,8 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
               ...(venue ? { venue } : {}),
               ...(deps.venues ? { venues: deps.venues } : {}),
               ...(deps.venueRealizer ? { venueRealizer: deps.venueRealizer } : {}),
+              // The repository the run names, threaded so runGig populates the room's tree from it.
+              ...(repoUrl ? { repoUrl } : {}),
               ...(depth ? { depth } : {}), ...reuseWiring, ...humanWiring,
             });
             return {
@@ -1191,6 +1205,9 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
           ...(venue ? { venue } : {}),
           ...(deps.venues ? { venues: deps.venues } : {}),
           ...(deps.venueRealizer ? { venueRealizer: deps.venueRealizer } : {}),
+          // Same repository wire as the sync path above — the default async dispatch must populate a
+          // named room's tree too, not only the deterministic wait:true path.
+          ...(repoUrl ? { repoUrl } : {}),
           gig_id: gigId, onProgress, signal: controller.signal, ...(depth ? { depth } : {}), ...reuseWiring, ...humanWiring,
         });
         // A REFUSED resume must be answered in THIS reply, not discovered later by polling. The
@@ -1515,6 +1532,9 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
           ...(args["architectures"] !== undefined ? { architectures: args["architectures"] } : {}),
           ...(args["max_concurrent_chairs"] !== undefined ? { max_concurrent_chairs: args["max_concurrent_chairs"] } : {}),
           ...(args["floor"] !== undefined ? { floor: args["floor"] } : {}),
+          // NO repo_url here: the repository is the SUBJECT of a RUN, named at dispatch, not an
+          // at-rest venue field. A venue serves many repositories; pinning one on the room would mint
+          // a venue per repository. See VenueObjectSchema's gap note.
         };
         const parsedVenue = VenueSchema.safeParse(venueInputDef);
         if (!parsedVenue.success) {
@@ -1590,8 +1610,34 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
           (args["fields_to_add"] as Record<string, unknown>) ?? {};
         const nextProps = { ...baseProps, ...addProps };
         const nextRequired = extension?.schema?.required ?? baseDef.required_fields;
+        // A MUTATION THAT CHANGES NOTHING SAYS SO. `addProps` reads exactly two shapes —
+        // `extension.schema.properties` and `fields_to_add`. An `extension` supplied in any OTHER
+        // shape (top-level JSON Schema keywords, say) matches neither, so addProps is {} and the
+        // caller's intent is DROPPED — while this handler went on to bump the version and seal
+        // content/effective hashes, reporting "additive: +0 field(s)" as success. The caller is told
+        // the genome moved when it did not, and learns otherwise only downstream, when the thing
+        // they authored never fires. Observed 2026-08-20 authoring a conditional constraint.
+        // Sibling of the agent_evolve no-op reported in #325; both refuse here rather than guess.
+        const addedNothing = Object.keys(addProps).length === 0;
+        const requiredUnchanged =
+          JSON.stringify([...nextRequired].sort()) === JSON.stringify([...baseDef.required_fields].sort());
+        if (addedNothing && requiredUnchanged) {
+          return {
+            ok: false,
+            requires_approval: approval,
+            error:
+              `type_extend would change nothing about "${baseDef.slug}" — no field was added and ` +
+              `required_fields is unchanged, so no version is warranted. Field additions are read ` +
+              `from \`extension.schema.properties\` or \`fields_to_add\`; an extension supplied in ` +
+              `any other shape (e.g. top-level JSON Schema keywords) is not read by this verb.`,
+          };
+        }
         const base: DomainTypeDef = {
-          slug: baseDef.slug, version: 1, extends: baseDef.extends, domain: baseDef.domain,
+          // Read the base's OWN version (widened onto DomainType) so proposeTypeChange computes
+          // next_version = base.version + 1 from reality, not a constant. `?? 1` covers the freshly
+          // registered projection that carries no version (always v1). The hardcoded 1 here forced
+          // every extend to next_version 2 — the first half of PR #433 AC6's second-extend defect.
+          slug: baseDef.slug, version: baseDef.version ?? 1, extends: baseDef.extends, domain: baseDef.domain,
           status: "active", schema: { type: "object", properties: baseProps }, required_fields: baseDef.required_fields,
         };
         // THE THIRD DOOR. `{...baseProps, ...addProps}` above is the exact merge #264 is
@@ -1617,10 +1663,48 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         };
         const proposal = proposeTypeChange(base, next);
         const newFields = Object.keys(nextProps).length - Object.keys(baseProps).length;
-        // substrate seal: the new version's identity is recorded in the ledger (file
-        // materialization of versioned types follows the version-aware loader path).
+        // substrate seal: PERSIST the extended definition the way type_register does, rather
+        // than only recording its identity in the ledger. The prior `recordIdentity` path
+        // deferred file materialization to a "version-aware loader path" that does not exist —
+        // so `ok:true` named a version nothing wrote: a fresh load still resolved the old
+        // definition, and the sealed genome_mutation row asserted a state the genome did not
+        // hold. `sealDefinition` seals-before-writes and materializes a loadable file, so an
+        // `ok:true` now means the type is resolvable. The loader keys domain types by version
+        // from file CONTENT and DomainTypeMap.get returns the highest-version record, so the
+        // in-place overwrite of `domain_types/<slug>.json` at the bumped version resolves today
+        // with no versioned filename — an `@v` file would be the same defect wearing a version
+        // number. The ledger subject stays the VERSIONED identity `<slug>@v<n>` (its content
+        // hash), while the file is the bare `<slug>.json` the loader reads.
         const versioned = { ...next, version: proposal.next_version };
-        const tx = deps.genome_dir ? recordIdentity("type_extend", `${base.slug}@v${proposal.next_version}`, versioned, deps.ledger, args["reason"] != null ? { reason: args["reason"] } : undefined) : undefined;
+        const tx = deps.genome_dir
+          ? sealDefinition(
+              "type_extend",
+              `${base.slug}@v${proposal.next_version}`,
+              versioned,
+              deps.ledger,
+              deps.genome_dir,
+              "domain_types",
+              args["reason"] != null ? { reason: args["reason"] } : undefined,
+              base.slug,
+            )
+          : undefined;
+        // Refresh the in-memory registry to match what was just sealed to disk. sealDefinition
+        // overwrites domain_types/<slug>.json at the bumped version, but the registry map still
+        // holds the pre-extend entry — so a SECOND type_extend on the same slug would re-read the
+        // stale version and compute next_version from it again (v1→v2→v2 instead of v3). That is
+        // the second half of PR #433 AC6's defect: the write became real, so the collision became
+        // real. Swap just this slug's entry (bumped version + the merged schema/required_fields
+        // just sealed) into a snapshot and replaceTypes it. replaceTypes — not registerType — is
+        // used deliberately: registerType runs reuse enforcement via score(), and an extended type
+        // scores >=80 against its own prior version (score() never inspects slug), so registerType
+        // would REFUSE it. replaceTypes is the existing bypass (genome_reload uses it) and is a
+        // sync, not authorship. See rationale in the sealed change-set re: score()'s slug-blindness.
+        const snapshot = deps.registry.listTypes().map((t) =>
+          t.slug === base.slug
+            ? { ...t, version: proposal.next_version, schema: { type: "object", properties: nextProps }, required_fields: [...nextRequired] }
+            : t,
+        );
+        deps.registry.replaceTypes(snapshot);
         return { ok: true, requires_approval: proposal.approval_required, data: { new_version: proposal.next_version, changelog_entry: `${proposal.change_class}: +${newFields} field(s)`, change_class: proposal.change_class, effective_hash: tx?.effective_hash, content_hash: tx?.content_hash } };
       }
       case "charter_read": {
@@ -1770,6 +1854,9 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
           domain: d.domain,
           schema: d.schema as Record<string, unknown>,
           required_fields: [...d.required_fields],
+          // Carry the on-disk version through the reload so a version decision reads it (mirrors
+          // loadRegistry). Editing domain_types/ and reloading must not reset a type to version-less.
+          version: d.version,
         }));
         const typeDiff = deps.registry.replaceTypes(typeDefs);
 
@@ -2229,6 +2316,21 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         const evolveSlug = typeof args["slug"] === "string" ? (args["slug"] as string) : undefined;
         const changes = (args["changes"] && typeof args["changes"] === "object")
           ? (args["changes"] as Partial<AgentDef>) : undefined;
+        // A MUTATION THAT CHANGES NOTHING SAYS SO (#325). Field edits are read ONLY from a
+        // `changes` object. A caller who puts them at the top level leaves `changes` undefined, the
+        // guarded block below is skipped, and this case used to fall through to `ok: true` with a
+        // `new_version` — success, a version bump, and nothing changed. Refuse instead, naming the
+        // shape, so the caller learns in one call rather than discovering it when the edit is absent.
+        if (evolveSlug && !changes) {
+          return {
+            ok: false,
+            requires_approval: approval,
+            error:
+              `agent_evolve: no \`changes\` object was supplied for "${evolveSlug}", so nothing ` +
+              `would be applied. Wrap the field edits in a \`changes\` object — top-level fields are ` +
+              `not read by this verb, and a call that changes nothing warrants no new version.`,
+          };
+        }
         if (evolveSlug && changes && (deps.genome_dir || deps.agents?.has(evolveSlug))) {
           // The base definition: the genome file when a working tree exists, else the loaded
           // agents map (a hosted surface has no filesystem — the STORE genome is the base,
@@ -2999,6 +3101,31 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
           },
         };
       }
+      case "org_hire": {
+        // NOT the live path — admission is intercepted in callSurfaceTool (which holds the caller
+        // identity and the deps.hireMember backend that dispatchTool never receives). This block
+        // exists, like venue_credential_mint's, so the verb's advertised schema has a matching
+        // handler that reads exactly its two arguments (advertised_args_are_read.test.ts), and it
+        // must live INSIDE this case body so those reads are attributed to org_hire, not the
+        // preceding case. Reaching this at runtime means the surface interception was bypassed —
+        // answer honestly rather than pretend a hire happened.
+        //
+        // ORDER MATTERS: this case sits BEFORE venue_credential_mint so venue_credential_mint stays
+        // the LAST string case in dispatchTool. The advertised_args_are_read parser slices the last
+        // case's body to end-of-file, sweeping in callSurfaceTool's own `args["…"]` reads; keeping
+        // venue last means that slurped tail's bracket reads stay {org_slug, instance} — exactly
+        // venue's schema. (The org_hire callSurfaceTool intercept reads its args by dot access for
+        // the same reason, so it contributes nothing to that tail.)
+        const org_slug = String(args["org_slug"] ?? "");
+        const agent_slug = String(args["agent_slug"] ?? "");
+        return {
+          ok: false, refusal: "no_backend", requires_approval: approval,
+          error:
+            `org_hire is served by the tool surface (createToolSurface), which wires the caller and ` +
+            `the deps.hireMember backend; the bare dispatcher cannot admit agent "${agent_slug}" to ` +
+            `org "${org_slug}". Call it through the surface.`,
+        };
+      }
       case "venue_credential_mint": {
         // NOT the live path — minting is intercepted in callSurfaceTool (which holds the caller
         // identity and the deps.mintVenueCredential backend that dispatchTool never receives).
@@ -3086,6 +3213,16 @@ export interface ToolSurfaceDeps extends ServerDeps {
    *  deployment ships the backend. Without it, venue_credential_mint is an honest typed refusal
    *  (`no_backend`) — the verb still answers, it never throws. */
   mintVenueCredential?: ((args: { org_slug: string; instance: string }) => Promise<VenueCredentialGrant>) | undefined;
+  /** Deployment-wired org admission: insert an {org_slug, agent_slug} membership row (the
+   *  coltrane_org_hire backend a deployment stands up over the store). Parallel to
+   *  mintVenueCredential — the engine ships the verb, its schema, its shape validation and its
+   *  refusals; the deployment ships the backend and any RLS. Resolves to a TYPED struct, never a
+   *  generic throw, so the two store-decided refusal codes survive the seam: `unknown_agent` (no
+   *  agent_record with that slug — a dead name fails closed) and `already_member` (the hire repeats
+   *  — an error, not a silent no-op). Without it, org_hire is an honest typed refusal (`no_backend`)
+   *  — the verb still answers, it never throws. ADMISSION IS NOT AUTHORITY: this seam admits, and no
+   *  capability travels through it. */
+  hireMember?: ((args: { org_slug: string; agent_slug: string }) => Promise<HireMemberResult>) | undefined;
 }
 
 export interface SurfaceTool {
@@ -3197,6 +3334,84 @@ async function callSurfaceTool(
     //     (that is the room contract's job, checked by realize before dispatch). The grant is the
     //     answer, returned exactly once; the engine does not persist it and there is no read-back.
     return { ok: true, data: grant };
+  }
+  if (slug === "org_hire") {
+    // The engine half of org admission: the two engine-decided refusals and the ledger seal around
+    // whatever backend a deployment injects. Intercepted here (like venue_credential_mint) for ALL
+    // callers, BEFORE the hosted check, so its refusals are structural facts about the act — not a
+    // hosted-transport concern — and so it never reaches a store upsert path.
+    //
+    // These two args are read by DOT access, not `args["…"]`, on purpose: the
+    // advertised_args_are_read parser slurps the LAST dispatchTool case's body to end-of-file and
+    // counts every bracket-with-string-literal read in it as that case's reads (this comment must
+    // not spell that pattern out, or the parser counts the EXPLANATION as an instance of the thing
+    // it explains — which is exactly how it first went red). venue_credential_mint is the last
+    // case (org_hire sits before it precisely to keep it so); a bracket read of `agent_slug` here
+    // would be miscounted as venue reading an arg it does not advertise. Dot access is invisible to
+    // that parser and keeps the slurped tail's reads honestly {org_slug, instance}.
+    const org_slug = String(args.org_slug ?? "");
+    const agent_slug = String(args.agent_slug ?? "");
+    // (a) HIRING IS NEVER SELF-SERVICE. Only a human 'member' caller may admit an agent; a
+    //     player/venue/gig token is an AGENT token, and an agent may not admit an agent — that is
+    //     the whole point of the verb. Decided from caller identity ALONE, before the backend is
+    //     reached, so a refused hire never touches deps.hireMember. Absent caller (a bare surface)
+    //     is not a member either, so it is refused too — the gate fails closed.
+    if (deps.caller?.kind !== "member") {
+      return {
+        ok: false,
+        refusal: "not_a_human_member",
+        error:
+          "hiring is never self-service: only a human member may admit an agent to an org. This " +
+          "caller presented an agent token, and an agent may not hire an agent. ADMISSION IS NOT " +
+          "AUTHORITY — a member performs the hire.",
+      };
+    }
+    // (b) No backend wired → the verb answers honestly rather than throwing, naming the seam to
+    //     wire (the same shape venue_credential_mint uses). A caller that cannot tell "hiring is
+    //     unwired here" from "your request was bad" retries the wrong thing forever.
+    if (!deps.hireMember) {
+      return {
+        ok: false,
+        refusal: "no_backend",
+        error:
+          "no admission backend is wired on this surface — org_hire ships its schema and refusals, " +
+          "but a deployment supplies the insert. Wire deps.hireMember (parallel to " +
+          "deps.mintVenueCredential) to admit the agent to the org.",
+      };
+    }
+    // (c) Admit, then map the store's TYPED answer. Existence (`unknown_agent`) and idempotency
+    //     (`already_member`) are facts only the store holds — the engine never checks the
+    //     agent_record's status ('named'/'active'), because governance and naming are separate acts
+    //     (coltrane-proposer is active yet was never named). Existence is the ONLY precondition, and
+    //     it is the store's answer, not the engine's.
+    let result: HireMemberResult;
+    try {
+      result = await deps.hireMember({ org_slug, agent_slug });
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : String(e) };
+    }
+    if (!result.ok) {
+      // A refused hire seals NOTHING — the ledger row is written only inside the {ok:true} branch
+      // below, so a hire that did not happen leaves no trace claiming it did.
+      return { ok: false, refusal: result.code };
+    }
+    // (d) SEAL THE ACT to the ledger BEFORE reporting success — a kind:"genome_mutation" row via
+    //     recordIdentity (ledger-only, NOT sealDefinition: a hire writes no genome file), so
+    //     who-hired-whom, when, and on whose authority lives in the append-only chain rather than
+    //     only in a database row. subject_slug is the agent admitted; event is 'org_hire'; org_slug
+    //     rides in the hashed detail. #218 — if the audit row does not land, say so (the store row
+    //     may already exist), rather than reporting a success whose seal never happened.
+    try {
+      recordIdentity("org_hire", agent_slug, { org_slug, agent_slug }, deps.ledger, { org_slug });
+    } catch (e) {
+      if (e instanceof LedgerError) {
+        return { ok: false, audit_write_failed: true, error: `audit write failed — "org_hire" was NOT sealed: ${e.message}` };
+      }
+      throw e;
+    }
+    // (e) Admission REPORTS the belonging it created — the {org_slug, agent_slug} pair, and nothing
+    //     carrying authority.
+    return { ok: true, data: { org_slug, agent_slug } };
   }
   if (deps.hosted) {
     const blocked = HOSTED_BLOCKED[slug];

@@ -318,6 +318,23 @@ export interface OutputStore {
   // primitives and output_types are not 1:1).
   coreTypeOf(typeSlug: string): string | null;
   /**
+   * The registry's CURRENT version for a type slug — the version the loaded genome's copy of the
+   * type carries right now.
+   *
+   * Lives here for the same reason `coreTypeOf` and `typeFingerprint` do: this store is the single
+   * owner of "what does the registry say about this type" at the seal boundary, and the seal sites
+   * must reach the version through the ONE owner rather than opening a second registry read. A
+   * record's `domain_type_version` is folded into its `content_sha` (canonical_form.ts), so it is
+   * part of the record's identity — stamping a constant there made two outputs conforming to
+   * genuinely different versions of one type hash as though they conformed to the same.
+   *
+   * A bare core type is version 1 by construction (the six cores are canonical and frozen). An
+   * unregistered slug, or a registered type that carries no explicit version, is reported as 1 —
+   * the same `?? 1` floor `write()` and the type_extend base read use, which is what keeps every
+   * already-sealed v1 record byte-identical.
+   */
+  typeVersionOf(typeSlug: string): number;
+  /**
    * A hash of the type's CURRENT shape — its core, its required list, its whole schema.
    *
    * Lives here for the same reason `coreTypeOf` does: this store is the single owner of
@@ -493,6 +510,17 @@ export function createOutputStore(registry: Registry, options?: OutputStoreOptio
     if ((CORE_TYPES as readonly string[]).includes(typeSlug)) return typeSlug;
     const dt = registry.listTypes().find((t) => t.slug === typeSlug);
     return dt ? dt.extends : null;
+  }
+
+  // The registry's answer to "what version is this type, right now". A bare core is v1
+  // (immutable by construction); a registered domain type reports its carried version;
+  // anything unregistered or version-less falls to the same `?? 1` floor write() uses,
+  // which is what preserves the v1 byte-identity of every already-sealed record.
+  function resolveTypeVersion(typeSlug: string): number {
+    if (!typeSlug) return 1;
+    if ((CORE_TYPES as readonly string[]).includes(typeSlug)) return 1;
+    const dt = registry.listTypes().find((t) => t.slug === typeSlug);
+    return dt?.version ?? 1;
   }
 
   function resolveTypeFingerprint(typeSlug: string): string {
@@ -979,6 +1007,10 @@ export function createOutputStore(registry: Registry, options?: OutputStoreOptio
 
     typeFingerprint(typeSlug) {
       return resolveTypeFingerprint(typeSlug);
+    },
+
+    typeVersionOf(typeSlug) {
+      return resolveTypeVersion(typeSlug);
     },
 
     validateWrite(o) {

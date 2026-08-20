@@ -193,6 +193,14 @@ export function gigEventLogLine(gig_id: string, ev: GigProgressEvent): string | 
     case "phase_start": return JSON.stringify({ ...base, ev: "phase_start", phase: ev.phase, chairs: ev.roles });
     case "chair_start": return JSON.stringify({ ...base, ev: "chair_start", phase: ev.phase, role: ev.role, producer: ev.producer });
     case "chair_complete": return JSON.stringify({ ...base, ev: "chair_complete", role: ev.role, sealed: ev.output_types, ms: ev.duration_ms });
+    // Logged whichever way it went. An adoption is a governance act and a refusal is the
+    // reason one did not happen; a line that only appeared on success would make silence
+    // ambiguous, which is the defect this channel exists to close.
+    case "lineage_adoption": return JSON.stringify({ ...base, ev: "lineage_adoption", role: ev.role,
+      adopt: ev.adopt, ...(ev.record_ref ? { record_ref: ev.record_ref } : {}),
+      ...(ev.institution_slug ? { institution: ev.institution_slug } : {}),
+      ...(ev.approved_by ? { approved_by: ev.approved_by } : {}),
+      ...(ev.refusals ? { refusals: ev.refusals } : {}) });
     case "chair_failed": return JSON.stringify({ ...base, ev: "chair_failed", role: ev.role, error: ev.error });
     // #241 — a dangling (non-required) skill binding. Surfaced live because an unskilled run
     // is otherwise indistinguishable from a skilled one: same genome_hash, run_fingerprint,

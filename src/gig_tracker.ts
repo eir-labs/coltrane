@@ -198,6 +198,7 @@ export function gigEventLogLine(gig_id: string, ev: GigProgressEvent): string | 
     // ambiguous, which is the defect this channel exists to close.
     case "lineage_adoption": return JSON.stringify({ ...base, ev: "lineage_adoption", role: ev.role,
       adopt: ev.adopt, ...(ev.record_ref ? { record_ref: ev.record_ref } : {}),
+      ...(ev.institution_slug ? { institution: ev.institution_slug } : {}),
       ...(ev.approved_by ? { approved_by: ev.approved_by } : {}),
       ...(ev.refusals ? { refusals: ev.refusals } : {}) });
     case "chair_failed": return JSON.stringify({ ...base, ev: "chair_failed", role: ev.role, error: ev.error });

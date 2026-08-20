@@ -1,0 +1,101 @@
+{
+  "fetched_at": "2026-08-20",
+  "records": [
+    {
+      "identifier": "10.2307/2082975",
+      "route": "crossref",
+      "subject": "InstitutionalLawSchema",
+      "fetched_at": "2026-08-20",
+      "reachable": true,
+      "status": 200,
+      "authors": [
+        "Crawford, S.E.S.",
+        "Ostrom, E."
+      ],
+      "year": 1995,
+      "title": "A Grammar of Institutions"
+    },
+    {
+      "identifier": "10.1093/mind/LX.237.1",
+      "route": "crossref",
+      "subject": "DeonticSchema",
+      "fetched_at": "2026-08-20",
+      "reachable": true,
+      "status": 200,
+      "authors": [
+        "von Wright, G.H."
+      ],
+      "year": 1951,
+      "title": "Deontic Logic"
+    },
+    {
+      "identifier": "https://archive.org/details/conceptoflaw0000hart",
+      "route": "direct",
+      "subject": "InstitutionSchema",
+      "fetched_at": "2026-08-20",
+      "reachable": true,
+      "status": 200,
+      "bytes": 221269
+    },
+    {
+      "identifier": "https://archive.org/details/moralityoflaw0000full",
+      "route": "direct",
+      "subject": "InstitutionalChairSchema",
+      "fetched_at": "2026-08-20",
+      "reachable": true,
+      "status": 200,
+      "bytes": 211702
+    },
+    {
+      "identifier": "10.1017/CBO9780511808678",
+      "route": "crossref",
+      "subject": "InstitutionalChairSchema.caps",
+      "fetched_at": "2026-08-20",
+      "reachable": true,
+      "status": 200,
+      "authors": [
+        "North, D.C."
+      ],
+      "year": 1990,
+      "title": "Institutions, Institutional Change and Economic Performance"
+    },
+    {
+      "identifier": "10.1023/A:1004748624537",
+      "route": "crossref",
+      "subject": "NormPairSchema",
+      "fetched_at": "2026-08-20",
+      "reachable": true,
+      "status": 200,
+      "authors": [
+        "Makinson, D.",
+        "van der Torre, L."
+      ],
+      "year": 2000,
+      "title": "Input/Output Logics"
+    },
+    {
+      "identifier": "https://storage.gasb.org/GASBS%2054.pdf",
+      "route": "direct",
+      "subject": "BookingSchema",
+      "fetched_at": "2026-08-20",
+      "reachable": true,
+      "status": 200,
+      "bytes": 577708
+    },
+    {
+      "identifier": "10.1109/MC.2009.347",
+      "route": "crossref",
+      "subject": "applyCommitmentOp",
+      "fetched_at": "2026-08-20",
+      "reachable": true,
+      "status": 200,
+      "authors": [
+        "Singh, M.P.",
+        "Chopra, A.K.",
+        "Desai, N."
+      ],
+      "year": 2009,
+      "title": "Commitment-Based Service-Oriented Architecture"
+    }
+  ]
+}

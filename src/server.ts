@@ -687,9 +687,13 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
                 `output rejected: "${domain_type || core_type}" did not satisfy its output contract`,
             );
           }
+          // Name what did NOT happen. Validation genuinely succeeded (ok:true, validated:true), but
+          // the runtime is the one sealer — this branch does NOT persist. A truthful compose chair
+          // once read `validated` as `sealed` and filed a false completion; `sealed:false` makes
+          // VALIDATED unmistakable from SEALED so no reader can launder one into the other.
           return {
             ok: true, requires_approval: approval,
-            data: { validated: true, validation_result: { valid: true } },
+            data: { validated: true, sealed: false, validation_result: { valid: true } },
           };
         }
         const rec = deps.outputs.write({

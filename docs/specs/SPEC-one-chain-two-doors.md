@@ -125,3 +125,23 @@ The defect is not any one of these wires. It is that the funnel has four bodies,
 is a coin flip about which doors receive it — and the failure mode is silent: the door you tested
 works, and the door the product uses does not. Fixing the repository wire alone would leave the
 generator of these defects in place, and the next one would arrive the same way.
+
+## Gates — the RED laws, and the mechanism each demands
+
+The laws above are sealed as RED tests in `tests/spec_one_chain_two_doors.test.ts`, observed failing
+against unmodified `main` for the stated defect (not for a missing import — see the file header on how
+each stays behavioural). Each obligation names the mechanism `create-change` must build and the
+callsite it lands at. The RED tests do not import the not-yet-existent assembler or resolver statically;
+they text-parse source and dynamic-import through a string specifier, so one pending symbol never blocks
+the whole band.
+
+| law | obligation → mechanism (callsite) | RED gate |
+|---|---|---|
+| **C1** | One exported `assembleRunDeps()` in `src/run_deps.ts` builds a gig's run-deps; every `runGig` call site obtains its deps from it (`server.ts:1113`/`:1198`, `worker.ts:1096`; `chart.ts:1006` inherits via `{ ...deps }`). | `C1.a/b/c` (assembler exists + server + worker use it); `C1.d` (chart resolves no repo of its own — a green-on-`main` pass-through guard). |
+| **C2** | `resolveWorkingRepo` moves to `src/run_deps.ts` with THREE tiers — typed `input.repository` ▸ explicit `repo_url` argument ▸ org column — asserted in order. Signature `resolveWorkingRepo(claim, explicitRepoUrl?)`; keep **arity 1** (a default initializer on `explicitRepoUrl`) so `tests/the_repo_is_typed_input` R0 (`resolveWorkingRepo.length === 1`) stays green. `worker.ts` re-exports it, so that same suite's `import { resolveWorkingRepo } from "../src/worker.js"` stays valid. | `C2` (dynamic-imports `run_deps.js`; the tier-2 middle rung is the new one — `main`'s resolver has only typed→org). |
+| **C3** | The dispatch door resolves the repository through the shared resolver, so `input.repository` is honoured (replacing the bare `args["repo_url"]` read at `server.ts:771`). | `C3` (real `dispatchTool` handler + real `resolveWorkingRepo` drain resolver; on `main` dispatch resolves `undefined`, drain resolves the typed repo). |
+| **C4** | Both `gig_dispatch` branches build deps from `assembleRunDeps`; the `server.ts:1202`/`:1208` "Same venue trio"/"Same repository wire" hand-carry comments are deleted (the wire is inherited, not copied by reminder). | `C4.a` (comments gone); `C4.b` (server routes through the assembler). |
+| **C5** | The wire that legitimately differs per door — `mcpServerConfigs` (empty on the drain per `run_deps.ts:19-25`; the bootstrap map on the server) — is set inside `assembleRunDeps` and supplied by explicit argument, never two hand-listed inline copies. | `C5` (comment-stripped `run_deps.ts` code names the assembler and sets `mcpServerConfigs`). |
+| **C6** | Unification, not redesign: the only behaviour that changes is C2/C3 (a typed repository is honoured everywhere); `repo_url` on `gig_dispatch` keeps working as a fallback beneath the typed input. | `C6.a` (capstone — wait:true, async and drain resolve one repository); `C6.b` (repo_url fallback preserved — a green-on-`main` non-goal guard). C6's full "every existing law passes untouched" clause is verified by the whole root suite staying green at the seal gate. |
+
+**Co-evolution owed at `create-change` (a contradiction surfaced, not resolved here).** `tests/run_deps_parity.test.ts` pins enforcement-key parity by TEXT-parsing the two inline `runGig` call-site literals in `server.ts`/`worker.ts`. C1/C4 collapse those literals into `assembleRunDeps`, which moves the enforcement keys off the call sites — so `run_deps_parity`'s parse breaks after the fix. Its own author sanctioned the migration in writing ("If the two call sites are ever replaced by ONE shared assembly … this test should be re-pointed at that assembly rather than deleted, because what it pins is the invariant, not the duplication"). This is aligned with the spec, not contradicting it — but the `draft-laws`/`create-change` separation means the implementer cannot edit `tests/`, so re-pointing `run_deps_parity` to parse the assembler must be authorised for whoever holds `tests/`. Left un-re-pointed, the root suite cannot be green after the fix and the stop-condition is unmeetable. This red-spec does **not** edit `run_deps_parity` (surfaced, per the no-weakening rule).

@@ -74,15 +74,16 @@ export interface LoadedInstitution {
 }
 
 /**
- * SEAM (RED — body throws). Read every institutions/*.json under `root`, validate each present
+ * Read every institutions/*.json under `root`, validate each present
  * section against its per-section schema, invoke checkInstitutionAdmissibility on the schema-valid
  * document, and return the admitted institutions keyed by slug PLUS one load_error of kind
  * "institution" per file that is malformed, schema-invalid, inadmissible, or a duplicate slug.
  *
- * TOTAL by contract: the GREEN body must never throw for an institution reason — a bad document is
- * a per-file load_error and drops out; the rest of the genome loads. Deliberately NOT wired into
- * loadGenome yet: wiring it (after the agent/standard/org maps exist) is the GREEN change these red
- * tests demand. Until then this throws, so the tree compiles and red is honest.
+ * TOTAL by contract: never throws for an institution reason — a bad document becomes a per-file
+ * load_error and drops out; the rest of the genome loads. WIRED: loadGenome calls this at
+ * src/loader.ts:577 and returns the map at :589, after the agent/standard/venue/chart maps exist.
+ * The laws are tests/institution_loader.test.ts — INV5 pins that the map is populated after a real
+ * load, INV6 pins the ordering, INV1/INV7/INV14 pin the totality.
  */
 export function loadInstitutions(root: string): {
   institutions: Map<string, LoadedInstitution>;

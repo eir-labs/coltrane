@@ -141,7 +141,7 @@
       "kind": "steve",
       "is_institution": false,
       "skill_slugs": [],
-      "status": "proposed",
+      "status": "named",
       "named_from_forebear": "blakey-art",
       "auth_user_id": null
     }

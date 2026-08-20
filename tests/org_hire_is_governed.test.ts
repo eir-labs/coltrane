@@ -76,7 +76,7 @@ const okHire = () =>
 const codeHire = (code: "unknown_agent" | "already_member") =>
   vi.fn(async (_args: { org_slug: string; agent_slug: string }) => ({ ok: false as const, code }));
 
-const ORG = "telesis";
+const ORG = "example-org"; // a neutral fixture: a test names no real organization.
 const AGENT = "coltrane-proposer"; // status active, never 'named' — governance and naming are separate acts.
 
 describe("org_hire — a governed verb that ADMITS an agent to an org (membership, never authority)", () => {

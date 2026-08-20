@@ -9,8 +9,8 @@ analogue of `venue_credential_mint`.
 ## The gap, concretely
 
 There is no verb that ADMITS an agent to an org. A peer session that asked to be seated as a
-`telesis` player was refused at genome load ("name a seated player"), and the only path to admit an
-agent is a human editing store rows by hand. The engine ships no governed surface for the act, so it
+player in another org was refused at genome load ("name a seated player"), and the only path to
+admit an agent is a human editing store rows by hand. The engine ships no governed surface for the act, so it
 has no gate and no audit trail.
 
 ## The pattern this copies exactly

@@ -758,6 +758,13 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         // the venue-less path stays byte-identical.
         const venue =
           args["venue"] === undefined || args["venue"] === null ? undefined : String(args["venue"]);
+        // WHAT REPOSITORY it works on, as distinct from WHERE it plays. The SUBJECT of the run, named
+        // EXPLICITLY at dispatch and threaded to runGig (the same conditional-spread trio venue uses)
+        // so the realized room's workspace is populated with THIS repository — never process.cwd() or
+        // any ambient host path. A venue is at rest and serves many repositories, so the repository
+        // belongs on the RUN, not the room. Absent → the room declines to populate (empty workspace).
+        const repoUrl =
+          args["repo_url"] === undefined || args["repo_url"] === null ? undefined : String(args["repo_url"]);
 
         const target = dispatchTarget({
           standard_slug: args["standard_slug"] === undefined || args["standard_slug"] === null ? undefined : String(args["standard_slug"]),
@@ -1109,6 +1116,8 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
               ...(venue ? { venue } : {}),
               ...(deps.venues ? { venues: deps.venues } : {}),
               ...(deps.venueRealizer ? { venueRealizer: deps.venueRealizer } : {}),
+              // The repository the run names, threaded so runGig populates the room's tree from it.
+              ...(repoUrl ? { repoUrl } : {}),
               ...(depth ? { depth } : {}), ...reuseWiring, ...humanWiring,
             });
             return {
@@ -1191,6 +1200,9 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
           ...(venue ? { venue } : {}),
           ...(deps.venues ? { venues: deps.venues } : {}),
           ...(deps.venueRealizer ? { venueRealizer: deps.venueRealizer } : {}),
+          // Same repository wire as the sync path above — the default async dispatch must populate a
+          // named room's tree too, not only the deterministic wait:true path.
+          ...(repoUrl ? { repoUrl } : {}),
           gig_id: gigId, onProgress, signal: controller.signal, ...(depth ? { depth } : {}), ...reuseWiring, ...humanWiring,
         });
         // A REFUSED resume must be answered in THIS reply, not discovered later by polling. The
@@ -1515,6 +1527,9 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
           ...(args["architectures"] !== undefined ? { architectures: args["architectures"] } : {}),
           ...(args["max_concurrent_chairs"] !== undefined ? { max_concurrent_chairs: args["max_concurrent_chairs"] } : {}),
           ...(args["floor"] !== undefined ? { floor: args["floor"] } : {}),
+          // NO repo_url here: the repository is the SUBJECT of a RUN, named at dispatch, not an
+          // at-rest venue field. A venue serves many repositories; pinning one on the room would mint
+          // a venue per repository. See VenueObjectSchema's gap note.
         };
         const parsedVenue = VenueSchema.safeParse(venueInputDef);
         if (!parsedVenue.success) {

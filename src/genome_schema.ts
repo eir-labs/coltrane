@@ -1011,6 +1011,17 @@ export const VenueObjectSchema = z
     /** The shared FLOOR this room composes over, so N rooms cost floor + Σ(deltas) rather than
      *  N × environment. A label two rooms share to declare they build on the same base. */
     floor: z.string().optional(),
+    // NO repository field, DELIBERATELY. A venue is a room AT REST — every field above is at-rest
+    // policy (the tool ceiling, the credential surface, the installs, the floor). The repository a run
+    // works on is the SUBJECT of that run, and it is one-to-MANY against any given room: one venue
+    // serves many repositories, so pinning a `repo_url` here would mint a venue per repository. The
+    // repository is therefore named on the RUN, not the room — explicitly at dispatch (a dispatch
+    // field threaded to `RunDeps.repoUrl`) or from the claim's governed `repo_url` column on the drain
+    // — and the realized room's workspace is populated from THAT (through src/workspace.ts
+    // `prepareWorkspace`, the same mechanism the drain uses). The legitimate worry that once lived on
+    // this field — never infer the host's cwd — is preserved by making the source explicit at
+    // dispatch, not by fixing it to the contract: a room's tree is a function of how the run was
+    // invoked, never of an at-rest venue field or of the operator's own checkout.
   })
   .strict();
 

@@ -100,9 +100,16 @@ export async function fetchGitCredential(
  * The helper is supplied through GIT_CONFIG_* rather than `-c`, because `git clone -c k=v` writes k
  * into the NEW clone's .git/config — see the note at the call site. Scoped to `https://github.com`
  * so a URL naming any other host is never offered the token.
+ *
+ * `targetDir`, when given, is WHERE the clone lands — a caller-supplied directory instead of this
+ * function's own throwaway tmpdir. It is the one addition a venue room needs over the drain: the room
+ * clones into `<realizationDir>/workspace` (the seat's cwd, subsumed by the realizer's own teardown)
+ * rather than a detached tmpdir. Everything else — the token-never-on-disk GIT_CONFIG_* path, cleanup,
+ * revoke — is IDENTICAL, because a room's working tree and the drain's must be the same thing prepared
+ * the same way. Omitted (the drain's call) keeps the original mkdtempSync behaviour byte-for-byte.
  */
-export function cloneInto(repoUrl: string, token: string): PreparedWorkspace {
-  const dir = mkdtempSync(join(tmpdir(), "coltrane-gig-"));
+export function cloneInto(repoUrl: string, token: string, targetDir?: string): PreparedWorkspace {
+  const dir = targetDir ?? mkdtempSync(join(tmpdir(), "coltrane-gig-"));
   const cleanup = () => {
     try {
       rmSync(dir, { recursive: true, force: true });
@@ -171,6 +178,10 @@ export async function prepareWorkspace(opts: {
   drainKey: string | undefined;
   instance: string | undefined;
   endpoint: string | undefined;
+  /** Where the clone lands. Omitted (the drain) → cloneInto's own throwaway tmpdir. Supplied (a venue
+   *  room) → `<realizationDir>/workspace`, so the seat's cwd is the room's tree and the realizer's
+   *  existing teardown subsumes the clone. The credential path is unchanged either way. */
+  target?: string | undefined;
 }): Promise<PreparedWorkspace | null> {
   if (!opts.repoUrl) return null;
   if (!opts.drainKey || !opts.instance) {
@@ -186,5 +197,5 @@ export async function prepareWorkspace(opts: {
     );
   }
   const cred = await fetchGitCredential(opts.endpoint, opts.drainKey, opts.instance, opts.gigId);
-  return cloneInto(opts.repoUrl, cred.token);
+  return cloneInto(opts.repoUrl, cred.token, opts.target);
 }

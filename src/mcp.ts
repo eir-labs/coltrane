@@ -153,7 +153,7 @@ export const MCP_TOOLS: readonly MCPToolDef[] = [
   // refusing; a supplied `input` leaves this false, so a disagreeing payload still gates
   // (src/runtime.ts). The handler reads it, so #234 requires it be advertised here — it is a real
   // control, not an internal signal, and a caller must be able to find it.
-  { slug: "gig_dispatch",                  category: "run", input_schema: obj({ standard_slug: "string", chart_slug: "string", venue: "string", acting_for: "string", input: "object", gig_input_omitted: "boolean", depth: "string", wait: "boolean", budget: "object", resume_gig_id: "string", reuse: "boolean", approvals: "object", approved_by: "string" }), output_schema: obj({ gig_id: "string", status: "string", awaiting: "object", depth: "string", manifest: "object", resumed_from: "string", reuse: "boolean", resume_refused: "boolean", drift: "array" }) },
+  { slug: "gig_dispatch",                  category: "run", input_schema: obj({ standard_slug: "string", chart_slug: "string", venue: "string", repo_url: "string", acting_for: "string", input: "object", gig_input_omitted: "boolean", depth: "string", wait: "boolean", budget: "object", resume_gig_id: "string", reuse: "boolean", approvals: "object", approved_by: "string" }), output_schema: obj({ gig_id: "string", status: "string", awaiting: "object", depth: "string", manifest: "object", resumed_from: "string", reuse: "boolean", resume_refused: "boolean", drift: "array" }) },
   // `skipped_chairs` / `resumed_from` / `reuse_rejected` are the ASYNC path's only report of a
   // saving — the manifest never reaches a caller who dispatched without `wait`.
   // `awaiting` names the human chair a parked run stopped at. On the async path — the DEFAULT

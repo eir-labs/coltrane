@@ -924,16 +924,36 @@ export async function workOnce(ctx: WorkerContext, deps: WorkOnceDeps): Promise<
   let deadline: ReturnType<typeof setTimeout> | undefined;
 
   try {
-    workspace = await prepareWorkspace({
-      repoUrl: claim.repo_url,
-      gigId: claim.gig_id,
-      drainKey: ctx.drainKey,
-      instance: ctx.instance,
-      endpoint: process.env["COLTRANE_GIT_CREDENTIALS_URL"],
-    });
-    if (workspace) {
-      process.chdir(workspace.dir);
-      log(`working tree ready: ${claim.repo_url}`);
+    // ── ONE TREE PER GIG: the Booker clones ONLY when the realized room will NOT populate. ──────────
+    // A claim that names both a venue and a repository, on a box that holds a realizer, gets its
+    // working tree from realize()'s own prepareWorkspace (SITE below, threaded via venueWiring) —
+    // populating the room's workspace through the SAME src/workspace.ts mechanism this Booker uses.
+    // Cloning HERE as well would mint a SECOND git credential and stand up a SECOND live tree for one
+    // gig — the collision. The decision uses only facts available BEFORE the genome load at :939:
+    // claim.venue and claim.repo_url (claim-level ClaimedGig fields) plus the run-level venueRealizer
+    // dep. No genome is hoisted; reordering the load would entangle the workspace lifecycle with
+    // genome-load failure paths, which is exactly what is avoided here.
+    //
+    // ERROR PATHS. When SUPPRESSED the Booker neither clones nor mints, so the whole workspace
+    // lifecycle — the credential mint, the clone, and every failure of either — shifts to realize()'s
+    // populate path, which re-throws a named failure and reaps its own realization directory. When NOT
+    // suppressed (no room, no repository named, or no realizer to build the room) the Booker's clone
+    // and its error paths are byte-identical to before this guard existed.
+    const roomWillPopulate = Boolean(claim.venue && claim.repo_url && deps.venueRealizer);
+    if (!roomWillPopulate) {
+      workspace = await prepareWorkspace({
+        repoUrl: claim.repo_url,
+        gigId: claim.gig_id,
+        drainKey: ctx.drainKey,
+        instance: ctx.instance,
+        endpoint: process.env["COLTRANE_GIT_CREDENTIALS_URL"],
+      });
+      if (workspace) {
+        process.chdir(workspace.dir);
+        log(`working tree ready: ${claim.repo_url}`);
+      }
+    } else {
+      log(`working tree deferred to room realization for venue "${claim.venue}" (${claim.repo_url})`);
     }
 
     const genome = await rpcGenomeStore(ctx).load();
@@ -1026,11 +1046,16 @@ export async function workOnce(ctx: WorkerContext, deps: WorkOnceDeps): Promise<
           `realizer this worker was not given — refusing rather than running the room unbuilt`,
       );
     }
+    // The repository is carried on the claim (claim.repo_url — the STORE's governed column), and is
+    // mapped into the run the SAME conditional-spread way the venue fields are, so runGig realizes the
+    // room WITH a repository to populate its tree from. Present only alongside a venue, because the
+    // repository populates a ROOM's workspace; a venue-less claim keeps the Booker's own clone above.
     const venueWiring = claim.venue
       ? {
           venue: claim.venue,
           venues: genome.venues,
           ...(deps.venueRealizer ? { venueRealizer: deps.venueRealizer } : {}),
+          ...(claim.repo_url ? { repoUrl: claim.repo_url } : {}),
         }
       : {};
 

@@ -18,6 +18,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { VenueSchema, DEVICE_CLASSES, type VenueOutput } from "./genome_schema.js";
 import { sha256Hex, canonStructuralJson } from "./canonical_form.js";
+import { prepareWorkspace, type PreparedWorkspace } from "./workspace.js";
+
+/** The workspace preparer the room populates its tree through. It IS the drain's `prepareWorkspace`
+ *  (src/workspace.ts) — one mechanism, not two — and defaults to exactly that. Injectable ONLY so a
+ *  law can observe the routing without a live git endpoint, the same seam shape `run` already uses for
+ *  docker; the default is the real shared function, so production population and drain population are
+ *  the identical clone path. */
+export type WorkspacePreparer = typeof prepareWorkspace;
 
 export { DEVICE_CLASSES };
 
@@ -84,6 +92,21 @@ export interface RealizeOpts {
   probe?: (s: { slug: string }) => Promise<string[]>;
   host?: RealizationHost;
   chairs?: number;
+  /** WHERE the room's tree comes from — the repository named by the RUN, supplied by the realization
+   *  caller, NEVER a venue field and NEVER read from the host's cwd. A venue is one AT-REST room that
+   *  serves many repositories, so the repository is a per-RUN fact, threaded in here from
+   *  `RunDeps.repoUrl` (an explicit dispatch field, or the claim's governed `repo_url`). Present → the
+   *  room's workspace is populated (through `prepareWorkspace`) with a clone of this repository, so a
+   *  seat inside the room has a tree to edit. Absent → the workspace stays the empty room, and no git
+   *  credential is minted. Inferring an ambient source is the exact failure this explicit field
+   *  forecloses. */
+  repoUrl?: string;
+  /** The per-gig git-credential plumbing `prepareWorkspace` requires, supplied by the realization
+   *  caller alongside `repoUrl` — never derived from ambient process state. The minted token only ever
+   *  rides `cloneInto`'s GIT_CONFIG_* env, never a host file, so token-never-on-disk is preserved. */
+  drainKey?: string;
+  instance?: string;
+  gitCredentialsEndpoint?: string;
 }
 
 /** The seam. The engine ships the interface, the state machine, the probe and the drift guard; a
@@ -805,7 +828,7 @@ export function localProcessRealizer(): VenueRealizer {
  *  NOT throw on construction — the out-of-scope laws call `.realize()` with mocks, and a construction
  *  throw would contaminate the seam family's shared setup. Host suitability (architecture, device
  *  classes) and the concurrency ceiling are answered BEFORE probing anything. */
-export function dockerComposeRealizer(opts?: { run?: ComposeRunner }): VenueRealizer {
+export function dockerComposeRealizer(opts?: { run?: ComposeRunner; prepareWorkspace?: WorkspacePreparer }): VenueRealizer {
   // THE DEFAULT IS THE REAL BINARY. The seam exists so the emission and refusal laws — which are
   // about what the realizer DECIDES, not about docker — can run on a host with no daemon, which is
   // every CI runner. It is deliberately NOT a "skip the container" switch: a caller that wants a
@@ -817,6 +840,11 @@ export function dockerComposeRealizer(opts?: { run?: ComposeRunner }): VenueReal
     ((args, timeout) => {
       execFileSync("docker", [...args], { stdio: "pipe", timeout });
     });
+  // THE ROOM POPULATES ITS TREE THROUGH THE DRAIN'S OWN FUNCTION. Defaults to the imported
+  // `prepareWorkspace` — literally the function worker.ts calls at its own clone site — so there is
+  // one clone/credential/cleanup mechanism, never a second the room could drift from. Injectable only
+  // for observation in a law (mirrors the `run` seam); production always gets the real shared function.
+  const prepare: WorkspacePreparer = opts?.prepareWorkspace ?? prepareWorkspace;
   const substrate = "container";
   return {
     substrate,
@@ -914,7 +942,46 @@ export function dockerComposeRealizer(opts?: { run?: ComposeRunner }): VenueReal
         ...(host ? { host } : {}),
       });
 
-      mkdirSync(join(realizationDir, "workspace"), { recursive: true });
+      // ── THE WORKSPACE IS POPULATED, OR DECLINED — NEVER INFERRED. ──────────────────────────────
+      //
+      // Before this join the workspace was an empty `mkdirSync` and nothing else — enough for a
+      // read-only seat (room-prober browses the genome, touches no tree), useless for any seat that
+      // edits code. The other half already existed in the drain: worker.ts clones a FRESH TREE PER GIG
+      // via prepareWorkspace and runs with cwd inside it. This joins them — a realized room's
+      // workspace is populated the SAME way the drain populates its own, so a seat running in a room
+      // has a repository to edit and two concurrent code-editing gigs get DISJOINT trees.
+      //
+      // The source is `opts.repoUrl` — the repository named by the RUN (RunDeps.repoUrl: an explicit
+      // dispatch field or the claim's governed `repo_url`), supplied by the caller — and NOTHING else.
+      // It is never a venue field, never process.cwd() and never an ambient host path: inferring the
+      // operator's own checkout is precisely the isolation failure this whole change exists to
+      // prevent, so an absent source declines to populate (empties the room, mints no credential)
+      // rather than reaching for a default. `prepare` IS the drain's prepareWorkspace (one mechanism),
+      // pointed at THIS room's workspace as its clone target; the realizer's own teardown rmSync's
+      // realizationDir, so the clone under it needs no separate cleanup, and the credential rides
+      // cloneInto's GIT_CONFIG_* env, never a host file.
+      mkdirSync(realizationDir, { recursive: true });
+      let workspace: PreparedWorkspace | null = null;
+      try {
+        if (opts.repoUrl) {
+          workspace = await prepare({
+            repoUrl: opts.repoUrl,
+            gigId: opts.gigId,
+            drainKey: opts.drainKey,
+            instance: opts.instance,
+            endpoint: opts.gitCredentialsEndpoint,
+            target: join(realizationDir, "workspace"),
+          });
+        } else {
+          mkdirSync(join(realizationDir, "workspace"), { recursive: true });
+        }
+      } catch (e) {
+        // A population failure names its SOURCE (prepareWorkspace/cloneInto say which repo failed) and
+        // must not strand the realization directory. It is re-thrown, not swallowed into an ambient
+        // fallback — declining silently to the host cwd is the one thing this branch may never do.
+        rmSync(realizationDir, { recursive: true, force: true });
+        throw e;
+      }
       // NO host secrets directory and no per-class file on the host. The former mechanism wrote each
       // resolved credential to <realizationDir>/secrets/<class> at mode 0600 and declared it as a
       // compose file-secret — but a compose file-secret is a BIND MOUNT, not a copy. Measured: stand
@@ -956,6 +1023,10 @@ export function dockerComposeRealizer(opts?: { run?: ComposeRunner }): VenueReal
         } catch {
           /* best-effort: the reap is a courtesy on an already-failed stand-up, not a guarantee */
         }
+        // A stand-up that fails AFTER population already minted a git credential must not leak it — hand
+        // it back the same fire-and-forget way teardown does, so a populate token never outlives the
+        // room even when the room never fully stood up. Null when no repo_url was declared.
+        void workspace?.revoke();
         rmSync(realizationDir, { recursive: true, force: true });
         const err = e as { stderr?: Buffer };
         throw new VenueHostUnsuitable(
@@ -986,6 +1057,11 @@ export function dockerComposeRealizer(opts?: { run?: ComposeRunner }): VenueReal
         } catch (e) {
           if (process.env["COLTRANE_DRAIN_DEBUG"]) console.error(`[venue] down failed: ${String(e)}`);
         }
+        // Hand the git credential back the way the drain does (worker.ts `void workspace?.revoke()`):
+        // fire-and-forget, never awaited, never throwing — a populate token must not outlive the room,
+        // and a revoke failure must not fail teardown. Null when the room declared no repo_url (nothing
+        // was minted). The rmSync below then subsumes the clone under realizationDir/workspace.
+        void workspace?.revoke();
         rmSync(realizationDir, { recursive: true, force: true });
       }, seat);
     },

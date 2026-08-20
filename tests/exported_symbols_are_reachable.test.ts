@@ -31,7 +31,12 @@ const SRC = join(process.cwd(), "src");
 const TESTS = join(process.cwd(), "tests");
 
 /** The count as measured on 2026-08-20. LOWER THIS when orphans are wired or removed; never raise it. */
-const PINNED_ORPHANS = 60;
+// 60 -> 19 on 2026-08-20. The drop is not work done; it is the law becoming ACCURATE. Before it
+// resolved `export * from "./x.js"`, forty-one symbols in wildcard-exported modules counted as
+// unreachable while being fully importable by a consumer — so the ratchet sat three times looser
+// than the truth and would have absorbed a real orphan without noticing. Lowered per this file's
+// own instruction ("If it SHRANK, lower PINNED_ORPHANS").
+const PINNED_ORPHANS = 19;
 
 function readAll(dir: string, out: string[] = []): string[] {
   for (const e of readdirSync(dir, { withFileTypes: true })) {
@@ -46,9 +51,21 @@ function unreachableExports(): string[] {
   const srcFiles = readdirSync(SRC).filter((f) => f.endsWith(".ts"));
   const src = new Map(srcFiles.map((f) => [f, readFileSync(join(SRC, f), "utf8")]));
   const tests = readAll(TESTS).map((p) => readFileSync(p, "utf8")).join("\n");
-  const publicSurface = ["index.ts", "tool_surface.ts", "genome_store.ts"]
-    .map((f) => src.get(f) ?? "")
-    .join("\n");
+  const PUBLIC_FILES = ["index.ts", "tool_surface.ts", "genome_store.ts"];
+  const publicSurface = PUBLIC_FILES.map((f) => src.get(f) ?? "").join("\n");
+
+  // A WILDCARD re-export is real reachability. `export * from "./chart.js"` in index.ts makes every
+  // symbol chart.ts exports importable by a consumer — but a name-substring scan of the entrypoint
+  // text cannot see that, because the names never appear there. This law used to miss it entirely
+  // and reported freshly-exported modules as orphans, which is a FALSE POSITIVE that pushes an
+  // author toward verbose named re-exports purely to satisfy the check, or toward raising the pin.
+  // Collect the wildcard-exported modules and treat a symbol defined in one of them as reached.
+  const wildcardModules = new Set<string>();
+  for (const f of PUBLIC_FILES) {
+    for (const m of (src.get(f) ?? "").matchAll(/^export \* from "\.\/([\w.]+)\.js";/gm)) {
+      wildcardModules.add(`${m[1]!}.ts`);
+    }
+  }
 
   const defs = new Map<string, string>();
   for (const [f, s] of src) {
@@ -70,6 +87,7 @@ function unreachableExports(): string[] {
       }
     }
     if (uses > 0) continue;
+    if (wildcardModules.has(home)) continue;
     if (word.test(publicSurface)) continue;
     if (((tests.match(new RegExp(`\\b${name}\\b`, "g")) ?? []).length) >= 4) orphans.push(name);
   }

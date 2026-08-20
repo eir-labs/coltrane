@@ -42,6 +42,7 @@ import {
 import { sealDrill } from "./seal_drill.js";
 import { standardSimulate } from "./simulate.js";
 import { runGig, BudgetExhausted, GigAborted, ResumeRefused, partialGigUsage, partialBudgetState, type AgentInvoker } from "./runtime.js";
+import { assembleRunDeps, resolveWorkingRepo } from "./run_deps.js";
 import { createCheckpointStore, createReuseStore, type CheckpointStore, type ReuseStore } from "./reuse.js";
 import { makeClaudeInvoker, killLiveChairChildren } from "./claude_invoker.js";
 import { dockerComposeRealizer, type VenueRealizer } from "./venue_realizer.js";
@@ -1161,23 +1162,32 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         // unresolvable standard slug returned before the preflights. So there is exactly one here.
         const standard = targetStandards[0]!;
 
+        // The repository this dispatch resolves for the run, through the ONE shared resolver both doors
+        // use (run_deps.ts): the TYPED input.repository is authoritative, and the explicit repo_url
+        // argument is honoured only BENEATH it (non-goal — repo_url on gig_dispatch keeps working as a
+        // fallback). This is the C2/C3 fix: a change-request carrying a typed `repository` is now
+        // honoured by a direct dispatch exactly as the drain honours it, instead of being ignored.
+        const dispatchRepoUrl = resolveWorkingRepo({ input: gigInput }, repoUrl);
+        // The SHARED run-deps for BOTH dispatch branches, built ONCE from the assembler so the wait:true
+        // and async paths cannot diverge by construction — a wire is inherited, not carried across by a
+        // reminder comment. The venue trio and repository are threaded (conditionally) inside the
+        // assembler; `mcpServerConfigs` is stated here as the explicit argument it requires. Each branch
+        // spreads its own door-specific fields (gig_id, onProgress, signal, depth, reuse/human wiring).
+        const dispatchDeps = assembleRunDeps({
+          outputs: deps.outputs, ledger: deps.ledger, invoke: deps.invoke,
+          model_version: deps.model_version, skills: deps.skills, skill_dirs: deps.skill_dirs,
+          evals: deps.evals, budget,
+          toolProviders: deps.toolProviders, mcpServerConfigs: deps.mcpServerConfigs, // dispatch preflight resolves against the invoker's environment
+          venue, venues: deps.venues, venueRealizer: deps.venueRealizer,
+          repoUrl: dispatchRepoUrl,
+        });
+
         // Synchronous mode (opt-in via wait:true) — block, return the manifest. The
         // deterministic test path and any caller that wants the answer in one call.
         if (wait) {
           try {
             const res = await runGig(standard, gigInput, {
-              outputs: deps.outputs, ledger: deps.ledger, invoke: deps.invoke,
-              model_version: deps.model_version, skills: deps.skills, skill_dirs: deps.skill_dirs, evals: deps.evals, budget,
-              toolProviders: deps.toolProviders, mcpServerConfigs: deps.mcpServerConfigs, // dispatch preflight resolves against the invoker's environment
-              // THE ROOM THIS DISPATCH NAMED, threaded so runGig realizes it or refuses fail-closed —
-              // the same conditional-spread trio the chart path uses (server.ts:935-941). `venue` is
-              // threaded only when non-empty so runGig's `deps.venue !== undefined` gate is never
-              // tripped by an absent one; `venues`/`venueRealizer` come from bootstrap (ServerDeps).
-              ...(venue ? { venue } : {}),
-              ...(deps.venues ? { venues: deps.venues } : {}),
-              ...(deps.venueRealizer ? { venueRealizer: deps.venueRealizer } : {}),
-              // The repository the run names, threaded so runGig populates the room's tree from it.
-              ...(repoUrl ? { repoUrl } : {}),
+              ...dispatchDeps,
               ...(depth ? { depth } : {}), ...reuseWiring, ...humanWiring,
             });
             return {
@@ -1250,19 +1260,11 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
           const line = gigEventLogLine(gigId, ev);
           if (line) { try { process.stderr.write(line + "\n"); } catch { /* best-effort */ } }
         };
+        // The SAME assembled base as the wait:true branch — the venue trio and the repository wire are
+        // INHERITED from `dispatchDeps`, not copied here by a reminder to keep the two branches in step.
+        // A wire added to the shared assembler reaches this default async path by construction.
         const runPromise = runGig(standard, gigInput, {
-          outputs: deps.outputs, ledger: deps.ledger, invoke: deps.invoke,
-          model_version: deps.model_version, skills: deps.skills, skill_dirs: deps.skill_dirs, evals: deps.evals, budget,
-          toolProviders: deps.toolProviders, mcpServerConfigs: deps.mcpServerConfigs, // dispatch preflight resolves against the invoker's environment
-          // Same venue trio as the sync path above — the DEFAULT dispatch mode must honour a named
-          // room too, or the fix covers only the deterministic wait:true test path and leaves the
-          // path the product actually dispatches through discarding the venue.
-          ...(venue ? { venue } : {}),
-          ...(deps.venues ? { venues: deps.venues } : {}),
-          ...(deps.venueRealizer ? { venueRealizer: deps.venueRealizer } : {}),
-          // Same repository wire as the sync path above — the default async dispatch must populate a
-          // named room's tree too, not only the deterministic wait:true path.
-          ...(repoUrl ? { repoUrl } : {}),
+          ...dispatchDeps,
           gig_id: gigId, onProgress, signal: controller.signal, ...(depth ? { depth } : {}), ...reuseWiring, ...humanWiring,
         });
         // A REFUSED resume must be answered in THIS reply, not discovered later by polling. The

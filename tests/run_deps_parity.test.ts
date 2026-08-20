@@ -35,8 +35,56 @@ const REPO = fileURLToPath(new URL("..", import.meta.url));
  *  (`budget: { opening, k }`) contributes `budget` once and none of its inner names. */
 function runGigDepKeys(relPath: string): Set<string> {
   const src = readFileSync(join(REPO, relPath), "utf8");
-  const call = src.indexOf("runGig(");
-  expect(call, `${relPath} must contain a runGig( call site`).toBeGreaterThan(-1);
+  // RE-POINTED, as this file's own header instructed: "If the two call sites are ever replaced by ONE
+  // shared assembly — the fix I would argue for — this test should be re-pointed at that assembly
+  // rather than deleted, because what it pins is the invariant, not the duplication."
+  //
+  // That day came (SPEC-one-chain-two-doors). The wires are assembled once in assembleRunDeps() and
+  // every door obtains its deps from it, so the enforcement-bearing keys are no longer text at the
+  // call sites — they are text in the assembler. The invariant is unchanged and is now pinned in the
+  // one place it can be dropped from; a door that hand-rolled a literal again would fail
+  // ASSEMBLER-SOURCED below.
+  // UNION of both halves. A door's deps are now assembleRunDeps({…}) plus whatever is genuinely
+  // door-specific alongside it — `signal` is each door's own AbortController and cannot come from a
+  // shared assembler. The invariant this file pins is that the wire REACHES the path, not which half
+  // supplies it, so both are read and merged.
+  // Read the deps that come OUT of the assembler, not the arguments passed IN. A first attempt at
+  // this re-point read the call sites' argument lists and was VACUOUS: deleting
+  // `toolProviders: args.toolProviders` from the assembler's RETURN left every law green, because the
+  // argument was still being passed at the call site while the wire was dropped on the floor. What
+  // runGig receives is the assembler's return object; that is the thing this file has always pinned.
+  const assembled = relPath.endsWith("run_deps.ts")
+    ? []
+    : extractAssemblerReturnKeys();
+  // Anchor on runGig( ONLY. Its object literal is `...assembleRunDeps({…})` plus the door-specific
+  // siblings, and the brace-flattening below reduces the nested assembler ARGUMENTS to `0` — which is
+  // what we want: the arguments a door passes IN are not evidence that the wire comes OUT. A second
+  // attempt at this re-point unioned the call site's argument list in and was still VACUOUS for that
+  // exact reason. What survives here is the door-specific siblings; the shared wires come from the
+  // assembler's RETURN via `assembled` above.
+  const anchors = ["runGig("].filter((an) => src.includes(an));
+  expect(anchors.length, `${relPath} must contain a runGig( or assembleRunDeps( call site`).toBeGreaterThan(0);
+  const keysFrom = (start: number): Set<string> => extractKeysAt(src, start);
+  const merged = new Set<string>(assembled);
+  for (const an of anchors) for (const k of keysFrom(src.indexOf(an))) merged.add(k);
+  return merged;
+}
+
+/** The keys assembleRunDeps() actually RETURNS — the deps runGig receives, whatever the doors passed
+ *  in. Dropping a wire here is exactly the regression this file exists to catch. */
+function extractAssemblerReturnKeys(): string[] {
+  const src = readFileSync(join(REPO, "src/run_deps.ts"), "utf8");
+  const fn = src.indexOf("export function assembleRunDeps");
+  expect(fn, "src/run_deps.ts must export assembleRunDeps").toBeGreaterThan(-1);
+  const ret = src.indexOf("return {", fn);
+  expect(ret, "assembleRunDeps must return an object literal").toBeGreaterThan(-1);
+  return [...extractKeysAt(src, ret)];
+}
+
+/** Brace-matched key extraction from the object literal beginning at the first `{` after `from`. */
+function extractKeysAt(src: string, from: number): Set<string> {
+  const call = from;
+  if (call < 0) return new Set();
   // third argument starts at the first `{` after the second comma at depth 0 of the arg list
   let i = src.indexOf("{", call);
   let depth = 0;

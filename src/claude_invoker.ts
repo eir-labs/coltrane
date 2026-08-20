@@ -1105,6 +1105,34 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
     // (bootstrapServerDeps always supplies it); a bare/test invoker without it captures from the
     // injected stream instead of a real spawn, so it needs no grant.
     const engineServerCfg = (opts.mcpServerConfigs ?? {})[ENGINE_MCP_SERVER];
+    // ABSENT MUST MEAN DECLINE — and this is the one place the rule was never applied.
+    //
+    // On the seal path the prompt INSTRUCTS the chair to call output_write. If the engine server
+    // config did not resolve and this is a REAL spawn, that tool will not exist in the child: the
+    // chair calls it correctly and receives "No such tool available: mcp__coltrane__output_write".
+    // The run then ends and the engine reports "chair X sealed no output through its write boundary"
+    // — true, and useless. It names the SYMPTOM while the cause was that there was no boundary.
+    //
+    // MEASURED: four gigs died this way (6197b4ba, 110c0076, 8f4cda54, 496ed9f3), every one
+    // dispatched from a git worktree that was never built. .mcp.json points the engine server at
+    // dist/src/server_entry.js, so with no dist/ the server cannot start. The two gigs whose trees
+    // WERE built sealed without trouble. Six for six — and the message blamed the agent every time.
+    //
+    // Same defect class the engine already refuses everywhere else: "a grant that resolves to none is
+    // a dead name … so dispatch FAILS CLOSED instead of confabulating". A seal tool that cannot be
+    // reached is a dead grant, and a chair that cannot possibly seal should cost nothing to discover.
+    //
+    // An INJECTED run captures from a stream instead of spawning, so it needs no server and no grant;
+    // that path is deliberately untouched (every existing invoker law depends on it).
+    if (sealViaOutputWrite && engineServerCfg === undefined && opts.run === undefined) {
+      throw new Error(
+        `chair "${ctx.agent.slug}" cannot seal: the in-band write boundary needs the engine MCP server ` +
+          `("${ENGINE_MCP_SERVER}") wired into the spawn, and no server config resolved for it. ` +
+          `The chair would be told to call ${OUTPUT_WRITE_TOOL} and find no such tool. This usually ` +
+          `means the working tree has no build — .mcp.json points the engine server at its dist/ ` +
+          `entrypoint. Build the tree (npm run build), or dispatch from one that is built.`,
+      );
+    }
     if (sealViaOutputWrite && engineServerCfg !== undefined) {
       resolvedMcpServers = { ...resolvedMcpServers, [ENGINE_MCP_SERVER]: engineServerCfg };
       effectiveAllowed = [...new Set([...(effectiveAllowed ?? []), OUTPUT_WRITE_TOOL])];

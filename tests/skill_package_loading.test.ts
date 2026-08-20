@@ -105,3 +105,100 @@ describe("skill package loading + identity", () => {
     }
   });
 });
+
+// RED-first laws — the network-grant false-assurance gate (docs/specs/skill-network-grant-refusal.md).
+// src/genome_schema.ts declares NetworkGrantSchema { allow, methods, max_requests, max_bytes } under
+// SkillPermissionSchema.network, but NOTHING outside genome_schema.ts reads permission.network,
+// max_requests, max_bytes or methods: a skill declaring an origin allowlist, a method restriction, and
+// rate/size caps is held to NONE of them (the runner even reaches the network freely — skill_runner.mjs:12).
+// The repo's convention for a grant the runtime cannot back is REFUSAL with a named error, not silence
+// (assertToolGrantsResolvable, src/tool_providers.ts:169). These laws demand the loader treat a declared
+// permission.network as a dead name and FAIL CLOSED at load — naming the skill and the field — exactly as
+// a dead tool grant is refused. They are RED until that gate lands in src/loader.ts (the loader stores the
+// SkillRecord today and throws nothing); the two baseline laws are GREEN controls proving the change does
+// not narrow a skill that declares no network permission.
+
+/** Write a skill package with an arbitrary `permission` sub-object (undefined ⇒ omit it entirely) —
+ *  mirrors writeSkillPackage but does not force { tier: 0 }, so a permission.network can be declared. */
+function writeSkillWithPermission(root: string, slug: string, permission: unknown | undefined): void {
+  const d = join(root, "skills", slug);
+  mkdirSync(join(d, "fixtures"), { recursive: true });
+  const meta = { slug, version: 1, ...(permission !== undefined ? { permission } : {}) };
+  writeFileSync(join(d, "meta.json"), JSON.stringify(meta));
+  writeFileSync(join(d, "skill.md"), "reasoning half");
+  writeFileSync(join(d, "fixtures", "f0.json"), JSON.stringify({ id: "basic", input: {}, assertions: [] }));
+}
+
+describe("skill network-grant refusal — fail closed on an unenforceable permission.network", () => {
+  it("RED: refuses at load a skill declaring a well-formed permission.network (fails closed, not a warning)", () => {
+    const dir = makeGenomeDir();
+    try {
+      seedCoreTypes(dir);
+      writeSkillWithPermission(dir, "netty", {
+        tier: 0,
+        network: { allow: ["https://api.example.com"], methods: ["GET"], max_requests: 100, max_bytes: 4096 },
+      });
+      // Fail CLOSED: loadGenome must THROW, not return a genome that silently stored the skill.
+      expect(() => loadGenome(dir)).toThrow();
+      // And it must not have been quietly accepted — the throw is the whole contract.
+      let threw = false;
+      try { loadGenome(dir); } catch { threw = true; }
+      expect(threw).toBe(true);
+    } finally {
+      rmGenome(dir);
+    }
+  });
+
+  it("RED: the refusal names the skill slug and the field 'permission.network' (dead-name shape)", () => {
+    const dir = makeGenomeDir();
+    try {
+      seedCoreTypes(dir);
+      writeSkillWithPermission(dir, "greedy-fetcher", {
+        tier: 0,
+        network: { allow: ["https://api.example.com"], methods: ["GET"] },
+      });
+      let message = "";
+      try { loadGenome(dir); } catch (e) { message = e instanceof Error ? e.message : String(e); }
+      expect(message).toContain("greedy-fetcher");
+      expect(message).toContain("permission.network");
+    } finally {
+      rmGenome(dir);
+    }
+  });
+
+  it("RED: any non-null network is refused — even an empty {} object (which parses to { allow: [] })", () => {
+    const dir = makeGenomeDir();
+    try {
+      seedCoreTypes(dir);
+      writeSkillWithPermission(dir, "empty-net", { tier: 0, network: {} });
+      expect(() => loadGenome(dir)).toThrow();
+    } finally {
+      rmGenome(dir);
+    }
+  });
+
+  it("GREEN control: a skill declaring no network (permission.tier only) loads and preserves its tier", () => {
+    const dir = makeGenomeDir();
+    try {
+      seedCoreTypes(dir);
+      writeSkillWithPermission(dir, "tier-only", { tier: 2 });
+      const g = loadGenome(dir);
+      expect(g.skills.has("tier-only")).toBe(true);
+      expect(g.skills.get("tier-only")?.permission?.tier).toBe(2);
+    } finally {
+      rmGenome(dir);
+    }
+  });
+
+  it("GREEN control: a skill declaring NO permission at all loads unchanged", () => {
+    const dir = makeGenomeDir();
+    try {
+      seedCoreTypes(dir);
+      writeSkillWithPermission(dir, "no-perm", undefined);
+      const g = loadGenome(dir);
+      expect(g.skills.has("no-perm")).toBe(true);
+    } finally {
+      rmGenome(dir);
+    }
+  });
+});

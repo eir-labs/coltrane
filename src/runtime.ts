@@ -1780,9 +1780,25 @@ export async function runGig(
         // already sealed into this output's input_shas — so no lookup is invented.
         if (domain_type === "lineage-verdict") {
           const target = approvalInputs.find((i) => i.domain_type === "lineage-record") ?? approvalInputs[0];
+          // An ENTRY human chair (depends_on []) has no upstream outputs — the record it approves
+          // arrived in the dispatch payload. lineage-adopt-v0 is exactly that shape, and exists to
+          // be: a record composed by any standard can be brought to a seat without re-running the
+          // work that made it. Reading only from approvalInputs made the adoption blind to every
+          // record seeded that way, which is every record that standard will ever see.
+          //
+          // Found by running it, not by testing it: five integration tests passed because all of
+          // them seated the human chair downstream of a compose phase. They encoded the assumption
+          // instead of testing it.
+          //
+          // The payload record carries no content_sha — it has not been sealed by THIS gig — so the
+          // reference falls back to its id. LineageRecordRefSchema admits exactly this: record_ref
+          // is "content_sha (OR SLUG) of the sealed lineage-record". Prefer the sha when a real
+          // upstream output exists; use the slug when the record came in from outside.
+          const seeded = gigInput["lineage-record"] as Record<string, unknown> | undefined;
+          const seededId = typeof seeded?.["id"] === "string" ? (seeded["id"] as string) : "";
           const decision = lineageAdoption({
             verdict: (approval ?? null) as Record<string, unknown> | null,
-            record_ref: target?.content_sha ?? "",
+            record_ref: target?.content_sha ?? seededId,
             sealed_at: rec.created_at,
           });
           emit({

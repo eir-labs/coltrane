@@ -98,3 +98,50 @@ describe("the adoption decision is reached at the human seal", () => {
     expect(adoption).toHaveLength(0);
   });
 });
+
+describe("the ENTRY human chair — a record seeded from the dispatch payload", () => {
+  // lineage-adopt-v0's only chair is human with depends_on []. Every test above seats the human
+  // chair downstream of a compose phase, so every one of them passed while the real standard's
+  // adoption was blind. This is the case that was missing, and it is the only shape that standard
+  // will ever run in.
+  const entryStd = () => composeStandard({
+    // input_types declares that the GIG supplies the record — which is how composeStandard
+    // permits an entry chair to require a type no upstream chair produces. The real
+    // lineage-adopt-v0 declares exactly this.
+    slug: "adopt-only", domain: "lineage", agents: [], input_types: ["lineage-record"],
+    phases: [
+      { name: "approve", chairs: [{ role: "approve", human: true, agent_slug: "", depends_on: [], input_contract: ["lineage-record"], output_contract: ["lineage-verdict"], optional_outputs: [], required_skills: [] }] },
+    ] as PhaseDef[],
+  });
+
+  async function runEntry(payload: Record<string, unknown>, approval: Record<string, unknown>) {
+    const events: GigProgressEvent[] = [];
+    await runGig(entryStd(), payload, {
+      outputs: createOutputStore(createRegistry(TYPES)),
+      ledger: new MemoryLedger(),
+      invoke: vi.fn() as unknown as AgentInvoker,
+      approvals: { approve: approval },
+      approved_by: "eugene",
+      onProgress: (ev: GigProgressEvent) => events.push(ev),
+    } as never);
+    return events.filter((e) => e.type === "lineage_adoption");
+  }
+
+  it("adopts a payload-seeded record by its slug id", async () => {
+    const a = await runEntry(
+      { "lineage-record": { id: "lineage-record--subject--abc", connections: [] } },
+      { pass: true, approver: "eugene", checks: CHECKS },
+    );
+    expect(a).toHaveLength(1);
+    expect(a[0]).toMatchObject({ adopt: true, record_ref: "lineage-record--subject--abc", approved_by: "eugene" });
+  });
+
+  it("still refuses when the payload record has no id to reference", async () => {
+    const a = await runEntry(
+      { "lineage-record": { connections: [] } },
+      { pass: true, approver: "eugene", checks: CHECKS },
+    );
+    expect(a[0]).toMatchObject({ adopt: false });
+    expect((a[0] as { refusals?: string[] }).refusals).toContain("no-record-ref");
+  });
+});

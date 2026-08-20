@@ -21,6 +21,8 @@ const TYPES: DomainType[] = [
     schema: { type: "object", properties: { connections: { type: "array" } } }, required_fields: [] },
   { slug: "lineage-verdict", extends: "Verdict", domain: "lineage",
     schema: { type: "object", properties: { pass: { type: "boolean" }, approver: { type: "string" }, rationale: { type: "string" }, checks: { type: "array" } } }, required_fields: [] },
+  { slug: "lineage-adoption-target", extends: "Signal", domain: "lineage",
+    schema: { type: "object", properties: { institution_slug: { type: "string" } } }, required_fields: [] },
   { slug: "some-other-verdict", extends: "Verdict", domain: "test",
     schema: { type: "object", properties: { pass: { type: "boolean" }, approver: { type: "string" }, checks: { type: "array" } } }, required_fields: [] },
 ];
@@ -48,7 +50,7 @@ const std = (verdictType: string) => composeStandard({
 async function run(verdictType: string, approval: Record<string, unknown>) {
   const events: GigProgressEvent[] = [];
   const registry = createRegistry(TYPES);
-  const res = await runGig(std(verdictType), {}, {
+  const res = await runGig(std(verdictType), { "lineage-adoption-target": { institution_slug: "studio" } }, {
     outputs: createOutputStore(registry),
     ledger: new MemoryLedger(),
     invoke: vi.fn(async () => RECORD) as unknown as AgentInvoker,
@@ -64,7 +66,7 @@ describe("the adoption decision is reached at the human seal", () => {
     const { res, adoption } = await run("lineage-verdict", { pass: true, approver: "eugene", rationale: "grounded", checks: CHECKS });
     expect(res.status).not.toBe("awaiting_approval");
     expect(adoption).toHaveLength(1);
-    expect(adoption[0]).toMatchObject({ type: "lineage_adoption", role: "approve", adopt: true, approved_by: "eugene" });
+    expect(adoption[0]).toMatchObject({ type: "lineage_adoption", role: "approve", adopt: true, approved_by: "eugene", institution_slug: "studio" });
   });
 
   it("names the record the verdict approved — not some other output", async () => {
@@ -129,7 +131,8 @@ describe("the ENTRY human chair — a record seeded from the dispatch payload", 
 
   it("adopts a payload-seeded record by its slug id", async () => {
     const a = await runEntry(
-      { "lineage-record": { id: "lineage-record--subject--abc", connections: [] } },
+      { "lineage-record": { id: "lineage-record--subject--abc", connections: [] },
+        "lineage-adoption-target": { institution_slug: "studio" } },
       { pass: true, approver: "eugene", checks: CHECKS },
     );
     expect(a).toHaveLength(1);
@@ -138,7 +141,8 @@ describe("the ENTRY human chair — a record seeded from the dispatch payload", 
 
   it("still refuses when the payload record has no id to reference", async () => {
     const a = await runEntry(
-      { "lineage-record": { connections: [] } },
+      { "lineage-record": { connections: [] },
+        "lineage-adoption-target": { institution_slug: "studio" } },
       { pass: true, approver: "eugene", checks: CHECKS },
     );
     expect(a[0]).toMatchObject({ adopt: false });

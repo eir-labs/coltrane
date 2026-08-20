@@ -25,7 +25,8 @@
             "change-context"
           ],
           "optional_outputs": [],
-          "required_skills": []
+          "required_skills": [],
+          "turn_reserve": 12
         }
       ]
     },
@@ -45,7 +46,8 @@
             "change-decision"
           ],
           "optional_outputs": [],
-          "required_skills": []
+          "required_skills": [],
+          "turn_reserve": 8
         }
       ]
     },
@@ -70,7 +72,8 @@
           "required_skills": [],
           "preferred_skills": [
             "structure-conformance"
-          ]
+          ],
+          "turn_reserve": 8
         }
       ]
     },
@@ -115,7 +118,8 @@
             "change-set"
           ],
           "optional_outputs": [],
-          "required_skills": []
+          "required_skills": [],
+          "turn_reserve": 14
         }
       ]
     },
@@ -139,7 +143,8 @@
             "change-verdict"
           ],
           "optional_outputs": [],
-          "required_skills": []
+          "required_skills": [],
+          "turn_reserve": 10
         }
       ]
     },
@@ -163,7 +168,8 @@
             "pull-request"
           ],
           "optional_outputs": [],
-          "required_skills": []
+          "required_skills": [],
+          "turn_reserve": 8
         }
       ]
     }
@@ -178,5 +184,6 @@
     "change-verdict",
     "pull-request"
   ],
-  "description": "Governed dev loop, RED-first: context → decision → plan → SEALED RED LAWS → build → verify → PR. draft-laws seats red-spec-drafter (holds tests/**, cannot reach src/) and its sealed red-spec is a required input of write-change, verify-change and publish-pr — so the builder cannot begin before the laws exist, and the verifier checks every sealed law is present, unmodified and green."
+  "description": "Governed dev loop, RED-first: context → decision → plan → SEALED RED LAWS → build → verify → PR. draft-laws seats red-spec-drafter (holds tests/**, cannot reach src/) and its sealed red-spec is a required input of write-change, verify-change and publish-pr. Every chair carries a turn_reserve so a seat that spends its budget gathering can still close out and seal.",
+  "reserve_pool": 60
 }

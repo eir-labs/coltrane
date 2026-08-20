@@ -23,10 +23,10 @@
           "output_contract": [
             "change-context"
           ],
+          "optional_outputs": [],
           "required_skills": []
         }
-      ],
-      "intent": "Read the material the change lands in, to the declared boundary and no further: entry points, the files the change plausibly touches, the checks that already cover the region, the conventions it must hold to — and the unknowns, which are part of the reading, not a failure of it. No decision is taken here."
+      ]
     },
     {
       "name": "frame-change",
@@ -43,10 +43,10 @@
           "output_contract": [
             "change-decision"
           ],
+          "optional_outputs": [],
           "required_skills": []
         }
-      ],
-      "intent": "Fix the direction from the reading: scope, non-goals, stop condition, and the alternatives set aside with their reasons. Stated before any structure exists, so the structure is answerable to it. Settled for the run — later phases append observations, never revisions."
+      ]
     },
     {
       "name": "plan-change",
@@ -65,13 +65,13 @@
           "output_contract": [
             "change-plan"
           ],
+          "optional_outputs": [],
           "required_skills": [],
           "preferred_skills": [
             "structure-conformance"
           ]
         }
-      ],
-      "intent": "Settle the structure the change will be built through: ordered steps with explicit dependencies, the checks that land FIRST together with what each reports while the change is absent, the paths the plan commits to touching, and the tradeoff at every step where more than one structure would have served."
+      ]
     },
     {
       "name": "create-change",
@@ -88,10 +88,10 @@
           "output_contract": [
             "change-set"
           ],
+          "optional_outputs": [],
           "required_skills": []
         }
-      ],
-      "intent": "Make the change the plan implies by WRITING it directly into the isolated working tree — every file it requires, created new or edited in place, however many that takes. The change lands as real files and the change-set is the real diff captured from the tree; this seat does not emit a patch for another to apply, and it does not verify its own work. Where the build departs from the plan, the departure is recorded with its reason."
+      ]
     },
     {
       "name": "verify-change",
@@ -110,10 +110,10 @@
           "output_contract": [
             "change-verdict"
           ],
+          "optional_outputs": [],
           "required_skills": []
         }
-      ],
-      "intent": "RUN the checks the plan fixed against the working tree the implementer has already written — build and tests, nothing to apply — then measure the change against its commitments criterion by criterion from the actual run: which acceptance criteria the run confirms green, where scope drifted, and which checks could not be executed. A criterion passes only when a real test asserted it and that test went green in this run; a check that could not run is unverified, never a pass; a red run is reported verbatim. The seat that clears the change is the seat that ran it."
+      ]
     },
     {
       "name": "publish-pr",
@@ -132,20 +132,20 @@
           "output_contract": [
             "pull-request"
           ],
+          "optional_outputs": [],
           "required_skills": []
         }
-      ],
-      "intent": "Turn the verified change into an open pull request the pipeline cannot merge. The change is already on disk and confirmed by the verifier; commit exactly what is in the working tree to a fresh non-main branch, push it, and open exactly one PR whose body carries the rationale and the verifier's verdict. A failed verdict is not published — it is surfaced as a caveat and the seat stops. Landing the PR on main is a human governor's act on green CI, external to this run."
+      ]
     }
   ],
   "input_types": [
-    "change-request"
+    "change-request",
+    "change-context"
   ],
   "output_types": [
     "change-set",
     "change-verdict",
     "pull-request"
   ],
-  "max_examine_rounds": 3,
-  "description": "The full governed dev-loop: read the material, fix the direction, settle the structure, WRITE the change into an isolated working tree, RUN it to say whether what was built is what was decided, and open it as a pull request the seat that built it cannot merge. The implementer HOLDS the tree — it writes the change directly with the real file-editing interface (any number of files) and seals the change-set as the real captured diff, so the change that gets reviewed is the change that exists; there is no hand-authored patch to apply. The verify seat then EXECUTES against that tree — build and tests — so a change is cleared by a real run, never by argument; and a failing run is not the end: max_examine_rounds budgets the examine⇄amend loop, so a red verdict re-runs the writer (the failing verdict fed back) and re-verifies, iterating to green or stopping honestly at the bound. The publish seat commits exactly what is on disk. The seams hold: the seat that reads does not decide, the seat that decides does not build, the seat that builds does not judge its own work, and the seat that publishes does not merge. The cage is the isolated tree, not a missing tool. Landing on the protected main line is a human governor's act on green CI, not the pipeline's."
+  "description": "The governed dev loop, dispatchable WITH its grounding. Reads context, frames the change, plans it, writes it, verifies by running the checks, and opens a pull request a human lands. `change-context` is declared a seedable input alongside `change-request` (#424 I9): the reading chair's product may arrive from any of four interchangeable producers — a reader, the src/repo_index.ts compiler, a prior standard, or a human — and the runtime's existing seeding seam satisfies a chair's contract from an upstream output OR from the gig payload. A dispatch that already holds a reading need not pay a premium seat to re-derive it; a dispatch that does not, still runs exactly as before."
 }

@@ -40,6 +40,11 @@ describe("CitationSchema — a citation is resolvable or it is prose", () => {
     locator: "89(3): 582–600",
     doi: "10.2307/2082975",
     evidence_grade: "archive" as const,
+    // An archive grade CLAIMS a fetch, so the fixture must carry when that fetch happened —
+    // this is the same date the GENOME_ATTRIBUTIONS row for Crawford & Ostrom records. Before
+    // the CitationSchema refinement this fixture was itself an ungrounded archive claim: the
+    // test guarding the grade used the illegal state as its example of a complete citation.
+    retrieved_at: "2026-08-13",
   };
 
   it("parses a complete citation loss-free", () => {

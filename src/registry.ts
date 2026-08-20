@@ -29,7 +29,15 @@ export const RESOLVE_WEIGHTS = {
 // explicit PROJECTION of the single Zod source (genome_schema.ts DomainTypeOutput), not a third
 // hand-written restatement. The persisted record additionally carries version/status/description,
 // which the registry doesn't use; deriving the shared fields keeps them from drifting from the source.
-export type DomainType = Pick<DomainTypeOutput, "slug" | "extends" | "domain" | "schema" | "required_fields">;
+// `version` is intersected in as OPTIONAL rather than added to the Pick key list: DomainTypeOutput.version
+// is a non-optional number (genome_schema.ts, z.number().default(1)), so putting it inside the Pick would
+// force every DomainType literal — 50+ in tests, plus the type_register handler — to carry a version and
+// break compilation. Optional is strictly sufficient: the type_extend handler reads `baseDef.version ?? 1`,
+// which resolves to the real version when a builder supplied it (loadRegistry, genome_reload) and 1 for the
+// projections that legitimately don't (a freshly registered type is always v1). Carrying version lets a
+// version DECISION (proposeTypeChange: next_version = base.version + 1) read a real base version instead of
+// a hardcoded constant — the fix for PR #433 AC6, where a second extend must reach v3.
+export type DomainType = Pick<DomainTypeOutput, "slug" | "extends" | "domain" | "schema" | "required_fields"> & { version?: number };
 
 export interface ResolveQuery {
   extends: string;
@@ -241,8 +249,19 @@ export function createRegistry(initial: DomainType[] = []): Registry {
   const types = new Map<string, DomainType>();
   for (const def of initial) types.set(def.slug, def);
 
-  function score(query: ResolveQuery): ResolveResult {
-    const candidates = [...types.values()].filter((t) => t.extends === query.extends);
+  // `exclude` names slugs that must not be scored as candidates. It exists so
+  // registerType can ask "does a DIFFERENT type duplicate this one?" — the query
+  // carries no slug, so without this a type's own prior version (same extends,
+  // domain and required_fields by construction) scores ~100 against its next
+  // version and registration is refused as a self-duplicate (the defect PR #432
+  // routed around via replaceTypes). resolveType passes nothing: its question is
+  // "what should I reuse?", where a same-slug match is a meaningful reuse target
+  // and must keep surfacing — so the exclusion is scoped to registerType's
+  // callsite, not baked into this shared closure.
+  function score(query: ResolveQuery, exclude?: ReadonlySet<string>): ResolveResult {
+    const candidates = [...types.values()].filter(
+      (t) => t.extends === query.extends && !(exclude?.has(t.slug) ?? false),
+    );
     if (candidates.length === 0) return { score: 0, action: "create", candidates: [] };
     let best = 0;
     for (const c of candidates) {
@@ -284,11 +303,33 @@ export function createRegistry(initial: DomainType[] = []): Registry {
         ...dt.required_fields,
       ]),
     ];
+    // Thread the authored CONDITIONAL keywords through the reconstruction. Before this, effective()
+    // rebuilt the schema as ONLY {type, properties, required, additionalProperties} and dropped any
+    // top-level if/then, allOf, dependentRequired, etc. — so a conditional constraint authored in a
+    // domain-type JSON (e.g. prior-art-hit's "verified:true requires verification_method") never
+    // reached ajv.compile and was a silent no-op. A cross-field obligation must survive into the one
+    // schema both the seal (validate) and the producer prompt read, or the contract does not exist.
+    const conditional: Record<string, unknown> = {};
+    for (const kw of [
+      "if",
+      "then",
+      "else",
+      "allOf",
+      "anyOf",
+      "oneOf",
+      "not",
+      "dependentRequired",
+      "dependentSchemas",
+    ] as const) {
+      const v = (dt.schema as Record<string, unknown>)[kw];
+      if (v !== undefined) conditional[kw] = v;
+    }
     return {
       type: "object",
       properties: { ...baseProps, ...ownProps },
       required: declaredRequired,
       additionalProperties,
+      ...conditional,
     };
   }
 
@@ -299,7 +340,14 @@ export function createRegistry(initial: DomainType[] = []): Registry {
       }
       const defect = domainTypeDefect(def);
       if (defect) throw new Error(`domain type "${def.slug}" rejected: ${defect}`);
-      const resolved = score({ extends: def.extends, domain: def.domain, required_fields: def.required_fields });
+      // Exclude the registrar's OWN slug: a type can never be a duplicate of a
+      // DIFFERENTLY-NAMED type by matching itself. Every other candidate is scored
+      // exactly as before, so a genuinely similar type under a different slug is
+      // still refused at >=80 — reuse enforcement's actual purpose is untouched.
+      const resolved = score(
+        { extends: def.extends, domain: def.domain, required_fields: def.required_fields },
+        new Set([def.slug]),
+      );
       if (resolved.score >= 80) {
         throw new Error(`reuse enforcement: an existing type scores ${resolved.score} (>=80)`);
       }
@@ -414,6 +462,10 @@ export function loadRegistry(genome: LoadedGenome): Registry {
     domain: d.domain,
     schema: d.schema as Record<string, unknown>,
     required_fields: [...d.required_fields],
+    // Carry the real on-disk version into the in-memory map so a version DECISION reads it.
+    // Without this a restart re-reads every type as version-less and a subsequent extend would
+    // fall back to `?? 1`, re-bumping a v3 type to v2 (PR #433 AC6, the second-extend defect).
+    version: d.version,
   }));
   return createRegistry(defs);
 }

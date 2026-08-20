@@ -72,6 +72,14 @@ export function sealDefinition(
   genome_dir: string | undefined,
   subdir: string,
   detail?: Record<string, unknown>,
+  // The FILE this definition materialises to, when its ledger identity (`slug`) and its
+  // on-disk filename must differ. A version-producing seal (type_extend) records the versioned
+  // identity `<slug>@v<n>` in the ledger — the subject the substrate reasons about — while the
+  // loader keys domain types by version from file CONTENT and resolves the bare `<slug>.json`
+  // (DomainTypeMap.get). An `@v` filename would be an unresolvable file the loader never reads —
+  // the same defect wearing a version number. Defaults to `slug`, so every existing caller
+  // (type_register, standard_compose) writes `<slug>.json` exactly as before.
+  fileSlug: string = slug,
 ): { content_hash: string; dependency_hash: string; effective_hash: string } {
   const content_hash = sha256Hex(canonJson(def));
   const dependency_hash = EMPTY_DEPENDENCY_HASH;
@@ -99,7 +107,7 @@ export function sealDefinition(
       // #234 — the authoring rationale, which the tools accepted and dropped.
       ...(detail && Object.keys(detail).length ? { detail } : {}),
     });
-    writeGenomeFileVersioned(genome_dir, subdir, slug, JSON.stringify(def, null, 2) + "\n");
+    writeGenomeFileVersioned(genome_dir, subdir, fileSlug, JSON.stringify(def, null, 2) + "\n");
   }
   return { content_hash, dependency_hash, effective_hash };
 }

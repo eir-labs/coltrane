@@ -96,6 +96,37 @@ describe("the clone itself", () => {
     expect(existsSync(ws.dir)).toBe(false);
   });
 
+  it("clones into a SUPPLIED target directory — the one addition a venue room needs, token still off disk", () => {
+    // A venue room clones into `<realizationDir>/workspace` rather than cloneInto's own tmpdir, so the
+    // seat's cwd IS the room's tree. The credential path is unchanged: the token still never lands in
+    // .git/config. This is the same clone mechanism, one optional argument wider — not a second one.
+    const origin = mkdtempSync(join(tmpdir(), "ws-tgt-origin-"));
+    execFileSync("git", ["init", "--quiet", "--bare", "--initial-branch=main", origin]);
+    const seed = mkdtempSync(join(tmpdir(), "ws-tgt-seed-"));
+    execFileSync("git", ["init", "--quiet", "--initial-branch=main", seed]);
+    writeFileSync(join(seed, "IN_TREE"), "present");
+    const g = (args: string[]) => execFileSync("git", ["-C", seed, ...args], {
+      env: { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" },
+    });
+    g(["add", "-A"]); g(["commit", "--quiet", "-m", "seed"]);
+    g(["remote", "add", "origin", origin]); g(["push", "--quiet", "origin", "HEAD:refs/heads/main"]);
+
+    // The caller names WHERE the clone lands — a path that does not yet exist under a dir it controls.
+    const realizationDir = mkdtempSync(join(tmpdir(), "ws-tgt-realization-"));
+    const target = join(realizationDir, "workspace");
+    const ws = cloneInto(origin, "ghs_supersecret_token", target);
+    try {
+      expect(ws.dir, "the clone lands in the supplied directory, not a throwaway tmpdir").toBe(target);
+      expect(existsSync(join(target, "IN_TREE")), "the tree is populated at the supplied path").toBe(true);
+      const cfg = readFileSync(join(target, ".git", "config"), "utf8");
+      expect(cfg, "the token still never touches disk when a target is supplied").not.toContain("ghs_supersecret_token");
+      expect(cfg).not.toContain("x-access-token");
+    } finally {
+      ws.cleanup();
+    }
+    expect(existsSync(target), "cleanup removes the supplied clone directory too").toBe(false);
+  });
+
   it("a clone that fails leaves no directory behind, and says why", () => {
     // An unreachable remote, not an empty one — git clones an empty repository quite happily, so
     // the first draft of this law asserted a throw that never came.

@@ -1,5 +1,5 @@
 import type { ChangeClass } from "./type_versioning.js";
-import { zodToMcpProps, AgentSchema, StandardSchema, SkillSchema, DomainTypeSchema, ChartSchema, VenueObjectSchema } from "./genome_schema.js";
+import { zodToMcpProps, AgentSchema, StandardSchema, SkillSchema, DomainTypeSchema, ChartSchema, VenueObjectSchema, OrgMemberSchema } from "./genome_schema.js";
 
 export type MCPCategory =
   | "understand"
@@ -153,7 +153,7 @@ export const MCP_TOOLS: readonly MCPToolDef[] = [
   // refusing; a supplied `input` leaves this false, so a disagreeing payload still gates
   // (src/runtime.ts). The handler reads it, so #234 requires it be advertised here — it is a real
   // control, not an internal signal, and a caller must be able to find it.
-  { slug: "gig_dispatch",                  category: "run", input_schema: obj({ standard_slug: "string", chart_slug: "string", venue: "string", acting_for: "string", input: "object", gig_input_omitted: "boolean", depth: "string", wait: "boolean", budget: "object", resume_gig_id: "string", reuse: "boolean", approvals: "object", approved_by: "string" }), output_schema: obj({ gig_id: "string", status: "string", awaiting: "object", depth: "string", manifest: "object", resumed_from: "string", reuse: "boolean", resume_refused: "boolean", drift: "array" }) },
+  { slug: "gig_dispatch",                  category: "run", input_schema: obj({ standard_slug: "string", chart_slug: "string", venue: "string", repo_url: "string", acting_for: "string", input: "object", gig_input_omitted: "boolean", depth: "string", wait: "boolean", budget: "object", resume_gig_id: "string", reuse: "boolean", approvals: "object", approved_by: "string" }), output_schema: obj({ gig_id: "string", status: "string", awaiting: "object", depth: "string", manifest: "object", resumed_from: "string", reuse: "boolean", resume_refused: "boolean", drift: "array" }) },
   // `skipped_chairs` / `resumed_from` / `reuse_rejected` are the ASYNC path's only report of a
   // saving — the manifest never reaches a caller who dispatched without `wait`.
   // `awaiting` names the human chair a parked run stopped at. On the async path — the DEFAULT
@@ -190,12 +190,24 @@ export const MCP_TOOLS: readonly MCPToolDef[] = [
   // deliberately NO read-back verb (see the venue_credential_* exact-list law) and NO authorization
   // policy in the engine — who may mint lives in the store.
   { slug: "venue_credential_mint",         category: "run", input_schema: obj({ org_slug: "string", instance: "string" }), output_schema: obj({ instance: "string", env: "object", credential_classes: "array", expires_at: nullable("string") }) },
+  // org_hire — the verb that ADMITS an agent to an org. The org-membership analogue of
+  // venue_credential_mint: the engine ships the schema and its refusals, a deployment wires the
+  // admission backend (deps.hireMember). `input_schema` is derived from the single Zod source
+  // (OrgMemberSchema = {org_slug, agent_slug}) — never a hand-written MCP schema — precisely so no
+  // field a capability could travel can appear on it. ADMISSION IS NOT AUTHORITY: membership is
+  // BELONGING, seating (a chair, caps, an assignment) is a SEPARATE act with its own gate, and a
+  // verb that could admit AND seat in one call would be a path to mint authority. The verb carries
+  // exactly the two fields that name the belonging and nothing more. It is intercepted in
+  // callSurfaceTool BEFORE the hosted check, so it appears in neither HOSTED_UPSERT (a hire writes
+  // no genome file) nor HOSTED_BLOCKED (it is callable in hosted mode); a successful hire is sealed
+  // to the ledger as a kind:"genome_mutation" row, so who-hired-whom is auditable, not only a store row.
+  { slug: "org_hire",                      category: "run", input_schema: obj(zodToMcpProps(OrgMemberSchema)), output_schema: obj({ org_slug: "string", agent_slug: "string" }) },
   // #234 — `gig_id`, `agent_slug` and `phase` were read by the handler and advertised nowhere.
   // This one had teeth: a skill prompt written against this schema omits `gig_id`, the handler
   // defaults it to "", and the sealed output lands in the store attached to NO gig. A live run
   // of the consuming product produced 509 such orphans. The provenance chain is the engine's
   // core promise, and the field that anchors an output to its run was undiscoverable.
-  { slug: "output_write",                  category: "run", input_schema: obj({ core_type: "string", primitive: "string", domain_type: "string", domain_type_version: "number", domain: "string", data: "object", input_refs: "array", refs: "array", gig_id: "string", agent_slug: "string", phase: "string", cost_usd: "number", tokens_used: "number", duration_ms: "number", model: "string", model_tier: "string" }), output_schema: obj({ output_id: "string", primitive: "string", output: "object", validation_result: "object", validated: "boolean" }) },
+  { slug: "output_write",                  category: "run", input_schema: obj({ core_type: "string", primitive: "string", domain_type: "string", domain_type_version: "number", domain: "string", data: "object", input_refs: "array", refs: "array", gig_id: "string", agent_slug: "string", phase: "string", cost_usd: "number", tokens_used: "number", duration_ms: "number", model: "string", model_tier: "string" }), output_schema: obj({ output_id: "string", primitive: "string", output: "object", validation_result: "object", validated: "boolean", sealed: "boolean" }) },
 
   { slug: "agent_validate_pipeline",       category: "improve", input_schema: obj({ agents: "array", standard_slug: "string", slug: "string", domain: "string", primitives: "array", phases: "array" }), output_schema: obj({ valid: "boolean", graph: "object", unsatisfied_inputs: "array", illegal_progressions: "array" }) },
   // #238 — success_rate and trend are NULLABLE, because the engine genuinely cannot compute

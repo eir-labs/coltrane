@@ -17,9 +17,40 @@
  *
  *  Gated on a live daemon, and the gate is visible: without docker these SKIP, they do not pass. A
  *  law that silently succeeds where it cannot run is the hollow-green this repo refuses. */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi, afterEach } from "vitest";
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, mkdtempSync, writeFileSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+afterEach(() => vi.unstubAllGlobals());
+
+/** A LOCAL bare repository with one committed file — the same no-network pattern tests/workspace.test.ts
+ *  clones from. A room's tree comes from THIS, so a live floor law can prove population without reaching
+ *  GitHub. Returns the bare repo path (the room's `repo_url`) and the marker committed into it. */
+function seedBareRepo(marker: string): { origin: string; marker: string } {
+  const origin = mkdtempSync(join(tmpdir(), "room-origin-"));
+  execFileSync("git", ["init", "--quiet", "--bare", "--initial-branch=main", origin]);
+  const seed = mkdtempSync(join(tmpdir(), "room-seed-"));
+  execFileSync("git", ["init", "--quiet", "--initial-branch=main", seed]);
+  writeFileSync(join(seed, "README.md"), marker);
+  const g = (a: string[]): void => {
+    execFileSync("git", ["-C", seed, ...a], {
+      env: { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" },
+    });
+  };
+  g(["add", "-A"]); g(["commit", "--quiet", "-m", "seed"]);
+  g(["remote", "add", "origin", origin]); g(["push", "--quiet", "origin", "HEAD:refs/heads/main"]);
+  return { origin, marker };
+}
+
+/** The per-gig git-credential mint prepareWorkspace calls before cloning. A LOCAL bare-repo clone never
+ *  offers the token (git challenges no local path), so any token satisfies the mint; stubbing it is what
+ *  lets a live docker law populate a tree without a real credentials endpoint. Returns the sentinel token
+ *  so a law can prove it never lands on the host filesystem. */
+function stubGitCredential(token: string): void {
+  vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ token }), { status: 200 })));
+}
 
 /** A daemon is not enough: the room is realized ON `coltrane/room:ephemeral`, which is BUILT from
  *  Dockerfile.room and published nowhere. A host with docker but without that image sends compose to
@@ -405,6 +436,180 @@ describe.skipIf(!HAVE_FLOOR)("two concurrent gigs get their own room — the sea
     // No realization directory left behind for either gig (they live under tmpdir/coltrane-realizations).
     for (const h of [handleA, handleB]) {
       expect(existsSync(h.seat!.workspace), `no realization workspace may survive teardown: ${h.seat!.workspace}`).toBe(false);
+    }
+  }, 300_000);
+});
+
+// ── THE ROOM'S WORKSPACE IS POPULATED WITH A WORKING TREE ────────────────────────────────────────
+//
+// The concurrent law above proves TWO EMPTY workspaces are disjoint. These prove the join this change
+// exists for: a realized room's workspace CONTAINS a working tree, cloned from the repository the RUN
+// names (opts.repoUrl) through the SAME prepareWorkspace the drain uses — so a seat inside the room has a
+// repository to edit, and two populated rooms are still disjoint. LIVE, because only a real container
+// with a real bind-mounted clone can show a seat reading a repository file at its cwd.
+//
+// A floored venue. The repository is NOT a venue field — it is named on the RUN and supplied through
+// `opts.repoUrl` at each realize() call below (the bare repo path is per-test, via mkdtempSync).
+function flooredRepoRoom(slug: string): unknown {
+  return {
+    slug,
+    institution_slug: "quartet",
+    equipment: { tools: ["mcp__notes__search"] },
+    credential_surface: [],
+    floor: "seat",
+    mcp_servers: [
+      { slug: "notes", transport: "stdio" as const, command: ["node", "/app/dist/src/server_entry.js"], credential_names: [] },
+    ],
+    lifecycle: { policy: "ephemeral" as const },
+  };
+}
+
+describe.skipIf(!HAVE_FLOOR)("a realized room's workspace contains a working tree", () => {
+  // ★ LAW (a): WORKING TREE IN THE ROOM. FAILS AGAINST CURRENT (pre-change) CODE. Before this join the
+  // workspace was an empty `mkdirSync(join(realizationDir, "workspace"))` in venue_realizer.ts and
+  // nothing else — no repository file existed at the seat's cwd, so the `cat README.md` below exits
+  // non-zero and this law is RED. The populate branch (prepareWorkspace clones into that same
+  // workspace) makes it GREEN. This is intentional per stop-condition (a): the law must fail against
+  // the empty mkdir.
+  it("a seat exec'd into the room reads a repository file at its cwd — the tree is populated", async () => {
+    const { dockerComposeRealizer } = await realizer();
+    const { origin, marker } = seedBareRepo("hello-from-the-cloned-tree-a1");
+    stubGitCredential("ghs_room_token_a");
+    const gigId = "treelawa-0000-0000-0000-00000000000a"; // distinct 8-char slice → own compose project
+    const handle = await dockerComposeRealizer().realize(flooredRepoRoom("tree-room-a"), noCredentials, {
+      gigId, repoUrl: origin, drainKey: "dk", instance: "box", gitCredentialsEndpoint: "https://x/api",
+    });
+    try {
+      expect(handle.seat, "a floored room carries a seat descriptor — the seat runs IN the room").toBeTruthy();
+
+      // NON-VACUITY: the room must be RUNNING, or a failed read below would pass for the wrong reason.
+      const state = spawnSync("docker", ["inspect", "-f", "{{.State.Status}}", handle.seat!.container], { encoding: "utf8" });
+      expect(state.stdout.trim(), "the room must be running to exec a seat into it").toBe("running");
+
+      // The seat's cwd IS handle.seat.workspace, and the clone landed THERE — so the committed file is
+      // present at the seat's working directory. Pre-change (empty mkdir) this file does not exist.
+      const read = spawnSync(
+        "docker",
+        ["exec", "-w", handle.seat!.workspace, handle.seat!.container, "cat", "README.md"],
+        { encoding: "utf8" },
+      );
+      expect(read.status, "docker exec cat README.md at the seat's cwd — the workspace must contain the tree").toBe(0);
+      expect(read.stdout, "the seat reads the repository file from its own populated working tree").toContain(marker);
+    } finally {
+      await handle.teardown();
+    }
+  }, 300_000);
+
+  // ★ LAW (d), POPULATED VARIANT: ISOLATION SURVIVES POPULATION. The empty-workspace isolation law
+  // above (":two concurrent gigs…") stays as-is and GREEN; this extends it onto CLONED trees — two
+  // rooms realized concurrently, each from its own repo_url, each get their OWN populated clone, and a
+  // write in room A's tree is invisible in room B's. The disjointness marker is now a file FROM the
+  // cloned tree (README.md), not a bare docker-exec touch. RED before the change: both workspaces were
+  // empty, so there was no cloned tree to prove disjoint population.
+  it("two rooms realized concurrently get DISJOINT populated trees — a write in one is invisible in the other", async () => {
+    const { dockerComposeRealizer } = await realizer();
+    const a = seedBareRepo("tree-A-original");
+    const b = seedBareRepo("tree-B-original");
+    stubGitCredential("ghs_room_token_d");
+    const gigA = "treeda11-0000-0000-0000-0000000000da";
+    const gigB = "treedb22-0000-0000-0000-0000000000db";
+    const realizer0 = dockerComposeRealizer();
+
+    // CONCURRENTLY — the condition that corrupted one shared tree when both seats resolved to the host.
+    const [handleA, handleB] = await Promise.all([
+      realizer0.realize(flooredRepoRoom("tree-room-da"), noCredentials, {
+        gigId: gigA, repoUrl: a.origin, drainKey: "dk", instance: "box", gitCredentialsEndpoint: "https://x/api",
+      }),
+      realizer0.realize(flooredRepoRoom("tree-room-db"), noCredentials, {
+        gigId: gigB, repoUrl: b.origin, drainKey: "dk", instance: "box", gitCredentialsEndpoint: "https://x/api",
+      }),
+    ]);
+    try {
+      expect(handleA.seat!.workspace, "each gig's seat cwd is its OWN workspace").not.toBe(handleB.seat!.workspace);
+
+      for (const c of [handleA.seat!.container, handleB.seat!.container]) {
+        const state = spawnSync("docker", ["inspect", "-f", "{{.State.Status}}", c], { encoding: "utf8" });
+        expect(state.stdout.trim(), `${c} must be running`).toBe("running");
+      }
+
+      // Both trees are POPULATED: each carries the file cloned from its OWN source, not the other's.
+      const readAOrig = spawnSync("docker", ["exec", handleA.seat!.container, "cat", `${handleA.seat!.workspace}/README.md`], { encoding: "utf8" });
+      expect(readAOrig.stdout, "room A holds the tree cloned from A's source").toContain("tree-A-original");
+      const readBOrig = spawnSync("docker", ["exec", handleB.seat!.container, "cat", `${handleB.seat!.workspace}/README.md`], { encoding: "utf8" });
+      expect(readBOrig.stdout, "room B holds the tree cloned from B's source").toContain("tree-B-original");
+
+      // A write into A's cloned tree, from inside room A, must be invisible in B's cloned tree.
+      const wrote = spawnSync(
+        "docker",
+        ["exec", handleA.seat!.container, "sh", "-c", `echo tree-A-mutated > ${handleA.seat!.workspace}/README.md`],
+        { encoding: "utf8" },
+      );
+      expect(wrote.status, "room A can write into its own populated tree").toBe(0);
+
+      const seenInA = spawnSync("docker", ["exec", handleA.seat!.container, "cat", `${handleA.seat!.workspace}/README.md`], { encoding: "utf8" });
+      expect(seenInA.stdout.trim(), "room A observes its own write").toBe("tree-A-mutated");
+
+      const seenInB = spawnSync("docker", ["exec", handleB.seat!.container, "cat", `${handleB.seat!.workspace}/README.md`], { encoding: "utf8" });
+      expect(seenInB.stdout.trim(), "room B cannot observe room A's write — the populated trees are disjoint").toBe(
+        "tree-B-original",
+      );
+    } finally {
+      await handleA.teardown();
+      await handleB.teardown();
+    }
+  }, 300_000);
+
+  // ★ LAW (e): ROOM POSTURE + NO HOST CREDENTIAL, ON A POPULATED ROOM. The posture must not have
+  // widened because a tree was cloned in, AND the git credential minted for population must never land
+  // on the host filesystem — the token rides cloneInto's GIT_CONFIG_* env, never .git/config and never
+  // a host staging file. Inert before the change (no token was minted); it gains teeth once population
+  // mints one via prepareWorkspace.
+  it("a populated room keeps the closed posture, and the populate credential is nowhere on the host", async () => {
+    const { dockerComposeRealizer } = await realizer();
+    const { origin } = seedBareRepo("posture-tree");
+    const SENTINEL = "ghs_populate_sentinel_e5f00d";
+    stubGitCredential(SENTINEL);
+    const gigId = "treelawe-0000-0000-0000-00000000000e";
+    const handle = await dockerComposeRealizer().realize(flooredRepoRoom("tree-room-e"), noCredentials, {
+      gigId, repoUrl: origin, drainKey: "dk", instance: "box", gitCredentialsEndpoint: "https://x/api",
+    });
+    try {
+      const room = handle.seat!.container;
+
+      // NON-VACUITY: the room must exist to inspect its live posture.
+      const inspect = spawnSync("docker", ["inspect", room], { encoding: "utf8" });
+      expect(inspect.status, "docker inspect — the populated room must exist to inspect its posture").toBe(0);
+      const c = (JSON.parse(inspect.stdout) as Array<{
+        HostConfig: { Binds?: string[] | null; Privileged?: boolean; CapAdd?: string[] | null; NetworkMode?: string };
+        Mounts?: Array<{ Source?: string; Destination?: string }>;
+      }>)[0]!;
+
+      const socket = /docker\.sock|containerd\.sock|podman\.sock|\/var\/run\/docker/i;
+      for (const bind of c.HostConfig.Binds ?? []) {
+        expect(socket.test(bind), `no runtime socket may be bound into the populated room: ${bind}`).toBe(false);
+      }
+      for (const m of c.Mounts ?? []) {
+        expect(socket.test(`${m.Source ?? ""}:${m.Destination ?? ""}`), "no runtime socket may be mounted into the populated room").toBe(false);
+      }
+      expect(c.HostConfig.Privileged ?? false, "the populated room is not privileged").toBe(false);
+      expect(c.HostConfig.CapAdd ?? [], "the populated room adds no capabilities").toEqual([]);
+      expect(c.HostConfig.NetworkMode, "the populated room is not on the host network").not.toBe("host");
+
+      // Not root — the seat runs as the invoking user, which owns the cloned bind mount.
+      const who = spawnSync("docker", ["exec", room, "id", "-u"], { encoding: "utf8" });
+      expect(who.stdout.trim(), "the populated room must NOT run as root").not.toBe("0");
+
+      // ★ THE CREDENTIAL IS NOWHERE ON THE HOST. cloneInto passes the token only through GIT_CONFIG_*,
+      // so it is not written into the clone's .git/config, and no host staging file holds it.
+      const gitConfig = readFileSync(join(handle.seat!.workspace, ".git", "config"), "utf8");
+      expect(gitConfig, "the populate token must not be written into the clone's .git/config").not.toContain(SENTINEL);
+      expect(gitConfig, "no credential helper naming the token survives into the tree").not.toContain("x-access-token");
+
+      // And nothing under the whole realization directory holds it either — no host-side staging leak.
+      const grep = spawnSync("grep", ["-rl", SENTINEL, join(handle.seat!.workspace, "..")], { encoding: "utf8" });
+      expect(grep.stdout.trim(), "the populate token must not persist anywhere under the realization directory").toBe("");
+    } finally {
+      await handle.teardown();
     }
   }, 300_000);
 });

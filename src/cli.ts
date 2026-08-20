@@ -26,6 +26,7 @@ import { dispatchTool, bootstrapServerDeps, type ServerDeps, type ToolResult } f
 import { COLTRANE_VERSION } from "./version.js";
 import { workOnce } from "./worker.js";
 import { workerCredentialMode } from "./worker_env.js";
+import { drainPreflight } from "./drain_preflight.js";
 import { makeClaudeInvoker } from "./claude_invoker.js";
 import { dockerComposeRealizer } from "./venue_realizer.js";
 import { readFileSync } from "node:fs";
@@ -51,6 +52,8 @@ export const USAGE = `coltrane ${COLTRANE_VERSION}
   coltrane health                       engine + store health
   coltrane serve                        run the MCP server on stdio
   coltrane work                         claim one queued gig from the org store and run it
+  coltrane work --check                  report whether this box's drain environment is configured
+                                        and exit without claiming (0 ready, 1 not ready)
                                         (env: COLTRANE_STORE_URL, COLTRANE_STORE_ANON,
                                          COLTRANE_AGENT_TOKEN; results drain via
                                          COLTRANE_DRAIN_URL + COLTRANE_DRAIN_KEY;
@@ -207,6 +210,27 @@ export async function runCli(argv: readonly string[], io: CliIO): Promise<number
   // `work` runs against the ORG STORE, not a genome root — the seated agent's token is the
   // read scope and the chair contract is the authorization, so no file genome boots here.
   if (cmd === "work") {
+    // `--check` asks the box a question BEFORE it spends a gig to learn the answer: is this box's
+    // drain environment actually configured? It runs the existing drainPreflight collector — the
+    // single source of what the drain reads, reused so it cannot drift from normalizeWorkerEnv —
+    // renders what it found BY VARIABLE NAME AND PRESENCE (never a value: these vars carry keys),
+    // and returns 0 for a ready box / 1 for an unready one. It claims nothing, contacts no store,
+    // and returns here — before the credential derivation and the workOnce call below.
+    if (flags["check"] === true || flags["check"] === "true") {
+      const report = drainPreflight(process.env);
+      for (const p of report.present) {
+        // Name and class only. `key_class` is a prefix like `cdk_`, never the key itself.
+        line(io, `present  ${p.variable}${p.key_class ? ` (${p.key_class})` : ""}`);
+      }
+      for (const m of report.missing) line(io, `missing  ${m.variable}`);
+      for (const s of report.suspicious) line(io, `suspicious  ${s.variable} — ${s.message}`);
+      // A check that cannot fail is not a check: a satisfied contract is ready (0), and either an
+      // absent required var OR the store/service conflation makes the box unready (1). The specific
+      // reason is in the rendered report; the code only says ready-or-not.
+      const ready = report.missing.length === 0 && report.suspicious.length === 0;
+      line(io, ready ? "drain environment ready" : "drain environment NOT ready");
+      return ready ? 0 : 1;
+    }
     const baseUrl = process.env["COLTRANE_STORE_URL"];
     const anonKey = process.env["COLTRANE_STORE_ANON"];
     // The credential mode is DERIVED IN ONE PLACE — workerCredentialMode in worker_env.ts. The CLI

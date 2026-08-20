@@ -1,0 +1,37 @@
+{
+  "slug": "lineage-adopt-v0",
+  "domain": "lineage",
+  "status": "active",
+  "description": "A LINEAGE ADOPTION brings an already-composed lineage-record to a human seat and nowhere else. It runs no scout, draws no edge, and composes nothing: its single chair is the approval office, seeded directly with the record under review. It exists because the approve office was reachable only as the tail of lineage-pass-v1, which meant a record composed by any other route could never be promoted. lineage-reweave-v0 is exactly that route \u2014 it re-draws the synthesis over reused and deepened seeds and seals a lineage-record with no human chair anywhere in its phase graph, so the strongest record a lineage effort produces was structurally unadoptable. A composition standard should not have to carry an approval office to make its output signable, and an approval office should not have to re-run a synthesis to reach a record. This standard is that seam, held once.",
+  "agent_slugs": [],
+  "phases": [
+    {
+      "name": "approve",
+      "chairs": [
+        {
+          "role": "approve",
+          "agent_slug": "",
+          "human": true,
+          "depends_on": [],
+          "input_contract": [
+            "lineage-record",
+            "lineage-adoption-target"
+          ],
+          "output_contract": [
+            "lineage-verdict"
+          ],
+          "optional_outputs": [],
+          "required_skills": []
+        }
+      ],
+      "intent": "A human approval office, and the only seat in this standard. The incumbent reviews the seeded lineage-record and either seals a passing lineage-verdict \u2014 which is what promotes the record to first-class lineage attached to an institution \u2014 or refuses it. An ENTRY chair (depends_on []): the record is supplied by the dispatch payload rather than produced upstream, which is the whole point \u2014 a record composed anywhere, by a pass or by a reweave, can be brought here without re-running the work that made it. The chair is seeded with BOTH the record under review and the adoption target naming which institution it would ground \u2014 the attachment is a property of this act, not of the record or the verdict, so it arrives here and nowhere else. A run that reaches this office unapproved PARKS awaiting the seal; nothing is adopted on an absent yes, and a refusal is a decision that gets recorded rather than a silence that gets forgotten."
+    }
+  ],
+  "input_types": [
+    "lineage-record",
+    "lineage-adoption-target"
+  ],
+  "output_types": [
+    "lineage-verdict"
+  ]
+}

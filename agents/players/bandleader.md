@@ -5,6 +5,9 @@ description: Decides what is played and stops the band when the take is wrong â€
 agent_profile_ref: agents/bandleader.json
 lane: direction
 tools_allowlist:
+  - Read
+  - Grep
+  - agent_browse
   - gig_dispatch
   - gig_monitor
   - gig_logs

@@ -35,6 +35,20 @@ const HOST_BUILTINS: ReadonlySet<string> = new Set([
   "Glob", "Grep", "LS",
   "WebFetch", "WebSearch",
   "Task", "TodoWrite",
+  // Added 2026-08-20, after they were OBSERVED escaping. Gig 34ff466b's review chair is
+  // `spec-reviewer`, whose record declares allowed_tools: [] and code_tool_access: "none" — a seat
+  // entitled to nothing. It called Monitor x13, LSP x6, ScheduleWakeup x2, ListAgents x1 and with
+  // them read the working tree, producing a verdict citing exact assertion counts and file sizes.
+  // It did not fabricate; it reached capabilities its grant never mentioned, because a tool absent
+  // from THIS SET is never in the complement below, so it is never denied. Monitor executes shell
+  // (`until <check>; do sleep 2; done`); LSP reads code; ListAgents discloses peer sessions;
+  // ScheduleWakeup schedules future work.
+  "Monitor", "LSP", "ListAgents", "ScheduleWakeup",
+  // DELIBERATELY ABSENT: ToolSearch. It is not a capability over the world — it is the loader a
+  // chair uses to reach the tools it WAS granted, including the engine's own output_write. Across
+  // the gig logs, 226 of 289 ToolSearch calls were loading output_write; denying it would sever the
+  // seal path for every model chair, which is the failure LAW 2 exists to prevent. It is governed
+  // by what it can load, not by whether it can run.
 ]);
 
 /** The engine's own MCP server slug — the key the repo's .mcp.json ships it under, and the prefix

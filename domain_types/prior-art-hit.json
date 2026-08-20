@@ -1,6 +1,6 @@
 {
   "slug": "prior-art-hit",
-  "version": 1,
+  "version": 2,
   "extends": "Signal",
   "domain": "patent-triage",
   "status": "active",
@@ -41,6 +41,21 @@
       "caveat": {
         "type": "string"
       }
+    },
+    "if": {
+      "properties": {
+        "verified": {
+          "const": true
+        }
+      },
+      "required": [
+        "verified"
+      ]
+    },
+    "then": {
+      "required": [
+        "verification_method"
+      ]
     }
   },
   "required_fields": [

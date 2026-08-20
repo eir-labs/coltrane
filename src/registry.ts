@@ -303,11 +303,33 @@ export function createRegistry(initial: DomainType[] = []): Registry {
         ...dt.required_fields,
       ]),
     ];
+    // Thread the authored CONDITIONAL keywords through the reconstruction. Before this, effective()
+    // rebuilt the schema as ONLY {type, properties, required, additionalProperties} and dropped any
+    // top-level if/then, allOf, dependentRequired, etc. — so a conditional constraint authored in a
+    // domain-type JSON (e.g. prior-art-hit's "verified:true requires verification_method") never
+    // reached ajv.compile and was a silent no-op. A cross-field obligation must survive into the one
+    // schema both the seal (validate) and the producer prompt read, or the contract does not exist.
+    const conditional: Record<string, unknown> = {};
+    for (const kw of [
+      "if",
+      "then",
+      "else",
+      "allOf",
+      "anyOf",
+      "oneOf",
+      "not",
+      "dependentRequired",
+      "dependentSchemas",
+    ] as const) {
+      const v = (dt.schema as Record<string, unknown>)[kw];
+      if (v !== undefined) conditional[kw] = v;
+    }
     return {
       type: "object",
       properties: { ...baseProps, ...ownProps },
       required: declaredRequired,
       additionalProperties,
+      ...conditional,
     };
   }
 

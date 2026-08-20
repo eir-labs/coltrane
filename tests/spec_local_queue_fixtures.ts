@@ -99,6 +99,23 @@ export interface LocalGigView {
   state: "queued" | "claimed" | "awaiting_approval" | "complete" | "failed" | "cancelled";
   holder?: string;
   lease?: LeaseState;
+  /**
+   * The identity of the output this gig sealed — present ONLY on a terminal, completed gig.
+   *
+   * A POINTER, not a copy. `state` answers "did the machine finish"; this answers "what did the work
+   * produce", and the two must not be folded together: a gig that runs perfectly and concludes "this
+   * change is bad" is state:complete with a verdict of fail, which has to stay distinguishable from a
+   * gig whose DRAIN broke. Those demand opposite responses.
+   *
+   * It is the content_sha `complete()` already computed, not a restatement of the judgment. Copying
+   * the verdict onto the row would be a second statement of one fact, which is the defect class that
+   * cost this repo twice in a day — package.json vs src/version.ts, and the org's repo_url vs the
+   * repository the gig already carried in its typed input. A pointer cannot drift.
+   *
+   * Absent on every non-terminal gig, and on a FAILED one: a failed run sealed nothing, so there is
+   * nothing to point at, and a placeholder would read like an answer.
+   */
+  content_sha?: string;
 }
 
 export interface LocalQueueOptions {

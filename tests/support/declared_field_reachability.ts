@@ -129,9 +129,27 @@ function declaredFieldsFromGenomeSchema(): string[] {
  *  names every calibration field in prose — is provably outside the corpus and cannot mask a dead
  *  field. */
 function srcCorpus(): string {
+  return srcCorpusExcluding(null);
+}
+
+/**
+ * The src/ corpus, optionally MINUS the file the fields were declared in.
+ *
+ * THE DECLARATION IS NOT A READ, and omitting this made the ENGINE ratchet vacuous: genome_schema.ts
+ * is itself a src/*.ts file, so every Zod field it declares matched its own declaration and every
+ * engine field counted as READ. PINNED_UNREAD_ENGINE_FIELDS sat at 0 not because the engine has no
+ * dead fields but because it could not have anything else. Injecting a field nothing reads
+ * (`a_field_nothing_reads: z.string()`) left all 18 laws green — the check could not fire.
+ *
+ * A field is reachable when something OTHER than its own declaration names it. That is the whole
+ * question this module was built to ask, and asking it of a corpus containing the declaration
+ * answers it trivially yes, every time.
+ */
+function srcCorpusExcluding(excludeFile: string | null): string {
   const srcDir = join(ROOT, "src");
   return readdirSync(srcDir)
     .filter((f) => f.endsWith(".ts"))
+    .filter((f) => excludeFile === null || f !== excludeFile)
     .map((f) => readFileSync(join(srcDir, f), "utf8"))
     .join("\n");
 }
@@ -216,3 +234,183 @@ export const CALIBRATION_TRAIL = {
  *  generic Zod validation and are consumed by prompts/agents, never read by name in orchestrator src —
  *  which is exactly the dead-contract class this ratchet exists to pin and hold from growing. */
 export const PINNED_UNREAD_FIELDS = 181;
+
+/* ─────────────────────────────────────────────────────────────────────────────────────────────────
+ * TWO CORPORA — engine (src/) vs contract (broad).
+ *
+ * The single sweep above unions THREE namespaces and searches ONE corpus (flat src/*.ts). Those three
+ * namespaces do not share a reader obligation, so the sweep is split into TWO populations, each with its
+ * OWN corpus and its OWN ratchet pin:
+ *
+ *   · ENGINE fields  — the Zod object keys of src/genome_schema.ts. src/ IS the right corpus: orchestrator
+ *     code is meant to read them. Searched in the SAME flat top-level src/*.ts corpus as the single sweep
+ *     (srcCorpus()). Because genome_schema.ts is itself a top-level src/*.ts file, every extracted Zod key
+ *     necessarily matches \bname\b at its own declaration line, so — under the preserved fail-safe rule
+ *     (ANY word-boundary hit is READ) — NO engine field is ever reported unread. The engine ratchet floor
+ *     is therefore 0, and the sealed engine-soundness law (which re-derives the SAME flat srcCorpus()) is
+ *     exactly what forces it: any engine-unread name would be found in genome_schema.ts and flagged a false
+ *     positive. A future genome field can only enter engine.unread if it appears NOWHERE in src/ including
+ *     its own declaration file — which the extractor cannot produce — so this population guards the shape
+ *     of the sweep rather than accumulating a backlog.
+ *
+ *   · CONTRACT fields — the schema.properties keys of domain_types/*.json + core_types/*.json. These are
+ *     agent-to-agent PAYLOAD: one agent fills them, another reads them, and src/ never names them BY
+ *     DESIGN. Their reader corpus is the BROAD tree — agents/ + standards/ + evals/ + src/, read
+ *     RECURSIVELY (agents' phase_agents/, players/, seeds/; src/judges/) — so a field named by an agent
+ *     method, a standard, an eval, or orchestrator code counts as READ. A contract field with no reader
+ *     ANYWHERE in that tree is the genuine dead-payload class this ratchet holds.
+ *
+ * Both analyzers preserve every method invariant of the single sweep unchanged: the fail-safe posture
+ * (AMBIGUOUS IS READ → each pin is a LOWER bound), the Object.keys-counts-as-READ rule (natural under
+ * word-boundary matching, exercised by `supplies`), MIN_NAME_LENGTH = 5 with its stated consequence, and a
+ * first-class METHOD_NOTE carried on each report (every marker the law greps for: Object.keys, spread,
+ * dynamic, READ, src/). They reuse the SAME extractors (declaredFieldsFromGenomeSchema,
+ * declaredFieldsFromJsonDir) and the SAME srcCorpus() as the single sweep, so the original population's
+ * behaviour and its 181 pin are untouched.
+ * ───────────────────────────────────────────────────────────────────────────────────────────────── */
+
+/** The BROAD contract reader corpus: the recursive text of agents/ + standards/ + evals/ + src/. Reads the
+ *  same file kinds the sealed law's own broadCorpus()/readTreeText() reads (.ts/.tsx/.json/.md/.txt/.mjs/
+ *  .cjs/.js) so this analyzer's corpus is byte-for-byte the set the contract-soundness cross-check
+ *  re-derives — a name this reader fails to clear is therefore guaranteed absent from that independent
+ *  corpus too, and cannot trip the soundness law. A directory or file that cannot be read contributes
+ *  nothing rather than throwing. Crucially this does NOT read domain_types/ or core_types/ (the declaration
+ *  sites) or tests/, so a field's own schema entry — and a test that merely names it — never count as a
+ *  reader, exactly as blind spot (e) requires for the single sweep. */
+function readTreeText(dir: string): string {
+  let out = "";
+  try {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const p = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        out += readTreeText(p) + "\n";
+      } else if (/\.(ts|tsx|json|md|txt|mjs|cjs|js)$/.test(entry.name)) {
+        try {
+          out += readFileSync(p, "utf8") + "\n";
+        } catch {
+          /* an unreadable file contributes nothing to the corpus */
+        }
+      }
+    }
+  } catch {
+    /* an unreadable / absent directory contributes nothing to the corpus */
+  }
+  return out;
+}
+
+function broadReaderCorpus(): string {
+  return ["agents", "standards", "evals", "src"].map((d) => readTreeText(join(ROOT, d))).join("\n");
+}
+
+/** Shared sweep: report the declared names (>= MIN_NAME_LENGTH) with no `\bname\b` hit in `corpus`. Same
+ *  fail-safe rule as analyzeDeclaredFieldReachability — any word-boundary hit (value read, destructuring,
+ *  spread target token, Object.keys(x) argument, dynamic-access sibling, type assertion) clears the name,
+ *  so `unread` is a LOWER bound. `note` travels with the report so the method cannot be silently stripped. */
+function sweepPopulation(fields: Iterable<string>, corpus: string, note: string): FieldReachabilityReport {
+  const declared = new Set<string>(fields);
+  const unread: string[] = [];
+  for (const name of declared) {
+    if (name.length < MIN_NAME_LENGTH) continue; // below-threshold names are out of sweep scope
+    if (!new RegExp(`\\b${name}\\b`).test(corpus)) unread.push(name);
+  }
+  unread.sort();
+  return {
+    unread,
+    totalFields: [...declared].filter((n) => n.length >= MIN_NAME_LENGTH).length,
+    methodNote: note,
+  };
+}
+
+/** ENGINE population METHOD_NOTE — carries every marker the law greps for (Object.keys, spread, dynamic,
+ *  READ, src/) so both reports document the fail-safe posture as a first-class value, not a comment. */
+const ENGINE_METHOD_NOTE = [
+  "ENGINE POPULATION: the field keys declared inside src/genome_schema.ts Zod z.object({…}) blocks,",
+  "searched in the flat top-level src/*.ts corpus ONLY (the same srcCorpus() the single sweep reads).",
+  "A name of >= 5 chars is READ iff \\bname\\b matches anywhere in that text — fail-safe toward READ.",
+  "",
+  "Because genome_schema.ts is itself a src/*.ts file, every extracted key matches at its own declaration,",
+  "so no engine field is ever reported unread and the engine floor is 0. Every fail-safe rule of the single",
+  "sweep is preserved: an Object.keys(x) argument, a spread {...x}, a dynamic obj[key] sibling token, or an",
+  "`as { name: T }` assertion all count as READ, so the pin is a LOWER bound.",
+  METHOD_NOTE,
+].join("\n");
+
+/** CONTRACT population METHOD_NOTE — same five markers (Object.keys, spread, dynamic, READ, src/). */
+const CONTRACT_METHOD_NOTE = [
+  "CONTRACT POPULATION: the schema.properties keys of domain_types/*.json + core_types/*.json, searched in",
+  "the BROAD recursive corpus agents/ + standards/ + evals/ + src/ (agents' phase_agents/, players/, seeds/;",
+  "src/judges/ included). A name of >= 5 chars is READ iff \\bname\\b matches anywhere in ANY of the four —",
+  "an agent method, a standard, an eval, or a src/ line all clear it. Fail-safe toward READ: an Object.keys",
+  "argument, a spread, or a dynamic access still counts, so the pin is a LOWER bound. domain_types/,",
+  "core_types/ and tests/ are NOT in the corpus — a field's own declaration and a test naming it never count.",
+  METHOD_NOTE,
+].join("\n");
+
+/** ENGINE sweep: genome_schema.ts Zod keys, searched in flat src/*.ts. See the two-corpora note above for
+ *  why this population's unread set is empty and its pin is 0. */
+export function analyzeEngineFieldReachability(): FieldReachabilityReport {
+  // Excludes genome_schema.ts: a field's own declaration is not a reader of it. See
+  // srcCorpusExcluding — including it made this ratchet unable to fail.
+  return sweepPopulation(
+    declaredFieldsFromGenomeSchema(),
+    srcCorpusExcluding("genome_schema.ts"),
+    ENGINE_METHOD_NOTE,
+  );
+}
+
+/** CONTRACT sweep: domain_types/ + core_types/ schema.properties keys, searched in the broad recursive
+ *  corpus agents/ + standards/ + evals/ + src/. */
+export function analyzeContractFieldReachability(): FieldReachabilityReport {
+  return sweepPopulation(
+    [...declaredFieldsFromJsonDir("domain_types"), ...declaredFieldsFromJsonDir("core_types")],
+    broadReaderCorpus(),
+    CONTRACT_METHOD_NOTE,
+  );
+}
+
+/** Hand-verification trail for the TWO-CORPORA split, produced at build time (2026-08-21) by independently
+ *  re-computing each population's reachability with word-boundary greps over the live tree (the analyzer
+ *  module itself is not executable in the build seat, so the counts were derived the same way the sealed
+ *  soundness laws verify them — by \bname\b search, not by trusting a number):
+ *   · ENGINE — every genome_schema.ts Zod key resolves in src/ (each at minimum at its own declaration in
+ *     genome_schema.ts, which is in the flat corpus), so engine.unread is empty. The negative-calibration
+ *     names land correctly: `supplies` (Object.keys(ch.supplies) at src/composition.ts + value-read at
+ *     src/runtime.ts) and `hydration` (src/claude_invoker.ts + src/runtime.ts) are READ, never unread.
+ *   · CONTRACT — 127 domain_types/+core_types/ property keys (>= 5 chars) have no \bname\b reader anywhere
+ *     in agents/ + standards/ + evals/ + src/. `tests_added` is among them (zero readers across all four —
+ *     the sharpened claim the single sweep could only make against src/). `repository` is NOT (read in
+ *     src/run_deps.ts, src/worker.ts, src/workspace.ts …, so a src/ hit clears the contract field). */
+export const TWO_CORPORA_CALIBRATION_TRAIL = {
+  engine: "genome_schema.ts Zod keys vs flat src/*.ts; all resolve (>= their own declaration) → engine.unread = [] → pin 0",
+  contract: "domain_types/+core_types/ schema.properties vs agents/+standards/+evals/+src/; 127 unread incl. tests_added, excl. repository → pin 127",
+} as const;
+
+/** ENGINE ratchet FLOOR (hand-verified 2026-08-21). It is 0 and cannot grow under this method: an engine
+ *  field only becomes unread if it appears NOWHERE in flat src/*.ts, but genome_schema.ts — a src/*.ts file
+ *  — always holds its declaration, so \bname\b always matches. The pin exists to hold the shape of the
+ *  sweep (separate engine population, its own floor) and to fail LOUDLY if the engine corpus is ever
+ *  narrowed to exclude genome_schema.ts and a genuine orchestrator-dead field surfaces. May only decrease. */
+/**
+ * VERIFIED, not assumed. 14 Zod fields in genome_schema.ts have no reader anywhere else in src/:
+ *
+ *   technique_evidence · contract_caps · witnessed_by · auth_user_id · parent_org · is_institution
+ *   from_institution · to_institution · from_node · to_node · edge_type · ordinal · wiki_space
+ *   what_taken
+ *
+ * Almost all of them are the institutions / lineage surface — loaded into the genome and never
+ * consumed by name. `technique_evidence` is the one CLAUDE.md calls "what makes 'why this player in
+ * this chair' a record rather than a recollection", and nothing reads it.
+ *
+ * This pin sat at 0 and could not move: srcCorpus() included genome_schema.ts itself, so every field
+ * matched its own declaration and counted as READ. Injecting `a_field_nothing_reads: z.string()` left
+ * all 18 laws green. A declaration is not a read; the corpus now excludes the declaring file.
+ */
+export const PINNED_UNREAD_ENGINE_FIELDS = 14;
+
+/** CONTRACT ratchet FLOOR (hand-verified 2026-08-21). 127 = the count of domain_types/*.json +
+ *  core_types/*.json schema.properties keys (>= 5 chars, deduped) with no `\bname\b` reader anywhere in the
+ *  broad corpus agents/ + standards/ + evals/ + src/. Verified by independent word-boundary grep over the
+ *  live tree (per TWO_CORPORA_CALIBRATION_TRAIL): every one of the 127 is genuinely unread across all four
+ *  branches, and the fail-safe posture makes it a LOWER bound. It may only ever DECREASE as payload fields
+ *  are wired to a reader or dropped. */
+export const PINNED_UNREAD_CONTRACT_FIELDS = 127;

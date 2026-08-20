@@ -831,6 +831,61 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
             warnings.push(`standard "${s.slug}" is deprecated — it still runs, but should not be built on.`);
           }
         }
+        // ── GENOME FRESHNESS ──────────────────────────────────────────────────────────────────
+        // Does this server still hold what is on disk? A long-running process loads the genome once
+        // and then the files move underneath it — a branch switch, a merge, another process, a hand
+        // edit. Measured on 2026-08-20: a server had drifted on 10 standards and 8 agents, a gig ran
+        // ninety minutes on STALE DEFINITIONS OF ITS OWN CHAIRS, and the drift also HID A LIVE
+        // OUTAGE (a red-spec pattern had taken three standards undispatchable; the session that
+        // shipped it kept dispatching because it was still drilling the old schema).
+        //
+        // The other direction is already handled — agent_define refreshes deps so compose sees an
+        // agent it just made (tests/compose_agent_freshness.test.ts). EXTERNAL change was not.
+        //
+        // WARN, do not refuse. A dev tree changes constantly, and a dispatch refused for every
+        // moved file is a false refusal of exactly the kind that just cost an afternoon. But an
+        // unreported divergence is a claim — "these are the definitions your gig ran" — that nothing
+        // checks. So the run proceeds and NAMES what drifted, on the response the operator reads.
+        //
+        // Scoped to what THIS gig seats: an unrelated edit in flight elsewhere is not this gig's
+        // problem, and naming it would bury the signal it exists to raise.
+        if (deps.genome_dir) {
+          try {
+            const onDisk = resolveGenome(deps.genome_dir);
+            const drifted: string[] = [];
+            const same = (a: unknown, b: unknown): boolean => {
+              try { return canonJson(a as never) === canonJson(b as never); }
+              catch { return true; } // uncomparable → say nothing rather than cry wolf
+            };
+            for (const s2 of targetStandards) {
+              // Compare the PHASE GRAPH, not the whole object: deps.standards holds the COMPOSED
+              // standard (derived fields applied by composeStandard) while resolveGenome returns the
+              // parsed file, so a whole-object compare reports drift on every dispatch even when
+              // nothing moved — the cry-wolf failure S4 exists to catch. The phase graph is what the
+              // run is: the chairs, their agents, their contracts and their order.
+              const fresh = onDisk.standards?.get(s2.slug);
+              if (fresh && !same(fresh.phases, s2.phases)) drifted.push(`standard "${s2.slug}"`);
+              // The agents this gig actually SEATS, read off the chairs — not a standard-level list
+              // that may name more than the run uses.
+              const seated = new Set<string>(s2.phases.flatMap((p) => p.chairs.map((c) => c.agent_slug)));
+              for (const slug of seated) {
+                const liveAgent = deps.agents?.get(slug);
+                const freshAgent = onDisk.agents?.get(slug);
+                if (liveAgent && freshAgent && !same(freshAgent, liveAgent)) drifted.push(`agent "${slug}"`);
+              }
+            }
+            if (drifted.length > 0) {
+              warnings.push(
+                `STALE GENOME — this server's loaded copy differs from disk for: ${[...new Set(drifted)].join(", ")}. ` +
+                  `The gig will run the LOADED definitions, and its genome_hash will not reproduce from the files. ` +
+                  `Run genome_reload first if you meant to run what is on disk.`,
+              );
+            }
+          } catch {
+            /* freshness is a courtesy, never a gate: an unreadable genome dir must not block a run */
+          }
+        }
+
         // WU-0008 preflight: run the same sealDrill used by standard_simulate BEFORE spending
         // on any chair. A structurally-unsealable standard is refused here (pennies) instead of
         // after a chair runs and aborts. Gate is placed once, above the wait/async split, so a

@@ -1273,7 +1273,19 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
         text: string,
       ): Promise<{ stdout: string; budgetStopped: boolean }> => {
         try {
-          return { stdout: await runOnce(args, text), budgetStopped: false };
+          const stdout = await runOnce(args, text);
+          // A BUDGET STOP IS A FACT ABOUT THE RESULT, NOT ABOUT THE EXIT CODE. The CLI reports
+          // `{"subtype":"error_max_turns"}` in its result event whether it exits 0 or 1, and only the
+          // non-zero form used to be read — so a chair that hit its cap and exited cleanly was a
+          // budget stop the engine could not see, and its reserve never fired.
+          //
+          // Measured on gig 8f4cda54: read-context declared turn_reserve 12, ran 106 tool calls
+          // against a cap of 120, reported error_max_turns, and recorded budget_reserve_granted 0.
+          // It was never extended and failed with "sealed no output through its write boundary".
+          // The reserve added in #478 could not fire because it was gated on the wrong signal.
+          const stoppedCleanly =
+            seal !== undefined && finalText(stdout).errorSubtype === BUDGET_STOP_SUBTYPE;
+          return { stdout, budgetStopped: stoppedCleanly };
         } catch (e) {
           const recoverable =
             seal !== undefined &&

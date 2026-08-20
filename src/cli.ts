@@ -25,6 +25,7 @@
 import { dispatchTool, bootstrapServerDeps, type ServerDeps, type ToolResult } from "./server.js";
 import { COLTRANE_VERSION } from "./version.js";
 import { workOnce } from "./worker.js";
+import { openLocalQueue, selectQueueBacking, LOCAL_QUEUE_DIR_VAR } from "./local_queue.js";
 import { workerCredentialMode } from "./worker_env.js";
 import { drainPreflight } from "./drain_preflight.js";
 import { makeClaudeInvoker } from "./claude_invoker.js";
@@ -51,6 +52,9 @@ export const USAGE = `coltrane ${COLTRANE_VERSION}
   coltrane simulate <standard>          cost/shape a standard without running it
   coltrane health                       engine + store health
   coltrane serve                        run the MCP server on stdio
+  coltrane enqueue <standard>           queue a gig on the LOCAL file queue (no store, no key)
+                                        (env: COLTRANE_QUEUE_DIR — its absence is the whole
+                                         difference between local and hosted)
   coltrane work                         claim one queued gig from the org store and run it
   coltrane work --check                  report whether this box's drain environment is configured
                                         and exit without claiming (0 ready, 1 not ready)
@@ -195,7 +199,7 @@ export async function runCli(argv: readonly string[], io: CliIO): Promise<number
   if (flags["version"]) { io.out(COLTRANE_VERSION + "\n"); return 0; }
   if (cmd === undefined || flags["help"] || cmd === "help") { io.out(USAGE); return cmd === undefined ? 2 : 0; }
 
-  const KNOWN = ["validate", "dispatch", "monitor", "logs", "abort", "trace", "simulate", "health", "serve", "work"];
+  const KNOWN = ["validate", "dispatch", "enqueue", "monitor", "logs", "abort", "trace", "simulate", "health", "serve", "work"];
   if (!KNOWN.includes(cmd)) {
     line(io, `unknown command "${cmd}"\n`);
     io.err(USAGE);
@@ -205,6 +209,44 @@ export async function runCli(argv: readonly string[], io: CliIO): Promise<number
     // Handled by the entry shim, which must not have booted deps twice.
     line(io, "coltrane serve is handled by the entrypoint");
     return 2;
+  }
+
+  // `enqueue` is the LOCAL queue's front door. src/local_queue.ts shipped with 34 laws and nothing
+  // could reach it: deps.queueGig is consulted only in callSurfaceTool's HOSTED branch, so a local
+  // caller's gig_dispatch spawns in-process and never queues. This is that door — the half a person
+  // needs before `coltrane work` has anything local to claim.
+  //
+  // It DECIDES NOTHING itself. selectQueueBacking is the single policy, already law-covered, and it
+  // answers from environment PRESENCE alone, never by reading a drain variable's value. A conflict
+  // means both backings are configured, and the honest answer is to refuse rather than pick a
+  // precedence order: which store owns a gig is not a thing to guess.
+  if (cmd === "enqueue") {
+    const standard = positional[0];
+    if (!standard) { line(io, "enqueue needs a standard slug"); return 2; }
+    const backing = selectQueueBacking(process.env);
+    if (backing.backing === "conflict") { line(io, `enqueue refused: ${backing.why}`); return 2; }
+    if (backing.backing === "hosted") {
+      line(io, `enqueue is the LOCAL queue's door; this box is configured for the hosted drain. ` +
+        `Dispatch through the surface, or unset the drain environment and set ${LOCAL_QUEUE_DIR_VAR}.`);
+      return 2;
+    }
+    if (backing.backing !== "file") {
+      line(io, `enqueue needs a local queue directory: set ${LOCAL_QUEUE_DIR_VAR} to a path this box may write.`);
+      return 2;
+    }
+    const qin = readInput(typeof flags["input"] === "string" ? flags["input"] : undefined, io);
+    if (qin.error) { line(io, qin.error); return 2; }
+    const payload: Record<string, unknown> = { standard_slug: standard, input: qin.value };
+    if (typeof flags["acting_for"] === "string") payload["acting_for"] = flags["acting_for"];
+    if (typeof flags["venue"] === "string") payload["venue"] = flags["venue"];
+    try {
+      const res = await openLocalQueue(backing.root).enqueue(payload);
+      line(io, JSON.stringify(res));
+      return 0;
+    } catch (e) {
+      line(io, `enqueue failed: ${e instanceof Error ? e.message : String(e)}`);
+      return 1;
+    }
   }
 
   // `work` runs against the ORG STORE, not a genome root — the seated agent's token is the

@@ -15,6 +15,42 @@ import type { Registry } from "./registry.js";
  * defect the drill exists to name. Deliberately not a fuzzer: one honest attempt at
  * the schema's own floor.
  */
+/**
+ * A short string satisfying `pattern`, or undefined when this drill cannot synthesise one.
+ *
+ * WHY: the stub honoured enum, const and minLength and IGNORED pattern, so `"sss"` was offered
+ * against `(^|\n)[+-]` and the drill declared the type unsealable. That took software-change-pr-v1,
+ * software-change-red-first-v0 and spec-drafting-v1 offline the moment red-spec gained its patch
+ * pattern (30d1b48) — the whole RED-first loop refused at dispatch, for a constraint every real
+ * drafter satisfies on every run.
+ *
+ * Deliberately a CANDIDATE LIST and not a regex inverter: inverting an arbitrary regex is its own
+ * project, and a wrong inversion would be worse than no answer — it would let the drill assert a
+ * type is sealable on the strength of a value no producer would ever write. Candidates cover the
+ * shapes that actually appear in this genome's types (diff markers, dates, hashes, urls, ids). When
+ * none matches, this returns undefined and the caller declines to drill the constraint rather than
+ * condemning the standard — see the pattern-error filter in sealDrill.
+ */
+function stringMatching(pattern: string, minLength: number): string | undefined {
+  let re: RegExp;
+  try {
+    re = new RegExp(pattern);
+  } catch {
+    return undefined; // an uncompilable pattern is the schema's problem, reported elsewhere
+  }
+  const candidates = [
+    "+", "-", "+a", "-a", "a\n+b", "diff --git a/x b/x\n+added",
+    "a", "A", "0", "1", "ab", "abc", "abc123", "a-b", "a_b", "a.b", "a/b",
+    "2026-01-01", "2026-01-01T00:00:00Z", "a@b.co", "https://example.com",
+    "0".repeat(40), "0".repeat(64), "00000000-0000-4000-8000-000000000000",
+    "s".repeat(Math.max(1, minLength)),
+  ];
+  for (const c of candidates) {
+    if (c.length >= minLength && re.test(c)) return c;
+  }
+  return undefined;
+}
+
 export function stubForSchema(schema: Record<string, unknown>): unknown {
   return stubValue(schema, 0);
 }
@@ -27,7 +63,10 @@ function stubValue(s: Record<string, unknown> | undefined, depth: number): unkno
   switch (t) {
     case "string": {
       const min = typeof s["minLength"] === "number" ? (s["minLength"] as number) : 1;
-      return "s".repeat(Math.max(1, min));
+      const plain = "s".repeat(Math.max(1, min));
+      const pattern = typeof s["pattern"] === "string" ? (s["pattern"] as string) : undefined;
+      if (!pattern) return plain;
+      return stringMatching(pattern, min) ?? plain;
     }
     case "number":
     case "integer":
@@ -154,7 +193,16 @@ export function sealDrill(standard: DrillableStandard, registry: Registry): Seal
           const floorCheck = validateOutput({ core_type: core, domain_type: slug, data: stub });
           if (!floorCheck.valid) errors.push(floorCheck.reason ?? "core substance floor rejected the stub");
         }
-        if (errors.length > 0) fail(errors);
+        // A PATTERN IS A CONTENT CONSTRAINT, NOT A STRUCTURAL ONE. This drill exists to catch a
+        // standard that CANNOT seal — an unknown type, a required field with contradictory bounds,
+        // a schema that will not compile. A `pattern` is a rule about what the AGENT writes, and the
+        // agent satisfies it every run; the stub is a synthetic placeholder that was never going to.
+        // Reporting it as "cannot seal" is a FALSE REFUSAL, and this one took the entire RED-first
+        // change pipeline offline (30d1b48 → three standards undispatchable) while every one of them
+        // was in fact perfectly sealable. stringMatching() now satisfies the patterns it can; what it
+        // cannot, the drill declines to judge rather than condemning the standard on.
+        const structural = errors.filter((e) => !/^pattern at /.test(e));
+        if (structural.length > 0) fail(structural);
       }
     }
   }

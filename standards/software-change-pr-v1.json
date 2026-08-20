@@ -5,6 +5,7 @@
     "john",
     "miles",
     "bill",
+    "red-spec-drafter",
     "code-implementer",
     "change-verifier",
     "pr-publisher"
@@ -74,16 +75,41 @@
       ]
     },
     {
+      "name": "draft-laws",
+      "chairs": [
+        {
+          "role": "draft-laws",
+          "agent_slug": "red-spec-drafter",
+          "depends_on": [
+            "plan-change",
+            "frame-change"
+          ],
+          "input_contract": [
+            "change-plan",
+            "change-decision"
+          ],
+          "output_contract": [
+            "red-spec"
+          ],
+          "optional_outputs": [],
+          "required_skills": [],
+          "turn_reserve": 14
+        }
+      ]
+    },
+    {
       "name": "create-change",
       "chairs": [
         {
           "role": "write-change",
           "agent_slug": "code-implementer",
           "depends_on": [
-            "plan-change"
+            "plan-change",
+            "draft-laws"
           ],
           "input_contract": [
-            "change-plan"
+            "change-plan",
+            "red-spec"
           ],
           "output_contract": [
             "change-set"
@@ -101,11 +127,13 @@
           "agent_slug": "change-verifier",
           "depends_on": [
             "plan-change",
-            "write-change"
+            "write-change",
+            "draft-laws"
           ],
           "input_contract": [
             "change-plan",
-            "change-set"
+            "change-set",
+            "red-spec"
           ],
           "output_contract": [
             "change-verdict"
@@ -123,11 +151,13 @@
           "agent_slug": "pr-publisher",
           "depends_on": [
             "write-change",
-            "verify-change"
+            "verify-change",
+            "draft-laws"
           ],
           "input_contract": [
             "change-set",
-            "change-verdict"
+            "change-verdict",
+            "red-spec"
           ],
           "output_contract": [
             "pull-request"
@@ -138,6 +168,7 @@
       ]
     }
   ],
+  "status": "active",
   "input_types": [
     "change-request",
     "change-context"
@@ -147,5 +178,5 @@
     "change-verdict",
     "pull-request"
   ],
-  "description": "The governed dev loop, dispatchable WITH its grounding. Reads context, frames the change, plans it, writes it, verifies by running the checks, and opens a pull request a human lands. `change-context` is declared a seedable input alongside `change-request` (#424 I9): the reading chair's product may arrive from any of four interchangeable producers — a reader, the src/repo_index.ts compiler, a prior standard, or a human — and the runtime's existing seeding seam satisfies a chair's contract from an upstream output OR from the gig payload. A dispatch that already holds a reading need not pay a premium seat to re-derive it; a dispatch that does not, still runs exactly as before."
+  "description": "Governed dev loop, RED-first: context → decision → plan → SEALED RED LAWS → build → verify → PR. draft-laws seats red-spec-drafter (holds tests/**, cannot reach src/) and its sealed red-spec is a required input of write-change, verify-change and publish-pr — so the builder cannot begin before the laws exist, and the verifier checks every sealed law is present, unmodified and green."
 }

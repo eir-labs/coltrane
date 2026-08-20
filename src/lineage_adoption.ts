@@ -3,7 +3,7 @@ import type { LineageRecordRefOutput } from "./genome_schema.js";
 /** Why an approved-looking verdict did NOT ground an institution. Reported rather than thrown,
  *  so a caller can log the refusal beside the gig instead of discovering silence. */
 export interface AdoptionRefusal {
-  reason: "not-a-pass" | "no-approver" | "no-record-ref";
+  reason: "not-a-pass" | "no-approver" | "no-record-ref" | "no-target";
   detail: string;
 }
 
@@ -12,6 +12,9 @@ export interface LineageAdoptionResult {
   adopt: boolean;
   /** Present iff adopt === true. `approved_by` is non-null by construction. */
   ref?: LineageRecordRefOutput;
+  /** Present iff adopt === true. WHICH institution the ref is written into — the caller needs
+   *  this to persist, and until lineage-adoption-target existed there was no answer to it. */
+  institution_slug?: string;
   refusals: readonly AdoptionRefusal[];
 }
 
@@ -53,6 +56,10 @@ export function lineageAdoption(input: {
   question?: string;
   /** ISO timestamp of the seal. The caller stamps it; this function invents no clock. */
   sealed_at?: string;
+  /** The institution this adoption grounds, from the lineage-adoption-target in the payload.
+   *  Absent is a refusal, not a default: an adoption naming no institution grounds nothing, and
+   *  guessing one would attach a lineage to a party that never approved it. */
+  institution_slug?: string;
 }): LineageAdoptionResult {
   const refusals: AdoptionRefusal[] = [];
   const v = input.verdict ?? {};
@@ -74,6 +81,11 @@ export function lineageAdoption(input: {
     refusals.push({ reason: "no-record-ref", detail: "a lineage reference that names no record references nothing" });
   }
 
+  const institution_slug = input.institution_slug?.trim() ?? "";
+  if (institution_slug === "") {
+    refusals.push({ reason: "no-target", detail: "an adoption that names no institution grounds nothing" });
+  }
+
   if (refusals.length > 0) return { adopt: false, refusals };
 
   const ref: LineageRecordRefOutput = {
@@ -83,7 +95,7 @@ export function lineageAdoption(input: {
     ...(input.sealed_at === undefined ? {} : { sealed_at: input.sealed_at }),
   } as LineageRecordRefOutput;
 
-  return { adopt: true, ref, refusals: [] };
+  return { adopt: true, ref, institution_slug, refusals: [] };
 }
 
 /** Apply an adopted reference to an institution document, returning a NEW document.

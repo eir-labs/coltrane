@@ -9,12 +9,13 @@ import { describe, it, expect } from "vitest";
 import { lineageAdoption, applyLineageAdoption } from "../src/lineage_adoption.js";
 
 const REF = "sha-lineage-record";
+const INST = "studio";   // every adoption must name the institution it grounds
 
 describe("lineageAdoption", () => {
   it("adopts a passing, signed verdict and sets approved_by from the approver", () => {
     const r = lineageAdoption({
       verdict: { pass: true, approver: "eugene", rationale: "grounded on both sides" },
-      record_ref: REF, question: "where does the board come from?", sealed_at: "2026-08-20T00:00:00.000Z",
+      record_ref: REF, institution_slug: INST, question: "where does the board come from?", sealed_at: "2026-08-20T00:00:00.000Z",
     });
     expect(r.adopt).toBe(true);
     expect(r.refusals).toEqual([]);
@@ -22,51 +23,63 @@ describe("lineageAdoption", () => {
   });
 
   it("refuses a failing verdict", () => {
-    const r = lineageAdoption({ verdict: { pass: false, approver: "eugene" }, record_ref: REF });
+    const r = lineageAdoption({ verdict: { pass: false, approver: "eugene" }, record_ref: REF, institution_slug: INST });
     expect(r.adopt).toBe(false);
     expect(r.refusals.map((x) => x.reason)).toEqual(["not-a-pass"]);
   });
 
   it("refuses an ABSENT pass — a parked run is not a yes", () => {
-    const r = lineageAdoption({ verdict: { approver: "eugene" }, record_ref: REF });
+    const r = lineageAdoption({ verdict: { approver: "eugene" }, record_ref: REF, institution_slug: INST });
     expect(r.adopt).toBe(false);
     expect(r.refusals.map((x) => x.reason)).toEqual(["not-a-pass"]);
   });
 
   it("refuses a truthy non-boolean pass — no rounding toward consent", () => {
     for (const p of ["true", 1, {}, []]) {
-      const r = lineageAdoption({ verdict: { pass: p, approver: "eugene" }, record_ref: REF });
+      const r = lineageAdoption({ verdict: { pass: p, approver: "eugene" }, record_ref: REF, institution_slug: INST });
       expect(r.adopt, `pass=${JSON.stringify(p)}`).toBe(false);
     }
   });
 
   it("refuses an unsigned pass — an unattributed approval is not an approval", () => {
     for (const a of [undefined, "", "   ", 42, null]) {
-      const r = lineageAdoption({ verdict: { pass: true, approver: a }, record_ref: REF });
+      const r = lineageAdoption({ verdict: { pass: true, approver: a }, record_ref: REF, institution_slug: INST });
       expect(r.adopt, `approver=${JSON.stringify(a)}`).toBe(false);
       expect(r.refusals.map((x) => x.reason)).toContain("no-approver");
     }
   });
 
   it("refuses a reference that names no record", () => {
-    const r = lineageAdoption({ verdict: { pass: true, approver: "eugene" }, record_ref: "   " });
+    const r = lineageAdoption({ verdict: { pass: true, approver: "eugene" }, record_ref: "   ", institution_slug: INST });
     expect(r.adopt).toBe(false);
     expect(r.refusals.map((x) => x.reason)).toEqual(["no-record-ref"]);
   });
 
   it("collects EVERY applicable refusal rather than short-circuiting", () => {
     const r = lineageAdoption({ verdict: { pass: false }, record_ref: "" });
-    expect(r.refusals.map((x) => x.reason).sort()).toEqual(["no-approver", "no-record-ref", "not-a-pass"]);
+    expect(r.refusals.map((x) => x.reason).sort()).toEqual(["no-approver", "no-record-ref", "no-target", "not-a-pass"]);
   });
 
   it("throws nothing on a null or garbage verdict", () => {
-    expect(() => lineageAdoption({ verdict: null, record_ref: REF })).not.toThrow();
-    expect(lineageAdoption({ verdict: undefined, record_ref: REF }).adopt).toBe(false);
+    expect(() => lineageAdoption({ verdict: null, record_ref: REF, institution_slug: INST })).not.toThrow();
+    expect(lineageAdoption({ verdict: undefined, record_ref: REF, institution_slug: INST }).adopt).toBe(false);
+  });
+
+  it("refuses an adoption that names no institution — it would ground nothing", () => {
+    const r = lineageAdoption({ verdict: { pass: true, approver: "eugene" }, record_ref: REF });
+    expect(r.adopt).toBe(false);
+    expect(r.refusals.map((x) => x.reason)).toEqual(["no-target"]);
+  });
+
+  it("returns the institution the caller must write into", () => {
+    const r = lineageAdoption({ verdict: { pass: true, approver: "eugene" }, record_ref: REF, institution_slug: "  studio  " });
+    expect(r.institution_slug).toBe("studio");
   });
 
   it("omits optional fields rather than writing undefined into them", () => {
-    const r = lineageAdoption({ verdict: { pass: true, approver: "tasha" }, record_ref: REF });
+    const r = lineageAdoption({ verdict: { pass: true, approver: "tasha" }, record_ref: REF, institution_slug: INST });
     expect(Object.keys(r.ref!).sort()).toEqual(["approved_by", "record_ref"]);
+    expect(r.institution_slug).toBe(INST);
   });
 });
 

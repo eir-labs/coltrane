@@ -35,6 +35,20 @@ const HOST_BUILTINS: ReadonlySet<string> = new Set([
   "Glob", "Grep", "LS",
   "WebFetch", "WebSearch",
   "Task", "TodoWrite",
+  // Added 2026-08-20, after they were OBSERVED escaping. Gig 34ff466b's review chair is
+  // `spec-reviewer`, whose record declares allowed_tools: [] and code_tool_access: "none" — a seat
+  // entitled to nothing. It called Monitor x13, LSP x6, ScheduleWakeup x2, ListAgents x1 and with
+  // them read the working tree, producing a verdict citing exact assertion counts and file sizes.
+  // It did not fabricate; it reached capabilities its grant never mentioned, because a tool absent
+  // from THIS SET is never in the complement below, so it is never denied. Monitor executes shell
+  // (`until <check>; do sleep 2; done`); LSP reads code; ListAgents discloses peer sessions;
+  // ScheduleWakeup schedules future work.
+  "Monitor", "LSP", "ListAgents", "ScheduleWakeup",
+  // DELIBERATELY ABSENT: ToolSearch. It is not a capability over the world — it is the loader a
+  // chair uses to reach the tools it WAS granted, including the engine's own output_write. Across
+  // the gig logs, 226 of 289 ToolSearch calls were loading output_write; denying it would sever the
+  // seal path for every model chair, which is the failure LAW 2 exists to prevent. It is governed
+  // by what it can load, not by whether it can run.
 ]);
 
 /** The engine's own MCP server slug — the key the repo's .mcp.json ships it under, and the prefix
@@ -61,6 +75,22 @@ export function toolBaseName(grant: string): string {
  * this function, so no call site re-inlines it (the change request forbids re-inlining the oracles).
  * Deterministic order (HOST_BUILTINS insertion order) so the emitted flag is stable.
  */
+/**
+ * Is `name` one of the host builtins the runtime provides?
+ *
+ * A SECOND ACCESSOR over the same single home, deliberately — not a second copy. HOST_BUILTINS
+ * stays unexported for the reason stated above (one universe, no re-inlined oracles), and callers
+ * that need to ASK about a name rather than compute a complement now have a way to do it without
+ * copying the set. The player compiler is the first such caller: it prefixed every declared tool
+ * with `mcp__coltrane__` unconditionally, so a player could not name `Read` without compiling it
+ * into `mcp__coltrane__Read` — a dead name that binds to nothing and fails silently.
+ *
+ * Takes a BASE name; pass `toolBaseName(grant)` for a scoped grant like `Bash(git add:*)`.
+ */
+export function isHostBuiltin(name: string): boolean {
+  return HOST_BUILTINS.has(name);
+}
+
 export function hostBuiltinDenials(effectiveAllowed: Iterable<string>): string[] {
   const granted = new Set<string>();
   for (const g of effectiveAllowed) granted.add(toolBaseName(g));

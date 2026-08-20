@@ -173,6 +173,8 @@ export type GigProgressEvent =
       adopt: boolean;
       /** content_sha of the lineage-record the institution would be grounded in. */
       record_ref?: string;
+      /** WHICH institution it grounds. Absent on a refusal. */
+      institution_slug?: string;
       approved_by?: string;
       /** every applicable refusal, not just the first — see lineageAdoption. */
       refusals?: string[];
@@ -1829,15 +1831,23 @@ export async function runGig(
           // upstream output exists; use the slug when the record came in from outside.
           const seeded = gigInput["lineage-record"] as Record<string, unknown> | undefined;
           const seededId = typeof seeded?.["id"] === "string" ? (seeded["id"] as string) : "";
+          // WHICH institution this grounds. Carried by lineage-adoption-target in the payload,
+          // because the attachment is a property of the adoption ACT — one record, approved once,
+          // may be adopted into two institutions by two separate acts. Neither the record nor the
+          // verdict holds it, and both promise the attachment in prose.
+          const tgt = gigInput["lineage-adoption-target"] as Record<string, unknown> | undefined;
+          const institution_slug = typeof tgt?.["institution_slug"] === "string" ? (tgt["institution_slug"] as string) : "";
           const decision = lineageAdoption({
             verdict: (approval ?? null) as Record<string, unknown> | null,
             record_ref: target?.content_sha ?? seededId,
             sealed_at: rec.created_at,
+            institution_slug,
           });
           emit({
             type: "lineage_adoption", phase: phase.name, role: hc.role,
             adopt: decision.adopt,
             ...(decision.ref ? { record_ref: decision.ref.record_ref, approved_by: decision.ref.approved_by ?? "" } : {}),
+            ...(decision.institution_slug ? { institution_slug: decision.institution_slug } : {}),
             ...(decision.refusals.length ? { refusals: decision.refusals.map((r) => r.reason) } : {}),
           });
         }

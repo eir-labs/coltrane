@@ -40,3 +40,12 @@ export * from "./polyphony.js";
 export * from "./harmonic_validation.js";
 export * from "./acoustics.js";
 export * from "./document_factory.js";
+
+// The two engine-half modules a downstream consumer imports directly. Neither is wired into a
+// surface yet — enqueueing locally and claiming locally are each their own contract — but both are
+// PUBLIC surfaces, not internals: local_queue is the third queue backing (the file sibling of
+// fileGenomeStore), and residency is the enforcement half of `coltrane reside`. Exporting them here
+// is what tests/exported_symbols_are_reachable.test.ts asks for when a mechanism has no in-src
+// caller: "wire it or export it." Wiring is a separate act; reachability is not.
+export * from "./local_queue.js";
+export * from "./residency.js";

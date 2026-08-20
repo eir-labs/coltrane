@@ -174,8 +174,13 @@ describe("local queue — a claim never serves a partial write (F4)", () => {
         const q = openLocalQueue(freshRoot());
         // Interleave enqueues and claims concurrently — the reader must never catch a mid-write row.
         const claims: Promise<ClaimedLocalGig | null>[] = [];
+        // Held, not awaited INLINE — the interleaving is the thing under test, so a claim must be
+        // able to race a mid-write enqueue. But an enqueue still in flight when afterAll removes
+        // the root rejects with ENOENT and nobody is holding it, which vitest reports as an
+        // unhandled rejection and warns "might cause false positive tests". Settled below.
+        const enqueues: Promise<unknown>[] = [];
         for (const p of payloads) {
-          void q.enqueue(p);
+          enqueues.push(q.enqueue(p));
           claims.push(q.claim("w1"));
         }
         for (const c of await Promise.all(claims)) {
@@ -185,6 +190,8 @@ describe("local queue — a claim never serves a partial write (F4)", () => {
           expect(c.input, "a claimed row missing input is a partial write").toBeTypeOf("object");
           expect(typeof c.acting_for).toBe("string");
         }
+        // Nothing may still be writing when this property run ends and the root is torn down.
+        await Promise.allSettled(enqueues);
       }),
       { numRuns: 25 },
     );

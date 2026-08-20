@@ -16,33 +16,83 @@ jobs:
       id-token: write         # OIDC trusted publishing (provenance attached automatically)
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The version is DERIVED from the tags and the commits since the last one, so the history
+          # and the tags have to be here. A shallow checkout would make `git describe` fail and every
+          # release refuse — loudly, but every time.
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
           registry-url: "https://registry.npmjs.org"
           cache: "npm"
       - run: npm ci
+
+      # ── THE VERSION IS COMPUTED, NOT REMEMBERED ────────────────────────────────────────────────
+      # It used to be a number a human bumped in package.json, and this workflow published iff that
+      # number was not already on npm. That gate always worked. The INPUT to it rotted: on 2026-08-20
+      # ten merges landed on main after 0.11.0 shipped — including the fix that unblocked the Fly
+      # drain — and every one of them ran this workflow, found 0.11.0 published, and correctly
+      # no-op'd. Nothing failed and nothing shipped.
+      #
+      # The semver intent was never missing from this repo; every commit here is conventional. It was
+      # only unread. scripts/next_version.mjs reads it: feat → minor, `!`/BREAKING CHANGE → major,
+      # anything else → patch, highest wins. Every merge to main is a release.
+      - id: ver
+        run: |
+          set -euo pipefail
+          LAST=$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null || true)
+          if [ -z "$LAST" ]; then
+            echo "::error::no v* tag found — refusing to guess a base version"
+            exit 1
+          fi
+          echo "last tag: $LAST"
+          # A non-zero exit here means "nothing to release" (no commits since the tag), which is a
+          # normal no-op — distinguished from a version by the script printing nothing to stdout.
+          if V=$(git log --format=%B "$LAST..HEAD" | node scripts/next_version.mjs --last "$LAST"); then
+            echo "next version: $V"
+            echo "version=$V" >> "$GITHUB_OUTPUT"
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "nothing to release since $LAST"
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Belt and braces: the computed version should never already exist, but if a tag was pushed by
+      # hand or a run was replayed, decline rather than fail loudly at `npm publish`.
+      - id: check
+        if: steps.ver.outputs.publish == 'true'
+        run: |
+          set -euo pipefail
+          V="${{ steps.ver.outputs.version }}"
+          if npm view "@eir-labs/coltrane@$V" version >/dev/null 2>&1; then
+            echo "$V already on npm — skipping"
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Write the computed version into BOTH statements of it (package.json + src/version.ts) before
+      # verify, so the tree that gets tested is the tree that gets published — and so
+      # tests/version_identity.test.ts is checking THIS release's number, not the last one's.
+      - if: steps.check.outputs.publish == 'true'
+        run: node scripts/stamp_version.mjs "${{ steps.ver.outputs.version }}"
+
       # Verify runs on the node-shipped npm (10.x) — the version the pack-audit tests target.
       # `npm pack --dry-run` changed its manifest output under npm 11, so upgrading BEFORE verify
       # (as the first draft did) broke tests/pack_content_audit for a CI-only reason.
       - run: npm run verify
-      # Only a merge that bumped package.json version publishes; every other merge no-ops here.
-      - id: check
-        run: |
-          V=$(node -p "require('./package.json').version")
-          if npm view "@eir-labs/coltrane@$V" version >/dev/null 2>&1; then
-            echo "publish=false" >> "$GITHUB_OUTPUT"
-            echo "$V already on npm — skipping"
-          else
-            echo "publish=true" >> "$GITHUB_OUTPUT"
-            echo "version=$V" >> "$GITHUB_OUTPUT"
-          fi
+
       # Trusted publishing needs npm >= 11.5.1; upgrade only now, past verify.
       - if: steps.check.outputs.publish == 'true'
         run: npm install -g npm@latest
       - if: steps.check.outputs.publish == 'true'
         run: npm publish
+
+      # The tag is the version's source of truth — main is protected (required reviews,
+      # enforce_admins), so CI cannot push the stamped files back, and does not try. The stamp lives
+      # only in this workspace; the tag is what the next run computes from.
       - if: steps.check.outputs.publish == 'true'
         run: |
-          git tag "v${{ steps.check.outputs.version }}"
-          git push origin "v${{ steps.check.outputs.version }}"
+          git tag "v${{ steps.ver.outputs.version }}"
+          git push origin "v${{ steps.ver.outputs.version }}"

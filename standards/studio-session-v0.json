@@ -1,0 +1,101 @@
+{
+  "slug": "studio-session-v0",
+  "domain": "introspection",
+  "agent_slugs": [
+    "john",
+    "miles",
+    "bill"
+  ],
+  "phases": [
+    {
+      "name": "listen",
+      "chairs": [
+        {
+          "role": "listen",
+          "agent_slug": "john",
+          "depends_on": [],
+          "input_contract": [
+            "parsed-conversation-trace"
+          ],
+          "output_contract": [
+            "pattern-extraction"
+          ],
+          "optional_outputs": [],
+          "required_skills": []
+        }
+      ]
+    },
+    {
+      "name": "direct",
+      "chairs": [
+        {
+          "role": "direct",
+          "agent_slug": "miles",
+          "depends_on": [
+            "listen"
+          ],
+          "input_contract": [
+            "pattern-extraction"
+          ],
+          "output_contract": [
+            "design-definition"
+          ],
+          "optional_outputs": [],
+          "required_skills": []
+        }
+      ]
+    },
+    {
+      "name": "name-the-seat",
+      "chairs": [
+        {
+          "role": "name-the-seat",
+          "agent_slug": "bill",
+          "depends_on": [
+            "direct",
+            "listen"
+          ],
+          "input_contract": [
+            "design-definition",
+            "pattern-extraction"
+          ],
+          "output_contract": [
+            "draft-agent-profile"
+          ],
+          "optional_outputs": [],
+          "required_skills": [],
+          "preferred_skills": [
+            "structure-conformance"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "accept",
+      "chairs": [
+        {
+          "role": "accept",
+          "agent_slug": "",
+          "human": true,
+          "depends_on": [
+            "name-the-seat"
+          ],
+          "input_contract": [],
+          "output_contract": [
+            "Judgment"
+          ],
+          "optional_outputs": [],
+          "required_skills": []
+        }
+      ]
+    }
+  ],
+  "status": "draft",
+  "input_types": [
+    "parsed-conversation-trace"
+  ],
+  "output_types": [
+    "draft-agent-profile"
+  ],
+  "description": "A STUDIO SESSION plays back a take and names what the leading was. It reads one session transcript as material — what was asked, what tune was called, what the band was handed, where the leader stopped the band and why — extracts the recurrent moves and the roles that keep reappearing, judges which of them are method and which are merely habit, and renders the seat that emerges as a draft agent for a human to accept or reject. The corpus is conduct, not code: a transcript records what a run DID as against what it REPORTED doing, and the gap between those two is the most instructive thing in it. Draft only — the profile is a proposal, never a promotion."
+}

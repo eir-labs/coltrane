@@ -33,6 +33,6 @@
     "Glob",
     "Grep"
   ],
-  "max_tool_calls": 20,
+  "max_tool_calls": 60,
   "code_tool_access": "read"
 }

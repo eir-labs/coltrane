@@ -1,0 +1,183 @@
+{
+  "slug": "software-change-red-first-v0",
+  "domain": "software-change",
+  "agent_slugs": [
+    "john",
+    "miles",
+    "bill",
+    "red-spec-drafter",
+    "code-implementer",
+    "change-verifier",
+    "pr-publisher"
+  ],
+  "phases": [
+    {
+      "name": "sense-context",
+      "chairs": [
+        {
+          "role": "read-context",
+          "agent_slug": "john",
+          "depends_on": [],
+          "input_contract": [
+            "change-request"
+          ],
+          "output_contract": [
+            "change-context"
+          ],
+          "optional_outputs": [],
+          "required_skills": [],
+          "turn_reserve": 12
+        }
+      ]
+    },
+    {
+      "name": "frame-change",
+      "chairs": [
+        {
+          "role": "frame-change",
+          "agent_slug": "miles",
+          "depends_on": [
+            "read-context"
+          ],
+          "input_contract": [
+            "change-context"
+          ],
+          "output_contract": [
+            "change-decision"
+          ],
+          "optional_outputs": [],
+          "required_skills": []
+        }
+      ]
+    },
+    {
+      "name": "plan-change",
+      "chairs": [
+        {
+          "role": "plan-change",
+          "agent_slug": "bill",
+          "depends_on": [
+            "read-context",
+            "frame-change"
+          ],
+          "input_contract": [
+            "change-context",
+            "change-decision"
+          ],
+          "output_contract": [
+            "change-plan"
+          ],
+          "optional_outputs": [],
+          "required_skills": [],
+          "preferred_skills": [
+            "structure-conformance"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "draft-laws",
+      "chairs": [
+        {
+          "role": "draft-laws",
+          "agent_slug": "red-spec-drafter",
+          "depends_on": [
+            "plan-change",
+            "frame-change"
+          ],
+          "input_contract": [
+            "change-plan",
+            "change-decision"
+          ],
+          "output_contract": [
+            "red-spec"
+          ],
+          "optional_outputs": [],
+          "required_skills": [],
+          "turn_reserve": 14
+        }
+      ]
+    },
+    {
+      "name": "create-change",
+      "chairs": [
+        {
+          "role": "write-change",
+          "agent_slug": "code-implementer",
+          "depends_on": [
+            "draft-laws",
+            "plan-change"
+          ],
+          "input_contract": [
+            "change-plan",
+            "red-spec"
+          ],
+          "output_contract": [
+            "change-set"
+          ],
+          "optional_outputs": [],
+          "required_skills": [],
+          "turn_reserve": 14
+        }
+      ]
+    },
+    {
+      "name": "verify-change",
+      "chairs": [
+        {
+          "role": "verify-change",
+          "agent_slug": "change-verifier",
+          "depends_on": [
+            "write-change",
+            "draft-laws",
+            "plan-change"
+          ],
+          "input_contract": [
+            "change-plan",
+            "change-set",
+            "red-spec"
+          ],
+          "output_contract": [
+            "change-verdict"
+          ],
+          "optional_outputs": [],
+          "required_skills": [],
+          "turn_reserve": 10
+        }
+      ]
+    },
+    {
+      "name": "publish-pr",
+      "chairs": [
+        {
+          "role": "publish-pr",
+          "agent_slug": "pr-publisher",
+          "depends_on": [
+            "write-change",
+            "verify-change",
+            "draft-laws"
+          ],
+          "input_contract": [
+            "change-set",
+            "change-verdict",
+            "red-spec"
+          ],
+          "output_contract": [
+            "pull-request"
+          ],
+          "optional_outputs": [],
+          "required_skills": []
+        }
+      ]
+    }
+  ],
+  "status": "draft",
+  "input_types": [
+    "change-request"
+  ],
+  "output_types": [
+    "pull-request"
+  ],
+  "description": "The governed change loop with the laws made STRUCTURAL. Identical to software-change-pr-v1 through planning, then it splits the single writing chair into two seats with disjoint powers: a law-drafting chair whose grant reaches tests/** and docs/specs/** and CANNOT touch src/, and a building chair that consumes the sealed red-spec as an input. The ordering is not requested in a brief — it is enforced twice over. By GRANT: the drafter cannot write source, so it cannot make its own laws pass. By TYPE: the builder requires a red-spec, so a phase graph seating it before the drafter fails to compose at all. The publishing chair receives the red-spec too, because the laws and the fix are written by DIFFERENT seats and a PR carrying one without the other is the artefact a laws-first pipeline exists to prevent. Carries a reserve pool: a budget-stopped chair may draw turns whose whole purpose is sealing what it already found, so exhaustion costs the tail of a run rather than all of it.",
+  "reserve_pool": 40
+}

@@ -5,7 +5,8 @@
   ],
   "input_types": [
     "change-plan",
-    "change-set"
+    "change-set",
+    "red-spec"
   ],
   "output_types": [
     "change-verdict"

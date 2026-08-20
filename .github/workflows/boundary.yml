@@ -1,0 +1,44 @@
+# THE PUBLISHING BOUNDARY — the gate that makes the rule fail rather than be remembered.
+#
+# The term list is NEVER in this repository; it arrives from the BOUNDARY_TERMS secret and is written
+# to a file outside the checkout, read once, and never echoed. Under CI the checker prints locations
+# only — a public workflow log that named the matched terms would republish exactly what the gate
+# protects.
+#
+# An absent or empty secret makes the checker exit 2 (GATE BROKEN), not 0. A gate that reports success
+# when it never ran is the failure this whole mechanism exists to remove, so it is loud here.
+name: boundary
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  boundary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The scan covers the whole tracked surface, but the checkout only needs the tip: a term
+          # introduced three commits ago is present in the tree today, which is what "published" means.
+          fetch-depth: 1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npm run build
+
+      - name: provision the private term list
+        env:
+          BOUNDARY_TERMS: ${{ secrets.BOUNDARY_TERMS }}
+        run: |
+          # Written OUTSIDE the workspace so no later step can stage or upload it.
+          install -m 600 /dev/null "$RUNNER_TEMP/boundary-terms.txt"
+          printf '%s\n' "$BOUNDARY_TERMS" > "$RUNNER_TEMP/boundary-terms.txt"
+
+      - name: scan the tracked surface
+        env:
+          COLTRANE_BOUNDARY_TERMS: ${{ runner.temp }}/boundary-terms.txt
+        # No `continue-on-error`: a violation fails the check, and a broken gate (exit 2) fails it too.
+        run: node dist/src/boundary_check.js

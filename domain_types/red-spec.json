@@ -1,6 +1,6 @@
 {
   "slug": "red-spec",
-  "version": 1,
+  "version": 2,
   "extends": "Artifact",
   "domain": "spec-drafting",
   "status": "active",
@@ -21,7 +21,9 @@
               "type": "string"
             },
             "patch": {
-              "type": "string"
+              "type": "string",
+              "description": "The unified diff itself, not a description of it. The spec-drafting review chair reads test bodies OUT OF THIS FIELD ('read each red test in the diffs'), so this is the evidence the gate adjudicates, not documentation of the change. Observed on gig 34ff466b: every patch sealed as a one-line summary ('full unified diff captured from git diff --cached ... content present verbatim in the working tree at this path') \u2014 true, and useless as evidence. The reviewer refused, correctly, marking NON-TAUTOLOGY and REDNESS 'NOT RUN'. The gate was not failed, it was STARVED, and the seal accepted that silently because the type asked only for a string.",
+              "pattern": "(^|\\n)[+-]"
             }
           },
           "required": [
@@ -59,7 +61,7 @@
       },
       "uncovered": {
         "type": "array",
-        "description": "Contract invariants with no red test — MUST be empty.",
+        "description": "Contract invariants with no red test \u2014 MUST be empty.",
         "items": {
           "type": "string"
         }

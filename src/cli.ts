@@ -280,7 +280,20 @@ export async function runCli(argv: readonly string[], io: CliIO): Promise<number
     // and composing a second error; the claim path (worker.ts) asks the same function's answer.
     const mode = workerCredentialMode(process.env);
 
-    if (!baseUrl || !anonKey || mode.mode === "none") {
+    // THE LOCAL BACKING IS SELECTED BEFORE THE STORE AND CREDENTIAL GATE, for the same reason
+    // claimNextGig selects it before workerCredentialMode: a local queue is a DIRECTORY, so there
+    // is no store to name and no bearer to present. Demanding either would invent a requirement the
+    // substrate does not have.
+    //
+    // This gate was the SECOND door. claimNextGig already claimed locally and seven laws proved it,
+    // while `coltrane work` still refused HERE, upstream, before ever calling it — the unit green
+    // and the user story broken. That is why the law for this change drives the CLI and not just
+    // the function: a seam that works behind a door that does not open is not a feature.
+    const workBacking = selectQueueBacking(process.env);
+    if (workBacking.backing === "conflict") { line(io, `work refused: ${workBacking.why}`); return 2; }
+    const localWork = workBacking.backing === "file";
+
+    if (!localWork && (!baseUrl || !anonKey || mode.mode === "none")) {
       if (!baseUrl || !anonKey) {
         line(io, "work needs COLTRANE_STORE_URL and COLTRANE_STORE_ANON.");
       }
@@ -291,8 +304,8 @@ export async function runCli(argv: readonly string[], io: CliIO): Promise<number
     }
     const res = await workOnce(
       {
-        baseUrl,
-        anonKey,
+        baseUrl: baseUrl ?? "",
+        anonKey: anonKey ?? "",
         // Empty in venue mode, and deliberately so: the credential arrives with the work.
         agentToken: mode.mode === "player" ? mode.agentToken : "",
         ...(mode.mode === "venue" ? { drainKey: mode.drainKey, instance: mode.instance } : {}),

@@ -38,7 +38,8 @@ import { runGig, ResumeRefused, genomeHash, CORE_TO_PRIMITIVE, type AgentInvoker
 import { loadRegistry, type Registry } from "./registry.js";
 import { createOutputStore, type OutputStore } from "./outputs.js";
 import { MemoryLedger } from "./ledger.js";
-import { rpcGenomeStore } from "./genome_store.js";
+import { rpcGenomeStore, fileGenomeStore } from "./genome_store.js";
+import { openLocalQueue, selectQueueBacking } from "./local_queue.js";
 import { workerCredentialMode } from "./worker_env.js";
 import { prepareWorkspace } from "./workspace.js";
 import { engineToolProviders, drainBudget, drainTimeoutMs } from "./run_deps.js";
@@ -362,6 +363,30 @@ export function venueMayClaim(
  * only until that lease expires.
  */
 export async function claimNextGig(ctx: WorkerContext): Promise<ClaimedGig | null> {
+  // THE LOCAL BACKING IS SELECTED BEFORE CREDENTIALS ARE CONSIDERED, and that ordering is the whole
+  // design. A local queue is a DIRECTORY: there is no store to authenticate to, so demanding a
+  // bearer for it would be inventing a requirement the substrate does not have. But the credential
+  // gate below must keep refusing for everyone who genuinely meant to reach a store — hence
+  // selection first, refusal untouched, and local mode strictly opt-in via COLTRANE_QUEUE_DIR.
+  //
+  // selectQueueBacking is the SINGLE policy (src/local_queue.ts), shared with `coltrane enqueue`, so
+  // the door in and the door out cannot disagree about which backing owns a gig. It answers from
+  // environment PRESENCE alone and never reads a drain variable's value. A conflict is refused
+  // rather than resolved by precedence: a box configured for both is a box whose operator has not
+  // decided, and guessing on their behalf is how a run writes to the wrong store.
+  //
+  // ClaimedLocalGig is a SUPERSET of ClaimedGig — it adds `worker` and `lease` — so no translation
+  // layer is needed and none is written. A local row carries no repo_url and no venue, which is what
+  // leaves the workspace clone and the git-credential mint downstream naturally ABSENT rather than
+  // stubbed with empty values that would read as configured.
+  const backing = selectQueueBacking(process.env);
+  if (backing.backing === "conflict") throw new Error(`claim refused: ${backing.why}`);
+  if (backing.backing === "file") {
+    const worker = ctx.worker ?? `local:${process.pid}`;
+    const local = await openLocalQueue(backing.root).claim(worker);
+    return local === null ? null : (local as ClaimedGig);
+  }
+
   // ONE DERIVATION, and it is the same one the CLI door asks — Gap 4's whole point. This used to
   // re-derive `ctx.drainKey && ctx.instance` here, which is the second home the specification
   // named; the defensive branch below it existed only because two homes might disagree.
@@ -962,7 +987,14 @@ export async function workOnce(ctx: WorkerContext, deps: WorkOnceDeps): Promise<
       log(`working tree deferred to room realization for venue "${claim.venue}" (${claim.repo_url})`);
     }
 
-    const genome = await rpcGenomeStore(ctx).load();
+    // THE GENOME COMES FROM WHEREVER THE QUEUE DID. A locally claimed gig has no store behind it,
+    // so loading its genome over rpc asks `undefined/rest/v1/rpc/...` and fails after the row is
+    // already leased — the run dies holding a claim, which is the worst shape of all. fileGenomeStore
+    // is the read-path sibling that has existed all along (labelled "Local dev"); the local queue is
+    // its write-path counterpart, and this is where the two finally meet.
+    const genome = selectQueueBacking(process.env).backing === "file"
+      ? await fileGenomeStore(process.cwd()).load()
+      : await rpcGenomeStore(ctx).load();
     const standard = genome.standards.get(claim.standard_slug);
     if (!standard) {
       throw new Error(

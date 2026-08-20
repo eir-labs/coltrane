@@ -168,7 +168,7 @@ standards (multi-phase workflows), dispatching gigs (runs), and sealing every ou
 a content-addressed ledger.
 
 It is an **MCP server**. You (Claude Code) are the natural client. The repo ships its own
-`.mcp.json` pointing at `dist/src/server_entry.js`, so after `npm run build` the 53 tools
+`.mcp.json` pointing at `dist/src/server_entry.js`, so after `npm run build` the 54 tools
 become available when Claude opens the directory. The same registry is host-mountable: a
 deployment imports `createToolSurface` (subpath `./tool_surface`) and mounts the identical
 surface over HTTP against an org genome store (subpath `./genome_store`) — there is one

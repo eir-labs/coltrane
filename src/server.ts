@@ -55,6 +55,7 @@ import {
   type CallerIdentity,
   type VenueCredentialGrant,
 } from "./venue_credential.js";
+import type { HireMemberResult } from "./org_hire.js";
 import { composeStandard, defineAgent, CompositionError, type Standard, type Agent, type AgentDef, type PhaseDef } from "./composition.js";
 import { PRIMITIVE_OUTPUT_TYPE, type Primitive } from "./core_types.js";
 import { proposeTypeChange, type DomainTypeDef } from "./type_versioning.js";
@@ -3100,6 +3101,31 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
           },
         };
       }
+      case "org_hire": {
+        // NOT the live path — admission is intercepted in callSurfaceTool (which holds the caller
+        // identity and the deps.hireMember backend that dispatchTool never receives). This block
+        // exists, like venue_credential_mint's, so the verb's advertised schema has a matching
+        // handler that reads exactly its two arguments (advertised_args_are_read.test.ts), and it
+        // must live INSIDE this case body so those reads are attributed to org_hire, not the
+        // preceding case. Reaching this at runtime means the surface interception was bypassed —
+        // answer honestly rather than pretend a hire happened.
+        //
+        // ORDER MATTERS: this case sits BEFORE venue_credential_mint so venue_credential_mint stays
+        // the LAST string case in dispatchTool. The advertised_args_are_read parser slices the last
+        // case's body to end-of-file, sweeping in callSurfaceTool's own `args["…"]` reads; keeping
+        // venue last means that slurped tail's bracket reads stay {org_slug, instance} — exactly
+        // venue's schema. (The org_hire callSurfaceTool intercept reads its args by dot access for
+        // the same reason, so it contributes nothing to that tail.)
+        const org_slug = String(args["org_slug"] ?? "");
+        const agent_slug = String(args["agent_slug"] ?? "");
+        return {
+          ok: false, refusal: "no_backend", requires_approval: approval,
+          error:
+            `org_hire is served by the tool surface (createToolSurface), which wires the caller and ` +
+            `the deps.hireMember backend; the bare dispatcher cannot admit agent "${agent_slug}" to ` +
+            `org "${org_slug}". Call it through the surface.`,
+        };
+      }
       case "venue_credential_mint": {
         // NOT the live path — minting is intercepted in callSurfaceTool (which holds the caller
         // identity and the deps.mintVenueCredential backend that dispatchTool never receives).
@@ -3187,6 +3213,16 @@ export interface ToolSurfaceDeps extends ServerDeps {
    *  deployment ships the backend. Without it, venue_credential_mint is an honest typed refusal
    *  (`no_backend`) — the verb still answers, it never throws. */
   mintVenueCredential?: ((args: { org_slug: string; instance: string }) => Promise<VenueCredentialGrant>) | undefined;
+  /** Deployment-wired org admission: insert an {org_slug, agent_slug} membership row (the
+   *  coltrane_org_hire backend a deployment stands up over the store). Parallel to
+   *  mintVenueCredential — the engine ships the verb, its schema, its shape validation and its
+   *  refusals; the deployment ships the backend and any RLS. Resolves to a TYPED struct, never a
+   *  generic throw, so the two store-decided refusal codes survive the seam: `unknown_agent` (no
+   *  agent_record with that slug — a dead name fails closed) and `already_member` (the hire repeats
+   *  — an error, not a silent no-op). Without it, org_hire is an honest typed refusal (`no_backend`)
+   *  — the verb still answers, it never throws. ADMISSION IS NOT AUTHORITY: this seam admits, and no
+   *  capability travels through it. */
+  hireMember?: ((args: { org_slug: string; agent_slug: string }) => Promise<HireMemberResult>) | undefined;
 }
 
 export interface SurfaceTool {
@@ -3298,6 +3334,84 @@ async function callSurfaceTool(
     //     (that is the room contract's job, checked by realize before dispatch). The grant is the
     //     answer, returned exactly once; the engine does not persist it and there is no read-back.
     return { ok: true, data: grant };
+  }
+  if (slug === "org_hire") {
+    // The engine half of org admission: the two engine-decided refusals and the ledger seal around
+    // whatever backend a deployment injects. Intercepted here (like venue_credential_mint) for ALL
+    // callers, BEFORE the hosted check, so its refusals are structural facts about the act — not a
+    // hosted-transport concern — and so it never reaches a store upsert path.
+    //
+    // These two args are read by DOT access, not `args["…"]`, on purpose: the
+    // advertised_args_are_read parser slurps the LAST dispatchTool case's body to end-of-file and
+    // counts every bracket-with-string-literal read in it as that case's reads (this comment must
+    // not spell that pattern out, or the parser counts the EXPLANATION as an instance of the thing
+    // it explains — which is exactly how it first went red). venue_credential_mint is the last
+    // case (org_hire sits before it precisely to keep it so); a bracket read of `agent_slug` here
+    // would be miscounted as venue reading an arg it does not advertise. Dot access is invisible to
+    // that parser and keeps the slurped tail's reads honestly {org_slug, instance}.
+    const org_slug = String(args.org_slug ?? "");
+    const agent_slug = String(args.agent_slug ?? "");
+    // (a) HIRING IS NEVER SELF-SERVICE. Only a human 'member' caller may admit an agent; a
+    //     player/venue/gig token is an AGENT token, and an agent may not admit an agent — that is
+    //     the whole point of the verb. Decided from caller identity ALONE, before the backend is
+    //     reached, so a refused hire never touches deps.hireMember. Absent caller (a bare surface)
+    //     is not a member either, so it is refused too — the gate fails closed.
+    if (deps.caller?.kind !== "member") {
+      return {
+        ok: false,
+        refusal: "not_a_human_member",
+        error:
+          "hiring is never self-service: only a human member may admit an agent to an org. This " +
+          "caller presented an agent token, and an agent may not hire an agent. ADMISSION IS NOT " +
+          "AUTHORITY — a member performs the hire.",
+      };
+    }
+    // (b) No backend wired → the verb answers honestly rather than throwing, naming the seam to
+    //     wire (the same shape venue_credential_mint uses). A caller that cannot tell "hiring is
+    //     unwired here" from "your request was bad" retries the wrong thing forever.
+    if (!deps.hireMember) {
+      return {
+        ok: false,
+        refusal: "no_backend",
+        error:
+          "no admission backend is wired on this surface — org_hire ships its schema and refusals, " +
+          "but a deployment supplies the insert. Wire deps.hireMember (parallel to " +
+          "deps.mintVenueCredential) to admit the agent to the org.",
+      };
+    }
+    // (c) Admit, then map the store's TYPED answer. Existence (`unknown_agent`) and idempotency
+    //     (`already_member`) are facts only the store holds — the engine never checks the
+    //     agent_record's status ('named'/'active'), because governance and naming are separate acts
+    //     (coltrane-proposer is active yet was never named). Existence is the ONLY precondition, and
+    //     it is the store's answer, not the engine's.
+    let result: HireMemberResult;
+    try {
+      result = await deps.hireMember({ org_slug, agent_slug });
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : String(e) };
+    }
+    if (!result.ok) {
+      // A refused hire seals NOTHING — the ledger row is written only inside the {ok:true} branch
+      // below, so a hire that did not happen leaves no trace claiming it did.
+      return { ok: false, refusal: result.code };
+    }
+    // (d) SEAL THE ACT to the ledger BEFORE reporting success — a kind:"genome_mutation" row via
+    //     recordIdentity (ledger-only, NOT sealDefinition: a hire writes no genome file), so
+    //     who-hired-whom, when, and on whose authority lives in the append-only chain rather than
+    //     only in a database row. subject_slug is the agent admitted; event is 'org_hire'; org_slug
+    //     rides in the hashed detail. #218 — if the audit row does not land, say so (the store row
+    //     may already exist), rather than reporting a success whose seal never happened.
+    try {
+      recordIdentity("org_hire", agent_slug, { org_slug, agent_slug }, deps.ledger, { org_slug });
+    } catch (e) {
+      if (e instanceof LedgerError) {
+        return { ok: false, audit_write_failed: true, error: `audit write failed — "org_hire" was NOT sealed: ${e.message}` };
+      }
+      throw e;
+    }
+    // (e) Admission REPORTS the belonging it created — the {org_slug, agent_slug} pair, and nothing
+    //     carrying authority.
+    return { ok: true, data: { org_slug, agent_slug } };
   }
   if (deps.hosted) {
     const blocked = HOSTED_BLOCKED[slug];

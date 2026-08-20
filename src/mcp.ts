@@ -1,5 +1,5 @@
 import type { ChangeClass } from "./type_versioning.js";
-import { zodToMcpProps, AgentSchema, StandardSchema, SkillSchema, DomainTypeSchema, ChartSchema, VenueObjectSchema } from "./genome_schema.js";
+import { zodToMcpProps, AgentSchema, StandardSchema, SkillSchema, DomainTypeSchema, ChartSchema, VenueObjectSchema, OrgMemberSchema } from "./genome_schema.js";
 
 export type MCPCategory =
   | "understand"
@@ -190,6 +190,18 @@ export const MCP_TOOLS: readonly MCPToolDef[] = [
   // deliberately NO read-back verb (see the venue_credential_* exact-list law) and NO authorization
   // policy in the engine — who may mint lives in the store.
   { slug: "venue_credential_mint",         category: "run", input_schema: obj({ org_slug: "string", instance: "string" }), output_schema: obj({ instance: "string", env: "object", credential_classes: "array", expires_at: nullable("string") }) },
+  // org_hire — the verb that ADMITS an agent to an org. The org-membership analogue of
+  // venue_credential_mint: the engine ships the schema and its refusals, a deployment wires the
+  // admission backend (deps.hireMember). `input_schema` is derived from the single Zod source
+  // (OrgMemberSchema = {org_slug, agent_slug}) — never a hand-written MCP schema — precisely so no
+  // field a capability could travel can appear on it. ADMISSION IS NOT AUTHORITY: membership is
+  // BELONGING, seating (a chair, caps, an assignment) is a SEPARATE act with its own gate, and a
+  // verb that could admit AND seat in one call would be a path to mint authority. The verb carries
+  // exactly the two fields that name the belonging and nothing more. It is intercepted in
+  // callSurfaceTool BEFORE the hosted check, so it appears in neither HOSTED_UPSERT (a hire writes
+  // no genome file) nor HOSTED_BLOCKED (it is callable in hosted mode); a successful hire is sealed
+  // to the ledger as a kind:"genome_mutation" row, so who-hired-whom is auditable, not only a store row.
+  { slug: "org_hire",                      category: "run", input_schema: obj(zodToMcpProps(OrgMemberSchema)), output_schema: obj({ org_slug: "string", agent_slug: "string" }) },
   // #234 — `gig_id`, `agent_slug` and `phase` were read by the handler and advertised nowhere.
   // This one had teeth: a skill prompt written against this schema omits `gig_id`, the handler
   // defaults it to "", and the sealed output lands in the store attached to NO gig. A live run

@@ -44,6 +44,9 @@ import {
   NorthstarSchema,
   TourSchema,
   ResourceSchema,
+
+  institutionLineageGrounding,
+  type LineageRecordRefOutput,
 } from "./genome_schema.js";
 import { checkInstitutionAdmissibility } from "./institution_enforcement.js";
 import { checkTourAdmissibility } from "./committed_work.js";
@@ -317,4 +320,66 @@ export function loadTours(
   }
 
   return { tours, load_errors };
+}
+
+
+/** The seat inherits the institution's lineage — the call site `institutionLineageGrounding`
+ *  was written for and has been waiting on.
+ *
+ *  Walk is `assignment.agent_slug -> chair_id -> chair.institution_slug -> institution.lineage[]`.
+ *  The chair's own `institution_slug` is authoritative, not the document the assignment happens to
+ *  be filed in: an assignment may seat a player from one institution into another's office, and
+ *  the lineage a seat carries is the lineage of the office, never of the paperwork.
+ *
+ *  ONLY APPROVED LINEAGE IS INHERITED. `LineageRecordRefSchema.approved_by` is nullable and
+ *  defaulted to null precisely so this filter can exist — the schema states the rule outright:
+ *  "an institution never grounds itself on an unapproved lineage." A record that reached the
+ *  approve chair and was not sealed is therefore invisible here, which is what makes a parked
+ *  lineage pass genuinely inert rather than quietly load-bearing.
+ *
+ *  Deduplicated by `record_ref`: one agent seated in two offices of the same institution inherits
+ *  the grounding once. Order is stable — institution slug, then declaration order — so a rendered
+ *  grounding does not churn between loads.
+ *
+ *  Returns refs, not dereferenced records. The store-backed dereference through
+ *  `coltrane_institution_lineage` is the follow-up named on `LineageRecordRefSchema`; this closes
+ *  the resolution half, which is the half that had no home at all. */
+export function agentLineageGrounding(
+  institutions: ReadonlyMap<string, LoadedInstitution>,
+  agent_slug: string,
+): readonly LineageRecordRefOutput[] {
+  const seen = new Set<string>();
+  const out: LineageRecordRefOutput[] = [];
+
+  // Chair id -> the institution that holds the office. Built once across every loaded document,
+  // because the chair an assignment names need not live in the same document as the assignment.
+  const chair_home = new Map<string, string>();
+  for (const inst of institutions.values()) {
+    for (const chair of inst.document.chairs ?? []) {
+      // InstitutionalChairSchema.id is optional. A chair with no id cannot be named by an
+      // assignment's chair_id, so it seats nobody and grounds nothing — skip rather than coerce.
+      if (chair.id) chair_home.set(chair.id, chair.institution_slug);
+    }
+  }
+
+  const held = new Set<string>();
+  for (const inst of institutions.values()) {
+    for (const a of inst.document.assignments ?? []) {
+      if (a.agent_slug !== agent_slug) continue;
+      const home = chair_home.get(a.chair_id);
+      if (home) held.add(home); // an assignment naming an unknown chair grounds nothing; it is not an error here
+    }
+  }
+
+  for (const slug of [...held].sort()) {
+    const inst = institutions.get(slug);
+    if (!inst) continue;
+    for (const ref of institutionLineageGrounding(inst.document.institution)) {
+      if (ref.approved_by == null) continue;      // unapproved lineage is not inherited
+      if (seen.has(ref.record_ref)) continue;
+      seen.add(ref.record_ref);
+      out.push(ref);
+    }
+  }
+  return out;
 }

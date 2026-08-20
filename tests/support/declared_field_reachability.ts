@@ -432,4 +432,28 @@ export const PINNED_UNREAD_ENGINE_FIELDS = 14;
  *  live tree (per TWO_CORPORA_CALIBRATION_TRAIL): every one of the 127 is genuinely unread across all four
  *  branches, and the fail-safe posture makes it a LOWER bound. It may only ever DECREASE as payload fields
  *  are wired to a reader or dropped. */
+/**
+ * READ THIS BEFORE TRUSTING THIS NUMBER. It is NOT a defect count, and it is much weaker evidence
+ * than the ENGINE pin above.
+ *
+ * A contract field does not need a textual reader to be used. An agent fills a domain-type field
+ * because the SCHEMA is handed to it — through the chair's output_contract and the seal predicate —
+ * not because prose in agents/, standards/ or evals/ names the field. So "no word-boundary mention
+ * anywhere" is normal for a schema-driven field and says almost nothing about whether it is alive.
+ *
+ * MEASURED, and it is decisive. Of change-verdict's 6 declared fields this sweep reports 5 as unread:
+ * criteria_unmet, decision_ref, failures_verbatim, inferred_not_run, scope_drift. Every one of them
+ * was FILLED by the change-verifier in gig d048e2fa. The sweep is not detecting dead fields there; it
+ * is detecting that no one writes their names in prose.
+ *
+ * The same correction applies to this module's own calibration case. `tests_added` is reported unread
+ * and that is TRUE of the text — but it is populated in 86 of 97 sealed change-set outputs on disk.
+ * It is FILLED AND UNCONSUMED (no code, eval or standard acts on it), which is a real but much
+ * smaller defect than "a field nobody reads".
+ *
+ * So: treat a GROWING number as worth a look and nothing more, and never read the absolute value as
+ * a count of defects. The honest test for a contract field is whether any SEALED OUTPUT ever carries
+ * it — runtime evidence this static sweep cannot see. That check is worth building; this one is not
+ * a substitute for it.
+ */
 export const PINNED_UNREAD_CONTRACT_FIELDS = 127;

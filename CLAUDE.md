@@ -155,6 +155,21 @@ top instead of diving straight in — these are where the magic tends to hide:
   claims a document makes about ITSELF: behaviour claims stay true because a test breaks when they
   drift; status and inventory claims rot silently, so delete them or make them checkable.
 
+- **A green check is a claim. Ask whether it could ever have been red.** The defect this repo keeps
+  producing is not a broken test — it is a passing one that cannot fail. Measured, all in one day: a
+  version gate that no merge could trip because nothing bumped the number it read; a reserve gated on
+  a non-zero exit code, so a chair that hit its turn cap and exited 0 was never extended; a parity law
+  re-pointed at the arguments passed IN rather than the deps that came OUT, so deleting a wire left it
+  green; a reachability ratchet whose corpus contained the file the fields were declared in, so every
+  field matched its own declaration and the pin sat at 0 forever; and a spread-recovery line matching
+  `{` against a string built with `ch !== "{"`. Every one of them read as coverage.
+
+  So the check on a check is mechanical and takes a minute: **break the thing on purpose and watch the
+  law go red.** Delete the wire, inject the dead field, remove the grant. If it stays green you have
+  learned something far more important than the feature you were building. And verify the sabotage
+  actually landed — a probe whose anchor string did not match reports a comfortable pass while testing
+  nothing, which is the same defect one level up.
+
 - **Look under rocks.** This substrate can do more than its clerical description — strange
   data through consistent processes finds connections nobody asked for. When you see one,
   surface it.

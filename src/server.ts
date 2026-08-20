@@ -1609,6 +1609,28 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
           (args["fields_to_add"] as Record<string, unknown>) ?? {};
         const nextProps = { ...baseProps, ...addProps };
         const nextRequired = extension?.schema?.required ?? baseDef.required_fields;
+        // A MUTATION THAT CHANGES NOTHING SAYS SO. `addProps` reads exactly two shapes —
+        // `extension.schema.properties` and `fields_to_add`. An `extension` supplied in any OTHER
+        // shape (top-level JSON Schema keywords, say) matches neither, so addProps is {} and the
+        // caller's intent is DROPPED — while this handler went on to bump the version and seal
+        // content/effective hashes, reporting "additive: +0 field(s)" as success. The caller is told
+        // the genome moved when it did not, and learns otherwise only downstream, when the thing
+        // they authored never fires. Observed 2026-08-20 authoring a conditional constraint.
+        // Sibling of the agent_evolve no-op reported in #325; both refuse here rather than guess.
+        const addedNothing = Object.keys(addProps).length === 0;
+        const requiredUnchanged =
+          JSON.stringify([...nextRequired].sort()) === JSON.stringify([...baseDef.required_fields].sort());
+        if (addedNothing && requiredUnchanged) {
+          return {
+            ok: false,
+            requires_approval: approval,
+            error:
+              `type_extend would change nothing about "${baseDef.slug}" — no field was added and ` +
+              `required_fields is unchanged, so no version is warranted. Field additions are read ` +
+              `from \`extension.schema.properties\` or \`fields_to_add\`; an extension supplied in ` +
+              `any other shape (e.g. top-level JSON Schema keywords) is not read by this verb.`,
+          };
+        }
         const base: DomainTypeDef = {
           // Read the base's OWN version (widened onto DomainType) so proposeTypeChange computes
           // next_version = base.version + 1 from reality, not a constant. `?? 1` covers the freshly
@@ -2293,6 +2315,21 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         const evolveSlug = typeof args["slug"] === "string" ? (args["slug"] as string) : undefined;
         const changes = (args["changes"] && typeof args["changes"] === "object")
           ? (args["changes"] as Partial<AgentDef>) : undefined;
+        // A MUTATION THAT CHANGES NOTHING SAYS SO (#325). Field edits are read ONLY from a
+        // `changes` object. A caller who puts them at the top level leaves `changes` undefined, the
+        // guarded block below is skipped, and this case used to fall through to `ok: true` with a
+        // `new_version` — success, a version bump, and nothing changed. Refuse instead, naming the
+        // shape, so the caller learns in one call rather than discovering it when the edit is absent.
+        if (evolveSlug && !changes) {
+          return {
+            ok: false,
+            requires_approval: approval,
+            error:
+              `agent_evolve: no \`changes\` object was supplied for "${evolveSlug}", so nothing ` +
+              `would be applied. Wrap the field edits in a \`changes\` object — top-level fields are ` +
+              `not read by this verb, and a call that changes nothing warrants no new version.`,
+          };
+        }
         if (evolveSlug && changes && (deps.genome_dir || deps.agents?.has(evolveSlug))) {
           // The base definition: the genome file when a working tree exists, else the loaded
           // agents map (a hosted surface has no filesystem — the STORE genome is the base,

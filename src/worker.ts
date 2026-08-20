@@ -123,6 +123,32 @@ export interface ClaimedGig {
 }
 
 /**
+ * WHICH REPOSITORY THIS GIG'S WORKING TREE IS. One home for the decision, and the ORDER is the fix.
+ *
+ * The drain used to source the tree from `coltrane_organization.repo_url` — one repository per
+ * organization, arriving as `claim.repo_url`. That is the wrong home twice over. A gig is not
+ * repo-shaped: a research standard has no repository and needs none, yet an org column forces the
+ * concept onto every gig. And a factory serves MANY repositories: one org runs work across many, so
+ * "which repo does this work land in" became an environment constant rather than a property of the
+ * work. server.ts already says it out loud — "A venue is at rest and serves many repositories".
+ *
+ * The right source already existed and already arrived. `repository` is a TYPED FIELD in the input
+ * contract of every code-touching standard (domain_types/change-request.json, change-context.json),
+ * and the claim already carries the typed input. The correct value was being passed and ignored.
+ *
+ * So: the typed input is authoritative; `claim.repo_url` remains only as a FALLBACK, so existing
+ * single-repo organizations keep working unchanged. Null is a normal answer, not a degraded one — a
+ * standard whose contract names no repository touches no tree and mints no git credential, which is
+ * already the correct behaviour for research work.
+ */
+export function resolveWorkingRepo(claim: ClaimedGig): string | null {
+  const typed = (claim.input as { repository?: unknown } | undefined)?.repository;
+  if (typeof typed === "string" && typed.trim().length > 0) return typed;
+  const orgDefault = claim.repo_url;
+  return typeof orgDefault === "string" && orgDefault.trim().length > 0 ? orgDefault : null;
+}
+
+/**
  * The worker's durable state root: `checkpoints/` for the resume records, `outputs/` + `refs/`
  * for the sealed rows those records name — the sibling layout `createCheckpointStore` documents.
  *
@@ -945,10 +971,12 @@ export async function workOnce(ctx: WorkerContext, deps: WorkOnceDeps): Promise<
     // populate path, which re-throws a named failure and reaps its own realization directory. When NOT
     // suppressed (no room, no repository named, or no realizer to build the room) the Booker's clone
     // and its error paths are byte-identical to before this guard existed.
-    const roomWillPopulate = Boolean(claim.venue && claim.repo_url && deps.venueRealizer);
+    // Resolved ONCE per run, from the work's own contract first (see resolveWorkingRepo).
+    const workingRepo = resolveWorkingRepo(claim);
+    const roomWillPopulate = Boolean(claim.venue && workingRepo && deps.venueRealizer);
     if (!roomWillPopulate) {
       workspace = await prepareWorkspace({
-        repoUrl: claim.repo_url,
+        repoUrl: workingRepo,
         gigId: claim.gig_id,
         drainKey: ctx.drainKey,
         instance: ctx.instance,
@@ -956,10 +984,10 @@ export async function workOnce(ctx: WorkerContext, deps: WorkOnceDeps): Promise<
       });
       if (workspace) {
         process.chdir(workspace.dir);
-        log(`working tree ready: ${claim.repo_url}`);
+        log(`working tree ready: ${workingRepo}`);
       }
     } else {
-      log(`working tree deferred to room realization for venue "${claim.venue}" (${claim.repo_url})`);
+      log(`working tree deferred to room realization for venue "${claim.venue}" (${workingRepo})`);
     }
 
     const genome = await rpcGenomeStore(ctx).load();
@@ -1052,7 +1080,7 @@ export async function workOnce(ctx: WorkerContext, deps: WorkOnceDeps): Promise<
           `realizer this worker was not given — refusing rather than running the room unbuilt`,
       );
     }
-    // The repository is carried on the claim (claim.repo_url — the STORE's governed column), and is
+    // The repository comes from the WORK's typed input, falling back to the org column (resolveWorkingRepo), and is
     // mapped into the run the SAME conditional-spread way the venue fields are, so runGig realizes the
     // room WITH a repository to populate its tree from. Present only alongside a venue, because the
     // repository populates a ROOM's workspace; a venue-less claim keeps the Booker's own clone above.
@@ -1061,7 +1089,7 @@ export async function workOnce(ctx: WorkerContext, deps: WorkOnceDeps): Promise<
           venue: claim.venue,
           venues: genome.venues,
           ...(deps.venueRealizer ? { venueRealizer: deps.venueRealizer } : {}),
-          ...(claim.repo_url ? { repoUrl: claim.repo_url } : {}),
+          ...(resolveWorkingRepo(claim) ? { repoUrl: resolveWorkingRepo(claim) } : {}),
         }
       : {};
 

@@ -61,6 +61,22 @@ export function toolBaseName(grant: string): string {
  * this function, so no call site re-inlines it (the change request forbids re-inlining the oracles).
  * Deterministic order (HOST_BUILTINS insertion order) so the emitted flag is stable.
  */
+/**
+ * Is `name` one of the host builtins the runtime provides?
+ *
+ * A SECOND ACCESSOR over the same single home, deliberately — not a second copy. HOST_BUILTINS
+ * stays unexported for the reason stated above (one universe, no re-inlined oracles), and callers
+ * that need to ASK about a name rather than compute a complement now have a way to do it without
+ * copying the set. The player compiler is the first such caller: it prefixed every declared tool
+ * with `mcp__coltrane__` unconditionally, so a player could not name `Read` without compiling it
+ * into `mcp__coltrane__Read` — a dead name that binds to nothing and fails silently.
+ *
+ * Takes a BASE name; pass `toolBaseName(grant)` for a scoped grant like `Bash(git add:*)`.
+ */
+export function isHostBuiltin(name: string): boolean {
+  return HOST_BUILTINS.has(name);
+}
+
 export function hostBuiltinDenials(effectiveAllowed: Iterable<string>): string[] {
   const granted = new Set<string>();
   for (const g of effectiveAllowed) granted.add(toolBaseName(g));

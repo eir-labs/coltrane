@@ -52,5 +52,8 @@
   "model_tier": "premium",
   "max_tool_calls": 150,
   "code_tool_access": "full",
-  "depth_profile": "deep"
+  "depth_profile": "deep",
+  "required_inputs": [
+    "red-spec"
+  ]
 }

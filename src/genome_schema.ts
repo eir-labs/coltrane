@@ -89,10 +89,24 @@ export const SkillSchema = z.object({
 
 // ── Agent — the template class, migrated end-to-end. z.input = AgentDef (what you author,
 //    optionals allowed); z.output = Agent (defaults applied). One definition, both types. ──
-export const AgentSchema = z.object({
+export const AgentObjectSchema = z.object({
   slug: z.string(),
   primitives: z.array(PrimitiveSchema).readonly(),
   input_types: z.array(z.string()).readonly().default([]),
+  /** The inputs this agent CANNOT WORK WITHOUT in ANY placement — the per-agent MANDATE that
+   *  `input_types` (the capability ENVELOPE: what the agent CAN consume across all roles) cannot
+   *  express. `composeStandard` refuses a chair whose `input_contract` omits any of these, because
+   *  that placement would run the agent's method against an input that never arrives. Every entry
+   *  MUST also appear in `input_types` — an agent cannot REQUIRE an input outside its own envelope;
+   *  the cross-field rule on `AgentSchema` (the `.superRefine` below) enforces that at PARSE.
+   *
+   *  OPTIONAL with NO default — deliberately, exactly like `turn_budget`/`tier`. A `.default([])`
+   *  would make the field non-optional on the `Agent` output type (breaking hand-rolled `Agent`
+   *  literals such as `tests/genome_write_roundtrip.test.ts`'s `sensor`) and would ADD
+   *  `required_inputs: []` to every existing agent on write-back, breaking byte-equivalent round-trip.
+   *  Absent stays absent; a Zod object drops an undeclared key, so the field must be declared HERE to
+   *  be retained. */
+  required_inputs: z.array(z.string()).readonly().optional(),
   output_types: z.array(z.string()).readonly().default([]),
   domain: z.string().nullable().default(null),
   identity: z.string(),
@@ -125,6 +139,35 @@ export const AgentSchema = z.object({
   code_tool_access: CodeToolAccessSchema.optional(),
   depth_profile: DepthSchema.optional(),
   browser_grant: BrowserGrantSchema.optional(),
+});
+
+/**
+ * The agent AUTHORING/parse surface: the plain `AgentObjectSchema` plus the one cross-field rule a
+ * single field cannot state — every `required_inputs` entry must also be an `input_types` entry.
+ *
+ * Mirrors the `VenueSchema` / `VenueObjectSchema` split below. The inner `AgentObjectSchema` is a
+ * plain `ZodObject`, so it retains `.shape` — which `zodToMcpProps(AgentObjectSchema)` (the advertised
+ * MCP surface) and `Object.keys(AgentObjectSchema.shape)` (server.ts's hosted-write key list) both
+ * need. `AgentSchema` wraps it in a `.superRefine`, a `ZodEffects` that has NEITHER — so those two
+ * consumers read the inner object while every `.parse`/`.safeParse` caller (`defineAgent`, the loader)
+ * gets the cross-field rule for free. An agent that requires an input outside its own capability
+ * envelope is MALFORMED, not merely un-composable, so it is refused at PARSE — earlier and closer to
+ * the author than the compose-time chair refusal, which is a different question (does THIS placement
+ * supply it?).
+ */
+export const AgentSchema = AgentObjectSchema.superRefine((agent, ctx) => {
+  const envelope = new Set(agent.input_types ?? []);
+  for (const req of agent.required_inputs ?? []) {
+    if (envelope.has(req)) continue;
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["required_inputs"],
+      message:
+        `required_inputs entry "${req}" is not in input_types [${(agent.input_types ?? []).join(", ")}] — ` +
+        `an agent cannot REQUIRE an input outside its capability envelope. Add "${req}" to input_types, ` +
+        `or drop it from required_inputs.`,
+    });
+  }
 });
 
 export type AgentInput = z.input<typeof AgentSchema>;
@@ -1180,9 +1223,17 @@ function jsonTypeOf(schema: z.ZodTypeAny): JsonType {
   return "object";
 }
 
-/** The MCP `properties` map (field → JSON type) for a genome class schema. */
-export function zodToMcpProps(schema: z.ZodObject<z.ZodRawShape>): Record<string, JsonType> {
-  return Object.fromEntries(Object.entries(schema.shape).map(([k, v]) => [k, jsonTypeOf(v as z.ZodTypeAny)]));
+/** The MCP `properties` map (field → JSON type) for a genome class schema.
+ *
+ *  Accepts either a plain `ZodObject` or a `.superRefine`/`.refine`-wrapped one (a `ZodEffects`, e.g.
+ *  `AgentSchema` with its `required_inputs ⊆ input_types` rule): a cross-field-refined class has no
+ *  own `.shape`, so unwrap to the inner object before reading it. This mirrors `jsonTypeOf`'s own
+ *  effects-unwrapping (`_def.schema`) and lets a refined class advertise its field surface without a
+ *  parallel object-schema sibling threaded to every call site. Passing the inner `…ObjectSchema`
+ *  directly (as venue does) still works — the guard is a no-op on a plain object. */
+export function zodToMcpProps(schema: z.ZodTypeAny): Record<string, JsonType> {
+  const obj = (schema instanceof z.ZodEffects ? schema._def.schema : schema) as z.ZodObject<z.ZodRawShape>;
+  return Object.fromEntries(Object.entries(obj.shape).map(([k, v]) => [k, jsonTypeOf(v as z.ZodTypeAny)]));
 }
 
 // ── The committed-work objects — Tour / Booking / Resource, the binding middle place ──────────────

@@ -21,7 +21,7 @@ import {
 } from "./mcp.js";
 import { createRegistry, loadRegistry, domainTypeDefect, type Registry, type DomainType } from "./registry.js";
 import { loadGenome, resolveGenome, type SkillRecord, type EvalRecord, type LoadError } from "./loader.js";
-import { SkillSchema, AgentSchema, StandardSchema, DomainTypeSchema, ChartSchema, VenueSchema, VenueObjectSchema, venueDefect } from "./genome_schema.js";
+import { SkillSchema, AgentObjectSchema, StandardSchema, DomainTypeSchema, ChartSchema, VenueSchema, VenueObjectSchema, venueDefect } from "./genome_schema.js";
 import {
   composeChart, runChart, chartHash, chartEntrySeedTypes, dispatchTarget,
   type Chart, type Venue, type ChartPlan, type ChartResult, type ResolvedMovement,
@@ -2269,7 +2269,7 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         // + composition checks and surfaces their precise typed errors — pre-parsing would mask a
         // composition error (e.g. CREATE with no upstream reasoning) behind a generic schema error.
         const built: Record<string, unknown> = {};
-        for (const key of Object.keys(AgentSchema.shape)) {
+        for (const key of Object.keys(AgentObjectSchema.shape)) {
           if (args[key] !== undefined) built[key] = args[key];
         }
         const def = built as unknown as AgentDef;
@@ -3309,8 +3309,8 @@ const HOSTED_BLOCKED: Readonly<Record<string, string>> = {
 // each persists as. Payload is filtered by the class's own Zod schema key list (the same
 // single source the handlers copy from), so the store payload can't drift from the schema.
 const HOSTED_UPSERT: Readonly<Record<string, { cls: GenomeClass; keys: readonly string[] }>> = {
-  agent_define: { cls: "agent", keys: Object.keys(AgentSchema.shape) },
-  agent_evolve: { cls: "agent", keys: Object.keys(AgentSchema.shape) },
+  agent_define: { cls: "agent", keys: Object.keys(AgentObjectSchema.shape) },
+  agent_evolve: { cls: "agent", keys: Object.keys(AgentObjectSchema.shape) },
   standard_compose: { cls: "standard", keys: Object.keys(StandardSchema.shape) },
   type_register: { cls: "domain_type", keys: Object.keys(DomainTypeSchema.shape) },
   skill_define: { cls: "skill", keys: Object.keys(SkillSchema.shape) },

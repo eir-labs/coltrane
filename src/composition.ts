@@ -357,6 +357,26 @@ export function composeStandard(def: {
             );
           }
         }
+        // ── The required-inputs floor ─────────────────────────────────────────────────────────
+        // `input_types` is the agent's capability ENVELOPE (what it CAN consume across all roles);
+        // `required_inputs` is the per-agent MANDATE — the inputs it CANNOT WORK WITHOUT in ANY
+        // placement. The runtime floor (runtime.ts) is deliberately `.some` over the envelope; this
+        // is the compose-time `.every` over the mandate, checked against THIS chair's `input_contract`
+        // (what the placement actually consumes), never the standard's gig `input_types`. A chair that
+        // omits a required input would run the agent's method against an input that never arrives —
+        // the same dead-slot defect class as the hydration check above, caught where the genome is
+        // authored rather than mid-run. Absent `required_inputs` (the common case) refuses nothing.
+        const consumed = new Set(ch.input_contract);
+        for (const req of ag.required_inputs ?? []) {
+          if (consumed.has(req)) continue;
+          throw new CompositionError(
+            `standard ${def.slug}: chair "${ch.role}" seats agent "${ag.slug}", which REQUIRES input ` +
+              `"${req}" in every placement, but this chair's input_contract ` +
+              `[${ch.input_contract.join(", ")}] omits it — a required input the placement never ` +
+              `receives. Add "${req}" to this chair's input_contract, or drop it from the agent's ` +
+              `required_inputs.`,
+          );
+        }
       }
       if (ch.output_contract.length === 0) {
         throw new CompositionError(

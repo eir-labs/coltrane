@@ -1,5 +1,5 @@
 import type { ChangeClass } from "./type_versioning.js";
-import { zodToMcpProps, AgentSchema, StandardSchema, SkillSchema, DomainTypeSchema, ChartSchema, VenueObjectSchema, OrgMemberSchema } from "./genome_schema.js";
+import { zodToMcpProps, AgentObjectSchema, StandardSchema, SkillSchema, DomainTypeSchema, ChartSchema, VenueObjectSchema, OrgMemberSchema } from "./genome_schema.js";
 
 export type MCPCategory =
   | "understand"
@@ -86,7 +86,7 @@ export const MCP_TOOLS: readonly MCPToolDef[] = [
 
   { slug: "type_register",                 category: "build", input_schema: obj({ ...DT_AUTHORED, reason: "string" }), output_schema: obj({ registered: "boolean", domain_type_id: "string", version: "number" }) },
   { slug: "type_extend",                   category: "build", input_schema: obj({ slug: "string", fields_to_add: "object", extension: "object", reason: "string" }), output_schema: obj({ new_version: "number", changelog_entry: "string" }) },
-  { slug: "agent_define",                  category: "build", input_schema: obj(zodToMcpProps(AgentSchema)), output_schema: obj({ agent_profile_id: "string", validation_result: "object" }) },
+  { slug: "agent_define",                  category: "build", input_schema: obj(zodToMcpProps(AgentObjectSchema)), output_schema: obj({ agent_profile_id: "string", validation_result: "object" }) },
   { slug: "agent_evolve",                  category: "build", input_schema: obj({ slug: "string", changes: "object", base: "object", next: "object", new_version: "number", reason: "string", evidence: "object" }), output_schema: obj({ new_version: "number", cascade_check: "object" }) },
   { slug: "standard_compose",              category: "build", input_schema: obj(zodToMcpProps(StandardSchema)), output_schema: obj({ standard_id: "string", validation_result: "object" }) },
   // chart_define / venue_define — generated from their schemas, like every migrated class. The

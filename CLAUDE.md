@@ -132,6 +132,29 @@ top instead of diving straight in — these are where the magic tends to hide:
 - **Leave conclusions honestly open.** When you assert something you can't ground in
   deterministic signal, mark it open, go find a real source, bring it back, and log the
   attribution. An unverifiable claim is a door, not a wall.
+- **Suspect the last inch, not the code.** This engine's mechanisms are mostly right; what fails is
+  the join between a mechanism and its caller. A field declared and never read. A safety mechanism
+  with eleven passing laws and zero standards setting it. A collector nothing calls. A class the
+  package does not ship. Every one of those passed CI, because a test proves a mechanism WORKS and
+  nothing was asking whether it is REACHED. When you finish something, ask what would fail if it
+  were silently disconnected — and if the answer is *nothing*, you have not finished.
+
+- **An absence is not an error, and that is what makes it dangerous.** The costly defects do not
+  raise; they return a legitimate-looking value. A drain that SUCCEEDS quietly writes to production.
+  A default standing in for a real value leaves nothing to grep for. An empty class is
+  indistinguishable from "none were declared". A sealed row can name a version nothing ever wrote.
+  Prefer a loud refusal to a plausible default: this repo already refuses a tool grant with no
+  provider, a skill permission it cannot enforce, and a boundary check whose term list is missing.
+  Absent must mean DECLINE, never quietly stand in.
+
+- **A rule that cannot fail is remembered, not enforced.** Prose in a brief loses to a tool grant
+  every time — measured: a laws-first ordering demanded in capitals across three dispatches was
+  ignored, and the same ordering held on the first run once the drafter's grant could not reach
+  `src/` and the builder's input contract required a sealed red-spec. When you find yourself writing
+  a longer instruction, look for the structure that makes the instruction unnecessary. And check the
+  claims a document makes about ITSELF: behaviour claims stay true because a test breaks when they
+  drift; status and inventory claims rot silently, so delete them or make them checkable.
+
 - **Look under rocks.** This substrate can do more than its clerical description — strange
   data through consistent processes finds connections nobody asked for. When you see one,
   surface it.
@@ -145,7 +168,7 @@ standards (multi-phase workflows), dispatching gigs (runs), and sealing every ou
 a content-addressed ledger.
 
 It is an **MCP server**. You (Claude Code) are the natural client. The repo ships its own
-`.mcp.json` pointing at `dist/src/server_entry.js`, so after `npm run build` the 49 tools
+`.mcp.json` pointing at `dist/src/server_entry.js`, so after `npm run build` the 53 tools
 become available when Claude opens the directory. The same registry is host-mountable: a
 deployment imports `createToolSurface` (subpath `./tool_surface`) and mounts the identical
 surface over HTTP against an org genome store (subpath `./genome_store`) — there is one
@@ -200,7 +223,8 @@ has a promote tool today (evals are declared inside the standard that uses them)
 | `venues` | the institution's configured performance space: equipment (a deny-by-default tool CEILING), doors (ingress/egress origin allowlists), digest-pinned installs, credential surface, lifecycle, and the accountable office | `venue_define · venue_browse` |
 | `skills` | reusable cognitive primitives — bound into agents by slug, or CARRIED on an agent's own record (load-only + promote) | `skill_promote` |
 | `evals` | verdict shapes that judge gig outputs (load-only; declared with the standard) | _none — declared in the standard file_ |
-| `institutions` | institutional instances: an institution, its chairs (with dispatch grants), assignments, forebears, lineage edges | _file-shaped under `institutions/`, validated by the Zod schemas; no loader or MCP surface yet — `tests/default_genome_quartet.test.ts` is the gate_ |
+| `tours` | COMMITTED WORK: a Tour is the institution-visible aggregation of committed future gigs (`Bookings`) drawing over declared `Resources` — the binding middle place between an intention (`Northstar`) and a settled actual (`GigLedgerEntry`), the encumbrance between the appropriation ceiling and the expenditure. Acceptance reuses `LawCheck` and the same `evaluate()`; admissibility returns the same `AdmissibilityResult`. | _file-shaped under `tours/`, loaded by `loadTours` (src/institution_loader.ts) and returned in the genome; no MCP surface yet. Gates: `tests/committed_work/` (6 law files) and `docs/specs/the-binding-middle-place.md`_ |
+| `institutions` | institutional instances: an institution, its chairs (with dispatch grants), assignments, forebears, lineage edges | _file-shaped under `institutions/`, loaded by `loadInstitutions` (src/institution_loader.ts) and returned in the genome alongside every other class; TOTAL by contract — a malformed document becomes a per-file `load_error` and drops out rather than failing the load. No MCP authoring surface yet. Gates: `tests/institution_loader.test.ts` (8 laws incl. wiring + ordering) and `tests/default_genome_quartet.test.ts`_ |
 
 Discoverability parity is an invariant: every class you can author over MCP you can list
 over MCP (`type_browse · skill_browse · agent_browse · standard_browse · chart_browse ·

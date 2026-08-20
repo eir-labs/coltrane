@@ -1,19 +1,33 @@
-// THE STANDING GUARD — the root unit suite reaches no remote.
+// THE SUITE REACHES NO REMOTE — two halves of one promise.
 //
-// This is NOT a RED-first law. It is green from the outset and must STAY green through every edit in
-// this change (and after it). Its job is structural: the dereference snapshot law in
-// a_fetch_claim_carries_its_evidence.test.ts is offline by DESIGN — it reads a committed fixture, it
-// does not fetch — and the only place a network call is permitted to appear is the operator refresh
-// script under scripts/, which the root vitest config never includes. This guard makes that promise
-// enforceable rather than aspirational: if any file the root config runs starts reaching the network,
-// the suite goes red here, loudly, naming the file and the primitive.
+// This file carries TWO independent guards that arrived by different routes and were merged rather
+// than one being dropped. They fail for different reasons and neither implies the other:
 //
-// It scans CODE, not prose. A network primitive named in a comment ("a skill could exfiltrate it with
-// a single fetch") or embedded in a string literal (skill body handed to a sandbox as data, an enum
-// value "fetch") is not the suite reaching a remote. So the scanner strips block comments, line
-// comments, and string/template literals FIRST, then looks for actual call sites. Scanning the raw
-// text would flag honest prose and produce green-for-the-wrong-reason churn — the exact failure mode
-// this codebase keeps pinning.
+//   1. THE ENVIRONMENT IS SEVERED (from #429). `src/output_mirror.ts` arms a remote append by reading
+//      AMBIENT env — remoteConfigured(): COLTRANE_DRAIN_KEY || COLTRANE_DRAIN_PG. A developer box
+//      configured to drain, the same box `npm run verify` runs on before a deploy, therefore POSTed
+//      every persisted output to that box's real service under that box's real credential, from a
+//      GREEN test run. Measured before the guard landed: one full suite sent 428 requests to the
+//      configured origin (423 gig rows, 4 output records, 1 artifact upload) and every test passed,
+//      because a fire-and-forget drain that SUCCEEDS logs nothing. This half asserts the observable
+//      fact — no drain credential and no drain origin is visible to a test.
+//
+//   2. NO TEST FILE CALLS OUT (from #446). The environment being severed says nothing about a test
+//      that hard-codes a URL and fetches it. This half scans the CODE of every file the root config
+//      runs. It is green from the outset and must stay green: the dereference snapshot law in
+//      a_fetch_claim_carries_its_evidence.test.ts is offline BY DESIGN — it reads a committed fixture
+//      — and the only sanctioned network call lives in scripts/refresh_citation_snapshot.ts, which
+//      the root vitest config never includes.
+//
+//      It scans code, not prose. A network primitive named in a comment ("a skill could exfiltrate it
+//      with a single fetch") or sitting in a string literal (a skill body handed to a sandbox as data,
+//      an enum value "fetch") is not the suite reaching a remote. The scanner strips block comments,
+//      line comments, and string/template literals FIRST, then looks for real call sites. Scanning raw
+//      text would flag honest prose and produce green-for-the-wrong-reason churn — the exact failure
+//      this codebase keeps pinning.
+//
+// Half 1 catches a configured box; half 2 catches a written test. Keep both.
+
 import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
 import { join, relative } from "node:path";
@@ -70,6 +84,22 @@ const NETWORK_PRIMITIVES: { name: string; re: RegExp }[] = [
 // call-site scan), so scan for network module imports separately against the raw source.
 const NETWORK_IMPORT_RE =
   /(?:import[^;]*from|require\s*\(|import\s*\()\s*['"](?:node:)?(?:http|https|net|tls|dgram|undici|axios|node-fetch|got|superagent)['"]/;
+
+describe("the test suite reaches no remote store", () => {
+  it("no drain credential is visible to a test — a green run cannot write to an org store", () => {
+    // The exact disjunction remoteConfigured() evaluates. Either being set is sufficient to arm the
+    // remote append, so both must be absent for the suite to be hermetic.
+    expect(process.env["COLTRANE_DRAIN_KEY"], "COLTRANE_DRAIN_KEY leaked into the suite").toBeUndefined();
+    expect(process.env["COLTRANE_DRAIN_PG"], "COLTRANE_DRAIN_PG leaked into the suite").toBeUndefined();
+  });
+
+  it("no drain ORIGIN is visible either — the address is severed as well as the credential", () => {
+    // Belt and braces, and it carries its own reason: a key with no origin already fails loudly
+    // (worker_env refuses the pair), but an ORIGIN left set is what turns a future ambient key into
+    // a live POST. Severing both means a single leaked variable is never sufficient.
+    expect(process.env["COLTRANE_DRAIN_URL"], "COLTRANE_DRAIN_URL leaked into the suite").toBeUndefined();
+  });
+});
 
 describe("the root unit suite reaches no remote (standing guard)", () => {
   const files = rootConfigTestFiles();

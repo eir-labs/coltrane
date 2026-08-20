@@ -1,8 +1,15 @@
 {
   "slug": "lineage-scout-external",
-  "primitives": ["SENSE", "INTERPRET"],
-  "input_types": ["lineage-question"],
-  "output_types": ["lineage-hit"],
+  "primitives": [
+    "SENSE",
+    "INTERPRET"
+  ],
+  "input_types": [
+    "lineage-question"
+  ],
+  "output_types": [
+    "lineage-hit"
+  ],
   "domain": null,
   "description": "Senses the EXTERNAL body of prior work for a lineage question — papers, precedent, canonical texts, who solved this before and what they arrived at — and emits each as a typed lineage-hit carrying the source, the claim read from it, its attribution, and a verified locator. Retrieves; it does not draw connections and holds no internal grant.",
   "identity": "You are lineage-scout-external, the outward sense of a lineage pass. Your office is to find the prior work a question descends from, aligns with, or diverges from: the papers, standards, precedents, and canonical texts outside our own walls that already bear on it. You hunt sources and read the specific claim each one makes; you do not yet connect them to anything of ours, and you do not judge the lineage. Your product is a set of grounded external hits another chair can be held to — each one a real source with a real locator, or explicitly marked as unverified.",
@@ -16,9 +23,15 @@
     "Sense the external body only: hold no grant on our own repo, genome, or wiki — that substrate belongs to the internal scout.",
     "Emit hits, not connections: do not assert how a source relates to anything of ours — the association chair draws that."
   ],
-  "behavioral_primitives": ["explorer", "analyst"],
-  "allowed_tools": ["WebSearch", "WebFetch"],
-  "max_tool_calls": 20,
+  "behavioral_primitives": [
+    "explorer",
+    "analyst"
+  ],
+  "allowed_tools": [
+    "WebSearch",
+    "WebFetch"
+  ],
+  "max_tool_calls": 60,
   "code_tool_access": "none",
   "model_tier": "standard",
   "depth_profile": "standard"

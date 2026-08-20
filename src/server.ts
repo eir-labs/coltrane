@@ -762,6 +762,13 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         // the venue-less path stays byte-identical.
         const venue =
           args["venue"] === undefined || args["venue"] === null ? undefined : String(args["venue"]);
+        // WHAT REPOSITORY it works on, as distinct from WHERE it plays. The SUBJECT of the run, named
+        // EXPLICITLY at dispatch and threaded to runGig (the same conditional-spread trio venue uses)
+        // so the realized room's workspace is populated with THIS repository — never process.cwd() or
+        // any ambient host path. A venue is at rest and serves many repositories, so the repository
+        // belongs on the RUN, not the room. Absent → the room declines to populate (empty workspace).
+        const repoUrl =
+          args["repo_url"] === undefined || args["repo_url"] === null ? undefined : String(args["repo_url"]);
 
         const target = dispatchTarget({
           standard_slug: args["standard_slug"] === undefined || args["standard_slug"] === null ? undefined : String(args["standard_slug"]),
@@ -1113,6 +1120,8 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
               ...(venue ? { venue } : {}),
               ...(deps.venues ? { venues: deps.venues } : {}),
               ...(deps.venueRealizer ? { venueRealizer: deps.venueRealizer } : {}),
+              // The repository the run names, threaded so runGig populates the room's tree from it.
+              ...(repoUrl ? { repoUrl } : {}),
               ...(depth ? { depth } : {}), ...reuseWiring, ...humanWiring,
             });
             return {
@@ -1195,6 +1204,9 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
           ...(venue ? { venue } : {}),
           ...(deps.venues ? { venues: deps.venues } : {}),
           ...(deps.venueRealizer ? { venueRealizer: deps.venueRealizer } : {}),
+          // Same repository wire as the sync path above — the default async dispatch must populate a
+          // named room's tree too, not only the deterministic wait:true path.
+          ...(repoUrl ? { repoUrl } : {}),
           gig_id: gigId, onProgress, signal: controller.signal, ...(depth ? { depth } : {}), ...reuseWiring, ...humanWiring,
         });
         // A REFUSED resume must be answered in THIS reply, not discovered later by polling. The
@@ -1519,6 +1531,9 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
           ...(args["architectures"] !== undefined ? { architectures: args["architectures"] } : {}),
           ...(args["max_concurrent_chairs"] !== undefined ? { max_concurrent_chairs: args["max_concurrent_chairs"] } : {}),
           ...(args["floor"] !== undefined ? { floor: args["floor"] } : {}),
+          // NO repo_url here: the repository is the SUBJECT of a RUN, named at dispatch, not an
+          // at-rest venue field. A venue serves many repositories; pinning one on the room would mint
+          // a venue per repository. See VenueObjectSchema's gap note.
         };
         const parsedVenue = VenueSchema.safeParse(venueInputDef);
         if (!parsedVenue.success) {
@@ -1595,7 +1610,11 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         const nextProps = { ...baseProps, ...addProps };
         const nextRequired = extension?.schema?.required ?? baseDef.required_fields;
         const base: DomainTypeDef = {
-          slug: baseDef.slug, version: 1, extends: baseDef.extends, domain: baseDef.domain,
+          // Read the base's OWN version (widened onto DomainType) so proposeTypeChange computes
+          // next_version = base.version + 1 from reality, not a constant. `?? 1` covers the freshly
+          // registered projection that carries no version (always v1). The hardcoded 1 here forced
+          // every extend to next_version 2 — the first half of PR #433 AC6's second-extend defect.
+          slug: baseDef.slug, version: baseDef.version ?? 1, extends: baseDef.extends, domain: baseDef.domain,
           status: "active", schema: { type: "object", properties: baseProps }, required_fields: baseDef.required_fields,
         };
         // THE THIRD DOOR. `{...baseProps, ...addProps}` above is the exact merge #264 is
@@ -1621,10 +1640,48 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         };
         const proposal = proposeTypeChange(base, next);
         const newFields = Object.keys(nextProps).length - Object.keys(baseProps).length;
-        // substrate seal: the new version's identity is recorded in the ledger (file
-        // materialization of versioned types follows the version-aware loader path).
+        // substrate seal: PERSIST the extended definition the way type_register does, rather
+        // than only recording its identity in the ledger. The prior `recordIdentity` path
+        // deferred file materialization to a "version-aware loader path" that does not exist —
+        // so `ok:true` named a version nothing wrote: a fresh load still resolved the old
+        // definition, and the sealed genome_mutation row asserted a state the genome did not
+        // hold. `sealDefinition` seals-before-writes and materializes a loadable file, so an
+        // `ok:true` now means the type is resolvable. The loader keys domain types by version
+        // from file CONTENT and DomainTypeMap.get returns the highest-version record, so the
+        // in-place overwrite of `domain_types/<slug>.json` at the bumped version resolves today
+        // with no versioned filename — an `@v` file would be the same defect wearing a version
+        // number. The ledger subject stays the VERSIONED identity `<slug>@v<n>` (its content
+        // hash), while the file is the bare `<slug>.json` the loader reads.
         const versioned = { ...next, version: proposal.next_version };
-        const tx = deps.genome_dir ? recordIdentity("type_extend", `${base.slug}@v${proposal.next_version}`, versioned, deps.ledger, args["reason"] != null ? { reason: args["reason"] } : undefined) : undefined;
+        const tx = deps.genome_dir
+          ? sealDefinition(
+              "type_extend",
+              `${base.slug}@v${proposal.next_version}`,
+              versioned,
+              deps.ledger,
+              deps.genome_dir,
+              "domain_types",
+              args["reason"] != null ? { reason: args["reason"] } : undefined,
+              base.slug,
+            )
+          : undefined;
+        // Refresh the in-memory registry to match what was just sealed to disk. sealDefinition
+        // overwrites domain_types/<slug>.json at the bumped version, but the registry map still
+        // holds the pre-extend entry — so a SECOND type_extend on the same slug would re-read the
+        // stale version and compute next_version from it again (v1→v2→v2 instead of v3). That is
+        // the second half of PR #433 AC6's defect: the write became real, so the collision became
+        // real. Swap just this slug's entry (bumped version + the merged schema/required_fields
+        // just sealed) into a snapshot and replaceTypes it. replaceTypes — not registerType — is
+        // used deliberately: registerType runs reuse enforcement via score(), and an extended type
+        // scores >=80 against its own prior version (score() never inspects slug), so registerType
+        // would REFUSE it. replaceTypes is the existing bypass (genome_reload uses it) and is a
+        // sync, not authorship. See rationale in the sealed change-set re: score()'s slug-blindness.
+        const snapshot = deps.registry.listTypes().map((t) =>
+          t.slug === base.slug
+            ? { ...t, version: proposal.next_version, schema: { type: "object", properties: nextProps }, required_fields: [...nextRequired] }
+            : t,
+        );
+        deps.registry.replaceTypes(snapshot);
         return { ok: true, requires_approval: proposal.approval_required, data: { new_version: proposal.next_version, changelog_entry: `${proposal.change_class}: +${newFields} field(s)`, change_class: proposal.change_class, effective_hash: tx?.effective_hash, content_hash: tx?.content_hash } };
       }
       case "charter_read": {
@@ -1774,6 +1831,9 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
           domain: d.domain,
           schema: d.schema as Record<string, unknown>,
           required_fields: [...d.required_fields],
+          // Carry the on-disk version through the reload so a version decision reads it (mirrors
+          // loadRegistry). Editing domain_types/ and reloading must not reset a type to version-less.
+          version: d.version,
         }));
         const typeDiff = deps.registry.replaceTypes(typeDefs);
 

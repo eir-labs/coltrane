@@ -313,6 +313,10 @@ export class ModelOutputParseError extends Error {
  * the authority on which promised types were merely optional; this error is the earlier, chair-
  * local signal that the write boundary sealed nothing at all.
  */
+/** Turns given to a channel repair. It needs to make a tool call it already has the answer for —
+ *  enough to seal each promised type and stop, not enough to restart the work. */
+const SEAL_REPAIR_TURNS = 4;
+
 export class ModelOutputContractError extends Error {
   readonly slug: string;
   readonly reason: string;
@@ -554,6 +558,35 @@ export function extractOptionsForChair(
  *  plus the bare slug for a legacy pass-through invoker. Matched by suffix so either resolves. */
 function isOutputWriteToolName(name: string): boolean {
   return name === "output_write" || name.endsWith("__output_write");
+}
+
+/**
+ * Did the chair ever ATTEMPT the write boundary — a call that was made, whether or not it passed?
+ *
+ * This is the line between two failures that look identical in the blob and are not the same defect:
+ *   · ATTEMPTED and rejected → the in-band loop DID engage. The engine told the agent what was wrong
+ *     and it gave up anyway. Re-prompting that is the bounded repair loop the governor rejected
+ *     twice (tests/output_write_boundary.test.ts) — the agent already had its correction.
+ *   · NEVER ATTEMPTED → the loop never engaged, because the agent never knocked. It produced its
+ *     answer as text or a file and finished. There was no in-band frame in which to correct it.
+ * Only the second is repairable, and only that one is repaired.
+ */
+function attemptedWriteBoundary(stdout: string): boolean {
+  for (const raw of stdout.split("\n")) {
+    const line = raw.trim();
+    if (!line) continue;
+    let e: Record<string, unknown>;
+    try { e = JSON.parse(line) as Record<string, unknown>; } catch { continue; }
+    const type = typeof e["type"] === "string" ? (e["type"] as string) : "";
+    const msg = e["message"];
+    if ((type === "assistant" || type === "user") && msg && typeof msg === "object") {
+      const content = (msg as { content?: Array<Record<string, unknown>> }).content ?? [];
+      for (const b of content) {
+        if (String(b["type"] ?? "") === "tool_use" && isOutputWriteToolName(String(b["name"] ?? ""))) return true;
+      }
+    }
+  }
+  return false;
 }
 
 /**
@@ -1301,7 +1334,67 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
         // validate-mode) and whose rejection it corrected in-band. Capture the payloads that
         // PASSED; the runtime (executeChair) then seals them through its own boundary exactly once.
         // A chair that got nothing past the boundary produced nothing — fail here, legibly.
-        const blob = captureOutputWrites(sealStdout, sealTypes);
+        let blob = captureOutputWrites(sealStdout, sealTypes);
+
+        // ── THE CHANNEL REPAIR ────────────────────────────────────────────────────────────────
+        // The chair finished cleanly and got NOTHING past the boundary — it produced its answer as
+        // final text, or a file, or a summary, and never made the call that seals. Give it one
+        // corrective continuation rather than failing the phase.
+        //
+        // The engine's in-band loop is already good, and that is exactly what makes this gap sharp:
+        // output_write "runs the full seal predicate and returns its verdict in-band, so the agent
+        // self-corrects" (:124) — but only for a chair that CALLED it. Getting the payload wrong is
+        // recoverable; getting the CHANNEL wrong was fatal. That is backwards. A wrong channel is the
+        // cheaper mistake to fix, because the work is already done and still sitting in the agent's
+        // context — one turn is enough to make the call it should have made.
+        //
+        // Same mechanism as the reserve grant above, for a different cause: continue once, say where
+        // it stands, and say plainly that nothing follows. Bounded to ONE — a chair that ignores a
+        // direct instruction to seal will not be argued into it, and the argument bills real tokens.
+        //
+        // NOT for a budget stop: that chair used the right channel and ran out of room, and the
+        // reserve grant is its remedy. Repairing it here would continue it twice for one stop.
+        //
+        // AND NOT for a chair that knocked and was refused. `attemptedWriteBoundary` is the whole
+        // line: a chair whose output_write was REJECTED already got its correction in-band and gave
+        // up, and re-prompting it is precisely the bounded repair loop the governor rejected twice
+        // (tests/output_write_boundary.test.ts, "never the old bounded repair loop"). That principle
+        // is untouched here. This repairs only the chair that never knocked at all — the one the
+        // in-band loop cannot see, because it never entered it.
+        if (Object.keys(blob).length === 0 && !budgetStopped && !attemptedWriteBoundary(sealStdout)) {
+          const calls = sealTypes
+            .map(
+              (t) =>
+                `  output_write({ "core_type": "${seal.core_by_type[t] ?? ""}", "domain_type": "${t}", ` +
+                `"gig_id": "${seal.gig_id}", "phase": "${seal.phase}", "agent_slug": "${seal.agent_slug}", ` +
+                `"data": <your result> })`,
+            )
+            .join("\n");
+          ctx.onEvent?.({
+            type: "seal_boundary_repair",
+            raw: {
+              agent: a.slug,
+              unsealed: [...sealTypes],
+              note:
+                "the chair completed without calling output_write; it is being continued ONCE to " +
+                "seal through the write boundary",
+            },
+          } as AgentStreamEvent);
+          const correction =
+            `STOP — your run finished but sealed NOTHING. Not one output_write call passed the ` +
+            `write boundary for [${sealTypes.join(", ")}].\n\n` +
+            `Whatever you produced — final text, a file, a summary — is NOT sealed. It will be ` +
+            `discarded and this phase will fail.\n\n` +
+            `The work you already did still counts. Do NOT redo it. Seal it now, by calling ` +
+            `output_write — the only channel that seals:\n${calls}\n\n` +
+            `This is the LAST attempt; it will not be offered again.\n\n${prompt}`;
+          const repairArgs = withPrompt(withMaxTurns(baseArgs, SEAL_REPAIR_TURNS), correction);
+          const repaired = await runTolerantOfBudgetStop(repairArgs, correction);
+          // Cumulative, exactly as the reserve path is: a write that passed in either pass counts.
+          sealStdout = `${sealStdout}\n${repaired.stdout}`;
+          blob = captureOutputWrites(sealStdout, sealTypes);
+        }
+
         if (Object.keys(blob).length === 0) {
           throw new ModelOutputContractError(
             a.slug,

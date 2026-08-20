@@ -679,6 +679,43 @@ function withPrompt(args: readonly string[], prompt: string): string[] {
 // dropped silently — a silent drop is exactly the "ok for a discarded record" lie this closes.
 export const MAX_SEALED_RECORDS_PER_TYPE = 64;
 
+/** One refusal the child reported: which tool, and why, from whichever field carries the reason. */
+export interface SeatDenial {
+  tool: string;
+  reason: string;
+}
+
+/**
+ * Every permission denial in a chair's stream.
+ *
+ * THE GAP THIS CLOSES: `grep -rn 'permission_denied' src/` returned NOTHING. The spawned child emits
+ * a system event on EVERY refused tool call, the invoker already walks those exact lines, and the
+ * engine read none of them. Measured across one day of real runs: 275 Bash, 36 Write and 9 Edit
+ * denials, none of which surfaced anywhere an operator would look — while gig_monitor reported a
+ * chair that had been refused six times, and had stopped working because of it, as RUNNING.
+ *
+ * Both reason fields are read because both occur in the real corpus: `message` on a
+ * subcommandResults refusal, `decision_reason` on an `other`. Handling one and dropping the other is
+ * a partial parse that looks like coverage.
+ */
+export function captureSeatDenials(stdout: string): SeatDenial[] {
+  const out: SeatDenial[] = [];
+  for (const raw of stdout.split("\n")) {
+    const line = raw.trim();
+    if (!line) continue;
+    let e: Record<string, unknown>;
+    try { e = JSON.parse(line) as Record<string, unknown>; } catch { continue; }
+    if (e["type"] !== "system" || e["subtype"] !== "permission_denied") continue;
+    const reason =
+      (typeof e["message"] === "string" && e["message"]) ||
+      (typeof e["decision_reason"] === "string" && e["decision_reason"]) ||
+      (typeof e["decision_reason_type"] === "string" && e["decision_reason_type"]) ||
+      "refused, no reason given";
+    out.push({ tool: typeof e["tool_name"] === "string" ? e["tool_name"] : "unknown", reason });
+  }
+  return out;
+}
+
 export function captureOutputWrites(
   stdout: string,
   sealTypes: readonly string[],
@@ -1457,13 +1494,45 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
           blob = captureOutputWrites(sealStdout, sealTypes);
         }
 
+        // WHAT THE SEAT WAS REFUSED. The child reports every denial; until now nothing read them, so a
+        // chair blocked out of doing its job was indistinguishable from one that had nothing to say.
+        // Emitted whenever any occurred — a denial is a fact about the run even when the chair
+        // recovered and sealed anyway.
+        const denials = captureSeatDenials(sealStdout);
+        if (denials.length > 0) {
+          ctx.onEvent?.({
+            type: "seat_denied",
+            raw: {
+              agent: a.slug,
+              count: denials.length,
+              denials,
+              note:
+                "the seat was refused these tool calls; a denial can mean the grant forbids it OR that " +
+                "the command was phrased in a form the grant does not match",
+            },
+          } as AgentStreamEvent);
+        }
+        
         if (Object.keys(blob).length === 0) {
+          // A chair that produced nothing because it was REFUSED is a different failure from one that
+          // simply produced nothing, and only the second is the agent's fault. Naming the denials is
+          // the difference between "the agent did not deliver" and "the seat could not run the
+          // commands its own plan required" — which is what happened on gig 486e0e6c, where the
+          // message pointed at the agent and the cause was a grant whose prefix did not match
+          // `git -C <path> add`.
+          const blocked =
+            denials.length > 0
+              ? ` The seat was DENIED ${denials.length} tool call(s) during this run — ` +
+                `${denials.map((d) => `${d.tool}: ${d.reason}`).join(" | ")}. ` +
+                `A denial may mean the grant forbids the call, or that the command was phrased in a ` +
+                `form the grant does not match; both look identical here.`
+              : "";
           throw new ModelOutputContractError(
             a.slug,
-            budgetStopped
+            (budgetStopped
               ? `ran out of tool budget (max_tool_calls) before any output_write passed the write ` +
                 `boundary for [${sealTypes.join(", ")}] — nothing was salvageable`
-              : `no output_write call passed the write boundary for [${sealTypes.join(", ")}]`,
+              : `no output_write call passed the write boundary for [${sealTypes.join(", ")}]`) + blocked,
           );
         }
         // The stop is REPORTED, never swallowed. What survived is real and sealed; what the agent

@@ -39,6 +39,7 @@
     "Write(docs/**)",
     "Edit(docs/**)",
     "Write(tests/**)",
+    "Edit(tests/**)",
     "Bash(git add:*)",
     "Bash(git diff:*)",
     "Bash(git status:*)",

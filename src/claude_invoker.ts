@@ -172,7 +172,29 @@ export function buildPrompt(
           (typeof s["text"] === "string" && (s["text"] as string)) ||
           (typeof s["body"] === "string" && (s["body"] as string)) ||
           "";
-        return `## ${s.slug}${text ? `\n${text}` : ""}`;
+        // THE FILLED SLOTS. A skill declares `hydration` slots; the institution fills the
+        // institution-bound ones at SEAT time (the chair's `supplies`, arriving as ctx.hydration) and
+        // the gig fills the gig-bound ones at DISPATCH time (the run's own payload). Until this
+        // rendered, both were validated and then discarded — a skill instructing its agent to "read
+        // the constraints supplied in the `house-style` slot" found nothing there, on every run.
+        //
+        // Only slots the skill DECLARES are rendered. A chair that supplies a key no skill declares
+        // is supplying nothing, and must not get a free channel into the prompt through it.
+        const slots = (s as { hydration?: Record<string, { binding?: string }> }).hydration ?? {};
+        const slotLines = Object.entries(slots).map(([name, spec]) => {
+          const fromSeat = (ctx.hydration ?? {})[name];
+          const fromGig = (ctx.gig_input ?? {})[name];
+          const value = (spec?.binding ?? "institution") === "gig" ? fromGig : fromSeat;
+          if (value === undefined) {
+            // Named as unfilled rather than omitted. A skill cannot follow its own rule for an
+            // unfilled slot if the prompt does not say which slots are empty — and silence here is
+            // exactly what let a severed wire read as an optional input.
+            return `- \`${name}\`: (unfilled — no value supplied)`;
+          }
+          return `- \`${name}\`: ${typeof value === "string" ? value : JSON.stringify(value)}`;
+        });
+        const slotBlock = slotLines.length > 0 ? `\n\n### Supplied\n${slotLines.join("\n")}` : "";
+        return `## ${s.slug}${text ? `\n${text}` : ""}${slotBlock}`;
       })
     // No resolved content this gig — still name the bound skills so the model knows it has
     // them (matches the old runtime's skills index). #241: NEVER name a slug the runtime

@@ -337,6 +337,12 @@ export function composeStandard(def: {
         // on the record composeStandard already holds) and INSTITUTION-bound slots (a gig-bound slot
         // is a formal parameter of the run — compose time knows nothing about the arguments of a
         // dispatch that has not happened, so demanding one here would refuse a legal standard).
+        // Only THIS chair's supplies. An institutional chair may also carry `supplies`, and the
+        // shipped quartet does exactly that (institutions/quartet.json, the structure-builder chair)
+        // — but neither composeStandard nor the runtime is given the institutions, so nothing can
+        // read it. The message this check raises used to send authors there; it no longer does,
+        // because following that advice supplies nothing. Threading institutional seatings into
+        // compose and dispatch is a real change and is not pretended at here.
         const supplied = new Set(Object.keys(ch.supplies ?? {}));
         for (const sk of ag.skills ?? []) {
           for (const [slot, spec] of Object.entries(sk.hydration ?? {})) {
@@ -346,8 +352,8 @@ export function composeStandard(def: {
             throw new CompositionError(
               `standard ${def.slug}: chair "${ch.role}" seats agent "${ag.slug}", whose carried skill ` +
                 `"${sk.slug}" requires hydration slot "${slot}" (${spec.type}) and nothing supplies it — ` +
-                `an unfilled required slot is a dead slot. Supply it on the chair (\`supplies\`) or on the ` +
-                `institutional chair this seat is held under, or drop the slot's \`required\`.`,
+                `an unfilled required slot is a dead slot. Supply it on THIS chair (\`supplies\`), or ` +
+                `drop the slot's \`required\`.`,
             );
           }
         }

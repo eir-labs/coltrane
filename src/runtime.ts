@@ -55,6 +55,22 @@ export interface AgentInvocationContext {
   // and that gig_id is what ties the chair's write-boundary adjudication to this run. Absent for a
   // legacy hand-rolled ctx (the text-seal path, which never sealed via output_write).
   gig_id?: string | undefined;
+  /**
+   * THE INSTITUTION'S DATA, delivered to the player it was supplied for: slot name → value, taken
+   * from the seated chair's `supplies`.
+   *
+   * The gap this closes: `supplies` was read in exactly ONE place in the engine —
+   * `composition.ts:340`, as `Object.keys(...)`. The KEYS, never the VALUES. Compose time confirmed a
+   * required slot was filled and then nothing delivered what filled it, so a carried skill telling
+   * its agent to "read the constraints supplied in the `house-style` slot" always found nothing
+   * there. The failure was invisible because the skill's own rule for an unfilled slot is to say so
+   * and proceed — it read as an optional input rather than a severed wire.
+   *
+   * Absent = the seat supplied nothing (unchanged legacy path); an empty object is a seat that
+   * supplied a slot set with no entries. buildPrompt renders only slots the agent's skills DECLARE,
+   * so a chair cannot use this as a free channel into the prompt.
+   */
+  hydration?: Record<string, unknown> | undefined;
   inputs: readonly OutputRecord[]; // upstream outputs matching this agent's input_types
   gig_input: Record<string, unknown>;
   // The output types THIS chair seals — the chair's output_contract intersected with the
@@ -2564,6 +2580,9 @@ export async function runGig(
         data = await deps.invoke({
           agent, phase: phaseName, gig_id, inputs, gig_input: gigInput, skills,
           missing_skills: p.missing_skills, // #241 — what did NOT resolve, so the prompt can't assert it
+          // THE SEAT IS WHERE THE INSTITUTION'S DATA ENTERS. Validated at compose time (the dead-slot
+          // refusal) and, until now, dropped on the floor immediately afterwards.
+          ...(p.chair.supplies ? { hydration: p.chair.supplies } : {}),
           output_types: output_specs.map((s) => s.domain_type), // #174 — the chair's promised subset
           // #250 level 2 + #237 — the cancellation signal and the run's depth reach the invocation
           // itself, so an invoker can kill its child and shape what it asks the model for.

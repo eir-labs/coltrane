@@ -15,6 +15,8 @@
 // duplicating, and a re-run that would produce a DIFFERENT output fails closed rather than forking.
 import { describe, it, expect, afterAll } from "vitest";
 import fc from "fast-check";
+import { readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { loadLocalQueue, freshRoot, cleanupRoots, gigPayloadArb, type ClaimedLocalGig } from "./spec_local_queue_fixtures.js";
 import type { ToolSurfaceDeps } from "../src/server.js";
 
@@ -86,24 +88,62 @@ describe("local queue — idempotent effect on re-run (I14, F9)", () => {
   // I14 — at-least-once + idempotent-effect. When a lapsed lease lets a second worker re-run a gig,
   // completing with the SAME output re-seals it (same content_sha) rather than duplicating — the
   // second seal reports duplicated:true. Grounded in coltrane's content_sha dedup (worker.ts).
-  it("I14 re-completing a gig with the same output dedups (same content_sha, duplicated:true)", async () => {
+  //
+  // THIS LAW WAS REWRITTEN, and the reason matters. It used to reach the re-run by completing a gig
+  // SUCCESSFULLY and then requiring it to be re-claimable — which made "a finished gig runs again"
+  // a guarantee rather than a tolerance. It is not one: the contract is at-least-once, which permits
+  // extra runs and never requires them, and a re-run of finished work costs real inference and real
+  // side effects (a second pull request) to rediscover an output that already exists.
+  //
+  // So the law now models the state at-least-once actually exists for: the worker sealed and DIED
+  // before the row could be moved terminal. That row is still sitting in claimed/ carrying its
+  // content_sha, the lease still lapses, reap() still returns it, a second worker still re-runs it,
+  // and the seal still dedups. The guarantee is intact; only the case where nothing went wrong is
+  // no longer treated as a crash.
+  it("I14 a crash after sealing re-runs and DEDUPS (same content_sha, duplicated:true)", async () => {
     const { openLocalQueue } = await loadLocalQueue();
+    const { sha256Hex, canonJson } = await import("../src/canonical_form.js");
     const clock = makeClock();
-    const q = openLocalQueue(freshRoot(), { leaseMs: LEASE_MS, clock: clock.now });
+    const root = freshRoot();
+    const q = openLocalQueue(root, { leaseMs: LEASE_MS, clock: clock.now });
+    const { gig_id } = await q.enqueue({ standard_slug: "s", input: {}, acting_for: "a" });
+    await q.claim("w1");
+    const output = { data: { verdict: "met", n: 3 } };
+
+    // THE CRASH, reconstructed exactly: the seal is recorded on the row in claimed/ and the process
+    // dies before the terminal move. Written directly because no verb can leave this state on
+    // purpose — that is what makes it a crash rather than a transition.
+    const claimedPath = join(root, "claimed", gig_id);
+    const sealed = JSON.parse(readFileSync(claimedPath, "utf8")) as Record<string, unknown>;
+    const first_sha = sha256Hex(canonJson(output));
+    sealed["content_sha"] = first_sha;
+    sealed["output"] = output;
+    writeFileSync(claimedPath, JSON.stringify(sealed));
+
+    clock.advance(LEASE_MS + 1);
+    expect(q.reap().requeued, "a crashed claim must come back regardless of what it had sealed").toContain(gig_id);
+    const c2 = await q.claim("w2");
+    expect(c2, "the lapsed gig must be re-claimable for the re-run").not.toBeNull();
+
+    const second = await q.complete("w2", gig_id, output);
+    expect(second.content_sha, "the same output must seal to the same content_sha").toBe(first_sha);
+    expect(second.duplicated, "the re-run duplicated an output instead of deduping").toBe(true);
+  });
+
+  // The other half of I14, now reachable directly: completing an ALREADY-COMPLETE gig dedups without
+  // anyone having to crash first. Before the terminal move this case could not be written, because a
+  // completed gig was indistinguishable from an in-flight one.
+  it("I14 re-completing an already-complete gig dedups rather than duplicating", async () => {
+    const { openLocalQueue } = await loadLocalQueue();
+    const q = openLocalQueue(freshRoot(), { leaseMs: LEASE_MS });
     const { gig_id } = await q.enqueue({ standard_slug: "s", input: {}, acting_for: "a" });
     await q.claim("w1");
     const output = { data: { verdict: "met", n: 3 } };
     const first = await q.complete("w1", gig_id, output);
     expect(first.duplicated).toBe(false);
-
-    // w1 "crashed" after sealing but before recording done; the lease lapses and w2 re-runs it.
-    clock.advance(LEASE_MS + 1);
-    q.reap();
-    const c2 = await q.claim("w2");
-    expect(c2, "the lapsed gig must be re-claimable for the re-run").not.toBeNull();
-    const second = await q.complete("w2", gig_id, output);
-    expect(second.content_sha, "the same output must seal to the same content_sha").toBe(first.content_sha);
-    expect(second.duplicated, "the re-run duplicated an output instead of deduping").toBe(true);
+    const second = await q.complete("w1", gig_id, output);
+    expect(second.content_sha).toBe(first.content_sha);
+    expect(second.duplicated).toBe(true);
   });
 
   // I14 property — content_sha is a pure function of the output: identical outputs always share it,

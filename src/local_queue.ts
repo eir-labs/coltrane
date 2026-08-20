@@ -85,6 +85,9 @@ export interface LocalQueue {
   approve(gig_id: string, role: string, verdict: Record<string, unknown>, approved_by?: string): Promise<boolean>;
   cancel(args: Record<string, unknown>): Promise<{ gig_id: string; status: "cancelled" }>;
   complete(worker: string, gig_id: string, output: Record<string, unknown>): Promise<{ content_sha: string; duplicated: boolean }>;
+  /** Record a failed run TERMINALLY, so the row is not left leased for reap() to hand out again.
+   *  True iff this worker held the lease. */
+  fail(worker: string, gig_id: string, error: string): Promise<boolean>;
   list(): LocalGigView[];
   readonly leaseMs: number;
 }
@@ -165,6 +168,7 @@ interface StoredGig {
   lease?: LeaseState;
   approvals?: Record<string, { verdict: Record<string, unknown>; approved_by?: string }>;
   content_sha?: string;
+  error?: string;
   output?: Record<string, unknown>;
 }
 
@@ -432,7 +436,43 @@ export function openLocalQueue(root: string, opts?: LocalQueueOptions): LocalQue
     record.content_sha = content_sha;
     record.output = output;
     await atomicWrite(loc.dir, gig_id, record);
+    // TERMINAL — and this move is the whole fix. The seal used to be recorded IN PLACE, leaving the
+    // row in claimed/, on the reasoning that a lapsed lease could let a second worker re-run it and
+    // the recorded content_sha would dedup the seal. The dedup is real, but it protects the LEDGER,
+    // not the WORK: reap() scans claimed/ and requeues anything whose lease has lapsed, with no idea
+    // the row is finished. So a COMPLETED gig went back on the queue and RAN AGAIN — real model
+    // spend, real side effects, a second pull request — and only discovered at the seal that its
+    // output already existed. At-least-once with an idempotent effect is a fair contract for a seal;
+    // it is not one for an execution that bills for inference. Moving the row out of claimed/ makes
+    // the re-run impossible by construction rather than harmless after the fact.
+    //
+    // A second complete() still dedups: locate() finds the row wherever it now lives, so the I14
+    // re-seal and the F9 refusal-to-fork are both unchanged.
+    if (loc.dir !== doneDir) {
+      await fsp.mkdir(doneDir, { recursive: true });
+      await fsp.rename(join(loc.dir, gig_id), join(doneDir, gig_id));
+    }
     return { content_sha, duplicated: false };
+  }
+
+  /**
+   * Record a failed run terminally. The gap this closes: there was no fail() at all, so a local run
+   * that threw had nowhere to say so — the row sat in claimed/ until its lease lapsed and reap()
+   * handed the SAME doomed gig to the next worker, which is the retry-a-poisoned-gig loop the
+   * hosted path avoids by recording the failure. failed/ was already a declared state that nothing
+   * could ever reach.
+   */
+  async function fail(worker: string, gig_id: string, error: string): Promise<boolean> {
+    const src = join(claimedDir, gig_id);
+    const record = await readGig(src);
+    // Only the lease HOLDER may fail it — the same check park() makes, so a stale worker cannot
+    // terminate a gig that has already been reaped and handed to someone else.
+    if (record === null || record.lease?.holder !== worker) return false;
+    record.error = error;
+    await atomicWrite(claimedDir, gig_id, record);
+    await fsp.mkdir(failedDir, { recursive: true });
+    await fsp.rename(src, join(failedDir, gig_id));
+    return true;
   }
 
   function list(): LocalGigView[] {
@@ -464,7 +504,7 @@ export function openLocalQueue(root: string, opts?: LocalQueueOptions): LocalQue
     return views;
   }
 
-  return { enqueue, claim, heartbeat, reap, park, approve, cancel, complete, list, leaseMs };
+  return { enqueue, claim, heartbeat, reap, park, approve, cancel, complete, fail, list, leaseMs };
 }
 
 /** The deps.queueGig-shaped enqueue seam — byte-compatible with postgrestQueueGig / rpcQueueGig

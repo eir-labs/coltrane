@@ -86,6 +86,7 @@ export interface LocalQueue {
    *  lease let a second worker take the gig) re-seals the SAME output rather than duplicating —
    *  `duplicated:true` on the second identical seal. */
   complete(worker: string, gig_id: string, output: Record<string, unknown>): Promise<{ content_sha: string; duplicated: boolean }>;
+  fail(worker: string, gig_id: string, error: string): Promise<boolean>;
   /** Observe the store — a reader must be able to distinguish a live claim from an abandoned one
    *  (O5) and see which rows are queued/claimed/parked/terminal. Read-only; touches no lease. */
   list(): LocalGigView[];

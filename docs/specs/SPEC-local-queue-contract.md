@@ -100,6 +100,18 @@ idempotent-effect, not true exactly-once (linearizability framing: one atomic cl
 duplicating (I14); a re-run that would seal a DIFFERENT output for the same gig fails closed rather
 than forking (F9).
 
+At-least-once **permits** a second run; it does not require one. A gig that completes SUCCESSFULLY is
+terminal — `complete()` moves the row into `done/` and `fail()` moves it into `failed/`, so neither is
+reachable by `reap()` and neither is handed to another worker (T1–T3, T6). This is not a weakening of
+the guarantee: every gig still runs at least once, and the case at-least-once exists for — a worker
+that sealed and died before the row could be moved — still leaves the row in `claimed/` carrying its
+`content_sha`, is still reaped, still re-run, and still dedups (I14).
+
+The distinction is what it costs to be wrong. Re-running finished work is not free the way a
+duplicate seal is: it spends real inference and repeats real side effects (a second pull request) to
+rediscover an output already recorded. The dedup protects the LEDGER; only a terminal state protects
+the WORK. `done/` and `failed/` were declared states with no transition into them until T1–T7.
+
 ---
 
 ## Refusals — typed and fail-closed

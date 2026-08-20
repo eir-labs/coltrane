@@ -24,7 +24,7 @@
         "deontic": "permitted",
         "aim": "open a pull request proposing a change to the institution's main line",
         "conditions": "the change is committed on a non-main branch and its local verify passed",
-        "or_else": "not applicable — a permission, not an obligation",
+        "or_else": "not applicable \u2014 a permission, not an obligation",
         "check": {
           "predicate": "(=> (and (is-agent actor) (= action \"open-pr\") (not (= source \"main\"))) allow)",
           "inputs": {
@@ -55,7 +55,7 @@
         "deontic": "permitted",
         "aim": "stand deliberately red between the spec merge and the implementation merge on a change-set branch, off the protected line",
         "conditions": "while the target branch is a change-set branch and is not the protected main line",
-        "or_else": "not applicable — a permission, not an obligation",
+        "or_else": "not applicable \u2014 a permission, not an obligation",
         "check": {
           "predicate": "(=> (not (= target_branch \"main\")) allow)",
           "inputs": {
@@ -65,11 +65,11 @@
         "content_hash": "sha256:f465a9f3e76a5288dd993ef1b8228993feea04a47af8f3c99462cc4edcb238a5"
       },
       {
-        "attributes": "any seated agent performing a coltrane-shaped operation — composing a standard, writing a typed output, defining an agent, registering a type",
+        "attributes": "any seated agent performing a coltrane-shaped operation \u2014 composing a standard, writing a typed output, defining an agent, registering a type",
         "deontic": "forbidden",
         "aim": "perform a coltrane-shaped operation through a built-in file or search surface instead of the MCP surface",
         "conditions": "whenever the operation has a coltrane tool that performs it; reading source and editing engine TypeScript are not coltrane-shaped and are unaffected",
-        "or_else": "the operation is not seen by the genome — the work does not enter the genome: no content_sha is sealed, no ledger entry is written, no hash updates, so the change is unrecorded however correct its bytes are. Where the seat holds no such grant the surface is absent and the bypass cannot arise; where it does, this is what follows.",
+        "or_else": "the operation is not seen by the genome \u2014 the work does not enter the genome: no content_sha is sealed, no ledger entry is written, no hash updates, so the change is unrecorded however correct its bytes are. Where the seat holds no such grant the surface is absent and the bypass cannot arise; where it does, this is what follows.",
         "check": {
           "predicate": "(=> (and (is-agent actor) (= operation \"coltrane-shaped\") (not (= surface \"mcp\"))) deny)",
           "inputs": {
@@ -85,7 +85,7 @@
         "deontic": "forbidden",
         "aim": "write to core_types/ or domain_types/ directly instead of using type_register or type_extend",
         "conditions": "at all times",
-        "or_else": "the type is not registered — the work does not enter the genome: no content_sha is sealed, no ledger entry is written, no hash updates, so the change is unrecorded however correct its bytes are. Where the seat holds no such grant the surface is absent and the bypass cannot arise; where it does, this is what follows.",
+        "or_else": "the type is not registered \u2014 the work does not enter the genome: no content_sha is sealed, no ledger entry is written, no hash updates, so the change is unrecorded however correct its bytes are. Where the seat holds no such grant the surface is absent and the bypass cannot arise; where it does, this is what follows.",
         "check": {
           "predicate": "(=> (and (is-agent actor) (= action \"direct-write\") (= target \"type-dir\")) deny)",
           "inputs": {
@@ -100,8 +100,8 @@
         "attributes": "any seated agent adding an agent definition to the genome",
         "deontic": "forbidden",
         "aim": "add an agent DEFINITION by dropping a file under agents/ instead of using agent_define",
-        "conditions": "for the genome agent-definition surface (agents/*.json). NOT the base-player surface: CLAUDE.md ships Claude Code subagents as markdown under agents/players/<name>.md, and those are files by design — a law that forbade them would forbid the shipped arrangement.",
-        "or_else": "the agent is not defined — the work does not enter the genome: no content_sha is sealed, no ledger entry is written, no hash updates, so the change is unrecorded however correct its bytes are. Where the seat holds no such grant the surface is absent and the bypass cannot arise; where it does, this is what follows.",
+        "conditions": "for the genome agent-definition surface (agents/*.json). NOT the base-player surface: CLAUDE.md ships Claude Code subagents as markdown under agents/players/<name>.md, and those are files by design \u2014 a law that forbade them would forbid the shipped arrangement.",
+        "or_else": "the agent is not defined \u2014 the work does not enter the genome: no content_sha is sealed, no ledger entry is written, no hash updates, so the change is unrecorded however correct its bytes are. Where the seat holds no such grant the surface is absent and the bypass cannot arise; where it does, this is what follows.",
         "check": {
           "predicate": "(=> (and (is-agent actor) (= action \"file-drop\") (= target \"agent-definition\")) deny)",
           "inputs": {
@@ -120,7 +120,7 @@
     {
       "slug": "eir-labs",
       "name": "Eir Labs",
-      "charter": "The organization that develops Coltrane through Coltrane's own governed pipeline. Its charter is to carry every change to the engine and its genome through a reviewed pull request a human governor merges on green continuous integration — never a direct write to the protected main line. It ships no capability it has not been granted and lands no change its checks have not passed.",
+      "charter": "The organization that develops Coltrane through Coltrane's own governed pipeline. Its charter is to carry every change to the engine and its genome through a reviewed pull request a human governor merges on green continuous integration \u2014 never a direct write to the protected main line. It ships no capability it has not been granted and lands no change its checks have not passed.",
       "parent_org": null
     }
   ],
@@ -180,7 +180,7 @@
       "role": "human-governor",
       "human": true,
       "function": "JUDGE",
-      "mission": "Hold the merge authority for Coltrane's protected main line. This chair is held by a person, never a model agent: the governor reviews an open pull request and its continuous-integration result and merges it under their own name, or refuses it. Nothing lands on main without this office's yes. The office ships unassigned — the adopting organization seats a person here as its first governance act.",
+      "mission": "Hold the merge authority for Coltrane's protected main line. This chair is held by a person, never a model agent: the governor reviews an open pull request and its continuous-integration result and merges it under their own name, or refuses it. Nothing lands on main without this office's yes. The office ships unassigned \u2014 the adopting organization seats a person here as its first governance act.",
       "required_skills": [],
       "caps": [],
       "obligations": [
@@ -209,6 +209,90 @@
       "witnessed_by": null
     }
   ],
-  "forebears": [],
-  "lineage_edges": []
+  "forebears": [
+    {
+      "slug": "crawford-ostrom-adico",
+      "institution_slug": "coltrane",
+      "name": "Crawford, S.E.S. & Ostrom, E. (1995), \"A Grammar of Institutions\"",
+      "domain": "institutional analysis",
+      "kind": "work",
+      "what_taken": "The ADICO grammar \u2014 Attribute, Deontic, aIm, Condition, Or-else \u2014 which InstitutionalLawSchema takes as the shape of a law. Cited with a DOI at src/genome_schema.ts:356, the tree's one explicit \"Descends from\" declaration."
+    },
+    {
+      "slug": "makinson-vandertorre-io-logic",
+      "institution_slug": "coltrane",
+      "name": "Makinson, D. & van der Torre, L. (2000), \"Input/Output Logics\"",
+      "domain": "deontic logic",
+      "kind": "work",
+      "what_taken": "The obligation as a norm-PAIR (condition, consequent) rather than a modal operator over a proposition \u2014 why a law here carries a predicate and an or_else instead of a truth value."
+    },
+    {
+      "slug": "xacml-3-decision-model",
+      "institution_slug": "coltrane",
+      "name": "OASIS eXtensible Access Control Markup Language (XACML) 3.0",
+      "domain": "access control",
+      "kind": "work",
+      "what_taken": "The multi-verdict decision algebra \u2014 permit / deny / not-applicable / indeterminate \u2014 that the admissibility result descends from, rather than a boolean. Named in the schema prose WITHOUT a locator: attestation, not archive."
+    },
+    {
+      "slug": "gasb-54-encumbrance",
+      "institution_slug": "coltrane",
+      "name": "GASB Statement No. 54, Fund Balance Reporting and Governmental Fund Type Definitions",
+      "domain": "governmental accounting",
+      "kind": "work",
+      "what_taken": "The encumbrance \u2014 a commitment recorded between an appropriation ceiling and an expenditure \u2014 which the committed-work objects (Tour / Booking / Resource) take as the binding middle place. Named in docs/specs/the-binding-middle-place.md WITHOUT a locator: attestation, not archive."
+    }
+  ],
+  "lineage_edges": [
+    {
+      "institution_slug": "coltrane",
+      "edge_type": "descends-from",
+      "from_node": "law:coltrane",
+      "to_node": "forebear:crawford-ostrom-adico",
+      "kind": "attribution",
+      "source": {
+        "doi": "10.2307/2082975",
+        "evidence_grade": "attestation",
+        "locator": "src/genome_schema.ts:356",
+        "note": "cited in the genome source; the primary was not fetched in this run, so the grade is attestation and not archive"
+      }
+    },
+    {
+      "institution_slug": "coltrane",
+      "edge_type": "descends-from",
+      "from_node": "law:coltrane",
+      "to_node": "forebear:makinson-vandertorre-io-logic",
+      "kind": "attribution",
+      "source": {
+        "doi": "10.1023/A:1004748624537",
+        "evidence_grade": "attestation",
+        "locator": "src/genome_schema.ts (InstitutionalLawSchema)",
+        "note": "cited in the genome source; the primary was not fetched in this run, so the grade is attestation and not archive"
+      }
+    },
+    {
+      "institution_slug": "coltrane",
+      "edge_type": "descends-from",
+      "from_node": "type:admissibility-result",
+      "to_node": "forebear:xacml-3-decision-model",
+      "kind": "attribution",
+      "source": {
+        "evidence_grade": "attestation",
+        "locator": "src/genome_schema.ts (AdmissibilityResult)",
+        "note": "named in prose without a doi or url. Under system.coltrane.institutional-model the citation rule refuses a citation carrying neither \u2014 recorded here as an attestation so the gap is visible, never laundered upward to archive"
+      }
+    },
+    {
+      "institution_slug": "coltrane",
+      "edge_type": "descends-from",
+      "from_node": "type:tour",
+      "to_node": "forebear:gasb-54-encumbrance",
+      "kind": "attribution",
+      "source": {
+        "evidence_grade": "attestation",
+        "locator": "docs/specs/the-binding-middle-place.md",
+        "note": "named in prose without a doi or url. Under system.coltrane.institutional-model the citation rule refuses a citation carrying neither \u2014 recorded here as an attestation so the gap is visible, never laundered upward to archive"
+      }
+    }
+  ]
 }

@@ -104,8 +104,14 @@ function extractKeysAt(src: string, from: number): Set<string> {
   flat = flat.replace(/\/\/[^\n]*/g, "");
   const keys = new Set<string>();
   for (const m of flat.matchAll(/(?:^|[,\n])\s*([A-Za-z_]\w*)\s*[:,\n]/g)) keys.add(m[1]!);
-  // `...(cond ? { resume_from: x } : {})` spreads are flattened to `0` above; recover their names.
-  for (const m of body.matchAll(/\{\s*([A-Za-z_]\w*)\s*:/g)) keys.add(m[1]!);
+  // THIS RECOVERY COULD NEVER FIRE, and is removed rather than left looking like coverage. It claimed
+  // to recover names from `...(cond ? { resume_from: x } : {})` spreads by matching `{` in `body` —
+  // but `body` is built with `ch !== "{"` and therefore never contains a brace. A mechanism that
+  // cannot match, inside the check written to catch mechanisms that cannot fire.
+  //
+  // Nothing is lost by deleting it: what it purported to recover, the ENFORCEMENT_BEARING and
+  // FIDELITY_BEARING wires, now comes from the assembler's RETURN via extractAssemblerReturnKeys(),
+  // which reads them at depth 1 where they actually are.
   return keys;
 }
 

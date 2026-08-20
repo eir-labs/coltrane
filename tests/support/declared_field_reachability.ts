@@ -401,6 +401,25 @@ export const TWO_CORPORA_CALIBRATION_TRAIL = {
  * consumed by name. `technique_evidence` is the one CLAUDE.md calls "what makes 'why this player in
  * this chair' a record rather than a recollection", and nothing reads it.
  *
+ * WHAT 14 MEANS — AND IT IS NOT 14 BUGS. Twelve of the fourteen are the institutions / lineage
+ * surface, and that surface is load-only BY DESIGN and documented as such: CLAUDE.md describes the
+ * `institutions` class as "file-shaped under institutions/, loaded by loadInstitutions … and returned
+ * in the genome alongside every other class", with "No MCP authoring surface yet". Verified rather
+ * than assumed: `assignments` and `lineage_edges` are read ONLY inside src/institution_loader.ts,
+ * their own loader, and neither server.ts, runtime.ts, composition.ts nor worker.ts consumes the
+ * loaded institutions map at all.
+ *
+ * So this pin is a measure of an UNFINISHED FEATURE, not of rot — the class is honestly labelled
+ * incomplete, and these fields are waiting for the consumer that has not been built. The number is
+ * still worth pinning: if it GROWS, something new was declared with no reader, and that is a
+ * defect. If the institutions consumer ever lands, it should SHRINK, and lowering the pin is how
+ * that gets recorded.
+ *
+ * The two that are not lineage — `contract_caps` and `technique_evidence` — sit on chair assignments
+ * and are the ones worth a second look, because CLAUDE.md describes technique_evidence as "what
+ * makes 'why this player in this chair' a record rather than a recollection". Nothing reads it, so
+ * for now it is exactly the recollection it was meant to replace.
+ *
  * This pin sat at 0 and could not move: srcCorpus() included genome_schema.ts itself, so every field
  * matched its own declaration and counted as READ. Injecting `a_field_nothing_reads: z.string()` left
  * all 18 laws green. A declaration is not a read; the corpus now excludes the declaring file.

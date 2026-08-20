@@ -134,6 +134,16 @@
       "status": "active",
       "named_from_forebear": null,
       "auth_user_id": null
+    },
+    {
+      "slug": "bandleader",
+      "name": "Bandleader",
+      "kind": "steve",
+      "is_institution": false,
+      "skill_slugs": [],
+      "status": "proposed",
+      "named_from_forebear": "blakey-art",
+      "auth_user_id": null
     }
   ],
   "org_members": [
@@ -241,6 +251,14 @@
       "domain": "governmental accounting",
       "kind": "work",
       "what_taken": "The encumbrance \u2014 a commitment recorded between an appropriation ceiling and an expenditure \u2014 which the committed-work objects (Tour / Booking / Resource) take as the binding middle place. Named in docs/specs/the-binding-middle-place.md WITHOUT a locator: attestation, not archive."
+    },
+    {
+      "slug": "blakey-art",
+      "institution_slug": "coltrane",
+      "name": "Art Blakey",
+      "domain": "modern jazz (drums, bandleading)",
+      "kind": "musician",
+      "what_taken": "Born 11 October 1919 in Pittsburgh, Pennsylvania; died 16 October 1990 in New York City (Scott DeVeaux/Gary Giddins record the dates; the American National Biography entry is titled \"Blakey, Art (1919-1990), jazz drummer and bandleader\", doi:10.1093/anb/9780198606697.article.1802592, retrieved 2026-08-20). What the BANDLEADER chair takes is the documented practice of running a band as an INSTITUTION THAT OUTLIVES ITS PLAYERS. From 1954 until his death Blakey led the Jazz Messengers through roughly two dozen lineups, seating young players, developing them, and releasing them onward \u2014 Horace Silver, Clifford Brown, Lee Morgan, Wayne Shorter, Freddie Hubbard, Keith Jarrett, Wynton Marsalis among them \u2014 while the band itself persisted as the durable thing. The disposition the chair takes is that of the seat rather than the incumbent: the leader calls the tune, counts it off, seats the players, judges the take, and stops the band when it is wrong, and does not play the horn. Grove Music Online's entry (Lewis Porter, 2003, doi:10.1093/gmo/9781561592630.article.j046400, retrieved 2026-08-20) records the Messengers as the defining vehicle of that practice. Nothing of the man's biography beyond this working disposition is claimed or carried."
     }
   ],
   "lineage_edges": [
@@ -292,6 +310,28 @@
         "evidence_grade": "attestation",
         "locator": "docs/specs/the-binding-middle-place.md",
         "note": "named in prose without a doi or url. Under system.coltrane.institutional-model the citation rule refuses a citation carrying neither \u2014 recorded here as an attestation so the gap is visible, never laundered upward to archive"
+      }
+    },
+    {
+      "institution_slug": "coltrane",
+      "edge_type": "descends-from",
+      "from_node": "agent:bandleader",
+      "to_node": "forebear:blakey-art",
+      "kind": "attribution",
+      "source": {
+        "figure": "Art Blakey",
+        "lifespan": "11 October 1919 - 16 October 1990",
+        "recordings": [
+          "A Night at Birdland (Blue Note BLP 5037/5038, recorded 21 February 1954)",
+          "Moanin' (Blue Note BLP 4003, recorded 30 October 1958)"
+        ],
+        "reference_works": [
+          "American National Biography, \"Blakey, Art (1919-1990), jazz drummer and bandleader\", doi:10.1093/anb/9780198606697.article.1802592 (retrieved 2026-08-20)",
+          "Grove Music Online, Lewis Porter, \"Blakey, Art (jazz)\", doi:10.1093/gmo/9781561592630.article.j046400 (retrieved 2026-08-20)"
+        ],
+        "attributed_disposition": "running a band as an institution that outlives its players: seating them, developing them, releasing them onward across roughly two dozen Jazz Messengers lineups from 1954 to 1990, while the band itself persisted as the durable thing. The seat calls the tune, judges the take and stops the band; it does not play.",
+        "evidence_grade": "attestation",
+        "note": "The two reference-work DOIs were dereferenced through api.crossref.org on 2026-08-20 and returned matching author, year and title. The recording details are carried from the standard Blue Note discography and were NOT independently dereferenced, so this edge is graded attestation rather than archive."
       }
     }
   ]

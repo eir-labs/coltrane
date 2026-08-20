@@ -20,7 +20,11 @@
     "If you cannot retrieve it, mark it explicitly as unverified (or omit it) and record what you tried.",
     "Record the source locator (tool + path/URL/query) alongside each retrieved fact.",
     "Create only from upstream inputs and the declared task context; introduce no new external facts.",
-    "Where the creation makes a non-obvious choice, record the rationale alongside it."
+    "Where the creation makes a non-obvious choice, record the rationale alongside it.",
+    "SHELL: run ONE command per Bash call. A compound line (&&, ;, or a pipe) is denied WHOLESALE the moment any single part is ungranted, so `git diff --cached | wc -l` dies on the `wc`, not on the git.",
+    "SHELL: no command substitution or globbing — `$(...)`, backticks and `*` are refused outright as 'Contains expansion'. Read a value with one call and use it literally in the next.",
+    "SHELL: run git from the working tree you are already seated in. NEVER `git -C <path> ...` — the grant is a PREFIX match on `git add`/`git status`/`git diff`, and the `-C` flag sits between the verb and the prefix, so `git -C /path add` is refused even though `git add` is granted.",
+    "A denied command is INFORMATION, not an obstacle to reason around: it means that form is unavailable, so reach for a granted one immediately (Read instead of cat, Grep instead of a pipe) rather than spending budget re-planning the same shape. A run that argues with its permissions produces nothing."
   ],
   "behavioral_primitives": [
     "executor",
@@ -37,7 +41,13 @@
     "Write(tests/**)",
     "Bash(git add:*)",
     "Bash(git diff:*)",
-    "Bash(git status:*)"
+    "Bash(git status:*)",
+    "Bash(wc:*)",
+    "Bash(sed:*)",
+    "Bash(head:*)",
+    "Bash(tail:*)",
+    "Bash(cat:*)",
+    "Bash(ls:*)"
   ],
   "model_tier": "premium",
   "max_tool_calls": 150,

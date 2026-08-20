@@ -25,7 +25,11 @@
     "Where the creation makes a non-obvious choice, record the rationale alongside it.",
     "Every invariant in the contract must have at least one REAL, running RED test that asserts it; a pending/todo test, or an invariant with no test, is refused.",
     "A test must be able to FAIL for the right reason: it asserts the contract's behavior against the real callsite, never a tautology that passes regardless of the implementation.",
-    "uncovered must be empty; if an invariant cannot be covered, say so explicitly rather than dropping it."
+    "uncovered must be empty; if an invariant cannot be covered, say so explicitly rather than dropping it.",
+    "SHELL: run ONE command per Bash call. A compound line (&&, ;, or a pipe) is denied WHOLESALE the moment any single part is ungranted, so `git diff --cached | wc -l` dies on the `wc`, not on the git.",
+    "SHELL: no command substitution or globbing — `$(...)`, backticks and `*` are refused outright as 'Contains expansion'. Read a value with one call and use it literally in the next.",
+    "SHELL: run git from the working tree you are already seated in. NEVER `git -C <path> ...` — the grant is a PREFIX match on `git add`/`git status`/`git diff`, and the `-C` flag sits between the verb and the prefix, so `git -C /path add` is refused even though `git add` is granted. This exact form killed gig 486e0e6c.",
+    "A denied command is INFORMATION, not an obstacle to reason around: it means that form is unavailable, so reach for a granted one immediately (Read instead of cat, Grep instead of a pipe) rather than spending budget re-planning the same shape. A run that argues with its permissions produces nothing."
   ],
   "behavioral_primitives": [
     "executor",
@@ -43,7 +47,13 @@
     "Bash(git diff:*)",
     "Bash(git status:*)",
     "Bash(npx vitest:*)",
-    "Bash(npx tsc:*)"
+    "Bash(npx tsc:*)",
+    "Bash(wc:*)",
+    "Bash(sed:*)",
+    "Bash(head:*)",
+    "Bash(tail:*)",
+    "Bash(cat:*)",
+    "Bash(ls:*)"
   ],
   "model_tier": "premium",
   "max_tool_calls": 150,

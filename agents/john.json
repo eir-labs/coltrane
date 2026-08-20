@@ -37,7 +37,7 @@
     "Glob",
     "Grep"
   ],
-  "max_tool_calls": 120,
+  "max_tool_calls": 260,
   "code_tool_access": "read",
   "model_tier": "standard",
   "depth_profile": "deep"

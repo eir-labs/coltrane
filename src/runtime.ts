@@ -37,6 +37,7 @@ import type { OutputStore, OutputRecord } from "./outputs.js";
 import { checkGigConformance, type GigConformanceResult } from "./gig_conformance.js";
 import { drainGigHeader } from "./output_mirror.js";
 import { LEDGER_SCHEMA_VERSION, type Ledger, type GigUsage } from "./ledger.js";
+import { PlacementRefused, type PlacementResolver } from "./placement.js";
 import type { Depth } from "./pricing.js";
 import type { SkillRecord, EvalRecord } from "./loader.js";
 import { COLTRANE_VERSION } from "./version.js";
@@ -458,6 +459,17 @@ export interface RunDeps {
    * and tests supply the daemon-free substitute (a realizer with an injected `run` seam).
    */
   venueRealizer?: VenueRealizer | undefined;
+  /**
+   * THE CHAIR-PLACEMENT SEAM. Asked at the moment a chair is taken: may this agent be here, can it do
+   * what this chair assigns, and with what history. Absent → every placement is admitted and the run
+   * is byte-identical to before, which is what makes the seam safe to ship ahead of any consumer.
+   *
+   * The engine owns the MOMENT and the REFUSAL; the deployment owns the answer. Per the Envoy
+   * orientation: "Coltrane (OSS) exposes the chair-placement seam; Envoy (deployment) plugs into it
+   * … the same shape as the venue-realizer seam." So institutions, assignments and technique_evidence
+   * are read by the RESOLVER, not by this engine — which is why none of them appear here.
+   */
+  placementResolver?: PlacementResolver | undefined;
   /**
    * How the substrate realizer binds credentials into the room. Passed as the required positional
    * `credentialResolver` argument to `venueRealizer.realize()`. Absent → `async () => ({})`, an empty
@@ -2577,12 +2589,51 @@ export async function runGig(
         reserveSettled = true;
       };
       try {
+        // ── THE PLACEMENT SEAM ────────────────────────────────────────────────────────────────────
+        // Asked BEFORE the chair is invoked, so a refused seating costs nothing. The engine owns the
+        // moment and the refusal; the deployment owns the answer (Envoy). Absent resolver → admitted,
+        // and the run is byte-identical to before.
+        //
+        // A resolver that THROWS refuses. Absent must mean DECLINE: treating an unreachable resolver as
+        // admission would make an outage look like an open door, which is the failure direction this
+        // engine refuses everywhere else.
+        let placedHydration: Record<string, unknown> | undefined;
+        if (deps.placementResolver) {
+          let decision;
+          try {
+            decision = await deps.placementResolver.place({
+              agent_slug: agent.slug,
+              role: chair.role,
+              standard_slug: standard.slug,
+              phase: phaseName,
+              gig_id,
+              input_contract: [...(chair.input_contract ?? [])],
+              output_contract: [...(chair.output_contract ?? [])],
+            });
+          } catch (e) {
+            throw new PlacementRefused(
+              agent.slug,
+              chair.role,
+              `the placement resolver failed, so no admission was given: ${e instanceof Error ? e.message : String(e)}`,
+            );
+          }
+          if (!decision.admitted) {
+            throw new PlacementRefused(agent.slug, chair.role, decision.reason ?? "no reason given");
+          }
+          placedHydration = decision.hydration;
+        }
+        
         data = await deps.invoke({
           agent, phase: phaseName, gig_id, inputs, gig_input: gigInput, skills,
           missing_skills: p.missing_skills, // #241 — what did NOT resolve, so the prompt can't assert it
           // THE SEAT IS WHERE THE INSTITUTION'S DATA ENTERS. Validated at compose time (the dead-slot
           // refusal) and, until now, dropped on the floor immediately afterwards.
-          ...(p.chair.supplies ? { hydration: p.chair.supplies } : {}),
+          // The seat's own supplies, then whatever the placement resolver carried in — Envoy's
+          // "carry the chain into the chair". The resolver wins on a key collision: it answers with
+          // the institution's live record, where the standard's chair carries an authored default.
+          ...(p.chair.supplies || placedHydration
+            ? { hydration: { ...(p.chair.supplies ?? {}), ...(placedHydration ?? {}) } }
+            : {}),
           output_types: output_specs.map((s) => s.domain_type), // #174 — the chair's promised subset
           // #250 level 2 + #237 — the cancellation signal and the run's depth reach the invocation
           // itself, so an invoker can kill its child and shape what it asks the model for.

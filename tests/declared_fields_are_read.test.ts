@@ -115,8 +115,15 @@ function srcCorpusExcluding(excludeFile: string | null): string {
   return readdirSync(SRC)
     .filter((f) => f.endsWith(".ts"))
     .filter((f) => excludeFile === null || f !== excludeFile)
-    .map((f) => readFileSync(join(SRC, f), "utf8"))
+    .map((f) => stripCommentsForCheck(readFileSync(join(SRC, f), "utf8")))
     .join("\n");
+}
+
+/** A COMMENT IS NOT A READER — the same definition the sweep uses. Cross-checking against a corpus
+ *  that still contains comments reports the sweep's true findings as over-reports, which is the second
+ *  way this class of mismatch hides (it hid the vacuous engine pin the same way). */
+function stripCommentsForCheck(src: string): string {
+  return src.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/\/\/[^\n]*/g, " ");
 }
 
 describe("declared fields have somewhere to be read from", () => {

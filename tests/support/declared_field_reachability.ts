@@ -150,8 +150,25 @@ function srcCorpusExcluding(excludeFile: string | null): string {
   return readdirSync(srcDir)
     .filter((f) => f.endsWith(".ts"))
     .filter((f) => excludeFile === null || f !== excludeFile)
-    .map((f) => readFileSync(join(srcDir, f), "utf8"))
+    .map((f) => stripComments(readFileSync(join(srcDir, f), "utf8")))
     .join("\n");
+}
+
+/**
+ * A COMMENT IS NOT A READER. Prose that mentions a field does not consume it, and this repo's source
+ * is unusually comment-dense — a design note explaining that `technique_evidence` has no readers would
+ * itself count as a reader and quietly retire the finding.
+ *
+ * Measured: adding src/placement.ts, whose header names `technique_evidence` and `contract_caps` while
+ * describing them as UNREAD, moved the engine pin from 14 to 12. The ratchet reported two fields
+ * newly-reachable because someone had written about them. Caught by the pin failing, not by review.
+ *
+ * Strips block and line comments before the corpus is searched. String literals are left alone: a
+ * field name in a literal is usually a real dynamic access (obj["name"]) and counting it as READ is
+ * the fail-safe direction this sweep already commits to.
+ */
+function stripComments(src: string): string {
+  return src.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/\/\/[^\n]*/g, " ");
 }
 
 export function analyzeDeclaredFieldReachability(): FieldReachabilityReport {
@@ -233,7 +250,8 @@ export const CALIBRATION_TRAIL = {
  *  The bulk of the 181 are agent-I/O schema fields (domain_types/*.json output types) that flow through
  *  generic Zod validation and are consumed by prompts/agents, never read by name in orchestrator src —
  *  which is exactly the dead-contract class this ratchet exists to pin and hold from growing. */
-export const PINNED_UNREAD_FIELDS = 181;
+// 181 → 197 for the same reason: a comment naming a field is not a reader of it.
+export const PINNED_UNREAD_FIELDS = 197;
 
 /* ─────────────────────────────────────────────────────────────────────────────────────────────────
  * TWO CORPORA — engine (src/) vs contract (broad).
@@ -424,7 +442,11 @@ export const TWO_CORPORA_CALIBRATION_TRAIL = {
  * matched its own declaration and counted as READ. Injecting `a_field_nothing_reads: z.string()` left
  * all 18 laws green. A declaration is not a read; the corpus now excludes the declaring file.
  */
-export const PINNED_UNREAD_ENGINE_FIELDS = 14;
+// 14 → 22 when comments stopped counting as readers. The eight that surfaced — address, asserts,
+// corpus, max_bytes, max_requests, methods, quote, statement — each verified BY HAND to have zero
+// non-comment references outside genome_schema.ts. They were never read; they were only written
+// about.
+export const PINNED_UNREAD_ENGINE_FIELDS = 22;
 
 /** CONTRACT ratchet FLOOR (hand-verified 2026-08-21). 127 = the count of domain_types/*.json +
  *  core_types/*.json schema.properties keys (>= 5 chars, deduped) with no `\bname\b` reader anywhere in the

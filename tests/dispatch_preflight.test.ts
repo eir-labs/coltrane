@@ -64,7 +64,6 @@ describe("dispatch_preflight: seal-drill gate in gig_dispatch", () => {
     const bad = JSON.parse(JSON.stringify(good)) as typeof good;
     bad.slug = "summarize-unsealable";
     // Overwrite the second phase's first chair output_contract with a type that cannot exist.
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     bad.phases[1]!.chairs[0]!.output_contract = ["no-such-type-xyz"];
     deps.standards!.set("summarize-unsealable", bad);
 

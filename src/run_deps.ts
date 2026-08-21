@@ -150,6 +150,7 @@ export type AssembleRunDepsArgs = Pick<
   | "venue"
   | "venues"
   | "venueRealizer"
+  | "placementResolver"
 > & {
   /**
    * The enforcement environment, supplied per door: {} on the drain, the bootstrap map on the server
@@ -180,6 +181,7 @@ export function assembleRunDeps(args: AssembleRunDepsArgs): RunDeps {
     ...(args.venue ? { venue: args.venue } : {}),
     ...(args.venues ? { venues: args.venues } : {}),
     ...(args.venueRealizer ? { venueRealizer: args.venueRealizer } : {}),
+    ...(args.placementResolver ? { placementResolver: args.placementResolver } : {}),
     ...(args.repoUrl ? { repoUrl: args.repoUrl } : {}),
   };
 }

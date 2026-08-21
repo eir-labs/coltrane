@@ -46,6 +46,8 @@ import { assembleRunDeps, resolveWorkingRepo } from "./run_deps.js";
 import { createCheckpointStore, createReuseStore, type CheckpointStore, type ReuseStore } from "./reuse.js";
 import { makeClaudeInvoker, killLiveChairChildren } from "./claude_invoker.js";
 import { dockerComposeRealizer, type VenueRealizer } from "./venue_realizer.js";
+import { institutionPlacementResolver } from "./placement_institutions.js";
+import type { PlacementResolver } from "./placement.js";
 import { isDepth, DEPTHS, type Depth } from "./pricing.js";
 import type { ToolProvider } from "./tool_providers.js";
 import { ENGINE_MCP_SERVER } from "./tool_providers.js";
@@ -129,6 +131,10 @@ export interface ServerDeps {
    *  the chart-path runGig deps beside `venue`, so a chart whose room declares servers gets a real
    *  room, not paper confinement. Absent → the substrate is skipped (the pre-wire behaviour). */
   venueRealizer?: VenueRealizer | undefined;
+  /** The chair-placement seam's resolver (src/placement.ts), threaded to runGig. Absent → every
+   *  placement is admitted and runs are byte-identical; bootstrapServerDeps supplies the file
+   *  backing, a deployment may supply its own. */
+  placementResolver?: PlacementResolver | undefined;
   invoke?: AgentInvoker | undefined;
   model_version?: string | undefined;
   // §13/skills — passed through to runGig so each invocation can resolve its
@@ -1174,6 +1180,8 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         // assembler; `mcpServerConfigs` is stated here as the explicit argument it requires. Each branch
         // spreads its own door-specific fields (gig_id, onProgress, signal, depth, reuse/human wiring).
         const dispatchDeps = assembleRunDeps({
+          // The placement seam, threaded to the dispatch door. Absent resolver → admitted, unchanged.
+          placementResolver: deps.placementResolver,
           outputs: deps.outputs, ledger: deps.ledger, invoke: deps.invoke,
           model_version: deps.model_version, skills: deps.skills, skill_dirs: deps.skill_dirs,
           evals: deps.evals, budget,
@@ -3756,6 +3764,17 @@ export function bootstrapServerDeps(genomeRoot?: string): ServerDeps {
     // from nowhere in src/, so a venue-named gig got no room. runGig only realizes when the venue
     // declares servers, so wiring it here changes no server-less venue's behaviour.
     venueRealizer: dockerComposeRealizer(),
+    // THE PLACEMENT SEAM'S FILE BACKING. Answers "may this agent take this chair, and with what
+    // history" from the genome's own institutions/*.json — the parallel to a deployment's
+    // store-backed resolver (Envoy), not a competitor to it.
+    //
+    // Wired HERE for the same reason the realizer above is: an exported resolver reachable from
+    // nowhere in src/ is a mechanism that cannot run, and the comment above records that exact
+    // mistake being made once already. tests/exported_symbols_are_reachable caught this one.
+    //
+    // Silence admits, so a genome with no institutions/ (which is most of them) is unaffected: every
+    // placement is admitted and the run is byte-identical.
+    placementResolver: institutionPlacementResolver(genome.institutions ?? new Map()),
     invoke: makeClaudeInvoker({
       registry,
       model: process.env["COLTRANE_MODEL"],

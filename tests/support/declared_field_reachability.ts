@@ -446,7 +446,10 @@ export const TWO_CORPORA_CALIBRATION_TRAIL = {
 // corpus, max_bytes, max_requests, methods, quote, statement — each verified BY HAND to have zero
 // non-comment references outside genome_schema.ts. They were never read; they were only written
 // about.
-export const PINNED_UNREAD_ENGINE_FIELDS = 22;
+// 22 → 21: `contract_caps` gained its first reader when the placement resolver began enforcing the
+// narrowing rule. The pin SHRINKING is the direction that matters — a field stopped being declared-
+// and-unread because something started using it, which is the whole point of measuring this.
+export const PINNED_UNREAD_ENGINE_FIELDS = 21;
 
 /** CONTRACT ratchet FLOOR (hand-verified 2026-08-21). 127 = the count of domain_types/*.json +
  *  core_types/*.json schema.properties keys (>= 5 chars, deduped) with no `\bname\b` reader anywhere in the

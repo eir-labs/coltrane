@@ -61,6 +61,31 @@ function resolve(
       };
     }
 
+    // THE NARROWING RULE, enforced at last. CLAUDE.md: "a credential presented by the incumbent may
+    // only NARROW what the chair grants — never widen it." DispatchCapGrantSchema's docstring repeats
+    // it, and the quartet declares it as a formal ADICO law whose or_else says "the action is refused
+    // at dispatch". It was enforced nowhere: evaluate() exists at institution_enforcement.ts:290,
+    // `exercised_caps` appears in no src/ file, and no dispatch path ever called evaluate(). A rule
+    // that states its own enforcement and has none is the sharpest form of this repo's recurring
+    // defect.
+    //
+    // `exercised_caps` is a RUNTIME fact — what the agent actually did — and placement cannot know it.
+    // The DECLARED half is exactly checkable: an assignment's contract_caps must be a subset of its
+    // chair's caps. A widening is a static contradiction, refusable before a token is spent.
+    //
+    // Only dispatch grants are compared. An edge-cap is a different authority with a different shape,
+    // and refusing it here would be a check exceeding its own stated scope.
+    const widened = widenedStandards(chair.caps ?? [], seat.contract_caps ?? []);
+    if (widened.length > 0) {
+      return {
+        admitted: false,
+        reason:
+          `seating "${seat.agent_slug}" in chair "${request.role}" claims dispatch of ` +
+          `[${widened.join(", ")}], which institution "${inst.slug}" does not grant that chair — ` +
+          `a seating may narrow what its chair grants, never widen it`,
+      };
+    }
+
     // Seated, and it is this agent. Carry the chair's supplies — the institution's data entering at
     // the seat, which is the wire this whole surface was waiting for.
     const supplies =
@@ -71,4 +96,24 @@ function resolve(
   }
   // No institution had anything to say about this role. Silence admits.
   return { admitted: true };
+}
+
+
+/** The dispatch standards a seating claims that its chair does not grant. Empty = the seating narrows
+ *  (or matches) its office, which is what a credential is for. */
+function widenedStandards(chairCaps: readonly unknown[], seatCaps: readonly unknown[]): string[] {
+  const granted = new Set(dispatchStandards(chairCaps));
+  return dispatchStandards(seatCaps).filter((s) => !granted.has(s));
+}
+
+/** Every standard slug named by a dispatch grant in a cap list. Non-dispatch caps are ignored. */
+function dispatchStandards(caps: readonly unknown[]): string[] {
+  const out: string[] = [];
+  for (const c of caps) {
+    if (!c || typeof c !== "object") continue;
+    const cap = c as { grant?: unknown; standards?: unknown };
+    if (cap.grant !== "dispatch" || !Array.isArray(cap.standards)) continue;
+    for (const s of cap.standards) if (typeof s === "string") out.push(s);
+  }
+  return out;
 }

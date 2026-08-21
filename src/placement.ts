@@ -1,8 +1,8 @@
 /**
  * THE CHAIR-PLACEMENT SEAM — the engine defines the question; a deployment answers it.
  *
- * WHY THIS SHAPE. The Envoy orientation (2026-08-21) states it directly: "Coltrane (OSS) exposes the
- * chair-placement seam; Envoy (deployment) plugs into it… the same shape as the venue-realizer seam:
+ * WHY THIS SHAPE. The deployment-seam orientation (2026-08-21) states it directly: "Coltrane (OSS) exposes the
+ * chair-placement seam; the deployment plugs into it… the same shape as the venue-realizer seam:
  * an interface the engine defines and enforces, an implementation the deployment supplies." So the
  * resolution — who may sit here, and with what history — deliberately does NOT live in this repo.
  * The engine owns the MOMENT and the REFUSAL; the resolver owns the answer.
@@ -42,7 +42,7 @@ export interface PlacementRequest {
 /**
  * The answer. `admitted: false` REFUSES the seating and stops the chair.
  *
- * `hydration` is the other half of placement — Envoy's "carry the chain into the chair". Whatever the
+ * `hydration` is the other half of placement — the deployment's "carry the chain into the chair". Whatever the
  * resolver returns reaches the invocation as `ctx.hydration`, on exactly the wire an institutional
  * chair's `supplies` would use. A resolver that admits without hydrating is valid; the field is
  * optional because validation and hydration are separable and a deployment may want only the first.

@@ -698,6 +698,77 @@ export interface SeatDenial {
  * subcommandResults refusal, `decision_reason` on an `other`. Handling one and dropping the other is
  * a partial parse that looks like coverage.
  */
+/** What kind of refusal a denial was — the distinction the seat cannot make for itself. */
+export interface DenialDiagnosis {
+  kind: "form-mismatch" | "not-granted" | "undetermined";
+  detail: string;
+}
+
+/**
+ * Decide whether a refusal means "you may not" or "you phrased it wrong".
+ *
+ * WHY THIS EXISTS. `permission_denied` means both, and they demand opposite responses — abandon the
+ * approach, versus rephrase and continue. A chair that cannot tell them apart does the expensive
+ * thing: it reasons about the refusal. Gig 486e0e6c spent its remaining budget doing exactly that.
+ *
+ * The pure case, measured: that chair HELD `Bash(git add:*)` and was refused `git -C /repo add -A`,
+ * because the `-C` flag sits between the verb and the prefix the grant matches on. It had the
+ * authority and could not reach it, and the refusal was indistinguishable from being forbidden.
+ *
+ * THE TEST: if the words of a grant the seat HOLDS appear IN ORDER in the refused command, the seat
+ * was authorised for that verb and the FORM was wrong. Order matters — a bag-of-words match would
+ * call almost anything a form mismatch.
+ *
+ * A HEURISTIC, NOT A PROOF, and it fails toward `undetermined` deliberately. Telling an agent to
+ * rephrase a command it is genuinely forbidden would send it into a loop, which is worse than saying
+ * nothing. Only Bash denials whose message actually carries the refused command text are diagnosed;
+ * everything else is undetermined.
+ */
+export function diagnoseDenial(denial: SeatDenial, allowedTools: readonly string[]): DenialDiagnosis {
+  if (denial.tool !== "Bash") {
+    return { kind: "undetermined", detail: "only Bash denials carry a command this can read" };
+  }
+  // The refused command text follows "require(s) approval:" in the subcommandResults message.
+  const m = /requires? approval:\s*(.+)$/i.exec(denial.reason);
+  if (!m?.[1]) {
+    return { kind: "undetermined", detail: "the refusal names no command to compare against a grant" };
+  }
+  const refused = m[1];
+  const bashGrants = allowedTools
+    .map((t) => /^Bash\(([^)]*)\)$/.exec(t)?.[1])
+    .filter((v): v is string => typeof v === "string")
+    .map((v) => v.replace(/:\*$/, "").trim())
+    .filter((v) => v.length > 0);
+
+  for (const grant of bashGrants) {
+    const words = grant.split(/\s+/).filter(Boolean);
+    // In-order containment, on word boundaries.
+    let idx = 0;
+    let ok = true;
+    for (const w of words) {
+      const at = refused.indexOf(w, idx);
+      const boundedBefore = at === 0 || (at > 0 && /[\s;|&]/.test(refused.charAt(at - 1)));
+      const after = at + w.length;
+      const boundedAfter = after >= refused.length || /[\s;|&]/.test(refused.charAt(after));
+      if (at < 0 || !boundedBefore || !boundedAfter) { ok = false; break; }
+      idx = after;
+    }
+    if (ok) {
+      return {
+        kind: "form-mismatch",
+        detail:
+          `the seat HOLDS \`Bash(${grant}:*)\` and the refused command uses that verb — the grant is a ` +
+          `PREFIX match, so a flag or path between the words (e.g. \`git -C <path> add\`) does not match ` +
+          `it. Rephrase into the granted form rather than abandoning the approach.`,
+      };
+    }
+  }
+  return {
+    kind: "not-granted",
+    detail: "no Bash grant this seat holds covers that command — the approach needs changing, not the wording",
+  };
+}
+
 export function captureSeatDenials(stdout: string): SeatDenial[] {
   const out: SeatDenial[] = [];
   for (const raw of stdout.split("\n")) {
@@ -1523,9 +1594,16 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
           const blocked =
             denials.length > 0
               ? ` The seat was DENIED ${denials.length} tool call(s) during this run — ` +
-                `${denials.map((d) => `${d.tool}: ${d.reason}`).join(" | ")}. ` +
-                `A denial may mean the grant forbids the call, or that the command was phrased in a ` +
-                `form the grant does not match; both look identical here.`
+                `${denials
+                  .map((d) => {
+                    // The KIND is the actionable half. form-mismatch: the seat HELD the authority and
+                    // mis-phrased it, so rephrase. not-granted: the approach needs changing. undetermined
+                    // says so rather than guessing — telling an agent to rephrase something it is
+                    // genuinely forbidden loops it, which is worse than staying silent.
+                    const dx = diagnoseDenial(d, a.allowed_tools ?? []);
+                    return `${d.tool}: ${d.reason} [${dx.kind} — ${dx.detail}]`;
+                  })
+                  .join(" | ")}.`
               : "";
           throw new ModelOutputContractError(
             a.slug,

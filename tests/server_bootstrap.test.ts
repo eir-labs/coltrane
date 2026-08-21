@@ -5,6 +5,8 @@
 // live, and gig_dispatch can run a file-defined standard end-to-end.
 import { describe, it, expect } from "vitest";
 import { join } from "node:path";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { bootstrapServerDeps, dispatchTool } from "../src/server.js";
 import type { AgentInvoker } from "../src/runtime.js";
@@ -22,7 +24,11 @@ describe("server bootstraps the genome from files", () => {
   it("gig_dispatch runs a FILE-defined standard end-to-end (no inline defs)", async () => {
     const invoke: AgentInvoker = (ctx) =>
       ctx.agent.slug === "sensor" ? { text: "the room is loud" } : { gist: "loud room" };
-    const deps = { ...bootstrapServerDeps(REPO), invoke };
+    // Isolate the single-flight lock key (change c1d0c2e0): this end-to-end dispatch backs on the
+    // shared REPO checkout, and dispatch_preflight.test.ts dispatches the same standard against the
+    // same checkout in the parallel band — a shared genome_dir would let the two PROCESSES contend
+    // for one repo lock. The genome is already loaded into deps from REPO; only the lock key moves.
+    const deps = { ...bootstrapServerDeps(REPO), invoke, genome_dir: mkdtempSync(join(tmpdir(), "coltrane-bootstrap-lock-")) };
     const res = await dispatchTool("gig_dispatch", { standard_slug: "summarize", input: { topic: "noise" } }, deps);
     expect(res.ok).toBe(true);
     expect((res.data as { gig_id?: string })?.gig_id).toBeTruthy();

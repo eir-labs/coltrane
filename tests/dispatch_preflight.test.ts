@@ -10,7 +10,9 @@
 
 import { describe, it, expect, beforeEach } from "vitest";
 import { fileURLToPath } from "node:url";
-import { dirname, resolve } from "node:path";
+import { dirname, resolve, join } from "node:path";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
 import {
   bootstrapServerDeps,
   dispatchTool,
@@ -34,7 +36,17 @@ const invoke: AgentInvoker = (ctx) => {
 };
 
 function makeDeps(): ServerDeps {
-  return { ...bootstrapServerDeps(REPO_ROOT), invoke, model_version: "preflight-test-v1" };
+  // The single-flight per-repo lock (change c1d0c2e0) keys on genome_dir. Point it at a fresh temp
+  // root so this file's REPO_ROOT-backed dispatch cannot contend for the repo lock with another
+  // test PROCESS that also bootstraps the shared checkout (server_bootstrap.test.ts runs in the same
+  // parallel band). The genome is already loaded into the deps maps by bootstrapServerDeps(REPO_ROOT);
+  // isolating genome_dir moves only the lock key, not what the standard resolves to.
+  return {
+    ...bootstrapServerDeps(REPO_ROOT),
+    invoke,
+    model_version: "preflight-test-v1",
+    genome_dir: mkdtempSync(join(tmpdir(), "coltrane-preflight-lock-")),
+  };
 }
 
 beforeEach(() => {
@@ -52,7 +64,6 @@ describe("dispatch_preflight: seal-drill gate in gig_dispatch", () => {
     const bad = JSON.parse(JSON.stringify(good)) as typeof good;
     bad.slug = "summarize-unsealable";
     // Overwrite the second phase's first chair output_contract with a type that cannot exist.
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     bad.phases[1]!.chairs[0]!.output_contract = ["no-such-type-xyz"];
     deps.standards!.set("summarize-unsealable", bad);
 

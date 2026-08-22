@@ -70,7 +70,8 @@ import { readFileSync, existsSync, mkdirSync, appendFileSync, readdirSync, write
 import { randomUUID, createHash } from "node:crypto";
 import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
-import { newGigRun, applyGigProgress, gigEventLogLine, pruneGigRuns, type GigRunState } from "./gig_tracker.js";
+import { newGigRun, applyGigProgress, gigEventLogLine, pruneGigRuns, isTerminalStatus, type GigRunState } from "./gig_tracker.js";
+import { acquireRepoLock, releaseRepoLock, type RepoLockRecord } from "./fs_atomic.js";
 import { isGig } from "./ledger.js";
 import { SubthreadRecorder, ApiVersionMismatchError } from "./subthread_recorder.js";
 import { canonJson, runFingerprint, CANONICAL_FORM_VERSION } from "./canonical_form.js";
@@ -253,6 +254,17 @@ function governanceRow(
     started_at: now,
     finished_at: now,
   };
+}
+
+/** The prose a single-flight refusal teaches a human: WHO holds the tree, and the two ways out
+ *  (wait for it to settle, or abort it). The machine-readable holder rides in `data.held_by`. */
+function heldTreeError(held: RepoLockRecord): string {
+  return (
+    `the working tree at "${held.genome_dir}" is held by a running gig "${held.gig_id}" ` +
+    `(pid ${held.pid}, since ${held.started_at}). Single-flight is law: a second dispatch against ` +
+    `the same repository is REFUSED — it does not queue and does not wait. Let that gig reach a ` +
+    `terminal state, or abort it with gig_abort "${held.gig_id}".`
+  );
 }
 
 const KNOWN_SLUGS = new Set(MCP_TOOLS.map((t) => t.slug));
@@ -1047,9 +1059,37 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
             ...(res.gates_approved ? { gates_approved: res.gates_approved } : {}),
             ...(res.resumed ? { resumed: res.resumed } : {}),
           });
+          // The gig id the whole performance runs under — minted ONCE for both the wait and async
+          // doors, so the single-flight lock names the same holder either way.
+          const chartGigId = resumeArg ?? randomUUID();
+          // ── single-flight: ONE lock for the CHART's full lifetime, never per-movement ──────────
+          // A chart runs its movements sequentially under one promise. The lock is claimed ONCE here
+          // (holder = the chart's own gig_id) BEFORE the first movement and released only when the
+          // performance settles. A per-movement acquire/release would either open a gap between
+          // movements where a concurrent dispatch could slip in, or deadlock movement 2 against the
+          // lock movement 1 still holds. Released on every terminal outcome; RETAINED through
+          // awaiting_approval (a parked performance holds uncommitted work in the tree).
+          let releaseChartLock: (() => void) | undefined;
+          let chartLockReacquired = false; // re-entered a parked performance's own lock, vs freshly minted
+          if (deps.genome_dir) {
+            const acq = acquireRepoLock(deps.genome_dir, {
+              gigId: chartGigId, pid: process.pid, startedAt: new Date().toISOString(),
+            });
+            if (!acq.ok) {
+              return {
+                ok: false, requires_approval: approval, refusal: "repo_locked",
+                error: heldTreeError(acq.held_by), data: { held_by: acq.held_by },
+              };
+            }
+            chartLockReacquired = acq.reacquired;
+            const genomeDir = deps.genome_dir;
+            releaseChartLock = () => { try { releaseRepoLock(genomeDir, chartGigId); } catch { /* best-effort */ } };
+          }
           if (wait) {
             try {
-              const res = await runChart(plan, gigInput, chartDeps);
+              const res = await runChart(plan, gigInput, { ...chartDeps, gig_id: chartGigId });
+              // Terminal (complete / budget-exhausted) frees the tree; a parked chart RETAINS it.
+              if (releaseChartLock && res.status !== "awaiting_approval") releaseChartLock();
               return {
                 ok: true, requires_approval: approval,
                 data: {
@@ -1061,9 +1101,13 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
               };
             } catch (e) {
               if (e instanceof ResumeRefused) {
+                // A re-entered lock belongs to the parked performance; a fresh one is freed here.
+                if (releaseChartLock && !chartLockReacquired) releaseChartLock();
                 return { ok: false, requires_approval: approval, error: e.message,
                   data: { resume_refused: true, gig_id: e.gig_id, drift: e.drift } };
               }
+              // Any other terminal throw (budget exhausted, a movement failed) frees the tree.
+              if (releaseChartLock) releaseChartLock();
               if (e instanceof BudgetExhausted) {
                 const partial = partialGigUsage(e);
                 return { ok: false, requires_approval: approval, error: e.message,
@@ -1076,7 +1120,6 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
           // Async, the default. Same live-state row an async standard dispatch registers, so
           // gig_monitor and gig_abort reach a performance exactly as they reach a run: the row
           // names the standard the performance OPENS with, and `chart_slug` names the arrangement.
-          const chartGigId = resumeArg ?? randomUUID();
           const chartRuns = deps.gig_runs ?? (deps.gig_runs = new Map());
           const priorChartState = chartRuns.get(chartGigId);
           const chartState = newGigRun(
@@ -1142,7 +1185,13 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
               if (bs) chartState.budget_state = bs;
               onChartProgress({ type: "gig_failed", error: chartState.error });
             })
-            .finally(() => { chartState.controller = undefined; });
+            .finally(() => {
+              chartState.controller = undefined; // don't pin a controller past settle
+              // Free the tree on every terminal outcome (complete / failed / aborted); a parked
+              // performance RETAINS it. A refused resume that re-entered a parked holder's lock
+              // leaves it held; one that minted a fresh lock still frees it.
+              if (releaseChartLock && isTerminalStatus(chartState.status) && !(chartRefusal && chartLockReacquired)) releaseChartLock();
+            });
           if (resumeArg !== undefined) {
             await Promise.resolve(); // one turn — see the ordering note on the standard path below
             if (chartRefusal) {
@@ -1190,14 +1239,47 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
           repoUrl: dispatchRepoUrl,
         });
 
+        // The gig id this run seals under — minted ONCE for both doors so the single-flight lock
+        // names the same holder whether the caller blocked (wait:true) or polled (async default).
+        const gigId = resumeArg ?? randomUUID();
+        // ── single-flight: claim the working tree BEFORE any chair runs ─────────────────────────
+        // Every LOCAL dispatch entry point funnels here (the in-process gig_dispatch tool AND the
+        // CLI, which calls dispatchTool). The lock is per genome ROOT (deps.genome_dir): two gigs
+        // against the same tree each derive their sealed change-set from `git diff` of a tree the
+        // other mutates, so the second is REFUSED — never queued — with a structured error naming
+        // the holder. A parked gig's OWN resume (same gig_id) re-enters the tree it already holds.
+        // The lock activates only when a genome_dir is present: a hosted/bare-deps drain carries no
+        // local tree to lock and is unaffected by construction.
+        let releaseLock: (() => void) | undefined;
+        // Did this claim RE-ENTER a lock the same gig already held (a parked gig's own resume), as
+        // opposed to minting a fresh one? A refused resume must NOT free a re-entered lock (the
+        // parked holder keeps its tree), but MUST free a fresh one (nothing else holds it).
+        let lockReacquired = false;
+        if (deps.genome_dir) {
+          const acq = acquireRepoLock(deps.genome_dir, {
+            gigId, pid: process.pid, startedAt: new Date().toISOString(),
+          });
+          if (!acq.ok) {
+            return {
+              ok: false, requires_approval: approval, refusal: "repo_locked",
+              error: heldTreeError(acq.held_by), data: { held_by: acq.held_by },
+            };
+          }
+          lockReacquired = acq.reacquired;
+          const genomeDir = deps.genome_dir;
+          releaseLock = () => { try { releaseRepoLock(genomeDir, gigId); } catch { /* best-effort */ } };
+        }
+
         // Synchronous mode (opt-in via wait:true) — block, return the manifest. The
         // deterministic test path and any caller that wants the answer in one call.
         if (wait) {
           try {
             const res = await runGig(standard, gigInput, {
-              ...dispatchDeps,
+              ...dispatchDeps, gig_id: gigId,
               ...(depth ? { depth } : {}), ...reuseWiring, ...humanWiring,
             });
+            // Terminal (complete) frees the tree; a parked gig (awaiting_approval) RETAINS it.
+            if (releaseLock && res.status !== "awaiting_approval") releaseLock();
             return {
               ok: true, requires_approval: approval,
               data: {
@@ -1218,11 +1300,16 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
             };
           } catch (e) {
             // A refused resume is a REFUSAL, not a crash: nothing ran, nothing was spent, and
-            // the caller needs the drift list to decide whether to re-dispatch cold.
+            // the caller needs the drift list to decide whether to re-dispatch cold. The holder it
+            // re-entered is unchanged, so the tree is NOT freed here.
             if (e instanceof ResumeRefused) {
+              // Free only a FRESH claim; a re-entered lock belongs to the parked holder, untouched.
+              if (releaseLock && !lockReacquired) releaseLock();
               return { ok: false, requires_approval: approval, error: e.message,
                 data: { resume_refused: true, gig_id: e.gig_id, drift: e.drift } };
             }
+            // Every other terminal throw (budget exhausted, a chair failed) frees the tree.
+            if (releaseLock) releaseLock();
             if (e instanceof BudgetExhausted) {
               // #236 — the synchronous half: a depleted gig also burned real dollars before it
               // stopped, and the operator needs them in the same reply as the depletion notice.
@@ -1240,8 +1327,8 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         // A resumed run CONTINUES the gig it resumes — same id — so the restored outputs stay
         // in-gig and `output_trace` still reaches them. The live-state entry for the earlier
         // attempt is replaced: that gig is running again, and showing its old `failed` state
-        // while it runs would be a lie the operator acts on.
-        const gigId = resumeArg ?? randomUUID();
+        // while it runs would be a lie the operator acts on. (`gigId` was minted above, before the
+        // wait/async split, so the single-flight lock names this same id.)
         const runs = deps.gig_runs ?? (deps.gig_runs = new Map());
         // #278 review — keep the prior attempt's record so a REFUSED resume can put it back.
         // Overwriting it is right when the resume proceeds (that gig is running again), and
@@ -1332,7 +1419,14 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
             if (bs) state.budget_state = bs;
             onProgress({ type: "gig_failed", error: state.error });
           })
-          .finally(() => { state.controller = undefined; }); // don't pin a controller past settle
+          .finally(() => {
+            state.controller = undefined; // don't pin a controller past settle
+            // Free the tree on every terminal outcome (complete / failed / aborted); a parked gig
+            // (awaiting_approval) RETAINS it — it holds uncommitted work the resume continues from.
+            // A refused resume that RE-ENTERED a parked holder's lock leaves it held; a refused
+            // resume that minted a FRESH lock still frees it (nothing else holds that tree).
+            if (releaseLock && isTerminalStatus(state.status) && !(resumeRefusal && lockReacquired)) releaseLock();
+          });
         if (resumeArg !== undefined) {
           await Promise.resolve(); // one turn — see the ordering note above
           if (resumeRefusal) {

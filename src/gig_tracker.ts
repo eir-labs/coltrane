@@ -81,6 +81,19 @@ export interface GigRunState {
   abort_reason?: string;
 }
 
+/**
+ * Is a gig's status TERMINAL — the run is over and holds the tree no longer?
+ *
+ * The single-flight per-repo lock (change c1d0c2e0) releases on exactly this set: complete, failed,
+ * and aborted. `awaiting_approval` is DELIBERATELY EXCLUDED — a parked gig is not terminal. It holds
+ * uncommitted work in the working tree (the chairs before the human gate already ran and left
+ * changes on disk) and will continue from that exact tree when approved, so it must RETAIN the lock
+ * while parked. Naming the terminal set here keeps the release site from re-deriving it and drifting.
+ */
+export function isTerminalStatus(status: GigStatus | string): boolean {
+  return status === "complete" || status === "failed" || status === "aborted";
+}
+
 export function newGigRun(gig_id: string, standard_slug: string, phases_total: number, now: string): GigRunState {
   return {
     gig_id, standard_slug, status: "running", started_at: now,

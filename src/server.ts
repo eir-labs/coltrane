@@ -3766,7 +3766,7 @@ export function bootstrapServerDeps(genomeRoot?: string): ServerDeps {
     venueRealizer: dockerComposeRealizer(),
     // THE PLACEMENT SEAM'S FILE BACKING. Answers "may this agent take this chair, and with what
     // history" from the genome's own institutions/*.json — the parallel to a deployment's
-    // store-backed resolver (Envoy), not a competitor to it.
+    // store-backed resolver (a deployment), not a competitor to it.
     //
     // Wired HERE for the same reason the realizer above is: an exported resolver reachable from
     // nowhere in src/ is a mechanism that cannot run, and the comment above records that exact

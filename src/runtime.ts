@@ -464,8 +464,8 @@ export interface RunDeps {
    * what this chair assigns, and with what history. Absent → every placement is admitted and the run
    * is byte-identical to before, which is what makes the seam safe to ship ahead of any consumer.
    *
-   * The engine owns the MOMENT and the REFUSAL; the deployment owns the answer. Per the Envoy
-   * orientation: "Coltrane (OSS) exposes the chair-placement seam; Envoy (deployment) plugs into it
+   * The engine owns the MOMENT and the REFUSAL; the deployment owns the answer. Per the deployment-seam
+   * orientation: "Coltrane (OSS) exposes the chair-placement seam; the deployment plugs into it
    * … the same shape as the venue-realizer seam." So institutions, assignments and technique_evidence
    * are read by the RESOLVER, not by this engine — which is why none of them appear here.
    */
@@ -2591,7 +2591,7 @@ export async function runGig(
       try {
         // ── THE PLACEMENT SEAM ────────────────────────────────────────────────────────────────────
         // Asked BEFORE the chair is invoked, so a refused seating costs nothing. The engine owns the
-        // moment and the refusal; the deployment owns the answer (Envoy). Absent resolver → admitted,
+        // moment and the refusal; the deployment owns the answer (the deployment). Absent resolver → admitted,
         // and the run is byte-identical to before.
         //
         // A resolver that THROWS refuses. Absent must mean DECLINE: treating an unreachable resolver as
@@ -2628,7 +2628,7 @@ export async function runGig(
           missing_skills: p.missing_skills, // #241 — what did NOT resolve, so the prompt can't assert it
           // THE SEAT IS WHERE THE INSTITUTION'S DATA ENTERS. Validated at compose time (the dead-slot
           // refusal) and, until now, dropped on the floor immediately afterwards.
-          // The seat's own supplies, then whatever the placement resolver carried in — Envoy's
+          // The seat's own supplies, then whatever the placement resolver carried in — the deployment's
           // "carry the chain into the chair". The resolver wins on a key collision: it answers with
           // the institution's live record, where the standard's chair carries an authored default.
           ...(p.chair.supplies || placedHydration

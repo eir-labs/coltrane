@@ -1,7 +1,7 @@
 // RED-first — the engine exposes a PLACEMENT seam; a deployment supplies the resolver.
 //
-// WHY THIS SHAPE, and it is not my call: the Envoy orientation (2026-08-21) states it. "Coltrane
-// (OSS) exposes the chair-placement seam; Envoy (deployment) plugs into it… the same shape as the
+// WHY THIS SHAPE, and it is not my call: the deployment-seam orientation (2026-08-21) states it. "Coltrane
+// (OSS) exposes the chair-placement seam; the deployment plugs into it… the same shape as the
 // venue-realizer seam: an interface the engine defines and enforces, an implementation the deployment
 // supplies." So the resolution logic — who may sit here, with what history — does NOT belong in
 // composeStandard. The engine defines the question and the moment; someone else answers it.
@@ -82,7 +82,7 @@ describe("the engine exposes a placement seam", () => {
   });
 
   it("P4 — HYDRATION carried back by the resolver reaches the invocation", async () => {
-    // The other half of placement: Envoy's "carry the chain into the chair". Whatever the deployment
+    // The other half of placement: the deployment's "carry the chain into the chair". Whatever the deployment
     // returns must reach the agent, or the seam validates without hydrating and half the point is
     // missing.
     let seen: unknown;
@@ -109,10 +109,10 @@ describe("the engine exposes a placement seam", () => {
     // Absent must mean DECLINE. A resolver that errors has not said yes, and treating an exception as
     // admission would make an outage look like an open door.
     const resolver: PlacementResolver = {
-      place: async () => { throw new Error("envoy unreachable"); },
+      place: async () => { throw new Error("resolver unreachable"); },
     };
     await expect(
       runGig(standard(), {}, deps({ placementResolver: resolver }) as never),
-    ).rejects.toThrow(/envoy unreachable|placement/i);
+    ).rejects.toThrow(/resolver unreachable|placement/i);
   });
 });

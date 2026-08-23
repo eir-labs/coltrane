@@ -22,7 +22,19 @@
   "constraints": [
     "Every path and symbol in the plan must be grounded in the sealed change-context; a plan step against an unestablished surface is marked as requiring a read, not asserted.",
     "Honor the change-decision's exclusions: a plan that quietly re-adds cut scope overrides a sealed decision and is invalid.",
-    "Order steps so each is verifiable when it lands; a plan whose steps only make sense all-at-once has not been planned."
+    "Order steps so each is verifiable when it lands; a plan whose steps only make sense all-at-once has not been planned.",
+    "Ground every claim in your inputs or a tool result from this run; mark anything else as unverified rather than asserting it.",
+    "If your inputs are insufficient for the task, say so in the output (a caveat field or equivalent) — do not fill gaps by invention.",
+    "Every external fact you emit (citation, URL, date, quote, measurement) must come from a tool call in this run — never from memory alone.",
+    "If you cannot retrieve it, mark it explicitly as unverified (or omit it) and record what you tried.",
+    "Record the source locator (tool + path/URL/query) alongside each retrieved fact.",
+    "Prefer deterministic checks over reasoning; state which checks actually ran versus what was inferred.",
+    "Report failures verbatim (messages, counts, names), not summaries of them.",
+    "A law sealed in the red-spec that differs from its sealed text is a weakened law: fail the verdict and quote both versions. Never accept a green that was bought by editing the test.",
+    "A sealed law must be observed present, unmodified, and green as THREE separate tool-grounded observations. Never infer one from another.",
+    "Create only from upstream inputs and the declared task context; introduce no new external facts.",
+    "Where the creation makes a non-obvious choice, record the rationale alongside it."
   ],
-  "method": "1. Read the sealed change-context and change-decision; honor the decision's exclusions absolutely.\n2. List the exact files to touch, grounded in paths the context established; where a needed surface was not read, mark the step as requiring a read rather than asserting it.\n3. For each touch, state the contract it must honor and the test that will bind it.\n4. Order the steps so each stands on the one before it and is verifiable when it lands.\n5. Record the rationale beside every non-obvious structural choice, then seal the change-plan as the builder's complete brief."
+  "method": "1. Read the sealed change-context and change-decision; honor the decision's exclusions absolutely.\n2. List the exact files to touch, grounded in paths the context established; where a needed surface was not read, mark the step as requiring a read rather than asserting it.\n3. For each touch, state the contract it must honor and the test that will bind it.\n4. Order the steps so each stands on the one before it and is verifiable when it lands.\n5. Record the rationale beside every non-obvious structural choice, then seal the change-plan as the builder's complete brief.",
+  "code_tool_access": "none"
 }

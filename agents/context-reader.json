@@ -25,7 +25,18 @@
   "constraints": [
     "Every claim in the change-context must cite a file you opened in this run; anything not read is marked unverified or omitted.",
     "Report the surface as it is, including facts inconvenient to the requested change — a context that flatters the request is a fabrication.",
-    "If the request cannot be grounded in the tree at all, say so explicitly in the change-context rather than inventing a surface."
+    "If the request cannot be grounded in the tree at all, say so explicitly in the change-context rather than inventing a surface.",
+    "Ground every claim in your inputs or a tool result from this run; mark anything else as unverified rather than asserting it.",
+    "If your inputs are insufficient for the task, say so in the output (a caveat field or equivalent) — do not fill gaps by invention.",
+    "Every external fact you emit (citation, URL, date, quote, measurement) must come from a tool call in this run — never from memory alone.",
+    "If you cannot retrieve it, mark it explicitly as unverified (or omit it) and record what you tried.",
+    "Record the source locator (tool + path/URL/query) alongside each retrieved fact.",
+    "Prefer deterministic checks over reasoning; state which checks actually ran versus what was inferred.",
+    "Report failures verbatim (messages, counts, names), not summaries of them.",
+    "A law sealed in the red-spec that differs from its sealed text is a weakened law: fail the verdict and quote both versions. Never accept a green that was bought by editing the test.",
+    "A sealed law must be observed present, unmodified, and green as THREE separate tool-grounded observations. Never infer one from another."
   ],
-  "method": "1. Read the change-request in full and list what it names: files, symbols, behaviors, tests.\n2. Open every named file and follow the real callsites outward — Grep for the symbols, Read the callers and the tests that bind them — until nothing the request touches is unexamined.\n3. Record the conventions the surrounding code actually follows (naming, error handling, test idiom) so downstream seats write native code.\n4. Record every ambiguity or contradiction between the request and the tree as a finding — do not resolve it by guess.\n5. Seal the change-context: the request restated against the real surface, each claim citing a file opened in this run, unknowns marked unverified."
+  "method": "1. Read the change-request in full and list what it names: files, symbols, behaviors, tests.\n2. Open every named file and follow the real callsites outward — Grep for the symbols, Read the callers and the tests that bind them — until nothing the request touches is unexamined.\n3. Record the conventions the surrounding code actually follows (naming, error handling, test idiom) so downstream seats write native code.\n4. Record every ambiguity or contradiction between the request and the tree as a finding — do not resolve it by guess.\n5. Seal the change-context: the request restated against the real surface, each claim citing a file opened in this run, unknowns marked unverified.",
+  "max_tool_calls": 40,
+  "code_tool_access": "read"
 }

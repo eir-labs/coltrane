@@ -68,6 +68,29 @@
       "intent": "Compose the buildable specification: architecture, the exact changes with their repositories and gates, preconditions, risks, rollback, and the receipts due — buildable as written, article for article."
     },
     {
+      "name": "specify",
+      "chairs": [
+        {
+          "role": "specify",
+          "agent_slug": "solution-developer",
+          "depends_on": [
+            "contract",
+            "survey"
+          ],
+          "input_contract": [
+            "subsystem-contract",
+            "repo-survey"
+          ],
+          "output_contract": [
+            "residency-spec"
+          ],
+          "optional_outputs": [],
+          "required_skills": []
+        }
+      ],
+      "intent": "FILL the residency-spec instance the contract obligates: read the surveyed files from disk and populate every field of the residency-spec type — resident_identity, seat_contract_source, canonical_repo, repo_aliases, host, cohabitation_boundary, laws, hands, rails, approval_seat — each entry carrying a locator into a file actually read. The subsystem-contract's obligations are the checklist this phase satisfies; the survey is its ground. No obligation left as a promise: the spec is the artifact, not a description of the artifact."
+    },
+    {
       "name": "approve",
       "chairs": [
         {
@@ -75,10 +98,10 @@
           "agent_slug": "",
           "human": true,
           "depends_on": [
-            "contract"
+            "specify"
           ],
           "input_contract": [
-            "subsystem-contract"
+            "residency-spec"
           ],
           "output_contract": [
             "lineage-verdict"

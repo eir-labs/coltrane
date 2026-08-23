@@ -14,9 +14,11 @@ describe("residency-spec-v0 · INV-1 presence", () => {
   it("exists", () => expect(existsSync(P)).toBe(true));
 });
 
-describe("residency-spec-v0 · INV-2 four phases in order", () => {
-  it("survey, charter, contract, approve", () => {
-    expect(load().phases.map((p: any) => p.name)).toEqual(["survey", "charter", "contract", "approve"]);
+describe("residency-spec-v0 · INV-2 five phases in order", () => {
+  it("survey, charter, contract, specify, approve", () => {
+    expect(load().phases.map((p: any) => p.name)).toEqual([
+      "survey", "charter", "contract", "specify", "approve",
+    ]);
   });
 });
 
@@ -40,20 +42,33 @@ describe("residency-spec-v0 · INV-3 the seats and contracts", () => {
     expect(c.depends_on).toEqual(["charter"]);
     expect(c.output_contract).toEqual(["subsystem-contract"]);
   });
+  it("specify: solution-developer FILLS the residency-spec instance, grounded in the survey", () => {
+    // The reconciliation miss (2026-08-23): the pipeline parked a subsystem-contract of
+    // OBLIGATIONS and asked the sovereign to approve it as if it were the spec. The specify
+    // phase is what actually produces the populated residency-spec the contract obligates.
+    const c = load().phases[3].chairs[0];
+    expect(c.agent_slug).toBe("solution-developer");
+    // depends on both: the obligations it satisfies (contract) and the ground it fills from (survey)
+    expect(c.depends_on).toEqual(["contract", "survey"]);
+    expect(c.input_contract).toContain("subsystem-contract");
+    expect(c.input_contract).toContain("repo-survey");
+    expect(c.output_contract).toEqual(["residency-spec"]);
+  });
 });
 
-describe("residency-spec-v0 · INV-4 the approve seat is human-only and sole verdict", () => {
-  it("human, empty agent_slug, parks doctrine in intent, sole verdict producer", () => {
+describe("residency-spec-v0 · INV-4 the approve seat is human-only and takes the FILLED spec", () => {
+  it("human, empty agent_slug, parks doctrine in intent, consumes residency-spec, sole verdict producer", () => {
     const d = load();
-    const a = d.phases[3].chairs[0];
+    const a = d.phases[4].chairs[0];
     expect(a.human).toBe(true);
     expect(a.agent_slug).toBe("");
-    expect(a.depends_on).toEqual(["contract"]);
-    expect(a.input_contract).toEqual(["subsystem-contract"]);
-    for (const ph of d.phases.slice(0, 3))
+    expect(a.depends_on).toEqual(["specify"]);
+    // The sovereign approves the populated spec, never the obligations-contract.
+    expect(a.input_contract).toEqual(["residency-spec"]);
+    for (const ph of d.phases.slice(0, 4))
       for (const c of ph.chairs)
         expect(c.output_contract).not.toContain(a.output_contract[0]);
-    expect((d.phases[3].intent || "").toUpperCase()).toContain("PARK");
+    expect((d.phases[4].intent || "").toUpperCase()).toContain("PARK");
   });
 });
 

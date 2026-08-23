@@ -9,6 +9,7 @@
   ],
   "output_types": [
     "Artifact",
+    "residency-spec",
     "subsystem-contract"
   ],
   "description": "Generates the project files from the charter. Writes .coltrane/agents/, .coltrane/standards/, .coltrane/skills/, .coltrane/types/, .claude/, CLAUDE.md, tests/preseed/, README.md, and an initial scaffold. Charter fields define scope; only appendable adjustments after define.",

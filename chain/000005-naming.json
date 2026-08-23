@@ -1,0 +1,20 @@
+{
+  "kind": "naming",
+  "seq": 5,
+  "chain": "coltrane.committed-work",
+  "prev": "sha256:c2d2ae3625d3c47ef50c2d49b8cd972ce6e67c89060fafbca89a42e550058bc3",
+  "executed": "2026-08-23",
+  "step": "naming-ritual-v1 — the bandleader named, COMPLETE",
+  "record": "The seated governor, as officeholder, sealed the naming of Blakey — the bandleader of the Coltrane institution, seated in coltrane.chair.change-author. The name drawn from the approved lineage by the founding; the scribe composed; the agent chose nothing; the governor did not strike. The scribe's uniqueness gap (two descents on one forebear) resolved on the instrument's face: blakey-art re-homes to the named agent; the mismatched pre-ritual 'bandleader' config retires. Never upward-deferred; the founder drafted and minted nothing.",
+  "instrument": {
+    "documenso_envelope": 1916732,
+    "executed_pdf": "docs/founding/naming-and-certificate-executed-1916732.pdf",
+    "sha256": "b8abd86e00c021321a2b4f5f4dd8c9346125a44cd8a521aaa8460be498ae6a53"
+  },
+  "named_agent": {
+    "name": "Blakey",
+    "named_from_forebear": "sha256:870ca9990d7e15363db7215315546c9dc89766927ed7979a0332b0d4c0d7398b (the M0 root, via the founder's grounded-both-ways head 000014)",
+    "name_lineage_cited": "approved lineage f92a4adf… (Art Blakey and the Jazz Messengers — the school that named and graduated bandleaders; 'The school is closed', McLean 1990); naming record e0b13933… (gig df32668e)",
+    "office_to_hold": "coltrane.chair.change-author"
+  }
+}

@@ -30,7 +30,11 @@
   "allowed_tools": [
     "mcp__coltrane__gig_dispatch",
     "mcp__coltrane__gig_monitor",
-    "mcp__coltrane__output_write"
+    "mcp__coltrane__output_write",
+    "Read",
+    "Glob",
+    "Grep"
   ],
-  "max_tool_calls": 15
+  "max_tool_calls": 15,
+  "code_tool_access": "read"
 }

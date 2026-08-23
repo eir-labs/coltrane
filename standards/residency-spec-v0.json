@@ -1,0 +1,100 @@
+{
+  "slug": "residency-spec-v0",
+  "domain": "seeding",
+  "status": "active",
+  "agent_slugs": [
+    "domain-explorer",
+    "problem-definer",
+    "solution-developer"
+  ],
+  "phases": [
+    {
+      "name": "survey",
+      "chairs": [
+        {
+          "role": "survey",
+          "agent_slug": "domain-explorer",
+          "depends_on": [],
+          "input_contract": [],
+          "output_contract": [
+            "repo-survey"
+          ],
+          "optional_outputs": [],
+          "required_skills": []
+        }
+      ],
+      "intent": "Sweep the subject named in the dispatch input — its repository, configuration, runtime, schedule, and credentials by name (never values) — and seal what actually exists. The subject arrives entirely in the input; this standard names none."
+    },
+    {
+      "name": "charter",
+      "chairs": [
+        {
+          "role": "charter",
+          "agent_slug": "problem-definer",
+          "depends_on": [
+            "survey"
+          ],
+          "input_contract": [
+            "repo-survey"
+          ],
+          "output_contract": [
+            "project-charter"
+          ],
+          "optional_outputs": [],
+          "required_skills": []
+        }
+      ],
+      "intent": "Define the formalization problem from the survey: handmade to governed, item by item — what carries, what must be rebuilt, what retires — as a charter with explicit scope and non-goals."
+    },
+    {
+      "name": "contract",
+      "chairs": [
+        {
+          "role": "contract",
+          "agent_slug": "solution-developer",
+          "depends_on": [
+            "charter"
+          ],
+          "input_contract": [
+            "project-charter"
+          ],
+          "output_contract": [
+            "subsystem-contract"
+          ],
+          "optional_outputs": [],
+          "required_skills": []
+        }
+      ],
+      "intent": "Compose the buildable specification: architecture, the exact changes with their repositories and gates, preconditions, risks, rollback, and the receipts due — buildable as written, article for article."
+    },
+    {
+      "name": "approve",
+      "chairs": [
+        {
+          "role": "approve",
+          "agent_slug": "",
+          "human": true,
+          "depends_on": [
+            "contract"
+          ],
+          "input_contract": [
+            "subsystem-contract"
+          ],
+          "output_contract": [
+            "lineage-verdict"
+          ],
+          "optional_outputs": [],
+          "required_skills": []
+        }
+      ],
+      "intent": "The sovereign's seat, and the ONLY seat that can produce the verdict. A dispatch reaching this chair PARKS and resumes only on the officeholder's recorded act. Approval releases the contract for a build order drafted from it article for article; rejection re-runs the survey with the rejection note as input."
+    }
+  ],
+  "input_types": [
+    "change-request"
+  ],
+  "output_types": [
+    "lineage-verdict"
+  ],
+  "description": "The formalization-spec pipeline: survey what exists, charter the problem, compose the buildable contract, and park at the human approve seat, which alone produces the verdict. Created under WO-E03 (Documenso #1916609) through deliberation-before-amendment-v1; the subject of any run arrives entirely in the dispatch input — genome entries are for reusable graphs only."
+}

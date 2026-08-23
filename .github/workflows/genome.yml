@@ -1,0 +1,32 @@
+# THE GENOME FLOOR — the Chancery's own mechanical gate.
+#
+# The amendment harness is RED-first and PR-gated: a change lands only after this check is green
+# on an open pull request and the human governor merges it. This job is the mechanical half of
+# that law: the genome in this repo must LOAD — every chair, contract type, skill and cap must
+# resolve — or the proposal cannot land. The engine is the enforcement; it holds no opinion
+# about the law it loads.
+name: genome
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: genome loads
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: install the engine
+        run: npm install --no-save @eir-labs/coltrane
+      - name: the genome must load
+        run: npx coltrane validate

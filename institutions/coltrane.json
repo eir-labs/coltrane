@@ -24,7 +24,7 @@
         "deontic": "permitted",
         "aim": "open a pull request proposing a change to the institution's main line",
         "conditions": "the change is committed on a non-main branch and its local verify passed",
-        "or_else": "not applicable \u2014 a permission, not an obligation",
+        "or_else": "not applicable — a permission, not an obligation",
         "check": {
           "predicate": "(=> (and (is-agent actor) (= action \"open-pr\") (not (= source \"main\"))) allow)",
           "inputs": {
@@ -55,7 +55,7 @@
         "deontic": "permitted",
         "aim": "stand deliberately red between the spec merge and the implementation merge on a change-set branch, off the protected line",
         "conditions": "while the target branch is a change-set branch and is not the protected main line",
-        "or_else": "not applicable \u2014 a permission, not an obligation",
+        "or_else": "not applicable — a permission, not an obligation",
         "check": {
           "predicate": "(=> (not (= target_branch \"main\")) allow)",
           "inputs": {
@@ -65,11 +65,11 @@
         "content_hash": "sha256:f465a9f3e76a5288dd993ef1b8228993feea04a47af8f3c99462cc4edcb238a5"
       },
       {
-        "attributes": "any seated agent performing a coltrane-shaped operation \u2014 composing a standard, writing a typed output, defining an agent, registering a type",
+        "attributes": "any seated agent performing a coltrane-shaped operation — composing a standard, writing a typed output, defining an agent, registering a type",
         "deontic": "forbidden",
         "aim": "perform a coltrane-shaped operation through a built-in file or search surface instead of the MCP surface",
         "conditions": "whenever the operation has a coltrane tool that performs it; reading source and editing engine TypeScript are not coltrane-shaped and are unaffected",
-        "or_else": "the operation is not seen by the genome \u2014 the work does not enter the genome: no content_sha is sealed, no ledger entry is written, no hash updates, so the change is unrecorded however correct its bytes are. Where the seat holds no such grant the surface is absent and the bypass cannot arise; where it does, this is what follows.",
+        "or_else": "the operation is not seen by the genome — the work does not enter the genome: no content_sha is sealed, no ledger entry is written, no hash updates, so the change is unrecorded however correct its bytes are. Where the seat holds no such grant the surface is absent and the bypass cannot arise; where it does, this is what follows.",
         "check": {
           "predicate": "(=> (and (is-agent actor) (= operation \"coltrane-shaped\") (not (= surface \"mcp\"))) deny)",
           "inputs": {
@@ -85,7 +85,7 @@
         "deontic": "forbidden",
         "aim": "write to core_types/ or domain_types/ directly instead of using type_register or type_extend",
         "conditions": "at all times",
-        "or_else": "the type is not registered \u2014 the work does not enter the genome: no content_sha is sealed, no ledger entry is written, no hash updates, so the change is unrecorded however correct its bytes are. Where the seat holds no such grant the surface is absent and the bypass cannot arise; where it does, this is what follows.",
+        "or_else": "the type is not registered — the work does not enter the genome: no content_sha is sealed, no ledger entry is written, no hash updates, so the change is unrecorded however correct its bytes are. Where the seat holds no such grant the surface is absent and the bypass cannot arise; where it does, this is what follows.",
         "check": {
           "predicate": "(=> (and (is-agent actor) (= action \"direct-write\") (= target \"type-dir\")) deny)",
           "inputs": {
@@ -100,8 +100,8 @@
         "attributes": "any seated agent adding an agent definition to the genome",
         "deontic": "forbidden",
         "aim": "add an agent DEFINITION by dropping a file under agents/ instead of using agent_define",
-        "conditions": "for the genome agent-definition surface (agents/*.json). NOT the base-player surface: CLAUDE.md ships Claude Code subagents as markdown under agents/players/<name>.md, and those are files by design \u2014 a law that forbade them would forbid the shipped arrangement.",
-        "or_else": "the agent is not defined \u2014 the work does not enter the genome: no content_sha is sealed, no ledger entry is written, no hash updates, so the change is unrecorded however correct its bytes are. Where the seat holds no such grant the surface is absent and the bypass cannot arise; where it does, this is what follows.",
+        "conditions": "for the genome agent-definition surface (agents/*.json). NOT the base-player surface: CLAUDE.md ships Claude Code subagents as markdown under agents/players/<name>.md, and those are files by design — a law that forbade them would forbid the shipped arrangement.",
+        "or_else": "the agent is not defined — the work does not enter the genome: no content_sha is sealed, no ledger entry is written, no hash updates, so the change is unrecorded however correct its bytes are. Where the seat holds no such grant the surface is absent and the bypass cannot arise; where it does, this is what follows.",
         "check": {
           "predicate": "(=> (and (is-agent actor) (= action \"file-drop\") (= target \"agent-definition\")) deny)",
           "inputs": {
@@ -111,6 +111,83 @@
           }
         },
         "content_hash": "sha256:cc778a9b25e6914cf9c8e70d63539dd7563f3be8c3c7b4f6a693de5bae5496f2"
+      },
+      {
+        "attributes": "any agent seated in an institutional chair",
+        "deontic": "forbidden",
+        "aim": "exercise a capability the seated chair grants do not contain",
+        "conditions": "while acting under an institutional seating",
+        "or_else": "the action is refused at dispatch, and the authority lapses the moment the agent is unseated",
+        "check": {
+          "predicate": "(subseteq exercised_caps chair_caps)",
+          "inputs": {
+            "exercised_caps": "CapGrant[]",
+            "chair_caps": "CapGrant[]"
+          }
+        },
+        "content_hash": "sha256:0d27ad56db185576590af99cd368e5826b7bc1589cf23b95bbbb890f8a863253"
+      },
+      {
+        "attributes": "any capability grant",
+        "deontic": "obliged",
+        "aim": "name only standards, tools, and types the genome contains",
+        "conditions": "at authoring time",
+        "or_else": "the grant is a dead name and is refused at authoring rather than resolved at dispatch",
+        "check": {
+          "predicate": "(forall o grant_objects (resolvable o genome))",
+          "inputs": {
+            "grant_objects": "string[]",
+            "genome": "Genome"
+          }
+        },
+        "content_hash": "sha256:faa936f438ae56f08a9f206f0c06603bb4e6c7012f4e2112f3a4557996ec5904"
+      },
+      {
+        "attributes": "every chair",
+        "deontic": "obliged",
+        "aim": "state its mission and its obligations before an incumbent is seated",
+        "conditions": "before any chair assignment for the chair is created",
+        "or_else": "the seating is refused; an office whose mission is inferred from its occupant is not an office",
+        "check": {
+          "predicate": "(and (nonempty chair_mission) (declared_before chair_obligations seat_created))",
+          "inputs": {
+            "chair_mission": "string",
+            "chair_obligations": "NormPair[]",
+            "seat_created": "timestamp"
+          }
+        },
+        "content_hash": "sha256:92d78f11e0b46bf31afe7b41c5037d0f238290589f2636b86118ab533249e2cc"
+      },
+      {
+        "attributes": "any agent name anchored in a forebear",
+        "deontic": "forbidden",
+        "aim": "claim descent from a forebear whose record lacks the forebear identity and a primary or scholarly source for the attributed disposition",
+        "conditions": "whenever a lineage attribution edge is authored",
+        "or_else": "the attribution is not claimed; an uncited lineage is a recollection, not a record",
+        "check": {
+          "predicate": "(and (has edge_source_figure) (or (has edge_source_primary_text) (has edge_source_scholarship)))",
+          "inputs": {
+            "edge_source_figure": "string",
+            "edge_source_primary_text": "string",
+            "edge_source_scholarship": "string"
+          }
+        },
+        "content_hash": "sha256:ee6c8db46e22e9b50a4862b140912634458438d96a6c1fda503e2b6782101e10"
+      },
+      {
+        "attributes": "the institution",
+        "deontic": "forbidden",
+        "aim": "expose any capability to another institution except through a witnessed exchange contract",
+        "conditions": "at all times",
+        "or_else": "the cross-institution access is refused; exposure exists only where an exchange contract carries the cap",
+        "check": {
+          "predicate": "(forall x cross_institution_access (backed_by_contract x exchange_contracts))",
+          "inputs": {
+            "cross_institution_access": "Access[]",
+            "exchange_contracts": "ExchangeContract[]"
+          }
+        },
+        "content_hash": "sha256:09c3ca9ff6c1da5921e1fc97a42602fc0896b4ac660ba8ae6ed51e4594070b60"
       }
     ],
     "sovereign": true,
@@ -120,7 +197,7 @@
     {
       "slug": "eir-labs",
       "name": "Eir Labs",
-      "charter": "The organization that develops Coltrane through Coltrane's own governed pipeline. Its charter is to carry every change to the engine and its genome through a reviewed pull request a human governor merges on green continuous integration \u2014 never a direct write to the protected main line. It ships no capability it has not been granted and lands no change its checks have not passed.",
+      "charter": "The organization that develops Coltrane through Coltrane's own governed pipeline. Its charter is to carry every change to the engine and its genome through a reviewed pull request a human governor merges on green continuous integration — never a direct write to the protected main line. It ships no capability it has not been granted and lands no change its checks have not passed.",
       "parent_org": null
     }
   ],
@@ -141,7 +218,7 @@
       "kind": "steve",
       "is_institution": false,
       "skill_slugs": [],
-      "status": "named",
+      "status": "active",
       "named_from_forebear": "blakey-art",
       "auth_user_id": null
     }
@@ -190,7 +267,7 @@
       "role": "human-governor",
       "human": true,
       "function": "JUDGE",
-      "mission": "Hold the merge authority for Coltrane's protected main line. This chair is held by a person, never a model agent: the governor reviews an open pull request and its continuous-integration result and merges it under their own name, or refuses it. Nothing lands on main without this office's yes. The office ships unassigned \u2014 the adopting organization seats a person here as its first governance act.",
+      "mission": "Hold the merge authority for Coltrane's protected main line. This chair is held by a person, never a model agent: the governor reviews an open pull request and its continuous-integration result and merges it under their own name, or refuses it. Nothing lands on main without this office's yes. The office ships unassigned — the adopting organization seats a person here as its first governance act.",
       "required_skills": [],
       "caps": [],
       "obligations": [
@@ -226,7 +303,7 @@
       "name": "Crawford, S.E.S. & Ostrom, E. (1995), \"A Grammar of Institutions\"",
       "domain": "institutional analysis",
       "kind": "work",
-      "what_taken": "The ADICO grammar \u2014 Attribute, Deontic, aIm, Condition, Or-else \u2014 which InstitutionalLawSchema takes as the shape of a law. Cited with a DOI at src/genome_schema.ts:356, the tree's one explicit \"Descends from\" declaration."
+      "what_taken": "The ADICO grammar — Attribute, Deontic, aIm, Condition, Or-else — which InstitutionalLawSchema takes as the shape of a law. Cited with a DOI at src/genome_schema.ts:356, the tree's one explicit \"Descends from\" declaration."
     },
     {
       "slug": "makinson-vandertorre-io-logic",
@@ -234,7 +311,7 @@
       "name": "Makinson, D. & van der Torre, L. (2000), \"Input/Output Logics\"",
       "domain": "deontic logic",
       "kind": "work",
-      "what_taken": "The obligation as a norm-PAIR (condition, consequent) rather than a modal operator over a proposition \u2014 why a law here carries a predicate and an or_else instead of a truth value."
+      "what_taken": "The obligation as a norm-PAIR (condition, consequent) rather than a modal operator over a proposition — why a law here carries a predicate and an or_else instead of a truth value."
     },
     {
       "slug": "xacml-3-decision-model",
@@ -242,7 +319,7 @@
       "name": "OASIS eXtensible Access Control Markup Language (XACML) 3.0",
       "domain": "access control",
       "kind": "work",
-      "what_taken": "The multi-verdict decision algebra \u2014 permit / deny / not-applicable / indeterminate \u2014 that the admissibility result descends from, rather than a boolean. Named in the schema prose WITHOUT a locator: attestation, not archive."
+      "what_taken": "The multi-verdict decision algebra — permit / deny / not-applicable / indeterminate — that the admissibility result descends from, rather than a boolean. Named in the schema prose WITHOUT a locator: attestation, not archive."
     },
     {
       "slug": "gasb-54-encumbrance",
@@ -250,7 +327,7 @@
       "name": "GASB Statement No. 54, Fund Balance Reporting and Governmental Fund Type Definitions",
       "domain": "governmental accounting",
       "kind": "work",
-      "what_taken": "The encumbrance \u2014 a commitment recorded between an appropriation ceiling and an expenditure \u2014 which the committed-work objects (Tour / Booking / Resource) take as the binding middle place. Named in docs/specs/the-binding-middle-place.md WITHOUT a locator: attestation, not archive."
+      "what_taken": "The encumbrance — a commitment recorded between an appropriation ceiling and an expenditure — which the committed-work objects (Tour / Booking / Resource) take as the binding middle place. Named in docs/specs/the-binding-middle-place.md WITHOUT a locator: attestation, not archive."
     },
     {
       "slug": "blakey-art",
@@ -258,7 +335,7 @@
       "name": "Art Blakey",
       "domain": "modern jazz (drums, bandleading)",
       "kind": "musician",
-      "what_taken": "Born 11 October 1919 in Pittsburgh, Pennsylvania; died 16 October 1990 in New York City (Scott DeVeaux/Gary Giddins record the dates; the American National Biography entry is titled \"Blakey, Art (1919-1990), jazz drummer and bandleader\", doi:10.1093/anb/9780198606697.article.1802592, retrieved 2026-08-20). What the BANDLEADER chair takes is the documented practice of running a band as an INSTITUTION THAT OUTLIVES ITS PLAYERS. From 1954 until his death Blakey led the Jazz Messengers through roughly two dozen lineups, seating young players, developing them, and releasing them onward \u2014 Horace Silver, Clifford Brown, Lee Morgan, Wayne Shorter, Freddie Hubbard, Keith Jarrett, Wynton Marsalis among them \u2014 while the band itself persisted as the durable thing. The disposition the chair takes is that of the seat rather than the incumbent: the leader calls the tune, counts it off, seats the players, judges the take, and stops the band when it is wrong, and does not play the horn. Grove Music Online's entry (Lewis Porter, 2003, doi:10.1093/gmo/9781561592630.article.j046400, retrieved 2026-08-20) records the Messengers as the defining vehicle of that practice. Nothing of the man's biography beyond this working disposition is claimed or carried."
+      "what_taken": "Born 11 October 1919 in Pittsburgh, Pennsylvania; died 16 October 1990 in New York City (Scott DeVeaux/Gary Giddins record the dates; the American National Biography entry is titled \"Blakey, Art (1919-1990), jazz drummer and bandleader\", doi:10.1093/anb/9780198606697.article.1802592, retrieved 2026-08-20). What the BANDLEADER chair takes is the documented practice of running a band as an INSTITUTION THAT OUTLIVES ITS PLAYERS. From 1954 until his death Blakey led the Jazz Messengers through roughly two dozen lineups, seating young players, developing them, and releasing them onward — Horace Silver, Clifford Brown, Lee Morgan, Wayne Shorter, Freddie Hubbard, Keith Jarrett, Wynton Marsalis among them — while the band itself persisted as the durable thing. The disposition the chair takes is that of the seat rather than the incumbent: the leader calls the tune, counts it off, seats the players, judges the take, and stops the band when it is wrong, and does not play the horn. Grove Music Online's entry (Lewis Porter, 2003, doi:10.1093/gmo/9781561592630.article.j046400, retrieved 2026-08-20) records the Messengers as the defining vehicle of that practice. Nothing of the man's biography beyond this working disposition is claimed or carried."
     }
   ],
   "lineage_edges": [
@@ -297,7 +374,7 @@
       "source": {
         "evidence_grade": "attestation",
         "locator": "src/genome_schema.ts (AdmissibilityResult)",
-        "note": "named in prose without a doi or url. Under system.coltrane.institutional-model the citation rule refuses a citation carrying neither \u2014 recorded here as an attestation so the gap is visible, never laundered upward to archive"
+        "note": "named in prose without a doi or url. Under system.coltrane.institutional-model the citation rule refuses a citation carrying neither — recorded here as an attestation so the gap is visible, never laundered upward to archive"
       }
     },
     {
@@ -309,7 +386,7 @@
       "source": {
         "evidence_grade": "attestation",
         "locator": "docs/specs/the-binding-middle-place.md",
-        "note": "named in prose without a doi or url. Under system.coltrane.institutional-model the citation rule refuses a citation carrying neither \u2014 recorded here as an attestation so the gap is visible, never laundered upward to archive"
+        "note": "named in prose without a doi or url. Under system.coltrane.institutional-model the citation rule refuses a citation carrying neither — recorded here as an attestation so the gap is visible, never laundered upward to archive"
       }
     },
     {

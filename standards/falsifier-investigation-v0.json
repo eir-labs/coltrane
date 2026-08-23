@@ -1,0 +1,95 @@
+{
+  "slug": "falsifier-investigation-v0",
+  "domain": "engineering",
+  "agent_slugs": [
+    "defect-investigator"
+  ],
+  "phases": [
+    {
+      "name": "reproduce",
+      "intent": "Reproduce the defect deterministically; no investigation proceeds on a guess.",
+      "chairs": [
+        {
+          "role": "reproduce",
+          "agent_slug": "defect-investigator",
+          "depends_on": [],
+          "input_contract": [
+            "defect-report"
+          ],
+          "output_contract": [
+            "reproduction"
+          ],
+          "required_skills": []
+        }
+      ]
+    },
+    {
+      "name": "locate",
+      "intent": "Trace the exact failing call-chain in read code, file:symbol.",
+      "chairs": [
+        {
+          "role": "locate",
+          "agent_slug": "defect-investigator",
+          "depends_on": [
+            "reproduce"
+          ],
+          "input_contract": [
+            "reproduction"
+          ],
+          "output_contract": [
+            "defect-location"
+          ],
+          "required_skills": []
+        }
+      ]
+    },
+    {
+      "name": "root-cause",
+      "intent": "Why-chain to the violated invariant, not the surface symptom.",
+      "chairs": [
+        {
+          "role": "root-cause",
+          "agent_slug": "defect-investigator",
+          "depends_on": [
+            "locate"
+          ],
+          "input_contract": [
+            "defect-location"
+          ],
+          "output_contract": [
+            "root-cause"
+          ],
+          "required_skills": []
+        }
+      ]
+    },
+    {
+      "name": "fix-spec",
+      "intent": "Plan a fix for EVERY swept instance, each RED-first, plus a class-guard test.",
+      "chairs": [
+        {
+          "role": "fix-spec",
+          "agent_slug": "defect-investigator",
+          "depends_on": [
+            "root-cause"
+          ],
+          "input_contract": [
+            "root-cause"
+          ],
+          "output_contract": [
+            "fix-spec"
+          ],
+          "required_skills": []
+        }
+      ]
+    }
+  ],
+  "input_types": [
+    "defect-report"
+  ],
+  "output_types": [
+    "fix-spec"
+  ],
+  "description": "The thin canon investigation standard: when a stated falsifier fires, its investigation is a standing procedure, never left to whoever happens to notice. Reproduce the firing, locate it, find the root cause, and seal a fix-spec to be carried through the RED-first amendment gate. Deliberately NARROW: the class-complete practice (generalize + sweep + class-guard) is tenant law — see defect-investigation-v1 in the coltrane example — and any institution may adopt it through its own gate. Canon carries only the guarantee that a fired falsifier is investigated by procedure.",
+  "status": "active"
+}

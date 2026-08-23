@@ -1,0 +1,19 @@
+{
+  "kind": "commission",
+  "seq": 1,
+  "chain": "coltrane.committed-work",
+  "prev": "PENDING — the prior chain head (the genesis row content address)",
+  "issued": "TO BE DATED AT EXECUTION",
+  "text": "Per-founding commission for the founding of Coltrane, issued from the Chancery's standing commission to the incumbent Chancellor. The commission authorizes execution of founding-pass-v0 steps 0 through 10 for Coltrane, under this workspace's RUNBOOK.md, and extinguishes mechanically at Step 10's seal.",
+  "cites": {
+    "genesis_row": "PENDING — the genesis row content address",
+    "founding_procedure": "founding-pass-v0 (nomos/docs/founding-pass-v0.md)",
+    "runbook": "RUNBOOK.md (this workspace)"
+  },
+  "constraints_carried": [
+    "The Chancellor executes and never judges; Step 10 verification is never the Chancellor's own say-so.",
+    "The Chancellor can never mint a named agent — only the naming ritual (Step 7), sealed by the seated governor.",
+    "Landrace (Step 2) is a hard prerequisite of the founding seal.",
+    "The rehearsed refusal (Step 9) is REQUIRED — a wall is only known where it has been struck."
+  ]
+}

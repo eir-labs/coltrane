@@ -1,0 +1,75 @@
+# The square — the open review venue (WO-002, Art. I).
+#
+# On every merge to main the venue dispatches square-review-v0 over the landed
+# change-set and seals the verdict in daylight, as a check run under its own
+# name. It holds exactly one credential class: a SPEND-CAPPED, MODEL-ONLY key
+# (SQUARE_ANTHROPIC_API_KEY). Production-data credentials never enter GitHub
+# secrets — that prohibition is unrelaxed. Before the key is seeded at the
+# commissioning seal, the venue awaits its commissioning honestly: it reports
+# so and exits clean, reviewing nothing, failing nothing.
+name: the square
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  checks: write
+
+concurrency:
+  group: the-square-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  review:
+    name: the square
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: stand or wait
+        id: commission
+        env:
+          HAS_KEY: ${{ secrets.SQUARE_ANTHROPIC_API_KEY != '' }}
+        run: |
+          if [ "$HAS_KEY" = "true" ]; then
+            echo "commissioned=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "commissioned=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=the square::The square awaits its commissioning — no spend-capped key is seeded, so no review ran. This is the venue standing, not the venue failing."
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.commission.outputs.commissioned == 'true'
+        with:
+          fetch-depth: 2
+
+      - uses: actions/setup-node@v4
+        if: steps.commission.outputs.commissioned == 'true'
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: build the engine
+        if: steps.commission.outputs.commissioned == 'true'
+        run: |
+          npm ci
+          npm run build
+
+      - name: compose the merge's change-set
+        if: steps.commission.outputs.commissioned == 'true'
+        run: node scripts/the-square-input.mjs > /tmp/square-input.json
+
+      - name: dispatch square-review-v0
+        if: steps.commission.outputs.commissioned == 'true'
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.SQUARE_ANTHROPIC_API_KEY }}
+          COLTRANE_CHAIR_TIMEOUT_MS: "900000"
+        run: node dist/src/cli.js dispatch square-review-v0 --input @/tmp/square-input.json --budget 15000
+
+      - name: seal the verdict as the square's own check
+        if: steps.commission.outputs.commissioned == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/the-square-verdict.mjs

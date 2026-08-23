@@ -481,4 +481,4 @@ export const PINNED_UNREAD_ENGINE_FIELDS = 21;
  * it — runtime evidence this static sweep cannot see. That check is worth building; this one is not
  * a substitute for it.
  */
-export const PINNED_UNREAD_CONTRACT_FIELDS = 126;
+export const PINNED_UNREAD_CONTRACT_FIELDS = 125;

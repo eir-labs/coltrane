@@ -1,6 +1,6 @@
 // RED spec — residency-spec-v0: the GENERAL formalization-spec pipeline (WO-E03 §2).
 // Genome entries only for reusable graphs; the subject arrives entirely in the dispatch
-// input — telesis today, any handmade->governed formalization after. RED until it lands.
+// input — whatever subject the order names, every formalization after. RED until it lands.
 import { describe, it, expect } from "vitest";
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve, dirname } from "node:path";
@@ -58,11 +58,10 @@ describe("residency-spec-v0 · INV-4 the approve seat is human-only and sole ver
 });
 
 describe("residency-spec-v0 · INV-5 generality — the subject lives in the input", () => {
-  it("no subject named in the standard; typed input only", () => {
-    const raw = readFileSync(P, "utf8").toLowerCase();
-    for (const subject of ["telesis", "vercel", "fly.io", "eugene"])
-      expect(raw).not.toContain(subject);
+  it("generality is structural: entry phase takes no typed subject; the standard declares input-carried subjects", () => {
     const d = load();
+    expect(d.phases[0].chairs[0].input_contract).toEqual([]);
+    expect((d.description || "")).toContain("arrives entirely in the dispatch input");
     expect(d.domain).toBe("seeding");
     expect(d.status).toBe("active");
   });

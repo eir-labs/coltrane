@@ -1,0 +1,19 @@
+{
+  "kind": "seating",
+  "seq": 3,
+  "chain": "coltrane.committed-work",
+  "prev": "PENDING — sealed at genesis finalization (the 000002 stamp-down content address)",
+  "executed": "2026-08-23",
+  "step": "founding-pass Step 4 — the human governor seated",
+  "record": "the founder is seated as the Governor of the Coltrane institution — the chair coltrane.chair.human-governor, human by its own stamped law (function JUDGE; forbidden to delegate the merge to a model or let the office be held by one). Executed as a legal instrument carrying the guarantor recital's first outing (docs/the-guarantor.md, landed this day on the founder's chain): the signer's name carries through all actions taken by the agents his seals bring into existence, personally before organizationally. Per the chancery precedent, the seating lives as this entry and its instrument — the chair's human-law IS the seat; no agent assignment row exists or may.",
+  "instrument": {
+    "documenso_envelope": 1916472,
+    "executed_pdf": "docs/founding/seating-governor-executed-1916472.pdf",
+    "sha256": "95244e14ab81015e617051b1249270ddebe9c75cb448b736f5f41a4215e6022b",
+    "executed_at": "2026-08-23T10:45:28Z"
+  },
+  "warrant": {
+    "work_order": "WO-001 (founder's chain), Article the Second — the Act-II commission",
+    "commission_note": "the founder seats and holds nothing; from this entry every naming of this institution parks at the seated governor's seal"
+  }
+}

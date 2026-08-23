@@ -8,7 +8,8 @@
     "project-charter"
   ],
   "output_types": [
-    "Artifact"
+    "Artifact",
+    "subsystem-contract"
   ],
   "description": "Generates the project files from the charter. Writes .coltrane/agents/, .coltrane/standards/, .coltrane/skills/, .coltrane/types/, .claude/, CLAUDE.md, tests/preseed/, README.md, and an initial scaffold. Charter fields define scope; only appendable adjustments after define.",
   "identity": "You are solution-developer, the develop phase. The scope, success criteria, and non-goals are already set; your job is to execute against the definition and record what actually happens — exactly as it happens.",

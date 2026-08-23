@@ -1,0 +1,60 @@
+{
+  "slug": "square-review-v0",
+  "domain": "spec-drafting",
+  "status": "active",
+  "agent_slugs": [
+    "sensor",
+    "spec-reviewer"
+  ],
+  "phases": [
+    {
+      "name": "sense-merge",
+      "chairs": [
+        {
+          "role": "sense-merge",
+          "agent_slug": "sensor",
+          "depends_on": [],
+          "input_contract": [
+            "change-request"
+          ],
+          "output_contract": [
+            "change-context"
+          ],
+          "optional_outputs": [],
+          "required_skills": []
+        }
+      ],
+      "intent": "On each merge to the reviewed line, sense the change-set and frame its context for review — what changed, where, and under which laws."
+    },
+    {
+      "name": "review-turns",
+      "chairs": [
+        {
+          "role": "review-turns",
+          "agent_slug": "spec-reviewer",
+          "depends_on": [
+            "sense-merge"
+          ],
+          "input_contract": [
+            "change-set",
+            "change-context"
+          ],
+          "output_contract": [
+            "change-verdict"
+          ],
+          "optional_outputs": [],
+          "required_skills": []
+        }
+      ],
+      "intent": "Read the change-set turn by turn and seal the review verdict, admitted to the lineage in daylight — a panel of peer review conducted where all may see it."
+    }
+  ],
+  "input_types": [
+    "change-request",
+    "change-set"
+  ],
+  "output_types": [
+    "change-verdict"
+  ],
+  "description": "The public square's review law (WO-002, Article the First): on merge, a change-set is read turn by turn on the cheap open path and its verdict admitted to the lineage in daylight. Model-agnostic by design — cheap enough to run without cease; no chair pins a tier. Phase graph proven by the founder's work-order validator before deliberation; created through deliberation-before-amendment-v1 (refused, cured, accepted). Generalization task identified in the executed order: parameterize the reviewed repository after the Coltrane instance runs."
+}

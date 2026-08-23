@@ -3,7 +3,7 @@
   "domain": "spec-drafting",
   "status": "active",
   "agent_slugs": [
-    "sensor",
+    "context-reader",
     "spec-reviewer"
   ],
   "phases": [
@@ -12,7 +12,7 @@
       "chairs": [
         {
           "role": "sense-merge",
-          "agent_slug": "sensor",
+          "agent_slug": "context-reader",
           "depends_on": [],
           "input_contract": [
             "change-request"

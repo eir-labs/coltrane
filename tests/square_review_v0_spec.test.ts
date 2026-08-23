@@ -22,9 +22,9 @@ describe("square-review-v0 · INV-2 two phases in order", () => {
 });
 
 describe("square-review-v0 · INV-3 the seats", () => {
-  it("sense-merge: sensor entry seat, change-request -> change-context", () => {
+  it("sense-merge: context-reader entry seat, change-request -> change-context", () => {
     const c = load().phases[0].chairs[0];
-    expect(c.agent_slug).toBe("sensor");
+    expect(c.agent_slug).toBe("context-reader");
     expect(c.depends_on).toEqual([]);
     expect(c.input_contract).toEqual(["change-request"]);
     expect(c.output_contract).toEqual(["change-context"]);

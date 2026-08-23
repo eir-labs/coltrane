@@ -325,7 +325,7 @@
     {
       "institution_slug": "coltrane",
       "edge_type": "descends-from",
-      "from_node": "agent:bandleader",
+      "from_node": "agent:blakey",
       "to_node": "forebear:blakey-art",
       "kind": "attribution",
       "source": {
@@ -339,9 +339,9 @@
           "American National Biography, \"Blakey, Art (1919-1990), jazz drummer and bandleader\", doi:10.1093/anb/9780198606697.article.1802592 (retrieved 2026-08-20)",
           "Grove Music Online, Lewis Porter, \"Blakey, Art (jazz)\", doi:10.1093/gmo/9781561592630.article.j046400 (retrieved 2026-08-20)"
         ],
-        "attributed_disposition": "running a band as an institution that outlives its players: seating them, developing them, releasing them onward across roughly two dozen Jazz Messengers lineups from 1954 to 1990, while the band itself persisted as the durable thing. The seat calls the tune, judges the take and stops the band; it does not play.",
+        "attributed_disposition": "running a band as an institution that outlives its players: seating them, developing them, releasing them onward across roughly two dozen Jazz Messengers lineups from 1954 to 1990, while the band itself persisted as the durable thing. Re-read at the naming of Blakey (2026-08-23) for the change-author chair's CREATE mandate: the drum chair DRIVES the band and BUILDS the players — hard-swinging daily work, graduating members forward — which is the chair's build-and-open-PR practice. The prior 'calls the tune, judges the take... does not play' reading belonged to the retired pre-ritual config (PLAN+JUDGE) and was found behaviorally mismatched by the ritual's scribe (naming record e0b13933…).",
         "evidence_grade": "attestation",
-        "note": "The two reference-work DOIs were dereferenced through api.crossref.org on 2026-08-20 and returned matching author, year and title. The recording details are carried from the standard Blue Note discography and were NOT independently dereferenced, so this edge is graded attestation rather than archive."
+        "note": "The two reference-work DOIs were dereferenced through api.crossref.org on 2026-08-20 and returned matching author, year and title. The recording details are carried from the standard Blue Note discography and were NOT independently dereferenced, so this edge is graded attestation rather than archive. RE-HOMED 2026-08-23: from_node agent:bandleader -> agent:blakey at the naming ritual's seal (Documenso #1916732, sha256:b8abd86e…6a53; chain 000005) — one forebear, one holder, per the uniqueness invariant; the pre-ritual config retired."
       }
     }
   ]

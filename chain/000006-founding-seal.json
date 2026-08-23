@@ -1,0 +1,14 @@
+{
+  "kind": "founding-seal",
+  "seq": 6,
+  "chain": "coltrane.committed-work",
+  "prev": "sha256:fc32322d0d817d940ff9df85f1ebd474c1ddbc6d1aa6c63a73808459e9f2663c",
+  "executed": "2026-08-23",
+  "step": "founding-pass — the founding SEALED; the commission EXTINGUISHED",
+  "record": "The Founding Certificate of Coltrane executed (same instrument as the naming seal, one envelope one session per WO-001 R5). The invariant SATISFIED: a bandleader bearing a name it did not grant itself, resolvable dated forebear, sealed by the institution's own human governor, seated in a constituted chair, upon a chain this institution owns and amended once through its own RED-first gate (PR #502; the wall struck FOR REAL in gig 8f7d1002 — its own seats refused forbidden writes and the publisher declined to ship red). Proof of life: seven sealed reconciled gigs this day. The founder's testimony entered as exhibit under the founder's own hand. The standing work registered: the case-law distillation (docs/founding/standing-works.md). THE ACT-II COMMISSION OF WO-001 IS EXTINGUISHED — the founder holds nothing within this institution; the tenure persists. Genesis finalization (genesis.draft → sealed genesis) follows the founder's chain pattern as the first act of ordinary life.",
+  "instrument": {
+    "documenso_envelope": 1916732,
+    "sha256": "b8abd86e00c021321a2b4f5f4dd8c9346125a44cd8a521aaa8460be498ae6a53"
+  },
+  "guarantor_recital": "carried on the executed instrument, above the signature, per docs/the-guarantor.md (the founder's chain)"
+}

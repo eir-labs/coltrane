@@ -141,7 +141,17 @@
       "kind": "steve",
       "is_institution": false,
       "skill_slugs": [],
-      "status": "active",
+      "status": "retired",
+      "named_from_forebear": null,
+      "auth_user_id": null
+    },
+    {
+      "slug": "blakey",
+      "name": "Blakey",
+      "kind": "steve",
+      "is_institution": false,
+      "skill_slugs": [],
+      "status": "named",
       "named_from_forebear": "blakey-art",
       "auth_user_id": null
     }
@@ -213,10 +223,10 @@
     {
       "id": "coltrane.seat.change-author",
       "chair_id": "coltrane.chair.change-author",
-      "agent_slug": "coltrane-proposer",
+      "agent_slug": "blakey",
       "org_slug": "eir-labs",
       "contract_caps": [],
-      "witnessed_by": null
+      "witnessed_by": "chain 000005; Documenso #1916732 (executed 2026-08-23T11:48:05Z, sha256:b8abd86e00c021321a2b4f5f4dd8c9346125a44cd8a521aaa8460be498ae6a53)"
     }
   ],
   "forebears": [

@@ -1,0 +1,10 @@
+{
+  "kind": "lineage",
+  "seq": 4,
+  "chain": "coltrane.committed-work",
+  "prev": "sha256:8a317cc49dd979d9f87b46ecdc48b546abb1e1fe72a391139ef123bff29b4a1e",
+  "executed": "2026-08-23",
+  "step": "founding-pass — the lineage grounded and approved",
+  "record": "The institution's lineage grounded by lineage-pass-v1 (gig 8813be13; first compose REFUSED at the founder's desk for the missing jazz leg, deepened by fifteen sourced hits (gig 0e39c59a), rewoven with the founder's testimony as internal input (gig 9db7fa6f)) and APPROVED by the seated governor's recorded act (Slack CHANNEL ts 1787482705, verified). Both legs on the record: the laws' scholars (Crawford & Ostrom, Makinson & van der Torre, XACML 3.0, GASB 54) and the practice's musicians (John Coltrane — A Love Supreme primary; Miles Davis; Art Blakey and the Jazz Messengers; Bill Evans).",
+  "approved_record_content_sha": "f92a4adf29b740cf…"
+}

@@ -1,0 +1,26 @@
+{
+  "kind": "genesis",
+  "status": "DRAFT — unsealed until every seal field below carries a real content address at execution",
+  "chain": "coltrane.committed-work",
+  "founder": "The Chancery (eir-labs/chancery) — vendor of foundings; founder of record for Coltrane under a per-founding commission",
+  "commission": "PENDING — the per-founding commission citation, issued from the Chancery's standing commission to the incumbent Chancellor at execution",
+  "cites": {
+    "founding_procedure": "founding-pass-v0 (nomos/docs/founding-pass-v0.md)",
+    "runbook": "RUNBOOK.md (this workspace)",
+    "prior_chain_cross_reference": {
+      "prev": "PENDING — the prior chain head at the seat move",
+      "head_content_sha": "PENDING — head of the prior committed-work chain at the seat move",
+      "grounded_both_ways": "PENDING — the reciprocal entry recording this founding as committed work on the prior chain"
+    },
+    "genesis_seals": {
+      "content_sha": "PENDING — sha256 of the SIGNED genesis page, not this draft",
+      "merge_sha": "PENDING — the human governor's merge of the founding change",
+      "instrument": "PENDING — the executed signature instrument (seals/*.pdf)",
+      "sha256": "PENDING — sha256 of the executed instrument",
+      "documenso_envelope": "PENDING — the Documenso envelope id",
+      "executed": "PENDING — the execution date",
+      "signer": "PENDING — the seated human governor, as signer of record",
+      "genesis_row": "PENDING — this row's own content address once sealed"
+    }
+  }
+}

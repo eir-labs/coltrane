@@ -1,0 +1,30 @@
+{
+  "kind": "stamp-down",
+  "seq": 2,
+  "chain": "coltrane.committed-work",
+  "prev": "PENDING — the 000001 commission content address",
+  "executed": "PENDING — the stamp-down date",
+  "step": "founding-pass-v0 Step 1 (with Step 3 chairs+caps and Step 3b binding recorded below)",
+  "source": {
+    "seed": "eir-labs/nomos",
+    "at": "TO BE PINNED AT EXECUTION — the confirmed nomos merge sha the genome was copied from",
+    "copied": [
+      "agents/ (21)",
+      "standards/ (11)",
+      "core_types/ (6)",
+      "domain_types/ (36)",
+      "skills/ (5)",
+      "venues/ (2)"
+    ]
+  },
+  "institution_file": {
+    "path": "institutions/coltrane.json",
+    "laws": "the laws byte-identical from nomos (content hashes preserved)",
+    "chairs": "coltrane.chair.change-author (caps: the two software-change standards) + coltrane.chair.human-governor — SHIPS UNASSIGNED; seating the governor is Step 4"
+  },
+  "step_3b_panel_access": {
+    "bound": "documentary — the payout path binds to the M2 pool and selection law by reference",
+    "honest_status": "no payout path exists yet; the binding becomes mechanical when the trigger fires. Stated here so the founding seal can say so rather than pretend."
+  },
+  "gate": ".github/workflows/genome.yml — the genome must load on every PR; a change lands only on green CI by the human governor's merge"
+}

@@ -23,6 +23,7 @@
  *   - `--json` prints the tool's `data` verbatim; without it, a short human summary.
  */
 import { dispatchTool, bootstrapServerDeps, type ServerDeps, type ToolResult } from "./server.js";
+import { detectGenomeOrphans } from "./genome_writer.js";
 import { COLTRANE_VERSION } from "./version.js";
 import { workOnce } from "./worker.js";
 import { openLocalQueue, selectQueueBacking, LOCAL_QUEUE_DIR_VAR } from "./local_queue.js";
@@ -43,7 +44,9 @@ export interface CliIO {
 
 export const USAGE = `coltrane ${COLTRANE_VERSION}
 
-  coltrane validate                     load the genome; exit non-zero on load errors
+  coltrane validate                     load the genome; exit non-zero on load errors OR on an
+                                        orphan — a standards/|domain_types/|agents/ file with no
+                                        genome_mutation seal in the tracked genome ledger
   coltrane dispatch <standard>          run a standard
   coltrane monitor <gig-id>             report a gig's progress
   coltrane logs <gig-id>                per-chair logs for a gig
@@ -352,25 +355,50 @@ export async function runCli(argv: readonly string[], io: CliIO): Promise<number
       const r = await call("genome_reload", {});
       const data = r.data as { load_errors?: unknown[]; changes?: Record<string, unknown[]> } | undefined;
       const errs = data?.load_errors ?? [];
-      if (emitJson(io, json, r.data)) return errs.length === 0 ? 0 : 1;
-      if (errs.length === 0) {
-        // `changes` is {added|modified|removed} -> {class -> slug[]}, so a count means summing
-        // the leaf arrays. Reporting a bare `undefined` here would be its own small dishonesty.
-        const c = data?.changes as Record<string, Record<string, unknown[]>> | undefined;
-        const counts = c
-          ? Object.entries(c)
-              .map(([k, byClass]) => [k, Object.values(byClass ?? {}).reduce((n, a2) => n + (a2?.length ?? 0), 0)] as const)
-              .filter(([, n]) => n > 0)
-              .map(([k, n]) => `${n} ${k}`)
-              .join(", ")
-          : "";
-        io.out(`genome ok${counts ? ` — ${counts}` : ", no changes"}\n`);
-        return 0;
+
+      // WO-F06 — the orphan invariant, folded into the CI gate so it ships wherever a genome repo
+      // already runs `coltrane validate`, with no per-repo .github/ wiring. Every genome file under
+      // standards/ | domain_types/ | agents/ must carry a genome_mutation seal in the git-tracked
+      // genome ledger; a file with none is an orphan — "no identity, outside the substrate"
+      // (src/genome_writer.ts:1-6). deps.ledger reads the genome ledger (defaultGenomeLedgerPath),
+      // so the seals CI sees are exactly the ones the repo shipped.
+      //
+      // Enforced ONLY when the genome ledger actually holds seals. A genome that ships no ledger at
+      // all predates sealing and has nothing to enforce against — failing it would break every bare,
+      // unsealed fixture and every pre-WO-F06 genome, which is not this gate's job. deps.genome_dir
+      // is absent in hosted/bare-deps mode, where there are no genome files on disk to scan.
+      let orphans: string[] = [];
+      if (deps.genome_dir) {
+        const seals = deps.ledger.query({ kind: "genome_mutation" });
+        if (seals.length > 0) orphans = detectGenomeOrphans(deps.genome_dir, deps.ledger);
       }
-      // Non-zero exit is the whole feature: this is what a CI job branches on.
-      line(io, `genome has ${errs.length} load error(s):`);
-      for (const e of errs) line(io, `  ${typeof e === "string" ? e : JSON.stringify(e)}`);
-      return 1;
+
+      if (emitJson(io, json, r.data)) return errs.length === 0 && orphans.length === 0 ? 0 : 1;
+
+      // Non-zero exit is the whole feature: this is what a CI job branches on. Load errors first —
+      // a genome that will not load is a harder failure than one that loads with an unsealed file.
+      if (errs.length > 0) {
+        line(io, `genome has ${errs.length} load error(s):`);
+        for (const e of errs) line(io, `  ${typeof e === "string" ? e : JSON.stringify(e)}`);
+        return 1;
+      }
+      if (orphans.length > 0) {
+        line(io, `genome has ${orphans.length} orphan(s) — a genome file with no ledger seal has no identity:`);
+        for (const o of orphans) line(io, `  ${o}`);
+        return 1;
+      }
+      // `changes` is {added|modified|removed} -> {class -> slug[]}, so a count means summing
+      // the leaf arrays. Reporting a bare `undefined` here would be its own small dishonesty.
+      const c = data?.changes as Record<string, Record<string, unknown[]>> | undefined;
+      const counts = c
+        ? Object.entries(c)
+            .map(([k, byClass]) => [k, Object.values(byClass ?? {}).reduce((n, a2) => n + (a2?.length ?? 0), 0)] as const)
+            .filter(([, n]) => n > 0)
+            .map(([k, n]) => `${n} ${k}`)
+            .join(", ")
+        : "";
+      io.out(`genome ok${counts ? ` — ${counts}` : ", no changes"}\n`);
+      return 0;
     }
 
     case "dispatch": {

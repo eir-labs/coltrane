@@ -36,7 +36,7 @@ import {
 } from "./outputs.js";
 import { createOutputMirror, defaultMirrorDir, outputPreview, mirrorStorageRef, type OutputMirror, type OutputMeta } from "./output_mirror.js";
 import {
-  FileLedger, LedgerError, LEDGER_SCHEMA_VERSION, defaultLedgerPath,
+  FileLedger, SplitLedger, LedgerError, LEDGER_SCHEMA_VERSION, defaultLedgerPath, defaultGenomeLedgerPath,
   type Ledger, type GovernanceLedgerEntry,
 } from "./ledger.js";
 import { sealDrill } from "./seal_drill.js";
@@ -3807,6 +3807,16 @@ function readMcpServerConfigs(root: string): Record<string, unknown> {
 
 export function bootstrapServerDeps(genomeRoot?: string): ServerDeps {
   const root = genomeRoot ?? process.env["COLTRANE_GENOME"] ?? process.cwd();
+  // The genome ledger's root follows the SAME isolation the gig ledger's does: an explicit
+  // genomeRoot or COLTRANE_GENOME wins, but when neither is set and COLTRANE_LEDGER_PATH relocates
+  // the gig ledger, the genome ledger resolves beside that override (dirname) instead of leaking to
+  // process.cwd()'s real checkout. Kept separate from `root` on purpose — `root` must stay the real
+  // genome for resolveGenome/registry/mirror, which cannot resolve against a bare ledger spine.
+  const gigLedgerOverride = process.env["COLTRANE_LEDGER_PATH"];
+  const genomeLedgerRoot =
+    genomeRoot ??
+    process.env["COLTRANE_GENOME"] ??
+    (gigLedgerOverride && gigLedgerOverride.length > 0 ? dirname(gigLedgerOverride) : process.cwd());
   const genome = resolveGenome(root); // manifest-aware: honors a consumer's `extends` base
   const registry = loadRegistry(genome);
   const mcpServerConfigs = readMcpServerConfigs(root);
@@ -3848,7 +3858,27 @@ export function bootstrapServerDeps(genomeRoot?: string): ServerDeps {
     // tests/e2e/recorder_durability_mid_crash.spec.ts deliberately pins.
     // FileLedger creates nothing until the first append (#210), so merely bootstrapping deps
     // — as tests/dispatch_tool_resolution.test.ts does with no root — leaves no trace.
-    ledger: new FileLedger(defaultLedgerPath(root)),
+    //
+    // WO-F06 — split by kind so genome PROVENANCE ships with the repo while runtime state stays
+    // machine-local. genome_mutation seals route to the git-tracked genome/ledger.jsonl (a sibling
+    // of the genome files at `root` — the same base as genome_dir below, so the seals and the files
+    // they identify travel together); gig/governance rows stay under the gitignored .coltrane/. Both
+    // backing FileLedgers are still lazy, so a bare bootstrap seeds neither store. This is the single
+    // production construction seam, so wiring the split here is what makes the seals ACTUALLY land in
+    // the tracked location — the reads union both, so no existing consumer sees a difference.
+    ledger: new SplitLedger(
+      // WO-F06 fix — the genome ledger MUST isolate to the same root the gig ledger does. When
+      // COLTRANE_LEDGER_PATH relocates the gig ledger (the per-file test spine, or a mounted
+      // volume) with no explicit genomeRoot and no COLTRANE_GENOME, the genome ledger has to sit
+      // beside that override — dirname(COLTRANE_LEDGER_PATH) — not fall back to process.cwd(), which
+      // would leak a genome_mutation seal into the real checkout's genome/ledger.jsonl. An explicit
+      // genomeRoot and COLTRANE_GENOME still win (production sets one), and COLTRANE_GENOME_LEDGER_PATH
+      // — read only inside defaultGenomeLedgerPath — still overrides all; the two env overrides stay
+      // independent (defaultGenomeLedgerPath never reads COLTRANE_LEDGER_PATH). The shared `root`
+      // above is untouched, so resolveGenome/registry/mirror keep resolving against the real genome.
+      new FileLedger(defaultGenomeLedgerPath(genomeLedgerRoot)),
+      new FileLedger(defaultLedgerPath(root)),
+    ),
     standards: genome.standards, // ← gig_dispatch can now resolve file-defined standards
     charts: genome.charts,   // ← gig_dispatch resolves a chart_slug; chart_browse lists them
     venues: genome.venues,   // ← the ceiling a chart's venue imposes has to resolve to something

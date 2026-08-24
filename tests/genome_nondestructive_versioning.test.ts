@@ -1,7 +1,7 @@
 // Non-destructive versioning: a re-compose / re-define over an existing slug
 // must NOT silently destroy the prior bytes. The ledger keeps the identity hash;
-// this keeps the actual prior content, snapshotted under .coltrane/history/ so a
-// definition is recoverable, not just provably-changed.
+// this keeps the actual prior content, snapshotted under genome/history/ (the
+// git-TRACKED path, WO-F06) so a definition is recoverable, not just provably-changed.
 import { describe, it, expect } from "vitest";
 import { TEST_BEHAVIOR } from "./_support/agents.js";
 import { dispatchTool, type ServerDeps } from "../src/server.js";
@@ -41,8 +41,8 @@ describe("non-destructive genome writes", () => {
 
     expect(v2).not.toBe(v1); // current file updated to v2
 
-    // prior bytes preserved under .coltrane/history/standards/<slug>/
-    const histDir = join(dir, ".coltrane", "history", "standards", slug);
+    // prior bytes preserved under genome/history/standards/<slug>/ (WO-F06 tracked path)
+    const histDir = join(dir, "genome", "history", "standards", slug);
     expect(existsSync(histDir)).toBe(true);
     const snaps = readdirSync(histDir);
     expect(snaps.length).toBeGreaterThanOrEqual(1);
@@ -56,7 +56,7 @@ describe("non-destructive genome writes", () => {
     const args = { slug, domain: "demo", agents: [sensor2], phases: [{ name: "sense", chairs: [{ role: "sense", agent_slug: "sensor2", depends_on: [], input_contract: [], output_contract: ["note"], required_skills: [] }] }] };
     await dispatchTool("standard_compose", args, deps);
     await dispatchTool("standard_compose", args, deps);
-    const histDir = join(dir, ".coltrane", "history", "standards", slug);
+    const histDir = join(dir, "genome", "history", "standards", slug);
     expect(existsSync(histDir)).toBe(false); // identical bytes → nothing to preserve
   });
 });

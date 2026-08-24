@@ -240,6 +240,27 @@ export function defaultLedgerPath(root?: string): string {
   return join(root ?? process.cwd(), ".coltrane", "ledger.jsonl");
 }
 
+/**
+ * Resolve the GENOME ledger file — where `kind:"genome_mutation"` seals live. `COLTRANE_GENOME_LEDGER_PATH`
+ * wins; otherwise `<root>/genome/ledger.jsonl`.
+ *
+ * Deliberately OUTSIDE `.coltrane/` (WO-F06). `.gitignore` excludes all of `.coltrane/`, so a genome
+ * repo that kept its seals there shipped every `standards/`, `domain_types/`, `agents/` file WITHOUT
+ * the seal that gives it identity — on a fresh clone every genome object was an orphan by the engine's
+ * own invariant (`src/genome_writer.ts:1-6`). `genome/ledger.jsonl` is a git-TRACKED sibling of the
+ * genome files, so provenance travels WITH the repo and no `.gitignore` edit is required.
+ *
+ * A SEPARATE override from `COLTRANE_LEDGER_PATH` (which governs the gig ledger, and only it): the two
+ * ledgers are now distinct stores with distinct lifecycles — one ships, one is machine-local — so a
+ * caller relocating one must not drag the other with it. `defaultLedgerPath` is unchanged and its
+ * override is untouched.
+ */
+export function defaultGenomeLedgerPath(root?: string): string {
+  const override = process.env["COLTRANE_GENOME_LEDGER_PATH"];
+  if (override && override.length > 0) return override;
+  return join(root ?? process.cwd(), "genome", "ledger.jsonl");
+}
+
 function isNonEmptyString(v: unknown): v is string {
   return typeof v === "string" && v.length > 0;
 }
@@ -538,5 +559,81 @@ export class MemoryLedger implements Ledger {
    *  `path` is empty because there is no file — not because we failed to find one. */
   integrity(): LedgerIntegrityReport {
     return { ok: true, path: "", entries: this.entries.length, corrupt: [] };
+  }
+}
+
+/**
+ * Two backing ledgers behind ONE `Ledger` handle, routed by `entry.kind` (WO-F06).
+ *
+ *   kind:"genome_mutation" → genomeLedger  (git-TRACKED `genome/ledger.jsonl`; ships with the repo)
+ *   kind:"gig" | "governance" → gigLedger  (gitignored `.coltrane/ledger.jsonl`; machine-local)
+ *
+ * WHY a wrapper rather than threading two ledgers to every append site, or a `kind` parameter on
+ * `Ledger.append`: `append` is reached from ~a dozen seal and seal-adjacent sites across
+ * `src/genome_writer.ts` and `src/server.ts`, several of them un-audited. A per-call-site split has
+ * unbounded blast radius, and a `kind` parameter would break the interface contract for every caller.
+ * This confines the routing decision to the ONE fact that already discriminates the entry — its own
+ * `kind` — and leaves the interface, every append() caller, and every reader untouched.
+ *
+ * `governance` rides with `gig` deliberately: WO-F06 tracks only `genome_mutation`, and keeping
+ * governance on the runtime side preserves the invariant "only genome_mutation travels with the
+ * genome" and keeps governance rows out of the orphan-detector's seal source. Reversible if
+ * governance provenance is later required to ship.
+ *
+ * Reads UNION both sources so `genome_reload` and every existing consumer still see one ledger. A
+ * kind-filtered read short-circuits to the single side that can hold that kind, so a gig query never
+ * parses the genome file (and vice versa) — the union is paid for only by an unfiltered read.
+ */
+export class SplitLedger implements Ledger {
+  private readonly genomeLedger: Ledger;
+  private readonly gigLedger: Ledger;
+
+  constructor(genomeLedger: Ledger, gigLedger: Ledger) {
+    this.genomeLedger = genomeLedger;
+    this.gigLedger = gigLedger;
+    // Bound like its siblings: `deps.ledger` is a service handle that gets passed around and
+    // destructured, never used as a prototype (see the FileLedger constructor note).
+    this.append = this.append.bind(this);
+    this.query = this.query.bind(this) as typeof this.query;
+    this.count = this.count.bind(this);
+    this.integrity = this.integrity.bind(this);
+  }
+
+  append(entry: LedgerEntry): void {
+    // Validation still happens in each backing ledger's append(); routing is the only decision here.
+    if (entry.kind === "genome_mutation") this.genomeLedger.append(entry);
+    else this.gigLedger.append(entry);
+  }
+
+  query(filter: GigOnlyQuery): GigLedgerEntry[];
+  query(filter: LedgerQuery & { kind: "genome_mutation" }): GenomeMutationLedgerEntry[];
+  query(filter: LedgerQuery & { kind: "governance" }): GovernanceLedgerEntry[];
+  query(filter?: LedgerQuery): LedgerEntry[];
+  query(filter: LedgerQuery = {}): LedgerEntry[] {
+    if (filter.kind === "genome_mutation") return this.genomeLedger.query(filter);
+    if (filter.kind === "gig" || filter.kind === "governance") return this.gigLedger.query(filter);
+    return [...this.genomeLedger.query(filter), ...this.gigLedger.query(filter)];
+  }
+
+  count(filter: LedgerQuery = {}): number {
+    return this.query(filter).length;
+  }
+
+  /** Whole only if BOTH backing files are whole; the report unions their entry counts and any torn
+   *  lines, so an operator asking one handle "is my audit trail intact" learns the truth about the
+   *  split store, not half of it. `path`, by its `LedgerIntegrityReport.path: string` contract
+   *  (see interface above), is a SINGLE ledger path and reports the gig ledger's — the report lands
+   *  verbatim in an MCP system_health response an operator reads, and a joined string is not a path.
+   *  The genome ledger's path is deliberately NOT concatenated in; a caller needing it reads the
+   *  genome-side handle directly rather than parsing it back out of this field. */
+  integrity(): LedgerIntegrityReport {
+    const g = this.genomeLedger.integrity();
+    const r = this.gigLedger.integrity();
+    return {
+      ok: g.ok && r.ok,
+      path: r.path,
+      entries: g.entries + r.entries,
+      corrupt: [...g.corrupt, ...r.corrupt],
+    };
   }
 }

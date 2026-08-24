@@ -4,7 +4,7 @@
 // genome_dir is given) write the content-addressed file AND append a ledger entry keyed
 // standard_slug="agent_define", genome_hash=effective_hash. A hand-edited file with no
 // such ledger entry is an orphan — no identity, outside the substrate.
-import { writeFileSync, mkdirSync, existsSync, readFileSync } from "node:fs";
+import { writeFileSync, mkdirSync, existsSync, readFileSync, readdirSync } from "node:fs";
 import { writeFileAtomic } from "./fs_atomic.js";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -19,9 +19,11 @@ import { LEDGER_SCHEMA_VERSION, type Ledger } from "./ledger.js";
  * an existing slug is recoverable, not just provably-changed.
  *
  * When <subdir>/<slug>.json already exists with DIFFERENT bytes, the old bytes are
- * snapshotted to .coltrane/history/<subdir>/<slug>/<oldContentHash>.json (gitignored,
- * local) before the overwrite. Identical bytes → no snapshot (idempotent no-op).
- * Returns the prior content hash when an overwrite displaced real content.
+ * snapshotted to genome/history/<subdir>/<slug>/<oldContentHash>.json before the overwrite
+ * (WO-F06: a git-TRACKED sibling of genome/ledger.jsonl, so a fresh clone carries prior
+ * versions instead of losing them to the gitignored .coltrane/). Identical bytes → no
+ * snapshot (idempotent no-op). Returns the prior content hash when an overwrite displaced
+ * real content.
  */
 export function writeGenomeFileVersioned(
   genome_dir: string,
@@ -37,7 +39,7 @@ export function writeGenomeFileVersioned(
     const oldBytes = readFileSync(path, "utf-8");
     if (oldBytes !== jsonText) {
       const prior = sha256Hex(oldBytes);
-      const histDir = join(genome_dir, ".coltrane", "history", subdir, slug);
+      const histDir = join(genome_dir, "genome", "history", subdir, slug);
       mkdirSync(histDir, { recursive: true });
       // History first, and atomically: this is the only copy of the bytes about to be replaced.
       writeFileAtomic(join(histDir, `${prior}.json`), oldBytes);
@@ -226,4 +228,46 @@ export function sealSkillPackage(
     }
   }
   return { content_hash, dependency_hash, effective_hash };
+}
+
+/** The genome subdirectories whose files each carry a substrate identity — a flat `<slug>.json`
+ *  whose slug must match a `genome_mutation` seal. `skills/` is deliberately excluded: a skill is a
+ *  PACKAGE directory (`skills/<slug>/meta.json …`, see sealSkillPackage), not a flat file, so it
+ *  needs a different scan and is reserved for a follow-up (WO-F06 non-goal). */
+export const ORPHAN_SCAN_SUBDIRS = ["standards", "domain_types", "agents"] as const;
+
+/**
+ * The orphan detector (WO-F06). Correlate every genome file under `standards/`, `domain_types/`,
+ * `agents/` with the `kind:"genome_mutation"` seals in the (git-tracked) genome ledger, and return
+ * the files that have NONE — the orphans this module's header calls "outside the substrate": a
+ * hand-edited file with no ledger entry has no identity.
+ *
+ * A file's slug is its basename without `.json`. It is considered sealed when some seal's
+ * `subject_slug` equals that slug, OR equals that slug carrying a version tag (`<slug>@v2` — the
+ * identity `type_extend`/`agent_evolve` record while still materialising `<slug>.json`, so the
+ * versioned seal must not read as leaving the base file an orphan). Returns genome-relative paths
+ * (`standards/orphan.json`) so a caller can name the offending file to CI.
+ *
+ * PURE over its two inputs: it makes no decision about WHETHER orphans should fail a run — that
+ * policy (only enforced once the genome ledger actually holds seals) lives at the `coltrane validate`
+ * call site, so this stays a reusable "which files lack a seal" query.
+ */
+export function detectGenomeOrphans(genome_dir: string, ledger: Ledger): string[] {
+  const sealed = new Set<string>();
+  for (const e of ledger.query({ kind: "genome_mutation" })) {
+    const slug = (e as { subject_slug?: string }).subject_slug;
+    // Fold `<slug>@v<n>` back to `<slug>`: the versioned identity seals the same flat file.
+    if (typeof slug === "string") sealed.add(slug.split("@")[0]!);
+  }
+  const orphans: string[] = [];
+  for (const subdir of ORPHAN_SCAN_SUBDIRS) {
+    const dir = join(genome_dir, subdir);
+    if (!existsSync(dir)) continue;
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (!entry.isFile() || !entry.name.endsWith(".json")) continue;
+      const slug = entry.name.slice(0, -".json".length);
+      if (!sealed.has(slug)) orphans.push(`${subdir}/${entry.name}`);
+    }
+  }
+  return orphans;
 }

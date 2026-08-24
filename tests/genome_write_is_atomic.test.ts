@@ -46,7 +46,9 @@ describe("genome writes are atomic", () => {
       expect(r.overwritten).toBe(true);
       expect(r.prior_content_hash).toBeTruthy();
       expect(readFileSync(join(dir, "domain_types", "note.json"), "utf-8")).toBe('{"v":2}\n');
-      const histDir = join(dir, ".coltrane", "history", "domain_types", "note");
+      // WO-F06 — history snapshots now ship with the genome under the tracked genome/history/
+      // path, not the gitignored .coltrane/history/, so a fresh clone carries prior versions.
+      const histDir = join(dir, "genome", "history", "domain_types", "note");
       expect(readdirSync(histDir)).toEqual([`${r.prior_content_hash}.json`]);
       expect(readFileSync(join(histDir, `${r.prior_content_hash}.json`), "utf-8")).toBe('{"v":1}\n');
     } finally { rmSync(dir, { recursive: true, force: true }); }

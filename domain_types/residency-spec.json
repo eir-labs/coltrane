@@ -1,0 +1,112 @@
+{
+  "slug": "residency-spec",
+  "version": 1,
+  "extends": "Plan",
+  "domain": "residency",
+  "status": "active",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "resident_identity": {
+        "type": "object",
+        "description": "The named agent holding the seat, speaking under its own identity per the identity law — never a person's.",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "voice": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "seat_contract_source": {
+        "type": "string",
+        "description": "Locator of the handmade contract this spec transcribes (e.g. DESK_BOOT.md at a pinned revision)."
+      },
+      "canonical_repo": {
+        "type": "string",
+        "description": "The single canonical repository identity for the product the resident stewards."
+      },
+      "repo_aliases": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Other names in circulation for the same product, recorded so they cannot silently fork the identity."
+      },
+      "host": {
+        "type": "object",
+        "description": "The box the resident cohabits — the residency is a tenancy, not ownership.",
+        "properties": {
+          "platform_app": {
+            "type": "string"
+          },
+          "machine": {
+            "type": "string"
+          },
+          "shared_paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "cohabitation_boundary": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "What the tenant may and may not touch of its host, stated as observable constraints (paths, processes, credentials)."
+      },
+      "laws": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "DESK_BOOT.md laws transcribed as governed constraints, each with a locator."
+      },
+      "hands": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "credential_class": {
+              "type": "string"
+            },
+            "grant": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "credential_class",
+            "grant"
+          ]
+        },
+        "description": "Credential grants by class name only, never values; seeded on-estate only per the chancery constraint."
+      },
+      "rails": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Phase gates the resident must pass — park-before-dispatch, deterministic-supervisor execution, toolbar review loop."
+      },
+      "approval_seat": {
+        "type": "string",
+        "description": "Where the spec parks for the sovereign's approval before any build order exists."
+      }
+    }
+  },
+  "required_fields": [
+    "resident_identity",
+    "seat_contract_source",
+    "canonical_repo",
+    "cohabitation_boundary",
+    "hands",
+    "approval_seat"
+  ]
+}

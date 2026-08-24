@@ -249,6 +249,10 @@ describe("#227 — the genome's declared required fields are dropped, not absent
     // (extends Verdict). All 7 declare their required fields in `required_fields`, so they
     // join `checked` and none appears in the `lossy` census.
     //
+    // 65 → 66: the residency-spec type (extends Plan) — WO-E03's deliverable, now PRODUCED by
+    // residency-spec-v0's specify phase — declares required_fields, so it joins `checked`; it is
+    // not in the `lossy` census (it drops nothing).
+    //
     // 51 → 52: the software-change-pr set added 1 type — pull-request (extends Artifact),
     // the opened PR the pr-publisher seat seals. It declares its required fields in
     // `required_fields`, so it joins `checked` and does not appear in the `lossy` census.
@@ -276,7 +280,7 @@ describe("#227 — the genome's declared required fields are dropped, not absent
     // It declares its required fields (source, institution_slug), so it joins `checked` and does
     // not appear in the `lossy` census.
     expect(checked).toHaveLength(genome.domain_types.size);
-    expect(checked.length).toBe(65);
+    expect(checked.length).toBe(66);
   });
 });
 

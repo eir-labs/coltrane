@@ -251,7 +251,12 @@ export const CALIBRATION_TRAIL = {
  *  generic Zod validation and are consumed by prompts/agents, never read by name in orchestrator src —
  *  which is exactly the dead-contract class this ratchet exists to pin and hold from growing. */
 // 181 → 197 for the same reason: a comment naming a field is not a reader of it.
-export const PINNED_UNREAD_FIELDS = 197;
+// 197 → 205: the residency-spec type became REACHABLE — the residency-spec-v0 specify phase
+// now produces it (WO-E03 fix, 2026-08-23), so its 8 domain-payload fields (canonical_repo,
+// approval_seat, cohabitation_boundary, laws, rails, repo_aliases, host, seat_contract_source)
+// enter the census. They are agent/human-read spec payload, never orchestrator-src reads —
+// exactly the dead-contract class this ratchet pins and holds from growing.
+export const PINNED_UNREAD_FIELDS = 205;
 
 /* ─────────────────────────────────────────────────────────────────────────────────────────────────
  * TWO CORPORA — engine (src/) vs contract (broad).

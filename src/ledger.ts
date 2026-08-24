@@ -619,15 +619,19 @@ export class SplitLedger implements Ledger {
     return this.query(filter).length;
   }
 
-  /** Whole only if BOTH backing files are whole; the report names both paths and unions their
-   *  entry counts and any torn lines, so an operator asking one handle "is my audit trail intact"
-   *  learns the truth about the split store, not half of it. */
+  /** Whole only if BOTH backing files are whole; the report unions their entry counts and any torn
+   *  lines, so an operator asking one handle "is my audit trail intact" learns the truth about the
+   *  split store, not half of it. `path`, by its `LedgerIntegrityReport.path: string` contract
+   *  (see interface above), is a SINGLE ledger path and reports the gig ledger's — the report lands
+   *  verbatim in an MCP system_health response an operator reads, and a joined string is not a path.
+   *  The genome ledger's path is deliberately NOT concatenated in; a caller needing it reads the
+   *  genome-side handle directly rather than parsing it back out of this field. */
   integrity(): LedgerIntegrityReport {
     const g = this.genomeLedger.integrity();
     const r = this.gigLedger.integrity();
     return {
       ok: g.ok && r.ok,
-      path: [g.path, r.path].filter((p) => p.length > 0).join(" + "),
+      path: r.path,
       entries: g.entries + r.entries,
       corrupt: [...g.corrupt, ...r.corrupt],
     };

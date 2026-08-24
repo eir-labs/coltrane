@@ -3807,6 +3807,16 @@ function readMcpServerConfigs(root: string): Record<string, unknown> {
 
 export function bootstrapServerDeps(genomeRoot?: string): ServerDeps {
   const root = genomeRoot ?? process.env["COLTRANE_GENOME"] ?? process.cwd();
+  // The genome ledger's root follows the SAME isolation the gig ledger's does: an explicit
+  // genomeRoot or COLTRANE_GENOME wins, but when neither is set and COLTRANE_LEDGER_PATH relocates
+  // the gig ledger, the genome ledger resolves beside that override (dirname) instead of leaking to
+  // process.cwd()'s real checkout. Kept separate from `root` on purpose — `root` must stay the real
+  // genome for resolveGenome/registry/mirror, which cannot resolve against a bare ledger spine.
+  const gigLedgerOverride = process.env["COLTRANE_LEDGER_PATH"];
+  const genomeLedgerRoot =
+    genomeRoot ??
+    process.env["COLTRANE_GENOME"] ??
+    (gigLedgerOverride && gigLedgerOverride.length > 0 ? dirname(gigLedgerOverride) : process.cwd());
   const genome = resolveGenome(root); // manifest-aware: honors a consumer's `extends` base
   const registry = loadRegistry(genome);
   const mcpServerConfigs = readMcpServerConfigs(root);
@@ -3857,7 +3867,16 @@ export function bootstrapServerDeps(genomeRoot?: string): ServerDeps {
     // production construction seam, so wiring the split here is what makes the seals ACTUALLY land in
     // the tracked location — the reads union both, so no existing consumer sees a difference.
     ledger: new SplitLedger(
-      new FileLedger(defaultGenomeLedgerPath(root)),
+      // WO-F06 fix — the genome ledger MUST isolate to the same root the gig ledger does. When
+      // COLTRANE_LEDGER_PATH relocates the gig ledger (the per-file test spine, or a mounted
+      // volume) with no explicit genomeRoot and no COLTRANE_GENOME, the genome ledger has to sit
+      // beside that override — dirname(COLTRANE_LEDGER_PATH) — not fall back to process.cwd(), which
+      // would leak a genome_mutation seal into the real checkout's genome/ledger.jsonl. An explicit
+      // genomeRoot and COLTRANE_GENOME still win (production sets one), and COLTRANE_GENOME_LEDGER_PATH
+      // — read only inside defaultGenomeLedgerPath — still overrides all; the two env overrides stay
+      // independent (defaultGenomeLedgerPath never reads COLTRANE_LEDGER_PATH). The shared `root`
+      // above is untouched, so resolveGenome/registry/mirror keep resolving against the real genome.
+      new FileLedger(defaultGenomeLedgerPath(genomeLedgerRoot)),
       new FileLedger(defaultLedgerPath(root)),
     ),
     standards: genome.standards, // ← gig_dispatch can now resolve file-defined standards

@@ -24,6 +24,8 @@
  */
 import { dispatchTool, bootstrapServerDeps, type ServerDeps, type ToolResult } from "./server.js";
 import { detectGenomeOrphans } from "./genome_writer.js";
+import { sealGenome, type SealGenomeReport } from "./seal_genome.js";
+import { FileLedger, defaultGenomeLedgerPath } from "./ledger.js";
 import { COLTRANE_VERSION } from "./version.js";
 import { workOnce } from "./worker.js";
 import { openLocalQueue, selectQueueBacking, LOCAL_QUEUE_DIR_VAR } from "./local_queue.js";
@@ -47,6 +49,11 @@ export const USAGE = `coltrane ${COLTRANE_VERSION}
   coltrane validate                     load the genome; exit non-zero on load errors OR on an
                                         orphan — a standards/|domain_types/|agents/ file with no
                                         genome_mutation seal in the tracked genome ledger
+  coltrane seal-genome [<genome_dir>]   bulk-seal a pre-sealing genome: append a genome_mutation
+                                        seal for every standards/|domain_types/|agents/ file not yet
+                                        sealed, via the blessed sealDefinition path. Content is
+                                        byte-unchanged; a second run seals nothing already sealed.
+                                        (default genome_dir: cwd)
   coltrane dispatch <standard>          run a standard
   coltrane monitor <gig-id>             report a gig's progress
   coltrane logs <gig-id>                per-chair logs for a gig
@@ -202,7 +209,7 @@ export async function runCli(argv: readonly string[], io: CliIO): Promise<number
   if (flags["version"]) { io.out(COLTRANE_VERSION + "\n"); return 0; }
   if (cmd === undefined || flags["help"] || cmd === "help") { io.out(USAGE); return cmd === undefined ? 2 : 0; }
 
-  const KNOWN = ["validate", "dispatch", "enqueue", "monitor", "logs", "abort", "trace", "simulate", "health", "serve", "work"];
+  const KNOWN = ["validate", "seal-genome", "dispatch", "enqueue", "monitor", "logs", "abort", "trace", "simulate", "health", "serve", "work"];
   if (!KNOWN.includes(cmd)) {
     line(io, `unknown command "${cmd}"\n`);
     io.err(USAGE);
@@ -334,6 +341,28 @@ export async function runCli(argv: readonly string[], io: CliIO): Promise<number
       (res.outputs_count !== undefined ? ` — ${res.outputs_count} sealed output(s)` : "") +
       (res.error ? ` — ${res.error}` : ""));
     return code;
+  }
+
+  // `seal-genome` is the bulk-migration door (WO-F07 Article I). It needs ONLY the genome ledger
+  // and the genome dir — not bootstrapServerDeps, which would load every definition and couple the
+  // command to server init for no benefit. It reuses sealDefinition (the blessed write path), so it
+  // never reimplements sealing; it only iterates it. Exit 0 when every file is sealed-or-skipped,
+  // exit 1 if any file errored — a partial seal leaves detectGenomeOrphans non-empty, so exit 0
+  // would falsely signal a fully-sealed genome (matching the validate exit-code contract).
+  if (cmd === "seal-genome") {
+    const genome_dir = positional[0] ?? process.cwd();
+    let report: SealGenomeReport;
+    try {
+      report = sealGenome(genome_dir, new FileLedger(defaultGenomeLedgerPath(genome_dir)));
+    } catch (e) {
+      line(io, `seal-genome failed: ${e instanceof Error ? e.message : String(e)}`);
+      return 1;
+    }
+    for (const { path, error } of report.errors) line(io, `error  ${path}: ${error}`);
+    if (emitJson(io, json, report)) return report.errors.length === 0 ? 0 : 1;
+    line(io, `sealed ${report.sealed.length}, skipped ${report.skipped.length}` +
+      (report.errors.length ? `, ${report.errors.length} error(s)` : ""));
+    return report.errors.length === 0 ? 0 : 1;
   }
 
   // Booting loads the genome and constructs the invoker, so it happens only after the command

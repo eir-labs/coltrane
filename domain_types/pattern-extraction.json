@@ -8,55 +8,125 @@
   "schema": {
     "type": "object",
     "properties": {
-      "input_refs":          { "type": "array", "items": { "type": "string" }, "description": "References to the repo-survey outputs this extraction is derived from." },
-      "user_signature":      { "type": "string", "description": "One-line characterization of the user's working pattern (e.g., 'rapid cross-domain research with TDD-flavored code changes')." },
-
+      "input_refs": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "References to the repo-survey outputs this extraction is derived from."
+      },
+      "user_signature": {
+        "type": "string",
+        "description": "One-line characterization of the user's working pattern (e.g., 'rapid cross-domain research with TDD-flavored code changes')."
+      },
       "recurrent_workflows": {
         "type": "array",
         "description": "Observable multi-step sequences the user runs across repos (e.g., 'fetch dataset → run analysis → write results doc → OTS-stamp').",
         "items": {
           "type": "object",
           "properties": {
-            "name":          { "type": "string" },
-            "steps":         { "type": "array", "items": { "type": "string" } },
-            "evidence_repos": { "type": "array", "items": { "type": "string" }, "description": "Which repos exhibit this pattern." },
-            "frequency":     { "type": "string", "enum": ["once", "occasional", "frequent", "dominant"] }
+            "name": {
+              "type": "string"
+            },
+            "steps": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "evidence_repos": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Which repos exhibit this pattern."
+            },
+            "frequency": {
+              "type": "string",
+              "enum": [
+                "once",
+                "occasional",
+                "frequent",
+                "dominant"
+              ]
+            }
           },
-          "required": ["name", "steps", "evidence_repos"]
+          "required": [
+            "name",
+            "steps",
+            "evidence_repos"
+          ]
         }
       },
-
       "agent_like_roles": {
         "type": "array",
         "description": "Implicit roles the user plays (or scripts they've written) that map to coltrane agent shapes.",
         "items": {
           "type": "object",
           "properties": {
-            "role":               { "type": "string" },
-            "implicit_primitives": { "type": "array", "items": { "type": "string" }, "description": "Behavioral primitives this role would map to (analyst, executor, etc.)." },
-            "evidence":           { "type": "string", "description": "What in the surveys suggests this role." }
+            "role": {
+              "type": "string"
+            },
+            "implicit_primitives": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Behavioral primitives this role would map to (analyst, executor, etc.)."
+            },
+            "evidence": {
+              "type": "string",
+              "description": "What in the surveys suggests this role."
+            }
           },
-          "required": ["role", "evidence"]
+          "required": [
+            "role",
+            "evidence"
+          ]
         }
       },
-
       "recurrent_domain_shapes": {
         "type": "array",
         "description": "Data shapes the user repeatedly works with (e.g., 'time-series with channel + bandpass metadata').",
         "items": {
           "type": "object",
           "properties": {
-            "shape_name":   { "type": "string" },
-            "schema_hint":  { "type": "object", "description": "Loose JSON-schema-ish hint, not a binding type definition." },
-            "evidence_repos": { "type": "array", "items": { "type": "string" } }
+            "shape_name": {
+              "type": "string"
+            },
+            "schema_hint": {
+              "type": "object",
+              "description": "Loose JSON-schema-ish hint, not a binding type definition."
+            },
+            "evidence_repos": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
           },
-          "required": ["shape_name", "evidence_repos"]
+          "required": [
+            "shape_name",
+            "evidence_repos"
+          ]
         }
       },
-
-      "confidence_band": { "type": "string", "enum": ["high", "moderate", "low"], "description": "How confident is this read across the survey cohort?" }
+      "confidence_band": {
+        "type": "string",
+        "enum": [
+          "high",
+          "moderate",
+          "low"
+        ],
+        "description": "How confident is this read across the survey cohort?"
+      }
     },
-    "required": ["input_refs", "user_signature", "confidence_band", "claims"]
+    "required": [
+      "input_refs",
+      "user_signature",
+      "confidence_band",
+      "claims"
+    ]
   },
   "required_fields": []
 }

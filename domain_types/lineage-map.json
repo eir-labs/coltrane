@@ -14,24 +14,51 @@
         "items": {
           "type": "object",
           "properties": {
-            "internal_ref": { "type": "string" },
-            "external_ref": { "type": "string" },
+            "internal_ref": {
+              "type": "string"
+            },
+            "external_ref": {
+              "type": "string"
+            },
             "relation": {
               "type": "string",
-              "enum": ["descends-from", "aligns-with", "diverges-from", "supersedes", "informed-by"]
+              "enum": [
+                "descends-from",
+                "aligns-with",
+                "diverges-from",
+                "supersedes",
+                "informed-by"
+              ]
             },
-            "grounding_internal": { "type": "string" },
-            "grounding_external": { "type": "string" },
+            "grounding_internal": {
+              "type": "string"
+            },
+            "grounding_external": {
+              "type": "string"
+            },
             "strength": {
               "type": "string",
-              "enum": ["dereferenceable-both-sides", "structural-correspondence", "conceptual-analogy"],
+              "enum": [
+                "dereferenceable-both-sides",
+                "structural-correspondence",
+                "conceptual-analogy"
+              ],
               "$comment": "The weaver DRAWS the grounding strength; the scribe carries it through unchanged into the lineage-record. Ordinal, closed vocabulary — see domain_types/lineage-record.json for the orthogonality note against CitationSchema.evidence_grade (src/genome_schema.ts:293-309)."
             }
           },
-          "required": ["internal_ref", "external_ref", "relation", "grounding_internal", "grounding_external", "strength"]
+          "required": [
+            "internal_ref",
+            "external_ref",
+            "relation",
+            "grounding_internal",
+            "grounding_external",
+            "strength"
+          ]
         }
       }
     }
   },
-  "required_fields": ["edges"]
+  "required_fields": [
+    "edges"
+  ]
 }

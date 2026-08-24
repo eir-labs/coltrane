@@ -42,7 +42,9 @@
     "mcp__playwright__browser_wait_for"
   ],
   "browser_grant": {
-    "allowed_origins": ["ppubs.uspto.gov"]
+    "allowed_origins": [
+      "ppubs.uspto.gov"
+    ]
   },
   "max_tool_calls": 34,
   "code_tool_access": "none"

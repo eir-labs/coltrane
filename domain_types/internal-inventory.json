@@ -13,14 +13,24 @@
         "items": {
           "type": "object",
           "properties": {
-            "reference": { "type": "string" },
-            "kind": { "type": "string" },
-            "summary": { "type": "string" }
+            "reference": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string"
+            },
+            "summary": {
+              "type": "string"
+            }
           },
-          "required": ["reference"]
+          "required": [
+            "reference"
+          ]
         }
       }
     }
   },
-  "required_fields": ["representations"]
+  "required_fields": [
+    "representations"
+  ]
 }

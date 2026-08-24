@@ -8,14 +8,25 @@
   "schema": {
     "type": "object",
     "properties": {
-      "id": { "type": "string" },
-      "name": { "type": "string" },
+      "id": {
+        "type": "string"
+      },
+      "name": {
+        "type": "string"
+      },
       "use_case": {
         "type": "string",
-        "enum": ["code-changes", "research-briefs", "operations", "mixed", "bare"]
+        "enum": [
+          "code-changes",
+          "research-briefs",
+          "operations",
+          "mixed",
+          "bare"
+        ]
       },
-      "template": { "type": "string" },
-
+      "template": {
+        "type": "string"
+      },
       "scope": {
         "type": "string",
         "description": "What the project will do."
@@ -28,44 +39,76 @@
         "type": "string",
         "description": "What this project is explicitly NOT."
       },
-
       "preseed_agents": {
         "type": "array",
-        "items": { "type": "string" },
+        "items": {
+          "type": "string"
+        },
         "description": "Slugs of agents to ship in the scaffolded .coltrane/agents/."
       },
       "preseed_standards": {
         "type": "array",
-        "items": { "type": "string" },
+        "items": {
+          "type": "string"
+        },
         "description": "Slugs of standards to ship in .coltrane/standards/."
       },
       "preseed_skills": {
         "type": "array",
-        "items": { "type": "string" },
+        "items": {
+          "type": "string"
+        },
         "description": "Slugs of skills to ship in .coltrane/skills/."
       },
       "default_model_tier": {
         "type": "string",
-        "enum": ["economy", "standard", "premium"],
+        "enum": [
+          "economy",
+          "standard",
+          "premium"
+        ],
         "default": "standard"
       },
       "default_code_tool_access": {
         "type": "string",
-        "enum": ["none", "read", "write", "full"],
+        "enum": [
+          "none",
+          "read",
+          "write",
+          "full"
+        ],
         "default": "read"
       },
-
       "outcome": {
-        "type": ["string", "null"],
-        "enum": [null, "completed", "partial", "refined", "aborted", "unverified"],
+        "type": [
+          "string",
+          "null"
+        ],
+        "enum": [
+          null,
+          "completed",
+          "partial",
+          "refined",
+          "aborted",
+          "unverified"
+        ],
         "description": "Set at DELIVER. unverified = outcome cannot be computed."
       },
       "outcome_at": {
-        "type": ["string", "null"],
+        "type": [
+          "string",
+          "null"
+        ],
         "format": "date-time"
       }
     },
-    "required": ["id", "name", "use_case", "scope", "steps"]
+    "required": [
+      "id",
+      "name",
+      "use_case",
+      "scope",
+      "steps"
+    ]
   },
   "required_fields": []
 }

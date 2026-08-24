@@ -8,23 +8,54 @@
   "schema": {
     "type": "object",
     "properties": {
-      "problem_statement": { "type": "string", "description": "The single problem the run commits to solving, stated so that a solution to a different problem would be visibly off-target." },
-      "in_scope":          { "type": "array", "items": { "type": "string" }, "description": "What the second diamond may explore." },
-      "out_of_scope":      { "type": "array", "items": { "type": "string" }, "description": "What it may not, and the neighbouring problems this one must not collapse into." },
-      "success_criteria":  { "type": "array", "items": { "type": "string" }, "description": "Observations that would confirm the problem was solved. Each checkable by someone who did not do the work." },
-      "discarded":         {
+      "problem_statement": {
+        "type": "string",
+        "description": "The single problem the run commits to solving, stated so that a solution to a different problem would be visibly off-target."
+      },
+      "in_scope": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "What the second diamond may explore."
+      },
+      "out_of_scope": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "What it may not, and the neighbouring problems this one must not collapse into."
+      },
+      "success_criteria": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Observations that would confirm the problem was solved. Each checkable by someone who did not do the work."
+      },
+      "discarded": {
         "type": "array",
         "description": "Problems the brief surfaced and this definition set aside, each with its reason.",
         "items": {
           "type": "object",
           "properties": {
-            "problem": { "type": "string" },
-            "reason":  { "type": "string" }
+            "problem": {
+              "type": "string"
+            },
+            "reason": {
+              "type": "string"
+            }
           },
-          "required": ["problem", "reason"]
+          "required": [
+            "problem",
+            "reason"
+          ]
         }
       },
-      "audience":          { "type": "string", "description": "Who the delivered answer is for, carried forward from the seed." }
+      "audience": {
+        "type": "string",
+        "description": "Who the delivered answer is for, carried forward from the seed."
+      }
     }
   },
   "required_fields": [

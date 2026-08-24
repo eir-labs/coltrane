@@ -8,9 +8,18 @@
   "schema": {
     "type": "object",
     "properties": {
-      "branch":     { "type": "string", "description": "The git branch to deploy to the preview target." },
-      "commit_sha": { "type": "string", "description": "The branch HEAD commit, sensed directly — the exact commit the preview will build." },
-      "project_id": { "type": "string", "description": "The Vercel project id the branch belongs to, when known at sense time." }
+      "branch": {
+        "type": "string",
+        "description": "The git branch to deploy to the preview target."
+      },
+      "commit_sha": {
+        "type": "string",
+        "description": "The branch HEAD commit, sensed directly — the exact commit the preview will build."
+      },
+      "project_id": {
+        "type": "string",
+        "description": "The Vercel project id the branch belongs to, when known at sense time."
+      }
     }
   },
   "required_fields": [

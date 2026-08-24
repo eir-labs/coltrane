@@ -7,27 +7,68 @@
   "schema": {
     "type": "object",
     "properties": {
-      "transcript_path": { "type": "string" },
-      "recorder_log_path": { "type": "string" },
-      "transcript_present": { "type": "boolean" },
-      "recorder_log_present": { "type": "boolean" },
-      "recorder_log_empty": { "type": "boolean" },
+      "transcript_path": {
+        "type": "string"
+      },
+      "recorder_log_path": {
+        "type": "string"
+      },
+      "transcript_present": {
+        "type": "boolean"
+      },
+      "recorder_log_present": {
+        "type": "boolean"
+      },
+      "recorder_log_empty": {
+        "type": "boolean"
+      },
       "turns": {
         "type": "array",
         "items": {
           "type": "object",
           "properties": {
-            "turn_idx": { "type": "number" },
-            "parent_session_id": { "type": ["string", "null"] },
-            "child_session_id": { "type": ["string", "null"] },
-            "prompt": { "type": ["string", "null"] },
-            "response": { "type": ["string", "null"] },
-            "timestamp": { "type": ["string", "null"] },
-            "tool_calls": { "type": "array" }
+            "turn_idx": {
+              "type": "number"
+            },
+            "parent_session_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "child_session_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "prompt": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "response": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "timestamp": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "tool_calls": {
+              "type": "array"
+            }
           }
         }
       },
-      "notes": { "type": "string" }
+      "notes": {
+        "type": "string"
+      }
     }
   },
   "required_fields": [

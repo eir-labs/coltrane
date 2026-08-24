@@ -2,7 +2,7 @@
   "slug": "software-change-v1",
   "domain": "software-change",
   "status": "active",
-  "description": "The default software-change standard. Read the material exhaustively, fix the direction, settle the structure, make the change, then say whether what was built is what was decided. The seams are deliberate: the seat that reads does not decide, the seat that decides does not build, and the seat that builds does not judge its own work. Only the reading seat holds a tool grant, and it is read-only \u2014 the change is emitted as reviewable content, never applied.",
+  "description": "The default software-change standard. Read the material exhaustively, fix the direction, settle the structure, make the change, then say whether what was built is what was decided. The seams are deliberate: the seat that reads does not decide, the seat that decides does not build, and the seat that builds does not judge its own work. Only the reading seat holds a tool grant, and it is read-only — the change is emitted as reviewable content, never applied.",
   "agent_slugs": [
     "john",
     "bill",
@@ -25,7 +25,7 @@
           "required_skills": []
         }
       ],
-      "intent": "Read the material the change lands in, to the declared boundary and no further: entry points, the files the change plausibly touches, the checks that already cover the region, the conventions it must hold to \u2014 and the unknowns, which are part of the reading, not a failure of it. No decision is taken here."
+      "intent": "Read the material the change lands in, to the declared boundary and no further: entry points, the files the change plausibly touches, the checks that already cover the region, the conventions it must hold to — and the unknowns, which are part of the reading, not a failure of it. No decision is taken here."
     },
     {
       "name": "frame-change",
@@ -45,7 +45,7 @@
           "required_skills": []
         }
       ],
-      "intent": "Fix the direction from the reading: scope, non-goals, stop condition, and the alternatives set aside with their reasons. Stated before any structure exists, so the structure is answerable to it. Settled for the run \u2014 later phases append observations, never revisions."
+      "intent": "Fix the direction from the reading: scope, non-goals, stop condition, and the alternatives set aside with their reasons. Stated before any structure exists, so the structure is answerable to it. Settled for the run — later phases append observations, never revisions."
     },
     {
       "name": "plan-change",
@@ -93,7 +93,7 @@
           ]
         }
       ],
-      "intent": "Make the change the structure implies, as patch content plus the checks it introduces. Where the artefact left the plan, the departure is recorded with its reason \u2014 the same seat that settled the structure is the one accountable for saying where it did not hold."
+      "intent": "Make the change the structure implies, as patch content plus the checks it introduces. Where the artefact left the plan, the departure is recorded with its reason — the same seat that settled the structure is the one accountable for saying where it did not hold."
     },
     {
       "name": "verify-change",
@@ -115,7 +115,7 @@
           "required_skills": []
         }
       ],
-      "intent": "Measure the change against the commitments as fixed, criterion by criterion: which acceptance criteria are unmet, where the scope drifted, and \u2014 separately and always \u2014 which checks could not be executed and were reasoned about instead. When the evidence does not reach the question, the verdict is insufficient evidence, not a pass."
+      "intent": "Measure the change against the commitments as fixed, criterion by criterion: which acceptance criteria are unmet, where the scope drifted, and — separately and always — which checks could not be executed and were reasoned about instead. When the evidence does not reach the question, the verdict is insufficient evidence, not a pass."
     },
     {
       "name": "approve",

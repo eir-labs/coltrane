@@ -18,5 +18,8 @@
       }
     }
   },
-  "required_fields": ["source", "institution_slug"]
+  "required_fields": [
+    "source",
+    "institution_slug"
+  ]
 }

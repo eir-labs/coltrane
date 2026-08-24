@@ -15,8 +15,13 @@
           "role": "associate",
           "agent_slug": "lineage-weaver",
           "depends_on": [],
-          "input_contract": ["lineage-hit", "internal-inventory"],
-          "output_contract": ["lineage-map"],
+          "input_contract": [
+            "lineage-hit",
+            "internal-inventory"
+          ],
+          "output_contract": [
+            "lineage-map"
+          ],
           "required_skills": []
         }
       ],
@@ -28,9 +33,15 @@
         {
           "role": "assess",
           "agent_slug": "lineage-weaver",
-          "depends_on": ["associate"],
-          "input_contract": ["lineage-map"],
-          "output_contract": ["alignment-plan"],
+          "depends_on": [
+            "associate"
+          ],
+          "input_contract": [
+            "lineage-map"
+          ],
+          "output_contract": [
+            "alignment-plan"
+          ],
           "required_skills": []
         }
       ],
@@ -42,15 +53,28 @@
         {
           "role": "compose",
           "agent_slug": "lineage-scribe",
-          "depends_on": ["associate", "assess"],
-          "input_contract": ["lineage-map", "alignment-plan"],
-          "output_contract": ["lineage-record"],
+          "depends_on": [
+            "associate",
+            "assess"
+          ],
+          "input_contract": [
+            "lineage-map",
+            "alignment-plan"
+          ],
+          "output_contract": [
+            "lineage-record"
+          ],
           "required_skills": []
         }
       ],
       "intent": "Compose the re-woven lineage-record: the identified external body, the reused internal inventory, the re-drawn connections, the gap, and the alignment recommendation — carrying each connection's both-side grounding through so the artifact is checkable citation by citation. Create only from upstream; introduce no new source."
     }
   ],
-  "input_types": ["lineage-hit", "internal-inventory"],
-  "output_types": ["lineage-record"]
+  "input_types": [
+    "lineage-hit",
+    "internal-inventory"
+  ],
+  "output_types": [
+    "lineage-record"
+  ]
 }

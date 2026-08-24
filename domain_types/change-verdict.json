@@ -8,12 +8,48 @@
   "schema": {
     "type": "object",
     "properties": {
-      "decision_ref":    { "type": "string", "description": "The change-decision this verdict measures against." },
-      "criteria_unmet":  { "type": "array", "items": { "type": "string" }, "description": "Acceptance criteria the change does not meet, stated plainly." },
-      "inferred_not_run": { "type": "array", "items": { "type": "string" }, "description": "Checks that could NOT be executed under the granted tools and were reasoned about instead. Required — an empty list is a claim that everything ran." },
-      "failures_verbatim": { "type": "array", "items": { "type": "string" }, "description": "Failure output as the tool reported it: messages, counts, names. Not summaries of them." },
-      "scope_drift":     { "type": "array", "items": { "type": "string" }, "description": "Where the change exceeded or fell short of the fixed scope." },
-      "recommendation":  { "type": "string", "enum": ["accept", "amend", "reject", "insufficient-evidence"], "description": "insufficient-evidence is the honest answer when the granted tools could not check what the verdict turns on." }
+      "decision_ref": {
+        "type": "string",
+        "description": "The change-decision this verdict measures against."
+      },
+      "criteria_unmet": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Acceptance criteria the change does not meet, stated plainly."
+      },
+      "inferred_not_run": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Checks that could NOT be executed under the granted tools and were reasoned about instead. Required — an empty list is a claim that everything ran."
+      },
+      "failures_verbatim": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Failure output as the tool reported it: messages, counts, names. Not summaries of them."
+      },
+      "scope_drift": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Where the change exceeded or fell short of the fixed scope."
+      },
+      "recommendation": {
+        "type": "string",
+        "enum": [
+          "accept",
+          "amend",
+          "reject",
+          "insufficient-evidence"
+        ],
+        "description": "insufficient-evidence is the honest answer when the granted tools could not check what the verdict turns on."
+      }
     }
   },
   "required_fields": [

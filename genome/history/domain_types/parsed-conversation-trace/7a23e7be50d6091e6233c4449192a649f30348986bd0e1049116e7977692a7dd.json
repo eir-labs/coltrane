@@ -1,0 +1,38 @@
+{
+  "slug": "parsed-conversation-trace",
+  "version": 1,
+  "extends": "Signal",
+  "domain": "self_judge",
+  "status": "active",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "transcript_path": { "type": "string" },
+      "recorder_log_path": { "type": "string" },
+      "transcript_present": { "type": "boolean" },
+      "recorder_log_present": { "type": "boolean" },
+      "recorder_log_empty": { "type": "boolean" },
+      "turns": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "turn_idx": { "type": "number" },
+            "parent_session_id": { "type": ["string", "null"] },
+            "child_session_id": { "type": ["string", "null"] },
+            "prompt": { "type": ["string", "null"] },
+            "response": { "type": ["string", "null"] },
+            "timestamp": { "type": ["string", "null"] },
+            "tool_calls": { "type": "array" }
+          }
+        }
+      },
+      "notes": { "type": "string" }
+    }
+  },
+  "required_fields": [
+    "transcript_present",
+    "turns",
+    "source"
+  ]
+}

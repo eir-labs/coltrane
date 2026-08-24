@@ -8,14 +8,43 @@
   "schema": {
     "type": "object",
     "properties": {
-      "preview_url":   { "type": "string", "description": "The reachable preview URL from POST /v13/deployments (the deployment's url, https-prefixed)." },
-      "commit_sha":    { "type": "string", "description": "The exact commit deployed, sensed from branch HEAD — not read out of the change-set." },
-      "branch":        { "type": "string", "description": "The git branch deployed to the preview target." },
-      "project_id":    { "type": "string", "description": "The Vercel project id (prj_...) the deployment belongs to." },
-      "deployment_id": { "type": "string", "description": "The Vercel deployment id (dpl_...), read later by a promote chair to call the promote API." },
-      "build_status":  { "type": "string", "description": "The last observed Vercel readyState: QUEUED | INITIALIZING | BUILDING | READY | ERROR | CANCELED." },
-      "protection":    { "type": "string", "enum": ["vercel-sso", "supabase-auth", "public"], "description": "How the preview URL is gated. supabase-auth is the phone-reachable mode required at the approval gate." },
-      "inspector_url": { "type": "string", "description": "The Vercel inspector/dashboard URL for the deployment, when the response carried it." }
+      "preview_url": {
+        "type": "string",
+        "description": "The reachable preview URL from POST /v13/deployments (the deployment's url, https-prefixed)."
+      },
+      "commit_sha": {
+        "type": "string",
+        "description": "The exact commit deployed, sensed from branch HEAD — not read out of the change-set."
+      },
+      "branch": {
+        "type": "string",
+        "description": "The git branch deployed to the preview target."
+      },
+      "project_id": {
+        "type": "string",
+        "description": "The Vercel project id (prj_...) the deployment belongs to."
+      },
+      "deployment_id": {
+        "type": "string",
+        "description": "The Vercel deployment id (dpl_...), read later by a promote chair to call the promote API."
+      },
+      "build_status": {
+        "type": "string",
+        "description": "The last observed Vercel readyState: QUEUED | INITIALIZING | BUILDING | READY | ERROR | CANCELED."
+      },
+      "protection": {
+        "type": "string",
+        "enum": [
+          "vercel-sso",
+          "supabase-auth",
+          "public"
+        ],
+        "description": "How the preview URL is gated. supabase-auth is the phone-reachable mode required at the approval gate."
+      },
+      "inspector_url": {
+        "type": "string",
+        "description": "The Vercel inspector/dashboard URL for the deployment, when the response carried it."
+      }
     }
   },
   "required_fields": [

@@ -13,14 +13,24 @@
         "items": {
           "type": "object",
           "properties": {
-            "source": { "type": "string" },
+            "source": {
+              "type": "string"
+            },
             "status": {
               "type": "string",
-              "enum": ["reached", "not-reached"]
+              "enum": [
+                "reached",
+                "not-reached"
+              ]
             },
-            "note": { "type": "string" }
+            "note": {
+              "type": "string"
+            }
           },
-          "required": ["source", "status"],
+          "required": [
+            "source",
+            "status"
+          ],
           "additionalProperties": false
         }
       },
@@ -29,11 +39,19 @@
         "items": {
           "type": "object",
           "properties": {
-            "reference": { "type": "string" },
-            "kind": { "type": "string" },
-            "summary": { "type": "string" }
+            "reference": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string"
+            },
+            "summary": {
+              "type": "string"
+            }
           },
-          "required": ["reference"],
+          "required": [
+            "reference"
+          ],
           "additionalProperties": false
         }
       },
@@ -43,27 +61,62 @@
         "items": {
           "type": "object",
           "properties": {
-            "internal_ref": { "type": "string" },
-            "external_ref": { "type": "string" },
+            "internal_ref": {
+              "type": "string"
+            },
+            "external_ref": {
+              "type": "string"
+            },
             "relation": {
               "type": "string",
-              "enum": ["descends-from", "aligns-with", "diverges-from", "supersedes", "informed-by"]
+              "enum": [
+                "descends-from",
+                "aligns-with",
+                "diverges-from",
+                "supersedes",
+                "informed-by"
+              ]
             },
-            "grounding_internal": { "type": "string" },
-            "grounding_external": { "type": "string" },
+            "grounding_internal": {
+              "type": "string"
+            },
+            "grounding_external": {
+              "type": "string"
+            },
             "strength": {
               "type": "string",
-              "enum": ["dereferenceable-both-sides", "structural-correspondence", "conceptual-analogy"],
+              "enum": [
+                "dereferenceable-both-sides",
+                "structural-correspondence",
+                "conceptual-analogy"
+              ],
               "$comment": "Per-edge grounding strength: HOW firmly this connection is drawn, ordinal from dereferenceable-both-sides (strongest) to conceptual-analogy (weakest). It is ORTHOGONAL to CitationSchema.evidence_grade (src/genome_schema.ts:293-309), which grades the source's fetch status (archive|attestation) and is never laundered upward. Both endpoints can be archive-grade while the edge between them is a loose conceptual-analogy. Do NOT collapse strength into evidence_grade — that obvious future 'simplification' would destroy the distinction between a citation-grounded edge and a loose structural or conceptual one."
             }
           },
-          "required": ["internal_ref", "external_ref", "relation", "grounding_internal", "grounding_external", "strength"],
+          "required": [
+            "internal_ref",
+            "external_ref",
+            "relation",
+            "grounding_internal",
+            "grounding_external",
+            "strength"
+          ],
           "additionalProperties": false
         }
       },
-      "gap": { "type": "string" },
-      "alignment_recommendation": { "type": "string" }
+      "gap": {
+        "type": "string"
+      },
+      "alignment_recommendation": {
+        "type": "string"
+      }
     }
   },
-  "required_fields": ["external_body", "internal_inventory", "connections", "gap", "alignment_recommendation"]
+  "required_fields": [
+    "external_body",
+    "internal_inventory",
+    "connections",
+    "gap",
+    "alignment_recommendation"
+  ]
 }

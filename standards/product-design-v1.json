@@ -25,7 +25,7 @@
           "required_skills": []
         }
       ],
-      "intent": "First divergence. Hold the question open: observations with their locators, the audience segments it lands differently for, the needs the current state does not serve, the adjacent questions the exploration surfaced, and an honest statement of how far the exploration actually reached. Findings only \u2014 nothing is chosen here."
+      "intent": "First divergence. Hold the question open: observations with their locators, the audience segments it lands differently for, the needs the current state does not serve, the adjacent questions the exploration surfaced, and an honest statement of how far the exploration actually reached. Findings only — nothing is chosen here."
     },
     {
       "name": "define",
@@ -45,7 +45,7 @@
           "required_skills": []
         }
       ],
-      "intent": "First convergence, and the seam between the diamonds. Name the ONE problem the second diamond opens on, what is out of scope, the success criteria a stranger could check \u2014 and, explicitly, the problems the brief surfaced that this definition discarded, each with its reason. Sealed as a Plan because the definition sequences what follows."
+      "intent": "First convergence, and the seam between the diamonds. Name the ONE problem the second diamond opens on, what is out of scope, the success criteria a stranger could check — and, explicitly, the problems the brief surfaced that this definition discarded, each with its reason. Sealed as a Plan because the definition sequences what follows."
     },
     {
       "name": "develop",
@@ -68,7 +68,7 @@
           ]
         }
       ],
-      "intent": "Second divergence, built rather than described. The concept states its mechanism step by step, names which success criteria it answers, and carries its tradeoffs and open questions \u2014 a concept presented as settled cannot be evaluated against the contest it hides."
+      "intent": "Second divergence, built rather than described. The concept states its mechanism step by step, names which success criteria it answers, and carries its tradeoffs and open questions — a concept presented as settled cannot be evaluated against the contest it hides."
     },
     {
       "name": "deliver",
@@ -90,7 +90,7 @@
           "required_skills": []
         }
       ],
-      "intent": "Second convergence. Measure the concept against the definition as sealed, criterion by criterion, and separate what was observed from what was reasoned about \u2014 most design criteria cannot be executed, so a verdict that does not say so overstates its own evidence. Where the concept is sound but the problem was the wrong one, the recommendation returns the run to the first seam."
+      "intent": "Second convergence. Measure the concept against the definition as sealed, criterion by criterion, and separate what was observed from what was reasoned about — most design criteria cannot be executed, so a verdict that does not say so overstates its own evidence. Where the concept is sound but the problem was the wrong one, the recommendation returns the run to the first seam."
     },
     {
       "name": "approve",

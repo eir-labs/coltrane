@@ -8,11 +8,32 @@
   "schema": {
     "type": "object",
     "properties": {
-      "question":       { "type": "string", "description": "The question as posed, unparaphrased." },
-      "audience":       { "type": "string", "description": "Who the eventual answer is for." },
-      "known_context":  { "type": "array", "items": { "type": "string" }, "description": "What the requester already holds as established." },
-      "constraints":    { "type": "array", "items": { "type": "string" }, "description": "Bounds the answer must respect regardless of what the exploration finds." },
-      "success_signal": { "type": "string", "description": "What the requester would observe if the run answered well." }
+      "question": {
+        "type": "string",
+        "description": "The question as posed, unparaphrased."
+      },
+      "audience": {
+        "type": "string",
+        "description": "Who the eventual answer is for."
+      },
+      "known_context": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "What the requester already holds as established."
+      },
+      "constraints": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Bounds the answer must respect regardless of what the exploration finds."
+      },
+      "success_signal": {
+        "type": "string",
+        "description": "What the requester would observe if the run answered well."
+      }
     }
   },
   "required_fields": [

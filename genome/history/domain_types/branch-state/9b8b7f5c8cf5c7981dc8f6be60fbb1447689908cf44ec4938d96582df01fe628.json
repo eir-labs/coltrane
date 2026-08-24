@@ -1,0 +1,21 @@
+{
+  "slug": "branch-state",
+  "version": 1,
+  "extends": "Signal",
+  "domain": "preview-deploy",
+  "status": "active",
+  "description": "The sensed state of the branch to deploy: its name and its HEAD commit, read independently of the change-set the run reviewed. The between-movement edge carries a change-set (diffs, tests, rationale) which holds no commit_sha and no branch — software-change-v1's write-change chair emits diffs as content, never an applied commit — so the deploy input is sensed here rather than threaded through the diff. This decouples the deploy from the diff content and keeps the edge honest.",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "branch":     { "type": "string", "description": "The git branch to deploy to the preview target." },
+      "commit_sha": { "type": "string", "description": "The branch HEAD commit, sensed directly — the exact commit the preview will build." },
+      "project_id": { "type": "string", "description": "The Vercel project id the branch belongs to, when known at sense time." }
+    }
+  },
+  "required_fields": [
+    "source",
+    "branch",
+    "commit_sha"
+  ]
+}

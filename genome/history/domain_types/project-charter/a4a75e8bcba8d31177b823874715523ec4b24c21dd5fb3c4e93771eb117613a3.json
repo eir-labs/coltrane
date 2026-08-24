@@ -1,0 +1,71 @@
+{
+  "slug": "project-charter",
+  "version": 1,
+  "extends": "Plan",
+  "domain": "bootstrap",
+  "status": "active",
+  "description": "The charter for a coltrane-flavored project. Emitted by problem-definer at the discover→define seam. The charter governs which preseed template is unrolled, which behavioral primitives are project-default, and which standards the project ships with.",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "id": { "type": "string" },
+      "name": { "type": "string" },
+      "use_case": {
+        "type": "string",
+        "enum": ["code-changes", "research-briefs", "operations", "mixed", "bare"]
+      },
+      "template": { "type": "string" },
+
+      "scope": {
+        "type": "string",
+        "description": "What the project will do."
+      },
+      "success_criteria": {
+        "type": "string",
+        "description": "How we will know it worked."
+      },
+      "non_goals": {
+        "type": "string",
+        "description": "What this project is explicitly NOT."
+      },
+
+      "preseed_agents": {
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "Slugs of agents to ship in the scaffolded .coltrane/agents/."
+      },
+      "preseed_standards": {
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "Slugs of standards to ship in .coltrane/standards/."
+      },
+      "preseed_skills": {
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "Slugs of skills to ship in .coltrane/skills/."
+      },
+      "default_model_tier": {
+        "type": "string",
+        "enum": ["economy", "standard", "premium"],
+        "default": "standard"
+      },
+      "default_code_tool_access": {
+        "type": "string",
+        "enum": ["none", "read", "write", "full"],
+        "default": "read"
+      },
+
+      "outcome": {
+        "type": ["string", "null"],
+        "enum": [null, "completed", "partial", "refined", "aborted", "unverified"],
+        "description": "Set at DELIVER. unverified = outcome cannot be computed."
+      },
+      "outcome_at": {
+        "type": ["string", "null"],
+        "format": "date-time"
+      }
+    },
+    "required": ["id", "name", "use_case", "scope", "steps"]
+  },
+  "required_fields": []
+}

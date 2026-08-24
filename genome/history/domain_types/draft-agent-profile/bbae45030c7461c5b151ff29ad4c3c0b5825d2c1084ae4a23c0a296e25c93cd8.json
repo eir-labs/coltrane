@@ -1,0 +1,31 @@
+{
+  "slug": "draft-agent-profile",
+  "version": 1,
+  "extends": "Artifact",
+  "domain": "seeding",
+  "status": "active",
+  "description": "Proposed agent_profile shape derived from pattern-extraction. Draft only — NOT promoted to the active fleet until user accepts. Includes a candidate .md frontmatter shape (for Claude Code subagent compile) + provenance back to the surveys.",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "input_refs":         { "type": "array", "items": { "type": "string" }, "description": "References to the pattern-extraction this draft is derived from." },
+      "slug":               { "type": "string", "description": "Proposed agent slug, kebab-case." },
+      "description":        { "type": "string", "description": "One-line description for the .claude/agents/<slug>.md frontmatter." },
+      "behavioral_primitives": { "type": "array", "items": { "type": "string" }, "description": "Proposed behavioral primitives (max 2 per coltrane convention)." },
+      "domain":             { "type": "string", "description": "Proposed domain slug (inferred from the user's work)." },
+      "tools_allowlist":    { "type": "array", "items": { "type": "string" }, "description": "Proposed coltrane MCP tools allowlist." },
+      "model_tier":         { "type": "string", "enum": ["economy", "standard", "premium"] },
+      "code_tool_access":   { "type": "string", "enum": ["none", "read", "write", "full"] },
+      "system_prompt_draft": { "type": "string", "description": "Draft body for the agent .md file — what Claude reads as system prompt when dispatched as this subagent." },
+      "evidence_summary":   { "type": "string", "description": "Why this agent is proposed: which patterns + which repos." },
+      "user_acceptance":    {
+        "type": "string",
+        "enum": ["pending", "accepted", "rejected", "refined"],
+        "default": "pending",
+        "description": "User's verdict at the seam: pending = not yet reviewed; accepted = adopt to active fleet; rejected = discard; refined = user edited fields, re-propose."
+      }
+    },
+    "required": ["input_refs", "slug", "description", "behavioral_primitives", "system_prompt_draft", "user_acceptance", "validation_criteria"]
+  },
+  "required_fields": []
+}

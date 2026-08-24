@@ -1,0 +1,69 @@
+{
+  "slug": "lineage-record",
+  "version": 2,
+  "extends": "Artifact",
+  "domain": "lineage",
+  "status": "active",
+  "description": "The formal, publishable lineage: the identified external body, our internal inventory, the established connections between them, the gap, and the alignment recommendation — grounded citation by citation. Held to the SAME bar the lineage-map weaver already meets one phase upstream: every connection carries the map edge's full shape plus a closed-vocabulary per-edge grounding strength, external bodies carry a closed reached|not-reached status, and inventory entries carry a checkable reference. On human approval this record becomes first-class lineage attached to an institution, inherited by every agent seated there.",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "external_body": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "source": { "type": "string" },
+            "status": {
+              "type": "string",
+              "enum": ["reached", "not-reached"]
+            },
+            "note": { "type": "string" }
+          },
+          "required": ["source", "status"],
+          "additionalProperties": false
+        }
+      },
+      "internal_inventory": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "reference": { "type": "string" },
+            "kind": { "type": "string" },
+            "summary": { "type": "string" }
+          },
+          "required": ["reference"],
+          "additionalProperties": false
+        }
+      },
+      "connections": {
+        "type": "array",
+        "minItems": 1,
+        "items": {
+          "type": "object",
+          "properties": {
+            "internal_ref": { "type": "string" },
+            "external_ref": { "type": "string" },
+            "relation": {
+              "type": "string",
+              "enum": ["descends-from", "aligns-with", "diverges-from", "supersedes", "informed-by"]
+            },
+            "grounding_internal": { "type": "string" },
+            "grounding_external": { "type": "string" },
+            "strength": {
+              "type": "string",
+              "enum": ["dereferenceable-both-sides", "structural-correspondence", "conceptual-analogy"],
+              "$comment": "Per-edge grounding strength: HOW firmly this connection is drawn, ordinal from dereferenceable-both-sides (strongest) to conceptual-analogy (weakest). It is ORTHOGONAL to CitationSchema.evidence_grade (src/genome_schema.ts:293-309), which grades the source's fetch status (archive|attestation) and is never laundered upward. Both endpoints can be archive-grade while the edge between them is a loose conceptual-analogy. Do NOT collapse strength into evidence_grade — that obvious future 'simplification' would destroy the distinction between a citation-grounded edge and a loose structural or conceptual one."
+            }
+          },
+          "required": ["internal_ref", "external_ref", "relation", "grounding_internal", "grounding_external", "strength"],
+          "additionalProperties": false
+        }
+      },
+      "gap": { "type": "string" },
+      "alignment_recommendation": { "type": "string" }
+    }
+  },
+  "required_fields": ["external_body", "internal_inventory", "connections", "gap", "alignment_recommendation"]
+}

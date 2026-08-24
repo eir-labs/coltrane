@@ -8,39 +8,81 @@
   "schema": {
     "type": "object",
     "properties": {
-      "input_refs":      { "type": "array", "items": { "type": "string" }, "description": "References to pattern-extraction + repo-survey outputs." },
-      "slug":            { "type": "string", "description": "Proposed standard slug." },
-      "domain":          { "type": "string" },
-      "description":     { "type": "string" },
-      "phases":          {
+      "input_refs": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "References to pattern-extraction + repo-survey outputs."
+      },
+      "slug": {
+        "type": "string",
+        "description": "Proposed standard slug."
+      },
+      "domain": {
+        "type": "string"
+      },
+      "description": {
+        "type": "string"
+      },
+      "phases": {
         "type": "array",
         "description": "Ordered phases per coltrane standard convention. Each phase names a phase-agent slug + intent.",
         "items": {
           "type": "object",
           "properties": {
-            "name":   { "type": "string" },
-            "agent":  { "type": "string" },
-            "intent": { "type": "string" }
+            "name": {
+              "type": "string"
+            },
+            "agent": {
+              "type": "string"
+            },
+            "intent": {
+              "type": "string"
+            }
           },
-          "required": ["name", "agent", "intent"]
+          "required": [
+            "name",
+            "agent",
+            "intent"
+          ]
         }
       },
       "execution_modes": {
         "type": "object",
         "description": "Per project-bootstrap-v0 shape — conductor_mode default, dispatch_mode for power users.",
         "properties": {
-          "conductor_mode": { "type": "object" },
-          "dispatch_mode":  { "type": "object" }
+          "conductor_mode": {
+            "type": "object"
+          },
+          "dispatch_mode": {
+            "type": "object"
+          }
         }
       },
-      "evidence_summary": { "type": "string", "description": "Which recurrent_workflow this standard formalizes + which repos exhibited it." },
-      "user_acceptance":  {
+      "evidence_summary": {
         "type": "string",
-        "enum": ["pending", "accepted", "rejected", "refined"],
+        "description": "Which recurrent_workflow this standard formalizes + which repos exhibited it."
+      },
+      "user_acceptance": {
+        "type": "string",
+        "enum": [
+          "pending",
+          "accepted",
+          "rejected",
+          "refined"
+        ],
         "default": "pending"
       }
     },
-    "required": ["input_refs", "slug", "domain", "phases", "user_acceptance", "validation_criteria"]
+    "required": [
+      "input_refs",
+      "slug",
+      "domain",
+      "phases",
+      "user_acceptance",
+      "validation_criteria"
+    ]
   },
   "required_fields": []
 }

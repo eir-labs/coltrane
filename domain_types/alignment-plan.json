@@ -8,9 +8,15 @@
   "schema": {
     "type": "object",
     "properties": {
-      "gap_summary": { "type": "string" },
-      "alignment_recommendation": { "type": "string" }
+      "gap_summary": {
+        "type": "string"
+      },
+      "alignment_recommendation": {
+        "type": "string"
+      }
     }
   },
-  "required_fields": ["gap_summary"]
+  "required_fields": [
+    "gap_summary"
+  ]
 }

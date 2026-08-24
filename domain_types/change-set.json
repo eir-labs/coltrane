@@ -8,31 +8,60 @@
   "schema": {
     "type": "object",
     "properties": {
-      "diffs":       {
+      "diffs": {
         "type": "array",
         "description": "Per-path patch content, in unified-diff form.",
         "items": {
           "type": "object",
           "properties": {
-            "path":  { "type": "string" },
-            "patch": { "type": "string" }
+            "path": {
+              "type": "string"
+            },
+            "patch": {
+              "type": "string"
+            }
           },
-          "required": ["path", "patch"]
+          "required": [
+            "path",
+            "patch"
+          ]
         }
       },
-      "tests_added": { "type": "array", "items": { "type": "string" }, "description": "Checks introduced by this change, named so a verifier can run exactly them." },
-      "rationale":   { "type": "array", "items": { "type": "string" }, "description": "The non-obvious choices this change makes, each with the reason it was made." },
-      "departures":  {
+      "tests_added": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Checks introduced by this change, named so a verifier can run exactly them."
+      },
+      "rationale": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "The non-obvious choices this change makes, each with the reason it was made."
+      },
+      "departures": {
         "type": "array",
         "description": "Where the artefact left the plan, and why.",
         "items": {
           "type": "object",
           "properties": {
-            "from_step": { "type": "string" },
-            "instead":   { "type": "string" },
-            "why":       { "type": "string" }
+            "from_step": {
+              "type": "string"
+            },
+            "instead": {
+              "type": "string"
+            },
+            "why": {
+              "type": "string"
+            }
           },
-          "required": ["from_step", "instead", "why"]
+          "required": [
+            "from_step",
+            "instead",
+            "why"
+          ]
         }
       }
     }

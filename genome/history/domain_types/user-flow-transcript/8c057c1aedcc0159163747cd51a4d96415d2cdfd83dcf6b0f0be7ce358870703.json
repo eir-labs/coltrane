@@ -1,0 +1,43 @@
+{
+  "slug": "user-flow-transcript",
+  "version": 1,
+  "extends": "Signal",
+  "domain": "self_judge",
+  "status": "active",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "transcript_present": { "type": "boolean" },
+      "turn_count": { "type": "number" },
+      "turns": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "turn_idx": { "type": "number" },
+            "user_intent": { "type": "string" },
+            "claude_response": { "type": "string" },
+            "tool_calls": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "tool_name": { "type": "string" },
+                  "args": { "type": ["object", "null"] }
+                }
+              }
+            },
+            "post_turn_genome_state": { "type": ["object", "null"] },
+            "malformed_input": { "type": "boolean" }
+          }
+        }
+      },
+      "notes": { "type": "string" }
+    }
+  },
+  "required_fields": [
+    "transcript_present",
+    "turns",
+    "source"
+  ]
+}

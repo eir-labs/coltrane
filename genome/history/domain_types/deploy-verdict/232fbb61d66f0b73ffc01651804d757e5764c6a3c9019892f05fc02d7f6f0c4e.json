@@ -1,0 +1,23 @@
+{
+  "slug": "deploy-verdict",
+  "version": 1,
+  "extends": "Verdict",
+  "domain": "preview-deploy",
+  "status": "active",
+  "description": "Whether the preview build reached a terminal state, and which one. pass is true only when terminal_state is READY. terminal_state carries the honest never-settled path: when the deploy chair's bounded poll loop exhausts its budget with no READY | ERROR | CANCELED observed, it seals terminal_state UNSETTLED with deadline_exceeded true and pass false — a give-up made visible in the ledger rather than a silent hang. logs_tail is present only on a non-READY terminal, so a failure carries the tail of the build log a human can read.",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "terminal_state":   { "type": "string", "enum": ["READY", "ERROR", "CANCELED", "UNSETTLED"], "description": "The build's terminal readyState, or UNSETTLED when the poll budget was spent before any terminal state was observed." },
+      "logs_tail":        { "type": "array", "items": { "type": "string" }, "description": "The tail of the build log, present only when terminal_state is not READY." },
+      "deadline_exceeded": { "type": "boolean", "description": "True when the bounded poll loop reached its max_tool_calls ceiling without a terminal readyState. Pairs with terminal_state UNSETTLED and pass false." }
+    }
+  },
+  "required_fields": [
+    "checks",
+    "target_ref",
+    "pass",
+    "terminal_state",
+    "deadline_exceeded"
+  ]
+}

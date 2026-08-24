@@ -1,0 +1,22 @@
+{
+  "slug": "lineage-adoption-target",
+  "version": 1,
+  "extends": "Signal",
+  "domain": "lineage",
+  "status": "active",
+  "description": "WHICH INSTITUTION an approved lineage-record grounds. Both lineage-record and lineage-verdict promise an attachment neither carries: the record says that on approval it 'becomes first-class lineage attached to an institution, inherited by every agent seated there', and the verdict says a passing verdict 'promotes the record to first-class institutional lineage' — yet neither holds an institution_slug, so a sealed adoption named no target and the caller had to know it out of band. The attachment is not a property of the LINEAGE: the same record can ground two institutions and nothing about its ancestry changes when it does. It is not a property of the APPROVAL either: the approver judges whether the evidence is sound, which is a question about grounding rather than about attachment. It is a property of the ADOPTION ACT. One record, approved once, may be adopted into two institutions by two separate acts, each with its own approver and its own seal. Carrying it here rather than on either sealed type also means no shared type changes shape, and lineage-adopt-v0's chair is already an ENTRY chair, so the target arrives the same way the record does — in the dispatch payload.",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "institution_slug": {
+        "type": "string",
+        "description": "The institution this adoption grounds. Must resolve against the loaded genome; an unresolved slug is a dead name and fails closed rather than adopting into nothing."
+      },
+      "note": {
+        "type": "string",
+        "description": "Optional. Why THIS institution, when a record could ground more than one. Recorded beside the act rather than inferred from it later."
+      }
+    }
+  },
+  "required_fields": ["source", "institution_slug"]
+}

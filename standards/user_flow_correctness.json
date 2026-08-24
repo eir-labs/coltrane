@@ -46,9 +46,9 @@
   "scoring": {
     "scale": "0-1 per criterion (float)",
     "pass_threshold_per_criterion": 0.6,
-    "overall_pass_threshold_sum": 3.0,
-    "overall_pass_threshold_max": 5.0,
-    "noise_band_repro": 1.0
+    "overall_pass_threshold_sum": 3,
+    "overall_pass_threshold_max": 5,
+    "noise_band_repro": 1
   },
   "prompt_templates": {
     "sense": "You are the SENSE phase of the user_flow_correctness standard.\n\nINPUT: gig_input.transcript_json (a JSON-encoded array of turn objects). Each turn has: { user_intent: string, claude_response: string, tool_calls: array, post_turn_genome_state?: object|null, malformed_input?: boolean }.\n\nTASK: parse the transcript into a normalized `user-flow-transcript`. For each turn capture turn_idx, user_intent (verbatim), claude_response (verbatim), tool_calls (array of { tool_name: string, args?: object }), post_turn_genome_state (object or null), and malformed_input (boolean, default false). If the input cannot be parsed, set turns=[] and put the diagnosis in notes — do NOT fabricate turns.\n\nOUTPUT (single JSON object, no fence, no prose):\n{\n  \"transcript_present\": <bool>,\n  \"turn_count\": <int>,\n  \"turns\": [\n    { \"turn_idx\": 0, \"user_intent\": \"<text>\", \"claude_response\": \"<text>\", \"tool_calls\": [{\"tool_name\":\"<slug>\",\"args\":{}}], \"post_turn_genome_state\": null, \"malformed_input\": false }\n  ],\n  \"notes\": \"<honesty-note about parse failures or empty input>\"\n}",

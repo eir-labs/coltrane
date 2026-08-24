@@ -16,69 +16,227 @@
     {
       "name": "analyze",
       "chairs": [
-        { "role": "analyze", "agent_slug": "disclosure-analyst", "depends_on": [], "input_contract": [], "output_contract": ["invention-analysis"], "required_skills": [] }
+        {
+          "role": "analyze",
+          "agent_slug": "disclosure-analyst",
+          "depends_on": [],
+          "input_contract": [],
+          "output_contract": [
+            "invention-analysis"
+          ],
+          "required_skills": []
+        }
       ],
       "intent": "De-spin the disclosure: state the real technical contribution, contrast it with what the inventor claims is novel, enumerate candidate inventive concepts (plural) and embodiments."
     },
     {
       "name": "claim",
       "chairs": [
-        { "role": "claim", "agent_slug": "claim-architect", "depends_on": ["analyze"], "input_contract": ["invention-analysis"], "output_contract": ["claim-draft"], "required_skills": ["claim-element-decompose", "diamond-cutting-discipline"] }
+        {
+          "role": "claim",
+          "agent_slug": "claim-architect",
+          "depends_on": [
+            "analyze"
+          ],
+          "input_contract": [
+            "invention-analysis"
+          ],
+          "output_contract": [
+            "claim-draft"
+          ],
+          "required_skills": [
+            "claim-element-decompose",
+            "diamond-cutting-discipline"
+          ]
+        }
       ],
       "intent": "Cut the broadest defensible independent claim AND a dependent fallback tree; grade the cleave; name every stripped feature as representation vs load-bearing."
     },
     {
       "name": "search",
       "chairs": [
-        { "role": "search", "agent_slug": "prior-art-scout", "depends_on": ["claim"], "input_contract": ["claim-draft"], "output_contract": ["prior-art-hit", "novelty-verdict", "coverage-report"], "required_skills": ["query-expand", "patent-fetch", "citation-verify"] }
+        {
+          "role": "search",
+          "agent_slug": "prior-art-scout",
+          "depends_on": [
+            "claim"
+          ],
+          "input_contract": [
+            "claim-draft"
+          ],
+          "output_contract": [
+            "prior-art-hit",
+            "novelty-verdict",
+            "coverage-report"
+          ],
+          "required_skills": [
+            "query-expand",
+            "patent-fetch",
+            "citation-verify"
+          ]
+        }
       ],
       "intent": "Search patents (USPTO PatentsView) AND literature per claim element; retrieve + verify each hit (fetched, not snippet); emit a coverage-report attesting which corpora were actually searched."
     },
     {
       "name": "map",
       "chairs": [
-        { "role": "map", "agent_slug": "anticipation-mapper", "depends_on": ["claim", "search"], "input_contract": ["claim-draft", "prior-art-hit"], "output_contract": ["novelty-analysis"], "required_skills": ["element-mapping-matrix"] }
+        {
+          "role": "map",
+          "agent_slug": "anticipation-mapper",
+          "depends_on": [
+            "claim",
+            "search"
+          ],
+          "input_contract": [
+            "claim-draft",
+            "prior-art-hit"
+          ],
+          "output_contract": [
+            "novelty-analysis"
+          ],
+          "required_skills": [
+            "element-mapping-matrix"
+          ]
+        }
       ],
       "intent": "Build the element x reference anticipation matrix (§102 per element + §103 obviousness combinations) with a derived coverage_fraction. Evidence only — no rejection call."
     },
     {
       "name": "examine",
       "chairs": [
-        { "role": "examine", "agent_slug": "patent-examiner", "depends_on": ["claim", "map"], "input_contract": ["claim-draft", "novelty-analysis"], "output_contract": ["examiner-rejection"], "required_skills": ["statutory-checklist"] }
+        {
+          "role": "examine",
+          "agent_slug": "patent-examiner",
+          "depends_on": [
+            "claim",
+            "map"
+          ],
+          "input_contract": [
+            "claim-draft",
+            "novelty-analysis"
+          ],
+          "output_contract": [
+            "examiner-rejection"
+          ],
+          "required_skills": [
+            "statutory-checklist"
+          ]
+        }
       ],
       "intent": "Adversary: try to reject the claim on every statute (§101/§102/§103/§112) via the statutory checklist; silence on a statute is not a clear. The only seat that rejects."
     },
     {
       "name": "amend",
       "chairs": [
-        { "role": "amend", "agent_slug": "claim-amender", "depends_on": ["claim", "examine"], "input_contract": ["claim-draft", "examiner-rejection"], "output_contract": ["examine-round-record"], "required_skills": ["claim-element-decompose"] }
+        {
+          "role": "amend",
+          "agent_slug": "claim-amender",
+          "depends_on": [
+            "claim",
+            "examine"
+          ],
+          "input_contract": [
+            "claim-draft",
+            "examiner-rejection"
+          ],
+          "output_contract": [
+            "examine-round-record"
+          ],
+          "required_skills": [
+            "claim-element-decompose"
+          ]
+        }
       ],
       "intent": "Narrow the claim to overcome the rejections or concede; seal an examine-round-record chained to its predecessor so survival is recomputable across rounds."
     },
     {
       "name": "judge",
       "chairs": [
-        { "role": "judge", "agent_slug": "triage-judge", "depends_on": ["search", "map", "examine", "amend"], "input_contract": ["coverage-report", "novelty-analysis", "examiner-rejection", "examine-round-record"], "output_contract": ["triage-verdict", "verdict-record"], "required_skills": ["citation-verify"] }
+        {
+          "role": "judge",
+          "agent_slug": "triage-judge",
+          "depends_on": [
+            "search",
+            "map",
+            "examine",
+            "amend"
+          ],
+          "input_contract": [
+            "coverage-report",
+            "novelty-analysis",
+            "examiner-rejection",
+            "examine-round-record"
+          ],
+          "output_contract": [
+            "triage-verdict",
+            "verdict-record"
+          ],
+          "required_skills": [
+            "citation-verify"
+          ]
+        }
       ],
       "intent": "Render the CANDIDATE verdict (FILEABLE / REFINE-FIRST / NOT-FILEABLE / INSUFFICIENT-EVIDENCE) from the evidence and seal a verdict-record with predecessor links to the disclosure, coverage-report, and final examine-round-record. The hard gate is a separate deterministic chair downstream — the judge states its honest recommendation; it does not enforce the gate itself."
     },
     {
       "name": "gate",
       "chairs": [
-        { "role": "gate", "skill_slug": "verdict-gate", "depends_on": ["judge", "search", "amend"], "input_contract": ["triage-verdict", "coverage-report", "examine-round-record"], "output_contract": ["triage-verdict"], "required_skills": [] }
+        {
+          "role": "gate",
+          "skill_slug": "verdict-gate",
+          "depends_on": [
+            "judge",
+            "search",
+            "amend"
+          ],
+          "input_contract": [
+            "triage-verdict",
+            "coverage-report",
+            "examine-round-record"
+          ],
+          "output_contract": [
+            "triage-verdict"
+          ],
+          "required_skills": []
+        }
       ],
       "intent": "The hard guard, as deterministic code (no model): downgrade a FILEABLE candidate to INSUFFICIENT-EVIDENCE unless a patent corpus was actually searched (coverage gate) AND the claim survived >=1 examine round (survival gate). Seals the final, gated triage-verdict the drafter acts on — runtime enforcement, not prompt guidance."
     },
     {
       "name": "draft",
       "chairs": [
-        { "role": "draft", "agent_slug": "spec-drafter", "depends_on": ["claim", "gate"], "input_contract": ["claim-draft", "triage-verdict"], "output_contract": ["provisional-draft"], "required_skills": [] }
+        {
+          "role": "draft",
+          "agent_slug": "spec-drafter",
+          "depends_on": [
+            "claim",
+            "gate"
+          ],
+          "input_contract": [
+            "claim-draft",
+            "triage-verdict"
+          ],
+          "output_contract": [
+            "provisional-draft"
+          ],
+          "required_skills": []
+        }
       ],
       "intent": "Only on a FILEABLE verdict (the gated one from the gate chair): a provisional with real §112 enablement — at least one worked embodiment + how-to-build, the surviving claim tree, and an abstract. On any other verdict, nothing."
     }
   ],
   "max_examine_rounds": 3,
-  "eval_slugs": ["claim-tree-eval", "enablement-eval"],
-  "input_types": ["invention-disclosure"],
-  "output_types": ["triage-verdict", "verdict-record", "provisional-draft"]
+  "eval_slugs": [
+    "claim-tree-eval",
+    "enablement-eval"
+  ],
+  "input_types": [
+    "invention-disclosure"
+  ],
+  "output_types": [
+    "triage-verdict",
+    "verdict-record",
+    "provisional-draft"
+  ]
 }

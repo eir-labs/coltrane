@@ -17,16 +17,24 @@
           "role": "identify-external",
           "agent_slug": "lineage-scout-external",
           "depends_on": [],
-          "input_contract": ["lineage-question"],
-          "output_contract": ["lineage-hit"],
+          "input_contract": [
+            "lineage-question"
+          ],
+          "output_contract": [
+            "lineage-hit"
+          ],
           "required_skills": []
         },
         {
           "role": "identify-internal",
           "agent_slug": "lineage-scout-internal",
           "depends_on": [],
-          "input_contract": ["lineage-question"],
-          "output_contract": ["internal-inventory"],
+          "input_contract": [
+            "lineage-question"
+          ],
+          "output_contract": [
+            "internal-inventory"
+          ],
           "required_skills": []
         }
       ],
@@ -38,9 +46,17 @@
         {
           "role": "associate",
           "agent_slug": "lineage-weaver",
-          "depends_on": ["identify-external", "identify-internal"],
-          "input_contract": ["lineage-hit", "internal-inventory"],
-          "output_contract": ["lineage-map"],
+          "depends_on": [
+            "identify-external",
+            "identify-internal"
+          ],
+          "input_contract": [
+            "lineage-hit",
+            "internal-inventory"
+          ],
+          "output_contract": [
+            "lineage-map"
+          ],
           "required_skills": []
         }
       ],
@@ -52,9 +68,15 @@
         {
           "role": "assess",
           "agent_slug": "lineage-weaver",
-          "depends_on": ["associate"],
-          "input_contract": ["lineage-map"],
-          "output_contract": ["alignment-plan"],
+          "depends_on": [
+            "associate"
+          ],
+          "input_contract": [
+            "lineage-map"
+          ],
+          "output_contract": [
+            "alignment-plan"
+          ],
           "required_skills": []
         }
       ],
@@ -66,9 +88,19 @@
         {
           "role": "compose",
           "agent_slug": "lineage-scribe",
-          "depends_on": ["identify-external", "identify-internal", "associate", "assess"],
-          "input_contract": ["lineage-map", "alignment-plan"],
-          "output_contract": ["lineage-record"],
+          "depends_on": [
+            "identify-external",
+            "identify-internal",
+            "associate",
+            "assess"
+          ],
+          "input_contract": [
+            "lineage-map",
+            "alignment-plan"
+          ],
+          "output_contract": [
+            "lineage-record"
+          ],
           "required_skills": []
         }
       ],
@@ -81,9 +113,13 @@
           "role": "approve",
           "agent_slug": "",
           "human": true,
-          "depends_on": ["compose"],
+          "depends_on": [
+            "compose"
+          ],
           "input_contract": [],
-          "output_contract": ["lineage-verdict"],
+          "output_contract": [
+            "lineage-verdict"
+          ],
           "optional_outputs": [],
           "required_skills": []
         }
@@ -91,6 +127,13 @@
       "intent": "A human approval office. The incumbent reviews the sealed lineage-record and either seals a passing lineage-verdict — which is what promotes the record to first-class lineage attached to an institution — or refuses it. A run that reaches this office unapproved PARKS awaiting the seal; nothing is adopted on an absent yes."
     }
   ],
-  "input_types": ["lineage-question"],
-  "output_types": ["lineage-record", "lineage-verdict", "internal-inventory", "lineage-hit"]
+  "input_types": [
+    "lineage-question"
+  ],
+  "output_types": [
+    "lineage-record",
+    "lineage-verdict",
+    "internal-inventory",
+    "lineage-hit"
+  ]
 }

@@ -1,0 +1,28 @@
+{
+  "slug": "draft-domain-type",
+  "version": 1,
+  "extends": "Artifact",
+  "domain": "seeding",
+  "status": "active",
+  "description": "Proposed domain type (extending one of the 6 core types) derived from recurrent_domain_shapes the user repeatedly works with. Draft only.",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "input_refs":  { "type": "array", "items": { "type": "string" } },
+      "slug":        { "type": "string" },
+      "extends":     { "type": "string", "enum": ["Signal", "Interpretation", "Judgment", "Plan", "Artifact", "Verdict"] },
+      "domain":      { "type": "string" },
+      "description": { "type": "string" },
+      "schema":      { "type": "object", "description": "Proposed JSON-schema for this domain type." },
+      "required_fields": { "type": "array", "items": { "type": "string" } },
+      "evidence_summary": { "type": "string", "description": "Which recurrent_domain_shape this type formalizes + which repos exhibited it." },
+      "user_acceptance":  {
+        "type": "string",
+        "enum": ["pending", "accepted", "rejected", "refined"],
+        "default": "pending"
+      }
+    },
+    "required": ["input_refs", "slug", "extends", "domain", "schema", "user_acceptance", "validation_criteria"]
+  },
+  "required_fields": []
+}

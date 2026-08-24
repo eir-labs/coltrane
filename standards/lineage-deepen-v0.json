@@ -14,14 +14,22 @@
           "role": "identify-external",
           "agent_slug": "lineage-scout-external",
           "depends_on": [],
-          "input_contract": ["lineage-question"],
-          "output_contract": ["lineage-hit"],
+          "input_contract": [
+            "lineage-question"
+          ],
+          "output_contract": [
+            "lineage-hit"
+          ],
           "required_skills": []
         }
       ],
       "intent": "Re-run the outward sense alone. identify-external takes the sharpened lineage-question and sweeps the external body of prior work with web tools, verifying each source live and sealing grounded lineage-hits — the deepened external reading. It holds no internal grant and draws no connection: it produces hits the re-weave can be held to, nothing more."
     }
   ],
-  "input_types": ["lineage-question"],
-  "output_types": ["lineage-hit"]
+  "input_types": [
+    "lineage-question"
+  ],
+  "output_types": [
+    "lineage-hit"
+  ]
 }

@@ -1,0 +1,55 @@
+{
+  "slug": "soft-verdict",
+  "version": 1,
+  "extends": "Interpretation",
+  "domain": "self_judge",
+  "status": "active",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "criteria": {
+        "type": "object",
+        "properties": {
+          "parent_context_preservation": {
+            "type": "object",
+            "properties": {
+              "score": { "type": ["number", "null"] },
+              "rationale": { "type": "string" }
+            }
+          },
+          "child_stay_on_task": {
+            "type": "object",
+            "properties": {
+              "score": { "type": ["number", "null"] },
+              "rationale": { "type": "string" }
+            }
+          },
+          "inter_turn_coherence": {
+            "type": "object",
+            "properties": {
+              "score": { "type": ["number", "null"] },
+              "rationale": { "type": "string" }
+            }
+          },
+          "graceful_degradation": {
+            "type": "object",
+            "properties": {
+              "score": { "type": ["number", "null"] },
+              "rationale": { "type": "string" }
+            }
+          }
+        }
+      },
+      "overall_verdict_shade": {
+        "type": "string",
+        "enum": ["pass", "mixed", "fail", "not-judgeable"]
+      },
+      "top_insight": { "type": "string" }
+    }
+  },
+  "required_fields": [
+    "criteria",
+    "overall_verdict_shade",
+    "claims"
+  ]
+}

@@ -8,9 +8,27 @@
   "schema": {
     "type": "object",
     "properties": {
-      "terminal_state":   { "type": "string", "enum": ["READY", "ERROR", "CANCELED", "UNSETTLED"], "description": "The build's terminal readyState, or UNSETTLED when the poll budget was spent before any terminal state was observed." },
-      "logs_tail":        { "type": "array", "items": { "type": "string" }, "description": "The tail of the build log, present only when terminal_state is not READY." },
-      "deadline_exceeded": { "type": "boolean", "description": "True when the bounded poll loop reached its max_tool_calls ceiling without a terminal readyState. Pairs with terminal_state UNSETTLED and pass false." }
+      "terminal_state": {
+        "type": "string",
+        "enum": [
+          "READY",
+          "ERROR",
+          "CANCELED",
+          "UNSETTLED"
+        ],
+        "description": "The build's terminal readyState, or UNSETTLED when the poll budget was spent before any terminal state was observed."
+      },
+      "logs_tail": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "The tail of the build log, present only when terminal_state is not READY."
+      },
+      "deadline_exceeded": {
+        "type": "boolean",
+        "description": "True when the bounded poll loop reached its max_tool_calls ceiling without a terminal readyState. Pairs with terminal_state UNSETTLED and pass false."
+      }
     }
   },
   "required_fields": [

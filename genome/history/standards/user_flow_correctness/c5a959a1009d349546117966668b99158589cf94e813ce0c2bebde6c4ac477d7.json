@@ -1,0 +1,57 @@
+{
+  "slug": "user_flow_correctness",
+  "domain": "self_judge",
+  "agent_slugs": [
+    "user_flow_sensor",
+    "user_flow_judge"
+  ],
+  "phases": [
+    {
+      "name": "sense",
+      "chairs": [
+        {
+          "role": "sense",
+          "agent_slug": "user_flow_sensor",
+          "depends_on": [],
+          "input_contract": [],
+          "output_contract": [
+            "user-flow-transcript"
+          ],
+          "required_skills": []
+        }
+      ]
+    },
+    {
+      "name": "interpret",
+      "chairs": [
+        {
+          "role": "interpret",
+          "agent_slug": "user_flow_judge",
+          "depends_on": [],
+          "input_contract": [],
+          "output_contract": [
+            "user-flow-verdict"
+          ],
+          "required_skills": []
+        }
+      ]
+    }
+  ],
+  "identity": {
+    "id": "user_flow_correctness@1",
+    "name": "User-flow behavioral correctness soft-judge",
+    "version": 1,
+    "purpose": "Scores whether claude PICKED the right coltrane MCP tool for a fuzzy user intent across multi-turn user-manual flows. SENSE normalizes a structured user-flow transcript (per-turn user intent, claude response, tool calls, post-turn genome state). INTERPRET LLM-scores five soft criteria the deterministic prompt tests cannot reach: tool-pick appropriateness, response faithfulness to stated intent, genome-state structural validity after the workflow, typed-error vs raw-stack-trace on malformed input, and multi-turn continuity (turn N+1 consistent with turn N's recorded state)."
+  },
+  "scoring": {
+    "scale": "0-1 per criterion (float)",
+    "pass_threshold_per_criterion": 0.6,
+    "overall_pass_threshold_sum": 3.0,
+    "overall_pass_threshold_max": 5.0,
+    "noise_band_repro": 1.0
+  },
+  "prompt_templates": {
+    "sense": "You are the SENSE phase of the user_flow_correctness standard.\n\nINPUT: gig_input.transcript_json (a JSON-encoded array of turn objects). Each turn has: { user_intent: string, claude_response: string, tool_calls: array, post_turn_genome_state?: object|null, malformed_input?: boolean }.\n\nTASK: parse the transcript into a normalized `user-flow-transcript`. For each turn capture turn_idx, user_intent (verbatim), claude_response (verbatim), tool_calls (array of { tool_name: string, args?: object }), post_turn_genome_state (object or null), and malformed_input (boolean, default false). If the input cannot be parsed, set turns=[] and put the diagnosis in notes — do NOT fabricate turns.\n\nOUTPUT (single JSON object, no fence, no prose):\n{\n  \"transcript_present\": <bool>,\n  \"turn_count\": <int>,\n  \"turns\": [\n    { \"turn_idx\": 0, \"user_intent\": \"<text>\", \"claude_response\": \"<text>\", \"tool_calls\": [{\"tool_name\":\"<slug>\",\"args\":{}}], \"post_turn_genome_state\": null, \"malformed_input\": false }\n  ],\n  \"notes\": \"<honesty-note about parse failures or empty input>\"\n}",
+    "interpret": "You are the INTERPRET phase of the user_flow_correctness standard — the soft-judge for user-flow behavioral correctness.\n\nINPUT: a `user-flow-transcript` from the SENSE phase (gig_input.transcript).\n\nTASK: score the flow on five criteria. Each criterion gets a float score in [0.0, 1.0] and a rationale grounded in specific turns. If turns=[], set every score to null and the rationale to the diagnosis — do NOT fabricate.\n\nCRITERIA:\n  a. tool_pick_appropriate: did claude pick the appropriate coltrane MCP tool for each user's stated intent? Score 1.0 if every turn's tool_calls match the user_intent's clear target; 0.0 if claude picked tools unrelated to the intent or made no tool call when one was clearly required.\n  b. response_faithful: did claude's natural-language response acknowledge the user's actual request faithfully, or did it drift to unrelated content? Score by semantic overlap between user_intent and claude_response.\n  c. genome_state_valid: did claude write a structurally-valid genome state after the requested workflow? Check that post_turn_genome_state objects have plausible shape (top-level keys like slug, agents, standards, types — coltrane's genome shape) and are not corrupted. Null states are acceptable when the turn is a query, not a write.\n  d. typed_error_on_malformed: when a turn has malformed_input=true, did claude surface a typed error (a named error class or a structured error object) rather than a raw stack trace or silent corruption? Score 1.0 for typed/named errors, 0.0 for raw stack traces.\n  e. multi_turn_continuity: for each turn N+1, is the behavior consistent with turn N's recorded post_turn_genome_state? (e.g., if turn 0 created a thing called X, does turn 1 acknowledge X exists?) Score 1.0 for full consistency; 0.0 for amnesia / contradiction.\n\nnot-judgeable CASE: turns=[] or the input is structurally insufficient → every score null, rationale states the cause, overall_pass=false, overall_score=null.\n\nOUTPUT (single JSON object, no fence, no prose):\n{\n  \"criteria\": {\n    \"tool_pick_appropriate\":     { \"score\": <0.0-1.0 or null>, \"rationale\": \"<text grounding the score in specific turns>\" },\n    \"response_faithful\":         { \"score\": <0.0-1.0 or null>, \"rationale\": \"<text>\" },\n    \"genome_state_valid\":        { \"score\": <0.0-1.0 or null>, \"rationale\": \"<text>\" },\n    \"typed_error_on_malformed\":  { \"score\": <0.0-1.0 or null>, \"rationale\": \"<text>\" },\n    \"multi_turn_continuity\":     { \"score\": <0.0-1.0 or null>, \"rationale\": \"<text>\" }\n  },\n  \"overall_score\": <sum of non-null scores (0.0-5.0), or null if all null>,\n  \"overall_pass\": <true if overall_score >= 3.0, else false>,\n  \"top_finding\": \"<the single most load-bearing observation; ground it in a specific turn>\"\n}"
+  }
+}

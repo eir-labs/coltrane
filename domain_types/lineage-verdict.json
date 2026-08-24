@@ -8,9 +8,15 @@
   "schema": {
     "type": "object",
     "properties": {
-      "approver": { "type": "string" },
-      "rationale": { "type": "string" }
+      "approver": {
+        "type": "string"
+      },
+      "rationale": {
+        "type": "string"
+      }
     }
   },
-  "required_fields": ["rationale"]
+  "required_fields": [
+    "rationale"
+  ]
 }

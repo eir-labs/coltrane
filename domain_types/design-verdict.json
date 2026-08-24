@@ -8,12 +8,48 @@
   "schema": {
     "type": "object",
     "properties": {
-      "definition_ref":   { "type": "string", "description": "The design-definition this verdict measures against." },
-      "criteria_met":     { "type": "array", "items": { "type": "string" }, "description": "Success criteria the concept satisfies, each with the observation that shows it." },
-      "criteria_unmet":   { "type": "array", "items": { "type": "string" }, "description": "Success criteria the concept does not satisfy, stated plainly and unsoftened." },
-      "inferred_not_run": { "type": "array", "items": { "type": "string" }, "description": "Criteria judged by reasoning because no check could be executed. Required — an empty list is a claim that everything was observed." },
-      "scope_drift":      { "type": "array", "items": { "type": "string" }, "description": "Where the concept answers a different problem than the one defined." },
-      "recommendation":   { "type": "string", "enum": ["deliver", "iterate", "redefine", "insufficient-evidence"], "description": "redefine returns the run to the first seam: the concept is sound but the problem was the wrong one." }
+      "definition_ref": {
+        "type": "string",
+        "description": "The design-definition this verdict measures against."
+      },
+      "criteria_met": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Success criteria the concept satisfies, each with the observation that shows it."
+      },
+      "criteria_unmet": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Success criteria the concept does not satisfy, stated plainly and unsoftened."
+      },
+      "inferred_not_run": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Criteria judged by reasoning because no check could be executed. Required — an empty list is a claim that everything was observed."
+      },
+      "scope_drift": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Where the concept answers a different problem than the one defined."
+      },
+      "recommendation": {
+        "type": "string",
+        "enum": [
+          "deliver",
+          "iterate",
+          "redefine",
+          "insufficient-evidence"
+        ],
+        "description": "redefine returns the run to the first seam: the concept is sound but the problem was the wrong one."
+      }
     }
   },
   "required_fields": [

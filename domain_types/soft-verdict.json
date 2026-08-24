@@ -13,38 +13,73 @@
           "parent_context_preservation": {
             "type": "object",
             "properties": {
-              "score": { "type": ["number", "null"] },
-              "rationale": { "type": "string" }
+              "score": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "rationale": {
+                "type": "string"
+              }
             }
           },
           "child_stay_on_task": {
             "type": "object",
             "properties": {
-              "score": { "type": ["number", "null"] },
-              "rationale": { "type": "string" }
+              "score": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "rationale": {
+                "type": "string"
+              }
             }
           },
           "inter_turn_coherence": {
             "type": "object",
             "properties": {
-              "score": { "type": ["number", "null"] },
-              "rationale": { "type": "string" }
+              "score": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "rationale": {
+                "type": "string"
+              }
             }
           },
           "graceful_degradation": {
             "type": "object",
             "properties": {
-              "score": { "type": ["number", "null"] },
-              "rationale": { "type": "string" }
+              "score": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "rationale": {
+                "type": "string"
+              }
             }
           }
         }
       },
       "overall_verdict_shade": {
         "type": "string",
-        "enum": ["pass", "mixed", "fail", "not-judgeable"]
+        "enum": [
+          "pass",
+          "mixed",
+          "fail",
+          "not-judgeable"
+        ]
       },
-      "top_insight": { "type": "string" }
+      "top_insight": {
+        "type": "string"
+      }
     }
   },
   "required_fields": [

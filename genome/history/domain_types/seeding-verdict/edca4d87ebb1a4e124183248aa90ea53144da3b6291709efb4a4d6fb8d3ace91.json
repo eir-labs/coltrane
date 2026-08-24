@@ -1,0 +1,70 @@
+{
+  "slug": "seeding-verdict",
+  "version": 1,
+  "extends": "Verdict",
+  "domain": "seeding",
+  "status": "active",
+  "description": "The DELIVER-phase verdict of seed-from-local-repos-v0. Names which drafts the user accepted, which they rejected, which they refined — and what landed in the active fleet.",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "input_refs":       { "type": "array", "items": { "type": "string" }, "description": "References to all draft-* outputs this verdict resolves." },
+      "repos_surveyed":   { "type": "integer", "description": "Total repo-survey signals consumed." },
+      "patterns_extracted": { "type": "integer", "description": "Total pattern-extraction interpretations produced." },
+
+      "drafts_proposed": {
+        "type": "object",
+        "properties": {
+          "agents":     { "type": "integer" },
+          "standards":  { "type": "integer" },
+          "domain_types": { "type": "integer" }
+        }
+      },
+      "drafts_accepted": {
+        "type": "object",
+        "properties": {
+          "agents":     { "type": "integer" },
+          "standards":  { "type": "integer" },
+          "domain_types": { "type": "integer" }
+        }
+      },
+      "drafts_rejected": {
+        "type": "object",
+        "properties": {
+          "agents":     { "type": "integer" },
+          "standards":  { "type": "integer" },
+          "domain_types": { "type": "integer" }
+        }
+      },
+      "drafts_refined": {
+        "type": "object",
+        "description": "Drafts the user edited before accepting — re-proposed and adopted in modified form.",
+        "properties": {
+          "agents":     { "type": "integer" },
+          "standards":  { "type": "integer" },
+          "domain_types": { "type": "integer" }
+        }
+      },
+
+      "pass":   { "type": "boolean", "description": "True if ≥1 draft of each kind (agent/standard/type) was accepted, OR the user explicitly approves the empty-result verdict." },
+      "checks": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "name":   { "type": "string" },
+            "method": { "type": "string", "description": "How the check was performed. Required by the Verdict core invariant (#227/#228) — this item schema previously omitted it, so a maximally schema-valid seeding-verdict was unsealable." },
+            "passed": { "type": "boolean" },
+            "note":   { "type": "string" }
+          },
+          "required": ["name", "method", "passed"]
+        }
+      },
+
+      "outcome":          { "type": "string", "enum": ["completed", "partial", "refined", "aborted"] },
+      "next_step_hint":   { "type": "string", "description": "What to run next." }
+    },
+    "required": ["input_refs", "repos_surveyed", "pass", "checks", "outcome"]
+  },
+  "required_fields": []
+}

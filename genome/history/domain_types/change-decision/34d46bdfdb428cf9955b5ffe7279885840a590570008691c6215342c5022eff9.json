@@ -1,0 +1,36 @@
+{
+  "slug": "change-decision",
+  "version": 1,
+  "extends": "Judgment",
+  "domain": "software-change",
+  "status": "active",
+  "description": "The direction, fixed once. Names the three commitments a change is held to — scope, non-goals, stop condition — and records the alternatives that were rejected, because subtraction that leaves no record is indistinguishable from oversight. Downstream seats may append observations; they may not revise these fields.",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "scope":                 { "type": "string", "description": "The observable outcome this change commits to." },
+      "non_goals":             { "type": "array", "items": { "type": "string" }, "description": "What this change is NOT, and the neighbouring shapes it must not collapse into." },
+      "stop_condition":        { "type": "string", "description": "The observation at which the work is finished, stated so that someone else could call it." },
+      "rejected_alternatives": {
+        "type": "array",
+        "description": "Directions considered and set aside, each with its reason.",
+        "items": {
+          "type": "object",
+          "properties": {
+            "alternative": { "type": "string" },
+            "reason":      { "type": "string" }
+          },
+          "required": ["alternative", "reason"]
+        }
+      },
+      "risks":                 { "type": "array", "items": { "type": "string" }, "description": "Consequences the direction accepts knowingly." }
+    }
+  },
+  "required_fields": [
+    "criteria",
+    "input_refs",
+    "scope",
+    "non_goals",
+    "stop_condition"
+  ]
+}

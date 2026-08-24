@@ -1,0 +1,47 @@
+{
+  "slug": "change-plan",
+  "version": 1,
+  "extends": "Plan",
+  "domain": "software-change",
+  "status": "active",
+  "description": "The ordered structure a change will be built through, settled before anything is written. test_first is required and separate from steps: a plan that lists the check after the change it checks cannot distinguish a passing check from one written to pass, which is the failure this repository's change discipline exists to close.",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "test_first":     {
+        "type": "array",
+        "description": "The checks that land before the change, each with the failure it is expected to show first.",
+        "items": {
+          "type": "object",
+          "properties": {
+            "check":           { "type": "string" },
+            "expected_before": { "type": "string", "description": "What this check reports while the change is absent." }
+          },
+          "required": ["check", "expected_before"]
+        }
+      },
+      "files_touched":  { "type": "array", "items": { "type": "string" }, "description": "Paths the plan commits to changing. A path outside this list is a departure to be recorded, not a silent extension." },
+      "tradeoffs":      {
+        "type": "array",
+        "description": "Steps where more than one structure would have served, and why this one was taken.",
+        "items": {
+          "type": "object",
+          "properties": {
+            "at":     { "type": "string" },
+            "chosen": { "type": "string" },
+            "over":   { "type": "string" },
+            "why":    { "type": "string" }
+          },
+          "required": ["at", "chosen", "why"]
+        }
+      },
+      "rollback":       { "type": "string", "description": "How the change is undone if the verdict fails." }
+    }
+  },
+  "required_fields": [
+    "steps",
+    "objective",
+    "test_first",
+    "files_touched"
+  ]
+}

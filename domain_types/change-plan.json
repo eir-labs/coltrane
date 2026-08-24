@@ -8,34 +8,63 @@
   "schema": {
     "type": "object",
     "properties": {
-      "test_first":     {
+      "test_first": {
         "type": "array",
         "description": "The checks that land before the change, each with the failure it is expected to show first.",
         "items": {
           "type": "object",
           "properties": {
-            "check":           { "type": "string" },
-            "expected_before": { "type": "string", "description": "What this check reports while the change is absent." }
+            "check": {
+              "type": "string"
+            },
+            "expected_before": {
+              "type": "string",
+              "description": "What this check reports while the change is absent."
+            }
           },
-          "required": ["check", "expected_before"]
+          "required": [
+            "check",
+            "expected_before"
+          ]
         }
       },
-      "files_touched":  { "type": "array", "items": { "type": "string" }, "description": "Paths the plan commits to changing. A path outside this list is a departure to be recorded, not a silent extension." },
-      "tradeoffs":      {
+      "files_touched": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Paths the plan commits to changing. A path outside this list is a departure to be recorded, not a silent extension."
+      },
+      "tradeoffs": {
         "type": "array",
         "description": "Steps where more than one structure would have served, and why this one was taken.",
         "items": {
           "type": "object",
           "properties": {
-            "at":     { "type": "string" },
-            "chosen": { "type": "string" },
-            "over":   { "type": "string" },
-            "why":    { "type": "string" }
+            "at": {
+              "type": "string"
+            },
+            "chosen": {
+              "type": "string"
+            },
+            "over": {
+              "type": "string"
+            },
+            "why": {
+              "type": "string"
+            }
           },
-          "required": ["at", "chosen", "why"]
+          "required": [
+            "at",
+            "chosen",
+            "why"
+          ]
         }
       },
-      "rollback":       { "type": "string", "description": "How the change is undone if the verdict fails." }
+      "rollback": {
+        "type": "string",
+        "description": "How the change is undone if the verdict fails."
+      }
     }
   },
   "required_fields": [

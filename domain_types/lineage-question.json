@@ -8,10 +8,19 @@
   "schema": {
     "type": "object",
     "properties": {
-      "question": { "type": "string", "minLength": 1 },
-      "internal_scope": { "type": "string" },
-      "external_scope": { "type": "string" }
+      "question": {
+        "type": "string",
+        "minLength": 1
+      },
+      "internal_scope": {
+        "type": "string"
+      },
+      "external_scope": {
+        "type": "string"
+      }
     }
   },
-  "required_fields": ["question"]
+  "required_fields": [
+    "question"
+  ]
 }

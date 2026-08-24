@@ -8,12 +8,25 @@
   "schema": {
     "type": "object",
     "properties": {
-      "source": { "type": "string" },
-      "claim": { "type": "string" },
-      "attribution": { "type": "string" },
-      "url": { "type": "string" },
-      "citation": { "type": "string" }
+      "source": {
+        "type": "string"
+      },
+      "claim": {
+        "type": "string"
+      },
+      "attribution": {
+        "type": "string"
+      },
+      "url": {
+        "type": "string"
+      },
+      "citation": {
+        "type": "string"
+      }
     }
   },
-  "required_fields": ["source", "claim"]
+  "required_fields": [
+    "source",
+    "claim"
+  ]
 }

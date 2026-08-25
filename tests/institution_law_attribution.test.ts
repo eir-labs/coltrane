@@ -139,7 +139,7 @@ describe("attribution relations must be able to say what a lineage pass FINDS", 
     //
     // So this is an access-control boundary wearing the shape of a naming preference. LineageEdgeTypeSchema
     // stays the grant vocabulary; AttributionRelationSchema stays scholarly; and the store-side
-    // `coltrane_lineage_edge.edge_type` CHECK constraint must NOT be widened to admit the scholarly
+    // `chancery_lineage_edge.edge_type` CHECK constraint must NOT be widened to admit the scholarly
     // terms either — it needs a separate column or table, for this reason and not for tidiness.
     const attribution = new Set(AttributionRelationSchema.options as readonly string[]);
     expect(attribution.has("aligns-with"), "attribution cannot express a non-descent alignment").toBe(true);

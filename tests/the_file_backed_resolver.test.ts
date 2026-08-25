@@ -4,7 +4,7 @@
 // repo's own: the venue seam defines VenueRealizer AND ships dockerComposeRealizer(); GenomeStore has
 // three backings (files, a member JWT, an agent capability token) behind one port. A file-backed
 // placement resolver is the same shape — the parallel to a deployment's store-backed one, not a competitor
-// to it. The deployment answers from coltrane_chair_assignment; this answers from institutions/*.json.
+// to it. The deployment answers from chancery_chair_assignment; this answers from institutions/*.json.
 //
 // WHAT IT CLOSES. The measured gap: institutions/quartet.json's structure-builder chair supplies a
 // real `house-style`, bill's carried structure-conformance skill instructs its agent to "read the

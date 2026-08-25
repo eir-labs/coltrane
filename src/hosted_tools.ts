@@ -191,9 +191,11 @@ export const HOSTED_TOOLS: HostedTool[] = [
       const one = typeof args["slug"] === "string" ? String(args["slug"]) : "";
       const out = await restGet(
         ctx,
+        // chancery_institution is the canonical governance table (coltrane-ui migration
+        // 20260825000000); the coltrane_institution shim is scheduled to drop.
         one
-          ? `coltrane_institution?select=slug,name,kind,sovereign,laws&slug=eq.${encodeURIComponent(one)}`
-          : "coltrane_institution?select=slug,name,kind,sovereign,laws&order=slug",
+          ? `chancery_institution?select=slug,name,kind,sovereign,laws&slug=eq.${encodeURIComponent(one)}`
+          : "chancery_institution?select=slug,name,kind,sovereign,laws&order=slug",
       );
       if (out.isError) return out;
 

@@ -1,5 +1,5 @@
 import type { Primitive } from "./core_types.js";
-import { PRIMITIVE_OUTPUT_TYPE } from "./core_types.js";
+import { PRIMITIVE_OUTPUT_TYPE, CORE_TYPES } from "./core_types.js";
 import type { ModelTier, Depth } from "./pricing.js";
 import { AgentSchema, type AgentInput, type AgentOutput, type StandardInput, type StandardOutput } from "./genome_schema.js";
 
@@ -377,6 +377,34 @@ export function composeStandard(def: {
               `required_inputs.`,
           );
         }
+        // ── input_contract ⊆ agent.input_types (#245's common case) ─────────────────────────────
+        // The prior checks bind input_contract to the PIPELINE (produced upstream, §156) and to the
+        // agent's MANDATE (required_inputs). NOTHING bound it to the agent's DECLARED ENVELOPE: a
+        // chair could feed the seated agent a type it never declared it consumes, and compose/dispatch
+        // accepted it — the agent is then invoked with an input it does not declare, confabulates an
+        // answer, and seals `status:complete` with full provenance (#245's diagnosis, closed there
+        // ONLY for the empty-input_contract branch; runtime.ts:2315's floor is unreachable once a
+        // chair declares an input_contract). Close it at the SOURCE: every type the chair feeds must be
+        // one the agent declares it consumes. Subtype rule mirrors runtime acceptance
+        // (`outputSatisfiesType`): an exact match, OR the agent declares a CORE type under which the
+        // fed type could resolve. Compose cannot resolve a domain type's core without the registry, so
+        // it is deliberately PERMISSIVE on a core-declared envelope — it can only ever fire on a
+        // PROVABLE miss (no exact match AND the agent declares no core type) and never rejects a
+        // runnable gig. The runtime (prepareChair) makes the same check PRECISELY with `coreTypeOf`.
+        for (const fed of ch.input_contract) {
+          const declared = ag.input_types.some(
+            (t) => t === fed || (CORE_TYPES as readonly string[]).includes(t),
+          );
+          if (!declared) {
+            throw new CompositionError(
+              `standard ${def.slug}: chair "${ch.role}" seats agent "${ag.slug}" and feeds it "${fed}", ` +
+                `but the agent's input_types [${ag.input_types.join(", ")}] does not declare it — a chair ` +
+                `may not feed an agent a type it never declared it consumes (the agent would be invoked on ` +
+                `an input outside its envelope and confabulate). Add "${fed}" to agent "${ag.slug}".input_types, ` +
+                `or remove it from this chair's input_contract.`,
+            );
+          }
+        }
       }
       if (ch.output_contract.length === 0) {
         throw new CompositionError(
@@ -657,6 +685,13 @@ export function composeStandard(def: {
         const chairProduces = (producerRoles.get(it)?.length ?? 0) > 0;
         const chairConsumes = (consumerRoles.get(it)?.length ?? 0) > 0;
         if (!chairProduces || !chairConsumes) continue;
+        // #156: a type that is a declared GIG INPUT is seeded from OUTSIDE the standard — an entry
+        // chair reading it consumes the seed, not the in-standard producer's output, so producing a
+        // record of the same type is a fresh production, not a loop. (This surfaced once the
+        // input_contract ⊆ input_types gate forced an entry-seed agent to DECLARE its seed type: an
+        // agent that reads a Signal seed and produces a Signal is not a self-cycle.) Mirrors the
+        // gig-input exemption the input_contract-satisfaction and runtime checks already make.
+        if (standardInputs.has(it)) continue;
         // #181: the chair graph orders this type's producer before its consumer → legal pipeline.
         if (pipelineOrdered(it)) continue;
         const producer = produces.get(it)!;

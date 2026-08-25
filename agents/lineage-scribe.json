@@ -5,7 +5,9 @@
   ],
   "input_types": [
     "lineage-map",
-    "alignment-plan"
+    "alignment-plan",
+    "draft-agent-profile",
+    "change-context"
   ],
   "output_types": [
     "lineage-record"

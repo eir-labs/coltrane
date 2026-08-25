@@ -2270,6 +2270,30 @@ export async function runGig(
     const domain_type = agent.output_types[0];
     if (!domain_type) throw new RuntimeError(`agent "${agent.slug}" declares no output_type`);
 
+    // ── input_contract ⊆ agent.input_types (#245's common case) ──────────────────────────────────
+    // The last line of defence, mirroring the compose-time gate (composition.ts). composeStandard
+    // catches this at authoring, but a hand-rolled Standard bypasses composition entirely (#245's own
+    // point), so the runtime enforces it too — HERE, where the chair is bound to its agent, BEFORE any
+    // input is gathered or the agent is invoked. Every type the chair feeds must be one the agent
+    // declares it consumes; feeding an UNDECLARED type is exactly how an agent gets invoked on an input
+    // outside its envelope, confabulates, and seals with full provenance. The subtype rule is the
+    // PRECISE mirror of `outputSatisfiesType`: an exact name match, OR the agent declares a CORE type
+    // that the fed type resolves to (`coreTypeOf`). This closes the branch #245's floor below could
+    // not reach — a NON-empty input_contract — without regressing the empty-contract branch it handles.
+    for (const fed of chair.input_contract) {
+      const declared = agent.input_types.some(
+        (t) => t === fed || (CORE_TYPE_SET.has(t) && deps.outputs.coreTypeOf(fed) === t),
+      );
+      if (!declared) {
+        throw new RuntimeError(
+          `chair "${chair.role}" seats agent "${agent.slug}" and feeds it "${fed}", but the agent's ` +
+            `input_types [${agent.input_types.join(",")}] does not declare it — refusing to invoke an ` +
+            `agent on an input it never declared it consumes (it would confabulate and seal with full ` +
+            `provenance). Add "${fed}" to agent "${agent.slug}".input_types, or drop it from this chair's input_contract.`,
+        );
+      }
+    }
+
     // Gather upstream inputs. When the chair declares depends_on, use the
     // OutputRecords of those specific roles. When it doesn't (legacy / no-deps
     // chair), fall back to the legacy behavior — all prior outputs whose

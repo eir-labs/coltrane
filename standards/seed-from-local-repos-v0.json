@@ -47,8 +47,12 @@
         {
           "role": "develop",
           "agent_slug": "solution-developer",
-          "depends_on": [],
-          "input_contract": [],
+          "depends_on": [
+            "define"
+          ],
+          "input_contract": [
+            "project-charter"
+          ],
           "output_contract": [
             "Artifact"
           ],

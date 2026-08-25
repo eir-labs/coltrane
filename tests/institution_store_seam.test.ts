@@ -1,6 +1,7 @@
 // RED SPEC — the GenomeStore institution row SHAPE (specified, not built).
 //
-// The hosted org store already models coltrane_institution and its six adjacent tables, but the
+// The hosted org store already models chancery_institution (canonical since coltrane-ui migration
+// 20260825000000 renamed the governance tables; the coltrane_* shims drop) and its six adjacent tables, but the
 // GenomeStore port (src/genome_store.ts) has a fixed class list with NO institution row. Left
 // unspecified, the file backing and a future store backing drift — the concrete failure the
 // dashboard audit documents on other classes (input_types, carried_skills, hydration). This suite
@@ -33,6 +34,6 @@ describe("INV12 STORE/FILE ENVELOPE PARITY — the institution row shape cannot 
     expect(
       STORE_SRC,
       "the institution store row must be the {slug, definition} envelope where definition IS the validated file document — not a bespoke shape",
-    ).toMatch(/coltrane_institution\?select=slug,definition/);
+    ).toMatch(/chancery_institution\?select=slug,definition/);
   });
 });

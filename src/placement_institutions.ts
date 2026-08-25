@@ -7,7 +7,7 @@ import type { PlacementDecision, PlacementRequest, PlacementResolver } from "./p
  * WHY THIS IS IN OSS, given the seam exists for a deployment to fill. The precedent is this repo's:
  * the venue seam defines `VenueRealizer` AND ships `dockerComposeRealizer()`; `GenomeStore` has three
  * backings behind one port. This is the file backing of the placement port — the parallel to a deployment's
- * store-backed resolver, not a competitor to it. The deployment answers from `coltrane_chair_assignment`; this
+ * store-backed resolver, not a competitor to it. The deployment answers from `chancery_chair_assignment`; this
  * answers from the files a clone already has.
  *
  * WHAT IT CLOSES. `institutions/quartet.json`'s structure-builder chair supplies a real `house-style`,

@@ -124,7 +124,11 @@ const Q = {
   // cannot drift (spec ITEM 4). The store backing / fetch is NOT built here (envelope string only);
   // the reconstruction has no institution branch yet, exactly as it had none for charts/venues before
   // their tables landed.
-  institutions: "coltrane_institution?select=slug,definition",
+  //
+  // `chancery_institution` is the CANONICAL governance table name (coltrane-ui migration
+  // 20260825000000 renamed the nine coltrane_* governance tables to chancery_*; the coltrane_*
+  // read-shim views are scheduled to drop). Engine reads go to the real table, never the shim.
+  institutions: "chancery_institution?select=slug,definition",
 } as const;
 
 type Row = Record<string, unknown>;

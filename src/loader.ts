@@ -4,7 +4,7 @@ import { join, extname, resolve, isAbsolute, dirname } from "node:path";
 import { createRequire } from "node:module";
 import { defineAgent, composeStandard, CompositionError, GenomeIncompleteError, type Agent, type AgentDef, type Standard, type PhaseDef } from "./composition.js";
 import { loadSkillPackage, SkillLoadError } from "./skills.js";
-import { SkillSchema, EvalSchema, DomainTypeSchema, VenueSchema, ChartSchema, venueDefect, type SkillOutput, type EvalOutput, type DomainTypeOutput, type ChartInput, type VenueInput } from "./genome_schema.js";
+import { SkillSchema, EvalSchema, DomainTypeSchema, VenueSchema, ChartSchema, BearingLawSchema, venueDefect, type SkillOutput, type EvalOutput, type DomainTypeOutput, type ChartInput, type VenueInput, type BearingLawOutput } from "./genome_schema.js";
 import { composeChart, chartEntrySeedTypes, type Chart, type Venue } from "./chart.js";
 import type { Primitive } from "./core_types.js";
 import { CANONICAL_CORE_TYPES } from "./canonical_core_types.js";
@@ -55,6 +55,9 @@ export class DomainTypeMap extends Map<string, DomainTypeRecord> {
 export type AgentFileDef = AgentDef;
 export interface StandardFileDef {
   slug: string;
+  /** Discriminator for non-executable documents sharing standards/: a file whose kind is
+   *  "bearing-law" is sealable canon (BearingLawSchema), never composed or dispatched. */
+  kind?: string;
   domain: string;
   agent_slugs: readonly string[];
   phases: readonly PhaseDef[];
@@ -117,6 +120,12 @@ export interface LoadedGenome {
   // same reason as institutions (a store backing need not carry it yet); loadGenome always populates
   // it. This is where checkTourAdmissibility gains a production callsite off the load path.
   tours?: ReadonlyMap<string, LoadedTour>;
+  // Bearing-laws — ADICO canon documents found under standards/ (kind: "bearing-law"). Validated
+  // against BearingLawSchema and admitted HERE, never into `standards`: dispatch resolves against
+  // the standards map, so exclusion from it is what makes a bearing-law non-dispatchable by
+  // construction. OPTIONAL for the same store-backing reason as institutions/tours; loadGenome
+  // and loadLayeredGenome always populate it.
+  bearing_laws?: ReadonlyMap<string, BearingLawOutput>;
   // Rob #129 — per-definition load failures recorded here instead of throwing.
   load_errors: LoadError[];
   // Genome extension (docs/genome-extension.md): when this genome was resolved from
@@ -360,16 +369,34 @@ export function loadGenome(
   }
   const standards = new Map<string, Standard>();
   const standard_paths = new Map<string, string>();
+  const bearing_laws = new Map<string, BearingLawOutput>();
   for (const { path, data: def } of standardRead.files) {
     const slug = typeof def?.slug === "string" ? def.slug : null;
     try {
       if (!def.slug || typeof def.slug !== "string") {
         throw new Error(`missing required "slug" field`);
       }
-      if (standards.has(def.slug)) {
+      if (standards.has(def.slug) || bearing_laws.has(def.slug)) {
         throw new Error(
           `duplicate standard slug "${def.slug}" (first seen in ${standard_paths.get(def.slug)})`,
         );
+      }
+      // kind: "bearing-law" — sealable canon sharing standards/, NOT an executable standard.
+      // It has no phase graph to compose and seats no agents; feeding it to composeStandard is
+      // the "def.phases is not iterable" defect this branch closes. Validate the law shape and
+      // admit it to bearing_laws only — never to `standards`, so dispatch (which resolves
+      // standard_slug against that map) cannot seat it. A shape failure is a soft per-file
+      // load_error like any other standards/ defect: an invalid law is refused loudly, never
+      // quietly admitted as canon.
+      if ((def as { kind?: unknown }).kind === "bearing-law") {
+        const check = BearingLawSchema.safeParse(def);
+        if (!check.success) {
+          const why = check.error.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`).join("; ");
+          throw new Error(`bearing-law validation failed — ${why}`);
+        }
+        bearing_laws.set(check.data.slug, check.data);
+        standard_paths.set(check.data.slug, path);
+        continue;
       }
       const resolved: Agent[] = [];
       for (const aslug of def.agent_slugs ?? []) {
@@ -604,7 +631,7 @@ export function loadGenome(
   load_errors.push(...tourRead.load_errors);
   const tours: ReadonlyMap<string, LoadedTour> = tourRead.tours;
 
-  return { core_types, domain_types, agents, standards, skills, evals, charts, venues, institutions, tours, load_errors };
+  return { core_types, domain_types, agents, standards, skills, evals, charts, venues, institutions, tours, bearing_laws, load_errors };
 }
 
 /**
@@ -627,6 +654,7 @@ export function loadLayeredGenome(roots: readonly string[]): LoadedGenome {
   const evals = new Map<string, EvalRecord>();
   const charts = new Map<string, Chart>();
   const venues = new Map<string, Venue>();
+  const bearing_laws = new Map<string, BearingLawOutput>();
   const load_errors: LoadError[] = [];
   const provenance = new Map<string, string>();
   let core_types: ReadonlyMap<string, CoreTypeRecord> = new Map();
@@ -658,6 +686,10 @@ export function loadLayeredGenome(roots: readonly string[]): LoadedGenome {
     fold(evals, layer.evals, root, "eval");
     fold(venues, layer.venues, root, "venue");
     fold(charts, layer.charts, root, "chart");
+    // Bearing-laws fold like every other class — the real consumer (an org genome whose
+    // genome.json extends this base) loads through HERE, so dropping them at the fold would
+    // green the single-root test while the deployed path lost the canon.
+    if (layer.bearing_laws) fold(bearing_laws, layer.bearing_laws, root, "bearing_law");
     for (const e of layer.load_errors) load_errors.push(e);
   }
 
@@ -669,7 +701,7 @@ export function loadLayeredGenome(roots: readonly string[]): LoadedGenome {
     }),
   );
 
-  return { core_types, domain_types, agents, standards, skills, evals, charts, venues, load_errors, provenance };
+  return { core_types, domain_types, agents, standards, skills, evals, charts, venues, bearing_laws, load_errors, provenance };
 }
 
 /**

@@ -496,6 +496,49 @@ export type DeonticOperator = z.output<typeof DeonticSchema>;
 export type InstitutionalLawOutput = z.output<typeof InstitutionalLawSchema>;
 export type NormPairOutput = z.output<typeof NormPairSchema>;
 
+/** A BEARING-LAW: sealable canon, not an executable standard.
+ *
+ *  An org genome's standards/ may hold documents of kind "bearing-law" — the ADICO record of an
+ *  obligation a LEGAL PERSON bears (an executed SAFE portfolio, a payment note, a delivery SOW),
+ *  researched against real instruments and destined for Nomos's seal. They carry NO phases, seat
+ *  no agents, and must never become dispatchable; the loader admits them here instead of feeding
+ *  them to composeStandard (where a missing phase graph is a defect, not a document kind).
+ *
+ *  The `law` is the full five-slot ADICO grammar (InstitutionalLawSchema) with ONE deliberate
+ *  relaxation: `content_hash` is optional — a bearing-law is lawfully PRE-sealing ("Nomos seals",
+ *  org-genome-design.md §3), so the hash the institution's laws must already carry may be absent
+ *  here. canonical_form.ts excludes `content_hash` from hashing either way, so sealing identity
+ *  is unmoved by its presence or absence.
+ *
+ *  Top level is deliberately NON-strict: `instrument` and `provenance` are evidentiary prose
+ *  objects whose interior shape belongs to the record, not the engine, and fields like `flags` /
+ *  `unresolved` are the document being honest about its own open questions. The engine validates
+ *  the load-bearing frame (identity, kind, ADICO law, source, subject, bearer) and carries the
+ *  rest as content. */
+export const BearingLawAdicoSchema = InstitutionalLawSchema.extend({
+  content_hash: z.string().optional(),
+});
+export const BearingLawSchema = z.object({
+  slug: z.string(),
+  kind: z.literal("bearing-law"),
+  domain: z.string().optional(),
+  status: z.enum(["active", "deprecated", "retired"]).optional(),
+  /** Where the obligation derives from (e.g. "charter"). */
+  source: z.string(),
+  /** The legal person that bears it, e.g. "org:eir-labs-inc". */
+  subject_ref: z.string(),
+  /** Prose identification of the bearer of record (and any intended assignee). */
+  bearer: z.string(),
+  description: z.string().optional(),
+  law: BearingLawAdicoSchema,
+  /** The instrument(s) evidencing the obligation — record-owned interior shape. */
+  instrument: z.record(z.unknown()),
+  /** Where this record came from and under what authority it was recast. */
+  provenance: z.record(z.unknown()),
+  flags: z.array(z.string()).optional(),
+});
+export type BearingLawOutput = z.output<typeof BearingLawSchema>;
+
 /** Where a genome schema class implements published prior art, the attribution lives HERE as data
  *  — parseable, dereferenceable, and gradeable — rather than only as a name-drop in a comment a
  *  reader must take on faith. Both entries below were fetched from publisher/registry on the

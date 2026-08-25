@@ -454,7 +454,14 @@ export const TWO_CORPORA_CALIBRATION_TRAIL = {
 // 22 → 21: `contract_caps` gained its first reader when the placement resolver began enforcing the
 // narrowing rule. The pin SHRINKING is the direction that matters — a field stopped being declared-
 // and-unread because something started using it, which is the whole point of measuring this.
-export const PINNED_UNREAD_ENGINE_FIELDS = 21;
+// 21 → 23: BearingLawSchema landed (the loader learned the bearing-law kind) and declared
+// `instrument` + `subject_ref` — hand-verified: zero non-comment `\binstrument\b` / `\bsubject_ref\b`
+// reads in src/*.ts outside genome_schema.ts. Same posture as the institutions-class fields above:
+// an UNFINISHED FEATURE, not rot. A bearing-law is canon the engine validates and CARRIES — its
+// consumer is Nomos's seal and a future bearing-law browse surface, neither built yet. `bearer`,
+// `provenance`, `source` etc. from the same schema matched existing src readers, so only these two
+// surface. When a bearing-law consumer lands, this should SHRINK back.
+export const PINNED_UNREAD_ENGINE_FIELDS = 23;
 
 /** CONTRACT ratchet FLOOR (hand-verified 2026-08-21). 127 = the count of domain_types/*.json +
  *  core_types/*.json schema.properties keys (>= 5 chars, deduped) with no `\bname\b` reader anywhere in the

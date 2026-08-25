@@ -1,0 +1,90 @@
+{
+  "slug": "reconciliation-map",
+  "version": 1,
+  "extends": "Interpretation",
+  "domain": "software-change",
+  "status": "active",
+  "description": "The COLD MAP of a work order's reconciliation (WO-F02, Documenso #1917537): every clause of the order — each article, each terminal, each receipts_due type — matched deterministically against the receipts actually landed (chancery_work_order_receipt rows and the completed_output_id FK into the sealed output chain). A clause with no receipt is listed ABSENT, never omitted. This is clerical work: no model judgment, no spend against the reconciliation budget — the map restates rows, it does not evaluate them.",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "work_order_id": {
+        "type": "string",
+        "description": "The chancery_work_order.id this map reconciles."
+      },
+      "reconciliation_owner": {
+        "type": "string",
+        "description": "chancery_work_order.reconciliation_owner — who reconciles: the bond's bonded_party or a named agent/chair."
+      },
+      "reconciliation_budget": {
+        "type": "number",
+        "description": "chancery_work_order.reconciliation_budget — the declared heat cap the hot audit must spend within."
+      },
+      "reconciliation_due_at": {
+        "type": "string",
+        "description": "chancery_work_order.reconciliation_due_at (ISO-8601) — the committed date the sweep fires at regardless of any completion signal."
+      },
+      "past_due": {
+        "type": "boolean",
+        "description": "Whether the mapping ran after reconciliation_due_at. Deterministic: map time vs the due timestamp."
+      },
+      "clauses": {
+        "type": "array",
+        "minItems": 1,
+        "description": "One row per clause of the order — every article, terminal, and receipts_due type. Nothing is skipped: an unmatched clause appears with status 'absent'.",
+        "items": {
+          "type": "object",
+          "properties": {
+            "clause_ref": {
+              "type": "string",
+              "description": "Which clause: an article title/index, a terminal role, or a receipts_due type name."
+            },
+            "clause_kind": {
+              "type": "string",
+              "enum": [
+                "article",
+                "terminal",
+                "receipt_due"
+              ]
+            },
+            "receipt_output_ids": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "The coltrane_outputs ids (via chancery_work_order_receipt.output_id or completed_output_id) matched to this clause. Empty when absent."
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "receipted",
+                "absent"
+              ],
+              "description": "receipted: at least one sealed receipt matches. absent: no receipt exists — stated plainly, never inferred away."
+            },
+            "locator": {
+              "type": "string",
+              "description": "Where the matching rows were read from (table/view + key), so the map is re-runnable."
+            }
+          },
+          "required": [
+            "clause_ref",
+            "clause_kind",
+            "status"
+          ]
+        }
+      },
+      "absent_count": {
+        "type": "number",
+        "description": "The number of clauses with status 'absent'. Zero is a claim like any other: it must equal the count in clauses."
+      }
+    }
+  },
+  "required_fields": [
+    "work_order_id",
+    "clauses",
+    "absent_count",
+    "input_refs",
+    "claims"
+  ]
+}

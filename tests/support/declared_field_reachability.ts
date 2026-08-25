@@ -256,7 +256,17 @@ export const CALIBRATION_TRAIL = {
 // approval_seat, cohabitation_boundary, laws, rails, repo_aliases, host, seat_contract_source)
 // enter the census. They are agent/human-read spec payload, never orchestrator-src reads —
 // exactly the dead-contract class this ratchet pins and holds from growing.
-export const PINNED_UNREAD_FIELDS = 205;
+// 205 → 220: the reconcile-work-order-v0 set (WO-B06, 2026-08-25) added 3 types —
+// reconciliation-map (extends Interpretation), proof-of-work-contract (extends Artifact),
+// reconciliation-record (extends Judgment) — whose 15 domain-payload fields (work_order_id,
+// reconciliation_owner/_budget/_due_at, past_due, clauses, absent_count, cold_map_ref,
+// audit_verdict_ref, clause_verdicts, proposed_state, reconciliation_state, proof_of_work_ref,
+// defaulted_clauses, settled_by …) enter the census. They are agent/human-read reconciliation
+// payload — filled and read by the standard's seats and the settling human, never by
+// orchestrator src — exactly the class this ratchet pins and holds from growing. The CONTRACT
+// ratchet below is the one that actually gates them: every one is named by an agent method or
+// the standard's phase intents, so the contract pin did not move.
+export const PINNED_UNREAD_FIELDS = 220;
 
 /* ─────────────────────────────────────────────────────────────────────────────────────────────────
  * TWO CORPORA — engine (src/) vs contract (broad).

@@ -1,0 +1,68 @@
+{
+  "slug": "proof-of-work-contract",
+  "version": 1,
+  "extends": "Artifact",
+  "domain": "software-change",
+  "status": "active",
+  "description": "The composed PROOF OF WORK for a work order's reconciliation (WO-F02, Documenso #1917537): the cold map, the hot audit's findings, and a verdict per clause, folded into one contract and written as a sealed output — the engine stamps its content_sha and input_shas, so the contract is content-addressed by construction, never by an agent's own hashing. This is what the sovereign settles against and what a DEFAULT cites: the document that makes 'the work was done' a checkable claim instead of a recollection.",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "work_order_id": {
+        "type": "string",
+        "description": "The chancery_work_order.id this contract reconciles."
+      },
+      "cold_map_ref": {
+        "type": "string",
+        "description": "content_sha (or output id) of the sealed reconciliation-map this contract composes from."
+      },
+      "audit_verdict_ref": {
+        "type": "string",
+        "description": "content_sha (or output id) of the sealed hot-audit change-verdict this contract composes from."
+      },
+      "clause_verdicts": {
+        "type": "array",
+        "minItems": 1,
+        "description": "One verdict per clause of the order — the cold map's row joined with the audit's finding for that clause. Copies only: the composer draws no verdict of its own.",
+        "items": {
+          "type": "object",
+          "properties": {
+            "clause_ref": { "type": "string" },
+            "clause_kind": {
+              "type": "string",
+              "enum": ["article", "terminal", "receipt_due"]
+            },
+            "receipt_status": {
+              "type": "string",
+              "enum": ["receipted", "absent"]
+            },
+            "audit_finding": {
+              "type": "string",
+              "description": "The audit's verdict for this clause, verbatim: upheld, refuted (with the refutation), or unaudited (with why — e.g. budget exhausted, receipt absent)."
+            },
+            "evidence_refs": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "The citations the finding rests on — output ids, file paths, URLs probed, check names run."
+            }
+          },
+          "required": ["clause_ref", "receipt_status", "audit_finding"]
+        }
+      },
+      "proposed_state": {
+        "type": "string",
+        "enum": ["satisfied", "defaulted"],
+        "description": "What the composed evidence supports — a PROPOSAL only. The adjudicator rules on default; only the sovereign's settlement records 'satisfied'."
+      }
+    }
+  },
+  "required_fields": [
+    "work_order_id",
+    "cold_map_ref",
+    "audit_verdict_ref",
+    "clause_verdicts",
+    "proposed_state",
+    "input_refs",
+    "content"
+  ]
+}

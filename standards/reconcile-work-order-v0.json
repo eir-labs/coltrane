@@ -1,0 +1,137 @@
+{
+  "slug": "reconcile-work-order-v0",
+  "domain": "software-change",
+  "status": "active",
+  "agent_slugs": [
+    "receipt-mapper",
+    "reconciliation-auditor",
+    "proof-composer",
+    "default-adjudicator"
+  ],
+  "phases": [
+    {
+      "name": "cold-map",
+      "chairs": [
+        {
+          "role": "cold-map",
+          "agent_slug": "receipt-mapper",
+          "depends_on": [],
+          "input_contract": [
+            "change-request"
+          ],
+          "output_contract": [
+            "reconciliation-map"
+          ],
+          "optional_outputs": [],
+          "required_skills": [],
+          "turn_budget": 25
+        }
+      ],
+      "intent": "The deterministic clause-to-receipt mapping. Read the work order the dispatch names — its articles, terminals, receipts_due, and reconciliation contract (owner, budget, due date) — and the receipts landed against it: chancery_work_order_receipt rows joined to the sealed output chain, plus the completed_output_id FK. Match every clause to its receipts by stated equality; every clause with no receipt is listed absent, in so many words, never omitted. This is clerical work: no model judgment falls here and the chair spends nothing against the reconciliation budget — same order, same receipts, same map, on any machine."
+    },
+    {
+      "name": "hot-audit",
+      "chairs": [
+        {
+          "role": "hot-audit",
+          "agent_slug": "reconciliation-auditor",
+          "depends_on": [
+            "cold-map"
+          ],
+          "input_contract": [
+            "change-request",
+            "reconciliation-map"
+          ],
+          "output_contract": [
+            "change-verdict"
+          ],
+          "optional_outputs": [],
+          "required_skills": [],
+          "turn_budget": 30,
+          "turn_reserve": 6
+        }
+      ],
+      "intent": "The refutation pass — the half that SPENDS. Within the order's declared reconciliation_budget (carried on the change-request; the chair's turn budget is the structural cap it may only narrow, never widen), attempt to refute what the receipted clauses claim: re-run the checks a receipt says went green, probe the deployed thing a receipt points at, open the sealed output and test its claims against the world. Every finding is cited — the tool call, check name, path, or URL it rests on — and a finding without a citation does not enter the verdict. When the budget exhausts, stop and seal the partial audit with every unaudited clause named; absent receipts pass through as absent, never audited into existence."
+    },
+    {
+      "name": "proof-of-work",
+      "chairs": [
+        {
+          "role": "proof-of-work",
+          "agent_slug": "proof-composer",
+          "depends_on": [
+            "cold-map",
+            "hot-audit"
+          ],
+          "input_contract": [
+            "reconciliation-map",
+            "change-verdict"
+          ],
+          "output_contract": [
+            "proof-of-work-contract"
+          ],
+          "optional_outputs": [],
+          "required_skills": [],
+          "turn_budget": 15
+        }
+      ],
+      "intent": "The composed contract: the cold map, the audit's findings, and a verdict per clause — every clause of the order, each row joining the map's receipt status with the audit's finding verbatim — written as a sealed output, which is what makes it content-addressed: the engine stamps content_sha and the input_shas of exactly the two seals composed from, and no agent hashes anything. Copies only; the composer draws no new verdict. This document is what the sovereign settles against and what a default cites."
+    },
+    {
+      "name": "default-judgment",
+      "chairs": [
+        {
+          "role": "default-judgment",
+          "agent_slug": "default-adjudicator",
+          "depends_on": [
+            "cold-map",
+            "proof-of-work"
+          ],
+          "input_contract": [
+            "change-request",
+            "reconciliation-map",
+            "proof-of-work-contract"
+          ],
+          "output_contract": [
+            "reconciliation-record"
+          ],
+          "optional_outputs": [],
+          "required_skills": [],
+          "turn_budget": 15
+        }
+      ],
+      "intent": "The default ruling — deterministic, sealed BEFORE the human seat so a parked approval cannot mask it. An order past reconciliation_due_at with clauses the cold map lists absent (unreceipted) reconciles as DEFAULTED: the record seals reconciliation_state 'defaulted' naming every absent clause_ref, and that state lands in chancery_work_order.reconciliation_state. The conductor's sweep (chancery_work_order_reconciliation_due) fires this standard at the committed date regardless of any completion signal, so abandonment cannot hide: the cold map runs, shows the absence, and the default is sealed with no human in the loop to not-show-up. Not past due, or every clause receipted: the record seals 'pending' and waits for the sovereign. This seat never seals 'satisfied'."
+    },
+    {
+      "name": "sovereign-settle",
+      "chairs": [
+        {
+          "role": "sovereign-settle",
+          "human": true,
+          "depends_on": [
+            "proof-of-work",
+            "default-judgment"
+          ],
+          "input_contract": [
+            "proof-of-work-contract",
+            "reconciliation-record"
+          ],
+          "output_contract": [
+            "reconciliation-record"
+          ],
+          "optional_outputs": [],
+          "required_skills": []
+        }
+      ],
+      "intent": "The parked human step — an approval office, not an agent. The gig PARKS here (awaiting_approval) until the reconciliation_owner — or the governor, where the order seats that terminal — reads the proof-of-work contract and settles. Settling seals the reconciliation-record with reconciliation_state 'satisfied' and settled_by naming the seat that settled — and that seal is the ONLY door to that state: no model seat can rule its own work satisfied, and a completion sealed without a proof-of-work the sovereign settled is forbidden by the order that commissioned this standard. A defaulted record needs no settling to stand — it was sealed upstream — but the owner may still settle over it once the absences are cured."
+    }
+  ],
+  "input_types": [
+    "change-request"
+  ],
+  "output_types": [
+    "reconciliation-record"
+  ],
+  "description": "Reconciliation as a standing office over WORK ORDERS — the standard WO-F02 ('The Reconciliation', Documenso #1917537, signed 2026 and never built) owes, generalizing reconcile-gig-v0's shape from gigs to signed orders. It runs against the chancery schema's reconciliation contract: chancery_work_order.reconciliation_owner / reconciliation_budget / reconciliation_due_at / reconciliation_state ('pending'|'satisfied'|'defaulted'), the chancery_work_order_receipt table joining clauses to the sealed output chain, and the chancery_work_order_reconciliation_due sweep view the conductor fires — the arming door (signing requires owner + budget + due) guarantees every sealed order carries the contract this standard executes. Five offices: COLD-MAP (deterministic clause-to-receipt mapping, absences listed, no judgment, no spend), HOT-AUDIT (refutation that spends within the order's declared reconciliation_budget, every finding cited), PROOF-OF-WORK (the composed per-clause contract, content-addressed by the engine's own seal), DEFAULT-JUDGMENT (past reconciliation_due_at with clauses unreceipted reconciles as defaulted — sealed before the human seat so abandonment cannot hide behind an approval nobody gives), and SOVEREIGN-SETTLE (the parked human office: only the owner's settling records reconciliation_state 'satisfied'). ADICO, roughly: the reconciliation_owner [A] must reconcile every clause of the order [I] against sealed receipts [C: at reconciliation_due_at, swept regardless of completion signals] or the order defaults [O] — and the enforcement is structural, not hortatory: the sweep view fires on the date, the default seat cannot be parked, and 'satisfied' is unreachable except through the human seal.",
+  "reserve_pool": 12
+}

@@ -279,8 +279,14 @@ describe("#227 — the genome's declared required fields are dropped, not absent
     // say which, so a sealed adoption named no target and the caller had to know it out of band.
     // It declares its required fields (source, institution_slug), so it joins `checked` and does
     // not appear in the `lossy` census.
+    // 66 → 69: the reconcile-work-order-v0 set (WO-B06) added 3 types — reconciliation-map
+    // (extends Interpretation), proof-of-work-contract (extends Artifact) and
+    // reconciliation-record (extends Judgment) — the cold map, the composed proof of work,
+    // and the adjudicated record of a work order's reconciliation (WO-F02's owed mechanism).
+    // All 3 declare their required fields in `required_fields`, so they join `checked` and
+    // none appears in the `lossy` census.
     expect(checked).toHaveLength(genome.domain_types.size);
-    expect(checked.length).toBe(66);
+    expect(checked.length).toBe(69);
   });
 });
 

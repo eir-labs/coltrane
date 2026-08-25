@@ -1,0 +1,52 @@
+{
+  "slug": "reconciliation-record",
+  "version": 1,
+  "extends": "Judgment",
+  "domain": "software-change",
+  "status": "active",
+  "description": "The adjudicated (and, at the human seat, settled) reconciliation of a work order — the record whose reconciliation_state lands in chancery_work_order.reconciliation_state. Its state vocabulary is EXACTLY the DB check constraint ('pending' | 'satisfied' | 'defaulted'): the default-adjudicator seals 'defaulted' (past reconciliation_due_at with clauses unreceipted) or 'pending' (awaiting the sovereign); only the human settling seal records 'satisfied'. A defaulted record cites the absences that defaulted it — abandonment is shown, not summarized.",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "work_order_id": {
+        "type": "string",
+        "description": "The chancery_work_order.id this record reconciles."
+      },
+      "reconciliation_state": {
+        "type": "string",
+        "enum": [
+          "pending",
+          "satisfied",
+          "defaulted"
+        ],
+        "description": "Mirrors the chancery_work_order.reconciliation_state check constraint, byte for byte."
+      },
+      "proof_of_work_ref": {
+        "type": "string",
+        "description": "content_sha (or output id) of the sealed proof-of-work-contract this record rules on."
+      },
+      "basis": {
+        "type": "string",
+        "description": "The deterministic rule applied, restated with its inputs: past_due (yes/no), absent_count, and — for 'satisfied' — the settling seat."
+      },
+      "defaulted_clauses": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "For a 'defaulted' record: the clause_refs still absent at ruling time, copied from the cold map. Empty for other states."
+      },
+      "settled_by": {
+        "type": "string",
+        "description": "For a 'satisfied' record: the human seat that settled — the reconciliation_owner (or the governor, where the order names that terminal)."
+      }
+    }
+  },
+  "required_fields": [
+    "work_order_id",
+    "reconciliation_state",
+    "proof_of_work_ref",
+    "basis",
+    "input_refs"
+  ]
+}

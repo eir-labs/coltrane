@@ -5,7 +5,8 @@
     "INTERPRET"
   ],
   "input_types": [
-    "change-request"
+    "change-request",
+    "draft-agent-profile"
   ],
   "output_types": [
     "change-context"

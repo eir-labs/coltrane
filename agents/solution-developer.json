@@ -5,7 +5,9 @@
     "CREATE"
   ],
   "input_types": [
-    "project-charter"
+    "project-charter",
+    "subsystem-contract",
+    "repo-survey"
   ],
   "output_types": [
     "Artifact",

@@ -31,7 +31,10 @@ const GENOME_ROWS = {
     {
       slug: "scout",
       primitives: ["SENSE"],
-      input_types: [],
+      // scout consumes a Signal seed (seeded-entry-v0 feeds it one via the entry-chair typed seed,
+      // #156). Declaring it keeps input_contract ⊆ input_types — a chair may not feed an agent a type
+      // it never declared it consumes (the input_contract-vs-input_types gate).
+      input_types: ["Signal"],
       output_types: ["Signal"],
       domain: "demo",
       identity: "you are scout",

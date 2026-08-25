@@ -5,7 +5,9 @@
   ],
   "input_types": [
     "subsystem-contract",
-    "red-spec"
+    "red-spec",
+    "change-context",
+    "change-set"
   ],
   "output_types": [
     "change-verdict"

@@ -137,6 +137,16 @@ export interface ServerDeps {
    *  placement is admitted and runs are byte-identical; bootstrapServerDeps supplies the file
    *  backing, a deployment may supply its own. */
   placementResolver?: PlacementResolver | undefined;
+  /** The durable-registration seam (store-plane gap #2's engine half). tool_register's
+   *  process-local set dies with the request; a deployment that wires this lands every
+   *  registration in its durable registry BEFORE the slug becomes grantable, and a failed
+   *  landing refuses the registration — a tool granted in-session but absent from the
+   *  durable registry is the gap in reverse. Absent → bare/OSS behaviour is unchanged.
+   *  Same idiom as placementResolver/queueGig: the engine defines the hook and holds the
+   *  ordering; the deployment supplies the writer. No endpoint lives here. */
+  registerToolDurable?: ((row: {
+    slug: string; tool_type: unknown; spec: unknown; category: unknown; registration_id: string;
+  }) => Promise<void>) | undefined;
   invoke?: AgentInvoker | undefined;
   model_version?: string | undefined;
   // §13/skills — passed through to runGig so each invocation can resolve its
@@ -2435,6 +2445,29 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
           spec: args["spec"] ?? null,
           category: args["category"] ?? null,
         }));
+        // Durable BEFORE grantable (#218's discipline extended): when the deployment wires
+        // the seam, the registration must land in the durable registry before the slug can
+        // be granted, and a refused landing refuses the whole call — otherwise a tool exists
+        // in-session with an audit trail that dies with the process.
+        if (deps.registerToolDurable) {
+          try {
+            await deps.registerToolDurable({
+              slug: targetSlug,
+              tool_type: args["type"] ?? null,
+              spec: args["spec"] ?? null,
+              category: args["category"] ?? null,
+              registration_id,
+            });
+          } catch (e) {
+            return {
+              ok: false,
+              requires_approval: approval,
+              error: `tool_register: durable registration refused — ${(e as Error).message}. ` +
+                `The slug was NOT granted: a capability the durable registry refused must not ` +
+                `exist only in this process.`,
+            };
+          }
+        }
         REGISTERED_TOOL_SLUGS.add(targetSlug);
         // Keep the #185 provider bridge live: a freshly-registered tool must resolve for a same-
         // session agent_define→dispatch (the registry and provider map share lifecycle).

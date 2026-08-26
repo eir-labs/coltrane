@@ -140,8 +140,23 @@ const refuse = (code: RefusalCode, detail: string): RealizationRefusal => ({
  * On a Linux drain, credentials are file-based under HOME, so PATH+HOME already suffices and this
  * key is inert. USER is a USERNAME, not a credential — admitting it carries no secret material, so
  * the deny-by-default posture is unweakened; the allowlist grows by exactly one non-secret key.
+ *
+ * Why CLAUDE_CODE_OAUTH_TOKEN and CLAUDE_CONFIG_DIR are admitted: the same defect class one layer
+ * up — a seat that can spawn but cannot AUTHENTICATE. On a headless drain the CLI's auth is the
+ * OAuth token env var (no keychain, and HOME on a Fly box carries no credentials file); under
+ * {PATH,HOME,USER} every model call dies api_error with zero tokens and the invoker reports "no
+ * JSON object in model output — the model produced no answer (candidates: 0)" (measured, gig
+ * fc9bec41, engine 0.24.17 — the first venue-confined engine on a box whose 0.10.0 seats had
+ * inherited process.env wholesale and so authenticated by accident). The token IS a credential,
+ * but the invoker's deny-list already adjudicated this exact name: a seat is a `claude -p` process
+ * and that is how it authenticates TO RUN AT ALL — possession lets the holder run as Claude (the
+ * work the box was given), not act as the box (COLTRANE_DRAIN_KEY, which stays denied).
+ * CLAUDE_CONFIG_DIR is a pointer, not a credential: it is where the CLI's identity lives and where
+ * transcripts land — without it a drain seat's thread is written to an ephemeral HOME and lost.
  */
-export const SEAT_ENV_ALLOWLIST = ["PATH", "HOME", "USER"] as const;
+export const SEAT_ENV_ALLOWLIST = [
+  "PATH", "HOME", "USER", "CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CONFIG_DIR",
+] as const;
 
 /**
  * Build a seat's env as the allowlisted subset of the ambient environment. Only keys in

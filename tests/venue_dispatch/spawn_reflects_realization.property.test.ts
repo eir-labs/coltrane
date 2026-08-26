@@ -258,8 +258,50 @@ describe("spawn reflects venue realization — the seat env admits USER (macOS k
     const seat = r.seats.find((s) => s.agent_slug === "p")!;
     expect(seat.env["USER"]).toBe("seat-runner"); // admitted from the ambient env
     expect(seat.env["COLTRANE_TEST_KEYCHAIN_TOKEN"]).toBeUndefined(); // credential-shaped → still denied
-    // The allowlist grew by EXACTLY one non-secret key over the prior ['PATH','HOME'].
-    expect([...SEAT_ENV_ALLOWLIST].sort()).toEqual(["HOME", "PATH", "USER"]);
+    // The full membership is pinned in the Defect-3 law below — any future growth must touch
+    // that pin deliberately, the way Defect 3 touched this law's.
+    expect(SEAT_ENV_ALLOWLIST).toContain("USER");
+  });
+});
+
+describe("spawn reflects venue realization — the seat env AUTHENTICATES (headless token auth)", () => {
+  it("SEAT_ENV_ALLOWLIST admits CLAUDE_CODE_OAUTH_TOKEN + CLAUDE_CONFIG_DIR, box credentials stay denied, grows by exactly two keys", () => {
+    // Defect 3, the same class as Defects 1 and 2 one layer up: a seat that can SPAWN but cannot
+    // AUTHENTICATE. On a headless drain the CLI's auth is CLAUDE_CODE_OAUTH_TOKEN (no keychain), and
+    // its identity/config root is CLAUDE_CONFIG_DIR. Under {PATH,HOME,USER} the chair spawns, runs,
+    // and every model call dies api_error with zero tokens — the invoker then reports "no JSON
+    // object in model output — the model produced no answer (candidates: 0)". MEASURED, gig
+    // fc9bec41 on the eugene-studio drain, engine 0.24.17: the first venue-confined engine on a box
+    // whose 0.10.0 seats had inherited process.env wholesale and so authenticated by accident.
+    // Reproduced on the box: `env -i PATH=… HOME=… claude -p …` → is_error, terminal_reason
+    // "api_error", output_tokens 0. (CLAUDE_CONFIG_DIR also decides where transcripts land — under
+    // {PATH,HOME,USER} the gig left no thread on the volume, the tee's upstream going dark.)
+    //
+    // The token IS a credential — but the invoker's own deny-list adjudicated this name already:
+    // "`CLAUDE_CODE_OAUTH_TOKEN` deliberately is NOT here: a seat is a `claude -p` process and that
+    // is how it authenticates to run at all." Possession lets the holder run AS CLAUDE — the work
+    // the box was given — not act AS THE BOX (that is COLTRANE_DRAIN_KEY, which stays denied).
+    // CLAUDE_CONFIG_DIR is a pointer, not a credential. Pre-patch the allowlist is
+    // ['PATH','HOME','USER'], so both keys are undefined in seat.env and this FAILS.
+    const agent = testAgent({ slug: "p", primitives: ["SENSE"], allowed_tools: ["Read"] });
+    const ambientEnv: Record<string, string> = {
+      PATH: process.env["PATH"] ?? "/usr/bin",
+      HOME: process.env["HOME"] ?? "/tmp",
+      CLAUDE_CODE_OAUTH_TOKEN: "seat-run-auth",
+      CLAUDE_CONFIG_DIR: "/data/.claude",
+      COLTRANE_DRAIN_KEY: "the-box-itself", // the venue's whole identity: must NEVER reach a seat
+    };
+    const r = realize(room(["Read"]), { seats: [{ agent }], ambientEnv, gigId: "g-auth" });
+    if (!r.ok) throw new Error("realize refused a sound room");
+    const seat = r.seats.find((s) => s.agent_slug === "p")!;
+    expect(seat.env["CLAUDE_CODE_OAUTH_TOKEN"]).toBe("seat-run-auth"); // the seat's run-authentication
+    expect(seat.env["CLAUDE_CONFIG_DIR"]).toBe("/data/.claude"); // where the CLI's identity + threads live
+    expect(seat.env["COLTRANE_DRAIN_KEY"]).toBeUndefined(); // box identity stays out, whatever else grew
+    // The allowlist grew by EXACTLY two keys over Defect 2's ['PATH','HOME','USER'] — the full
+    // membership pin lives here, on the newest defect, so the next growth must rewrite this line.
+    expect([...SEAT_ENV_ALLOWLIST].sort()).toEqual(
+      ["CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CONFIG_DIR", "HOME", "PATH", "USER"],
+    );
   });
 });
 

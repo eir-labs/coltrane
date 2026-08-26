@@ -35,6 +35,8 @@ import * as fs from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { runGig, ResumeRefused, genomeHash, CORE_TO_PRIMITIVE, type AgentInvoker } from "./runtime.js";
+import { makeGigLogTee, gigLogBaseFromEnv } from "./gig_log_tee.js";
+import { defaultOutputsPersistDir } from "./outputs.js";
 import { loadRegistry, type Registry } from "./registry.js";
 import { createOutputStore, type OutputStore } from "./outputs.js";
 import { MemoryLedger } from "./ledger.js";
@@ -1068,7 +1070,12 @@ export async function workOnce(ctx: WorkerContext, deps: WorkOnceDeps): Promise<
     // `mcpServerConfigs: {}` (empty for an untrusted clone; see run_deps.ts header) is stated here as
     // the explicit argument the assembler requires, never a default. Door-specific fields (gig_id,
     // signal, checkpoints, resume_from, human) are spread onto the result below.
+    // The thread tee, on THE PATH GIGS ACTUALLY TAKE. The server's dispatch had
+    // this and the drain did not, so every production gig's thread went
+    // unrecorded at every engine version — found live, box configured, no files.
+    const tee = makeGigLogTee(gigLogBaseFromEnv(defaultOutputsPersistDir), claim.gig_id);
     const run = (resume: boolean): ReturnType<typeof runGig> => runGig(standard, claim.input, {
+      onProgress: tee,
       ...assembleRunDeps({
         outputs,
         ledger,

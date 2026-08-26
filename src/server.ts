@@ -9,6 +9,7 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprot
 import { z } from "zod";
 // The wire names of the reserved relay↔child methods (restart guard, venue/8). Defined by the
 // relay — the relay owns the conversation — and answered by the child handlers registered below.
+import { makeGigLogTee } from "./gig_log_tee.js";
 import { RUNNING_GIGS_METHOD, ABORT_FOR_RESTART_METHOD } from "./server_relay.js";
 import {
   MCP_TOOLS,
@@ -1345,12 +1346,12 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         // controller is never pruned out from under gig_abort.
         pruneGigRuns(runs);
         const logDir = deps.gig_log_base ? join(deps.gig_log_base, "gigs", gigId) : undefined;
+        const teeFn = makeGigLogTee(deps.gig_log_base, gigId);
         const onProgress = (ev: Parameters<typeof applyGigProgress>[1]): void => {
           applyGigProgress(state, ev);
           // tee each chair's child events to its own jsonl — the agent-layer log
-          if (logDir && ev.type === "agent_event") {
-            try { mkdirSync(logDir, { recursive: true }); appendFileSync(join(logDir, `${ev.role}.jsonl`), JSON.stringify(ev.event) + "\n"); } catch { /* best-effort */ }
-          }
+          // (the SHARED tee: one implementation for the server path and the drain path)
+          teeFn(ev);
           // compact milestone line to stderr (captured in the MCP log)
           const line = gigEventLogLine(gigId, ev);
           if (line) { try { process.stderr.write(line + "\n"); } catch { /* best-effort */ } }

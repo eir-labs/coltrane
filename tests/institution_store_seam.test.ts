@@ -26,11 +26,26 @@ describe("INV12 STORE/FILE ENVELOPE PARITY — the institution row shape cannot 
     expect(m![1], "GenomeClass must gain an 'institution' member — a class the file backing loads but the port cannot name is a drift seam").toMatch(/"institution"/);
   });
 
-  it("the PostgREST institution select rides the same {slug, definition} envelope as charts/venues", () => {
-    // Premise: charts/venues already use {slug, definition}. The institution row must match that
-    // envelope exactly — a bespoke column set is precisely how file and store drift.
-    expect(STORE_SRC, "charts {slug, definition} envelope premise").toMatch(/coltrane_charts\?select=slug,definition/);
-    expect(STORE_SRC, "venues {slug, definition} envelope premise").toMatch(/coltrane_venues\?select=slug,definition/);
+  it("the PostgREST institution select carries `definition` whole, as charts and venues do", () => {
+    // RE-STATED, not retired (A1+A2). This law's SUBJECT is chancery_institution, and that
+    // is unchanged and still asserted below. What changed is a PREMISE it cited: the venues
+    // envelope is no longer the literal string `select=slug,definition`, because
+    // coltrane_venues is VERSIONED and STATUSED and the loader must see those facts — reading
+    // slug+definition handed it every superseded row, and a repaired room reported as broken
+    // forever. That is not the drift this law guards against; it is the store's real shape.
+    //
+    // So the premise is restated as the PROPERTY it always meant rather than the spelling it
+    // happened to have: `definition` is selected WHOLE and is the validated file document. A
+    // venue may also carry the columns that identify WHICH definition is current; what it may
+    // not do is shred the document into bespoke columns, which is the actual drift seam.
+    expect(STORE_SRC, "charts carry definition whole").toMatch(/coltrane_charts\?select=[^"]*\bdefinition\b/);
+    expect(STORE_SRC, "venues carry definition whole").toMatch(/coltrane_venues\?select=[^"]*\bdefinition\b/);
+    // and the fields that made the restatement necessary are really there, so this premise
+    // cannot be satisfied by quietly reverting the envelope
+    for (const f of ["status", "version"]) {
+      expect(STORE_SRC, `venues select ${f} — the facts that distinguish a live room from history`)
+        .toMatch(new RegExp(`coltrane_venues\\?select=[^"]*\\b${f}\\b`));
+    }
     expect(
       STORE_SRC,
       "the institution store row must be the {slug, definition} envelope where definition IS the validated file document — not a bespoke shape",

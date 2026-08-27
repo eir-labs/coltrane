@@ -109,7 +109,7 @@ export function fileGenomeStore(root: string): GenomeStore {
 
 // The five genome tables and the columns the engine reads back. Row shapes are the
 // round-tripped Supabase schema (org_id is RLS's concern, not the engine's).
-const Q = {
+export const Q = {
   core_types: "coltrane_core_types?select=slug,primitive,base_schema,description",
   domain_types: "coltrane_domain_types?select=slug,version,extends,domain,status,schema,required_fields",
   agents:
@@ -118,7 +118,15 @@ const Q = {
   standards: "coltrane_standards?select=slug,version,status,domain,phases,input_types,output_types",
   skills: "coltrane_skills?select=slug,name,description,skill_md,tier,input_type,output_type,status",
   charts: "coltrane_charts?select=slug,definition",
-  venues: "coltrane_venues?select=slug,definition",
+  // A2 — SLUG AND DEFINITION WAS NOT ENOUGH. coltrane_venues is VERSIONED and STATUSED:
+  // a repair lands as v2 and v1 stays on the table as history. Reading slug+definition
+  // handed the loader every superseded row, which then failed the rules its own successor
+  // was authored to satisfy — and the error named the SLUG, so a perfectly repaired room
+  // reported as broken forever. Found by the verifier reading the ENGINE's oracle against
+  // production after the venue-contract repair landed: 8 load errors, the three repaired
+  // rooms still among them. org_id rides along so two orgs claiming one slug is a fact the
+  // loader can SEE rather than a collision it discovers by row order.
+  venues: "coltrane_venues?select=slug,version,status,org_id,definition",
   // The institution row rides the SAME {slug, definition} envelope charts and venues use, where
   // `definition` IS the multi-section file document the loader validates — so file and store backings
   // cannot drift (spec ITEM 4). The store backing / fetch is NOT built here (envelope string only);
@@ -341,18 +349,71 @@ export function reconstructGenome(rows: GenomeRows): LoadedGenome {
   const venues = new Map<string, Venue>();
 
   // venues before charts — a chart names a venue, exactly the loader's ordering.
-  for (const r of rows.venues ?? []) {
+  //
+  // A2 · ONLY ACTIVE ROWS ARE ROOMS. `status` is a STORE concept: the PostgREST backing
+  // selects it, the file backing has no such column. So a row that carries no status is
+  // taken as standing (a file genome has no versioning to disagree with), and a row that
+  // carries one must say `active`. Superseded and retired rows are not rooms with problems
+  // — they are not rooms, and reading them was the whole defect.
+  const liveVenueRows = (rows.venues ?? []).filter((r) => {
+    const st = r["status"];
+    return st === undefined || st === null || st === "active";
+  });
+
+  // A2 · TWO ACTIVE ROWS CLAIMING ONE NAME IS AN AMBIGUITY, NOT A RACE. Previously the
+  // second arrival threw "duplicate venue slug" and which room the genome held was a
+  // function of row order — a fact nobody declared. There is no caller and no org context
+  // at this layer (org_id is RLS's concern, stated above), so choosing between them would
+  // be a coin toss wearing a determinism costume. It refuses, naming every claimant, on the
+  // precedent set for principals: attribution is a fact, not a coin toss.
+  const bySlug = new Map<string, Row[]>();
+  for (const r of liveVenueRows) {
+    const k = typeof r["slug"] === "string" ? r["slug"] : "?";
+    bySlug.set(k, [...(bySlug.get(k) ?? []), r]);
+  }
+  for (const [k, rs] of bySlug) {
+    if (rs.length > 1) {
+      const claimants = rs.map((r) => `org ${String(r["org_id"] ?? "?")} v${String(r["version"] ?? "?")}`);
+      const msg = `ambiguous venue "${k}": ${rs.length} ACTIVE rows claim this name (${claimants.join(", ")}) `
+        + `— the engine will not pick one by row order`;
+      load_errors.push({ kind: "venue", path: `postgrest:coltrane_venues/${k}`, slug: k, error: msg });
+    }
+  }
+
+  for (const r of liveVenueRows) {
     const slug = typeof r["slug"] === "string" ? r["slug"] : null;
     const path = `postgrest:coltrane_venues/${slug ?? "?"}`;
+    if (slug !== null && (bySlug.get(slug)?.length ?? 0) > 1) continue;  // already reported
     try {
       const check = VenueSchema.safeParse(r["definition"]);
       if (!check.success) throw new Error(`venue schema validation failed — ${zodWhy(check.error.issues)}`);
       const defect = venueDefect(check.data);
       if (defect) throw new Error(defect);
-      if (venues.has(check.data.slug)) throw new Error(`duplicate venue slug "${check.data.slug}"`);
       venues.set(check.data.slug, check.data);
     } catch (e) {
-      load_errors.push({ kind: "venue", path, slug, error: e instanceof Error ? e.message : String(e) });
+      const msg = e instanceof Error ? e.message : String(e);
+      // A1 · A GENOME THAT FAILED TO LOAD IS NOT A GENOME. An ACTIVE room that cannot be
+      // read used to be filed in load_errors while the load returned successfully — so the
+      // engine served a genome in which the residency did not exist and said nothing to the
+      // caller who asked for one. An empty result and a broken read are indistinguishable
+      // downstream, and the empty one reads as healthy.
+      //
+      // THIS LOADER REPORTS; THE CONSUMER REFUSES. Two wrong answers preceded this one.
+      // First I gave reconstructGenome a `{diagnostic}` flag no caller set — dead code
+      // wearing the costume of a control. Then I removed it and made the refusal
+      // unconditional, on a law proving the only consumer was the drain worker: a law that
+      // grepped FOUR FILES IN THIS REPO and was true of them and false of the system. The
+      // consumer it could not see runs on production — coltrane-ui's src/lib/hosted-genome.ts
+      // imports GenomeStore from this package, and its genomeSurfaceSlice hands
+      // `load_errors` to the SERVED MCP's deps. That is where system_health is actually read.
+      // Every load_error seen there carries a `postgrest:` path, which only this file builds.
+      //
+      // So an unconditional throw here silences production's diagnostic on the next bad
+      // active room — the very hazard the dead flag was gesturing at, reintroduced by the
+      // fix for it. The rule belongs where the obligation is: this loader REPORTS, and the
+      // drain worker REFUSES TO RUN when anything failed to load. Fail-closed at the
+      // consumer that must not proceed, reporting intact for the one that must see.
+      load_errors.push({ kind: "venue", path, slug, error: `venue "${slug ?? "?"}" is active but could not be loaded — ${msg}` });
     }
   }
   for (const r of rows.charts ?? []) {

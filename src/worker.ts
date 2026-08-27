@@ -55,7 +55,7 @@ import {
   type GigCheckpoint, type CheckpointRole, type RunIdentity,
 } from "./reuse.js";
 import type { Standard, Chair } from "./composition.js";
-import type { LoadedGenome } from "./loader.js";
+import type { LoadedGenome, LoadError } from "./loader.js";
 import type { VenueRealizer } from "./venue_realizer.js";
 
 /** Where the org store is, and who is working. */
@@ -366,6 +366,77 @@ export function venueMayClaim(
  * the moment the next one is taken, so a compromised drain holds exactly one gig's authority and
  * only until that lease expires.
  */
+
+/**
+ * A WORKER DOES NOT RUN WORK AGAINST A GENOME WITH A HOLE IN IT.
+ *
+ * The loader REPORTS (its other consumer is the served MCP's system_health, which exists to
+ * show an operator what is broken and must not be silenced by a throw). The refusal belongs
+ * at the consumer that must not proceed — this worker, about to run a gig. A genome missing
+ * the room that gig is placed in is not a genome with a note attached; it is the wrong
+ * genome, and the run would be against a substrate nobody authored.
+ *
+ * Fail-closed on ANY load error, not only ones the gig appears to touch: "appears to touch"
+ * is a judgment made from the very genome that failed to load.
+ *
+ * EXTRACTED SO THE PROPERTY CAN BE DRIVEN. The verifier killed the previous version of this
+ * guard's law by Law 3: the law was a source regex (does worker.ts contain "load_errors.length",
+ * does "refusing to run" appear, is one before the other), so neutering the condition to
+ * `if (false)` while leaving the text in place kept it GREEN. A law that passes on a fake fix
+ * is not a law. The guard lives here, whole, so a test can call it with a genome that has a
+ * hole and watch it refuse — and so the call site is a bare invocation with no condition of
+ * its own to quietly disable.
+ */
+export function refuseUnlessLoaded(genome: {
+  load_errors: readonly LoadError[];
+  standards: { get(slug: string): unknown };
+}): void {
+  if (genome.load_errors.length === 0) return;
+  const named = genome.load_errors
+    .map((e) => `${e.kind} ${e.slug ?? e.path}: ${e.error}`)
+    .join("; ");
+  throw new Error(
+    `refusing to run: ${genome.load_errors.length} genome load error(s) — ${named}. ` +
+    `A gig runs against the genome as authored or it does not run.`,
+  );
+}
+
+
+/**
+ * The gig's standard, and the ORDER in which it is obtained.
+ *
+ * The order is the point, and it took a surviving mutant to get it right. The guard was
+ * already extracted and driven, with a `standards` map that detonates if consulted — which
+ * proves the GUARD is standards-blind but proves nothing about WHERE THE WORKER CALLS IT.
+ * The verifier moved the call to sit after `standards.get(...)`, it compiled, and all ten
+ * laws stayed green.
+ *
+ * With that move in place, a gig naming a missing standard on a broken genome dies with
+ * "claimed standard … is not in the org genome" — which is the WRONG STORY. The genome had a
+ * hole in it; the standard's absence is a symptom of the hole, not the fault. An operator
+ * told the wrong cause fixes the wrong thing.
+ *
+ * So the ordering stops being a fact about where two statements sit in a long function and
+ * becomes a property of one small one, which a law can drive: hole first, standard second,
+ * always.
+ */
+export function standardForRun<S>(
+  genome: {
+    load_errors: readonly LoadError[];
+    standards: { get(slug: string): S | undefined };
+  },
+  standardSlug: string,
+): S {
+  refuseUnlessLoaded(genome);
+  const standard = genome.standards.get(standardSlug);
+  if (!standard) {
+    throw new Error(
+      `claimed standard "${standardSlug}" is not in the org genome this token can read`,
+    );
+  }
+  return standard;
+}
+
 export async function claimNextGig(ctx: WorkerContext): Promise<ClaimedGig | null> {
   // ONE DERIVATION, and it is the same one the CLI door asks — Gap 4's whole point. This used to
   // re-derive `ctx.drainKey && ctx.instance` here, which is the second home the specification
@@ -970,13 +1041,8 @@ export async function workOnce(ctx: WorkerContext, deps: WorkOnceDeps): Promise<
     }
 
     const genome = await rpcGenomeStore(ctx).load();
-    const standard = genome.standards.get(claim.standard_slug);
-    if (!standard) {
-      throw new Error(
-        `claimed standard "${claim.standard_slug}" is not in the org genome this token can read` +
-        (genome.load_errors.length ? ` (${genome.load_errors.length} load error(s) — system_health has them)` : ""),
-      );
-    }
+
+    const standard = standardForRun(genome, claim.standard_slug);
     const registry = loadRegistry(genome);
     const stateRoot = workerStateRoot();
     // The mirror tier is where OUTPUT drain lives (the header drains from the runtime

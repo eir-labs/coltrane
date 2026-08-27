@@ -401,6 +401,42 @@ export function refuseUnlessLoaded(genome: {
   );
 }
 
+
+/**
+ * The gig's standard, and the ORDER in which it is obtained.
+ *
+ * The order is the point, and it took a surviving mutant to get it right. The guard was
+ * already extracted and driven, with a `standards` map that detonates if consulted — which
+ * proves the GUARD is standards-blind but proves nothing about WHERE THE WORKER CALLS IT.
+ * The verifier moved the call to sit after `standards.get(...)`, it compiled, and all ten
+ * laws stayed green.
+ *
+ * With that move in place, a gig naming a missing standard on a broken genome dies with
+ * "claimed standard … is not in the org genome" — which is the WRONG STORY. The genome had a
+ * hole in it; the standard's absence is a symptom of the hole, not the fault. An operator
+ * told the wrong cause fixes the wrong thing.
+ *
+ * So the ordering stops being a fact about where two statements sit in a long function and
+ * becomes a property of one small one, which a law can drive: hole first, standard second,
+ * always.
+ */
+export function standardForRun<S>(
+  genome: {
+    load_errors: readonly LoadError[];
+    standards: { get(slug: string): S | undefined };
+  },
+  standardSlug: string,
+): S {
+  refuseUnlessLoaded(genome);
+  const standard = genome.standards.get(standardSlug);
+  if (!standard) {
+    throw new Error(
+      `claimed standard "${standardSlug}" is not in the org genome this token can read`,
+    );
+  }
+  return standard;
+}
+
 export async function claimNextGig(ctx: WorkerContext): Promise<ClaimedGig | null> {
   // ONE DERIVATION, and it is the same one the CLI door asks — Gap 4's whole point. This used to
   // re-derive `ctx.drainKey && ctx.instance` here, which is the second home the specification
@@ -1006,15 +1042,7 @@ export async function workOnce(ctx: WorkerContext, deps: WorkOnceDeps): Promise<
 
     const genome = await rpcGenomeStore(ctx).load();
 
-    refuseUnlessLoaded(genome);
-
-    const standard = genome.standards.get(claim.standard_slug);
-    if (!standard) {
-      throw new Error(
-        `claimed standard "${claim.standard_slug}" is not in the org genome this token can read` +
-        (genome.load_errors.length ? ` (${genome.load_errors.length} load error(s) — system_health has them)` : ""),
-      );
-    }
+    const standard = standardForRun(genome, claim.standard_slug);
     const registry = loadRegistry(genome);
     const stateRoot = workerStateRoot();
     // The mirror tier is where OUTPUT drain lives (the header drains from the runtime

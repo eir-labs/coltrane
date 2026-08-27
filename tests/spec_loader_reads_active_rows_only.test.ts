@@ -39,7 +39,7 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { reconstructGenome, Q } from "../src/genome_store.js";
-import { refuseUnlessLoaded } from "../src/worker.js";
+import { refuseUnlessLoaded, standardForRun } from "../src/worker.js";
 
 const room = (slug: string, tools: string[] = ["Read"]) => ({
   slug,
@@ -199,12 +199,57 @@ describe("A1 · the loader REPORTS, the consumer REFUSES", () => {
       .not.toThrow();
   });
 
+  it("the HOLE is reported before the missing standard — the story must be the true one", () => {
+    // THE MUTANT THAT SURVIVED, and the law that kills it. The guard was already extracted
+    // and driven with a detonating `standards` map — which proves the GUARD is standards-blind
+    // and proves NOTHING about where the worker calls it. The verifier moved the call to sit
+    // after `standards.get(...)`; it compiled; all ten laws stayed green.
+    //
+    // With that move, a gig naming a missing standard on a broken genome dies with "claimed
+    // standard … is not in the org genome" — the WRONG STORY. The genome had a hole in it;
+    // the standard's absence is a symptom of the hole, not the fault. An operator told the
+    // wrong cause fixes the wrong thing, and this whole arc has been about oracles that
+    // report the wrong cause.
+    //
+    // Both faults are present at once ON PURPOSE: that is the only arrangement in which the
+    // ORDER is observable. With one fault, either order gives the same answer.
+    const holedAndMissing = {
+      load_errors: [{
+        kind: "venue" as const,
+        path: "postgrest:coltrane_venues/residency",
+        slug: "residency",
+        error: 'venue "residency" is active but could not be loaded — doors: present but not an object',
+      }],
+      standards: { get: (): undefined => undefined },   // the standard is ALSO absent
+    };
+
+    let err: Error | undefined;
+    try {
+      standardForRun(holedAndMissing, "software-change-red-first-v0");
+    } catch (e) {
+      err = e as Error;
+    }
+    expect(err).toBeDefined();
+    expect(err!.message, "the genome's hole is the cause, and must be the one reported")
+      .toContain("refusing to run");
+    expect(err!.message, "the standard's absence is a SYMPTOM and must not be blamed")
+      .not.toContain("not in the org genome");
+  });
+
+  it("a whole genome still reports a genuinely missing standard", () => {
+    // The other side, so the law above cannot be satisfied by always blaming the genome.
+    expect(() => standardForRun({ load_errors: [], standards: { get: () => undefined } }, "nope"))
+      .toThrow(/not in the org genome/);
+    expect(standardForRun({ load_errors: [], standards: { get: () => ({ slug: "s" }) } }, "s"))
+      .toEqual({ slug: "s" });
+  });
+
   it("(weaker, second clause) the call site is a bare invocation with no condition to disable", () => {
     // Deliberately NOT the law — the law is the two behavioural ones above. This only pins
     // that the guard is invoked unconditionally, so the whole of it lives in one function
     // where a mutant must edit the guard itself rather than quietly neuter a call site.
     const w = readFileSync(fileURLToPath(new URL("../src/worker.ts", import.meta.url)), "utf8");
-    expect(w).toMatch(/^\s*refuseUnlessLoaded\(genome\);\s*$/m);
+    expect(w).toMatch(/^\s*const standard = standardForRun\(genome, claim\.standard_slug\);\s*$/m);
   });
 
   it("no law here may claim a COMPLETE consumer set — the package boundary is real", () => {

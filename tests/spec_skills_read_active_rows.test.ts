@@ -87,14 +87,33 @@ describe("a skill's version history is a history, not a duplicate", () => {
   });
 
   it("the same slug in TWO ORGS is two skills, not a collision", () => {
-    // The scoping key is (org, slug). Without org_id in the envelope, two orgs each holding
-    // their own ledger-reconcile would have collided — and RLS scoping the fetch is not a
-    // reason to key wrongly here.
+    // RE-WRITTEN — the verifier proved the first version VACUOUS by Law 3. It used org-a v3
+    // beside org-b v1 and asserted only `load_errors == []`. With the org dropped from the
+    // key, org-a's v3 simply wins on version, org-b's row is silently discarded, no error is
+    // raised, and the law stays green while the defect it names is fully present. A "no
+    // error" assertion on a fixture that CANNOT COLLIDE is a description, not a law.
+    //
+    // The fixture now uses the SAME VERSION in both orgs, which is the only arrangement where
+    // the key is observable: with a correct (org, slug) key these are two different skills and
+    // there is nothing to reconcile; with a slug-only key they are one slug at one version —
+    // the ambiguity case — and the clash pass fires.
     const g = load([
-      skill({ org_id: "org-a", version: 3, description: "A's" }),
+      skill({ org_id: "org-a", version: 1, description: "A's" }),
       skill({ org_id: "org-b", version: 1, description: "B's" }),
     ]);
-    expect(g.load_errors).toEqual([]);
+    expect(
+      g.load_errors,
+      "two orgs holding the same slug at the same version are two skills, not a clash — a " +
+      "slug-only key reports them as ambiguous, which is how this law sees the defect",
+    ).toEqual([]);
+
+    // AND THE HONEST LIMITATION, stated rather than hidden: the genome's `skills` map is keyed
+    // by SLUG, so it cannot hold both at once and one of these two is what remains. The
+    // scoping fixed here is the RECONCILIATION (they are not treated as a version conflict);
+    // a slug-keyed genome serving two orgs at once is a larger question than this change, and
+    // pretending otherwise by asserting both survive would be asserting something false.
+    expect(g.skills.size, "one survives — the map is slug-keyed, which this law does not fix")
+      .toBe(1);
   });
 
   it("THE MUTANT (verifier's law 3): the envelope must carry status, version and org_id", () => {

@@ -38,7 +38,7 @@ const GENOME_ROWS = {
       behavioral_primitives: ["explorer", "critic"], permissions: {}, default_skills: [] },
   ],
   standards: [
-    { slug: "wire-run-v0", domain: "demo", status: "draft",
+    { slug: "wire-run-v0", domain: "demo", status: "active",  // the drain runs ACTIVE standards; a draft is not dispatchable
       phases: [{ name: "scan", chairs: [{ role: "scan", agent_slug: "scout", depends_on: [], input_contract: [], output_contract: ["Signal"], optional_outputs: [], required_skills: [] }] }],
       output_types: ["Signal"] },
   ],

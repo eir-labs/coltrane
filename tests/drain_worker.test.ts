@@ -52,7 +52,7 @@ const GENOME_ROWS = {
     {
       slug: "wire-run-v0",
       domain: "demo",
-      status: "draft",
+      status: "active",   // the drain runs ACTIVE standards — a draft is not dispatchable (sovereign's ruling)
       phases: [
         {
           name: "scan",
@@ -70,7 +70,7 @@ const GENOME_ROWS = {
     {
       slug: "seeded-entry-v0",
       domain: "demo",
-      status: "draft",
+      status: "active",   // the drain runs ACTIVE standards — a draft is not dispatchable (sovereign's ruling)
       input_types: ["Signal"],
       phases: [
         {
@@ -87,7 +87,7 @@ const GENOME_ROWS = {
     {
       slug: "approve-run-v0",
       domain: "demo",
-      status: "draft",
+      status: "active",   // the drain runs ACTIVE standards — a draft is not dispatchable (sovereign's ruling)
       phases: [
         {
           name: "scan",

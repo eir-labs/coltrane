@@ -99,6 +99,21 @@ export interface LoadedGenome {
   // Mutable: the live server shares this map as deps.standards so MCP write-path
   // tools (standard_compose) can make a definition dispatchable in-session.
   standards: Map<string, Standard>;
+  /**
+   * Standards at status `draft` — DELIBERATELY NOT IN `standards`.
+   *
+   * The sovereign's ruling: "drafts don't load into the drain genome". A draft is a thing
+   * being written; it is not part of what the drain runs, so a draft that cannot compose is
+   * the draft's problem and not a fault that holds the worker closed against unrelated work.
+   * Two of production's six load errors were exactly this.
+   *
+   * They are kept HERE rather than dropped, because dropping them turns "drafts do not load"
+   * into "drafts can never be promoted": standard_promote validates a promotion against the
+   * loaded genome, so a draft absent from every collection would be `notFound` and unpromotable
+   * forever. Separate collection, so the drain sees only what it runs and promote still sees
+   * what it must check.
+   */
+  draft_standards: Map<string, Standard>;
   // Mutable: shared as deps.skills so skill_define writes through to the live map.
   skills: Map<string, SkillRecord>;
   evals: Map<string, EvalRecord>;
@@ -631,7 +646,7 @@ export function loadGenome(
   load_errors.push(...tourRead.load_errors);
   const tours: ReadonlyMap<string, LoadedTour> = tourRead.tours;
 
-  return { core_types, domain_types, agents, standards, skills, evals, charts, venues, institutions, tours, bearing_laws, load_errors };
+  return { core_types, domain_types, agents, standards, draft_standards: new Map(), skills, evals, charts, venues, institutions, tours, bearing_laws, load_errors };
 }
 
 /**
@@ -701,7 +716,9 @@ export function loadLayeredGenome(roots: readonly string[]): LoadedGenome {
     }),
   );
 
-  return { core_types, domain_types, agents, standards, skills, evals, charts, venues, bearing_laws, load_errors, provenance };
+  // The file backing has no `status` column, so a genome directory has no drafts to
+  // separate — empty, which is the same shape a store genome with no drafts returns.
+  return { core_types, domain_types, agents, standards, draft_standards: new Map(), skills, evals, charts, venues, bearing_laws, load_errors, provenance };
 }
 
 /**

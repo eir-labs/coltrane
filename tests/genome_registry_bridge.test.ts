@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { loadRegistry, type LoadedGenome } from "../src";
 
 const genome: LoadedGenome = {
+  draft_standards: new Map(),
   core_types: new Map([
     ["Interpretation", { slug: "Interpretation", primitive: "INTERPRET", description: "", schema: {} }],
   ]),

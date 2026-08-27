@@ -281,7 +281,45 @@ export function reconstructGenome(rows: GenomeRows): LoadedGenome {
       // standards — phases jsonb is already the engine phase shape; the agents a standard
       // composes are the ones its chairs name. composeStandard is the loader's own gate.
       const standards = new Map<string, Standard>();
-      for (const r of standardRows) {
+
+      // A DRAFT IS NOT A PROMISE — the sovereign's ruling, and the venue rule one class over.
+      //
+      // Two of production's six load errors were DRAFT standards whose chairs feed an agent a
+      // type its input_types never declared. That is a real composition fault and the drain
+      // was right to dislike it — but it was reported as a fault of the DRAIN's genome, and it
+      // held the worker closed against work that had nothing to do with either draft. A draft
+      // is a thing being written. It is not part of what the drain runs, so its problems are
+      // not the drain's problems.
+      //
+      // NOT AN EXCUSE TO STOP CHECKING THEM: the composition rule still runs at PROMOTE, where
+      // it belongs. "Drafts do not load" must never quietly become "drafts are never checked",
+      // and a law holds that line — a draft that fails composition cannot be promoted.
+      //
+      // Reported as NOTHING, deliberately: a draft that cannot compose produces no load_error,
+      // because an error the operator cannot act on (they did not ask for the draft to run) is
+      // noise that trains people to ignore the list.
+      const isDraft = (r: Row) => r["status"] === "draft";
+      const liveStandardRows = standardRows.filter((r) => !isDraft(r));
+
+      // Drafts are parsed into their OWN map, not dropped: standard_promote validates against
+      // the loaded genome, so a draft absent from everything would be `notFound` and could
+      // never be promoted. They are parsed leniently — a draft that cannot even be read is
+      // simply not offered for promotion, and promote's own check is what refuses it there.
+      const draft_standards = new Map<string, Standard>();
+      for (const r of standardRows.filter(isDraft)) {
+        const slug = typeof r["slug"] === "string" ? r["slug"] : null;
+        if (!slug) continue;
+        draft_standards.set(slug, {
+          slug,
+          domain: r["domain"] ?? "",
+          phases: (r["phases"] ?? []) as readonly PhaseDef[],
+          input_types: r["input_types"] ?? [],
+          output_types: r["output_types"] ?? [],
+          status: "draft",
+        } as unknown as Standard);
+      }
+
+      for (const r of liveStandardRows) {
         const slug = typeof r["slug"] === "string" ? r["slug"] : null;
         const path = `postgrest:coltrane_standards/${slug ?? "?"}`;
         try {
@@ -348,7 +386,14 @@ export function reconstructGenome(rows: GenomeRows): LoadedGenome {
       }
       for (const [key, rs] of skillClash) {
         if (rs.length <= 1) continue;
-        const slug = key.split("\u0000")[1] ?? "?";
+        // The slug comes off the ROW, not off the composite key. Deriving it by splitting the
+        // key was fragile in a way the verifier's M4 exposed: with the org dropped from the
+        // key there is no separator, the split yields nothing at [1], and the error was
+        // reported against slug "?" — so the same-version law died for the WRONG CAUSE under
+        // that mutant. A law that dies for the wrong reason is as misleading as one that
+        // survives for the wrong reason, and this is the second time today a defect has come
+        // from reading a fact out of a derived string instead of off the thing itself.
+        const slug = typeof rs[0]?.["slug"] === "string" ? (rs[0]["slug"] as string) : "?";
         const how = rs.map((r) => `status ${String(r["status"] ?? "active")}`).join(", ");
         load_errors.push({
           kind: "skill",
@@ -484,7 +529,7 @@ export function reconstructGenome(rows: GenomeRows): LoadedGenome {
     }
   }
 
-  return { core_types, domain_types, agents, standards, skills, evals, charts, venues, load_errors };
+  return { core_types, domain_types, agents, standards, draft_standards, skills, evals, charts, venues, load_errors };
 }
 
 /** Hosted backing: load the genome from the store's five tables and reconstruct the SAME

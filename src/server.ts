@@ -121,6 +121,9 @@ export interface ServerDeps {
   // dispatcher reads — a definition made through the MCP surface is dispatchable
   // in the same session, not stale until re-bootstrap (T14 / manual-refresh gap).
   standards?: Map<string, Standard> | undefined;
+  /** Standards at `draft` — separate from `standards` so the drain runs only what is
+   *  promoted, while standard_promote can still find (and check) what it is promoting. */
+  draft_standards?: Map<string, Standard> | undefined;
   /** The loaded ARRANGEMENTS. Mutable for the same reason `standards` is: a chart authored through
    *  chart_define is dispatchable in the same session. Absent → chart_browse and a `chart_slug`
    *  dispatch say what bootstrap they need rather than reporting an empty genome. */
@@ -3000,7 +3003,16 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
             };
           }
         } else if (slug === "standard_promote" && deps.standards) {
-          if (!deps.standards.get(targetSlug)) return notFound("standard");
+          // A DRAFT IS THE COMMON CASE HERE, and drafts deliberately do NOT sit in
+          // `standards` (the sovereign's ruling: they do not load into the drain genome). If
+          // this looked only at `standards`, "drafts do not load" would silently become
+          // "drafts can never be promoted" — the definition would be notFound forever, and the
+          // one path that is supposed to CHECK a draft would be the one path that cannot see
+          // it. That is the failure the verifier named before this was built, so it is guarded
+          // here rather than discovered later.
+          if (!deps.standards.get(targetSlug) && !deps.draft_standards?.get(targetSlug)) {
+            return notFound("standard");
+          }
         } else if (slug === "skill_promote" && deps.skills) {
           const sk = deps.skills.get(targetSlug);
           if (!sk) return notFound("skill");
@@ -3962,6 +3974,7 @@ export function bootstrapServerDeps(genomeRoot?: string): ServerDeps {
     evals: genome.evals, // ← 5th-class eval substrate — runGig judges declared eval_slugs
     genome_dir: root, // ← genome-mutation tools persist + ledger-seal into the live genome
     load_errors: [...genome.load_errors], // ← Rob #129 — surfaced via system_health
+    draft_standards: new Map(genome.draft_standards), // ← promote can still see what the drain will not run
     agents: new Map(genome.agents), // ← Rob #130 + #132 — slug-resolve + reload-diff
     provenance: genome.provenance, // ← genome extension — which layer supplied each def
     gig_runs: new Map(), // ← async dispatch — live gig state gig_monitor reads

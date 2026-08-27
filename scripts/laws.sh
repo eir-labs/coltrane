@@ -37,6 +37,25 @@ EXPECTED_FAILURE_MODES_FILES="${EXPECTED_FAILURE_MODES_FILES:-5}"
 EXPECTED_HONEST_BROKER_FILES="${EXPECTED_HONEST_BROKER_FILES:-2}"
 EXPECTED_SECURITY_FILES="${EXPECTED_SECURITY_FILES:-1}"
 
+# THE FILES DELEGATED AWAY FROM THE ROOT BAND, by name.
+#
+# The verifier caught this message overclaiming: it said "plus every band, exact" while the
+# DOCKER band (test:room, tests/venue_live/vitest.config.ts, run by ci.yml) was the one band
+# nothing pinned. Her fix was EXPECTED_ROOM_FILES=1. Measuring it suggested a stronger law:
+# `find` sees 350 test files and the root band collects 347, and the three-file difference is
+# the whole of what any other config is responsible for.
+#
+# So instead of pinning one more count, this pins the DELEGATION ITSELF: the set of files the
+# root band does not collect must be EXACTLY this list. A file that leaves the root band —
+# excluded, moved under a band directory, or delegated to a new config — must be named here,
+# in the commit that moves it. That catches the room band (it is in the list), and it catches
+# the thing a room-band count could not: A TEST FILE THAT NO BAND RUNS AT ALL. A dead law
+# nobody executes reports nothing and passes forever, which is the same silence this whole
+# script exists to end, one level further out.
+EXPECTED_DELEGATED="tests/honest_broker/gig_dispatch.test.ts
+tests/honest_broker/recorder_append.test.ts
+tests/spec_venue_room_live.test.ts"
+
 # ONE run, not two: this suite is large enough that running it twice to count it is a real
 # cost, and a second run is also a second chance to disagree with the first.
 JSON_OUT="$(mktemp -t coltrane-laws-XXXXXX.json)"
@@ -99,6 +118,27 @@ band() {
     echo "REFUSED: band '$name' collected $n files, expected exactly $expected." >&2; return 1
   fi
 }
+# ── nothing is orphaned ───────────────────────────────────────────────────────────────
+# Needs no docker and no band run: it compares what is ON DISK against what the ROOT band
+# collected, which we already have.
+delegated_actual="$(python3 -c "
+import json,os,subprocess
+d=json.load(open('$JSON_OUT'))
+root={os.path.relpath(t['name'], os.getcwd()) for t in d.get('testResults',[])}
+disk=set(subprocess.run(['find','tests','-name','*.test.ts'],capture_output=True,text=True).stdout.split())
+print('\n'.join(sorted(disk-root)))
+")"
+if [ "$delegated_actual" != "$(printf '%s' "$EXPECTED_DELEGATED" | sort)" ]; then
+  echo "REFUSED: the files delegated away from the root band are not the ones declared." >&2
+  echo "  declared:" >&2; printf '%s\n' "$EXPECTED_DELEGATED" | sort | sed 's/^/    /' >&2
+  echo "  actual:"   >&2; printf '%s\n' "$delegated_actual"   | sed 's/^/    /' >&2
+  echo "  A file that leaves the root band must be named in EXPECTED_DELEGATED, in the" >&2
+  echo "  commit that moves it — otherwise a test nobody runs passes forever in silence." >&2
+  fail=1
+else
+  echo "  delegated: $(printf '%s\n' "$EXPECTED_DELEGATED" | wc -l | tr -d ' ') files, each declared"
+fi
+
 band failure-modes  test:failure-modes  "$EXPECTED_FAILURE_MODES_FILES"  || fail=1
 band honest-broker  test:honest-broker  "$EXPECTED_HONEST_BROKER_FILES"  || fail=1
 band security       test:security       "$EXPECTED_SECURITY_FILES"       || fail=1

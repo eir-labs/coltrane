@@ -1,5 +1,7 @@
 # Cross-environment test matrix. Sweeps typecheck + every deterministic band across
-# {ubuntu, macos} x {node 20, node 22}.
+# {ubuntu, macos} ON MAIN and ubuntu-only on pull requests — macOS is billed at
+# 10x and none of these jobs is platform-specific (see the `os:` comment below).
+# The cross-environment contract is kept; it runs where it pays.
 #
 # Failure on a single matrix cell isolates the regression to (OS, node-version);
 # see CI.md "Interpreting failures" for triage notes.
@@ -42,7 +44,18 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        # macOS runs ON PUSH TO MAIN, not on every pull request. GitHub bills
+        # macOS runners at 10x Linux, and none of these three job families is
+        # platform-specific: they are typecheck and deterministic test bands
+        # over a TypeScript package with no native dependencies, whose only
+        # deployment target is Linux (the fly.io drain). Sweeping macOS on
+        # every PR bought a signal nobody has acted on, at ten times the price,
+        # and it was the largest single multiplier in the account when the
+        # minutes ran out (2026-08-27). The cross-environment contract this
+        # file exists for is KEPT — it now runs where it pays: on main, before
+        # anything ships, instead of on every intermediate commit of every
+        # branch.
+        os: ${{ github.event_name == 'push' && fromJSON('["ubuntu-latest","macos-latest"]') || fromJSON('["ubuntu-latest"]') }}
         node: ["22.x"]
     steps:
       - uses: actions/checkout@v4
@@ -59,7 +72,18 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        # macOS runs ON PUSH TO MAIN, not on every pull request. GitHub bills
+        # macOS runners at 10x Linux, and none of these three job families is
+        # platform-specific: they are typecheck and deterministic test bands
+        # over a TypeScript package with no native dependencies, whose only
+        # deployment target is Linux (the fly.io drain). Sweeping macOS on
+        # every PR bought a signal nobody has acted on, at ten times the price,
+        # and it was the largest single multiplier in the account when the
+        # minutes ran out (2026-08-27). The cross-environment contract this
+        # file exists for is KEPT — it now runs where it pays: on main, before
+        # anything ships, instead of on every intermediate commit of every
+        # branch.
+        os: ${{ github.event_name == 'push' && fromJSON('["ubuntu-latest","macos-latest"]') || fromJSON('["ubuntu-latest"]') }}
         node: ["22.x"]
     steps:
       - uses: actions/checkout@v4
@@ -78,7 +102,18 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        # macOS runs ON PUSH TO MAIN, not on every pull request. GitHub bills
+        # macOS runners at 10x Linux, and none of these three job families is
+        # platform-specific: they are typecheck and deterministic test bands
+        # over a TypeScript package with no native dependencies, whose only
+        # deployment target is Linux (the fly.io drain). Sweeping macOS on
+        # every PR bought a signal nobody has acted on, at ten times the price,
+        # and it was the largest single multiplier in the account when the
+        # minutes ran out (2026-08-27). The cross-environment contract this
+        # file exists for is KEPT — it now runs where it pays: on main, before
+        # anything ships, instead of on every intermediate commit of every
+        # branch.
+        os: ${{ github.event_name == 'push' && fromJSON('["ubuntu-latest","macos-latest"]') || fromJSON('["ubuntu-latest"]') }}
         node: ["22.x"]
     steps:
       - uses: actions/checkout@v4

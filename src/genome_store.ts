@@ -211,14 +211,7 @@ export interface GenomeRows {
 
 /** Reconstruct the loader's in-memory genome shape from store rows — ONE reconstruction,
  *  shared by every backing, so a JWT-loaded genome and a ctk-loaded genome cannot drift. */
-/**
- * @param opts.diagnostic  Collect load failures into `load_errors` instead of refusing.
- *   ONLY the reporting path (genome_reload / system_health) may set this: those tools exist
- *   to show an operator what is broken, and a throw would silence them precisely when they
- *   matter. Every other caller gets a genome or an error — never a genome with a hole in it.
- */
-export function reconstructGenome(rows: GenomeRows, opts?: { diagnostic?: boolean }): LoadedGenome {
-  const diagnostic = opts?.diagnostic === true;
+export function reconstructGenome(rows: GenomeRows): LoadedGenome {
   const { core_types: coreRows, domain_types: typeRows, agents: agentRows, standards: standardRows, skills: skillRows } = rows;
   const load_errors: LoadError[] = [];
 
@@ -383,11 +376,7 @@ export function reconstructGenome(rows: GenomeRows, opts?: { diagnostic?: boolea
       const claimants = rs.map((r) => `org ${String(r["org_id"] ?? "?")} v${String(r["version"] ?? "?")}`);
       const msg = `ambiguous venue "${k}": ${rs.length} ACTIVE rows claim this name (${claimants.join(", ")}) `
         + `— the engine will not pick one by row order`;
-      if (diagnostic) {
-        load_errors.push({ kind: "venue", path: `postgrest:coltrane_venues/${k}`, slug: k, error: msg });
-      } else {
-        throw new Error(msg);
-      }
+      throw new Error(msg);
     }
   }
 
@@ -409,15 +398,16 @@ export function reconstructGenome(rows: GenomeRows, opts?: { diagnostic?: boolea
       // caller who asked for one. An empty result and a broken read are indistinguishable
       // downstream, and the empty one reads as healthy.
       //
-      // DIAGNOSTIC MODE EXISTS FOR ONE REASON: `genome_reload` / `system_health` are the
-      // tools you reach for to SEE what is broken, and they read load_errors. If they threw,
-      // the diagnostic would fail exactly when it is needed and the operator would be told
-      // nothing at all. So the reporting path collects; every other path refuses.
-      if (diagnostic) {
-        load_errors.push({ kind: "venue", path, slug, error: msg });
-      } else {
-        throw new Error(`venue "${slug ?? "?"}" is active but could not be loaded — ${msg}`);
-      }
+      // I FIRST BUILT A `{diagnostic}` ESCAPE HERE and the verifier caught it dead: no
+      // caller passed it, so the option was a comment wearing the costume of a control.
+      // Chasing that down settled the question it was invented for. THERE ARE TWO LOADERS.
+      // `system_health` and `genome_reload` read `deps.load_errors`, which comes from the
+      // FILE loader (loader.ts:555, untouched by this change) — they never call this
+      // function. reconstructGenome's ONLY consumer is the drain worker (worker.ts:972),
+      // about to run a gig. So there is no reporting caller to protect, and the refusal is
+      // unconditional: a worker must not run work against a genome with a room missing
+      // from it. If a store-backed diagnostic is ever wanted, it arrives WITH its caller.
+      throw new Error(`venue "${slug ?? "?"}" is active but could not be loaded — ${msg}`);
     }
   }
   for (const r of rows.charts ?? []) {

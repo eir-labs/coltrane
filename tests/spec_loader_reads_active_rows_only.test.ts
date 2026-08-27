@@ -36,6 +36,8 @@
 // would be precisely the silent row-order pick this file exists to end. (#131 set this
 // precedent for principals: "attribution is a fact, not a coin toss".)
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { reconstructGenome, Q } from "../src/genome_store.js";
 
 const room = (slug: string, tools: string[] = ["Read"]) => ({
@@ -140,5 +142,34 @@ describe("A1 · a genome that failed to load is not a genome", () => {
     const activeSlugs = new Set(rows.filter((r) => r.status === "active").map((r) => r.slug));
     expect(g.venues.size).toBe(activeSlugs.size);
     expect(new Set(g.venues.keys())).toEqual(activeSlugs);
+  });
+});
+
+describe("A1 · the refusal is unconditional because there is nobody to spare", () => {
+  it("reconstructGenome has exactly ONE consumer, and it is production work", () => {
+    // THE LAW THAT REPLACED A DEAD OPTION. I first gave reconstructGenome a
+    // `{diagnostic}` escape so the reporting tools could still see load_errors instead of
+    // throwing — and the verifier caught it DEAD: nothing passed it, so it was a comment
+    // wearing the costume of a control.
+    //
+    // Chasing that down settled the question. THERE ARE TWO LOADERS. `system_health` and
+    // `genome_reload` read `deps.load_errors`, sourced from the FILE loader (loader.ts),
+    // which this change never touched. reconstructGenome's only consumer is the drain
+    // worker, about to run a gig — and a worker must not run work against a genome with a
+    // room missing from it.
+    //
+    // So this law pins the premise the unconditional refusal rests on. The day someone adds
+    // a REPORTING caller on the store path, this fails and they are made to decide
+    // deliberately — rather than inheriting a throw that silences the diagnostic exactly
+    // when it is needed, which is the hazard the dead option was gesturing at.
+    const src = (f: string) =>
+      readFileSync(fileURLToPath(new URL(`../src/${f}`, import.meta.url)), "utf8")
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .replace(/(^|[^:])\/\/.*$/gm, "$1");
+    const importers = ["worker.ts", "server.ts", "cli.ts", "runtime.ts"]
+      .filter((f) => /\b(rpcGenomeStore|fileGenomeStore|agentTokenGenomeStore)\b/.test(src(f)));
+    expect(importers, "only the drain worker may construct a genome store").toEqual(["worker.ts"]);
+    expect(src("server.ts"), "the reporting tools must not reach the store loader")
+      .not.toMatch(/\breconstructGenome\b/);
   });
 });

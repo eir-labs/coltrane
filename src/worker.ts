@@ -55,7 +55,7 @@ import {
   type GigCheckpoint, type CheckpointRole, type RunIdentity,
 } from "./reuse.js";
 import type { Standard, Chair } from "./composition.js";
-import type { LoadedGenome } from "./loader.js";
+import type { LoadedGenome, LoadError } from "./loader.js";
 import type { VenueRealizer } from "./venue_realizer.js";
 
 /** Where the org store is, and who is working. */
@@ -366,6 +366,41 @@ export function venueMayClaim(
  * the moment the next one is taken, so a compromised drain holds exactly one gig's authority and
  * only until that lease expires.
  */
+
+/**
+ * A WORKER DOES NOT RUN WORK AGAINST A GENOME WITH A HOLE IN IT.
+ *
+ * The loader REPORTS (its other consumer is the served MCP's system_health, which exists to
+ * show an operator what is broken and must not be silenced by a throw). The refusal belongs
+ * at the consumer that must not proceed — this worker, about to run a gig. A genome missing
+ * the room that gig is placed in is not a genome with a note attached; it is the wrong
+ * genome, and the run would be against a substrate nobody authored.
+ *
+ * Fail-closed on ANY load error, not only ones the gig appears to touch: "appears to touch"
+ * is a judgment made from the very genome that failed to load.
+ *
+ * EXTRACTED SO THE PROPERTY CAN BE DRIVEN. The verifier killed the previous version of this
+ * guard's law by Law 3: the law was a source regex (does worker.ts contain "load_errors.length",
+ * does "refusing to run" appear, is one before the other), so neutering the condition to
+ * `if (false)` while leaving the text in place kept it GREEN. A law that passes on a fake fix
+ * is not a law. The guard lives here, whole, so a test can call it with a genome that has a
+ * hole and watch it refuse — and so the call site is a bare invocation with no condition of
+ * its own to quietly disable.
+ */
+export function refuseUnlessLoaded(genome: {
+  load_errors: readonly LoadError[];
+  standards: { get(slug: string): unknown };
+}): void {
+  if (genome.load_errors.length === 0) return;
+  const named = genome.load_errors
+    .map((e) => `${e.kind} ${e.slug ?? e.path}: ${e.error}`)
+    .join("; ");
+  throw new Error(
+    `refusing to run: ${genome.load_errors.length} genome load error(s) — ${named}. ` +
+    `A gig runs against the genome as authored or it does not run.`,
+  );
+}
+
 export async function claimNextGig(ctx: WorkerContext): Promise<ClaimedGig | null> {
   // ONE DERIVATION, and it is the same one the CLI door asks — Gap 4's whole point. This used to
   // re-derive `ctx.drainKey && ctx.instance` here, which is the second home the specification
@@ -971,28 +1006,7 @@ export async function workOnce(ctx: WorkerContext, deps: WorkOnceDeps): Promise<
 
     const genome = await rpcGenomeStore(ctx).load();
 
-    // A1 — A WORKER DOES NOT RUN WORK AGAINST A GENOME WITH A HOLE IN IT.
-    //
-    // The loader REPORTS (its other consumer is the served MCP's system_health, which exists
-    // to show an operator what is broken and must not be silenced by a throw). The refusal
-    // belongs HERE, at the consumer that must not proceed: this worker is about to run a gig,
-    // and a genome missing the room that gig is placed in is not a genome with a note
-    // attached — it is the wrong genome, and the run would be against a substrate nobody
-    // authored. An empty result and a broken read are indistinguishable downstream, and the
-    // empty one reads as healthy.
-    //
-    // Fail-closed on ANY load error, not only ones this gig appears to touch: "appears to
-    // touch" is a judgment made from the very genome that failed to load, so it is exactly
-    // the thing that cannot be trusted here.
-    if (genome.load_errors.length > 0) {
-      const named = genome.load_errors
-        .map((e) => `${e.kind} ${e.slug ?? e.path}: ${e.error}`)
-        .join("; ");
-      throw new Error(
-        `refusing to run: ${genome.load_errors.length} genome load error(s) — ${named}. ` +
-        `A gig runs against the genome as authored or it does not run.`,
-      );
-    }
+    refuseUnlessLoaded(genome);
 
     const standard = genome.standards.get(claim.standard_slug);
     if (!standard) {

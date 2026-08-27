@@ -39,6 +39,7 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { reconstructGenome, Q } from "../src/genome_store.js";
+import { refuseUnlessLoaded } from "../src/worker.js";
 
 const room = (slug: string, tools: string[] = ["Read"]) => ({
   slug,
@@ -152,26 +153,58 @@ describe("A1 · the loader REPORTS, the consumer REFUSES", () => {
       .replace(/(^|[^:])\/\/.*$/gm, "$1");
 
   it("the drain worker refuses to run when ANYTHING failed to load", () => {
-    // THE REFUSAL LIVES HERE, and getting it here took two wrong answers worth recording.
-    // First a `{diagnostic}` flag no caller set — dead code wearing the costume of a control.
-    // Then an unconditional throw in the loader, justified by a law that grepped four files
-    // in THIS repo and concluded the drain worker was the only consumer. That law was true of
-    // those files and false of the system: coltrane-ui's src/lib/hosted-genome.ts imports this
-    // package's GenomeStore and hands `load_errors` to the SERVED MCP, which is where
-    // system_health is actually read. The unconditional throw would have silenced production's
-    // diagnostic on the next bad room — the exact hazard the dead flag was gesturing at,
-    // reintroduced by the fix for it.
+    // DRIVEN, NOT SPELLED. The previous version of this law was a source regex — does
+    // worker.ts contain "load_errors.length", does "refusing to run" appear, is one before
+    // the other — and the verifier killed it by Law 3: neutering the condition to
+    // `if (false)` while leaving the TEXT in place kept the law GREEN. A law that passes on
+    // a fake fix is not a law, it is a description of the file. So the guard was extracted
+    // and this calls it.
     //
-    // So the obligation is placed where it belongs: the loader reports, and the consumer that
-    // MUST NOT PROCEED refuses. Fail-closed on ANY load error, not only ones this gig looks
-    // like it touches — "looks like it touches" is a judgment made from the very genome that
-    // failed to load.
-    const w = src("src/worker.ts");
-    expect(w, "the worker must consult load_errors before running").toMatch(/load_errors\.length/);
-    expect(w, "and refuse, not merely mention them").toMatch(/refusing to run/);
-    const idx = w.indexOf("load_errors.length");
-    const std = w.indexOf("genome.standards.get");
-    expect(idx, "the refusal must come BEFORE the gig's work is resolved").toBeLessThan(std);
+    // THE ORDER IS PART OF THE PROPERTY, and it is asserted the only honest way: with a
+    // `standards` map that DETONATES if consulted. If the refusal ever moved after the gig's
+    // standard is resolved, a missing standard would mask it and the operator would be told
+    // the wrong thing about why their gig died.
+    const boom = {
+      get(): never {
+        throw new Error("standards.get was consulted before the genome was checked");
+      },
+    };
+    const holed = {
+      load_errors: [{
+        kind: "venue" as const,
+        path: "postgrest:coltrane_venues/residency",
+        slug: "residency",
+        error: 'venue "residency" is active but could not be loaded — doors: present but not an object',
+      }],
+      standards: boom,
+    };
+
+    let err: Error | undefined;
+    try {
+      refuseUnlessLoaded(holed);
+    } catch (e) {
+      err = e as Error;
+    }
+    expect(err, "a genome with a hole in it must stop the run").toBeDefined();
+    expect(err!.message, "the refusal is the genome one, not the standards one")
+      .toContain("refusing to run");
+    expect(err!.message, "and it names the kind").toContain("venue");
+    expect(err!.message, "and the room").toContain("residency");
+    expect(err!.message, "and the rule it broke").toContain("doors");
+  });
+
+  it("a whole genome runs — the guard narrows to the defect and nothing else", () => {
+    // Without this, `throw always` would satisfy the law above and stop every gig forever.
+    expect(() => refuseUnlessLoaded({ load_errors: [], standards: { get: () => undefined } }))
+      .not.toThrow();
+  });
+
+  it("(weaker, second clause) the call site is a bare invocation with no condition to disable", () => {
+    // Deliberately NOT the law — the law is the two behavioural ones above. This only pins
+    // that the guard is invoked unconditionally, so the whole of it lives in one function
+    // where a mutant must edit the guard itself rather than quietly neuter a call site.
+    const w = readFileSync(fileURLToPath(new URL("../src/worker.ts", import.meta.url)), "utf8");
+    expect(w).toMatch(/^\s*refuseUnlessLoaded\(genome\);\s*$/m);
   });
 
   it("no law here may claim a COMPLETE consumer set — the package boundary is real", () => {

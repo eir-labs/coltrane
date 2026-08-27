@@ -75,7 +75,7 @@
     "build": "tsc && cp src/skill_runner.mjs dist/src/ && chmod +x dist/src/server_entry.js dist/src/server_relay.js dist/src/cli_entry.js",
     "dev": "tsc --watch",
     "prepare": "npm run build",
-    "test": "vitest run",
+    "test": "bash scripts/laws.sh",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "verify": "tsc --noEmit && vitest run && npm run test:failure-modes && npm run test:honest-broker && npm run test:security && npm run e2e:offline && npm run test:room",

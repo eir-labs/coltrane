@@ -3010,8 +3010,50 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
           // one path that is supposed to CHECK a draft would be the one path that cannot see
           // it. That is the failure the verifier named before this was built, so it is guarded
           // here rather than discovered later.
-          if (!deps.standards.get(targetSlug) && !deps.draft_standards?.get(targetSlug)) {
-            return notFound("standard");
+          const std = deps.standards.get(targetSlug) ?? deps.draft_standards?.get(targetSlug);
+          if (!std) return notFound("standard");
+
+          // THE COMPOSITION GATE, and it did not exist before drafts stopped loading.
+          //
+          // standard_promote only ever checked EXISTENCE, because the loader refused a
+          // non-composing standard and nothing could reach promote without having loaded.
+          // Once drafts stop loading, that stops being true: the only path that can check a
+          // draft becomes the only path that never did. "Drafts do not load" would then mean
+          // "drafts are never checked", which is worse than the defect it replaced — the two
+          // production standards that started all this fail exactly this rule.
+          //
+          // The check is the LOADER'S OWN (composeStandard), not a parallel one. A promote
+          // that validates differently from the load is the drift this file already names as
+          // the cause of #254, and it is the two-doors-disagreeing shape this whole arc has
+          // been closing.
+          if (deps.agents) {
+            const phases = (std.phases ?? []) as readonly PhaseDef[];
+            const chairAgentSlugs = [
+              ...new Set(phases.flatMap((p) => (p.chairs ?? []).map((c) => c.agent_slug).filter((x): x is string => !!x))),
+            ];
+            try {
+              const resolved: Agent[] = chairAgentSlugs.map((aslug) => {
+                const a = deps.agents?.get(aslug);
+                if (!a) throw new CompositionError(`references unknown agent "${aslug}"`);
+                return a;
+              });
+              // Same shape the loader passes, agents included — one gate, one call site idiom.
+              composeStandard({
+                slug: std.slug,
+                domain: std.domain ?? "",
+                agents: resolved,
+                phases,
+                status: "active",
+                ...(Array.isArray(std.input_types) ? { input_types: std.input_types as string[] } : {}),
+                ...(Array.isArray(std.output_types) ? { output_types: std.output_types as string[] } : {}),
+              } as never);
+            } catch (e) {
+              return {
+                ok: false, requires_approval: approval,
+                error: `${slug}: standard "${targetSlug}" does not compose and must not become `
+                     + `"${target}" — ${(e as Error).message}`,
+              };
+            }
           }
         } else if (slug === "skill_promote" && deps.skills) {
           const sk = deps.skills.get(targetSlug);

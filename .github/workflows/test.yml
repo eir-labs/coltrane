@@ -92,8 +92,11 @@ jobs:
           node-version: ${{ matrix.node }}
           cache: "npm"
       - run: npm ci
-      # The fast unit band (root vitest.config.ts). The other bands are separate jobs below —
-      # `npx vitest run` reaches none of them, which is how four configs went unexecuted.
+      # `npm test` is now scripts/laws.sh — the EXACT count gate, not a bare `vitest run`.
+      # It runs the root band and then asserts every band's file count, so a DELETED law
+      # cannot pass by simply reporting a smaller number (verifier n=232: the suite went
+      # 3458 -> 3487 in a day with nothing asserting what it should be). The guard lives
+      # where the developer runs, and CI calls the same script rather than duplicating it.
       - run: npm test
 
   bands:

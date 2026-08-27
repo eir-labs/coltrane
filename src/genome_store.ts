@@ -116,7 +116,12 @@ export const Q = {
     "coltrane_agent_profiles?select=slug,version,status,primitives,input_types,output_types,domain," +
     "identity,method,constraints,depth_profile,permissions,behavioral_primitives,skill_slots,default_skills,carried_skills",
   standards: "coltrane_standards?select=slug,version,status,domain,phases,input_types,output_types",
-  skills: "coltrane_skills?select=slug,name,description,skill_md,tier,input_type,output_type,status",
+  // Same gap venues had, one class over: no `version`, no `org_id`. coltrane_skills is
+  // versioned, so skill_evolve minting v2 leaves v1 on the table — and the loader, seeing
+  // two rows for one slug, threw "duplicate skill slug" and named the SLUG. A live skill
+  // reporting as broken because its own history sits beside it. Found on production:
+  // ledger-reconcile v1 and v2, BOTH active, same org, minted 39 minutes apart.
+  skills: "coltrane_skills?select=slug,version,org_id,name,description,skill_md,tier,input_type,output_type,status",
   charts: "coltrane_charts?select=slug,definition",
   // A2 — SLUG AND DEFINITION WAS NOT ENOUGH. coltrane_venues is VERSIONED and STATUSED:
   // a repair lands as v2 and v1 stays on the table as history. Reading slug+definition
@@ -313,12 +318,53 @@ export function reconstructGenome(rows: GenomeRows): LoadedGenome {
       // skills — the row's skill_md IS the loaded reasoning half (`md`, the prompt's Skills
       // layer). Hosted skills carry no local package dir / code half by construction.
       const skills = new Map<string, SkillRecord>();
-      for (const r of skillRows) {
+      // WHICH ROWS ARE SKILLS — the venue rule, one class over, with one difference that
+      // matters. Venues could filter to `active` alone because a superseded room is not a
+      // room. Skills carry three statuses and the engine defaults a missing one to "active"
+      // (see the domain_types loop above), which says a DEPRECATED skill is still meant to
+      // load: deprecated means "do not reach for this", not "this does not exist". Dropping
+      // deprecated rows to fix a duplicate would silently remove skills that are in use.
+      // So: RETIRED is ignored; deprecated and active both stand.
+      const liveSkillRows = skillRows.filter((r) => {
+        const st = r["status"];
+        return st === undefined || st === null || st !== "retired";
+      });
+
+      // AMONG SURVIVORS, THE HIGHEST VERSION PER (org, slug) WINS — because that is what a
+      // version IS. Two rows at the SAME version claiming one slug is not a version history,
+      // it is contradictory data, and it REFUSES naming both: picking would be the row-order
+      // coin toss this loader has now been cured of twice.
+      const bestSkill = new Map<string, Row>();
+      const skillClash = new Map<string, Row[]>();
+      for (const r of liveSkillRows) {
+        const slug = typeof r["slug"] === "string" ? r["slug"] : null;
+        if (!slug) continue;
+        const key = `${String(r["org_id"] ?? "")}\u0000${slug}`;
+        const cur = bestSkill.get(key);
+        const v = Number(r["version"] ?? 1);
+        const cv = cur ? Number(cur["version"] ?? 1) : -Infinity;
+        if (!cur || v > cv) { bestSkill.set(key, r); skillClash.set(key, [r]); }
+        else if (v === cv) { skillClash.set(key, [...(skillClash.get(key) ?? []), r]); }
+      }
+      for (const [key, rs] of skillClash) {
+        if (rs.length <= 1) continue;
+        const slug = key.split("\u0000")[1] ?? "?";
+        const how = rs.map((r) => `status ${String(r["status"] ?? "active")}`).join(", ");
+        load_errors.push({
+          kind: "skill",
+          path: `postgrest:coltrane_skills/${slug}`,
+          slug,
+          error: `ambiguous skill "${slug}": ${rs.length} rows share one version (${how}) — `
+               + `a version history has one row per version, and the engine will not pick by row order`,
+        });
+        bestSkill.delete(key);
+      }
+
+      for (const r of bestSkill.values()) {
         const slug = typeof r["slug"] === "string" ? r["slug"] : null;
         const path = `postgrest:coltrane_skills/${slug ?? "?"}`;
         try {
           if (!slug) throw new Error(`missing required "slug" field`);
-          if (skills.has(slug)) throw new Error(`duplicate skill slug "${slug}"`);
           const meta: Row = {
             slug,
             description: r["description"] ?? undefined,

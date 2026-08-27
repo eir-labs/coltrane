@@ -1068,6 +1068,17 @@ export const DEVICE_CLASSES = VenueDeviceClassSchema.options;
  *  CLASSES it needs (never material). Modelled on what a room declares and deliberately NOT
  *  `.strict()`, so a future transport-specific field is an addition rather than a breaking change —
  *  the sub-schema is inferred from the contract's own shape, not a formally frozen surface. */
+/** The transports a venue may declare. `transport` was a bare `z.string()` so that a future
+ *  transport could be an addition rather than a breaking change — but the effect was that NOTHING
+ *  checked it: `"http"` passed unvalidated, and so did `"banana"`. Rule 2 below only ever spoke
+ *  about `stdio` and `sse`, so any other spelling — including a typo — declared a server the
+ *  realizer would then hand to a client that has never heard of it, discovered at use.
+ *
+ *  So the set is NAMED, and it grows by a deliberate one-line edit here plus teaching
+ *  buildMcpConfigs() what the new transport means — the same discipline as this repo's exact
+ *  law-count pins: openness to the future is kept, silent acceptance of nonsense is not. */
+export const KNOWN_TRANSPORTS = ["stdio", "sse", "http"] as const;
+
 export const VenueMcpServerSchema = z.object({
   slug: z.string(),
   transport: z.string(),
@@ -1181,18 +1192,33 @@ export const VenueSchema = VenueObjectSchema.superRefine((venue, ctx) => {
   venue.mcp_servers.forEach((server, i) => {
     // Rule 2 — each transport owes the one field that makes it reachable: a command for stdio, a url
     // for sse. A declaration that cannot be acted on is not a declaration.
-    if (server.transport === "stdio" && server.command.length === 0) {
+    if (!(KNOWN_TRANSPORTS as readonly string[]).includes(server.transport)) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        path: ["mcp_servers", i, "command"],
-        message: `mcp server "${server.slug}" uses transport "stdio" but declares no command — a stdio server is reached by the command that launches it`,
+        path: ["mcp_servers", i, "transport"],
+        message:
+          `mcp server "${server.slug}" declares transport "${server.transport}", which this engine ` +
+          `does not know (${KNOWN_TRANSPORTS.join(", ")}). An unknown transport is not a future ` +
+          `transport — it is a declaration the realizer cannot act on, discovered at use. Adding one ` +
+          `is a deliberate edit of KNOWN_TRANSPORTS plus teaching buildMcpConfigs what it means.`,
       });
-    }
-    if (server.transport === "sse" && !server.url) {
+    } else if (server.transport === "stdio") {
+      // Rule 2, generalized. Each transport owes the ONE field that makes it reachable: a command
+      // for the process the realizer execs, a url for everything reached over the wire. This used
+      // to name only stdio and sse by hand, so `http` — the transport three live rooms actually
+      // use — owed nothing and was checked by nobody.
+      if (server.command.length === 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["mcp_servers", i, "command"],
+          message: `mcp server "${server.slug}" uses transport "stdio" but declares no command — a stdio server is reached by the command that launches it`,
+        });
+      }
+    } else if (!server.url) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["mcp_servers", i, "url"],
-        message: `mcp server "${server.slug}" uses transport "sse" but declares no url — an sse server is reached by the url it connects to`,
+        message: `mcp server "${server.slug}" uses transport "${server.transport}" but declares no url — an over-the-wire server is reached by the url it connects to`,
       });
     }
 

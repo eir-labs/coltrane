@@ -85,16 +85,21 @@ describe("A2 · the loader reads ACTIVE rows, at their current version", () => {
     expect(g.load_errors).toEqual([]);
   });
 
-  it("two ACTIVE rooms claiming one name is an ambiguity, and it refuses naming both", () => {
-    // Not a pick. The loader has no caller and no org context (org_id is RLS's concern,
-    // genome_store.ts:111), so choosing between them would be a row-order coin toss wearing
-    // a determinism costume.
-    expect(() =>
-      load([
-        { slug: "dev", version: 1, status: "active", org_id: "org-a", definition: room("dev") },
-        { slug: "dev", version: 1, status: "active", org_id: "org-b", definition: room("dev") },
-      ]),
-    ).toThrow(/dev/);
+  it("two ACTIVE rooms claiming one name is an ambiguity, REPORTED naming both claimants", () => {
+    // Not a pick. Choosing between them would be a row-order coin toss wearing a determinism
+    // costume — there is no caller and no org context here (org_id is RLS's concern,
+    // genome_store.ts:111). RE-STATED from `toThrow`: the loader reports and the drain worker
+    // refuses (see the A1 block below for why the refusal moved), so the assertion is that
+    // the ambiguity is RECORDED with both claimants, and neither room is silently adopted.
+    const g = load([
+      { slug: "dev", version: 1, status: "active", org_id: "org-a", definition: room("dev") },
+      { slug: "dev", version: 1, status: "active", org_id: "org-b", definition: room("dev") },
+    ]);
+    expect(g.venues.has("dev"), "neither claimant may be adopted").toBe(false);
+    const e = g.load_errors.find((x) => x.slug === "dev");
+    expect(e, "the ambiguity is reported").toBeDefined();
+    expect(e!.error).toContain("org-a");
+    expect(e!.error).toContain("org-b");
   });
 
   it("THE MUTANT (verifier's law 3): with the old slug-only select, bar 1 breaks", () => {
@@ -110,25 +115,20 @@ describe("A2 · the loader reads ACTIVE rows, at their current version", () => {
 });
 
 describe("A1 · a genome that failed to load is not a genome", () => {
-  it("an unloadable ACTIVE room REFUSES the load, naming the slug and the rule", () => {
+  it("an unloadable ACTIVE room is REPORTED, naming the slug and the rule", () => {
     // The residency is the room every resident Envoy is placed in. When it failed
     // VenueSchema it went into load_errors and the load returned "successfully" — so the
     // engine served a genome in which that room did not exist, and said nothing. An empty
     // result and a broken read are indistinguishable downstream, and the empty one reads as
     // healthy.
-    let err: Error | undefined;
-    try {
-      load([
-        { slug: "residency", version: 2, status: "active", org_id: "org-a", definition: { slug: "residency" } },
-      ]);
-    } catch (e) {
-      err = e as Error;
-    }
-    expect(err, "an active row that cannot be loaded must REFUSE, not be filed as a note")
-      .toBeDefined();
-    expect(err!.message, "the refusal names the room").toContain("residency");
-    expect(err!.message.length, "and names the rule it broke, not just that it broke")
-      .toBeGreaterThan("residency".length + 10);
+    const g = load([
+      { slug: "residency", version: 2, status: "active", org_id: "org-a", definition: { slug: "residency" } },
+    ]);
+    const e = g.load_errors.find((x) => x.slug === "residency");
+    expect(e, "an active row that cannot be loaded is reported").toBeDefined();
+    expect(e!.error, "names the room").toContain("residency");
+    expect(e!.error, "and the rule it broke, not just that it broke").toMatch(/could not be loaded/);
+    expect(g.venues.has("residency"), "and is NOT quietly present").toBe(false);
   });
 
   it("loaded venues == active rows in scope — the verifier's bar, stated as an equation", () => {
@@ -145,31 +145,54 @@ describe("A1 · a genome that failed to load is not a genome", () => {
   });
 });
 
-describe("A1 · the refusal is unconditional because there is nobody to spare", () => {
-  it("reconstructGenome has exactly ONE consumer, and it is production work", () => {
-    // THE LAW THAT REPLACED A DEAD OPTION. I first gave reconstructGenome a
-    // `{diagnostic}` escape so the reporting tools could still see load_errors instead of
-    // throwing — and the verifier caught it DEAD: nothing passed it, so it was a comment
-    // wearing the costume of a control.
+describe("A1 · the loader REPORTS, the consumer REFUSES", () => {
+  const src = (repoRel: string) =>
+    readFileSync(fileURLToPath(new URL(`../${repoRel}`, import.meta.url)), "utf8")
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/(^|[^:])\/\/.*$/gm, "$1");
+
+  it("the drain worker refuses to run when ANYTHING failed to load", () => {
+    // THE REFUSAL LIVES HERE, and getting it here took two wrong answers worth recording.
+    // First a `{diagnostic}` flag no caller set — dead code wearing the costume of a control.
+    // Then an unconditional throw in the loader, justified by a law that grepped four files
+    // in THIS repo and concluded the drain worker was the only consumer. That law was true of
+    // those files and false of the system: coltrane-ui's src/lib/hosted-genome.ts imports this
+    // package's GenomeStore and hands `load_errors` to the SERVED MCP, which is where
+    // system_health is actually read. The unconditional throw would have silenced production's
+    // diagnostic on the next bad room — the exact hazard the dead flag was gesturing at,
+    // reintroduced by the fix for it.
     //
-    // Chasing that down settled the question. THERE ARE TWO LOADERS. `system_health` and
-    // `genome_reload` read `deps.load_errors`, sourced from the FILE loader (loader.ts),
-    // which this change never touched. reconstructGenome's only consumer is the drain
-    // worker, about to run a gig — and a worker must not run work against a genome with a
-    // room missing from it.
-    //
-    // So this law pins the premise the unconditional refusal rests on. The day someone adds
-    // a REPORTING caller on the store path, this fails and they are made to decide
-    // deliberately — rather than inheriting a throw that silences the diagnostic exactly
-    // when it is needed, which is the hazard the dead option was gesturing at.
-    const src = (f: string) =>
-      readFileSync(fileURLToPath(new URL(`../src/${f}`, import.meta.url)), "utf8")
-        .replace(/\/\*[\s\S]*?\*\//g, "")
-        .replace(/(^|[^:])\/\/.*$/gm, "$1");
-    const importers = ["worker.ts", "server.ts", "cli.ts", "runtime.ts"]
-      .filter((f) => /\b(rpcGenomeStore|fileGenomeStore|agentTokenGenomeStore)\b/.test(src(f)));
-    expect(importers, "only the drain worker may construct a genome store").toEqual(["worker.ts"]);
-    expect(src("server.ts"), "the reporting tools must not reach the store loader")
-      .not.toMatch(/\breconstructGenome\b/);
+    // So the obligation is placed where it belongs: the loader reports, and the consumer that
+    // MUST NOT PROCEED refuses. Fail-closed on ANY load error, not only ones this gig looks
+    // like it touches — "looks like it touches" is a judgment made from the very genome that
+    // failed to load.
+    const w = src("src/worker.ts");
+    expect(w, "the worker must consult load_errors before running").toMatch(/load_errors\.length/);
+    expect(w, "and refuse, not merely mention them").toMatch(/refusing to run/);
+    const idx = w.indexOf("load_errors.length");
+    const std = w.indexOf("genome.standards.get");
+    expect(idx, "the refusal must come BEFORE the gig's work is resolved").toBeLessThan(std);
+  });
+
+  it("no law here may claim a COMPLETE consumer set — the package boundary is real", () => {
+    // The verifier's sentence, kept as a law rather than a note because I have already made
+    // this mistake once: a consumer set proven by grepping one repo is a fact about that
+    // repo, not about the system. This package is imported by coltrane-ui (hosted-genome.ts)
+    // and reached through hosted_tools.ts; both are outside anything a test in this repo can
+    // enumerate. So the property asserted is the honest one — the loader's contract must hold
+    // for consumers it cannot see, which is exactly why it reports rather than throws.
+    // The boundary stated as the fact that makes it real: `./genome_store` is a PUBLIC
+    // subpath of this package. Anything that imports it is a consumer, and no test in this
+    // repo can enumerate those. (I first tried to point this law at hosted_tools.ts, where
+    // `postgrestGenomeStore` appears — and it appears only in a COMMENT there. The export
+    // map is the load-bearing fact; a mention in prose is not a consumer.)
+    const pkg = JSON.parse(
+      readFileSync(fileURLToPath(new URL("../package.json", import.meta.url)), "utf8"),
+    ) as { exports?: Record<string, unknown> };
+    expect(Object.keys(pkg.exports ?? {}), "the store loader is exported to consumers we cannot see")
+      .toContain("./genome_store");
+    // and the loader must not have regained an unconditional throw on an active row
+    expect(src("src/genome_store.ts"))
+      .not.toMatch(/throw new Error\(`venue "\$\{slug/);
   });
 });

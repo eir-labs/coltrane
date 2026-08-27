@@ -376,7 +376,7 @@ export function reconstructGenome(rows: GenomeRows): LoadedGenome {
       const claimants = rs.map((r) => `org ${String(r["org_id"] ?? "?")} v${String(r["version"] ?? "?")}`);
       const msg = `ambiguous venue "${k}": ${rs.length} ACTIVE rows claim this name (${claimants.join(", ")}) `
         + `— the engine will not pick one by row order`;
-      throw new Error(msg);
+      load_errors.push({ kind: "venue", path: `postgrest:coltrane_venues/${k}`, slug: k, error: msg });
     }
   }
 
@@ -398,16 +398,22 @@ export function reconstructGenome(rows: GenomeRows): LoadedGenome {
       // caller who asked for one. An empty result and a broken read are indistinguishable
       // downstream, and the empty one reads as healthy.
       //
-      // I FIRST BUILT A `{diagnostic}` ESCAPE HERE and the verifier caught it dead: no
-      // caller passed it, so the option was a comment wearing the costume of a control.
-      // Chasing that down settled the question it was invented for. THERE ARE TWO LOADERS.
-      // `system_health` and `genome_reload` read `deps.load_errors`, which comes from the
-      // FILE loader (loader.ts:555, untouched by this change) — they never call this
-      // function. reconstructGenome's ONLY consumer is the drain worker (worker.ts:972),
-      // about to run a gig. So there is no reporting caller to protect, and the refusal is
-      // unconditional: a worker must not run work against a genome with a room missing
-      // from it. If a store-backed diagnostic is ever wanted, it arrives WITH its caller.
-      throw new Error(`venue "${slug ?? "?"}" is active but could not be loaded — ${msg}`);
+      // THIS LOADER REPORTS; THE CONSUMER REFUSES. Two wrong answers preceded this one.
+      // First I gave reconstructGenome a `{diagnostic}` flag no caller set — dead code
+      // wearing the costume of a control. Then I removed it and made the refusal
+      // unconditional, on a law proving the only consumer was the drain worker: a law that
+      // grepped FOUR FILES IN THIS REPO and was true of them and false of the system. The
+      // consumer it could not see runs on production — coltrane-ui's src/lib/hosted-genome.ts
+      // imports GenomeStore from this package, and its genomeSurfaceSlice hands
+      // `load_errors` to the SERVED MCP's deps. That is where system_health is actually read.
+      // Every load_error seen there carries a `postgrest:` path, which only this file builds.
+      //
+      // So an unconditional throw here silences production's diagnostic on the next bad
+      // active room — the very hazard the dead flag was gesturing at, reintroduced by the
+      // fix for it. The rule belongs where the obligation is: this loader REPORTS, and the
+      // drain worker REFUSES TO RUN when anything failed to load. Fail-closed at the
+      // consumer that must not proceed, reporting intact for the one that must see.
+      load_errors.push({ kind: "venue", path, slug, error: `venue "${slug ?? "?"}" is active but could not be loaded — ${msg}` });
     }
   }
   for (const r of rows.charts ?? []) {

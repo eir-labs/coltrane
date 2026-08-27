@@ -970,6 +970,30 @@ export async function workOnce(ctx: WorkerContext, deps: WorkOnceDeps): Promise<
     }
 
     const genome = await rpcGenomeStore(ctx).load();
+
+    // A1 — A WORKER DOES NOT RUN WORK AGAINST A GENOME WITH A HOLE IN IT.
+    //
+    // The loader REPORTS (its other consumer is the served MCP's system_health, which exists
+    // to show an operator what is broken and must not be silenced by a throw). The refusal
+    // belongs HERE, at the consumer that must not proceed: this worker is about to run a gig,
+    // and a genome missing the room that gig is placed in is not a genome with a note
+    // attached — it is the wrong genome, and the run would be against a substrate nobody
+    // authored. An empty result and a broken read are indistinguishable downstream, and the
+    // empty one reads as healthy.
+    //
+    // Fail-closed on ANY load error, not only ones this gig appears to touch: "appears to
+    // touch" is a judgment made from the very genome that failed to load, so it is exactly
+    // the thing that cannot be trusted here.
+    if (genome.load_errors.length > 0) {
+      const named = genome.load_errors
+        .map((e) => `${e.kind} ${e.slug ?? e.path}: ${e.error}`)
+        .join("; ");
+      throw new Error(
+        `refusing to run: ${genome.load_errors.length} genome load error(s) — ${named}. ` +
+        `A gig runs against the genome as authored or it does not run.`,
+      );
+    }
+
     const standard = genome.standards.get(claim.standard_slug);
     if (!standard) {
       throw new Error(

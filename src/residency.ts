@@ -406,18 +406,14 @@ export function bootResidency(spec: ResidencySpec, deps: BootDeps): BootResult {
 
 // ── The verb mirrors work's env + exit contract (I20) ──────────────────────────────────────────────
 
-interface ResideIo {
-  env?: Record<string, string | undefined>;
-}
-
 /**
- * The `reside` verb REUSES work's gig path — it does not fork the drain's five-variable env contract.
- * Missing COLTRANE_STORE_URL / COLTRANE_STORE_ANON is a usage refusal (exit 2), the same door work
- * uses (src/cli.ts:241-248). The gig itself is workOnce, re-exported above as residencyGigPath; the
- * store/channel wiring is a deployment seam the laws inject rather than assert here.
+ * The `reside` verb lives in src/reside.ts, with the loop it starts, and is re-exported here so the
+ * residency surface stays one import for its callers (law I20/O14 reads it from this module).
+ *
+ * It used to be a three-line stub RIGHT HERE — and that was the defect. It honoured the env contract
+ * and returned the right exit code, and `src/cli.ts`'s KNOWN table had no "reside" in it, so nothing
+ * on earth could call it: a law proved the mechanism worked while `coltrane reside` answered
+ * `unknown command`. The verb now starts a real loop and the CLI mounts it; tests/spec_reside_cli.test.ts
+ * asserts the MOUNT rather than the symbol, so this cannot quietly come undone again.
  */
-export async function runReside(_argv: readonly string[], io: unknown): Promise<number> {
-  const env = (io as ResideIo)?.env ?? {};
-  if (!env["COLTRANE_STORE_URL"] || !env["COLTRANE_STORE_ANON"]) return 2;
-  return 0;
-}
+export { runReside } from "./reside.js";

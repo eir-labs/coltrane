@@ -28,6 +28,7 @@ import { sealGenome, type SealGenomeReport } from "./seal_genome.js";
 import { FileLedger, defaultGenomeLedgerPath } from "./ledger.js";
 import { COLTRANE_VERSION } from "./version.js";
 import { workOnce } from "./worker.js";
+import { runReside } from "./reside.js";
 import { openLocalQueue, selectQueueBacking, LOCAL_QUEUE_DIR_VAR } from "./local_queue.js";
 import { workerCredentialMode } from "./worker_env.js";
 import { drainPreflight } from "./drain_preflight.js";
@@ -42,6 +43,9 @@ export interface CliIO {
   deps?: ServerDeps;
   /** Injected for tests. Production reads stdin for `--input -`. */
   stdin?: () => string;
+  /** Injected for tests; production reads the process environment. Only `reside` consults it —
+   *  every other command reads process.env directly, and moving them is not this change's scope. */
+  env?: Record<string, string | undefined>;
 }
 
 export const USAGE = `coltrane ${COLTRANE_VERSION}
@@ -74,6 +78,15 @@ export const USAGE = `coltrane ${COLTRANE_VERSION}
                                          checkpoints under COLTRANE_WORKER_CHECKPOINTS,
                                          default ~/.coltrane/worker-checkpoints;
                                          exit 0 complete or parked, 1 failed, 3 queue empty)
+  coltrane reside [--any|--residency <id>]  hold a residency: claim a seat, ack its channel in
+                                         reflex, answer every wake, and drain the org's due work
+                                         orders through its institution's governed verbs
+                                        (env: the same contract work uses — COLTRANE_STORE_URL,
+                                         COLTRANE_STORE_ANON, COLTRANE_SERVICE_URL, plus
+                                         COLTRANE_DRAIN_KEY + COLTRANE_INSTANCE for venue mode;
+                                         no new credential class
+                                         exit 0 released, 1 cortex failed, 2 misconfigured or a
+                                         seam no deployment wired, 3 nothing claimable)
 
 Options
   --input <json|@file|->                dispatch payload; @file reads a file, - reads stdin
@@ -209,7 +222,7 @@ export async function runCli(argv: readonly string[], io: CliIO): Promise<number
   if (flags["version"]) { io.out(COLTRANE_VERSION + "\n"); return 0; }
   if (cmd === undefined || flags["help"] || cmd === "help") { io.out(USAGE); return cmd === undefined ? 2 : 0; }
 
-  const KNOWN = ["validate", "seal-genome", "dispatch", "enqueue", "monitor", "logs", "abort", "trace", "simulate", "health", "serve", "work"];
+  const KNOWN = ["validate", "seal-genome", "dispatch", "enqueue", "monitor", "logs", "abort", "trace", "simulate", "health", "serve", "work", "reside"];
   if (!KNOWN.includes(cmd)) {
     line(io, `unknown command "${cmd}"\n`);
     io.err(USAGE);
@@ -257,6 +270,15 @@ export async function runCli(argv: readonly string[], io: CliIO): Promise<number
       line(io, `enqueue failed: ${e instanceof Error ? e.message : String(e)}`);
       return 1;
     }
+  }
+
+  // `reside` stands beside `work` and shares its bootstrap contract exactly — the residency's hands
+  // materialize from the drain key that already exists, so there is no new credential class here.
+  // The verb owns the env check and the exit codes (src/reside.ts); this is only the mount, and the
+  // mount is the half that was missing: runReside has been exported and law-covered since the state
+  // machine landed while nothing could reach it.
+  if (cmd === "reside") {
+    return await runReside(argv, io);
   }
 
   // `work` runs against the ORG STORE, not a genome root — the seated agent's token is the

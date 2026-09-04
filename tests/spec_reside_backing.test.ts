@@ -195,10 +195,11 @@ describe("the local file backing is a real seat, not a stub", () => {
     // A local seat is not a gig token and must not read as one.
     expect(claim.gig_id ?? null).toBe(null);
 
-    await seat.heartbeat(claim.residency_id);
-    const moved = await seat.cursorAdvance(claim.residency_id, 3);
+    const grip = String(claim.fence);
+    await seat.heartbeat(claim.residency_id, grip);
+    const moved = await seat.cursorAdvance(claim.residency_id, grip, 3);
     expect(moved).toBe(3);
-    await seat.release(claim.residency_id, "hibernated");
+    await seat.release(claim.residency_id, grip, "hibernated");
 
     // The seat is genuinely on disk — a second process could read it.
     const rows = JSON.parse(readFileSync(join(root, `${claim.residency_id}.json`), "utf8")) as { status: string; cursor: number };
@@ -211,11 +212,12 @@ describe("the local file backing is a real seat, not a stub", () => {
     const root = mkdtempSync(join(tmpdir(), "reside-"));
     const seat = R.fileSeatBacking(root);
     const id = await R.fileSeatSeed(root, { agent_slug: "a", org: "o", venue_slug: "v", channel_id: "c" });
-    await seat.claim("any");
-    await seat.cursorAdvance(id, 5);
+    const held = await seat.claim("any");
+    const grip = String(held?.fence);
+    await seat.cursorAdvance(id, grip, 5);
     // Both halves exist for a reason: the store cannot see a seal, and the engine cannot see another
     // box. A local backing that skipped this would be laxer than the hosted one it stands in for.
-    await expect(seat.cursorAdvance(id, 3)).rejects.toThrow(/cursor_regression/);
+    await expect(seat.cursorAdvance(id, grip, 3)).rejects.toThrow(/cursor_regression/);
   });
 
   it("a claimed seat is not claimable twice while its lease holds", async () => {

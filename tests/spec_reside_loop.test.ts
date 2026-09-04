@@ -156,7 +156,9 @@ describe("LAW 5 — the cursor moves only behind a seal, and never backwards", (
     r.onInbound(msg("m-old", 1));
     await r.wake();
     for (const call of calls.cursorAdvance) {
-      expect(Number(call[1]), "the cursor was moved to a smaller value than the seat resumed at")
+      // (id, FENCE, cursor) — the fence slid into slot 1 when the grip landed, and the cursor to 2.
+      // This is the one place a positional call changes meaning silently; the law reads slot 2.
+      expect(Number(call[2]), "the cursor was moved to a smaller value than the seat resumed at")
         .toBeGreaterThanOrEqual(5);
     }
   });
@@ -172,7 +174,8 @@ describe("LAW 6 — SIGTERM hands the seat over; it does not race for it", () =>
 
     await r.shutdown("SIGTERM");
     expect(calls.release.length, "a redeploy raced for the seat instead of handing it over").toBe(1);
-    expect(calls.release[0]?.[1]).toBe("hibernated");
+    // (id, fence, STATUS) — slot 2 since the fence landed.
+    expect(calls.release[0]?.[2]).toBe("hibernated");
   });
 
   it("a second signal does not release twice", async () => {
@@ -203,7 +206,7 @@ describe("LAW 6 — SIGTERM hands the seat over; it does not race for it", () =>
     const r = R.createResidency({ residency: "any" }, deps);
     await r.boot();
     await r.shutdown("SIGINT");
-    expect(calls.release[0]?.[1]).toBe("hibernated");
+    expect(calls.release[0]?.[2]).toBe("hibernated");
   });
 
   it("shutdown before a successful boot releases nothing — there is no seat to hand over", async () => {

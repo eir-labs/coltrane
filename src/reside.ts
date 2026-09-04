@@ -128,6 +128,13 @@ export interface ResidencyClaim {
   cursor: number;
   lease_token: string;
   gig_id?: string | null;
+  /**
+   * THE FENCE — minted by claim, carried unread to the three doors that move the seat. OPAQUE on
+   * purpose: a grip identifies the GRANT, not the grantee, and WHICH token closes that (a monotonic
+   * fence or a random secret) is the store's decision. The engine carries it and never parses,
+   * orders, or prints it — so a secret token cannot leak and a public one costs nothing.
+   */
+  fence?: string;
   /** An EXACT allow-list of standard slugs; its wildcard is "*". Never a boolean — a lease token
    *  carries ["*"], and dispatch authority still sits on the chair, so this widens nothing. */
   may_dispatch?: readonly string[];
@@ -159,11 +166,11 @@ export type EnvoyCall = (verb: string, args: Record<string, unknown>) => Promise
 
 export interface ResideDeps {
   claim?: (which: string | "any") => Promise<ResidencyClaim | null>;
-  heartbeat?: (residencyId: string) => Promise<void>;
-  release?: (residencyId: string, status: "hibernated" | "unseated") => Promise<void>;
+  heartbeat?: (residencyId: string, fence: string) => Promise<void>;
+  release?: (residencyId: string, fence: string, status: "hibernated" | "unseated") => Promise<void>;
   /** A backing may answer the new cursor, or answer nothing. Both are accepted — the engine reads
    *  its own record rather than the reply, so no backing's return shape is load-bearing here. */
-  cursorAdvance?: (residencyId: string, n: number) => Promise<number | void>;
+  cursorAdvance?: (residencyId: string, fence: string, n: number) => Promise<number | void>;
   channelListener?: (channelId: string) => AsyncIterable<InboundMessage>;
   cortex?: (session: { session_id: string | null; inbox: readonly InboundMessage[] }) => Promise<CortexTurn>;
   sealOutput?: (args: Record<string, unknown>) => Promise<{ content_sha: string }>;
@@ -253,6 +260,18 @@ export function createResidency(opts: ResideOptions, deps: ResideDeps): Residenc
 
   let rec: ResidencyRecord | null = null;
   let residencyId: string | null = null;
+  /**
+   * THE FENCE on this grant, held for the life of the seat and PRESENTED ON EVERY OP.
+   *
+   * Presenting it is the whole point, and it was missing: applyResidencyOp gates on
+   * `op.fence !== undefined && op.fence < rec.fence`, so an op that omits the field is not gated at
+   * all. All six call sites below omitted it, which left law I9 — the fencing law, with a case named
+   * for a GC-paused host resuming post-lease — unable to fire anywhere on the live path. The store
+   * had the mirror of this defect: no `fence` column at all. A declared invariant enforced by
+   * neither side is the shape this repo keeps finding, and it survived two green suites.
+   */
+  let fence = "";
+  let fenceNum = 0;
   let claimed = false;
   let released = false;
   /** The boot refusal, held so a later step answers with the reason it never seated rather than a
@@ -304,11 +323,17 @@ export function createResidency(opts: ResideOptions, deps: ResideDeps): Residenc
       return standing;
     }
 
+    // The fence is taken from the claim FIRST — the record is built from it, so an ordering slip
+    // here would seat every residency at fence 0 and quietly hand the store a stale token on the
+    // first heartbeat.
+    fence = claim.fence ?? "";
+    fenceNum = Number(fence) || 0;
+
     // The store's session and cursor are the durable ones — a thaw resumes the same life.
-    rec = { ...booted.rec, session_id: claim.session_id, cursor: claim.cursor, lease_until: Number.MAX_SAFE_INTEGER };
+    rec = { ...booted.rec, session_id: claim.session_id, cursor: claim.cursor, fence: fenceNum, lease_until: Number.MAX_SAFE_INTEGER };
     residencyId = claim.residency_id;
 
-    const listening = applyResidencyOp(rec, { kind: "listen" });
+    const listening = applyResidencyOp(rec, { kind: "listen", fence: fenceNum });
     // A refusal ends the STEP, never the process: an un-listened seat is still a seat.
     if (listening.ok) rec = listening.next;
     return { ok: true, residency_id: residencyId };
@@ -318,7 +343,7 @@ export function createResidency(opts: ResideOptions, deps: ResideDeps): Residenc
   function onInbound(msg: InboundMessage): { acked: true; elapsed_ticks: number } {
     inbox.push(msg);
     if (rec) {
-      const acked = applyResidencyOp(rec, { kind: "ack" });
+      const acked = applyResidencyOp(rec, { kind: "ack", fence: fenceNum });
       if (acked.ok) rec = acked.next;
     }
     // reflexAck is the existing, law-covered primitive (I10/I11) — not a second ack path.
@@ -327,7 +352,7 @@ export function createResidency(opts: ResideOptions, deps: ResideDeps): Residenc
 
   async function wake(): Promise<ResideResult<{ utterance: Utterance; cursor: number }>> {
     if (!rec || !residencyId) return standing ?? refuse("no_backend", "not seated", { seam: "claim" });
-    const playing = applyResidencyOp(rec, { kind: "play" });
+    const playing = applyResidencyOp(rec, { kind: "play", fence: fenceNum });
     if (playing.ok) rec = playing.next;
 
     const turn = await deps.cortex!({ session_id: rec.session_id, inbox: [...inbox] });
@@ -345,12 +370,12 @@ export function createResidency(opts: ResideOptions, deps: ResideDeps): Residenc
 
     // The cursor advances ONLY as a consequence of the seal, in the same write (I1/I3) — the state
     // machine owns that arithmetic, not this loop.
-    const advanced = applyResidencyOp(rec, { kind: "wake_seal", message_index: rec.cursor, sealed_output_sha: sha });
+    const advanced = applyResidencyOp(rec, { kind: "wake_seal", fence: fenceNum, message_index: rec.cursor, sealed_output_sha: sha });
     if (!advanced.ok) {
       return refuse(advanced.reason === "cursor_without_seal" ? "cursor_without_seal" : "silent_wake", `the seal did not earn a cursor: ${advanced.reason}`);
     }
     rec = advanced.next;
-    await deps.cursorAdvance!(residencyId, rec.cursor);
+    await deps.cursorAdvance!(residencyId, fence, rec.cursor);
     return { ok: true, utterance, cursor: rec.cursor };
   }
 
@@ -422,9 +447,9 @@ export function createResidency(opts: ResideOptions, deps: ResideDeps): Residenc
   async function beat(): Promise<ResideResult> {
     // Renewing after the seat has been handed back is how two boxes come to believe they hold it.
     if (released || !rec || !residencyId) return refuse("no_backend", "no live seat to renew", { seam: "claim" });
-    const beaten = applyResidencyOp(rec, { kind: "heartbeat", cortex_alive: typeof deps.cortex === "function" });
+    const beaten = applyResidencyOp(rec, { kind: "heartbeat", fence: fenceNum, cortex_alive: typeof deps.cortex === "function" });
     if (beaten.ok) rec = beaten.next;
-    await deps.heartbeat!(residencyId);
+    await deps.heartbeat!(residencyId, fence);
     return { ok: true };
   }
 
@@ -433,9 +458,9 @@ export function createResidency(opts: ResideOptions, deps: ResideDeps): Residenc
     // a drain must not release twice, and a seat never held is not released at all.
     if (released || !rec || !residencyId) return { ok: true };
     released = true;
-    const hibernating = applyResidencyOp(rec, { kind: "hibernate", by: "holder" });
+    const hibernating = applyResidencyOp(rec, { kind: "hibernate", fence: fenceNum, by: "holder" });
     if (hibernating.ok) rec = hibernating.next;
-    await deps.release!(residencyId, "hibernated");
+    await deps.release!(residencyId, fence, "hibernated");
     return { ok: true };
   }
 

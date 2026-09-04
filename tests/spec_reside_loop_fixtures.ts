@@ -62,6 +62,16 @@ export interface ResidencyClaim {
   cursor: number;
   /** The lease credential. A `ctk_`; gig-scoped iff `gig_id` is set or `may_dispatch` is false. */
   lease_token: string;
+  /**
+   * THE FENCE — minted by claim, carried unread to the three doors that move the seat.
+   *
+   * OPAQUE ON PURPOSE. A grip identifies the GRANT, not the grantee: an instance name fails because
+   * two machines share it and because a box re-claiming after a lapse is indistinguishable from its
+   * own expired grant. WHICH token closes that — a monotonic fence or a random secret — is the
+   * store's decision, and the engine must not encode an answer. Typed `string`, never parsed, never
+   * compared for order, never logged.
+   */
+  fence?: string;
   gig_id?: string | null;
   /** An exact allow-list of standard slugs; wildcard "*". Never a boolean (measured against the
    *  store: coltrane_agent_token.may_dispatch is text[], "a may_dispatch list is exact, not a hint"). */
@@ -109,11 +119,11 @@ export type EnvoyCall = (verb: string, args: Record<string, unknown>) => Promise
  */
 export interface ResideDeps {
   claim?: (which: string | "any") => Promise<ResidencyClaim | null>;
-  heartbeat?: (residencyId: string) => Promise<void>;
-  release?: (residencyId: string, status: "hibernated" | "unseated") => Promise<void>;
+  heartbeat?: (residencyId: string, fence: string) => Promise<void>;
+  release?: (residencyId: string, fence: string, status: "hibernated" | "unseated") => Promise<void>;
   /** The store returns the new cursor (its cursor_advance answers a bigint); a hand-built
    *  backing may answer nothing. Both are accepted — the engine reads the record, not the reply. */
-  cursorAdvance?: (residencyId: string, n: number) => Promise<number | void>;
+  cursorAdvance?: (residencyId: string, fence: string, n: number) => Promise<number | void>;
   channelListener?: (channelId: string) => AsyncIterable<InboundMessage>;
   cortex?: (session: { session_id: string | null; inbox: readonly InboundMessage[] }) => Promise<CortexTurn>;
   sealOutput?: (args: Record<string, unknown>) => Promise<{ content_sha: string }>;
@@ -191,9 +201,9 @@ export type ResidencyBackingChoice =
  *  separate axes a deployment always supplies; this seam is only about the seat. */
 export interface SeatBacking {
   claim: (which: string | "any") => Promise<ResidencyClaim | null>;
-  heartbeat: (residencyId: string) => Promise<void>;
-  release: (residencyId: string, status: "hibernated" | "unseated") => Promise<void>;
-  cursorAdvance: (residencyId: string, n: number) => Promise<number>;
+  heartbeat: (residencyId: string, fence: string) => Promise<void>;
+  release: (residencyId: string, fence: string, status: "hibernated" | "unseated") => Promise<void>;
+  cursorAdvance: (residencyId: string, fence: string, n: number) => Promise<number>;
 }
 
 export type SeatResolution =
@@ -246,6 +256,7 @@ export function leaseClaim(over: Partial<ResidencyClaim> = {}): ResidencyClaim {
     session_id: "sess-viola-1",
     cursor: 0,
     lease_token: "ctk_lease_viola",
+    fence: "1",
     gig_id: null,
     may_dispatch: ["*"],
     hands: ["Read", "Bash", "gig_dispatch", "gig_monitor", "output_write"],
@@ -269,12 +280,13 @@ export function msg(id: string, at = 0, text = "hello"): InboundMessage {
 export function recordingDeps(over: Partial<ResideDeps> = {}): {
   deps: ResideDeps;
   tape: string[];
-  calls: { claim: number; heartbeat: number; release: unknown[][]; cursorAdvance: unknown[][]; cortex: number; envoy: unknown[][]; say: Utterance[] };
+  calls: { claim: number; heartbeat: number; heartbeatArgs: unknown[][]; release: unknown[][]; cursorAdvance: unknown[][]; cortex: number; envoy: unknown[][]; say: Utterance[] };
 } {
   const tape: string[] = [];
   const calls = {
     claim: 0,
     heartbeat: 0,
+    heartbeatArgs: [] as unknown[][],
     release: [] as unknown[][],
     cursorAdvance: [] as unknown[][],
     cortex: 0,
@@ -283,7 +295,7 @@ export function recordingDeps(over: Partial<ResideDeps> = {}): {
   };
   const deps: ResideDeps = {
     claim: async (which) => { calls.claim += 1; tape.push("claim"); return leaseClaim({ residency_id: String(which === "any" ? "res-viola-1" : which) }); },
-    heartbeat: async () => { calls.heartbeat += 1; tape.push("heartbeat"); },
+    heartbeat: async (...a) => { calls.heartbeat += 1; calls.heartbeatArgs.push(a); tape.push("heartbeat"); },
     release: async (...a) => { calls.release.push(a); tape.push(`release:${String(a[1])}`); },
     cursorAdvance: async (...a) => { calls.cursorAdvance.push(a); tape.push(`cursorAdvance:${String(a[1])}`); },
     // eslint-disable-next-line require-yield

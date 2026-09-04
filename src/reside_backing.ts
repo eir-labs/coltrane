@@ -42,9 +42,9 @@ export type ResidencyBackingChoice =
 /** The four seat seams — where the residency ROW lives, and nothing else. */
 export interface SeatBacking {
   claim: (which: string | "any") => Promise<ResidencyClaim | null>;
-  heartbeat: (residencyId: string) => Promise<void>;
-  release: (residencyId: string, status: "hibernated" | "unseated") => Promise<void>;
-  cursorAdvance: (residencyId: string, n: number) => Promise<number>;
+  heartbeat: (residencyId: string, fence: string) => Promise<void>;
+  release: (residencyId: string, fence: string, status: "hibernated" | "unseated") => Promise<void>;
+  cursorAdvance: (residencyId: string, fence: string, n: number) => Promise<number>;
 }
 
 /** Checked IN THIS ORDER, so a refusal names the first thing a hand-built backing forgot. */
@@ -183,6 +183,26 @@ interface SeatRow {
   host: string | null;
   lease_until: number;
   hands: string[];
+  /** The fence on the CURRENT grant: monotonic, so a stale holder's token is simply LOWER. Never
+   *  reset — zeroing it on release would make a resurrected host's old token valid again, which is
+   *  the precise failure it exists to prevent. */
+  fence: number;
+}
+
+/**
+ * The fence check, and the reason the local backing has one at all: a backing laxer than the store it
+ * stands in for lets a bug pass locally and fail only in production. Refused with the name the
+ * ENGINE already uses for this rule (stale_fence, src/residency.ts:268) rather than a second name
+ * for one invariant.
+ */
+function assertFence(root: string, id: string, fence: string): SeatRow {
+  const row = readRow(root, id);
+  if (Number(fence) < Number(row.fence)) {
+    throw new Error(
+      `stale_fence: a stale fence on residency ${id} — the lease was re-claimed, or this box never held it. Claim again.`,
+    );
+  }
+  return row;
 }
 
 function rowPath(root: string, id: string): string {
@@ -210,6 +230,7 @@ export async function fileSeatSeed(root: string, seed: SeatSeed): Promise<string
     host: null,
     lease_until: 0,
     hands: [],
+    fence: 0,
   };
   writeRow(root, row);
   return row.residency_id;
@@ -236,6 +257,9 @@ export function fileSeatBacking(root: string): SeatBacking {
         row.host = "local";
         row.status = "seated";
         row.lease_until = now() + LOCAL_LEASE_MS;
+        // A NEW grant gets a NEW grip. This is what makes a re-claim by the SAME box distinguishable
+        // from its own expired grant — the failure an instance name cannot see.
+        row.fence = (row.fence ?? 0) + 1;
         writeRow(root, row);
         return {
           residency_id: row.residency_id,
@@ -247,6 +271,7 @@ export function fileSeatBacking(root: string): SeatBacking {
           cursor: row.cursor,
           // A local seat is not a minted credential and must never read as one.
           lease_token: `local:${row.residency_id}`,
+          fence: String(row.fence),
           gig_id: null,
           may_dispatch: ["*"],
           hands: row.hands,
@@ -255,21 +280,21 @@ export function fileSeatBacking(root: string): SeatBacking {
       return null;
     },
 
-    heartbeat: async (id) => {
-      const row = readRow(root, id);
+    heartbeat: async (id, fence) => {
+      const row = assertFence(root, id, fence);
       row.lease_until = now() + LOCAL_LEASE_MS;
       writeRow(root, row);
     },
 
-    release: async (id, status) => {
-      const row = readRow(root, id);
+    release: async (id, fence, status) => {
+      const row = assertFence(root, id, fence);
       row.status = status;
       row.host = null;
       writeRow(root, row);
     },
 
-    cursorAdvance: async (id, n) => {
-      const row = readRow(root, id);
+    cursorAdvance: async (id, fence, n) => {
+      const row = assertFence(root, id, fence);
       if (n < row.cursor) {
         throw new Error(`cursor_regression: ${n} is behind the seat's cursor ${row.cursor} — a cursor only ever moves forward.`);
       }

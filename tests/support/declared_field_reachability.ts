@@ -266,7 +266,7 @@ export const CALIBRATION_TRAIL = {
 // orchestrator src — exactly the class this ratchet pins and holds from growing. The CONTRACT
 // ratchet below is the one that actually gates them: every one is named by an agent method or
 // the standard's phase intents, so the contract pin did not move.
-export const PINNED_UNREAD_FIELDS = 220;
+export const PINNED_UNREAD_FIELDS = 218;
 
 /* ─────────────────────────────────────────────────────────────────────────────────────────────────
  * TWO CORPORA — engine (src/) vs contract (broad).

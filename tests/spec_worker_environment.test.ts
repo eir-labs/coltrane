@@ -166,7 +166,11 @@ describe("GAP 3 — the worker environment contract is written down in one place
       for (const legacy of v.legacy_names ?? []) known.add(legacy);
     }
 
-    const WORKER_PATH = ["worker.ts", "cli.ts", "output_mirror.ts", "workspace.ts", "run_deps.ts", "worker_env.ts"];
+    // reside.ts joins the path deliberately. `coltrane reside` shares work's bootstrap contract and
+    // introduces no credential class of its own — a promise that would otherwise rot silently, since
+    // nothing but this scan can tell a module that HONOURS the contract from one that merely has not
+    // broken it yet. Today it reads no named variable at all, so the scan is a ratchet on that.
+    const WORKER_PATH = ["worker.ts", "cli.ts", "output_mirror.ts", "workspace.ts", "run_deps.ts", "worker_env.ts", "reside.ts"];
     const missing: string[] = [];
     for (const file of WORKER_PATH) {
       const path = join(SRC, file);

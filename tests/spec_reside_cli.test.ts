@@ -67,23 +67,33 @@ describe("LAW 1 — `reside` is on the real surface, beside `work` (spec_reside_
       .not.toContain("COLTRANE_DRAIN_URL");
   });
 
-  it("running `coltrane reside` does not answer `unknown command`", async () => {
-    // THE LAW THAT CANNOT BE SATISFIED BY A DECLARATION. Today this is exactly what happens.
+  it("running `coltrane reside` REACHES the verb — not merely names it", async () => {
+    // THE NEGATIVE LEG WAS NOT ENOUGH, and a reviewer's sabotage proved it: with `reside` left in
+    // KNOWN and the dispatch branch made dead, all five legs of this law still passed. Once the name
+    // is registered the CLI stops saying `unknown command` whether or not anything runs — so the
+    // assertion below proved REGISTRATION and called it REACHABILITY. That is the very defect this
+    // file exists to close, committed one hop further along by the law meant to close it.
+    //
+    // The fix is to assert something ONLY THE VERB CAN EMIT. `reside refused:` is written by
+    // runReside and by nothing else in the CLI, so a dead dispatch cannot produce it.
     const o = io();
     const code = await runCli(["reside"], o);
-    expect(o.stderr.join(""), "coltrane reside is not a command the CLI knows")
-      .not.toContain("unknown command");
-    // Missing store env is a USAGE refusal — exit 2, the same door `work` uses (law I20/O14).
+    const err = o.stderr.join("");
+    expect(err, "coltrane reside is not a command the CLI knows").not.toContain("unknown command");
+    expect(err, "the command was named but never reached — nothing the verb writes came back")
+      .toContain("reside refused:");
     expect(code).toBe(2);
   });
 
-  it("--any and --residency <uuid> are accepted, not rejected as malformed", async () => {
+  it("--any and --residency <uuid> reach the verb too, not just the dispatcher", async () => {
     for (const argv of [["reside", "--any"], ["reside", "--residency", "res-viola-1"]]) {
       const o = io();
       await runCli(argv, o);
       const err = o.stderr.join("");
       expect(err, `${argv.join(" ")} was not understood`).not.toContain("unknown command");
       expect(err, `${argv.join(" ")} was rejected as an unknown option`).not.toContain("unknown option");
+      // Same positive leg: the flags are only meaningful if the verb they configure is reached.
+      expect(err, `${argv.join(" ")} never reached the verb`).toContain("reside refused:");
     }
   });
 

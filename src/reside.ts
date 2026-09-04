@@ -521,6 +521,9 @@ export async function runReside(argv: readonly string[], io: unknown): Promise<n
   // no store to point at, and asking it for one made a whole provider unreachable.
   const choice = selectResidencyBacking(env);
   if (choice.backing === "hosted" && (!env["COLTRANE_STORE_URL"] || !env["COLTRANE_STORE_ANON"])) {
+    // Said, not silent. A bare exit 2 leaves an operator to guess which of five variables is
+    // missing — and leaves the reachability law with nothing only THIS command could have emitted.
+    say("reside refused: no_backend (seam: store-env) — the hosted backing needs COLTRANE_STORE_URL and COLTRANE_STORE_ANON.");
     return 2;
   }
   const seat = await resolveSeatBacking(choice, {});

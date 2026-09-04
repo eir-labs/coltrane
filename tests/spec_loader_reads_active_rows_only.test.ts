@@ -21,7 +21,7 @@
 //     order, and row order is not a fact anyone declared.
 //
 // And A1, the shape underneath: a row that fails to load is pushed into `load_errors` and
-// the load SUCCEEDS. A genome missing the residency — the room every resident Envoy is
+// the load SUCCEEDS. A genome missing the residency — the room every resident agent is
 // placed in — is not a genome with a note attached; the caller who asked for a genome got
 // something that is not one, and nothing in the return value says so. The verifier's bar:
 // loaded venues == active rows in scope, or the load refuses.
@@ -117,7 +117,7 @@ describe("A2 · the loader reads ACTIVE rows, at their current version", () => {
 
 describe("A1 · a genome that failed to load is not a genome", () => {
   it("an unloadable ACTIVE room is REPORTED, naming the slug and the rule", () => {
-    // The residency is the room every resident Envoy is placed in. When it failed
+    // The residency is the room every resident agent is placed in. When it failed
     // VenueSchema it went into load_errors and the load returned "successfully" — so the
     // engine served a genome in which that room did not exist, and said nothing. An empty
     // result and a broken read are indistinguishable downstream, and the empty one reads as

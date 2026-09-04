@@ -4,7 +4,7 @@
 # THE DEFECT THIS CLOSES (verifier, n=232), and it was the law under everything else:
 # `npm test` was a bare `vitest run` with no expected count anywhere — not in package.json,
 # not in scripts/, not in either workflow. Every other lane in this program is pinned and
-# matches its files (envoy 98, coltrane-ui unit 116 / pgTAP 78, chancery 13, conformance 5).
+# matches its files (the sibling lanes pin theirs at 98, 116 unit / 78 pgTAP, 13, and 5).
 # COLTRANE, THE LARGEST SUITE, WAS NOT.
 #
 # What that costs: a file that fails to COLLECT does exit 1, so an import that throws is

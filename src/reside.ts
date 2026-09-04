@@ -34,6 +34,7 @@
  * module evaluation. The alternative was duplicating the transition table, which is the one thing
  * the surface's identity laws exist to forbid.
  */
+import { selectResidencyBacking, resolveSeatBacking } from "./reside_backing.js";
 import {
   applyResidencyOp,
   bootResidency,
@@ -43,6 +44,20 @@ import {
   type SimClock,
 } from "./residency.js";
 
+export {
+  selectResidencyBacking,
+  resolveSeatBacking,
+  fileSeatBacking,
+  fileSeatSeed,
+  SEAT_MEMBERS,
+  RESIDENCY_DIR_VAR,
+  RESIDENCY_MODULE_VAR,
+  type ResidencyBackingChoice,
+  type SeatBacking,
+  type SeatResolution,
+  type SeatSeed,
+} from "./reside_backing.js";
+
 /** The gig path is WORK's gig path. A second implementation fails by existing (I12, one level out). */
 export { workOnce as resideGigPath } from "./worker.js";
 
@@ -50,6 +65,7 @@ export { workOnce as resideGigPath } from "./worker.js";
 
 export type ResideRefusal =
   | "no_backend"
+  | "backing_conflict"
   | "nothing_claimable"
   | "gig_scoped_token"
   | "silent_wake"
@@ -59,6 +75,7 @@ export type ResideRefusal =
 
 export const RESIDE_REFUSALS: readonly ResideRefusal[] = [
   "no_backend",
+  "backing_conflict",
   "nothing_claimable",
   "gig_scoped_token",
   "silent_wake",
@@ -78,6 +95,7 @@ export const RESIDE_REFUSALS: readonly ResideRefusal[] = [
  */
 const EXIT_FOR_REFUSAL: Record<ResideRefusal, number> = {
   no_backend: 2,
+  backing_conflict: 2,
   nothing_claimable: 3,
   gig_scoped_token: 2,
   silent_wake: 1,
@@ -110,7 +128,9 @@ export interface ResidencyClaim {
   cursor: number;
   lease_token: string;
   gig_id?: string | null;
-  may_dispatch?: boolean;
+  /** An EXACT allow-list of standard slugs; its wildcard is "*". Never a boolean — a lease token
+   *  carries ["*"], and dispatch authority still sits on the chair, so this widens nothing. */
+  may_dispatch?: readonly string[];
   hands: readonly string[];
 }
 
@@ -141,7 +161,9 @@ export interface ResideDeps {
   claim?: (which: string | "any") => Promise<ResidencyClaim | null>;
   heartbeat?: (residencyId: string) => Promise<void>;
   release?: (residencyId: string, status: "hibernated" | "unseated") => Promise<void>;
-  cursorAdvance?: (residencyId: string, n: number) => Promise<void>;
+  /** A backing may answer the new cursor, or answer nothing. Both are accepted — the engine reads
+   *  its own record rather than the reply, so no backing's return shape is load-bearing here. */
+  cursorAdvance?: (residencyId: string, n: number) => Promise<number | void>;
   channelListener?: (channelId: string) => AsyncIterable<InboundMessage>;
   cortex?: (session: { session_id: string | null; inbox: readonly InboundMessage[] }) => Promise<CortexTurn>;
   sealOutput?: (args: Record<string, unknown>) => Promise<{ content_sha: string }>;
@@ -184,10 +206,37 @@ const BOOT_SEAMS = ["claim", "channelListener", "cortex", "say", "sealOutput", "
 const refuse = (refusal: ResideRefusal, message: string, extra: Record<string, unknown> = {}) =>
   ({ ok: false as const, refusal, message, ...extra });
 
-/** A lease token that is narrow. Narrow may not mint broad (L28): a token bound to one gig cannot
- *  hold a residency, and `may_dispatch:false` says so even when no gig_id is carried. */
+/**
+ * A lease token that is narrow. Narrow may not mint broad (L28): a token bound to one gig cannot
+ * hold a residency.
+ *
+ * THE SIGNAL IS gig_id, AND ONLY gig_id — corrected against the store twice, and the second
+ * correction is the interesting one. An earlier draft read `may_dispatch === false`, a shape the
+ * column (text[]) cannot hold. The fix to "an EMPTY allow-list is narrow" was then ALSO wrong, and
+ * would have been worse: the list stopped being the wildcard and became the exact standards a
+ * presence may reach, so `{}` is now a perfectly legitimate seating — a residency that dispatches
+ * (chair-gated) but reaches no gig it did not dispatch. Treating empty as narrowness would have
+ * refused valid seats, and refused them in the one direction nobody tests: the quiet one.
+ *
+ * The dispatch allow-list is an authorization gate in the STORE, in exactly one place. It is not
+ * the engine's business to re-derive it, and a residency's authority sits on its chair regardless.
+ *
+ * This is a second line either way. The claim door refuses a gig token itself with a message whose
+ * machine-readable prefix is `gig_scoped_token:` (see storeRefusalName); the engine still checks,
+ * because a local or hand-built backing has no such door in front of it.
+ */
 function isGigScoped(claim: ResidencyClaim): boolean {
-  return claim.gig_id != null || claim.may_dispatch === false;
+  return claim.gig_id != null;
+}
+
+/**
+ * The machine-readable name a store refusal begins with (`gig_scoped_token: …`, `not_holder: …`,
+ * `cursor_regression: …`). Branching on the PREFIX rather than the prose is the same discipline the
+ * router applies to law_ref: the human half of the message is written to be reworded.
+ */
+export function storeRefusalName(message: string): string | null {
+  const m = /^([a-z][a-z0-9_]*):/.exec(message.trim());
+  return m ? m[1]! : null;
 }
 
 /** A monotonic tick source so the reflex budget is measured on a simulated clock on every machine,
@@ -353,7 +402,12 @@ export function createResidency(opts: ResideOptions, deps: ResideDeps): Residenc
 
       // A refusal is information, and the residency's voice is where it is shown — VERBATIM. The
       // engine does not judge a governance refusal; it raises it.
-      relayed.push({ refusal: answer.refusal, message: answer.message });
+      //
+      // The store names its refusals in a machine-readable PREFIX, so the relayed record carries
+      // that name when there is one. This is also the second place a gig-scoped token can surface:
+      // the seat check catches one that arrives in a claim, and this catches one the wire reports.
+      const named = storeRefusalName(answer.message);
+      relayed.push({ refusal: named ?? answer.refusal, message: answer.message });
       await deps.say!({ channel_id: rec.channel_id, text: answer.message });
     }
 
@@ -422,15 +476,31 @@ export async function runReside(argv: readonly string[], io: unknown): Promise<n
   const env = asIo?.env ?? process.env;
   const say = (s: string): void => { asIo?.err?.(s + "\n"); };
 
-  if (!env["COLTRANE_STORE_URL"] || !env["COLTRANE_STORE_ANON"]) return 2;
-
   const at = argv.indexOf("--residency");
   const residency = at >= 0 && argv[at + 1] ? String(argv[at + 1]) : "any";
 
-  // No deployment has wired the residency backends in this tree: WI-2's doors are not applied to a
-  // reachable database. So the command's honest answer today is a NAMED refusal that says which
-  // seam is missing — never a throw, and never a plausible default that would look like a run.
-  const r = createResidency({ residency }, {});
+  // WHERE THE SEAT LIVES is selected FIRST, and never guessed: a local file roster, a backing you
+  // wrote, or a hosted one the DEPLOYMENT injects. The engine holds no hosted provider, so with the
+  // drain environment set this refuses and names what to wire.
+  //
+  // THE ORDER HERE IS THE FIX FOR A REAL DEFECT. This used to demand COLTRANE_STORE_URL/_ANON before
+  // selecting anything — and both are DRAIN_VARS, so setting COLTRANE_RESIDENCY_DIR produced a
+  // backing CONFLICT every time and the local roster could not be selected by any environment on
+  // earth. A store credential is the HOSTED backing's requirement, not the verb's: a local seat has
+  // no store to point at, and asking it for one made a whole provider unreachable.
+  const choice = selectResidencyBacking(env);
+  if (choice.backing === "hosted" && (!env["COLTRANE_STORE_URL"] || !env["COLTRANE_STORE_ANON"])) {
+    return 2;
+  }
+  const seat = await resolveSeatBacking(choice, {});
+  if (!seat.ok) {
+    say(`reside refused: ${seat.refusal} (seam: ${seat.seam}) — ${seat.message}`);
+    return resideExitCode(seat.refusal);
+  }
+
+  // The seat resolved; the remaining seams (channel, cortex, hands) are per-deployment on every
+  // backing, so an unwired one still refuses BY NAME rather than pretending to stand.
+  const r = createResidency({ residency }, { ...seat.seat });
   const booted = await r.boot();
   if (!booted.ok) {
     say(`reside refused: ${booted.refusal}${booted.seam ? ` (seam: ${booted.seam})` : ""} — ${booted.message}`);

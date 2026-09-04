@@ -70,18 +70,33 @@ describe("LAW 7 — a gig-scoped token is refused TYPED, before the wire", () =>
     expect(calls.envoy.length, "a gig-scoped token was carried to the envoy anyway").toBe(0);
   });
 
-  it("may_dispatch:false alone is enough — a gig_id is not the only way to be narrow", async () => {
+  it("an EMPTY may_dispatch list is a LEGITIMATE seat, not narrowness", async () => {
+    // TWICE-CORRECTED against the store, and this is the near-miss worth keeping a law on.
+    // may_dispatch is text[], never a boolean — so the first draft (`may_dispatch:false`) asserted a
+    // shape the column cannot hold. The obvious fix, "an empty list is narrow", was WORSE: the list
+    // stopped being a wildcard and became the exact standards a presence may reach, making `{}` a
+    // legitimate seating — a residency that dispatches but reaches no gig it did not dispatch.
+    // Reading empty as gig-scoped would have refused valid seats in the quiet direction.
     const R: ResideModule = await loadReside();
     const { deps } = recordingDeps({
-      claim: async () => leaseClaim({ gig_id: null, may_dispatch: false }),
+      claim: async () => leaseClaim({ gig_id: null, may_dispatch: [] }),
     });
     const r = R.createResidency({ residency: "any" }, deps);
-    const booted = await r.boot();
-    expect(booted.ok).toBe(false);
-    if (!booted.ok) expect(booted.refusal).toBe("gig_scoped_token");
+    expect((await r.boot()).ok, "a residency declaring no standards was refused as gig-scoped").toBe(true);
   });
 
-  it("a proper lease token seats — the law refuses narrowness, not every token", async () => {
+  it("a store refusal is read by its machine-readable PREFIX, not its prose", async () => {
+    // The claim door refuses a gig token itself, raising 42501 with a message beginning
+    // `gig_scoped_token:`. The engine reads the prefix — the human half is written to be reworded.
+    const R: ResideModule = await loadReside();
+    expect(R.storeRefusalName("gig_scoped_token: this token is scoped to gig abc")).toBe("gig_scoped_token");
+    expect(R.storeRefusalName("not_holder: box.B holds this seat")).toBe("not_holder");
+    expect(R.storeRefusalName("cursor_regression: 3 is behind 5")).toBe("cursor_regression");
+    // Prose that merely mentions the words carries no name, and must not be mistaken for one.
+    expect(R.storeRefusalName("the token was gig scoped, sorry")).toBe(null);
+  });
+
+  it("a lease token with the \"*\" allow-list seats — the law refuses narrowness, not every token", async () => {
     const R: ResideModule = await loadReside();
     const { deps } = recordingDeps();
     const r = R.createResidency({ residency: "any" }, deps);

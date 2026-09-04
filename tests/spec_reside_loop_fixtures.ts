@@ -63,7 +63,9 @@ export interface ResidencyClaim {
   /** The lease credential. A `ctk_`; gig-scoped iff `gig_id` is set or `may_dispatch` is false. */
   lease_token: string;
   gig_id?: string | null;
-  may_dispatch?: boolean;
+  /** An exact allow-list of standard slugs; wildcard "*". Never a boolean (measured against the
+   *  store: coltrane_agent_token.may_dispatch is text[], "a may_dispatch list is exact, not a hint"). */
+  may_dispatch?: readonly string[];
   /** Hand NAMES only — the venue is the sole hands surface (I17); no second tool list travels. */
   hands: readonly string[];
 }
@@ -109,7 +111,9 @@ export interface ResideDeps {
   claim?: (which: string | "any") => Promise<ResidencyClaim | null>;
   heartbeat?: (residencyId: string) => Promise<void>;
   release?: (residencyId: string, status: "hibernated" | "unseated") => Promise<void>;
-  cursorAdvance?: (residencyId: string, n: number) => Promise<void>;
+  /** The store returns the new cursor (its cursor_advance answers a bigint); a hand-built
+   *  backing may answer nothing. Both are accepted — the engine reads the record, not the reply. */
+  cursorAdvance?: (residencyId: string, n: number) => Promise<number | void>;
   channelListener?: (channelId: string) => AsyncIterable<InboundMessage>;
   cortex?: (session: { session_id: string | null; inbox: readonly InboundMessage[] }) => Promise<CortexTurn>;
   sealOutput?: (args: Record<string, unknown>) => Promise<{ content_sha: string }>;
@@ -155,8 +159,52 @@ export interface ResideModule {
   RESIDE_REFUSALS: readonly ResideRefusal[];
   SCHEDULE_LAW_REF: string;
   createResidency(opts: ResideOptions, deps: ResideDeps): Residency;
+  selectResidencyBacking(env: Record<string, string | undefined>): ResidencyBackingChoice;
+  resolveSeatBacking(
+    choice: ResidencyBackingChoice,
+    injected: { hosted?: Partial<SeatBacking>; module?: Partial<SeatBacking> },
+  ): Promise<SeatResolution>;
+  fileSeatBacking(root: string): SeatBacking;
+  fileSeatSeed(root: string, seed: SeatSeed): Promise<string>;
+  storeRefusalName(message: string): string | null;
+  runReside(argv: readonly string[], io: unknown): Promise<number>;
   /** The SAME symbol as workOnce — reside does not fork the gig path (I12, one level out). */
   resideGigPath: unknown;
+}
+
+
+// ── The backing seam: local · hand-built · hosted ────────────────────────────────────────────────
+//
+// selectQueueBacking's shape one table over (src/local_queue.ts:153) — presence, never value; a
+// conflict REFUSES rather than ordering the candidates. The third door is the new part: a module
+// you wrote yourself. `hosted` deliberately resolves to nothing the engine ships — a deployment
+// injects it, which is what makes "platform agnostic at the engine level" a checkable property.
+
+export type ResidencyBackingChoice =
+  | { backing: "local"; root: string }
+  | { backing: "module"; spec: string }
+  | { backing: "hosted" }
+  | { backing: "none"; why: string }
+  | { backing: "conflict"; why: string };
+
+/** The four seat seams — where the residency ROW lives. The channel, the cortex and the envoy are
+ *  separate axes a deployment always supplies; this seam is only about the seat. */
+export interface SeatBacking {
+  claim: (which: string | "any") => Promise<ResidencyClaim | null>;
+  heartbeat: (residencyId: string) => Promise<void>;
+  release: (residencyId: string, status: "hibernated" | "unseated") => Promise<void>;
+  cursorAdvance: (residencyId: string, n: number) => Promise<number>;
+}
+
+export type SeatResolution =
+  | { ok: true; seat: SeatBacking; backing: "local" | "module" | "hosted" }
+  | { ok: false; refusal: "no_backend" | "backing_conflict"; seam: string; message: string };
+
+export interface SeatSeed {
+  agent_slug: string;
+  org: string;
+  venue_slug: string;
+  channel_id: string;
 }
 
 // ── The loader ───────────────────────────────────────────────────────────────────────────────────
@@ -199,7 +247,7 @@ export function leaseClaim(over: Partial<ResidencyClaim> = {}): ResidencyClaim {
     cursor: 0,
     lease_token: "ctk_lease_viola",
     gig_id: null,
-    may_dispatch: true,
+    may_dispatch: ["*"],
     hands: ["Read", "Bash", "gig_dispatch", "gig_monitor", "output_write"],
     ...over,
   };
@@ -207,7 +255,9 @@ export function leaseClaim(over: Partial<ResidencyClaim> = {}): ResidencyClaim {
 
 /** The same claim carrying a GIG-scoped token — narrow may not mint broad (plan law L28). */
 export function gigScopedClaim(over: Partial<ResidencyClaim> = {}): ResidencyClaim {
-  return leaseClaim({ lease_token: "ctk_gig_abc", gig_id: "gig-abc", may_dispatch: false, ...over });
+  // Narrow by gig_id — the only signal. The allow-list is an authorization gate in the store and
+  // says nothing about whether a token may hold a seat.
+  return leaseClaim({ lease_token: "ctk_gig_abc", gig_id: "gig-abc", may_dispatch: [], ...over });
 }
 
 export function msg(id: string, at = 0, text = "hello"): InboundMessage {

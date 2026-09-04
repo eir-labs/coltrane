@@ -80,7 +80,7 @@ export const USAGE = `coltrane ${COLTRANE_VERSION}
                                          exit 0 complete or parked, 1 failed, 3 queue empty)
   coltrane reside [--any|--residency <id>]  hold a residency: claim a seat, ack its channel in
                                          reflex, answer every wake, and drain the org's due work
-                                         orders through the Envoy's governed verbs
+                                         orders through its institution's governed verbs
                                         (env: the same contract work uses — COLTRANE_STORE_URL,
                                          COLTRANE_STORE_ANON, COLTRANE_SERVICE_URL, plus
                                          COLTRANE_DRAIN_KEY + COLTRANE_INSTANCE for venue mode;

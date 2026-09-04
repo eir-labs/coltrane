@@ -134,10 +134,14 @@ describe("THE AGNOSTICISM LAW — the engine ships no platform of its own", () =
     // The structural half, and the one that catches the drift a year from now: if someone wires
     // eir's residency RPCs straight into the engine, this goes red and they have to put it behind
     // the injected seam instead.
+    // ORG-INTERNAL NAMES ARE DELIBERATELY ABSENT from this list. The repository already has a
+    // publishing gate whose term list arrives from a secret and is never committed
+    // (.github/workflows/boundary.yml); restating those terms here would republish in a public test
+    // exactly what that gate protects, and would be a second mechanism for one rule besides. This
+    // law covers what is left: store-shaped call patterns the engine must not grow.
     const forbidden = [
       "residency.claim", "residency.seat", "residency.heartbeat", "residency.release",
-      "cursor_advance", "coltrane_drain_claim", "supabase", "postgrest", "x-coltrane-provisioner-key",
-      "envoy.eir.sh", "slack",
+      "cursor_advance", "coltrane_drain_claim", "/rest/v1", "provisioner-key",
     ];
     for (const file of RESIDE_PATH) {
       const text = readFileSync(join(SRC, file), "utf8").toLowerCase();

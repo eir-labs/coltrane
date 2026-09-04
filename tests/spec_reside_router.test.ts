@@ -1,7 +1,7 @@
 // RED — LAWS 7, 9 and 10 of WI-3: the work-order router is CODE, the lease token is not a gig
 // token, and reside does not fork the gig path.
 //
-// The verb contract these laws encode is WI-4's, taken from spec.envoy-residency.envoy-binds-the-verbs
+// The verb contract these laws encode is WI-4's, taken from spec.callVerb-residency.callVerb-binds-the-verbs
 // (amendments a-c) rather than guessed:
 //   work-order-due       args {}            — a row-routed READ; no pin, the credential is the header
 //   work-order-dispatch  args {work_order_id, schedule_ordinal, mode?, input?, pin:{org,venue}}
@@ -18,19 +18,19 @@ import {
   leaseClaim,
   SCHEDULE_LAW_REF,
   type ResideModule,
-  type EnvoyAnswer,
+  type VerbAnswer,
 } from "./spec_reside_loop_fixtures.js";
 
 const PIN = { org: "org.house", venue: "venue.studio" };
 
-/** An envoy stub that answers `due` with the given entries and dispatches each to a fresh gig. */
-function envoyWith(
+/** An callVerb stub that answers `due` with the given entries and dispatches each to a fresh gig. */
+function verbsWith(
   due: { work_order_id: string; schedule_ordinal: number }[],
-  over: { dispatch?: (args: Record<string, unknown>) => EnvoyAnswer } = {},
+  over: { dispatch?: (args: Record<string, unknown>) => VerbAnswer } = {},
 ) {
   const seen: { verb: string; args: Record<string, unknown> }[] = [];
   let n = 0;
-  const envoy = async (verb: string, args: Record<string, unknown>): Promise<EnvoyAnswer> => {
+  const callVerb = async (verb: string, args: Record<string, unknown>): Promise<VerbAnswer> => {
     seen.push({ verb, args });
     if (verb === "work-order-due") return { ok: true, data: { due } };
     if (verb === "work-order-dispatch") {
@@ -41,14 +41,14 @@ function envoyWith(
     if (verb === "gig_monitor") return { ok: true, data: { gig_id: args["gig_id"], status: "running" } };
     return { ok: false, refusal: "unresolvable-ref", message: `no executor for ${verb}` };
   };
-  return { envoy, seen };
+  return { callVerb, seen };
 }
 
 describe("LAW 7 — a gig-scoped token is refused TYPED, before the wire", () => {
   it("a gig-scoped credential presented as the residency's refuses 'gig_scoped_token'", async () => {
     const R: ResideModule = await loadReside();
     const { deps } = recordingDeps({ claim: async () => gigScopedClaim() });
-    const r = R.createResidency({ residency: "any" }, deps);
+    const r = R.createResidency({ residency: "any", escalateOn: [SCHEDULE_LAW_REF] }, deps);
     const booted = await r.boot();
     expect(booted.ok, "a gig-scoped token seated a residency").toBe(false);
     if (!booted.ok) {
@@ -59,15 +59,15 @@ describe("LAW 7 — a gig-scoped token is refused TYPED, before the wire", () =>
     }
   });
 
-  it("the refusal happens ENGINE-SIDE — the envoy is never called with a gig token", async () => {
+  it("the refusal happens ENGINE-SIDE — the callVerb is never called with a gig token", async () => {
     const R: ResideModule = await loadReside();
     const { deps, calls } = recordingDeps({ claim: async () => gigScopedClaim() });
-    const r = R.createResidency({ residency: "any" }, deps);
+    const r = R.createResidency({ residency: "any", escalateOn: [SCHEDULE_LAW_REF] }, deps);
     await r.boot();
     await r.tick();
     // The store would refuse it too (42501 at the dispatch door) — but a token that cannot possibly
     // dispatch should never reach the wire to find out.
-    expect(calls.envoy.length, "a gig-scoped token was carried to the envoy anyway").toBe(0);
+    expect(calls.callVerb.length, "a gig-scoped token was carried to the callVerb anyway").toBe(0);
   });
 
   it("an EMPTY may_dispatch list is a LEGITIMATE seat, not narrowness", async () => {
@@ -81,7 +81,7 @@ describe("LAW 7 — a gig-scoped token is refused TYPED, before the wire", () =>
     const { deps } = recordingDeps({
       claim: async () => leaseClaim({ gig_id: null, may_dispatch: [] }),
     });
-    const r = R.createResidency({ residency: "any" }, deps);
+    const r = R.createResidency({ residency: "any", escalateOn: [SCHEDULE_LAW_REF] }, deps);
     expect((await r.boot()).ok, "a residency declaring no standards was refused as gig-scoped").toBe(true);
   });
 
@@ -99,7 +99,7 @@ describe("LAW 7 — a gig-scoped token is refused TYPED, before the wire", () =>
   it("a lease token with the \"*\" allow-list seats — the law refuses narrowness, not every token", async () => {
     const R: ResideModule = await loadReside();
     const { deps } = recordingDeps();
-    const r = R.createResidency({ residency: "any" }, deps);
+    const r = R.createResidency({ residency: "any", escalateOn: [SCHEDULE_LAW_REF] }, deps);
     // Guards the sabotage: if this went red too, law 7 would be refusing everything and proving
     // nothing.
     expect((await r.boot()).ok).toBe(true);
@@ -114,9 +114,9 @@ describe("LAW 9 — the router is code: every due entry once, the cortex zero ti
       { work_order_id: "wo-1", schedule_ordinal: 1 },
       { work_order_id: "wo-2", schedule_ordinal: 0 },
     ];
-    const { envoy, seen } = envoyWith(due);
-    const { deps } = recordingDeps({ envoy });
-    const r = R.createResidency({ residency: "any" }, deps);
+    const { callVerb, seen } = verbsWith(due);
+    const { deps } = recordingDeps({ callVerb });
+    const r = R.createResidency({ residency: "any", escalateOn: [SCHEDULE_LAW_REF] }, deps);
     await r.boot();
     const res = await r.tick();
 
@@ -129,9 +129,9 @@ describe("LAW 9 — the router is code: every due entry once, the cortex zero ti
 
   it("consults the cortex ZERO times on a clean pass", async () => {
     const R: ResideModule = await loadReside();
-    const { envoy } = envoyWith([{ work_order_id: "wo-1", schedule_ordinal: 0 }]);
-    const { deps, calls } = recordingDeps({ envoy });
-    const r = R.createResidency({ residency: "any" }, deps);
+    const { callVerb } = verbsWith([{ work_order_id: "wo-1", schedule_ordinal: 0 }]);
+    const { deps, calls } = recordingDeps({ callVerb });
+    const r = R.createResidency({ residency: "any", escalateOn: [SCHEDULE_LAW_REF] }, deps);
     await r.boot();
     await r.tick();
     // Determinism in the engine; inference in the prompt; they never overlap (plan law). A router
@@ -141,9 +141,9 @@ describe("LAW 9 — the router is code: every due entry once, the cortex zero ti
 
   it("sends work-order-due with NO pin, and work-order-dispatch WITH one", async () => {
     const R: ResideModule = await loadReside();
-    const { envoy, seen } = envoyWith([{ work_order_id: "wo-1", schedule_ordinal: 0 }]);
-    const { deps } = recordingDeps({ envoy });
-    const r = R.createResidency({ residency: "any" }, deps);
+    const { callVerb, seen } = verbsWith([{ work_order_id: "wo-1", schedule_ordinal: 0 }]);
+    const { deps } = recordingDeps({ callVerb });
+    const r = R.createResidency({ residency: "any", escalateOn: [SCHEDULE_LAW_REF] }, deps);
     await r.boot();
     await r.tick();
 
@@ -159,12 +159,12 @@ describe("LAW 9 — the router is code: every due entry once, the cortex zero ti
 
   it("monitors each open gig and records terminality", async () => {
     const R: ResideModule = await loadReside();
-    const { envoy, seen } = envoyWith([
+    const { callVerb, seen } = verbsWith([
       { work_order_id: "wo-1", schedule_ordinal: 0 },
       { work_order_id: "wo-2", schedule_ordinal: 0 },
     ]);
-    const { deps } = recordingDeps({ envoy });
-    const r = R.createResidency({ residency: "any" }, deps);
+    const { deps } = recordingDeps({ callVerb });
+    const r = R.createResidency({ residency: "any", escalateOn: [SCHEDULE_LAW_REF] }, deps);
     await r.boot();
     const res = await r.tick();
     const monitored = seen.filter((s) => s.verb === "gig_monitor");
@@ -174,7 +174,7 @@ describe("LAW 9 — the router is code: every due entry once, the cortex zero ti
 
   it("a governance refusal is RELAYED verbatim, not judged", async () => {
     const R: ResideModule = await loadReside();
-    const { envoy } = envoyWith([{ work_order_id: "wo-1", schedule_ordinal: 0 }], {
+    const { callVerb } = verbsWith([{ work_order_id: "wo-1", schedule_ordinal: 0 }], {
       dispatch: () => ({
         ok: false,
         refusal: "store-refused",
@@ -182,8 +182,8 @@ describe("LAW 9 — the router is code: every due entry once, the cortex zero ti
         errcode: "42501",
       }),
     });
-    const { deps, calls } = recordingDeps({ envoy });
-    const r = R.createResidency({ residency: "any" }, deps);
+    const { deps, calls } = recordingDeps({ callVerb });
+    const r = R.createResidency({ residency: "any", escalateOn: [SCHEDULE_LAW_REF] }, deps);
     await r.boot();
     const res = await r.tick();
 
@@ -197,7 +197,7 @@ describe("LAW 9 — the router is code: every due entry once, the cortex zero ti
 
   it("ONLY the schedule law_ref escalates to the cortex — keyed on law_ref, never on prose", async () => {
     const R: ResideModule = await loadReside();
-    const { envoy } = envoyWith([{ work_order_id: "wo-1", schedule_ordinal: 2 }], {
+    const { callVerb } = verbsWith([{ work_order_id: "wo-1", schedule_ordinal: 2 }], {
       dispatch: () => ({
         ok: false,
         refusal: "store-refused",
@@ -206,8 +206,8 @@ describe("LAW 9 — the router is code: every due entry once, the cortex zero ti
         law_ref: SCHEDULE_LAW_REF,
       }),
     });
-    const { deps, calls } = recordingDeps({ envoy });
-    const r = R.createResidency({ residency: "any" }, deps);
+    const { deps, calls } = recordingDeps({ callVerb });
+    const r = R.createResidency({ residency: "any", escalateOn: [SCHEDULE_LAW_REF] }, deps);
     await r.boot();
     const res = await r.tick();
 
@@ -220,7 +220,7 @@ describe("LAW 9 — the router is code: every due entry once, the cortex zero ti
 
   it("the SAME message without the law_ref does NOT escalate", async () => {
     const R: ResideModule = await loadReside();
-    const { envoy } = envoyWith([{ work_order_id: "wo-1", schedule_ordinal: 2 }], {
+    const { callVerb } = verbsWith([{ work_order_id: "wo-1", schedule_ordinal: 2 }], {
       dispatch: () => ({
         ok: false,
         refusal: "store-refused",
@@ -228,8 +228,8 @@ describe("LAW 9 — the router is code: every due entry once, the cortex zero ti
         errcode: "23514",
       }),
     });
-    const { deps, calls } = recordingDeps({ envoy });
-    const r = R.createResidency({ residency: "any" }, deps);
+    const { deps, calls } = recordingDeps({ callVerb });
+    const r = R.createResidency({ residency: "any", escalateOn: [SCHEDULE_LAW_REF] }, deps);
     await r.boot();
     await r.tick();
     // The pair with the law above is what makes "keyed on law_ref" a real property: identical prose,
@@ -237,17 +237,17 @@ describe("LAW 9 — the router is code: every due entry once, the cortex zero ti
     expect(calls.cortex, "the router keyed on the refusal's prose instead of its law_ref").toBe(0);
   });
 
-  it("with no envoy wired the router refuses 'no_backend' naming the seam", async () => {
+  it("with no callVerb wired the router refuses 'no_backend' naming the seam", async () => {
     const R: ResideModule = await loadReside();
     const { deps } = recordingDeps();
-    delete (deps as { envoy?: unknown }).envoy;
-    const r = R.createResidency({ residency: "any" }, deps);
+    delete (deps as { callVerb?: unknown }).callVerb;
+    const r = R.createResidency({ residency: "any", escalateOn: [SCHEDULE_LAW_REF] }, deps);
     await r.boot();
     const res = await r.tick();
     expect(res.ok).toBe(false);
     if (!res.ok) {
       expect(res.refusal).toBe("no_backend");
-      expect(res.seam).toBe("envoy");
+      expect(res.seam).toBe("callVerb");
     }
   });
 });

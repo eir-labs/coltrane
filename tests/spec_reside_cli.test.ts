@@ -37,7 +37,7 @@ function io(over: Partial<CliIO> = {}): CliIO & { stdout: string[]; stderr: stri
 
 /** The three bootstrap values `work` actually reads, per src/worker_env.ts's WORKER_ENV_CONTRACT —
  *  NOT the spec's original M1 wording, which named the deprecated COLTRANE_DRAIN_URL. Amended on
- *  spec.envoy-residency.coltrane-reside before this was written. */
+ *  spec.callVerb-residency.coltrane-reside before this was written. */
 const BOOT_ENV = {
   COLTRANE_STORE_URL: "https://store.example",
   COLTRANE_STORE_ANON: "anon-key",

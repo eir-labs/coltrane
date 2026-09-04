@@ -24,7 +24,7 @@
  *
  *   3. THE ROUTER IS CODE. Determinism in the engine, inference in the prompt, no overlap. A clean
  *      pass dispatches every due (order, ordinal) and consults the cortex ZERO times. The cortex is
- *      reached on ONE named demand — a store refusal whose `law_ref` is SCHEDULE_LAW_REF — and that
+ *      reached on NAMED DEMAND only — a store refusal whose `law_ref` the deployment listed — and that
  *      is keyed on the law_ref, never on the refusal's prose, because prose is written for humans
  *      and gets reworded without notice.
  *
@@ -110,11 +110,13 @@ export function resideExitCode(refusal: string): number {
 }
 
 /**
- * The ONE law_ref that turns a store refusal into a question for the cortex: a schedule entry the
- * order classifies `needs-amendment` / `to-be-created`. Everything else a clean pass can meet is
- * governance — relayed into the channel verbatim and never adjudicated by a model.
+ * WHICH refusals constitute NAMED DEMAND is configuration, not an engine constant. The engine ships
+ * the mechanism — branch on a refusal's `law_ref`, never on its prose, because prose is written for
+ * humans and gets reworded — and the deployment supplies the refs that mean "a human must rule".
+ * Hard-coding one institution's law reference here named someone else's governance inside the
+ * engine, which is the coupling the backing seam exists to prevent, one layer over.
  */
-export const SCHEDULE_LAW_REF = "chancery:dispatch:the-schedule-holds-the-pen";
+const NO_NAMED_DEMAND: readonly string[] = [];
 
 // ── The seam ─────────────────────────────────────────────────────────────────────────────────────
 
@@ -159,10 +161,10 @@ export interface DueEntry {
   mode?: "rehearsal" | "studio" | "live";
   input?: Record<string, unknown>;
 }
-export type EnvoyAnswer =
+export type VerbAnswer =
   | { ok: true; data: Record<string, unknown> }
   | { ok: false; refusal: string; message: string; errcode?: string; law_ref?: string };
-export type EnvoyCall = (verb: string, args: Record<string, unknown>) => Promise<EnvoyAnswer>;
+export type VerbCall = (verb: string, args: Record<string, unknown>) => Promise<VerbAnswer>;
 
 export interface ResideDeps {
   claim?: (which: string | "any") => Promise<ResidencyClaim | null>;
@@ -174,13 +176,16 @@ export interface ResideDeps {
   channelListener?: (channelId: string) => AsyncIterable<InboundMessage>;
   cortex?: (session: { session_id: string | null; inbox: readonly InboundMessage[] }) => Promise<CortexTurn>;
   sealOutput?: (args: Record<string, unknown>) => Promise<{ content_sha: string }>;
-  envoy?: EnvoyCall;
+  callVerb?: VerbCall;
   say?: (u: Utterance) => Promise<void>;
   clock?: SimClock;
 }
 
 export interface ResideOptions {
   residency: string | "any";
+  /** Refusal `law_ref`s that mean "a human must rule" — supplied by the deployment, never by the
+   *  engine. Absent means no refusal escalates: the router relays and the cortex stays unconsulted. */
+  escalateOn?: readonly string[];
   now?: () => number;
 }
 
@@ -205,7 +210,7 @@ export interface Residency {
   readonly inbox: readonly InboundMessage[];
 }
 
-/** The seams boot cannot proceed without, in the order they are reported. `envoy` is absent from
+/** The seams boot cannot proceed without, in the order they are reported. `callVerb` is absent from
  *  this list on purpose: a residency that only listens and answers is a legitimate residency, and
  *  the router names its own seam when it is the thing that is unwired. */
 const BOOT_SEAMS = ["claim", "channelListener", "cortex", "say", "sealOutput", "cursorAdvance", "release"] as const;
@@ -256,6 +261,7 @@ function clockOf(deps: ResideDeps): SimClock {
 
 export function createResidency(opts: ResideOptions, deps: ResideDeps): Residency {
   const clock = clockOf(deps);
+  const escalateOn = opts.escalateOn ?? NO_NAMED_DEMAND;
   const inbox: InboundMessage[] = [];
 
   let rec: ResidencyRecord | null = null;
@@ -381,8 +387,8 @@ export function createResidency(opts: ResideOptions, deps: ResideDeps): Residenc
 
   async function tick(): Promise<ResideResult<RouterResult>> {
     if (!rec || !residencyId) return standing ?? refuse("no_backend", "not seated", { seam: "claim" });
-    if (typeof deps.envoy !== "function") {
-      return refuse("no_backend", "reside has no envoy backend wired — the router's hands are the Envoy MCP, hydrated under the lease token.", { seam: "envoy" });
+    if (typeof deps.callVerb !== "function") {
+      return refuse("no_backend", "reside has no callVerb backend wired — the router's hands are the governed verb surface, hydrated under the lease token.", { seam: "callVerb" });
     }
 
     const pin: Pin = { org: rec.org, venue: rec.venue_slug };
@@ -393,7 +399,7 @@ export function createResidency(opts: ResideOptions, deps: ResideDeps): Residenc
 
     // A row-routed READ forwards its args verbatim and reads the credential from the header, so it
     // carries no pin. The dispatch is an ACT and names its org and venue in the act itself.
-    const due = await deps.envoy("work-order-due", {});
+    const due = await deps.callVerb("work-order-due", {});
     if (!due.ok) {
       await deps.say!({ channel_id: rec.channel_id, text: due.message });
       return { ok: true, dispatched, monitored, relayed: [{ refusal: due.refusal, message: due.message }], escalated };
@@ -401,7 +407,7 @@ export function createResidency(opts: ResideOptions, deps: ResideDeps): Residenc
 
     const entries = (Array.isArray((due.data as { due?: unknown }).due) ? (due.data as { due: DueEntry[] }).due : []);
     for (const entry of entries) {
-      const answer = await deps.envoy("work-order-dispatch", {
+      const answer = await deps.callVerb("work-order-dispatch", {
         work_order_id: entry.work_order_id,
         schedule_ordinal: entry.schedule_ordinal,
         mode: entry.mode ?? "live",
@@ -416,7 +422,7 @@ export function createResidency(opts: ResideOptions, deps: ResideDeps): Residenc
         continue;
       }
 
-      if (answer.law_ref === SCHEDULE_LAW_REF) {
+      if (answer.law_ref !== undefined && escalateOn.includes(answer.law_ref)) {
         // THE ONE NAMED DEMAND. Keyed on the law_ref — the identical prose without it is governance
         // and must not reach a model.
         escalated.push({ work_order_id: entry.work_order_id, schedule_ordinal: entry.schedule_ordinal, law_ref: answer.law_ref });
@@ -437,7 +443,7 @@ export function createResidency(opts: ResideOptions, deps: ResideDeps): Residenc
     }
 
     for (const d of dispatched) {
-      const seen = await deps.envoy("gig_monitor", { gig_id: d.gig_id });
+      const seen = await deps.callVerb("gig_monitor", { gig_id: d.gig_id });
       if (seen.ok) monitored.push(d.gig_id);
     }
 

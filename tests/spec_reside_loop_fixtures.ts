@@ -47,7 +47,10 @@ export const RESIDE_REFUSALS: readonly ResideRefusal[] = [
 
 /** The ONE law_ref that turns a store refusal into a question for the cortex. Keyed on the law_ref,
  *  never on the prose: a message is written for a human and may be reworded without notice. */
-export const SCHEDULE_LAW_REF = "chancery:dispatch:the-schedule-holds-the-pen";
+/** A stand-in law reference. The engine no longer holds one — WHICH refs mean "a human must rule"
+ *  is the deployment's to supply — so these laws only need A ref, and naming a real institution's
+ *  governance in a public fixture would say something the engine deliberately does not know. */
+export const SCHEDULE_LAW_REF = "example:dispatch:the-schedule-holds-the-pen";
 
 // ── The seam ─────────────────────────────────────────────────────────────────────────────────────
 
@@ -104,12 +107,12 @@ export interface DueEntry {
   input?: Record<string, unknown>;
 }
 
-/** The envoy's answer: an act or a refusal. Every refusal carries `message` (WI-4 amendment c). */
-export type EnvoyAnswer =
+/** The callVerb's answer: an act or a refusal. Every refusal carries `message` (WI-4 amendment c). */
+export type VerbAnswer =
   | { ok: true; data: Record<string, unknown> }
   | { ok: false; refusal: string; message: string; errcode?: string; law_ref?: string };
 
-export type EnvoyCall = (verb: string, args: Record<string, unknown>) => Promise<EnvoyAnswer>;
+export type VerbCall = (verb: string, args: Record<string, unknown>) => Promise<VerbAnswer>;
 
 /**
  * The injected seam — the way `deps.queueGig` injects dispatch (src/server.ts:3436). The engine
@@ -128,13 +131,14 @@ export interface ResideDeps {
   cortex?: (session: { session_id: string | null; inbox: readonly InboundMessage[] }) => Promise<CortexTurn>;
   sealOutput?: (args: Record<string, unknown>) => Promise<{ content_sha: string }>;
   /** The hands. Hydrated under the LEASE token; the engine never holds a broader credential. */
-  envoy?: EnvoyCall;
+  callVerb?: VerbCall;
   say?: (u: Utterance) => Promise<void>;
   clock?: SimClock;
 }
 
 export interface ResideOptions {
   residency: string | "any";
+  escalateOn?: readonly string[];
   /** Present only so a law can drive the loop without a wall clock. */
   now?: () => number;
 }
@@ -167,7 +171,6 @@ export interface Residency {
 
 export interface ResideModule {
   RESIDE_REFUSALS: readonly ResideRefusal[];
-  SCHEDULE_LAW_REF: string;
   createResidency(opts: ResideOptions, deps: ResideDeps): Residency;
   selectResidencyBacking(env: Record<string, string | undefined>): ResidencyBackingChoice;
   resolveSeatBacking(
@@ -197,7 +200,7 @@ export type ResidencyBackingChoice =
   | { backing: "none"; why: string }
   | { backing: "conflict"; why: string };
 
-/** The four seat seams — where the residency ROW lives. The channel, the cortex and the envoy are
+/** The four seat seams — where the residency ROW lives. The channel, the cortex and the callVerb are
  *  separate axes a deployment always supplies; this seam is only about the seat. */
 export interface SeatBacking {
   claim: (which: string | "any") => Promise<ResidencyClaim | null>;
@@ -280,7 +283,7 @@ export function msg(id: string, at = 0, text = "hello"): InboundMessage {
 export function recordingDeps(over: Partial<ResideDeps> = {}): {
   deps: ResideDeps;
   tape: string[];
-  calls: { claim: number; heartbeat: number; heartbeatArgs: unknown[][]; release: unknown[][]; cursorAdvance: unknown[][]; cortex: number; envoy: unknown[][]; say: Utterance[] };
+  calls: { claim: number; heartbeat: number; heartbeatArgs: unknown[][]; release: unknown[][]; cursorAdvance: unknown[][]; cortex: number; callVerb: unknown[][]; say: Utterance[] };
 } {
   const tape: string[] = [];
   const calls = {
@@ -290,7 +293,7 @@ export function recordingDeps(over: Partial<ResideDeps> = {}): {
     release: [] as unknown[][],
     cursorAdvance: [] as unknown[][],
     cortex: 0,
-    envoy: [] as unknown[][],
+    callVerb: [] as unknown[][],
     say: [] as Utterance[],
   };
   const deps: ResideDeps = {
@@ -302,7 +305,7 @@ export function recordingDeps(over: Partial<ResideDeps> = {}): {
     channelListener: async function* () { /* a listener that yields nothing is still a listener */ },
     cortex: async () => { calls.cortex += 1; tape.push("cortex"); return { utterance: { channel_id: "chan.parlor", text: "answered" } }; },
     sealOutput: async () => { tape.push("sealOutput"); return { content_sha: "sha-utterance-0" }; },
-    envoy: async (verb, args) => { calls.envoy.push([verb, args]); tape.push(`envoy:${verb}`); return { ok: true, data: {} }; },
+    callVerb: async (verb, args) => { calls.callVerb.push([verb, args]); tape.push(`callVerb:${verb}`); return { ok: true, data: {} }; },
     say: async (u) => { calls.say.push(u); tape.push("say"); },
     clock: simClock(),
     ...over,

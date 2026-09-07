@@ -266,12 +266,26 @@ export const CALIBRATION_TRAIL = {
 // orchestrator src — exactly the class this ratchet pins and holds from growing. The CONTRACT
 // ratchet below is the one that actually gates them: every one is named by an agent method or
 // the standard's phase intents, so the contract pin did not move.
-// 218 → 217: `description` left the unread set. It was declared on genome classes and read by
-// nothing in src/; MCPToolDef now declares it too, and src/server.ts READS it to build each tool's
-// advertised description — where the surface previously computed `${t.category} tool` and every one
-// of the 54 verbs reached its client saying "run tool" / "build tool". The ratchet moves in the
-// only direction it may: a field that had no reader now has one.
-export const PINNED_UNREAD_FIELDS = 217;
+// STAYS AT 218, and the retracted move is worth more than the number.
+//
+// The tool-descriptions change first lowered this to 217 and credited `description`: "declared on
+// genome classes and read by nothing in src/, and server.ts now READS it." That was false in both
+// halves. `description` already had four readers in src/server.ts on main, so it was never in the
+// unread set. The field that actually left was `invariants` — because a NEW DESCRIPTION STRING
+// ("under typed invariants") contains the word, and stripComments below blanks comments but NOT
+// string literals. Prose retired a real finding, and the ratchet reported it as progress.
+//
+// That is precisely the defect this file already documents one layer up: "A COMMENT IS NOT A
+// READER … a design note explaining that `technique_evidence` has no readers would itself count as
+// a reader and quietly retire the finding." Measured then for comments; measured now for strings.
+// The description was reworded so nothing is masked, and the pin returns to where it belongs.
+//
+// THE WIDER HOLE IS REAL AND IS NOT CLOSED HERE. Blanking string literals as well as comments
+// moves the true count 217 → 242: twenty-five declared fields currently read as reached ONLY
+// because their name appears inside some string in src/. Re-baselining a sealed ratchet by
+// twenty-five belongs in its own change, with its own reading of what those fields are — not
+// folded into a change about tool descriptions. Measured, named, and left for a decision.
+export const PINNED_UNREAD_FIELDS = 218;
 
 /* ─────────────────────────────────────────────────────────────────────────────────────────────────
  * TWO CORPORA — engine (src/) vs contract (broad).

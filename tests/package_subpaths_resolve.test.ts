@@ -26,6 +26,7 @@ import { readFileSync, existsSync, mkdtempSync, mkdirSync, symlinkSync, writeFil
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createRequire } from "node:module";
+import { pathToFileURL } from "node:url";
 
 const ROOT = join(__dirname, "..");
 const pkg = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")) as {
@@ -55,12 +56,9 @@ describe("every subpath this package advertises can be imported", () => {
     }
   });
 
-  it("law 1 — every advertised subpath RESOLVES from outside the package, as Node resolves it", () => {
-    // Not existsSync on the target. A file can exist and still be unexported — that IS the failure
-    // (@eir-labs/coltrane/worker_env threw ERR_PACKAGE_PATH_NOT_EXPORTED while worker_env.js sat in
-    // dist the whole time), so a law that checks the path exists would have passed straight through
-    // it. This stands where a consumer stands: a directory outside the package, with the package
-    // linked under node_modules, resolving BY NAME through the exports map.
+  /** A directory outside the package, with the package linked under node_modules — where a
+   *  consumer stands. Returns a require anchored there, so `.resolve()` goes through `exports`. */
+  function asConsumer<T>(fn: (req: NodeRequire) => T): T {
     const consumer = mkdtempSync(join(tmpdir(), "coltrane-consumer-"));
     try {
       mkdirSync(join(consumer, "node_modules", "@eir-labs"), { recursive: true });
@@ -68,24 +66,34 @@ describe("every subpath this package advertises can be imported", () => {
       writeFileSync(join(consumer, "package.json"), JSON.stringify({ name: "consumer", type: "module" }));
       const anchor = join(consumer, "index.js");
       writeFileSync(anchor, "");
-      const req = createRequire(anchor);
+      return fn(createRequire(anchor));
+    } finally {
+      rmSync(consumer, { recursive: true, force: true });
+    }
+  }
 
-      const unreachable: string[] = [];
+  it("law 1 — every advertised subpath RESOLVES from outside the package, as Node resolves it", () => {
+    // Not existsSync on the target. A file can exist and still be unexported — that IS the failure
+    // (@eir-labs/coltrane/worker_env threw ERR_PACKAGE_PATH_NOT_EXPORTED while worker_env.js sat in
+    // dist the whole time), so a law that checks the path exists would have passed straight through
+    // it. This stands where a consumer stands: a directory outside the package, with the package
+    // linked under node_modules, resolving BY NAME through the exports map.
+    const unreachable = asConsumer((req) => {
+      const bad: string[] = [];
       for (const key of subpaths()) {
         const specifier = key === "." ? pkg.name : `${pkg.name}/${key.replace(/^\.\//, "")}`;
         try {
           req.resolve(specifier);
         } catch (e) {
-          unreachable.push(`${specifier} -> ${(e as { code?: string }).code ?? (e as Error).message}`);
+          bad.push(`${specifier} -> ${(e as { code?: string }).code ?? (e as Error).message}`);
         }
       }
-      expect(
-        unreachable,
-        `a downstream cannot import these, whatever dist holds:\n${unreachable.join("\n")}`,
-      ).toEqual([]);
-    } finally {
-      rmSync(consumer, { recursive: true, force: true });
-    }
+      return bad;
+    });
+    expect(
+      unreachable,
+      `a downstream cannot import these, whatever dist holds:\n${unreachable.join("\n")}`,
+    ).toEqual([]);
   });
 
   it("law 1b — and the files those entries name are actually built", () => {
@@ -119,19 +127,29 @@ describe("every subpath this package advertises can be imported", () => {
     ).toEqual([]);
   });
 
-  it("law 3 — the two the knowledge base needs export the symbols it needs", () => {
+  it("law 3 — the two the knowledge base needs export the symbols it needs, THROUGH the subpath", async () => {
     // Reachability, not existence. A rename inside either module leaves the subpath resolving and
-    // the downstream generator silently empty — which is this repo's named defect, a legitimate
-    // -looking value where an absence should have refused.
-    const require_ = createRequire(join(ROOT, "package.json"));
+    // the downstream generator silently empty — this repo's named defect, a legitimate-looking
+    // value where an absence should have refused.
+    //
+    // ITS FIRST DRAFT DID NOT TOUCH THE EXPORTS MAP. It require()d ABSOLUTE paths into dist/,
+    // which bypasses `exports` entirely — measured: deleting BOTH subpaths from package.json left
+    // this law green, while its title claims to check they are exported. It also used require()
+    // on ESM, only unflagged from Node 22.12 while `engines` says >=22, so it would have thrown
+    // for a contributor on 22.0-22.11. Both halves fixed: the specifier is resolved from a
+    // consumer's anchor (so `exports` decides the path) and then loaded with import().
+    const resolved = asConsumer((req) => ({
+      workerEnv: req.resolve(`${pkg.name}/worker_env`),
+      schema: req.resolve(`${pkg.name}/genome_schema`),
+    }));
 
-    const workerEnv = require_(join(ROOT, "dist/src/worker_env.js")) as Record<string, unknown>;
+    const workerEnv = (await import(pathToFileURL(resolved.workerEnv).href)) as Record<string, unknown>;
     expect(
       workerEnv.WORKER_ENV_CONTRACT,
       "WORKER_ENV_CONTRACT is the one enumerated table of the worker's environment",
     ).toBeDefined();
 
-    const schema = require_(join(ROOT, "dist/src/genome_schema.js")) as Record<string, unknown>;
+    const schema = (await import(pathToFileURL(resolved.schema).href)) as Record<string, unknown>;
     for (const sym of ["VenueSchema", "AgentSchema", "StandardSchema"]) {
       expect(schema[sym], `${sym} is the single Zod source every restatement derives from`).toBeDefined();
     }

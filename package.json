@@ -51,6 +51,16 @@
       "types": "./dist/src/tool_surface.d.ts",
       "import": "./dist/src/tool_surface.js",
       "default": "./dist/src/tool_surface.js"
+    },
+    "./worker_env": {
+      "types": "./dist/src/worker_env.d.ts",
+      "import": "./dist/src/worker_env.js",
+      "default": "./dist/src/worker_env.js"
+    },
+    "./genome_schema": {
+      "types": "./dist/src/genome_schema.d.ts",
+      "import": "./dist/src/genome_schema.js",
+      "default": "./dist/src/genome_schema.js"
     }
   },
   "files": [

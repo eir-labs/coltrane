@@ -11,7 +11,7 @@
 // DEPLOYMENT injects, the way deps.queueGig and deps.mintVenueCredential already work. If coltrane
 // ever grows a residency.claim() call of its own, the last law in this file goes red.
 import { describe, it, expect } from "vitest";
-import { readFileSync, mkdtempSync } from "node:fs";
+import { readFileSync, mkdtempSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { DRAIN_VARS } from "../src/local_queue.js";
@@ -19,10 +19,29 @@ import { loadReside, type ResideModule } from "./spec_reside_loop_fixtures.js";
 
 const SRC = new URL("../src/", import.meta.url).pathname;
 
-/** The reside path — the files this law holds to the agnosticism standard. `work`'s older drain
- *  path (src/worker.ts) names coltrane_drain_claim directly and is deliberately NOT in scope: this
- *  law pins what reside is, it does not retroactively re-litigate the drain. */
-const RESIDE_PATH = ["reside.ts", "reside_backing.ts"];
+/**
+ * The reside path — the files this law holds to the agnosticism standard.
+ *
+ * DISCOVERED, NEVER LISTED, and that is the whole point. This used to be the literal
+ * `["reside.ts", "reside_backing.ts"]`, which made the law unable to see the one file anybody would
+ * actually add: a `reside_hosted.ts` wiring eir's residency RPCs straight into the engine would
+ * have passed this suite untouched — not because it was clean, but because the list was short. A
+ * rule that cannot fail is remembered, not enforced, and a two-name array is a memory.
+ *
+ * So the corpus is every `reside*.ts` / `residency*.ts` in src/. Add a file to the reside path and
+ * it is in scope by existing, which is what makes "the engine ships no platform of its own" a
+ * property rather than a promise. `src/worker.ts` stays deliberately OUT: it names
+ * coltrane_drain_claim directly, and this law pins what reside is rather than re-litigating the
+ * drain — reside.ts re-exports workOnce, so a naive import closure would drag it in and red on
+ * history instead of on drift.
+ */
+function resideCorpus(): string[] {
+  return readdirSync(SRC)
+    .filter((f) => /^(reside|residency)[a-z_]*\.ts$/.test(f))
+    .sort();
+}
+
+const RESIDE_PATH = resideCorpus();
 
 describe("the backing is SELECTED from presence, never guessed", () => {
   it("COLTRANE_RESIDENCY_DIR selects the local file backing", async () => {
@@ -128,6 +147,21 @@ describe("THE AGNOSTICISM LAW — the engine ships no platform of its own", () =
     const res = await R.resolveSeatBacking({ backing: "hosted" }, { hosted });
     expect(res.ok).toBe(true);
     if (res.ok) expect(res.seat.claim).toBe(hosted.claim);
+  });
+
+  it("the corpus this law scans is DISCOVERED, and is never empty", () => {
+    // THE CHECK ON THE CHECK. The agnosticism law below is a loop over `RESIDE_PATH`; a loop over
+    // an empty array passes, loudly and instantly, while testing nothing. That is the same defect
+    // the law itself exists to catch, one level up — so the corpus proves itself before it is used.
+    expect(RESIDE_PATH, "the reside corpus came back empty — the law below would pass vacuously")
+      .not.toHaveLength(0);
+    // The two files that must always be in it. A regex that stops matching them has broken.
+    expect(RESIDE_PATH, "the corpus lost the module the law is named for").toContain("reside.ts");
+    expect(RESIDE_PATH, "the corpus lost the backing seam").toContain("reside_backing.ts");
+    // And it must be DISCOVERY, not a restatement: every file it names is really on disk.
+    for (const f of RESIDE_PATH) {
+      expect(() => readFileSync(join(SRC, f), "utf8"), `${f} is named by the corpus but not on disk`).not.toThrow();
+    }
   });
 
   it("the reside path names NO platform-specific store symbol", () => {

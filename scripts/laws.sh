@@ -29,7 +29,8 @@ cd "$(dirname "$0")/.."
 # stopped being true at Node 24), and two pure flag-string laws replaced it in this band. The nine
 # laws that need a real request moved to tests/security — a band may reach out, the root suite may
 # not — so they are counted there, by file, not here.
-EXPECTED_LAWS="${EXPECTED_LAWS:-4132}"
+EXPECTED_LAWS="${EXPECTED_LAWS:-4133}"
+#   +1 the agnosticism law can FAIL (#537) — the reside corpus is discovered, not listed.
 #  +13 spec_reside_drive (new file, #537) — driveResidency: the pump, the single-flight drain, the stop
 #      race (WI-9). Rebased onto b5112ff (#550): main 4119 + the branch's own +13.
 #   +7 a_red_law_names_its_plant (#551, red-spec v5) — carried in by the rebase onto 805b535; the

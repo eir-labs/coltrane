@@ -3758,7 +3758,13 @@ async function callSurfaceTool(
 export function createToolSurface(deps: ToolSurfaceDeps): SurfaceTool[] {
   return MCP_TOOLS.map((t) => ({
     name: t.slug,
-    description: `${t.category} tool`,
+    // The tool's OWN description (src/mcp.ts TOOL_DESCRIPTIONS), not a string computed from its
+    // category. This line used to be `${t.category} tool`, which meant every client — stdio and
+    // hosted alike — saw all 54 verbs described as "run tool" / "build tool" / "understand tool".
+    // The description is the field a model reads to pick a verb, so the surface was offering
+    // fifty-four choices and five distinct hints. It never looked unfinished, because it was
+    // computed: a missing description was indistinguishable from a written one.
+    description: t.description,
     input_schema: t.input_schema,
     call: (args: Record<string, unknown>): Promise<SurfaceToolResult> => callSurfaceTool(t.slug, args, deps),
   }));

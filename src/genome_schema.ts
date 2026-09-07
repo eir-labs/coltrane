@@ -1170,8 +1170,40 @@ export const VenueObjectSchema = z
  * makes it reachable, or a server needing a credential the surface does not admit. Each is refused at
  * PARSE, moving the discovery from a box nobody is watching to the author's own terminal.
  */
+/** The host an over-the-wire url is reached at — what `doors.egress` must name. `null` when the url
+ *  does not parse as one (which rule 4 then refuses, naming the server). */
+export function mcpServerHost(url: string | undefined): string | null {
+  if (!url) return null;
+  const m = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\/(?:[^@/?#]*@)?([^/?#:]+)/.exec(url);
+  return m ? m[1]!.toLowerCase() : null;
+}
+
+/** A url that carries MATERIAL — userinfo before the host, or a query string — is a key wearing an
+ *  address. A room names WHERE, never a secret (rule 6). */
+export function urlCarriesMaterial(url: string | undefined): boolean {
+  if (!url) return false;
+  return /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\/[^/?#]*@/.test(url) || url.includes("?");
+}
+
 export const VenueSchema = VenueObjectSchema.superRefine((venue, ctx) => {
   const declaredSlugs = new Set(venue.mcp_servers.map((s) => s.slug));
+  const egress = new Set((venue.doors?.egress ?? []).map((h) => h.toLowerCase()));
+
+  // Rule 5 — one slug, one server. Two declarations under one slug are two authors of WHERE; a
+  // grant `mcp__<slug>__<tool>` could not say which it meant, and a store row could not either.
+  // (Ruling A4: the store refuses the same at its door — 20260907100000.)
+  const seen = new Map<string, number>();
+  venue.mcp_servers.forEach((server, i) => {
+    const first = seen.get(server.slug);
+    if (first === undefined) { seen.set(server.slug, i); return; }
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["mcp_servers", i, "slug"],
+      message:
+        `mcp server "${server.slug}" is declared more than once in venue "${venue.slug}" (entries ${first} and ${i}) — ` +
+        `one slug names one server, or nothing that names the slug can say which it meant.`,
+    });
+  });
 
   // Rule 1 — every `mcp__<slug>__<tool>` grant must name a DECLARED server. R10 checks the tool-NAME
   // intersection at compose time, a different question; nothing there says what provides the server.
@@ -1219,6 +1251,42 @@ export const VenueSchema = VenueObjectSchema.superRefine((venue, ctx) => {
         code: z.ZodIssueCode.custom,
         path: ["mcp_servers", i, "url"],
         message: `mcp server "${server.slug}" uses transport "${server.transport}" but declares no url — an over-the-wire server is reached by the url it connects to`,
+      });
+    }
+
+    // Rule 4 — a room reaches what its doors declare. An over-the-wire server is reached at a host
+    // the room's own `doors.egress` names, or the declaration contradicts the room's own contract:
+    // `realize()`'s egress probe (`canReach`) would answer false for the very server the room
+    // grants tools from. The store enforces the same at its write and its servers read
+    // (coltrane-ui 20260907120000); ruling A4, store matches engine, in both directions.
+    if (server.transport !== "stdio" && server.url) {
+      const host = mcpServerHost(server.url);
+      if (host === null) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["mcp_servers", i, "url"],
+          message: `mcp server "${server.slug}" declares a url with no host the realizer could reach — a wire is reached at a host`,
+        });
+      } else if (!egress.has(host)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["mcp_servers", i, "url"],
+          message:
+            `mcp server "${server.slug}" is reached at host "${host}", which venue "${venue.slug}" does not name in ` +
+            `doors.egress — a room reaches what its doors declare. Name the host, or found a room whose doors do.`,
+        });
+      }
+    }
+
+    // Rule 6 — never material. A url with userinfo before the host or a query string is a key
+    // wearing an address; the url itself is not repeated in the refusal, because the refusal travels.
+    if (urlCarriesMaterial(server.url)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["mcp_servers", i, "url"],
+        message:
+          `mcp server "${server.slug}" declares a url that carries material (userinfo before the host, or a query string) — ` +
+          `a room names WHERE, never a key. Move the secret to a credential class in credential_names.`,
       });
     }
 

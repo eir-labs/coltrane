@@ -27,7 +27,9 @@ const room = (server: Record<string, unknown>) => ({
   slug: "transport-probe",
   institution_slug: "chancery",
   responsible_chair: "chancery.chair.steward",
-  doors: { ingress: [], egress: ["example.invalid"] },
+  // A room reaches what its doors declare (rule 4): the hosts these probes dial are named here, so
+  // the transport laws below measure the transport rule and not the egress rule.
+  doors: { ingress: [], egress: ["example.invalid", "x.invalid", "wiki.eir.sh"] },
   credential_surface: [],
   equipment: { tools: [] },
   mcp_servers: [server],

@@ -208,6 +208,30 @@ export interface Residency {
   beat(): Promise<ResideResult>;
   shutdown(signal: "SIGTERM" | "SIGINT"): Promise<ResideResult>;
   readonly inbox: readonly InboundMessage[];
+  /** The social room the claim named — what the DRIVE subscribes to. Null before a successful boot:
+   *  a residency that has not claimed has no channel, and guessing one is how a box comes to answer
+   *  in a room it was never seated in. */
+  readonly channel_id: string | null;
+  /** How far the seat has answered. The drive's loop condition — `cursor < inbox.length` is the
+   *  set of messages that are owed an answer, and the store's cursor (not zero) is where a
+   *  re-hosted box resumes, so a resurrected residency never re-answers a dead one's messages. */
+  readonly cursor: number;
+}
+
+/**
+ * What the DRIVE takes.
+ *
+ * The engine owns the loop's SHAPE — subscribe, pump, wake on growth, arm a heartbeat, hand the
+ * seat back on a signal — and the deployment owns the cadence, the timer, and where a signal comes
+ * from. A wall clock and `process.on` are the DEFAULTS, never the contract: a loop whose only timer
+ * is the global one cannot be driven by a law without fake timers, and a law that needs fake timers
+ * for a thing this simple is a law nobody writes.
+ */
+export interface DriveOptions {
+  /** Cadence for the lease renewal, in ms. Default 30s — under WI-2's lease, with room to miss one. */
+  heartbeat_ms?: number;
+  timer?: { set(fn: () => void, ms: number): unknown; clear(h: unknown): void };
+  onSignal?: (fn: (s: "SIGTERM" | "SIGINT") => void) => void;
 }
 
 /** The seams boot cannot proceed without, in the order they are reported. `callVerb` is absent from
@@ -478,7 +502,147 @@ export function createResidency(opts: ResideOptions, deps: ResideDeps): Residenc
     beat,
     shutdown,
     get inbox() { return inbox; },
+    get channel_id() { return rec ? rec.channel_id : null; },
+    get cursor() { return rec ? rec.cursor : 0; },
   };
+}
+
+// ── The drive ────────────────────────────────────────────────────────────────────────────────────
+
+/** 30 seconds. The lease is the store's to define; how often a live box proves itself is the box's,
+ *  and this is a default a deployment overrides, not a constant the engine asserts. */
+const DEFAULT_HEARTBEAT_MS = 30_000;
+
+/**
+ * THE DRIVE — the caller every move in this module was waiting for.
+ *
+ * `createResidency` returns six moves, each one law-covered and each one correct. Nothing called
+ * them. `runReside` booted and returned 0, so `coltrane reside --any` claimed a seat and exited,
+ * and a supervisor would have watched its "standing" machine come up and immediately go down. That
+ * is #532's defect one layer in: the mount landed, the drive did not, and no law could see it
+ * because every law calls the move itself. tests/spec_reside_drive.test.ts drives THIS, and its
+ * last law goes through `runReside` so the gap cannot quietly reopen.
+ *
+ * THREE PROPERTIES THE SHAPE ENFORCES RATHER THAN REQUESTS:
+ *
+ *   1. THE EAR IS NEVER BLOCKED BY THE MIND. The pump calls `onInbound` (synchronous, so it cannot
+ *      reach a model) and then KICKS a drain it does not await. A cortex turn that takes 900 seconds
+ *      does not stop the next message being acked — which is the whole reason the reflex was built
+ *      synchronous, and would have been given away by a pump that awaited its own wake.
+ *
+ *   2. THE DRAIN IS SINGLE-FLIGHT AND SELF-EXTENDING. One drain runs at a time; its `while` re-reads
+ *      `inbox.length` every turn, so messages that arrive mid-wake are picked up by the drain already
+ *      running rather than racing a second one. Two concurrent drains would both wake on the same
+ *      cursor, and the second would be refused `illegal_transition` — a correct refusal for an
+ *      incorrect caller.
+ *
+ *   3. A SIGNAL ENDS THE PUMP WITHOUT CANCELLING IT. A socket listener never returns, so the loop
+ *      RACES the pump against a stop promise rather than pretending an async iterator can be
+ *      cancelled. The seat is handed back once, whatever ends first.
+ *
+ * Exit codes are `resideExitCode`'s, unchanged: 0 released cleanly, 2 a seam or a claim the
+ * deployment misconfigured, 3 nothing claimable, 1 the cortex failed mid-life.
+ */
+export async function driveResidency(r: Residency, deps: ResideDeps, opts: DriveOptions = {}): Promise<number> {
+  const booted = await r.boot();
+  if (!booted.ok) return resideExitCode(booted.refusal);
+
+  const channel = r.channel_id;
+  if (channel === null) {
+    // Unreachable through boot's own contract, and still not assumed: a seated residency with no
+    // channel would otherwise subscribe to the string "null" and answer in a room nobody named.
+    return resideExitCode("no_backend");
+  }
+
+  let stopping = false;
+  let signalled: "SIGTERM" | "SIGINT" = "SIGTERM";
+  let resolveStopped!: () => void;
+  const stopped = new Promise<void>((res) => { resolveStopped = res; });
+
+  const onSignal = opts.onSignal ?? ((fn) => {
+    process.on("SIGTERM", () => fn("SIGTERM"));
+    process.on("SIGINT", () => fn("SIGINT"));
+  });
+  onSignal((s) => {
+    if (stopping) return;   // a second signal during a drain must not release twice
+    stopping = true;
+    signalled = s;
+    resolveStopped();
+  });
+
+  // ARMED BEFORE THE FIRST MESSAGE. A residency on a quiet channel must still prove it is alive, or
+  // the reaper takes a seat that was never abandoned — so the heartbeat is not a consequence of
+  // traffic.
+  const timer = opts.timer ?? {
+    set: (fn: () => void, ms: number) => setInterval(fn, ms),
+    clear: (h: unknown) => clearInterval(h as ReturnType<typeof setInterval>),
+  };
+  const beatHandle = timer.set(() => { void r.beat(); }, opts.heartbeat_ms ?? DEFAULT_HEARTBEAT_MS);
+
+  /** The cortex's refusal, held so the exit code reports the reason the life ended. */
+  let failure: ResideRefusal | null = null;
+
+  // THE GUARD IS A BOOLEAN SET BEFORE THE BODY RUNS, AND THAT IS NOT A STYLE CHOICE.
+  // The obvious spelling — `if (draining) return; draining = (async () => { … finally { draining =
+  // null } })()` — WEDGES THE RESIDENCY PERMANENTLY, and silently. An async IIFE whose body takes no
+  // await runs to completion synchronously, so its `finally` nulls the handle BEFORE the assignment
+  // lands, and the variable is left holding a resolved promise nothing will ever clear. Every later
+  // kick then hits a truthy guard and returns: the box goes on acking in reflex time and never
+  // answers again, which reads from the channel exactly like a thinking presence. It is reached by
+  // the ordinary path — the first message to arrive while the cursor is already level takes no
+  // await — and spec_reside_drive.test.ts LAW D3's re-hosted case is what caught it.
+  // A boolean set before the body and cleared in its `finally` cannot invert that order.
+  let draining = false;
+  let drained: Promise<void> = Promise.resolve();
+
+  function kickDrain(): void {
+    if (draining) return;   // property 2: the running drain re-reads the inbox and picks these up
+    draining = true;
+    drained = (async () => {
+      try {
+        while (!stopping && r.cursor < r.inbox.length) {
+          const woke = await r.wake();
+          if (!woke.ok) {
+            // A wake that could not answer ends the life rather than looping on the same cursor:
+            // `wake` refuses without advancing, so retrying would spin forever on one message.
+            failure = woke.refusal;
+            stopping = true;
+            resolveStopped();
+            return;
+          }
+        }
+      } finally {
+        draining = false;
+      }
+    })();
+  }
+
+  const pump = (async () => {
+    for await (const m of deps.channelListener!(channel)) {
+      if (stopping) break;
+      r.onInbound(m);   // property 1: synchronous, and not awaited
+      kickDrain();
+    }
+  })();
+
+  try {
+    // Whichever comes first: a channel that ended, or a signal. A real socket only ever does the
+    // second; a test's listener does the first, which is what lets these laws terminate.
+    await Promise.race([pump, stopped]);
+    // Let an in-flight answer finish before the seat goes back. A message acked and half-answered
+    // at shutdown is exactly the consumed-but-unanswered state the cursor law exists to forbid.
+    await drained;
+  } catch (e) {
+    // A listener that THROWS is a dead transport, not a dead residency: hand the seat back cleanly
+    // so the next box can take it, and report the failure rather than a clean release.
+    failure = failure ?? "store_refused";
+    void e;
+  } finally {
+    timer.clear(beatHandle);
+    await r.shutdown(signalled);
+  }
+
+  return failure ? resideExitCode(failure) : 0;
 }
 
 // ── The verb ─────────────────────────────────────────────────────────────────────────────────────
@@ -534,11 +698,21 @@ export async function runReside(argv: readonly string[], io: unknown): Promise<n
 
   // The seat resolved; the remaining seams (channel, cortex, hands) are per-deployment on every
   // backing, so an unwired one still refuses BY NAME rather than pretending to stand.
-  const r = createResidency({ residency }, { ...seat.seat });
+  const deps: ResideDeps = { ...seat.seat };
+  const r = createResidency({ residency }, deps);
+
+  // BOOT IS ASKED FIRST, AND ONLY SO ITS REFUSAL CAN BE SAID. `driveResidency` boots too — boot is
+  // idempotent by construction (it returns the seat it holds rather than claiming again, LAW 2), so
+  // this costs one no-op and buys the operator a named reason on stderr instead of a bare code.
   const booted = await r.boot();
   if (!booted.ok) {
     say(`reside refused: ${booted.refusal}${booted.seam ? ` (seam: ${booted.seam})` : ""} — ${booted.message}`);
     return resideExitCode(booted.refusal);
   }
-  return 0;
+
+  // AND THEN IT LIVES. This line is the whole of what was missing: the verb used to stop here and
+  // return 0, so a claimed seat exited before it ever listened. spec_reside_drive.test.ts LAW D8
+  // drives the command itself and reads the evidence off disk, so a future refactor that quietly
+  // drops this call reds there rather than passing on the strength of the moves it no longer makes.
+  return await driveResidency(r, deps);
 }

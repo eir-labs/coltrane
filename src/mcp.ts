@@ -293,7 +293,7 @@ const TOOL_DEFS: readonly Omit<MCPToolDef, "description">[] = [
 // them in one place. ABSENT MUST MEAN DECLINE: a slug with no entry throws at module load
 // (below) rather than falling back to something plausible, and `tests/mcp_tools_describe.test.ts`
 // refuses a description that merely restates the category or the slug.
-const TOOL_DESCRIPTIONS: Record<string, string> = {
+export const TOOL_DESCRIPTIONS: Record<string, string> = {
   // understand — read the genome and the chain
   type_resolve:
     "Given a shape you need, find the domain type that already covers it. Returns ranked candidates and a recommendation: reuse an existing type, extend one, or register a new one. Call this before type_register so the registry does not grow a near-duplicate.",
@@ -312,7 +312,7 @@ const TOOL_DESCRIPTIONS: Record<string, string> = {
   venue_browse:
     "List venues, the configured performance spaces. Each row carries whose institution owns the room, how much equipment it holds at all (the tool ceiling), whether anything may leave it, and its lifecycle.",
   output_query:
-    "Query sealed outputs. Returns compact rows by default (id, gig, agent, phase, content_sha, preview). Pass output_id or content_sha with include_data:true to fetch ONE output's full payload from the artifact tier.",
+    "Query sealed outputs, filtered by domain type, gig, agent or a data filter. Payloads are CARRIED BY DEFAULT — pass include_data:false for the compact rows (id, gig, agent, phase, content_sha, preview) when you are traversing rather than reading. Addressing one output by output_id or content_sha returns its full payload regardless of the flag.",
   output_trace:
     "Walk an output's provenance graph — back to the root signals it consumed, or forward to what consumed it. Crosses a chart's movement boundaries, and NAMES any referenced content_sha this store does not hold rather than dropping it: a hole in the chain is reported.",
   charter_read:
@@ -336,7 +336,7 @@ const TOOL_DESCRIPTIONS: Record<string, string> = {
   agent_define:
     "Define an agent: what it consumes and produces, its cognitive primitives, its disposition (exactly two roles in tension), its tool grant and its model tier. The tool grant is a ceiling, not a suggestion.",
   agent_evolve:
-    "Change an existing agent under typed invariants, producing a new version. Returns a cascade check naming every standard the change reaches — evolution goes through here, never through prompt drift.",
+    "Change an existing agent under the typed rules that govern it, producing a new version. Returns a cascade check naming every standard the change reaches — evolution goes through here, never through prompt drift.",
   standard_compose:
     "Compose a standard: a graph of phases whose chairs bind producers to an input and output contract, written in type slugs. Refused at COMPOSE time if a chair asks for a shape nothing upstream produces, rather than at minute nine of a run.",
   chart_define:
@@ -346,9 +346,9 @@ const TOOL_DESCRIPTIONS: Record<string, string> = {
   standard_simulate:
     "Walk a standard's graph without running it: its phases, estimated cost and duration, and the BASIS that estimate came from — a measured mean of real runs, the standard's real structure, or a per-slug guess. Cheap to run before a dispatch is not.",
   agent_promote:
-    "Promote an agent definition to active status.",
+    "Move an agent definition one step along its lifecycle: name the target `status` and the `current` one you believe it holds. The chain is draft, review, approved, active, retired — promotion is not a jump to active.",
   standard_promote:
-    "Promote a standard to active status, so it becomes dispatchable. Compose and simulate first — promotion does not re-check the graph.",
+    "Move a standard along its lifecycle — draft, active, retired — by naming the target `status` and the `current` one you believe it holds. Reaching active is what makes it dispatchable; compose and simulate first, because promotion does not re-check the graph.",
   skill_define:
     "Define a skill package: reusable capability, including executable code, with hydration slots filled at seating or dispatch instead of hard-coding one house's data.",
   skill_evolve:

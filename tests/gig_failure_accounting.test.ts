@@ -116,10 +116,12 @@ describe("#236 — a failed gig still reports what it actually spent", () => {
     };
     let caught: BudgetExhausted | null = null;
     try {
-      // opening=15, base_cost=10, k=0 → p1 settles at 10, p2 needs 10 against 5 → exhausted
+      // max_usd=0.05: p1 settles $0.11 of real spend, past the ceiling, so p2's batch never starts →
+      // BudgetExhausted — still carrying the $0.11 that already settled. (Under the append-unit gate
+      // this was `opening:15, base_cost:10, k:0`; the contract enforces the ceiling in DOLLARS.)
       await runGig(std, {}, {
         outputs: createOutputStore(registry), ledger: new MemoryLedger(), invoke: spendOnly,
-        budget: { opening: 15, base_cost: 10, k: 0 },
+        budget: { max_usd: 0.05 } as unknown as import("../src/index.js").BudgetInput,
       });
     } catch (e) { if (e instanceof BudgetExhausted) caught = e; else throw e; }
 
@@ -139,7 +141,7 @@ describe("#236 — a failed gig still reports what it actually spent", () => {
     const d = deps(burnThenDie, standard());
     const r = await dispatchTool(
       "gig_dispatch",
-      { standard_slug: "burns-then-dies", input: {}, budget: { opening: 1000, base_cost: 10, k: 0 } },
+      { standard_slug: "burns-then-dies", input: {}, budget: { max_usd: 45 } },
       d,
     );
     const gid = (r.data as { gig_id: string }).gig_id;
@@ -148,12 +150,12 @@ describe("#236 — a failed gig still reports what it actually spent", () => {
     expect(done["status"]).toBe("failed");
     const bs = done["budget_state"] as Record<string, unknown> | undefined;
     expect(bs, "a failed gig must surface how much budget it burned").toBeDefined();
-    // p1 succeeded and settled 10; p2's invoker threw, so its reservation was released (#232).
-    expect(bs!["spent"], "only the chair that actually ran is charged").toBe(10);
-    expect(bs!["balance"]).toBe(990);
-    // and the real dollars ride alongside the synthetic units, correctly denominated (#233)
-    expect(bs!["unit"]).toBe("append-units");
-    expect(bs!["settled_usd"], "the REAL spend of the chairs that ran").toBeCloseTo(0.42, 6);
+    // p1 succeeded and settled $0.42; p2's invoker threw before reporting, so it settled nothing —
+    // only the chair that ran is charged, and the snapshot is denominated in dollars (I4/O5). Under
+    // the append-unit gate this asserted spent/balance/unit:"append-units"; the contract retires them.
+    expect(bs!["spent_usd"], "only the chair that actually ran is charged, in dollars").toBeCloseTo(0.42, 6);
+    expect(bs!["unit"], "the failed gig's budget snapshot is denominated in usd, not append-units").toBe("usd");
+    expect(bs!["max_usd"], "the dollar ceiling the operator set rides on the snapshot").toBe(45);
   });
 
   it("a SUCCESSFUL async gig surfaces its budget_state too (the same gap, success side)", async () => {
@@ -166,14 +168,14 @@ describe("#236 — a failed gig still reports what it actually spent", () => {
     );
     const r = await dispatchTool(
       "gig_dispatch",
-      { standard_slug: "burns-then-dies", input: {}, budget: { opening: 1000, base_cost: 10, k: 0 } },
+      { standard_slug: "burns-then-dies", input: {}, budget: { max_usd: 45 } },
       d,
     );
     const done = await pollDone(d, (r.data as { gig_id: string }).gig_id);
     expect(done["status"]).toBe("complete");
     const bs = done["budget_state"] as Record<string, unknown> | undefined;
     expect(bs, "budget_state was dropped on the async path regardless of outcome").toBeDefined();
-    expect(bs!["spent"], "both chairs ran and settled").toBe(20);
+    expect(bs!["unit"], "a dollar-ceiling gig's snapshot is denominated in usd, not append-units").toBe("usd");
     expect(bs!["agent_state"], "a completed cycle is settled").toBe("settled");
   });
 });

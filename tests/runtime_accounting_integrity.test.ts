@@ -12,10 +12,10 @@
 // tests/runtime_usage_and_provenance.test.ts) — no `claude` subprocess is ever spawned.
 import { describe, it, expect } from "vitest";
 import {
-  createRegistry, createOutputStore, MemoryLedger, runGig, BudgetExhausted,
+  createRegistry, createOutputStore, MemoryLedger, runGig,
   runFingerprint, CANONICAL_FORM_VERSION, outputContentHash,
   type AgentInvoker, type DomainType, type Chair, type Standard, type Agent, type OutputRecord,
-  type GigProgressEvent, type BudgetState, type EvalRecord,
+  type GigProgressEvent, type BudgetInput, type EvalRecord,
 } from "../src/index.js";
 import { testAgent } from "./_support/agents.js";
 
@@ -43,49 +43,33 @@ const VALIDATION = { validation_criteria: ["fixture: the artifact matches its de
 const CHECKS = { checks: [{ method: "deterministic-invoker", target_ref: "fixture", result: "pass" }] };
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════
-// #232 — budget is deducted at chair-PREP, before the model runs. `.map` is eager, so in a
-// batch of N ready chairs one tripping BudgetExhausted leaves chairs 1..N-1 CHARGED and never
-// invoked. The docstring promises "after success, deducts cost from balance."
+// #232 — REWRITTEN to the budget-in-dollars contract (operator decision 2026-09-16). The original
+// #232 pinned an APPEND-UNIT reservation bug: budget was deducted at chair-PREP (`opening`/
+// `base_cost`/`k`), so an eager `ready.map(prepareChair)` left earlier batch members charged for
+// work no invoker started. The contract retires pre-invocation reservation entirely — there is no
+// per-chair charge at prep; SETTLED USD is checked at BATCH BOUNDARIES (O2), and only chairs that
+// actually ran and settled contribute to spend.
+//
+// The old phantom-charge law (a parallel batch whose third chair tripped the prep gate, so NONE ran
+// and none were charged) has NO dollar analog: a parallel phase is ONE batch, the ceiling is checked
+// before it starts, so either the whole batch runs or none of it does — there is no
+// "prepared-but-not-invoked-yet-charged" state to catch. Its surviving property — "a chair that
+// never started is never charged; the stop happens before the NEXT batch" — is already first-batch
+// LAW 2 (I2) in tests/spec_budget_is_dollars.test.ts (three sequential $0.03 chairs vs a $0.05
+// ceiling → exactly two start, then BudgetExhausted) together with I3 in
+// tests/cost_budget_enforcement.test.ts (the running batch finishes and seals; the next never
+// starts). So that law is DELETED here rather than duplicated.
+//
+// What survives with a genuinely distinct dollar equivalent is the post-success rule: a chair whose
+// invocation THROWS settles no dollars. RED today because a `max_usd` budget is not enforced in
+// dollars and the failed gig's snapshot reports the append-unit `spent`, never `spent_usd`.
 // ═══════════════════════════════════════════════════════════════════════════════════════════
-describe("#232 — budget charges only work that actually ran", () => {
-  // Three parallel chairs in one phase, k=0 so every chair costs exactly base_cost=10.
-  // opening=25 → chairs A(10) and B(10) pass the gate, chair C(10) trips at 5 < 10.
-  // `prepared = ready.map(prepareChair)` throws on C, so invokeAndWriteChair runs for NOBODY.
-  const parallel = (): Standard => ({
-    slug: "phantom-charge", domain: "demo",
-    agents: (["a", "b", "c"] as const).map((s) =>
-      testAgent({ slug: `ag-${s}`, primitives: ["SENSE"], input_types: [], output_types: ["note"], domain: "demo" })),
-    phases: [{
-      name: "sense",
-      chairs: (["a", "b", "c"] as const).map((s): Chair => ({
-        role: `r-${s}`, agent_slug: `ag-${s}`, depends_on: [], input_contract: [], output_contract: ["note"], required_skills: [],
-      })),
-    }],
-  });
-
-  it("a chair that is never invoked is never charged (the phantom-charge case)", async () => {
-    const { outputs, ledger } = store([T.note]);
-    let invocations = 0;
-    const invoke: AgentInvoker = () => { invocations++; return { t: "hi", ...SIGNAL }; };
-
-    let caught: BudgetExhausted | null = null;
-    try {
-      await runGig(parallel(), {}, { outputs, ledger, invoke, budget: { opening: 25, base_cost: 10, k: 0 } });
-    } catch (e) { if (e instanceof BudgetExhausted) caught = e; else throw e; }
-
-    expect(caught, "the third chair must trip BudgetExhausted").not.toBeNull();
-    expect(invocations, "the batch aborts in the synchronous prep stage — NO chair is invoked").toBe(0);
-    // THE DEFECT: chairs a and b were charged 10 each at prep and then never ran. The
-    // operator is shown spent=20 for zero work.
-    expect(
-      caught!.state.spent,
-      "chairs that were prepared but never invoked must not appear as spend",
-    ).toBe(0);
-    expect(caught!.state.balance, "balance must equal opening when nothing settled").toBe(25);
-  });
-
-  it("a chair whose invoker throws is not charged (deduction is post-success, per the docstring)", async () => {
-    // Two sequential phases: p1 succeeds (charged), p2's invoker throws (must NOT be charged).
+describe("#232 — settled spend counts only chairs that actually ran (in dollars)", () => {
+  it("a chair whose invocation throws settles NO dollars — only the chair that ran is charged, in USD", async () => {
+    // Two sequential phases: p1 succeeds and reports $0.02 of settled spend; p2's invoker throws
+    // before reporting anything. The gig fails, and the budget snapshot riding on the thrown error
+    // (#236's carrier) must report spent_usd = $0.02 — the exploding chair, which never settled,
+    // adds nothing, and the denomination is dollars, not append-units.
     const std: Standard = {
       slug: "throwing-chair", domain: "demo",
       agents: [
@@ -98,65 +82,41 @@ describe("#232 — budget charges only work that actually ran", () => {
       ],
     };
     const { outputs, ledger } = store([T.note, T.read]);
-    const invoke: AgentInvoker = ({ agent }) => {
-      if (agent.slug === "cons") throw new Error("invoker exploded");
+    const invoke: AgentInvoker = (ctx) => {
+      if (ctx.agent.slug === "cons") throw new Error("invoker exploded");
+      // p1 reports real settled dollars the way the CLI's result event does, then succeeds.
+      ctx.onEvent?.({ type: "result", raw: { type: "result", total_cost_usd: 0.02, usage: { input_tokens: 10, output_tokens: 5 } } });
       return { t: "hi", ...SIGNAL };
     };
 
     let err: unknown;
     try {
-      await runGig(std, {}, { outputs, ledger, invoke, budget: { opening: 1000, base_cost: 10, k: 0 } });
+      // A dollar ceiling well above the real spend: the stop here is the THROW, not the ceiling.
+      await runGig(std, {}, { outputs, ledger, invoke, budget: { max_usd: 45 } as unknown as BudgetInput });
     } catch (e) { err = e; }
 
     expect(err, "the gig must fail").toBeInstanceOf(Error);
-    // Bracket access: the budget snapshot rides on the thrown error (#236's carrier), so the
-    // operator can see what the failed gig actually cost. Before that carrier exists this is
-    // undefined — which is itself the observability hole #236 names.
-    const bs = (err as Record<string, unknown>)["budget_state"] as BudgetState | undefined;
+    const bs = (err as Record<string, unknown>)["budget_state"] as Record<string, unknown> | undefined;
     expect(bs, "a failed gig must still surface its budget state").toBeDefined();
     expect(
-      bs!.spent,
-      "only the chair that SUCCEEDED (10) is charged — the exploding chair must not be",
-    ).toBe(10);
+      bs?.["spent_usd"],
+      "only the chair that SUCCEEDED settled its $0.02 — the exploding chair, which never settled, must not be charged",
+    ).toBeCloseTo(0.02, 5);
+    expect(bs?.["unit"], "a dollar ceiling's snapshot must be denominated in usd, not append-units").toBe("usd");
   });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════
-// #233 — the cost basis is a byte proxy over input UUIDs, not content. An upstream output
-// contributes exactly 36 bytes whether it is a one-line signal or a 40-page draft.
+// #233 — DELETED under the budget-in-dollars contract. The former law ("cost basis measures
+// consumed CONTENT, not identifiers") asserted that a chair consuming a larger input costs MORE —
+// an append-unit cost-basis property, run on `budget: { opening, base_cost, k }`. The contract
+// retires the append-unit cost basis outright (O3) and states the OPPOSITE as an invariant: I8 —
+// payload size has NO effect on budget enforcement (spend is the invoker's settled USD, independent
+// of consumed bytes). Kept as-is, #233 would be a law directly CONTRADICTING I8 the moment the
+// enforcement lands, and it constructs exactly the append-unit budget shape acceptance forbids — so
+// it is removed here. Its concern is inverted and owned by the first-batch law
+// tests/spec_budget_payload_size_irrelevant.test.ts (I8).
 // ═══════════════════════════════════════════════════════════════════════════════════════════
-describe("#233 — cost basis measures consumed CONTENT, not identifiers", () => {
-  const std = (): Standard => ({
-    slug: "cost-basis", domain: "demo",
-    agents: [
-      testAgent({ slug: "bulker", primitives: ["SENSE"], input_types: [], output_types: ["bulk"], domain: "demo" }),
-      testAgent({ slug: "reader", primitives: ["INTERPRET"], input_types: ["bulk"], output_types: ["read"], domain: "demo" }),
-    ],
-    phases: [
-      { name: "p1", chairs: [{ role: "r0", agent_slug: "bulker", depends_on: [], input_contract: [], output_contract: ["bulk"], required_skills: [] }] },
-      { name: "p2", chairs: [{ role: "r1", agent_slug: "reader", depends_on: ["r0"], input_contract: ["bulk"], output_contract: ["read"], required_skills: [] }] },
-    ],
-  });
-
-  const spendFor = async (payloadBytes: number): Promise<number> => {
-    const { outputs, ledger } = store([T.bulk, T.read]);
-    const invoke: AgentInvoker = ({ agent }) =>
-      agent.slug === "bulker" ? { payload: "x".repeat(payloadBytes), ...SIGNAL } : { summary: "read it", ...CLAIMS };
-    const res = await runGig(std(), {}, { outputs, ledger, invoke, budget: { opening: 1e9, base_cost: 0, k: 1 } });
-    return (res.budget_state as BudgetState).spent;
-  };
-
-  it("a chair consuming a 40-page input costs more than one consuming a one-liner", async () => {
-    const small = await spendFor(10);
-    const large = await spendFor(40_000);
-    // THE DEFECT: both runs cost the same, because the only thing the proxy measured about
-    // the upstream output was its 36-character UUID.
-    expect(
-      large,
-      "cost-of-append must be monotonic in the bytes the invoker actually sees",
-    ).toBeGreaterThan(small + 30_000);
-  });
-});
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════
 // #235 — partial usage capture is indistinguishable from complete capture, and from zero

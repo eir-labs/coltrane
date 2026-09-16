@@ -1359,14 +1359,21 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
       ];
       // NO OVER-DENIAL (LAW 5, and LAW 2's structural half): nothing the seat legitimately holds may be
       // denied — most sharply OUTPUT_WRITE_TOOL, which effectiveAllowed now carries on the seal path.
-      // Subtract the effective allow set — by exact name AND base name, so a scoped grant like
-      // `Bash(npx …)` still protects its `Bash` — then dedupe. code_tool_access-kept tools are NOT
-      // subtracted here: a venue that excludes a code tool must still deny it even under access "full".
+      // Subtract the effective allow set, then dedupe. The base-name half is right ONLY for a BARE deny
+      // (`Write`): emitting it would kill a scoped `Write(src/**)` grant of the same tool too, so a
+      // grant of that base — scoped or not — protects it. Applied to a SCOPED deny it is wrong:
+      // `Write(tests/**)` and `Write(src/**)` share the base `Write`, yet name different surfaces, so a
+      // scoped deny is removed ONLY by an EXACT-string grant. Without that split a seat could never be
+      // granted `src/**` while denied `tests/**` — the one shape a builder that must not weaken its own
+      // laws needs. code_tool_access-kept tools are NOT subtracted here: a venue that excludes a code
+      // tool must still deny it even under access "full".
       const allowExact = new Set(effectiveAllowed ?? []);
       const allowBase = new Set((effectiveAllowed ?? []).map(toolBaseName));
-      const disallowedTools = [...new Set(denyUnion)].filter(
-        (t) => !allowExact.has(t) && !allowBase.has(toolBaseName(t)),
-      );
+      const disallowedTools = [...new Set(denyUnion)].filter((t) => {
+        if (allowExact.has(t)) return false; // an exact grant of the very string always protects it
+        const isBare = t === toolBaseName(t); // no scope parens → a bare tool name
+        return !(isBare && allowBase.has(toolBaseName(t)));
+      });
       const baseArgs = buildInvokerArgs(prompt, cfgPath, {
         model: resolveModel(a.model_tier, opts.model),
         allowed_tools: effectiveAllowed,
@@ -1433,8 +1440,24 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
             seal !== undefined &&
             e instanceof ChildExitError &&
             finalText(e.stdout).errorSubtype === BUDGET_STOP_SUBTYPE;
-          if (!recoverable) throw e;
-          return { stdout: (e as ChildExitError).stdout, budgetStopped: true };
+          if (recoverable) return { stdout: (e as ChildExitError).stdout, budgetStopped: true };
+          // A non-recoverable non-zero exit still carries the child's stream, and on the provider-
+          // usage-limit path that stream — NOT stderr — holds the only account of why the run stopped:
+          // the CLI emits the notice as a synthetic assistant message and/or an is_error result and
+          // writes nothing to stderr. The default runner builds its failure from stderr alone, so the
+          // operator was handed `claude exited 1:` with a blank reason for a failure that had a precise
+          // one. Fold the stream's notice into the failure so the reason — and when the limit resets —
+          // survives; keep it a ChildExitError so the stdout it carries is preserved. When the stream
+          // says nothing, the original error (which carries stderr) is rethrown unchanged, so an
+          // ordinary non-zero exit still reports stderr (the control).
+          if (e instanceof ChildExitError) {
+            const notice = providerNoticeFrom(e.stdout);
+            if (notice) {
+              const sep = e.message === "" || e.message.endsWith(" ") ? "" : " ";
+              throw new ChildExitError(`${e.message}${sep}${notice}`, e.stdout);
+            }
+          }
+          throw e;
         }
       };
 
@@ -1888,4 +1911,51 @@ function finalText(stdout: string): StreamOutcome {
   // and beat real assistant text. Nullish coalescing was the bug; emptiness is the test.
   if (result !== undefined && result.trim() !== "") return { text: result };
   return { text: answerBlock(assistant) };
+}
+
+/**
+ * The provider's own account of why a run stopped, read from the child's STREAM rather than stderr.
+ *
+ * When the Claude CLI hits the account's usage limit it writes NOTHING to stderr — it emits the
+ * notice as a synthetic assistant message (model `<synthetic>`) and/or an is_error result whose
+ * `result` field is the notice, then exits non-zero (measured on build gig 13ea0d99: its verify seat
+ * failed with `claude exited 1: `, and the session transcript ended on "You've hit your session
+ * limit · resets …"). Both carriers are read because the exact fields of the CLI's final event on
+ * this path were not captured, so a fix that read only one could miss whichever shape the day's CLI
+ * happens to take. Returns "" when the stream carries no such notice, so an ordinary non-zero exit's
+ * failure keeps reporting stderr unchanged.
+ *
+ * Deliberately narrow — a `<synthetic>` assistant, not any assistant text, and an is_error result,
+ * not any result — so a budget-stopped TEXT run's partial reasoning is never mistaken for a reason.
+ */
+function providerNoticeFrom(stdout: string): string {
+  const texts: string[] = [];
+  const push = (v: unknown): void => {
+    if (typeof v === "string" && v.trim() !== "") texts.push(v.trim());
+  };
+  for (const raw of stdout.split("\n")) {
+    const line = raw.trim();
+    if (!line) continue;
+    let e: Record<string, unknown>;
+    try { e = JSON.parse(line) as Record<string, unknown>; } catch { continue; /* non-json */ }
+    const type = typeof e["type"] === "string" ? (e["type"] as string) : "";
+    if (type === "result" && e["is_error"] === true) {
+      push(e["result"]);
+    } else if (type === "assistant" && e["message"] && typeof e["message"] === "object") {
+      const msg = e["message"] as { model?: unknown; content?: Array<Record<string, unknown>> };
+      if (msg.model === "<synthetic>") {
+        for (const b of msg.content ?? []) if (b["type"] === "text") push(b["text"]);
+      }
+    }
+  }
+  // Distinct, first-seen order — the limit notice usually rides BOTH carriers, and repeating it
+  // would only pad the failure line.
+  const seen = new Set<string>();
+  const distinct: string[] = [];
+  for (const t of texts) {
+    if (seen.has(t)) continue;
+    seen.add(t);
+    distinct.push(t);
+  }
+  return distinct.join(" — ");
 }

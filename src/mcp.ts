@@ -85,7 +85,7 @@ export const MCP_TOOLS: readonly MCPToolDef[] = [
   { slug: "access_grant_check",            category: "understand", input_schema: obj({ grant: "object", plan: "object", required_permissions: "array", now_ms: "number" }), output_schema: obj({ granted: "boolean", missing_permissions: "array", expires_in: "number" }) },
 
   { slug: "type_register",                 category: "build", input_schema: obj({ ...DT_AUTHORED, reason: "string" }), output_schema: obj({ registered: "boolean", domain_type_id: "string", version: "number" }) },
-  { slug: "type_extend",                   category: "build", input_schema: obj({ slug: "string", fields_to_add: "object", extension: "object", reason: "string" }), output_schema: obj({ new_version: "number", changelog_entry: "string" }) },
+  { slug: "type_extend",                   category: "build", input_schema: obj({ slug: "string", fields_to_add: "object", fields_to_retire: "array", extension: "object", reason: "string" }), output_schema: obj({ new_version: "number", changelog_entry: "string" }) },
   { slug: "agent_define",                  category: "build", input_schema: obj(zodToMcpProps(AgentObjectSchema)), output_schema: obj({ agent_profile_id: "string", validation_result: "object" }) },
   { slug: "agent_evolve",                  category: "build", input_schema: obj({ slug: "string", changes: "object", base: "object", next: "object", new_version: "number", reason: "string", evidence: "object" }), output_schema: obj({ new_version: "number", cascade_check: "object" }) },
   { slug: "standard_compose",              category: "build", input_schema: obj(zodToMcpProps(StandardSchema)), output_schema: obj({ standard_id: "string", validation_result: "object" }) },

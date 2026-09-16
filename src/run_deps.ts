@@ -151,6 +151,7 @@ export type AssembleRunDepsArgs = Pick<
   | "venues"
   | "venueRealizer"
   | "placementResolver"
+  | "tree_root"
 > & {
   /**
    * The enforcement environment, supplied per door: {} on the drain, the bootstrap map on the server
@@ -183,5 +184,11 @@ export function assembleRunDeps(args: AssembleRunDepsArgs): RunDeps {
     ...(args.venueRealizer ? { venueRealizer: args.venueRealizer } : {}),
     ...(args.placementResolver ? { placementResolver: args.placementResolver } : {}),
     ...(args.repoUrl ? { repoUrl: args.repoUrl } : {}),
+    // The address-stamping tree (records-by-address): the directory whose git objects the seal reads
+    // to stamp a red-spec's `laws` / a change-set's `changes`. Supplied per door — the server/CLI
+    // name the repository root the server was bootstrapped with, the drain its working clone — and
+    // threaded only when present, so a research gig that names no tree stays byte-identical and a
+    // laws/changes seal with no tree_root refuses `tree_root_unknown` rather than reading process.cwd().
+    ...(args.tree_root ? { tree_root: args.tree_root } : {}),
   };
 }

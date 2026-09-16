@@ -5,6 +5,9 @@
 // that carries model_version + (empty, v0) eval_scores — honestly un-tempered.
 import { lineageAdoption } from "./lineage_adoption.js";
 import { randomUUID } from "node:crypto";
+import { execFileSync } from "node:child_process";
+import { existsSync } from "node:fs";
+import { join as joinPath } from "node:path";
 import type { Standard, Agent, Chair } from "./composition.js";
 import { PRIMITIVE_OUTPUT_TYPE, CORE_TYPES } from "./core_types.js";
 import { executeSkillAsync } from "./skill_subprocess.js";
@@ -502,6 +505,18 @@ export interface RunDeps {
    * the room declines to populate (an empty read-only workspace) and no git credential is minted.
    */
   repoUrl?: string | undefined;
+  /**
+   * The directory whose git objects the SEAL stamps law and change addresses from (records-by-address,
+   * contract-records-by-address-v1). When a sealed `red-spec` record carries `laws` or a `change-set`
+   * record carries `changes`, the seal replaces those entries with ones the engine stamps from git in
+   * THIS directory — `blob_sha`/`tests` for a law, `blob_sha`/`patch_sha256`/`bytes` for a change —
+   * via `stampLawAddresses`/`stampChangeAddresses`. Stamping NEVER reads `process.cwd()`: a record
+   * carrying `laws`/`changes` sealed with no `tree_root` refuses with `tree_root_unknown`. Absent AND
+   * the sealed records carry only `diffs` (the pre-migration shape) = no stamping, byte-identical to
+   * before this field existed. Every door that runs a gig names the tree it stamps from; it is never
+   * an ambient host path.
+   */
+  tree_root?: string | undefined;
 }
 
 /**
@@ -957,6 +972,120 @@ export function workingModel(outputByModel: ReadonlyMap<string, number>): string
     }
   }
   return best;
+}
+
+// ── records by address: the engine stamps WHAT the bytes are, from git, AT SEAL ─────────────────
+// A seat supplies only WHERE a law/change lives — {path, commit} for a law, {path, base} for a
+// change — and these two seal helpers read the bytes from git in `tree_root` and stamp the derived
+// fields (contract-records-by-address-v1). The bytes are never model output or a record field: an
+// attester used to re-emit ~150KB of verbatim patches into the record and hit the output-token cap
+// three times (gig c1771b13). Called from executeChair's seal loop, beside the *_sha backfill.
+//
+// Every git read runs in `tree_root` via execFileSync (no shell). A supplied field that DISAGREES
+// with git is refused (`law_bytes_mismatch`), never overwritten — the engine catches a lying seat
+// rather than silently clobbering its claim.
+type LawAddress = { path: string; commit: string; blob_sha?: string; tests?: string[] };
+type ChangeAddress = { path: string; base: string; blob_sha?: string; patch_sha256?: string; bytes?: number };
+
+function gitInTree(tree_root: string, args: readonly string[]): string {
+  return execFileSync("git", ["-C", tree_root, ...args]).toString();
+}
+
+// The it/test titles a law blob declares, in file order — the `tests` the reviewer is handed instead
+// of a sentence about the law. Matches `it(...)`/`test(...)` (with any `.only`/`.skip`/… chain) taking
+// a string literal as its first argument; the leading \b keeps `it`/`test` from matching inside a
+// longer identifier (submit, audit, …). Escaped quotes/backslashes in the title are unescaped.
+function testTitlesIn(body: string): string[] {
+  const re = /\b(?:it|test)(?:\.\w+)*\s*\(\s*(['"`])((?:\\.|(?!\1)[\s\S])*?)\1/g;
+  const titles: string[] = [];
+  for (let m = re.exec(body); m !== null; m = re.exec(body)) {
+    titles.push(m[2]!.replace(/\\(["'`\\])/g, "$1"));
+  }
+  return titles;
+}
+
+/**
+ * Stamp each law's `blob_sha` (`git rev-parse <commit>:<path>`) and `tests` (the it/test titles in
+ * that blob, in file order) from a supplied `{path, commit}`, reading git in `tree_root`.
+ * REFUSALS: no `tree_root` → `tree_root_unknown` (never a `process.cwd()` fallback); an address that
+ * does not resolve (unknown commit, or a path absent at that commit) → `law_record_unresolvable`
+ * naming `path@commit`; a seat-supplied `blob_sha`/`tests` that disagrees with git → `law_bytes_mismatch`
+ * naming the path and field.
+ */
+export function stampLawAddresses(
+  laws: readonly LawAddress[],
+  tree_root: string | undefined,
+): Array<Required<LawAddress>> {
+  if (tree_root === undefined) {
+    throw new RuntimeError(
+      "tree_root_unknown: a red-spec carrying `laws` cannot be stamped without a RunDeps.tree_root — the seal reads git objects from a named tree and never falls back to process.cwd().",
+    );
+  }
+  return laws.map((law) => {
+    let blob_sha: string;
+    try {
+      blob_sha = gitInTree(tree_root, ["rev-parse", `${law.commit}:${law.path}`]).trim();
+    } catch {
+      throw new RuntimeError(
+        `law_record_unresolvable: the law ${law.path}@${law.commit} does not resolve in tree_root — git holds no object for that <commit>:<path>. Nothing is sealed.`,
+      );
+    }
+    const body = gitInTree(tree_root, ["show", `${law.commit}:${law.path}`]);
+    const tests = testTitlesIn(body);
+    if (law.blob_sha !== undefined && law.blob_sha !== blob_sha) {
+      throw new RuntimeError(
+        `law_bytes_mismatch: the seat-supplied blob_sha for law ${law.path} (${law.blob_sha}) disagrees with the engine (${blob_sha}). A seat's claim is refused, never overwritten. Nothing is sealed.`,
+      );
+    }
+    if (law.tests !== undefined && (law.tests.length !== tests.length || law.tests.some((t, i) => t !== tests[i]))) {
+      throw new RuntimeError(
+        `law_bytes_mismatch: the seat-supplied tests for law ${law.path} disagree with the titles git holds in that blob. A seat's claim is refused, never overwritten. Nothing is sealed.`,
+      );
+    }
+    return { path: law.path, commit: law.commit, blob_sha, tests };
+  });
+}
+
+/**
+ * Stamp each change's `blob_sha` (`git hash-object` of the file in `tree_root`, or the literal
+ * `"deleted"` when the file is absent from the tree), `patch_sha256` (sha256 of `git diff <base> --
+ * <path>` in `tree_root`) and `bytes` (that diff's length) from a supplied `{path, base}`.
+ * REFUSALS: no `tree_root` → `tree_root_unknown`; a seat-supplied `blob_sha`/`patch_sha256`/`bytes`
+ * that disagrees with git → `law_bytes_mismatch` naming the path and field.
+ */
+export function stampChangeAddresses(
+  changes: readonly ChangeAddress[],
+  tree_root: string | undefined,
+): Array<Required<ChangeAddress>> {
+  if (tree_root === undefined) {
+    throw new RuntimeError(
+      "tree_root_unknown: a change-set carrying `changes` cannot be stamped without a RunDeps.tree_root — the seal reads git objects from a named tree and never falls back to process.cwd().",
+    );
+  }
+  return changes.map((change) => {
+    const blob_sha = existsSync(joinPath(tree_root, change.path))
+      ? gitInTree(tree_root, ["hash-object", change.path]).trim()
+      : "deleted";
+    const diff = gitInTree(tree_root, ["diff", change.base, "--", change.path]);
+    const patch_sha256 = sha256Hex(diff);
+    const bytes = Buffer.byteLength(diff, "utf8");
+    if (change.blob_sha !== undefined && change.blob_sha !== blob_sha) {
+      throw new RuntimeError(
+        `law_bytes_mismatch: the seat-supplied blob_sha for change ${change.path} (${change.blob_sha}) disagrees with the engine (${blob_sha}). A seat's claim is refused, never overwritten. Nothing is sealed.`,
+      );
+    }
+    if (change.patch_sha256 !== undefined && change.patch_sha256 !== patch_sha256) {
+      throw new RuntimeError(
+        `law_bytes_mismatch: the seat-supplied patch_sha256 for change ${change.path} disagrees with the sha256 of the real diff. A seat's claim is refused, never overwritten. Nothing is sealed.`,
+      );
+    }
+    if (change.bytes !== undefined && change.bytes !== bytes) {
+      throw new RuntimeError(
+        `law_bytes_mismatch: the seat-supplied bytes for change ${change.path} (${change.bytes}) disagrees with the engine (${bytes}). A seat's claim is refused, never overwritten. Nothing is sealed.`,
+      );
+    }
+    return { path: change.path, base: change.base, blob_sha, patch_sha256, bytes };
+  });
 }
 
 // Deterministic hash over the definitions a gig touches: the standard + its agents,
@@ -2986,6 +3115,21 @@ export async function runGig(
     // backfillShas refuses an ambiguous provenance field. Run it over EVERY slice up front so
     // that throw also lands before the first write, rather than midway through them.
     for (const { slice } of resolved) backfillShas(slice);
+
+    // RECORDS BY ADDRESS — the seal stamps law/change addresses from git, beside the *_sha backfill
+    // and before any validateWrite or write, so a stamping refusal fails the chair with its typed
+    // reason and nothing is sealed. A sealed `red-spec` carrying `laws` (or a `change-set` carrying
+    // `changes`) has those entries REPLACED with the engine-stamped ones; a record carrying only
+    // `diffs` and no `laws`/`changes` is left exactly as today (the pre-migration shape this gig's
+    // own attester and builder still seal). tree_root is required only once a record actually carries
+    // an address — a stamp with no tree_root refuses (`tree_root_unknown`), never reads process.cwd().
+    for (const { spec, slice } of resolved) {
+      if (spec.domain_type === "red-spec" && Array.isArray(slice["laws"])) {
+        slice["laws"] = stampLawAddresses(slice["laws"] as unknown as LawAddress[], deps.tree_root);
+      } else if (spec.domain_type === "change-set" && Array.isArray(slice["changes"])) {
+        slice["changes"] = stampChangeAddresses(slice["changes"] as unknown as ChangeAddress[], deps.tree_root);
+      }
+    }
 
     // The output_contract is a FLOOR, not merely a selector. `written.length === 0` alone let a
     // chair that promised two types and sealed one complete silently. The old in-code

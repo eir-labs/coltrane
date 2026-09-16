@@ -1056,6 +1056,11 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
             // onto each chair's spawn. Absent = the substrate is skipped (server-less venues, or a
             // bare deps without a realizer wired).
             ...(deps.venueRealizer ? { venueRealizer: deps.venueRealizer } : {}),
+            // The address-stamping tree (records-by-address), carried into the performance so each
+            // movement stamps against the same repository root the server was bootstrapped with —
+            // runChart forwards it to every movement via `...deps`. Threaded only when present, never
+            // process.cwd().
+            ...(deps.genome_dir ? { tree_root: deps.genome_dir } : {}),
             ...(depth ? { depth } : {}), ...reuseWiring, ...humanWiring,
           };
           /** The ARRANGEMENT's manifest. A chart has no single genome_hash or run_fingerprint — it
@@ -1252,6 +1257,11 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
           toolProviders: deps.toolProviders, mcpServerConfigs: deps.mcpServerConfigs, // dispatch preflight resolves against the invoker's environment
           venue, venues: deps.venues, venueRealizer: deps.venueRealizer,
           repoUrl: dispatchRepoUrl,
+          // The address-stamping tree (records-by-address): the repository root this server was
+          // bootstrapped with. The CLI reaches this same door through `dispatchTool`, so its stamps
+          // resolve against the bootstrapped root too. Never process.cwd(): absent genome_dir → no
+          // tree_root, and a laws/changes seal then refuses `tree_root_unknown`.
+          tree_root: deps.genome_dir,
         });
 
         // The gig id this run seals under — minted ONCE for both doors so the single-flight lock
@@ -1782,8 +1792,39 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         const addProps =
           (extension?.schema?.properties as Record<string, unknown> | undefined) ??
           (args["fields_to_add"] as Record<string, unknown>) ?? {};
-        const nextProps = { ...baseProps, ...addProps };
-        const nextRequired = extension?.schema?.required ?? baseDef.required_fields;
+        // RECORDS BY ADDRESS — a field can be RETIRED through the genome's mouth, not only added. Each
+        // named field is removed from `properties` AND dropped from `required_fields` in the SAME call
+        // that applies any additions; the merge below then versions through proposeTypeChange, which
+        // classifies a removal as `breaking` (approval required). Two refusals guard it, BEFORE the
+        // version bumps and BEFORE the "changes nothing" guard: a name the type does not DECLARE cannot
+        // be retired, and a field cannot be retired while the same call still REQUIRES it (an explicit
+        // `extension.schema.required` naming it) — a type that requires a field it no longer declares is
+        // the contradiction domainTypeDefect would catch downstream, refused here by name instead.
+        const retire = Array.isArray(args["fields_to_retire"]) ? (args["fields_to_retire"] as string[]) : [];
+        const undeclared = retire.filter((f) => !Object.hasOwn(baseProps, f));
+        if (undeclared.length > 0) {
+          return {
+            ok: false, requires_approval: approval,
+            error:
+              `type_extend cannot retire ${undeclared.map((f) => `"${f}"`).join(", ")} from "${baseDef.slug}" — ` +
+              `the type does not declare ${undeclared.length > 1 ? "those fields" : "that field"}. A retirement names a property the type currently has.`,
+          };
+        }
+        const explicitRequired = extension?.schema?.required;
+        const retiredButRequired = explicitRequired ? retire.filter((f) => explicitRequired.includes(f)) : [];
+        if (retiredButRequired.length > 0) {
+          return {
+            ok: false, requires_approval: approval,
+            error:
+              `type_extend cannot both retire and require ${retiredButRequired.map((f) => `"${f}"`).join(", ")} in one call ` +
+              `on "${baseDef.slug}" — a field cannot be retired while the same call still lists it in required_fields. Drop it from \`required\` to retire it.`,
+          };
+        }
+        const retired = new Set(retire);
+        const nextProps = Object.fromEntries(
+          Object.entries({ ...baseProps, ...addProps }).filter(([k]) => !retired.has(k)),
+        );
+        const nextRequired = (explicitRequired ?? baseDef.required_fields).filter((f) => !retired.has(f));
         // A MUTATION THAT CHANGES NOTHING SAYS SO. `addProps` reads exactly two shapes —
         // `extension.schema.properties` and `fields_to_add`. An `extension` supplied in any OTHER
         // shape (top-level JSON Schema keywords, say) matches neither, so addProps is {} and the
@@ -1795,7 +1836,10 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         const addedNothing = Object.keys(addProps).length === 0;
         const requiredUnchanged =
           JSON.stringify([...nextRequired].sort()) === JSON.stringify([...baseDef.required_fields].sort());
-        if (addedNothing && requiredUnchanged) {
+        // A retirement (already validated to remove a declared property) IS a change, even with no
+        // additions and no required-set drift — so the "changes nothing" guard must not fire when one
+        // is present, or a lawful retirement would be refused as a no-op.
+        if (addedNothing && requiredUnchanged && retire.length === 0) {
           return {
             ok: false,
             requires_approval: approval,

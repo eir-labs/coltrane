@@ -131,16 +131,6 @@ function mapGrant(grant: string): string {
   return mcpServerOf(grant) ? grant : `mcp__${ENGINE_MCP_SERVER}__${toolBaseName(grant)}`;
 }
 
-/** A tool from a FOREIGN MCP server — one the deployment wired into the source that is not the
- *  engine's own. The engine's grant list governs the engine's own tools; a foreign server's tools
- *  arrive already governed by that server, so the deployment's decision to list them IS the
- *  authorization. (Law 21 gates engine tools by grant; the completions laws keep a foreign tool the
- *  source lists callable even when the chair never named it.) */
-function isForeignServerTool(name: string): boolean {
-  const server = mcpServerOf(name);
-  return server !== null && server !== ENGINE_MCP_SERVER;
-}
-
 export function makeCompletionsInvoker(opts: CompletionsInvokerOptions): AgentInvoker {
   const port = makeChatCompletionsPort({
     baseUrl: opts.baseUrl,
@@ -196,16 +186,14 @@ export function makeCompletionsInvoker(opts: CompletionsInvokerOptions): AgentIn
     const prompt = buildPrompt(ctx, single, many);
 
     // THE OFFERED SET. The chair's grants — narrowed by the room when the chair sits in one (the SAME
-    // venueEffectiveTools oracle claude_invoker uses, never a re-inlined intersection) — mapped to the
-    // engine server's namespace. Those grants become the loop's allow list; a foreign server's tools
-    // the source lists are added so they stay callable. The loop offers exactly `listed ∩ allow`,
-    // re-sent byte-identical every round, and refuses any call outside it before it reaches source.
+    // venueEffectiveTools oracle claude_invoker uses, never a re-inlined intersection) — mapped so a
+    // bare in-house grant addresses the engine server's tool. Those mapped grants ARE the loop's allow
+    // list, whichever server serves the tool: a grant is the chair's ceiling, and a tool the source
+    // lists but the chair never named is not authorization to offer it. The loop offers exactly
+    // `listed ∩ allow`, re-sent byte-identical every round, and refuses any call outside it before it
+    // reaches source.
     const chairGrants = ctx.venue ? venueEffectiveTools(ctx.agent, ctx.venue) : grants;
-    const listed = opts.tools ? await opts.tools.list() : [];
-    const allow = [
-      ...chairGrants.map(mapGrant),
-      ...listed.filter((t) => isForeignServerTool(t.name)).map((t) => t.name),
-    ];
+    const allow = chairGrants.map(mapGrant);
 
     // THE ROUND CAP. Chair budget, then the agent's own cap, then the invoker default, then the
     // engine default — the turn-budget contract's order. `ctx.turn_budget === 0` is a deliberate hard

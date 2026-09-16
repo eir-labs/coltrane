@@ -42,6 +42,8 @@ export interface CompletionsInvokerOptions {
   fetchFn?: typeof fetch | undefined;
   /** Absent = a chair with any tool grant is refused; the loop needs hands to run one. */
   tools?: McpToolSource | undefined;
+  /** Served model id → USD per million tokens (turn-loop spec). Absent = spend is unpriced, not free. */
+  prices?: Readonly<Record<string, { input: number; output: number; cache_read?: number; cache_write?: number }>> | undefined;
 }
 
 /** Typed, never thrown. `hosted_unsupported` is deliberately not reused for any of these. */
@@ -49,7 +51,11 @@ export type CompletionsRefusal =
   | "host_tool_denied"
   | "no_tool_source"
   | "transport_failed"
-  | "unresolved_tier";
+  | "unresolved_tier"
+  // The turn loop's typed stops, surfaced as refusals (docs/specs/turn-loop.red-spec.md).
+  | "round_limit"
+  | "timeout"
+  | "aborted";
 
 export interface CompletionsModule {
   makeCompletionsInvoker(opts: CompletionsInvokerOptions): AgentInvoker;

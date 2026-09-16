@@ -152,9 +152,15 @@ export function buildPrompt(
     `# Disposition\nYou hold these cognitive modes in equal tension:\n${dispo}\nHold every mode active throughout your work; none dominates.`,
   );
 
-  // 2. Identity — who you are: the slug line plus the agent's own prose.
+  // 2. Identity — who you are: the slug line plus the agent's own prose. When the context carries
+  // a chair role, name the seat this invocation holds — and ONLY this seat. Two chairs seating the
+  // same agent in one phase share every other layer, so the seat line is what splits their prompts;
+  // without it the division of labour a standard declares between them exists only in the role
+  // names and each chair does the same work. A ctx without a role (hand-built literals, the
+  // text-seal path) renders no seat line, so those prompts stay valid and byte-identical.
+  const seatLine = ctx.role ? `\nYou are seated as the "${ctx.role}" chair in this phase.` : "";
   layers.push(
-    `# Identity\nYou are the agent "${a.slug}"${a.domain ? ` in the "${a.domain}" domain` : ""}.\n\n${a.identity}`,
+    `# Identity\nYou are the agent "${a.slug}"${a.domain ? ` in the "${a.domain}" domain` : ""}.${seatLine}\n\n${a.identity}`,
   );
 
   // 3. Method — how THIS agent does its job, the step-by-step.

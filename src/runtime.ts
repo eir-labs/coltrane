@@ -51,6 +51,15 @@ import { COLTRANE_VERSION } from "./version.js";
 export interface AgentInvocationContext {
   agent: Agent;
   phase: string;
+  /**
+   * The ROLE of the chair this invocation seats (Chair.role) — the seat's name within its phase.
+   * Threaded so buildPrompt can name the seat, and so two chairs seating the SAME agent in one
+   * phase do NOT receive byte-identical prompts: the division of labour a standard declares between
+   * them has to reach the model, not live only in the role names. Absent for a hand-built ctx (the
+   * text-seal literals and other tests that construct a context directly) — buildPrompt renders the
+   * seat only when a role is present, so those prompts stay valid and unchanged.
+   */
+  role?: string | undefined;
   // The id of the gig this chair runs under. Threaded so a model chair can seal its output
   // IN-BAND: the invoker tells the agent to call `output_write({ gig_id, phase, agent_slug, … })`,
   // and that gig_id is what ties the chair's write-boundary adjudication to this run. Absent for a
@@ -928,6 +937,28 @@ export function computeAppendCost(
   return base_cost + k * size_bytes;
 }
 
+/**
+ * The model that DID a chair's work: the model that WROTE the most output tokens across the chair's
+ * `modelUsage` breakdown — NOT whichever key the CLI listed first. Claude Code spends a small
+ * background call on a fast model before the real work, and that model is listed FIRST while writing
+ * almost nothing, so a first-key stamp names a model that did none of the chair's work. Output
+ * tokens are the honest signal of which model produced the answer. Ties break on the model id
+ * (lexicographic ascending), so the stamp is deterministic regardless of the breakdown's key order.
+ * An empty map (a transport that reported no per-model breakdown) yields undefined — nothing to
+ * stamp, exactly as before.
+ */
+export function workingModel(outputByModel: ReadonlyMap<string, number>): string | undefined {
+  let best: string | undefined;
+  let bestTokens = -1;
+  for (const [model, tokens] of outputByModel) {
+    if (tokens > bestTokens || (tokens === bestTokens && best !== undefined && model < best)) {
+      best = model;
+      bestTokens = tokens;
+    }
+  }
+  return best;
+}
+
 // Deterministic hash over the definitions a gig touches: the standard + its agents,
 // in a canonical (sorted, JCS) form. This is the reproducibility key — same defs,
 // same genome_hash, regardless of model or run.
@@ -1152,21 +1183,24 @@ export async function runGig(
   } => {
     let saw = false;
     // Per-chair, alongside the gig-level fold. The gig's `by_model` cannot separate two chairs in
-    // one run, which is exactly the question per-chair routing asks.
-    let chairModel: string | undefined;
+    // one run, which is exactly the question per-chair routing asks. Output tokens per model id,
+    // accumulated across this chair's `result` events; `workingModel` picks the one that did the
+    // work (the argmax) at report time rather than trusting the CLI's first key.
+    const chairOutputByModel = new Map<string, number>();
     let chairCost = 0;
     let chairTokens = 0;
     let chairSaw = false;
     return {
       attributed: () => saw,
-      reported: () =>
-        chairSaw
-          ? {
-              ...(chairModel !== undefined ? { model: chairModel } : {}),
-              cost_usd: chairCost,
-              tokens_used: chairTokens,
-            }
-          : {},
+      reported: () => {
+        if (!chairSaw) return {};
+        const model = workingModel(chairOutputByModel);
+        return {
+          ...(model !== undefined ? { model } : {}),
+          cost_usd: chairCost,
+          tokens_used: chairTokens,
+        };
+      },
       fold(ev: AgentStreamEvent): void {
         if (ev.type !== "result") return;
         const raw = ev.raw as Record<string, unknown> | undefined;
@@ -1195,14 +1229,18 @@ export async function runGig(
         // Per-model breakdown keyed by the ACTUAL model id that ran (not the configured tier).
         if (hasBreakdown) {
           for (const [model, m] of Object.entries(mu)) {
+            const outTok = typeof m["outputTokens"] === "number" ? (m["outputTokens"] as number) : 0;
             const slot = usage.by_model[model] ?? { input_tokens: 0, output_tokens: 0, cost_usd: 0 };
             slot.input_tokens += typeof m["inputTokens"] === "number" ? (m["inputTokens"] as number) : 0;
-            slot.output_tokens += typeof m["outputTokens"] === "number" ? (m["outputTokens"] as number) : 0;
+            slot.output_tokens += outTok;
             slot.cost_usd += typeof m["costUSD"] === "number" ? (m["costUSD"] as number) : 0;
             usage.by_model[model] = slot;
-            // The first key IS the answer to "what ran this chair" — the transport's own word,
-            // which is the only honest source for the stamp.
-            chairModel ??= model;
+            // The stamp is the model that WROTE this chair's output, decided at report time by
+            // `workingModel` (argmax over output tokens). The CLI lists a fast background call's
+            // model FIRST though it writes almost nothing, so the old first-key `??=` stamped a
+            // model that did none of the work. Accumulate per-model output; the gig-level `by_model`
+            // total above is untouched.
+            chairOutputByModel.set(model, (chairOutputByModel.get(model) ?? 0) + outTok);
           }
         } else {
           // The scalars moved but `by_model` did not — the breakdown cannot sum to the total.
@@ -2678,7 +2716,7 @@ export async function runGig(
         }
         
         data = await deps.invoke({
-          agent, phase: phaseName, gig_id, inputs, gig_input: gigInput, skills,
+          agent, phase: phaseName, role: chair.role, gig_id, inputs, gig_input: gigInput, skills,
           missing_skills: p.missing_skills, // #241 — what did NOT resolve, so the prompt can't assert it
           // THE SEAT IS WHERE THE INSTITUTION'S DATA ENTERS. Validated at compose time (the dead-slot
           // refusal) and, until now, dropped on the floor immediately afterwards.
@@ -2899,7 +2937,36 @@ export async function runGig(
     const resolved: Array<{ spec: (typeof output_specs)[number]; slice: Record<string, unknown> }> = [];
     for (const spec of output_specs) {
       const keyed = data[spec.domain_type];
-      const raw = keyed !== undefined && keyed !== null ? keyed : single ? data : undefined;
+      // WRAPPER vs FIELD — THE TYPE'S OWN SCHEMA DECIDES, never the data's shape. A chair may return
+      // its record bare, or keyed under its type slug (`{ <type>: <record> }`). But a record whose
+      // OWN schema declares a field named like its type (a type `line` with a `line` field) puts a
+      // value under `data[<type>]` that is a FIELD, not a wrapper — and the shape alone cannot tell
+      // the two apart (law 2: an OBJECT field looks exactly like a wrapped record). The schema can:
+      // the keyed value is a wrapper only if it VALIDATES as a record of the type while the whole
+      // `data` does not. So when `data[<type>]` cannot itself be a record of this type but the whole
+      // `data` can, `data[<type>]` is a field and the whole record seals; otherwise the keyed wrapper
+      // is honoured (control law 3), and multi-output (`single` false) is untouched — its blob is
+      // keyed by construction. An array under the key is the multi-record seal list; honour it as-is.
+      let raw: unknown;
+      if (keyed === undefined || keyed === null) {
+        raw = single ? data : undefined;
+      } else if (single && !Array.isArray(keyed)) {
+        const keyedIsRecord =
+          typeof keyed === "object" &&
+          deps.outputs.validateWrite({
+            core_type: spec.core_type,
+            domain_type: spec.domain_type,
+            data: keyed as Record<string, unknown>,
+          }).valid;
+        const wholeIsRecord = deps.outputs.validateWrite({
+          core_type: spec.core_type,
+          domain_type: spec.domain_type,
+          data,
+        }).valid;
+        raw = !keyedIsRecord && wholeIsRecord ? data : keyed;
+      } else {
+        raw = keyed;
+      }
       if (raw === undefined || raw === null) continue;
       // MULTI-RECORD SEAL. captureOutputWrites hands the runtime a LIST of records per declared type
       // — a chair may seal MANY records of one type (gig 8baced9d's lineage scout made 15 accepted

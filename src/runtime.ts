@@ -3100,11 +3100,15 @@ export async function runGig(
       // even be DELIVERED. `gig_abort` during a skill chair was a promise the engine could
       // not keep — #249's shape again, but a missing opportunity to kill rather than a
       // missing kill.
+      // Beside the merge, the upstream outputs INDIVIDUALLY, by role — the merge alone collapses two
+      // same-type outputs into one (measured: two adjudicators read as one; tests/skill_chair_upstream_by_role).
+      const skillContext = { upstream: inputs.map((i) => ({ role: i.from_role, domain_type: i.domain_type, data: i.data })) };
       // contract-skill-chair-runs-in-tree-v1 (O1/I1) — a skill chair's code half runs in the GIG'S
       // tree: forward RunDeps.tree_root as the child's working directory when the run has one. A run
       // with no tree_root passes no cwd, so the child inherits the engine process's directory (I2).
       const r = await executeSkillAsync(p.skill_dir, skillInput, 120_000, {
         signal: deps.signal,
+        context: skillContext,
         ...(deps.tree_root !== undefined ? { cwd: deps.tree_root } : {}),
       });
       if (!r.ok) throw new RuntimeError(`skill chair "${chair.role}" ("${chair.skill_slug}") failed: ${r.error}`);

@@ -1,0 +1,9 @@
+{
+  "id": "basic",
+  "description": "With no context the skill sees the merge only: zero upstreams, the merged keys.",
+  "input": { "value": 1 },
+  "assertions": [
+    { "path": "upstream_count", "op": "equals", "value": 0 },
+    { "path": "merged_keys", "op": "equals", "value": ["value"] }
+  ]
+}

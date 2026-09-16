@@ -25,8 +25,8 @@ cd "$(dirname "$0")/.."
 
 # THE ROOT BAND — `npm test`, the one the verifier measured and the one carrying almost
 # every law in this repo.
-EXPECTED_LAWS="${EXPECTED_LAWS:-3674}"   # 3606 passing + 22 todo + 32 turn-loop + 7 engine-defect + 7 completions-seat (RED until built)
-EXPECTED_FILES="${EXPECTED_FILES:-363}"
+EXPECTED_LAWS="${EXPECTED_LAWS:-3677}"   # includes 22 todo; RED until built: 7 engine-defect, 7 completions-seat, 2 field-named-like-its-type
+EXPECTED_FILES="${EXPECTED_FILES:-364}"
 
 # THE OTHER BANDS. `vitest run` is ROOT-CONFIG ONLY — this repo's own workflow comments
 # record that four configs went unexecuted once for exactly that reason. So pinning only the

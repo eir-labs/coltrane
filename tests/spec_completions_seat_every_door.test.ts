@@ -190,11 +190,15 @@ describe("a completions seat at every door", () => {
     });
     writeJson(join(root, "domain_types"), "line.json", {
       slug: "line", extends: "Artifact", domain: "demo",
-      schema: { type: "object", properties: { line: { type: "string" } } }, required_fields: ["line"],
+      // AMENDED 2026-09-16: the field is `text`, not `line`. A `line` field on a type named `line` hit a
+      // separate runtime defect (a field named like its type is read as the keyed wrapper), which build
+      // gig a18eb84e surfaced. That defect has its own laws in spec_field_named_like_its_type; this law
+      // is about the debate loop, not the collision.
+      schema: { type: "object", properties: { text: { type: "string" }, validation_criteria: { type: "array" } } }, required_fields: ["text"],
     });
     writeJson(join(root, "domain_types"), "floor.json", {
       slug: "floor", extends: "Verdict", domain: "demo",
-      schema: { type: "object", properties: { pass: { type: "boolean" }, reason: { type: "string" } } }, required_fields: ["pass"],
+      schema: { type: "object", properties: { pass: { type: "boolean" }, reason: { type: "string" }, checks: { type: "array" } } }, required_fields: ["pass"],
     });
     writeJson(join(root, "agents"), "maker.json", {
       ...TEST_BEHAVIOR, slug: "maker", identity: "SEAT-MAKER. You defend the thesis, one move at a time, in a single JSON object.",
@@ -218,9 +222,12 @@ describe("a completions seat at every door", () => {
       const prompt = body.messages.map((m) => m.content).join("\n");
       if (prompt.includes("SEAT-VERIFY")) {
         verifies += 1;
-        return reply({ pass: verifies >= 3, reason: `look ${verifies}` }, "served-flash", { prompt_tokens: 100, completion_tokens: 10 });
+        return reply(
+          { pass: verifies >= 3, reason: `look ${verifies}`, checks: [{ method: "floor rule", result: verifies >= 3 ? "holds" : "does not hold" }] },
+          "served-flash", { prompt_tokens: 100, completion_tokens: 10 },
+        );
       }
-      return reply({ line: "red is a colour" }, "served-std", { prompt_tokens: 100, completion_tokens: 10 });
+      return reply({ text: "red is a colour", validation_criteria: ["answers the challenge"] }, "served-std", { prompt_tokens: 100, completion_tokens: 10 });
     });
     vi.stubGlobal("fetch", fn);
     env({ COLTRANE_COMPLETIONS_URL: URL_BASE, COLTRANE_COMPLETIONS_KEY: "k", COLTRANE_TIER_STANDARD: "model-std", COLTRANE_TIER_ECONOMY: "model-flash" });

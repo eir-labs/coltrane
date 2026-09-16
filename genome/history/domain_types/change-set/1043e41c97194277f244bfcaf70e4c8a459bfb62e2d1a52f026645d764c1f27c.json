@@ -1,12 +1,31 @@
 {
   "slug": "change-set",
-  "version": 3,
+  "version": 2,
   "extends": "Artifact",
   "domain": "software-change",
   "status": "active",
   "schema": {
     "type": "object",
     "properties": {
+      "diffs": {
+        "type": "array",
+        "description": "Per-path patch content, in unified-diff form.",
+        "items": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string"
+            },
+            "patch": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "path",
+            "patch"
+          ]
+        }
+      },
       "tests_added": {
         "type": "array",
         "items": {

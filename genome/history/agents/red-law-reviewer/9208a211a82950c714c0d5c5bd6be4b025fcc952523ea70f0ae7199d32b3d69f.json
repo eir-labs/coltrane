@@ -37,9 +37,7 @@
     "Grep",
     "Bash(npx vitest run:*)",
     "Bash(git diff:*)",
-    "Bash(git status:*)",
-    "Bash(git rev-parse:*)",
-    "Bash(git show:*)"
+    "Bash(git status:*)"
   ],
   "disallowed_tools": [
     "Write",

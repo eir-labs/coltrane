@@ -29,6 +29,8 @@ export * from "./gig_conformance.js";
 export * from "./chart.js";
 export * from "./claude_invoker.js";
 export * from "./bifrost_invoker.js";
+export * from "./turn_loop.js";
+export * from "./chat_completions_port.js";
 export * from "./completions_invoker.js";
 // THE SEAM A DEPLOYMENT MUST IMPLEMENT HAS TO BE IMPORTABLE BY ONE. `resolveSeatBacking` and
 // friends were reachable from inside src/ — which satisfied the orphan ratchet and left the only

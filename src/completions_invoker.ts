@@ -28,13 +28,29 @@
 import type { AgentInvocationContext, AgentInvoker } from "./runtime.js";
 import type { Registry } from "./registry.js";
 import type { ModelTier } from "./pricing.js";
-import { isHostBuiltin } from "./tool_providers.js";
+import { ENGINE_MCP_SERVER, isHostBuiltin, mcpServerOf, toolBaseName } from "./tool_providers.js";
+import { venueEffectiveTools } from "./chart.js";
 import {
   buildPrompt,
   extractJson,
   extractOptionsForChair,
   promptSchemaFor,
 } from "./claude_invoker.js";
+// The provider-neutral loop and the chat-completions wire it runs on. The invoker no longer carries
+// a loop of its own: it hands `runTurn` a port and a tool source and reads back typed stops. The
+// tool-name encoding lives in the port now (the one place that speaks the wire) and is re-exported
+// here UNCHANGED so the existing completions-invoker laws keep their import path (Laws 4 & 12 import
+// encodeToolName/fromFunctionName/toFunctionDef from this module).
+import { runTurn, type PriceTable, type ToolSource, type TurnMessage } from "./turn_loop.js";
+import {
+  encodeToolName,
+  fromFunctionName,
+  makeChatCompletionsPort,
+  toFunctionDef,
+  type FunctionDef,
+} from "./chat_completions_port.js";
+export { encodeToolName, fromFunctionName, toFunctionDef };
+export type { FunctionDef };
 
 /** One model invocation's wall-clock bound — a completion plus its tool turns, not a whole chair. */
 export const DEFAULT_COMPLETIONS_TIMEOUT_MS = 120_000;
@@ -58,11 +74,6 @@ export interface McpToolSource {
   call: (name: string, args: Record<string, unknown>) => Promise<unknown>;
 }
 
-export interface FunctionDef {
-  type: "function";
-  function: { name: string; description?: string; parameters: Record<string, unknown> };
-}
-
 export interface CompletionsInvokerOptions {
   /** Chat-completions base URL. `/chat/completions` is appended. */
   baseUrl: string;
@@ -72,22 +83,35 @@ export interface CompletionsInvokerOptions {
   tierMap?: Partial<Record<ModelTier, string>> | undefined;
   maxTokens?: number | undefined;
   timeoutMs?: number | undefined;
+  /** Engine-default round cap, the LAST fallback under the chair budget and the agent's own cap. */
   maxToolRounds?: number | undefined;
   fetchFn?: typeof fetch | undefined;
   tools?: McpToolSource | undefined;
+  /** Served model id → USD per million tokens. Supplied by the deployment; absent = spend is
+   *  UNPRICED (reported unpriced, never as $0). Handed straight to the loop's accounting. */
+  prices?: PriceTable | undefined;
 }
 
 export type CompletionsRefusal =
   | "host_tool_denied"
   | "no_tool_source"
   | "transport_failed"
-  | "unresolved_tier";
+  | "unresolved_tier"
+  // The turn loop's typed stops, surfaced to the chair as named refusals so the runtime's typed
+  // refusal read (runtime.ts) turns a loop that ran out of rounds, timed out or was aborted into a
+  // legible chair failure rather than an empty-answer parse error.
+  | "round_limit"
+  | "timeout"
+  | "aborted";
 
 export const COMPLETIONS_REFUSALS: readonly CompletionsRefusal[] = [
   "host_tool_denied",
   "no_tool_source",
   "transport_failed",
   "unresolved_tier",
+  "round_limit",
+  "timeout",
+  "aborted",
 ];
 
 const refuse = (refusal: CompletionsRefusal, message: string): Record<string, unknown> => ({
@@ -96,93 +120,34 @@ const refuse = (refusal: CompletionsRefusal, message: string): Record<string, un
   message,
 });
 
-// ── MCP ↔ function-calling, losslessly ───────────────────────────────────────────────────────────
-//
-// Tool names on the wire are constrained to [A-Za-z0-9_-]{1,64}; MCP names are not. A readable name
-// survives unchanged (the model reasons better about `mcp__coltrane__output_query` than about a hex
-// blob), and anything else is escaped reversibly. The round trip is a law, not an intention.
-
-const SAFE_NAME = /^[A-Za-z0-9_-]{1,64}$/;
-const ESCAPE = "x0_";
-/** The wire's own bound on a function name. Legality is a SEPARATE property from losslessness — a
- *  round-trip law proves the second and says nothing about the first, which is how a 68-character
- *  name came to encode to 139 and pass every test. */
-const NAME_LIMIT = 64;
-const TRUNC = "x1_";
-
-/** A short deterministic digest, so two distinct long names cannot collapse onto one wire name. */
-function shortDigest(s: string): string {
-  let h1 = 0x811c9dc5;
-  let h2 = 0x01000193;
-  for (let i = 0; i < s.length; i++) {
-    h1 = Math.imul(h1 ^ s.charCodeAt(i), 0x01000193) >>> 0;
-    h2 = Math.imul(h2 + s.charCodeAt(i) + i, 0x85ebca6b) >>> 0;
-  }
-  return h1.toString(36).padStart(7, "0") + h2.toString(36).padStart(7, "0");
-}
-
-/**
- * An MCP name → a name the wire will actually accept: `[A-Za-z0-9_-]{1,64}`.
- *
- * Three tiers, and the third is the one this needed. A safe short name passes through unchanged,
- * because a model reasons better about `mcp__coltrane__output_query` than about a hex blob. Anything
- * else is hex-escaped, which is reversible. And a name too long for EITHER form is truncated with a
- * digest — legal and collision-resistant, but no longer invertible on its own.
- *
- * That last tier is why the invoker resolves replies through the tool list it already holds rather
- * than by inverting the name: a long-named tool stays callable instead of being refused for the
- * shape of its name.
- */
-export function encodeToolName(name: string): string {
-  if (SAFE_NAME.test(name) && !name.startsWith(ESCAPE) && !name.startsWith(TRUNC)) return name;
-  let hex = "";
-  for (const byte of new TextEncoder().encode(name)) hex += byte.toString(16).padStart(2, "0");
-  const escaped = ESCAPE + hex;
-  if (escaped.length <= NAME_LIMIT) return escaped;
-  const digest = shortDigest(name);
-  const room = NAME_LIMIT - TRUNC.length - digest.length - 1;
-  return `${TRUNC}${hex.slice(0, Math.max(0, room))}_${digest}`;
-}
-
-export function fromFunctionName(name: string): string {
-  if (!name.startsWith(ESCAPE)) return name;
-  const hex = name.slice(ESCAPE.length);
-  const bytes = new Uint8Array(hex.length / 2);
-  for (let i = 0; i < bytes.length; i++) bytes[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
-  return new TextDecoder().decode(bytes);
-}
-
-export function toFunctionDef(tool: McpToolDef): FunctionDef {
-  return {
-    type: "function",
-    function: {
-      name: encodeToolName(tool.name),
-      ...(tool.description !== undefined ? { description: tool.description } : {}),
-      parameters: tool.inputSchema,
-    },
-  };
-}
-
 // ── The invoker ──────────────────────────────────────────────────────────────────────────────────
 
-interface ChatChoice {
-  message?: {
-    content?: string | null;
-    tool_calls?: { id?: string; function?: { name?: string; arguments?: string } }[];
-  };
-  finish_reason?: string;
+/** A bare in-house grant `x` addresses the engine server's tool `mcp__coltrane__x` (#204); an
+ *  already-namespaced grant (`mcp__<server>__<tool>`, including a `*` prefix) is kept verbatim. This
+ *  is the SAME bridge resolveAgentGrants applies internally — sharing the one constant keeps the
+ *  bare-slug/namespaced-surface split (#204) from drifting without dragging a provider registry into
+ *  this invoker's options. */
+function mapGrant(grant: string): string {
+  return mcpServerOf(grant) ? grant : `mcp__${ENGINE_MCP_SERVER}__${toolBaseName(grant)}`;
 }
-interface ChatReply {
-  choices?: ChatChoice[];
-  model?: string;
-  usage?: { prompt_tokens?: number; completion_tokens?: number };
+
+/** A tool from a FOREIGN MCP server — one the deployment wired into the source that is not the
+ *  engine's own. The engine's grant list governs the engine's own tools; a foreign server's tools
+ *  arrive already governed by that server, so the deployment's decision to list them IS the
+ *  authorization. (Law 21 gates engine tools by grant; the completions laws keep a foreign tool the
+ *  source lists callable even when the chair never named it.) */
+function isForeignServerTool(name: string): boolean {
+  const server = mcpServerOf(name);
+  return server !== null && server !== ENGINE_MCP_SERVER;
 }
 
 export function makeCompletionsInvoker(opts: CompletionsInvokerOptions): AgentInvoker {
-  const doFetch = opts.fetchFn ?? fetch;
+  const port = makeChatCompletionsPort({
+    baseUrl: opts.baseUrl,
+    apiKey: opts.apiKey,
+    ...(opts.fetchFn ? { fetchFn: opts.fetchFn } : {}),
+  });
   const timeoutMs = opts.timeoutMs ?? DEFAULT_COMPLETIONS_TIMEOUT_MS;
-  const maxRounds = opts.maxToolRounds ?? DEFAULT_MAX_TOOL_ROUNDS;
-  const url = `${opts.baseUrl.replace(/\/+$/, "")}/chat/completions`;
 
   return async (ctx: AgentInvocationContext): Promise<Record<string, unknown>> => {
     const grants = ctx.agent.allowed_tools ?? [];
@@ -230,89 +195,92 @@ export function makeCompletionsInvoker(opts: CompletionsInvokerOptions): AgentIn
         : undefined;
     const prompt = buildPrompt(ctx, single, many);
 
-    // The list is the authority on what a wire name means. Inverting the encoding works for the
-    // two reversible tiers and cannot work for a truncated one — so the map is built once here and
-    // the reply is resolved through it, which is correct for all three.
+    // THE OFFERED SET. The chair's grants — narrowed by the room when the chair sits in one (the SAME
+    // venueEffectiveTools oracle claude_invoker uses, never a re-inlined intersection) — mapped to the
+    // engine server's namespace. Those grants become the loop's allow list; a foreign server's tools
+    // the source lists are added so they stay callable. The loop offers exactly `listed ∩ allow`,
+    // re-sent byte-identical every round, and refuses any call outside it before it reaches source.
+    const chairGrants = ctx.venue ? venueEffectiveTools(ctx.agent, ctx.venue) : grants;
     const listed = opts.tools ? await opts.tools.list() : [];
-    const byWireName = new Map(listed.map((t) => [encodeToolName(t.name), t.name]));
-    const defs = listed.map(toFunctionDef);
-    const messages: Record<string, unknown>[] = [{ role: "user", content: prompt }];
+    const allow = [
+      ...chairGrants.map(mapGrant),
+      ...listed.filter((t) => isForeignServerTool(t.name)).map((t) => t.name),
+    ];
 
-    let reply: ChatReply | undefined;
-    for (let round = 0; round <= maxRounds; round++) {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), timeoutMs);
-      let res: Response;
-      try {
-        res = await doFetch(url, {
-          method: "POST",
-          headers: { "content-type": "application/json", authorization: `Bearer ${opts.apiKey}` },
-          body: JSON.stringify({
-            model,
-            messages,
-            ...(defs.length > 0 ? { tools: defs } : {}),
-            ...(opts.maxTokens !== undefined ? { max_tokens: opts.maxTokens } : {}),
-          }),
-          signal: ctx.signal ?? controller.signal,
-        });
-      } catch (e) {
-        return refuse("transport_failed", `the completions endpoint could not be reached: ${String(e)}`);
-      } finally {
-        clearTimeout(timer);
-      }
+    // THE ROUND CAP. Chair budget, then the agent's own cap, then the invoker default, then the
+    // engine default — the turn-budget contract's order. `ctx.turn_budget === 0` is a deliberate hard
+    // floor and does NOT fall through (0 is not nullish).
+    const maxRounds =
+      ctx.turn_budget ?? ctx.agent.max_tool_calls ?? opts.maxToolRounds ?? DEFAULT_MAX_TOOL_ROUNDS;
 
-      if (!res.ok) {
-        const body = await res.text().catch(() => "");
-        return refuse("transport_failed", `completions ${res.status}: ${body.slice(0, 300)}`);
-      }
-      reply = (await res.json()) as ChatReply;
+    const seed: TurnMessage[] = [{ role: "user", content: prompt }];
+    const result = await runTurn(seed, {
+      port,
+      model,
+      ...(opts.tools ? { tools: opts.tools as ToolSource } : {}),
+      allow,
+      max_rounds: maxRounds,
+      timeout_ms: timeoutMs,
+      ...(ctx.signal ? { signal: ctx.signal } : {}),
+      ...(opts.prices ? { prices: opts.prices } : {}),
+      ...(opts.maxTokens !== undefined ? { max_tokens: opts.maxTokens } : {}),
+    });
 
-      const choice = reply.choices?.[0];
-      const calls = choice?.message?.tool_calls ?? [];
-      if (calls.length === 0) break;
-
-      // The tool loop. Every call goes back out through the SOURCE — the engine resolves nothing
-      // itself, so whatever governs that surface governs this chair.
-      messages.push({ role: "assistant", content: null, tool_calls: calls });
-      for (const call of calls) {
-        const wire = call.function?.name ?? "";
-        const name = byWireName.get(wire) ?? fromFunctionName(wire);
-        let result: unknown;
-        try {
-          const args = JSON.parse(call.function?.arguments || "{}") as Record<string, unknown>;
-          result = await opts.tools!.call(name, args);
-        } catch (e) {
-          result = { error: String(e) };
-        }
-        messages.push({
-          role: "tool",
-          tool_call_id: call.id ?? wire,
-          content: typeof result === "string" ? result : JSON.stringify(result),
-        });
-      }
+    // Settle what RAN, whatever the stop. The full prompt (uncached input + cache reads + cache
+    // writes) preserves GigUsage.input_tokens' "whole prompt" meaning — reporting the uncached part
+    // alone would silently narrow the field, unseen by any fixture that caches nothing. Cost is
+    // emitted ONLY when every round was priced; a round the transport left unpriced or unreported is
+    // never folded in as $0 (#235). The per-model breakdown is keyed by the model the transport
+    // NAMED as serving the round, never the configured tier.
+    const totalInput =
+      result.totals.input_tokens + result.totals.cache_read_tokens + result.totals.cache_write_tokens;
+    const totalOutput = result.totals.output_tokens;
+    const byModel: Record<string, { inputTokens: number; outputTokens: number; costUSD: number }> = {};
+    for (const r of result.rounds) {
+      if (r.model === undefined || r.usage === undefined) continue;
+      const slot = (byModel[r.model] ??= { inputTokens: 0, outputTokens: 0, costUSD: 0 });
+      slot.inputTokens +=
+        (r.usage.input_tokens ?? 0) + (r.usage.cache_read_tokens ?? 0) + (r.usage.cache_write_tokens ?? 0);
+      slot.outputTokens += r.usage.output_tokens ?? 0;
+      slot.costUSD += r.cost_usd ?? 0;
     }
-
-    // Usage, reported ONLY as far as the transport actually reported it. Fabricating a zero is how
-    // "not captured" becomes "$0.00 spent" (#235) — and the model id is what the seal stamps, so an
-    // invented one would put a lie in the chain.
-    const served = reply?.model;
-    const inTok = reply?.usage?.prompt_tokens;
-    const outTok = reply?.usage?.completion_tokens;
-    if (served !== undefined || inTok !== undefined || outTok !== undefined) {
+    const everyRoundPriced =
+      result.rounds.length > 0 && result.rounds.every((r) => r.cost_usd !== undefined);
+    if (totalInput > 0 || totalOutput > 0) {
       ctx.onEvent?.({
         type: "result",
         raw: {
-          ...(inTok !== undefined || outTok !== undefined
-            ? { usage: { input_tokens: inTok ?? 0, output_tokens: outTok ?? 0 } }
-            : {}),
-          ...(served !== undefined
-            ? { modelUsage: { [served]: { inputTokens: inTok ?? 0, outputTokens: outTok ?? 0 } } }
-            : {}),
+          usage: { input_tokens: totalInput, output_tokens: totalOutput },
+          ...(everyRoundPriced ? { total_cost_usd: result.totals.cost_usd } : {}),
+          ...(Object.keys(byModel).length > 0 ? { modelUsage: byModel } : {}),
         },
       });
     }
 
-    const text = reply?.choices?.[0]?.message?.content ?? "";
-    return extractJson(text, extractOptionsForChair(types, single));
+    // A typed stop is a NAMED refusal, never a throw and never a parse of empty content. The runtime
+    // reads `{ok:false, refusal, message}` and fails the chair with the reason, so running out of
+    // rounds no longer falls through to "the model produced no answer".
+    if (result.stop === "round_limit") {
+      return refuse(
+        "round_limit",
+        `chair "${ctx.agent.slug}" ran ${result.totals.rounds} model round(s) — its turn budget of ` +
+          `${maxRounds} — without answering. Raise the chair's turn_budget or the agent's ` +
+          `max_tool_calls, or narrow the work.`,
+      );
+    }
+    if (result.stop === "timeout") {
+      return refuse("timeout", `a model call exceeded the ${timeoutMs}ms per-call timeout.`);
+    }
+    if (result.stop === "aborted") {
+      return refuse("aborted", `the invocation was aborted by its caller before the chair answered.`);
+    }
+    if (result.stop === "transport_failed") {
+      return refuse(
+        "transport_failed",
+        `the completions endpoint failed: ${result.error ?? "no reason reported"}`,
+      );
+    }
+
+    return extractJson(result.text, extractOptionsForChair(types, single));
   };
 }

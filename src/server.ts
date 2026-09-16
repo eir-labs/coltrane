@@ -51,7 +51,7 @@ import { institutionPlacementResolver } from "./placement_institutions.js";
 import type { PlacementResolver } from "./placement.js";
 import { isDepth, DEPTHS, type Depth } from "./pricing.js";
 import type { ToolProvider } from "./tool_providers.js";
-import { ENGINE_MCP_SERVER } from "./tool_providers.js";
+import { ENGINE_MCP_SERVER, isHostBuiltin, toolBaseName } from "./tool_providers.js";
 import type { ToolHook, ToolCallContext, PreOutcome } from "./hooks.js";
 import {
   gigScopeRefusal,
@@ -2391,16 +2391,24 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
           if (args[key] !== undefined) built[key] = args[key];
         }
         const def = built as unknown as AgentDef;
-        // Governance gate: each allowed_tools slug must be registered. tool_propose
-        // alone does NOT register; tool_register lands the slug. Unknown slugs are
-        // rejected so the cage cannot grant scope to a tool the registry doesn't know.
+        // Governance gate: each allowed_tools slug must be registered OR be a host builtin the
+        // invoker knows (Read, Write(src/**), Bash(npx vitest run:*) — judged on the base name).
+        // tool_propose alone does NOT register; tool_register lands the slug. Unknown names are
+        // rejected so the cage cannot grant scope to a tool nothing provides. Host builtins were
+        // refused here until 2026-09-16, so no code-touching seat could be authored through this
+        // surface at all (every one in the genome was committed as a file instead). Registering one
+        // is not the cure: the registry is the engine's own tool surface, and `Read` is not an engine
+        // tool. Admitting a host builtin grants nothing by itself — dispatch still resolves every
+        // grant and fails closed, and a venue still narrows the set to its equipment.
         if (def.allowed_tools && def.allowed_tools.length > 0) {
-          const unknown = def.allowed_tools.filter((s) => !REGISTERED_TOOL_SLUGS.has(s));
+          const unknown = def.allowed_tools.filter(
+            (s) => !REGISTERED_TOOL_SLUGS.has(s) && !isHostBuiltin(toolBaseName(s)),
+          );
           if (unknown.length > 0) {
             return {
               ok: false,
               requires_approval: approval,
-              error: `agent_define: unknown/unregistered allowed_tools slug${unknown.length > 1 ? "s" : ""}: ${unknown.join(", ")} — call tool_propose then tool_register first`,
+              error: `agent_define: unknown/unregistered allowed_tools slug${unknown.length > 1 ? "s" : ""}: ${unknown.join(", ")} — not a host builtin and not registered; call tool_propose then tool_register first`,
             };
           }
         }

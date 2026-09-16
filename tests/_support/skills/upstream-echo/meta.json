@@ -1,0 +1,8 @@
+{
+  "slug": "upstream-echo",
+  "version": 1,
+  "skill_type": "extraction",
+  "determinism_ratio": 1.0,
+  "permission": { "tier": 0 },
+  "description": "Test skill: reports how many upstream outputs reached it and by which roles. Exists to prove a skill chair can see N same-type upstreams individually, not as one merged object."
+}

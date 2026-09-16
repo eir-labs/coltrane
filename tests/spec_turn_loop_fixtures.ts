@@ -54,7 +54,7 @@ export interface ModelRequest {
 }
 
 export interface ModelReply {
-  /** The model the transport says SERVED this round. */
+  /** The model the transport says SERVED this round. Absent = the round is unpriced; the requested model does not stand in. */
   model?: string;
   message: { content: string | null; tool_calls?: ToolCall[]; raw?: unknown };
   usage?: TurnUsage;

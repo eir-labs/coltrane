@@ -153,6 +153,21 @@ describe("LAW 5 — cost is priced from the deployment's table, by the model tha
     expect(r.totals.cost_usd).toBeCloseTo(3.3, 9);
     expect(r.totals.unpriced_rounds).toBe(0);
   });
+
+  // AMENDED after review gig c539c33b. The spec first said: when the transport names no served
+  // model, price by the requested one. A request can name an alias the transport routed elsewhere,
+  // so that fallback is a default standing in for a value nobody reported — and no law exercised it.
+  it("a round whose transport names no served model is UNPRICED — the requested model does not stand in", async () => {
+    const L = await loadTurnLoop();
+    const unnamed: ModelReply = { message: { content: "ok" }, usage: u(1_000_000, 0), stop: "end" };
+    const { port } = scriptedPort([unnamed]);
+    const r = await L.runTurn([user("go")], {
+      port, model: "m-1", max_rounds: 2, prices: { "m-1": { input: 5, output: 25 } },
+    });
+    expect(r.rounds[0]?.cost_usd, "the requested model's price stood in for the served one").toBeUndefined();
+    expect(r.rounds[0]?.model, "the round claims a model the transport never named").toBeUndefined();
+    expect(r.totals.unpriced_rounds).toBe(1);
+  });
 });
 
 describe("LAW 6 — spend that cannot be priced is UNPRICED, never $0", () => {
@@ -495,14 +510,17 @@ function oneChair(agent: Agent): Standard {
   } as Standard;
 }
 
-async function threeRoundGig(prices?: Record<string, { input: number; output: number }>) {
+async function threeRoundGig(
+  prices?: Record<string, { input: number; output: number }>,
+  usages: Record<string, unknown>[] = [wireUsage(100, 10), wireUsage(200, 20), wireUsage(300, 30)],
+) {
   const C = await loadCompletions();
   const registry = createRegistry();
   registry.registerType(note);
   const { fn } = fakeCompletions([
-    toolTurn("mcp__coltrane__output_query", "a", wireUsage(100, 10)),
-    toolTurn("mcp__coltrane__output_query", "b", wireUsage(200, 20)),
-    jsonTurn({ claim: "c", source: "sealed://g" }, wireUsage(300, 30)),
+    toolTurn("mcp__coltrane__output_query", "a", usages[0]),
+    toolTurn("mcp__coltrane__output_query", "b", usages[1]),
+    jsonTurn({ claim: "c", source: "sealed://g" }, usages[2]),
   ]);
   const { source } = recordingTools(ENGINE_TOOLS);
   return runGig(oneChair(researcher), {}, {
@@ -521,6 +539,20 @@ describe("LAW 19 — a chair's tokens from EVERY round reach GigResult.usage", (
     const res = await threeRoundGig();
     expect(res.outputs).toHaveLength(1);
     expect(res.usage?.input_tokens, "the gig settled only part of the chair's rounds").toBe(600);
+    expect(res.usage?.output_tokens).toBe(60);
+  });
+
+  // AMENDED after review gig c539c33b. The port splits prompt_tokens into uncached input and cache
+  // reads. GigUsage carries no cache fields, so an invoker that settled only the uncached part would
+  // silently shrink the gig's input_tokens — and the fixture above, which caches nothing, cannot see
+  // it. This invoker has always settled the full prompt; the law keeps it that way.
+  it("a cached prompt still settles the FULL prompt as input_tokens", async () => {
+    const cached = (prompt_tokens: number, completion_tokens: number, cached_tokens: number) => ({
+      prompt_tokens, completion_tokens, prompt_tokens_details: { cached_tokens },
+    });
+    const res = await threeRoundGig(undefined, [cached(1000, 10, 0), cached(2000, 20, 900), cached(3000, 30, 1900)]);
+    expect(res.outputs).toHaveLength(1);
+    expect(res.usage?.input_tokens, "cached prompt tokens fell out of the gig's input_tokens").toBe(6000);
     expect(res.usage?.output_tokens).toBe(60);
   });
 });
@@ -596,6 +628,19 @@ describe("LAW 23 — the invoker honours the chair's turn budget", () => {
     expect(threw, "running out of turns threw instead of refusing").toBe(null);
     expect(sent, "the chair's turn budget was ignored").toHaveLength(2);
     expect(res["ok"]).toBe(false);
+    expect(res["refusal"]).toBe("round_limit");
+  });
+
+  // AMENDED after review gig c539c33b: no law covered a chair with no turn_budget. The order is the
+  // turn-budget contract's (docs/specs/turn-budget-contract.md): chair, then agent, then the engine.
+  it("with no chair budget, the agent's own max_tool_calls bounds the rounds", async () => {
+    const C = await loadCompletions();
+    const { fn, calls: sent } = fakeCompletions([toolTurn("mcp__coltrane__output_query", "loop")]);
+    const { source } = recordingTools(ENGINE_TOOLS);
+    const res = (await C.makeCompletionsInvoker({
+      baseUrl: "https://endpoint.test/v1", apiKey: "k", tierMap: { economy: "cheap-model-1" }, fetchFn: fn, tools: source,
+    })(ctxFor({ ...researcher, max_tool_calls: 3 }))) as Record<string, unknown>;
+    expect(sent, "the agent's max_tool_calls did not bound the rounds").toHaveLength(3);
     expect(res["refusal"]).toBe("round_limit");
   });
 });

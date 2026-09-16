@@ -276,7 +276,13 @@ describe("LAW 12 — an encoded tool name is LEGAL, not merely lossless", () => 
     const { fn } = fakeCompletions([callsTool(wire, {}), saysJson({ claim: "c", source: "s" })]);
     const { source, called } = recordingTools([huge], { [longName]: { ok: true } });
 
-    await C.makeCompletionsInvoker(opts({ fetchFn: fn, tools: source }))(ctxFor(researcher));
+    // AMENDED 2026-09-16: the chair is GRANTED the long-named tool. This law predates grant filtering
+    // and called an ungranted tool; once grants bound the chair, the only way to keep it green without
+    // this grant was a carve-out letting every non-engine tool bypass grants (build gig 13ea0d99).
+    // Its point was always that a long NAME stays callable, never that an ungranted tool does.
+    await C.makeCompletionsInvoker(opts({ fetchFn: fn, tools: source }))(
+      ctxFor({ ...researcher, allowed_tools: [...(researcher.allowed_tools ?? []), longName] }),
+    );
     expect(called.map((c) => c.name), "the long-named tool never reached the surface").toEqual([longName]);
   });
 

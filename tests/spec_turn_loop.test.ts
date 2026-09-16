@@ -484,6 +484,13 @@ const ENGINE_TOOLS: McpToolDef[] = [
   { name: "mcp__coltrane__agent_define", inputSchema: { type: "object" } },
 ];
 
+/** The same source, also serving tools from a server that is not the engine's. */
+const MIXED_TOOLS: McpToolDef[] = [
+  ...ENGINE_TOOLS,
+  { name: "mcp__browser__navigate", inputSchema: { type: "object" } },
+  { name: "mcp__db__execute_sql", inputSchema: { type: "object" } },
+];
+
 const wireUsage = (prompt_tokens: number, completion_tokens: number) => ({ prompt_tokens, completion_tokens });
 const toolTurn = (name: string, id: string, usage?: Record<string, unknown>) => ({
   choices: [{
@@ -580,6 +587,26 @@ describe("LAW 21 — the invoker offers only the chair's grants", () => {
     const offered = ((sent[0]?.body["tools"] ?? []) as { function: { name: string } }[]).map((t) => t.function.name);
     expect(offered, "a tool outside the chair's grants was offered").toEqual(["mcp__coltrane__output_query"]);
     expect(called.map((c) => c.name), "an ungranted tool reached the surface").toEqual([]);
+  });
+
+  // AMENDED 2026-09-16 after build gig 13ea0d99, whose builder kept an older law green by letting
+  // every NON-engine tool bypass grants ("a foreign server's tools arrive with their server's own
+  // authorization"). No law could see it: the case above only lists engine tools. A grant is the
+  // chair's ceiling whichever server serves the tool.
+  it("an ungranted tool from a server that is NOT the engine's is not offered either, and never called", async () => {
+    const C = await loadCompletions();
+    const { fn, calls: sent } = fakeCompletions([
+      toolTurn("mcp__db__execute_sql", "x"),
+      jsonTurn({ claim: "c", source: "s" }),
+    ]);
+    const { source, called } = recordingTools(MIXED_TOOLS);
+    await C.makeCompletionsInvoker({
+      baseUrl: "https://endpoint.test/v1", apiKey: "k", tierMap: { economy: "cheap-model-1" }, fetchFn: fn, tools: source,
+    })(ctxFor({ ...researcher, allowed_tools: ["mcp__coltrane__output_query", "mcp__browser__navigate"] }));
+
+    const offered = ((sent[0]?.body["tools"] ?? []) as { function: { name: string } }[]).map((t) => t.function.name);
+    expect(offered, "an ungranted non-engine tool was offered").toEqual(["mcp__coltrane__output_query", "mcp__browser__navigate"]);
+    expect(called.map((c) => c.name), "an ungranted non-engine tool reached the surface").toEqual([]);
   });
 
   it("a bare in-house grant offers the engine server's tool of that name", async () => {

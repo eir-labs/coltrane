@@ -120,6 +120,11 @@ interface WireUsage {
   prompt_tokens?: number;
   completion_tokens?: number;
   prompt_tokens_details?: { cached_tokens?: number };
+  // A provider that reports cache hits and misses as SEPARATE counts (rather than folding hits into
+  // prompt_tokens_details.cached_tokens). Both shapes describe the same whole prompt; only the way
+  // the split is reported differs.
+  prompt_cache_hit_tokens?: number;
+  prompt_cache_miss_tokens?: number;
 }
 interface WireReply {
   choices?: WireChoice[];
@@ -149,14 +154,24 @@ function toWireMessage(m: TurnMessage): Record<string, unknown> {
 
 /** Split the wire's `prompt_tokens` into uncached input and cache reads (law 16). A cached prompt is
  *  still the full prompt; the split is what makes the cache visible without inventing a class the
- *  wire did not report. Absent usage stays absent — an unreported round is not a zero-token one. */
+ *  wire did not report. Absent usage stays absent — an unreported round is not a zero-token one.
+ *
+ *  Two wire shapes report the same split. The OpenAI shape folds hits into
+ *  `prompt_tokens_details.cached_tokens` and leaves `prompt_tokens` whole. A provider that reports
+ *  hits and misses SEPARATELY names them `prompt_cache_hit_tokens` / `prompt_cache_miss_tokens`;
+ *  there the cache hits are the hit count and the uncached input is the reported miss count directly.
+ *  Either way the prompt stays whole and only the reported split differs — pricing cache hits as
+ *  uncached input (the pre-cache-hit bug) would overcharge a run priced in cents. */
 function mapUsage(u: WireUsage | undefined): TurnUsage | undefined {
   if (!u) return undefined;
-  const cached = typeof u.prompt_tokens_details?.cached_tokens === "number"
-    ? u.prompt_tokens_details.cached_tokens
-    : 0;
+  const cached = typeof u.prompt_cache_hit_tokens === "number"
+    ? u.prompt_cache_hit_tokens
+    : typeof u.prompt_tokens_details?.cached_tokens === "number"
+      ? u.prompt_tokens_details.cached_tokens
+      : 0;
   const usage: TurnUsage = {};
-  if (typeof u.prompt_tokens === "number") usage.input_tokens = u.prompt_tokens - cached;
+  if (typeof u.prompt_cache_miss_tokens === "number") usage.input_tokens = u.prompt_cache_miss_tokens;
+  else if (typeof u.prompt_tokens === "number") usage.input_tokens = u.prompt_tokens - cached;
   if (cached > 0) usage.cache_read_tokens = cached;
   if (typeof u.completion_tokens === "number") usage.output_tokens = u.completion_tokens;
   return usage;

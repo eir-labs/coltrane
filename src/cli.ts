@@ -32,8 +32,7 @@ import { runReside } from "./reside.js";
 import { openLocalQueue, selectQueueBacking, LOCAL_QUEUE_DIR_VAR } from "./local_queue.js";
 import { workerCredentialMode } from "./worker_env.js";
 import { drainPreflight } from "./drain_preflight.js";
-import { makeClaudeInvoker } from "./claude_invoker.js";
-import { makeCompletionsInvoker } from "./completions_invoker.js";
+import { selectChairInvoker } from "./invoker_selection.js";
 import { dockerComposeRealizer } from "./venue_realizer.js";
 import { readFileSync } from "node:fs";
 
@@ -334,34 +333,22 @@ export async function runCli(argv: readonly string[], io: CliIO): Promise<number
       {
         // WHICH PORT RUNS THE CHAIRS is selected from environment PRESENCE, the same policy shape
         // selectQueueBacking and selectResidencyBacking already use: a completions URL means the
-        // cheap model port, its absence means the host-tool invoker, and nothing is guessed. The
-        // tier→model map is deployment-defined — the engine names no model, because a standard says
-        // what the work IS and the executor is fungible. A tier the deployment did not map is a
-        // typed refusal at the chair, not a silent default.
-        makeInvoke: (registry) => {
-          const completionsUrl = process.env["COLTRANE_COMPLETIONS_URL"];
-          if (completionsUrl) {
-            const tierMap: Record<string, string> = {};
-            const eco = process.env["COLTRANE_TIER_ECONOMY"];
-            const std = process.env["COLTRANE_TIER_STANDARD"];
-            const prem = process.env["COLTRANE_TIER_PREMIUM"];
-            if (eco) tierMap["economy"] = eco;
-            if (std) tierMap["standard"] = std;
-            if (prem) tierMap["premium"] = prem;
-            return makeCompletionsInvoker({
-              baseUrl: completionsUrl,
-              apiKey: process.env["COLTRANE_COMPLETIONS_KEY"] ?? "",
-              registry,
-              tierMap,
-              ...(process.env["COLTRANE_CHAIR_TIMEOUT_MS"] ? { timeoutMs: Number(process.env["COLTRANE_CHAIR_TIMEOUT_MS"]) } : {}),
-            });
-          }
-          return makeClaudeInvoker({
+        // cheap model port, its absence means the host-tool invoker, and nothing is guessed. The one
+        // selector (src/invoker_selection.ts) is shared with the dispatch door so the drain and
+        // dispatch cannot drift on the choice. The tier→model map is deployment-defined — the engine
+        // names no model, because a standard says what the work IS and the executor is fungible; a
+        // tier the deployment did not map is a typed refusal at the chair, not a silent default. On
+        // the host-tool path the drain passes ITS OWN options (registry, model and timeout only),
+        // unchanged.
+        makeInvoke: (registry) =>
+          selectChairInvoker(process.env, {
             registry,
-            model: process.env["COLTRANE_MODEL"],
-            ...(process.env["COLTRANE_CHAIR_TIMEOUT_MS"] ? { timeout_ms: Number(process.env["COLTRANE_CHAIR_TIMEOUT_MS"]) } : {}),
-          });
-        },
+            claude: {
+              registry,
+              model: process.env["COLTRANE_MODEL"],
+              ...(process.env["COLTRANE_CHAIR_TIMEOUT_MS"] ? { timeout_ms: Number(process.env["COLTRANE_CHAIR_TIMEOUT_MS"]) } : {}),
+            },
+          }),
         // The SAME realizer the interactive path constructs at src/server.ts:3486 — one bootstrap,
         // so the drain and the server cannot drift on which substrate a venue-named room is stood up
         // on. A box's claim gate (venueMayClaim) already promised it can stand this room up; without

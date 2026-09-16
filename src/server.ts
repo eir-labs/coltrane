@@ -45,7 +45,8 @@ import { standardSimulate } from "./simulate.js";
 import { runGig, BudgetExhausted, GigAborted, ResumeRefused, partialGigUsage, partialBudgetState, type AgentInvoker } from "./runtime.js";
 import { assembleRunDeps, resolveWorkingRepo } from "./run_deps.js";
 import { createCheckpointStore, createReuseStore, type CheckpointStore, type ReuseStore } from "./reuse.js";
-import { makeClaudeInvoker, killLiveChairChildren } from "./claude_invoker.js";
+import { killLiveChairChildren } from "./claude_invoker.js";
+import { selectChairInvoker } from "./invoker_selection.js";
 import { dockerComposeRealizer, type VenueRealizer } from "./venue_realizer.js";
 import { institutionPlacementResolver } from "./placement_institutions.js";
 import type { PlacementResolver } from "./placement.js";
@@ -3995,27 +3996,37 @@ export function bootstrapServerDeps(genomeRoot?: string): ServerDeps {
     // Silence admits, so a genome with no institutions/ (which is most of them) is unaffected: every
     // placement is admitted and the run is byte-identical.
     placementResolver: institutionPlacementResolver(genome.institutions ?? new Map()),
-    invoke: makeClaudeInvoker({
+    // ONE selector for this door AND the drain (src/invoker_selection.ts). A completions URL in the
+    // environment seats the cheap chat-completions port so `coltrane dispatch` / `gig_dispatch` can
+    // reach a model priced in cents, exactly as `coltrane work` already could; its absence keeps the
+    // host-tool invoker below, configured byte-for-byte as it was — the Claude options are handed to
+    // the selector WHOLE and passed through untouched on that path, so this door's Claude behaviour
+    // is unchanged. The selector also loads the deployment's price table (COLTRANE_PRICES_FILE),
+    // failing startup if it is malformed — the propagation this bootstrap owes.
+    invoke: selectChairInvoker(process.env, {
       registry,
-      model: process.env["COLTRANE_MODEL"],
-      // #185 — per-agent grant resolution wires each agent's MCP servers into its spawn (coltrane's
-      // own server + any the deployment registers in .mcp.json). An unresolvable grant fails closed.
-      mcpServerConfigs,
-      toolProviders, // the genome→provider bridge (above) — makes in_house grants resolvable
-      // The production seal path: a model chair SEALS IN-BAND by calling output_write (validated at
-      // the full write boundary, corrected in-band), and the invoker captures what passed. The
-      // engine server config above is bridged into the spawn and its validate-mode env set, so the
-      // chair's output_write adjudicates-not-persists and the runtime seals exactly once.
-      sealVia: "output_write",
-      // per-chair wall-clock bound; COLTRANE_CHAIR_TIMEOUT_MS overrides for slow deployments
-      ...(process.env["COLTRANE_CHAIR_TIMEOUT_MS"] ? { timeout_ms: Number(process.env["COLTRANE_CHAIR_TIMEOUT_MS"]) } : {}),
-      // The reserve grant (#329) had no reachable caller: it was built, tested, and set by nothing,
-      // so a chair that spent its budget still died silently at the cap. This is the operator-level
-      // door to it. Absent = no reserve, which is the prior behaviour exactly — an extension nobody
-      // asked for is spend nobody authorised. The DURABLE fix is a per-chair `turn_reserve` declared
-      // in the standard (PR #331), because a budget is a property of the work rather than of the
-      // player; this env is the deployment-level stopgap until that lands, not a substitute for it.
-      ...(process.env["COLTRANE_TURN_RESERVE"] ? { turn_reserve: Number(process.env["COLTRANE_TURN_RESERVE"]) } : {}),
+      claude: {
+        registry,
+        model: process.env["COLTRANE_MODEL"],
+        // #185 — per-agent grant resolution wires each agent's MCP servers into its spawn (coltrane's
+        // own server + any the deployment registers in .mcp.json). An unresolvable grant fails closed.
+        mcpServerConfigs,
+        toolProviders, // the genome→provider bridge (above) — makes in_house grants resolvable
+        // The production seal path: a model chair SEALS IN-BAND by calling output_write (validated at
+        // the full write boundary, corrected in-band), and the invoker captures what passed. The
+        // engine server config above is bridged into the spawn and its validate-mode env set, so the
+        // chair's output_write adjudicates-not-persists and the runtime seals exactly once.
+        sealVia: "output_write",
+        // per-chair wall-clock bound; COLTRANE_CHAIR_TIMEOUT_MS overrides for slow deployments
+        ...(process.env["COLTRANE_CHAIR_TIMEOUT_MS"] ? { timeout_ms: Number(process.env["COLTRANE_CHAIR_TIMEOUT_MS"]) } : {}),
+        // The reserve grant (#329) had no reachable caller: it was built, tested, and set by nothing,
+        // so a chair that spent its budget still died silently at the cap. This is the operator-level
+        // door to it. Absent = no reserve, which is the prior behaviour exactly — an extension nobody
+        // asked for is spend nobody authorised. The DURABLE fix is a per-chair `turn_reserve` declared
+        // in the standard (PR #331), because a budget is a property of the work rather than of the
+        // player; this env is the deployment-level stopgap until that lands, not a substitute for it.
+        ...(process.env["COLTRANE_TURN_RESERVE"] ? { turn_reserve: Number(process.env["COLTRANE_TURN_RESERVE"]) } : {}),
+      },
     }),
     model_version: process.env["COLTRANE_MODEL"] ?? "claude-cli-default",
     skills: genome.skills, // ← skill substrate — runGig resolves agent.skill_slugs into prompt

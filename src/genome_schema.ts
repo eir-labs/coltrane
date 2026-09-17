@@ -229,6 +229,15 @@ export const ChairSchema = z.object({
    *  fail-closed, integer discipline as `turn_budget`. May be declared WITHOUT `turn_budget`: the
    *  budget then falls through the resolution tiers while the reserve still bounds the draw. */
   turn_reserve: z.number().int().nonnegative().optional(),
+  /** contract-seat-primer-v1 — the STANDING SEAT primers. A `prime` chair READS an area once and
+   *  seals a `seat-primer` record (the blobs it read); a later `fork_from` chair of the SAME agent
+   *  warm-starts from that primer instead of re-reading cold. The two are mutually exclusive and
+   *  `fork_from.primer` must be a lowercase-hyphen slug — composeStandard refuses a chair that breaks
+   *  either rule, naming the chair and the field. OPTIONAL so every existing chair record parses
+   *  byte-equivalent (a Zod object DROPS an undeclared key, so the fields must be declared here to be
+   *  RETAINED through composition into the runtime Chair). */
+  prime: z.object({ area: z.string() }).optional(),
+  fork_from: z.object({ primer: z.string() }).optional(),
 });
 export const PhaseSchema = z.object({ name: z.string(), chairs: z.array(ChairSchema) });
 /** Lifecycle status, shared by domain types and standards (#203). */

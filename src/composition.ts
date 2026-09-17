@@ -86,6 +86,12 @@ export interface Chair {
   /** The per-chair ceiling on draws from the gig reserve pool (mirrors `ChairSchema.turn_reserve`).
    *  A chair never draws more than this even when the pool is larger. */
   turn_reserve?: number;
+  /** contract-seat-primer-v1 — a PRIME chair reads an `area` once and seals a `seat-primer`
+   *  (mirrors `ChairSchema.prime`). Mutually exclusive with `fork_from`. */
+  prime?: { area: string };
+  /** contract-seat-primer-v1 — a FORK chair warm-starts from the most recent `seat-primer` its
+   *  agent sealed for `fork_from.primer` (an area slug; mirrors `ChairSchema.fork_from`). */
+  fork_from?: { primer: string };
 }
 
 export interface PhaseDef {
@@ -298,6 +304,24 @@ export function composeStandard(def: {
         );
       }
       seenRoles.set(ch.role, ph.name);
+
+      // contract-seat-primer-v1 (F3) — a chair either PRIMES an area or FORKS one, never both, and a
+      // fork_from area must be a lowercase-hyphen slug (the shape the primer lookup keys on). Refuse
+      // an ill-formed seat here, where the genome is authored, naming the chair AND the field —
+      // rather than composing a seat whose warm-start could never resolve.
+      if (ch.prime && ch.fork_from) {
+        throw new CompositionError(
+          `standard ${def.slug}: chair "${ch.role}" declares BOTH prime and fork_from — a seat either ` +
+            `PRIMES an area (reads it once and seals a seat-primer) or FORKS one (warm-starts from a ` +
+            `primer), never both. Drop one of prime/fork_from.`,
+        );
+      }
+      if (ch.fork_from && !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(ch.fork_from.primer)) {
+        throw new CompositionError(
+          `standard ${def.slug}: chair "${ch.role}" fork_from area "${ch.fork_from.primer}" is not a ` +
+            `lowercase-hyphen slug — a primer area is a slug like "amend-loop". Fix the fork_from field.`,
+        );
+      }
 
       // A skill-backed chair (skill_slug set, no agent_slug) runs the skill's deterministic
       // code half instead of an agent — skip the agent/required-skills checks for it. The

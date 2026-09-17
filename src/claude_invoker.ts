@@ -323,6 +323,17 @@ export function buildPrompt(
     );
   }
 
+  // contract-seat-primer-v1 (O4) — a FORK warm-starts from a primer that already read this area; the
+  // files whose working-tree blob CHANGED since priming are named here so the seat re-reads exactly
+  // those, not the whole area cold. An empty stale set adds nothing (the primed reading still holds).
+  if (ctx.fork?.stale_paths && ctx.fork.stale_paths.length > 0) {
+    layers.push(
+      `# Changed since priming\nYou forked a primer that had already read this area. These files have ` +
+        `CHANGED since it was primed — RE-READ them before relying on them, the primer's copy is stale:\n` +
+        ctx.fork.stale_paths.map((p) => `- ${p}`).join("\n"),
+    );
+  }
+
   return layers.join("\n\n");
 }
 
@@ -888,6 +899,38 @@ export function captureOutputWrites(
   return blob;
 }
 
+/**
+ * contract-seat-primer-v1 (O1/I2) — the file paths a PRIME seat Read, parsed from the run's stdout the
+ * SAME way `captureOutputWrites` parses its `output_write` calls: a `Read` tool_use's `file_path`. The
+ * primer's `files` list is the SET of files the seat read, so paths are de-duped preserving first
+ * appearance. Read through the RETURNED stdout (not the streaming `onEvent` path) because an injected
+ * `run` seam bypasses streaming — the sealer must see what the run actually returned.
+ */
+function captureReadPaths(stdout: string): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of stdout.split("\n")) {
+    const line = raw.trim();
+    if (!line) continue;
+    let e: Record<string, unknown>;
+    try { e = JSON.parse(line) as Record<string, unknown>; } catch { continue; }
+    const type = typeof e["type"] === "string" ? (e["type"] as string) : "";
+    const msg = e["message"];
+    if ((type !== "assistant" && type !== "user") || !msg || typeof msg !== "object") continue;
+    const content = (msg as { content?: Array<Record<string, unknown>> }).content ?? [];
+    for (const b of content) {
+      if (String(b["type"] ?? "") !== "tool_use" || String(b["name"] ?? "") !== "Read") continue;
+      const input = (b["input"] && typeof b["input"] === "object" ? b["input"] : {}) as Record<string, unknown>;
+      const path = input["file_path"];
+      if (typeof path === "string" && path.length > 0 && !seen.has(path)) {
+        seen.add(path);
+        out.push(path);
+      }
+    }
+  }
+  return out;
+}
+
 // The wall-clock bound on one chair's spawn. A tool-granted child has no inherent
 // terminus (it can search/loop), and the gig runs the spawn synchronously — so without
 // this bound one wedged child wedges the whole server. SIGKILL, not SIGTERM: a
@@ -1135,7 +1178,7 @@ function sessionIdInUse(stdout: string, message: string): boolean {
 export function buildInvokerArgs(
   prompt: string,
   mcpConfigPath: string,
-  opts: { model?: string | undefined; allowed_tools?: readonly string[] | undefined; disallowed_tools?: readonly string[] | undefined; max_tool_calls?: number | undefined; effort?: Effort | undefined; session_id?: string | undefined; resume?: boolean | undefined },
+  opts: { model?: string | undefined; allowed_tools?: readonly string[] | undefined; disallowed_tools?: readonly string[] | undefined; max_tool_calls?: number | undefined; effort?: Effort | undefined; session_id?: string | undefined; resume?: boolean | undefined; fork_from_session?: string | undefined },
 ): string[] {
   // `-p` is a BOOLEAN flag and the prompt is a POSITIONAL argument, which is what makes the
   // large-prompt path clean: keep the flag, drop the positional, write it to stdin. The
@@ -1147,7 +1190,13 @@ export function buildInvokerArgs(
   // resume it. Every spawn with a session id opens one with `--session-id`; a re-invocation that
   // is resuming (the amend round) carries `--resume` instead — never both, or the CLI opens a
   // fresh session rather than continuing. A gig-less spawn has no session id and carries neither.
-  if (opts.session_id) {
+  // contract-seat-primer-v1 (O2) — a FORK chair's FIRST spawn WARM-STARTS: it `--resume`s the primer
+  // seat's session, `--fork-session`s that conversation into a NEW branch, and names THAT branch with
+  // its own (gig, role) `--session-id`. Distinct from an amend `--resume` (which continues the SAME
+  // session under the same id): a fork opens its own session forked FROM another's.
+  if (opts.fork_from_session && opts.session_id) {
+    args.push("--resume", opts.fork_from_session, "--fork-session", "--session-id", opts.session_id);
+  } else if (opts.session_id) {
     if (opts.resume) args.push("--resume", opts.session_id);
     else args.push("--session-id", opts.session_id);
   }
@@ -1518,6 +1567,11 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
       // by the runtime) RESUMES it (--resume). Absent gig_id ⇒ no session ⇒ neither flag.
       const sessionId = sessionUuidFor(ctx.gig_id, ctx.role);
       const resumeRound = ctx.resume === true && sessionId !== undefined;
+      // contract-seat-primer-v1 (O2/I1) — a FORK chair (ctx.fork threaded, and this seat has a session)
+      // WARM-STARTS its first spawn from the primer's session. A plain chair carries no ctx.fork, so
+      // isFork is false and the spawn is byte-identical to today (no --fork-session — the I1 control).
+      const forkFromSession = ctx.fork?.primer_session_id;
+      const isFork = forkFromSession !== undefined && sessionId !== undefined;
       // #seat-effort (O3) — the runtime already resolved precedence onto ctx.effort; floor to medium
       // so an undeclared, untiered seat (or any hand-built ctx) still spawns with an explicit
       // --effort rather than the operator's settings-file effort. Hoisted so baseArgs and the cold
@@ -1532,6 +1586,10 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
       const baseArgs = buildInvokerArgs(prompt, cfgPath, {
         ...invokerOpts,
         ...(sessionId !== undefined ? { session_id: sessionId, resume: resumeRound } : {}),
+        // contract-seat-primer-v1 (O2) — the fork warm-start rides on the FIRST spawn (baseArgs); the
+        // cold arg list below carries no fork_from_session, so an unresumable primer (F2) falls back to
+        // a plain fresh-session spawn with no --fork-session.
+        ...(isFork ? { fork_from_session: forkFromSession } : {}),
       });
       // contract-amend-resume-prompt-v1 (I2) — the cold arg list for a resume whose session is gone:
       // a FRESH --session-id spawn (resume:false) carrying the FULL prompt, because nothing else
@@ -1640,6 +1698,25 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
         return runTolerantOfBudgetStop(coldArgs, fullPrompt);
       };
 
+      // contract-seat-primer-v1 (F2) — a FORK whose primer session cannot be resumed (the run seam
+      // reports "no conversation" for its id) falls back COLD: a FRESH --session-id spawn with the full
+      // prompt (coldArgs carries no fork_from_session, so no --fork-session), NEVER failing the chair.
+      // The `fork_fallback` event names the unresumable primer session so chair_complete records the
+      // reason — a resume that did not happen, not a fork the record falsely claims.
+      const forkColdFallback = async (): Promise<{ stdout: string; budgetStopped: boolean }> => {
+        ctx.onEvent?.({
+          type: "fork_fallback",
+          raw: {
+            agent: a.slug,
+            primer_session_id: forkFromSession,
+            forked: false,
+            reason: `the primer session ${forkFromSession} could not be resumed; re-running cold with ` +
+              `--session-id and the full prompt`,
+          },
+        } as AgentStreamEvent);
+        return runTolerantOfBudgetStop(coldArgs, fullPrompt);
+      };
+
       // contract-resumed-gig-session-v1 (O2/O3/F1) — a FIRST `--session-id` open can COLLIDE: the
       // chair's session id is deterministic in (gig_id, role), so a KILLED attempt that already opened
       // it leaves the id live, and a resumed gig's first spawn re-opens it — the CLI refuses it
@@ -1687,6 +1764,9 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
         const first = await runTolerantOfBudgetStop(baseArgs, prompt);
         if (resumeRound && resumeSessionLost(first.stdout)) {
           ({ stdout, budgetStopped } = await resumeColdFallback());
+        } else if (isFork && resumeSessionLost(first.stdout)) {
+          // contract-seat-primer-v1 (F2) — the fork's --resume of the primer found no conversation.
+          ({ stdout, budgetStopped } = await forkColdFallback());
         } else if (collided(first.stdout, "")) {
           ({ stdout, budgetStopped } = await collisionResume());
         } else {
@@ -1695,6 +1775,8 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
       } catch (e) {
         if (resumeRound && e instanceof ChildExitError && resumeSessionLost(e.stdout)) {
           ({ stdout, budgetStopped } = await resumeColdFallback());
+        } else if (isFork && e instanceof ChildExitError && resumeSessionLost(e.stdout)) {
+          ({ stdout, budgetStopped } = await forkColdFallback());
         } else if (e instanceof ChildExitError && collided(e.stdout, e.message)) {
           ({ stdout, budgetStopped } = await collisionResume());
         } else {
@@ -1784,6 +1866,18 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
           `claude flagged its result with is_error — the payload is an error message, not an ` +
             `answer: ${outcome.apiErrorText.slice(0, 300)}`,
         );
+      }
+
+      // contract-seat-primer-v1 (O1/I2) — a PRIME seat's Read events, parsed from the run's stdout and
+      // emitted so the runtime seals the seat-primer from EXACTLY the files this seat read. Emitted on
+      // both seal and text paths (an injected `run` bypasses streaming, so the returned stdout is the
+      // one place the reads are), and before the seal branches so the reads reach the runtime whatever
+      // the seat produced.
+      if (ctx.prime) {
+        ctx.onEvent?.({
+          type: "seat_reads",
+          raw: { agent: a.slug, area: ctx.prime.area, reads: captureReadPaths(sealStdout) },
+        } as AgentStreamEvent);
       }
 
       if (seal) {

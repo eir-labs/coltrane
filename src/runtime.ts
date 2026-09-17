@@ -189,6 +189,16 @@ export interface AgentInvocationContext {
   // conversation to carry that identity — trimming it would leave the seat unidentifiable. Absent on a
   // maker amend, whose trimmed continuation is correct because the failing verdict is its one new input.
   resume_keep_prompt?: boolean | undefined;
+  // contract-seat-primer-v1 (O1/I2) — set on a PRIME chair. The invoker parses the seat's forwarded
+  // `Read` events from the run's stdout and emits them (a `seat_reads` stream event) so the runtime
+  // can seal the seat-primer record from exactly the files this seat read. Absent = a non-prime chair.
+  prime?: { area: string } | undefined;
+  // contract-seat-primer-v1 (O2/O4) — set on a FORK chair whose agent has a primer for the named area.
+  // `primer_session_id` is the primer seat's own session the fork --resumes; `stale_paths` are the
+  // primer files whose working-tree blob changed since priming (the runtime decided this against
+  // deps.tree_root), which buildPrompt names in the fork's prompt. Absent = a plain chair, or a fork
+  // whose primer is missing (F1) — either way the spawn opens a fresh session and never --fork-sessions.
+  fork?: { primer_session_id: string; stale_paths: readonly string[] } | undefined;
 }
 
 // One parsed event from a chair's child process (a stream-json line). `type` is the
@@ -244,6 +254,18 @@ export type GigProgressEvent =
        *  did not happen, rather than `resumed: true` claiming a continuation that never occurred.
        *  Absent when no fallback fired. */
       resume_fallback?: boolean;
+      /** contract-seat-primer-v1 (O3) — a forked chair records the primer it warm-started from: the
+       *  seat-primer record's id, the primer seat's own session_id, and the commit it sealed at.
+       *  Present only when the fork actually resumed the primer (absent on a cold fallback). */
+      forked_from?: { id: string; session_id: string; commit: string };
+      /** contract-seat-primer-v1 (O4) — the primer files whose working-tree blob differs from the
+       *  blob recorded at priming (empty when none changed). Named in the fork's prompt too. Present
+       *  on a successful fork. */
+      primer_stale_paths?: string[];
+      /** contract-seat-primer-v1 (F1/F2) — the fork could not warm-start (no primer for this
+       *  agent+area → "primer_missing", or the primer's session could not be resumed → a reason
+       *  naming that session). The chair ran COLD and did not fail; this records why, never silently. */
+      fork_fallback?: string;
     }
   | { type: "chair_failed"; phase: string; role: string; error: string }
   // #241 — one or more of the agent's declared skill_slugs resolved to no package. Not fatal
@@ -2380,6 +2402,17 @@ export async function runGig(
     /** contract-spend-survives-v1 (O1) — which round this invocation is, stamped on the chair_spend
      *  row: 1 on a first run, and the examine⇄amend re-run's round otherwise. Absent → 1. */
     round?: number;
+    /** contract-seat-primer-v1 (O2/O3/O4) — a fork chair whose agent has a primer for its area.
+     *  Resolved at prep (the lookup + the blob-staleness comparison against deps.tree_root) so the
+     *  invoker warm-starts by construction and chair_complete records `forked_from`/`primer_stale_paths`. */
+    fork?: { primer_session_id: string; primer_id: string; primer_commit: string; stale_paths: string[] };
+    /** contract-seat-primer-v1 (F1) — a fork chair with NO primer for its agent+area. The chair runs
+     *  cold and chair_complete records `fork_fallback: "primer_missing"`; never fails. */
+    fork_fallback?: string;
+    /** contract-seat-primer-v1 (O5) — a fork whose reuse key WOULD hit. The hit is recorded (the cache
+     *  is live) but NEVER served: a fork carries warm conversation the reuse key cannot describe, so
+     *  serving the cached artifact would replay the very reading the fork exists to reuse. */
+    fork_reuse_withheld?: { cache_key: string; source_gig_id: string; output_types: string[] };
   }
 
   // Resolve a chair's declared output types into seal-specs (type → core → primitive).
@@ -2493,6 +2526,26 @@ export async function runGig(
       }
     }
     return { key, hit: { cache_key: key, source_gig_id: entry.source_gig_id, outputs: entry.outputs } };
+  }
+
+  /**
+   * contract-seat-primer-v1 (O2/I3) — the MOST RECENT `seat-primer` this agent sealed for `area`,
+   * across gigs. Agent-specific by construction: a chair never forks a primer sealed by a DIFFERENT
+   * agent, even for the same area (I3), because the (agent_slug, area) filter admits only its own.
+   * "Most recent" so re-priming an area updates every later fork — staleness is decided per blob at
+   * fork time, not pinned to one primer id. Returns undefined when the agent has never primed the area.
+   */
+  function mostRecentSeatPrimer(agentSlug: string, area: string): OutputRecord | undefined {
+    let best: OutputRecord | undefined;
+    for (const r of deps.outputs.all()) {
+      if (r.domain_type !== "seat-primer") continue;
+      const d = r.data as Record<string, unknown>;
+      if (d["agent_slug"] !== agentSlug || d["area"] !== area) continue;
+      // `>=` prefers the later-iterated record on an equal timestamp; all() is insertion-ordered, so
+      // the newest primer wins even when two sealed in the same millisecond.
+      if (!best || r.created_at >= best.created_at) best = r;
+    }
+    return best;
   }
 
   /**
@@ -2728,12 +2781,54 @@ export async function runGig(
     // context, so charging it (or worse, refusing it for lack of allowance) would be the budget
     // enforcing a cost that is not going to be incurred.
     const lookup = lookupReuse({ chair, phaseName, inputs, output_specs, agent, skills, producer_slug: agent.slug, domain });
+
+    // contract-seat-primer-v1 (O2/O3/O4/F1) — FORK WIRING. A chair with fork_from looks up the most
+    // recent seat-primer for (its agent, area) across gigs and warm-starts from it. Resolved here so
+    // the reuse gate below can withhold the hit (O5) and so the invocation carries the primer session
+    // and the blob-stale paths. A fork with NO primer (F1) records `primer_missing` and runs cold.
+    let fork: PreparedChair["fork"];
+    let fork_fallback: string | undefined;
+    if (chair.fork_from) {
+      const area = chair.fork_from.primer;
+      const primer = mostRecentSeatPrimer(agent.slug, area);
+      if (!primer) {
+        fork_fallback = "primer_missing";
+      } else {
+        const pd = primer.data as Record<string, unknown>;
+        // O4 — staleness is decided by BLOBS against the working tree, through the SAME gitInTree seam
+        // the law/change stampers use. A file git can no longer hash (removed since priming) is stale.
+        const files = Array.isArray(pd["files"]) ? (pd["files"] as Array<{ path: string; blob_sha: string }>) : [];
+        const stale_paths = files
+          .filter((f) => {
+            if (deps.tree_root === undefined) return false;
+            let current: string;
+            try { current = gitInTree(deps.tree_root, ["hash-object", f.path]).trim(); } catch { return true; }
+            return current !== f.blob_sha;
+          })
+          .map((f) => f.path);
+        fork = {
+          primer_session_id: String(pd["session_id"] ?? ""),
+          primer_id: primer.id,
+          primer_commit: String(pd["commit"] ?? ""),
+          stale_paths,
+        };
+      }
+    }
+
     // contract-chair-session-continuity-v1 (O5) — a RESUMED (amend-round) invocation is NEVER served
     // from the reuse cache: the seat resumes its own conversation, which carries what the failing
     // verdict prompted it to reconsider, and none of that is in the reuse key. Serving the cached
     // artifact would replay the very work the amend exists to redo. The key is still kept below (the
     // amend's own output is cacheable on the round-one terms), only the HIT is withheld.
-    const effectiveHit = opts.resume ? undefined : lookup?.hit;
+    // contract-seat-primer-v1 (O5) — the SAME withholding for a FORK: a warm-started conversation the
+    // reuse key cannot describe would replay the very reading the fork exists to reuse. The hit is
+    // withheld here AND recorded (below, in executeChair) so the cache-was-live signal survives — a
+    // fork always invokes, even on a key that would otherwise hit.
+    const effectiveHit = (opts.resume || fork) ? undefined : lookup?.hit;
+    // O5 — record the withheld fork hit so executeChair marks the cache LIVE without serving it.
+    const fork_reuse_withheld = fork && lookup?.hit
+      ? { cache_key: lookup.hit.cache_key, source_gig_id: lookup.hit.source_gig_id, output_types: lookup.hit.outputs.map((o) => o.domain_type) }
+      : undefined;
 
     // BUDGET GATE — the append-unit pre-invocation gate is GONE (O3). Payload size / base_cost / k
     // no longer decide whether a chair runs. The dollar ceiling is enforced against SETTLED spend at
@@ -2765,6 +2860,9 @@ export async function runGig(
       ...(opts.resume ? { resume: true } : {}),
       ...(opts.keep_prompt ? { resume_keep_prompt: true } : {}),
       ...(opts.round !== undefined ? { round: opts.round } : {}),
+      ...(fork ? { fork } : {}),
+      ...(fork_fallback !== undefined ? { fork_fallback } : {}),
+      ...(fork_reuse_withheld ? { fork_reuse_withheld } : {}),
     };
   }
 
@@ -2813,6 +2911,12 @@ export async function runGig(
     // in use continued the conversation instead of failing. `p.resume` is false on such a spawn (it is a
     // first open, not an amend), so this is what makes chair_complete record the continuation truthfully.
     let resumedOnCollision = false;
+    // contract-seat-primer-v1 (O1/I2) — the files a PRIME seat Read, captured from the invoker's
+    // forwarded `seat_reads` event, so the seat-primer is sealed from exactly what the seat read.
+    let primerReads: string[] | undefined;
+    // contract-seat-primer-v1 (F2) — set when the invoker reported the primer's session could not be
+    // resumed and fell back cold (the `fork_fallback` stream event). Recorded on chair_complete.
+    let forkFellBackReason: string | undefined;
     const WRITE_TOOLS = new Set(["Write", "Edit", "MultiEdit", "NotebookEdit"]);
 
     // ── REUSE HIT ────────────────────────────────────────────────────────────────────────
@@ -2877,6 +2981,16 @@ export async function runGig(
 
     const producerHint = chair.skill_slug || p.agent?.slug || chair.agent_slug || chair.role;
     emit({ type: "chair_start", phase: phaseName, role: chair.role, producer: producerHint });
+    // contract-seat-primer-v1 (O5) — a fork whose reuse key WOULD hit: the cache is LIVE (record the
+    // hit so the signal survives) but the fork is NEVER served — it invokes below, carrying warm
+    // conversation the reuse key cannot describe.
+    if (p.fork_reuse_withheld) {
+      reuseReport.hits.push({
+        phase: phaseName, role: chair.role,
+        cache_key: p.fork_reuse_withheld.cache_key, source_gig_id: p.fork_reuse_withheld.source_gig_id,
+        output_types: p.fork_reuse_withheld.output_types,
+      });
+    }
     let data: Record<string, unknown>;
     // Skill-backed chairs record which skill (version + verified code_hash + tier) sealed the
     // output, so the ledger entry traces back to the exact SkillChainEvent. Undefined for agents.
@@ -2993,6 +3107,13 @@ export async function runGig(
           // contract-resumed-gig-session-v1 (O1) — a re-verify resumes its session but keeps the full
           // prompt; thread it so buildPrompt skips the maker's trimmed continuation for this seat.
           ...(p.resume_keep_prompt ? { resume_keep_prompt: true } : {}),
+          // contract-seat-primer-v1 (O1/I2) — a PRIME chair: the invoker parses its Read events and
+          // emits them so the runtime seals the seat-primer from exactly what this seat read.
+          ...(chair.prime ? { prime: chair.prime } : {}),
+          // contract-seat-primer-v1 (O2/O4) — a FORK chair with a primer: the invoker warm-starts from
+          // the primer's session and names the stale paths in the prompt. Absent on a plain chair or a
+          // fork whose primer is missing (F1), so both spawn a fresh session and never --fork-session.
+          ...(p.fork ? { fork: { primer_session_id: p.fork.primer_session_id, stale_paths: p.fork.stale_paths } } : {}),
           // The venue → dispatch wire: thread the realized room onto the chair's ctx ONLY when a
           // venue resolved, so the invoker narrows the spawn by construction; both fields stay
           // absent otherwise (the venue-less path is unchanged).
@@ -3015,6 +3136,19 @@ export async function runGig(
             // contract-resumed-gig-session-v1 (O3) — the invoker's collision-resume signal, captured on
             // the same seam so chair_complete can record the chair CONTINUED its session.
             if (ev.type === "resume_on_collision") resumedOnCollision = true;
+            // contract-seat-primer-v1 (O1/I2) — a PRIME seat's forwarded reads, so the seat-primer is
+            // sealed (below) from exactly the files it Read.
+            if (ev.type === "seat_reads") {
+              const r = (ev.raw as { reads?: unknown } | undefined)?.reads;
+              primerReads = Array.isArray(r) ? r.filter((x): x is string => typeof x === "string") : [];
+            }
+            // contract-seat-primer-v1 (F2) — the fork's primer session could not be resumed and it fell
+            // back cold. Captured so chair_complete records the fallback (naming the session), not a
+            // fork that never happened.
+            if (ev.type === "fork_fallback") {
+              const reason = (ev.raw as { reason?: unknown } | undefined)?.reason;
+              forkFellBackReason = typeof reason === "string" ? reason : "the primer session could not be resumed";
+            }
             // #seat-metrics — track the last assistant context and the FIRST write, BEFORE the
             // budget early-return below (which fires whenever no budget is wired). An assistant
             // event's raw.message.usage carries the context; the first Write/Edit/MultiEdit/
@@ -3452,9 +3586,47 @@ export async function runGig(
         }
       }
     }
+    // contract-seat-primer-v1 (O1/I2) — a PRIME chair seals a `seat-primer` record DERIVED by the
+    // engine (never typed by the model): its own (gig, role) session, HEAD at seal, and the files its
+    // seat Read, each with the `git hash-object` blob in the tree at seal. The reads arrive through the
+    // invoker's `seat_reads` event (captured above); the record is sealed HERE, through the same write
+    // boundary a derived output crosses, so it enters this gig's store and any later fork can find it.
+    if (chair.prime) {
+      const area = chair.prime.area;
+      const session_id = sessionUuidFor(gig_id, chair.role);
+      const reads = primerReads ?? [];
+      const commit = deps.tree_root ? gitInTree(deps.tree_root, ["rev-parse", "HEAD"]).trim() : "";
+      const files = reads.map((path) => ({
+        path,
+        blob_sha: deps.tree_root ? gitInTree(deps.tree_root, ["hash-object", path]).trim() : "",
+      }));
+      deps.outputs.write({
+        core_type: "Signal",
+        domain_type: "seat-primer",
+        domain,
+        gig_id,
+        agent_slug: producer_slug,
+        from_role: chair.role,
+        phase: phaseName,
+        primitive: CORE_TO_PRIMITIVE["Signal"] ?? "SENSE",
+        // `source` is the Signal core's substance floor; the rest is the derived primer.
+        data: {
+          agent_slug: producer_slug, area,
+          ...(session_id !== undefined ? { session_id } : {}),
+          commit, files,
+          source: `seat-primer://${producer_slug}/${area}`,
+        },
+      });
+    }
     // A DECLARED-optional absence is still a fact about this run. Legitimising a shortfall is
     // not the same as hiding it, so it keeps its row in the manifest.
     if (missing.length > 0) unfulfilledOutputs.push({ role: chair.role, phase: phaseName, missing });
+    // contract-seat-primer-v1 (O3/O4/F1/F2) — a fork that WARM-STARTED records where it forked from and
+    // the paths stale since priming; a fork that FELL BACK cold (no primer, or an unresumable session)
+    // records the fallback instead. `forkFellBackReason` is set by the invoker's cold-fallback event
+    // (F2); `p.fork_fallback` is the prep-time "primer_missing" (F1). A cold fallback did NOT fork, so
+    // it records neither forked_from nor primer_stale_paths.
+    const forkFellBack = forkFellBackReason !== undefined;
     emit({
       type: "chair_complete", phase: phaseName, role: chair.role, producer: producer_slug,
       output_types: written.map((w) => w.domain_type), duration_ms: Date.now() - t0,
@@ -3481,6 +3653,15 @@ export async function runGig(
       // contract-amend-resume-prompt-v1 (F1) — a resume that fell back cold is recorded (never silent),
       // and only then, so a normal spawn's chair_complete is byte-identical to before.
       ...(resumeFellBack ? { resume_fallback: true } : {}),
+      // contract-seat-primer-v1 (O3/O4) — a fork that warm-started names its primer and the stale paths.
+      ...(p.fork && !forkFellBack
+        ? {
+            forked_from: { id: p.fork.primer_id, session_id: p.fork.primer_session_id, commit: p.fork.primer_commit },
+            primer_stale_paths: p.fork.stale_paths,
+          }
+        : {}),
+      // contract-seat-primer-v1 (F1/F2) — a fork that could not warm-start records why (never silent).
+      ...(forkFellBack ? { fork_fallback: forkFellBackReason! } : p.fork_fallback !== undefined ? { fork_fallback: p.fork_fallback } : {}),
     });
     return written;
   }

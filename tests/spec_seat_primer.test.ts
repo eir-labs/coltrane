@@ -249,12 +249,22 @@ describe("F2 — a primer whose session cannot be resumed falls back cold and re
 });
 
 // ── F3 — composeStandard refuses an ill-formed prime/fork_from chair ───────────────────────────────
-describe("F3 — composeStandard refuses prime+fork_from together, or a non-slug area, naming the chair", () => {
-  it("both prime and fork_from on one chair is refused, naming the chair and the field", () => {
+// contract-rolling-seat-primer-v1 (O1) REWRITES the first law: prime+fork_from is no longer refused
+// outright — a build that PRIMES an area and FORKS the prior primer OF THAT SAME AREA is the rolling
+// primer itself, so composeStandard must ADMIT the same-area chair and refuse only a chair whose
+// prime.area DIFFERS from its fork_from.primer (a warm-start from a reading of the wrong area), naming
+// the chair and both areas. Red today: composeStandard still refuses ALL prime+fork chairs (117cf6b's
+// F3). The slug-shape law below is unchanged and stays green.
+describe("F3 — composeStandard refuses prime+fork_from of DIFFERENT areas (same area allowed), or a non-slug area", () => {
+  it("prime+fork_from of the SAME area is ADMITTED; DIFFERENT areas are refused, naming the chair and both areas", () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const both = chairDef("dual", { role: "dual", prime: { area: "a-b" }, fork_from: { primer: "a-b" } }) as any;
-    expect(() => composeStandard(both), "a chair declaring BOTH prime and fork_from must be refused").toThrow(/fork_from|prime/i);
-    expect(() => composeStandard(both), "the refusal must name the chair").toThrow(/dual/);
+    const same = chairDef("roller", { role: "roll", prime: { area: "amend-loop" }, fork_from: { primer: "amend-loop" } }) as any;
+    expect(() => composeStandard(same), "a build primes an area and forks the prior primer OF THAT area — the same-area chair is the rolling primer and must be admitted, not refused").not.toThrow();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const diff = chairDef("dual", { role: "dual", prime: { area: "area-a" }, fork_from: { primer: "area-b" } }) as any;
+    expect(() => composeStandard(diff), "priming one area while forking a DIFFERENT one warm-starts from the wrong area's reading — refused, naming the chair").toThrow(/dual/);
+    expect(() => composeStandard(diff), "the refusal must name the primed area").toThrow(/area-a/);
+    expect(() => composeStandard(diff), "and the forked area, so the author sees exactly which two areas disagree").toThrow(/area-b/);
   });
 
   it("a fork_from area that is not a lowercase-hyphen slug is refused", () => {

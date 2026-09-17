@@ -231,6 +231,12 @@ export type GigProgressEvent =
        *  than opening it. Present for a model chair; absent for a skill chair, which runs no session. */
       session_id?: string;
       resumed?: boolean;
+      /** contract-amend-resume-prompt-v1 (F1) — set when this seat's amend RESUME found no session
+       *  and fell back COLD (a fresh --session-id spawn with the full prompt). The fallback never
+       *  fails the chair, but it is never silent either: this records that a resume was ATTEMPTED and
+       *  did not happen, rather than `resumed: true` claiming a continuation that never occurred.
+       *  Absent when no fallback fired. */
+      resume_fallback?: boolean;
     }
   | { type: "chair_failed"; phase: string; role: string; error: string }
   // #241 — one or more of the agent's declared skill_slugs resolved to no package. Not fatal
@@ -2751,6 +2757,10 @@ export async function runGig(
     // (below) so the chair_complete emit can record what the seat ran at. Stays undefined for a skill
     // chair, which runs no model at an effort.
     let resolvedEffort: Effort | undefined;
+    // contract-amend-resume-prompt-v1 (F1) — set when the invoker reports a resume whose session was
+    // gone and fell back cold (the `resume_fallback` stream event). Recorded on chair_complete so the
+    // fallback is observable rather than a resume the record falsely claims happened.
+    let resumeFellBack = false;
     const WRITE_TOOLS = new Set(["Write", "Edit", "MultiEdit", "NotebookEdit"]);
 
     // ── REUSE HIT ────────────────────────────────────────────────────────────────────────
@@ -2944,6 +2954,9 @@ export async function runGig(
           onEvent: (ev) => {
             sink.fold(ev);
             emit({ type: "agent_event", phase: phaseName, role: chair.role, event: ev });
+            // contract-amend-resume-prompt-v1 (F1) — the invoker's cold-fallback signal. Captured here
+            // (the one seam every chair event flows through) so chair_complete can record it.
+            if (ev.type === "resume_fallback") resumeFellBack = true;
             // #seat-metrics — track the last assistant context and the FIRST write, BEFORE the
             // budget early-return below (which fires whenever no budget is wired). An assistant
             // event's raw.message.usage carries the context; the first Write/Edit/MultiEdit/
@@ -3380,6 +3393,9 @@ export async function runGig(
       ...(p.agent && sessionUuidFor(gig_id, chair.role) !== undefined
         ? { session_id: sessionUuidFor(gig_id, chair.role)!, resumed: p.resume === true }
         : {}),
+      // contract-amend-resume-prompt-v1 (F1) — a resume that fell back cold is recorded (never silent),
+      // and only then, so a normal spawn's chair_complete is byte-identical to before.
+      ...(resumeFellBack ? { resume_fallback: true } : {}),
     });
     return written;
   }

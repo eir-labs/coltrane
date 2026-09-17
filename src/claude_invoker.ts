@@ -145,6 +145,31 @@ export function buildPrompt(
   seal?: OutputWriteSeal,
 ): string {
   const a = ctx.agent;
+
+  // contract-amend-resume-prompt-v1 (O1/O2/I1) — a RESUMED amend carries ONLY what is new. The
+  // resumed conversation already holds # Disposition / # Identity / # Method / # Context and the gig
+  // input from round one, so re-sending them re-pays the whole cold read the resume exists to avoid
+  // (measured: the amend prompt was byte-for-byte the full round-one prompt). Emit a trimmed prompt:
+  // a short statement that this is an amend round of the same chair, plus the failing verdict's
+  // content (its pass:false and failing checks) — the one thing round one did not yet have. The cold
+  // fallback for a lost session re-invokes buildPrompt with resume OFF, so the FULL prompt is still
+  // reachable when the resume's conversation is gone (I2).
+  if (ctx.resume === true) {
+    const failing = ctx.inputs.find(
+      (o) => (o.data as { pass?: unknown } | undefined)?.pass === false,
+    );
+    const verdictBlock = failing
+      ? JSON.stringify(failing.data)
+      : "(the failing verdict was not carried into this amend round)";
+    return [
+      `# Amend round`,
+      `This is an amend round of the same "${ctx.role ?? a.slug}" chair, resuming the conversation ` +
+        `that already holds your disposition, identity, method, tools and the gig input. Fix ONLY ` +
+        `what the verify below caught, then re-seal your output exactly as you did before.`,
+      `# Failing verdict\nThe verify FAILED (pass: false). Its failing checks are what to fix:\n${verdictBlock}`,
+    ].join("\n\n");
+  }
+
   const layers: string[] = [];
 
   // 1. Disposition — the Belbin cognitive-role pairing, held in tension (how you think).
@@ -1121,6 +1146,15 @@ export function buildInvokerArgs(
   //
   // This is what makes one gig's write to a repo stop being every later gig's execution.
   args.push("--setting-sources", "user");
+  // contract-seat-memory-v1 (O1/I1) — a seat's writes are its grants; the operator's auto-memory is
+  // NOT a seat's to write. Measured: a `claude -p` seat spawned as chairs are (`--setting-sources
+  // user`) wrote ~/.claude/projects/<repo>/memory/, loaded by every later session in the repo.
+  // `--setting-sources user` bounds which settings FILES load; it does not turn the auto-memory tool
+  // off. Pass exactly ONE `--settings` whose JSON disables it, here at the single point every spawn
+  // kind is built from (first run, resumed amend, reserve continuation, cold fallback), so the pair
+  // rides through every arg-list transform. Disjoint from --setting-sources / --effort / the session
+  // flags, so the effort and session-continuity contracts are untouched.
+  args.push("--settings", JSON.stringify({ autoMemoryEnabled: false }));
   if (opts.allowed_tools && opts.allowed_tools.length > 0) args.push("--allowedTools", opts.allowed_tools.join(","));
   if (opts.disallowed_tools && opts.disallowed_tools.length > 0) args.push("--disallowedTools", opts.disallowed_tools.join(","));
   return args;
@@ -1342,7 +1376,13 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
           core_by_type: Object.fromEntries(sealTypes.map((t) => [t, coreTypeOf(t)])),
         }
       : undefined;
-    const prompt = buildPrompt(ctx, schema, outputSchemas, seal);
+    // contract-amend-resume-prompt-v1 — on an amend RESUME (ctx.resume, and a session to resume) the
+    // spawn carries a TRIMMED prompt (buildPrompt keys on ctx.resume); the FULL prompt is built with
+    // resume OFF so the cold fallback for a lost resume session can re-send it (I2). On every
+    // non-resume spawn the two are identical, so nothing else changes shape.
+    const resumingWithSession = ctx.resume === true && sessionUuidFor(ctx.gig_id, ctx.role) !== undefined;
+    const fullPrompt = buildPrompt(resumingWithSession ? { ...ctx, resume: false } : ctx, schema, outputSchemas, seal);
+    const prompt = resumingWithSession ? buildPrompt(ctx, schema, outputSchemas, seal) : fullPrompt;
     // #221 — the key signal for candidate selection, derived from what we just resolved.
     // Threaded into BOTH extract calls below; threading only the injected-run one would
     // leave every real chair unscored.
@@ -1448,17 +1488,28 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
       // by the runtime) RESUMES it (--resume). Absent gig_id ⇒ no session ⇒ neither flag.
       const sessionId = sessionUuidFor(ctx.gig_id, ctx.role);
       const resumeRound = ctx.resume === true && sessionId !== undefined;
-      const baseArgs = buildInvokerArgs(prompt, cfgPath, {
+      // #seat-effort (O3) — the runtime already resolved precedence onto ctx.effort; floor to medium
+      // so an undeclared, untiered seat (or any hand-built ctx) still spawns with an explicit
+      // --effort rather than the operator's settings-file effort. Hoisted so baseArgs and the cold
+      // arg list below share ONE opts object rather than two parallel derivations.
+      const invokerOpts = {
         model: resolveModel(a.model_tier, opts.model),
         allowed_tools: effectiveAllowed,
         disallowed_tools: disallowedTools,
         max_tool_calls: maxToolCalls,
-        ...(sessionId !== undefined ? { session_id: sessionId, resume: resumeRound } : {}),
-        // #seat-effort (O3) — the runtime already resolved precedence onto ctx.effort; floor to
-        // medium so an undeclared, untiered seat (or any hand-built ctx) still spawns with an
-        // explicit --effort rather than the operator's settings-file effort.
         effort: ctx.effort ?? "medium",
+      };
+      const baseArgs = buildInvokerArgs(prompt, cfgPath, {
+        ...invokerOpts,
+        ...(sessionId !== undefined ? { session_id: sessionId, resume: resumeRound } : {}),
       });
+      // contract-amend-resume-prompt-v1 (I2) — the cold arg list for a resume whose session is gone:
+      // a FRESH --session-id spawn (resume:false) carrying the FULL prompt, because nothing else
+      // carries the chair's context once the resume fell through. Identical to baseArgs on every
+      // non-resume spawn (same session flag, same full prompt), so it changes shape only on an amend.
+      const coldArgs = sessionId !== undefined
+        ? buildInvokerArgs(fullPrompt, cfgPath, { ...invokerOpts, session_id: sessionId, resume: false })
+        : baseArgs;
       // SEAT IN THE ROOM. When the substrate stood up a SEAT-BEARING room, ctx.seatExec names its
       // container and per-realization workspace, and the chair runs INSIDE it:
       // `docker exec -i -w <workspace> <container> claude …` — so the seat's cwd is the room's own
@@ -1540,19 +1591,11 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
         }
       };
 
-      let { stdout, budgetStopped } = await runTolerantOfBudgetStop(baseArgs, prompt);
-      // Every stream whose writes count toward the seal. Diverges from `stdout` only when a reserve
-      // was granted, which is the one case where a chair's output spans more than one invocation.
-      let sealStdout = stdout;
-
-      // THE RESERVE GRANT. The chair spent its declared budget; rather than losing whatever it was
-      // mid-way through, it is told where it stands and given a bounded extension to close out.
-      // Once. The continuation names what already sealed so the chair does not redo it, and says
-      // plainly that nothing follows — a chair that believes another extension is coming will spend
-      // this one reaching rather than landing.
       // F1 — the cold fallback for a resume whose session is gone: a FRESH spawn with --session-id
-      // and the FULL original prompt, recorded loudly so the fallback is never silent. Shared by the
-      // reserve continuation below (and available to any resume path) so the fallback is one shape.
+      // and the FULL prompt (coldArgs/fullPrompt), recorded loudly so the fallback is never silent.
+      // Shared by the main amend resume below AND the reserve continuation so the fallback is one
+      // shape; on the reserve path coldArgs === baseArgs and fullPrompt === prompt, so it is unchanged
+      // there. Defined before the first run so the main amend path can reach it.
       const resumeColdFallback = async (): Promise<{ stdout: string; budgetStopped: boolean }> => {
         ctx.onEvent?.({
           type: "resume_fallback",
@@ -1564,8 +1607,31 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
               "--session-id and the full prompt",
           },
         } as AgentStreamEvent);
-        return runTolerantOfBudgetStop(baseArgs, prompt);
+        return runTolerantOfBudgetStop(coldArgs, fullPrompt);
       };
+
+      // contract-amend-resume-prompt-v1 (I2/F1) — run the chair once. On an amend RESUME whose session
+      // the seam reports gone (whether the run resolved with the error result or threw a non-zero exit
+      // carrying it), fall back COLD rather than failing the chair; every other spawn kind is untouched.
+      let stdout: string;
+      let budgetStopped: boolean;
+      try {
+        const first = await runTolerantOfBudgetStop(baseArgs, prompt);
+        if (resumeRound && resumeSessionLost(first.stdout)) {
+          ({ stdout, budgetStopped } = await resumeColdFallback());
+        } else {
+          ({ stdout, budgetStopped } = first);
+        }
+      } catch (e) {
+        if (resumeRound && e instanceof ChildExitError && resumeSessionLost(e.stdout)) {
+          ({ stdout, budgetStopped } = await resumeColdFallback());
+        } else {
+          throw e;
+        }
+      }
+      // Every stream whose writes count toward the seal. Diverges from `stdout` only when a reserve
+      // was granted, which is the one case where a chair's output spans more than one invocation.
+      let sealStdout = stdout;
 
       if (budgetStopped && reserveTurns > 0 && seal !== undefined) {
         const sealedSoFar = captureOutputWrites(stdout, sealTypes);

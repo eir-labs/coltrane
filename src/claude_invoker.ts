@@ -1010,10 +1010,19 @@ function captureLastContext(stdout: string): number | undefined {
 /** The write tools whose first call ends a seat's READING (contract-primer-reading-frontier-v1 O1). */
 const FRONTIER_WRITE_TOOLS = new Set(["Write", "Edit", "MultiEdit", "NotebookEdit"]);
 
-/** The input+cache_read+cache_creation of an assistant line's usage, or undefined when it carries none. */
+/**
+ * The input+cache_read+cache_creation of an assistant line's usage, or undefined when it carries none.
+ * contract-fork-continuation-is-exact-v1 (O2) — a usage reporting NONE of the three context fields
+ * (e.g. a write line carrying only `output_tokens`) contributes NO reading: it returns `undefined`, not
+ * `0`, so `usage ?? lastUsageBefore` falls through to the last REPORTED reading rather than discarding
+ * it. A usage reporting ANY of the three sums the ones present (a missing field as `0`), as today.
+ */
 function assistantContextOf(msg: unknown): number | undefined {
   const u = (msg as { usage?: Record<string, number> } | undefined)?.usage;
   if (!u || typeof u !== "object") return undefined;
+  if (u["input_tokens"] === undefined && u["cache_read_input_tokens"] === undefined && u["cache_creation_input_tokens"] === undefined) {
+    return undefined;
+  }
   return (u["input_tokens"] ?? 0) + (u["cache_read_input_tokens"] ?? 0) + (u["cache_creation_input_tokens"] ?? 0);
 }
 
@@ -1026,18 +1035,27 @@ function assistantContextOf(msg: unknown): number | undefined {
  *     yields no frontier.
  *   · `context_tokens` — WITH a frontier, the context of that first-write assistant line (its own usage,
  *     or the last usage before it); WITHOUT one, the seat's LAST usage exactly as today (I3/F1).
- *   · `reads` — WITH a frontier, the Read paths on assistant lines BEFORE the first write (so a file
- *     first read after the frontier is dropped, O4); WITHOUT one, every Read as today.
+ *   · `reads` — WITH a frontier, the Read paths on assistant lines BEFORE the FRONTIER line — the reads
+ *     the cut conversation holds. contract-fork-continuation-is-exact-v1 (O3): the frontier is the last
+ *     `user` line before the first write, so a Read in the write's OWN turn (after that user line, with
+ *     no user line between it and the write) is AFTER the frontier and is NOT recorded. Reads since the
+ *     last user line are PENDING; a user line commits them, and the first write discards the pending set.
+ *     WITHOUT a frontier, every Read as today.
  * Derived by the engine from the stream, never typed by the model.
  */
 function captureReadingFrontier(stdout: string): { frontier?: string | undefined; context_tokens?: number | undefined; reads: string[] } {
   let lastUserUuid: string | undefined;
   let lastUsageBefore: number | undefined;
-  const readsBefore: string[] = [];
+  const readsBefore: string[] = [];       // reads BEFORE the frontier line (committed at each user line)
+  let pendingReads: string[] = [];        // reads SINCE the last user line — not yet before a frontier
   const seen = new Set<string>();
   let frontier: string | undefined;
   let firstWriteContext: number | undefined;
   let foundWrite = false;
+  const commitPending = (): void => {
+    for (const p of pendingReads) if (!seen.has(p)) { seen.add(p); readsBefore.push(p); }
+    pendingReads = [];
+  };
   for (const raw of stdout.split("\n")) {
     const line = raw.trim();
     if (!line) continue;
@@ -1046,6 +1064,8 @@ function captureReadingFrontier(stdout: string): { frontier?: string | undefined
     const type = typeof e["type"] === "string" ? (e["type"] as string) : "";
     if (type === "user") {
       if (typeof e["uuid"] === "string") lastUserUuid = e["uuid"] as string;
+      // reads seen since the last user line are now BEFORE a user line ⇒ before any later frontier (O3)
+      commitPending();
       continue;
     }
     const msg = e["message"];
@@ -1056,13 +1076,14 @@ function captureReadingFrontier(stdout: string): { frontier?: string | undefined
       foundWrite = true;
       frontier = lastUserUuid;                 // undefined ⇒ no user line before the write ⇒ no frontier (F1)
       firstWriteContext = usage ?? lastUsageBefore;
+      // pendingReads (this write's OWN turn, after the frontier) are DISCARDED — the cut ends before them
       break;
     }
     for (const b of content) {
       if (String(b["type"] ?? "") !== "tool_use" || String(b["name"] ?? "") !== "Read") continue;
       const input = (b["input"] && typeof b["input"] === "object" ? b["input"] : {}) as Record<string, unknown>;
       const path = input["file_path"];
-      if (typeof path === "string" && path.length > 0 && !seen.has(path)) { seen.add(path); readsBefore.push(path); }
+      if (typeof path === "string" && path.length > 0 && !seen.has(path) && !pendingReads.includes(path)) { pendingReads.push(path); }
     }
     if (usage !== undefined) lastUsageBefore = usage;
   }
@@ -1260,14 +1281,22 @@ export function sessionUuidFor(gig_id: string | undefined, role: string | undefi
 }
 
 /**
- * Rewrite a built arg list to RESUME a session rather than open one: drop `--session-id <uuid>` and
- * add `--resume <uuid>`. A resume must not ALSO name a fresh session (the CLI reads that as opening,
- * not continuing), so the `--session-id` pair is removed, never merely appended past.
+ * Rewrite a built arg list to RESUME a session rather than open one: it must carry EXACTLY ONE
+ * `--resume <uuid>` naming the session to CONTINUE, and none of the flags that open or fork a fresh
+ * conversation. A resume must not ALSO name a fresh session (`--session-id`, which the CLI reads as
+ * opening, not continuing), nor re-run a warm start: for a FORK chair `baseArgs` is the first-spawn
+ * warm start `--resume <primer> --resume-session-at <frontier> --fork-session --session-id <own>`
+ * (contract-fork-continuation-is-exact-v1 O1), and a continuation of that chair's OWN session carries
+ * none of it — the warm start belongs to the FIRST spawn only. So every `--session-id`,
+ * `--resume-session-at` and inherited `--resume` PAIR is dropped (flag and value), `--fork-session`
+ * (valueless) is dropped, and a single `--resume <sessionId>` is appended.
  */
 function withResume(args: readonly string[], sessionId: string): string[] {
   const out: string[] = [];
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === "--session-id") { i++; continue; } // drop the flag AND its value
+    // drop each opening/warm-start flag AND its value — a continuation resumes ONE session and no more
+    if (args[i] === "--session-id" || args[i] === "--resume" || args[i] === "--resume-session-at") { i++; continue; }
+    if (args[i] === "--fork-session") continue; // valueless flag: the warm start belongs to the first spawn
     out.push(args[i]!);
   }
   out.push("--resume", sessionId);
@@ -2163,7 +2192,13 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
             `The work you already did still counts. Do NOT redo it. Seal it now, by calling ` +
             `output_write — the only channel that seals:\n${calls}\n\n` +
             `This is the LAST attempt; it will not be offered again.\n\n${prompt}`;
-          const repairArgs = withPrompt(withMaxTurns(baseArgs, SEAL_REPAIR_TURNS), correction);
+          // contract-fork-continuation-is-exact-v1 (O1) — the repair CONTINUES the chair's own
+          // session, exactly as the reserve continuation does: resume `<own>`, and carry none of the
+          // warm start (`--session-id`, `--fork-session`, `--resume-session-at`, the primer `--resume`)
+          // that `baseArgs` holds for a fork chair. Only a gig-less spawn (no session) reuses baseArgs.
+          const repairArgs = sessionId !== undefined
+            ? withPrompt(withMaxTurns(withResume(baseArgs, sessionId), SEAL_REPAIR_TURNS), correction)
+            : withPrompt(withMaxTurns(baseArgs, SEAL_REPAIR_TURNS), correction);
           const repaired = await runTolerantOfBudgetStop(repairArgs, correction);
           // Cumulative, exactly as the reserve path is: a write that passed in either pass counts.
           sealStdout = `${sealStdout}\n${repaired.stdout}`;

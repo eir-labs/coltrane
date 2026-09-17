@@ -90,8 +90,10 @@ export interface Chair {
    *  (mirrors `ChairSchema.prime`). Mutually exclusive with `fork_from`. */
   prime?: { area: string };
   /** contract-seat-primer-v1 — a FORK chair warm-starts from the most recent `seat-primer` its
-   *  agent sealed for `fork_from.primer` (an area slug; mirrors `ChairSchema.fork_from`). */
-  fork_from?: { primer: string };
+   *  agent sealed for `fork_from.primer` (an area slug; mirrors `ChairSchema.fork_from`).
+   *  contract-rolling-seat-primer-v1 (O4) — `max_context_tokens` is a context ceiling: a primer whose
+   *  recorded `context_tokens` exceeds it is REPLACED (cold run), never forked. Absent → fork any size. */
+  fork_from?: { primer: string; max_context_tokens?: number };
 }
 
 export interface PhaseDef {
@@ -305,15 +307,18 @@ export function composeStandard(def: {
       }
       seenRoles.set(ch.role, ph.name);
 
-      // contract-seat-primer-v1 (F3) — a chair either PRIMES an area or FORKS one, never both, and a
-      // fork_from area must be a lowercase-hyphen slug (the shape the primer lookup keys on). Refuse
-      // an ill-formed seat here, where the genome is authored, naming the chair AND the field —
-      // rather than composing a seat whose warm-start could never resolve.
-      if (ch.prime && ch.fork_from) {
+      // contract-rolling-seat-primer-v1 (O1) — a chair MAY declare both prime and fork_from when they
+      // name the SAME area: a build primes the area and forks the prior primer OF THAT area (the rolling
+      // primer itself). Refuse ONLY a chair whose primed area DIFFERS from the area it forks — a
+      // warm-start from a reading of the wrong area — naming the chair AND both areas so the author sees
+      // exactly which two disagree. (This rewrites contract-seat-primer-v1's F3, which refused ALL
+      // prime+fork chairs.) The fork_from slug check below is unchanged.
+      if (ch.prime && ch.fork_from && ch.prime.area !== ch.fork_from.primer) {
         throw new CompositionError(
-          `standard ${def.slug}: chair "${ch.role}" declares BOTH prime and fork_from — a seat either ` +
-            `PRIMES an area (reads it once and seals a seat-primer) or FORKS one (warm-starts from a ` +
-            `primer), never both. Drop one of prime/fork_from.`,
+          `standard ${def.slug}: chair "${ch.role}" primes area "${ch.prime.area}" but forks a primer of ` +
+            `a DIFFERENT area "${ch.fork_from.primer}" — a seat that primes and forks must name the SAME ` +
+            `area (a build primes an area and forks the prior primer OF THAT area). Make prime.area and ` +
+            `fork_from.primer the same slug, or drop one.`,
         );
       }
       if (ch.fork_from && !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(ch.fork_from.primer)) {

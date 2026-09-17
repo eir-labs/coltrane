@@ -2404,8 +2404,10 @@ export async function runGig(
     round?: number;
     /** contract-seat-primer-v1 (O2/O3/O4) — a fork chair whose agent has a primer for its area.
      *  Resolved at prep (the lookup + the blob-staleness comparison against deps.tree_root) so the
-     *  invoker warm-starts by construction and chair_complete records `forked_from`/`primer_stale_paths`. */
-    fork?: { primer_session_id: string; primer_id: string; primer_commit: string; stale_paths: string[] };
+     *  invoker warm-starts by construction and chair_complete records `forked_from`/`primer_stale_paths`.
+     *  contract-rolling-seat-primer-v1 (O2) — `primer_files` carries the forked primer's own files so a
+     *  chair that ALSO primes the area can seal a FRESHER primer unioning them with its own reads. */
+    fork?: { primer_session_id: string; primer_id: string; primer_commit: string; stale_paths: string[]; primer_files: Array<{ path: string; blob_sha: string }> };
     /** contract-seat-primer-v1 (F1) — a fork chair with NO primer for its agent+area. The chair runs
      *  cold and chair_complete records `fork_fallback: "primer_missing"`; never fails. */
     fork_fallback?: string;
@@ -2795,23 +2797,37 @@ export async function runGig(
         fork_fallback = "primer_missing";
       } else {
         const pd = primer.data as Record<string, unknown>;
-        // O4 — staleness is decided by BLOBS against the working tree, through the SAME gitInTree seam
-        // the law/change stampers use. A file git can no longer hash (removed since priming) is stale.
-        const files = Array.isArray(pd["files"]) ? (pd["files"] as Array<{ path: string; blob_sha: string }>) : [];
-        const stale_paths = files
-          .filter((f) => {
-            if (deps.tree_root === undefined) return false;
-            let current: string;
-            try { current = gitInTree(deps.tree_root, ["hash-object", f.path]).trim(); } catch { return true; }
-            return current !== f.blob_sha;
-          })
-          .map((f) => f.path);
-        fork = {
-          primer_session_id: String(pd["session_id"] ?? ""),
-          primer_id: primer.id,
-          primer_commit: String(pd["commit"] ?? ""),
-          stale_paths,
-        };
+        // contract-rolling-seat-primer-v1 (O4/I1) — a `max_context_tokens` ceiling REPLACES a bloated
+        // primer instead of forking it: when the primer's recorded context size exceeds the ceiling, the
+        // chair does NOT fork — it runs COLD (a fresh `--session-id`, its full prompt) and records
+        // `primer_too_large`. Absent ceiling (I1) → the fork happens whatever the size, so size gates the
+        // fork ONLY through this ceiling.
+        const ceiling = chair.fork_from.max_context_tokens;
+        const primer_context = typeof pd["context_tokens"] === "number" ? (pd["context_tokens"] as number) : 0;
+        if (ceiling !== undefined && primer_context > ceiling) {
+          fork_fallback = "primer_too_large";
+        } else {
+          // O4 — staleness is decided by BLOBS against the working tree, through the SAME gitInTree seam
+          // the law/change stampers use. A file git can no longer hash (removed since priming) is stale.
+          const files = Array.isArray(pd["files"]) ? (pd["files"] as Array<{ path: string; blob_sha: string }>) : [];
+          const stale_paths = files
+            .filter((f) => {
+              if (deps.tree_root === undefined) return false;
+              let current: string;
+              try { current = gitInTree(deps.tree_root, ["hash-object", f.path]).trim(); } catch { return true; }
+              return current !== f.blob_sha;
+            })
+            .map((f) => f.path);
+          fork = {
+            primer_session_id: String(pd["session_id"] ?? ""),
+            primer_id: primer.id,
+            primer_commit: String(pd["commit"] ?? ""),
+            stale_paths,
+            // contract-rolling-seat-primer-v1 (O2) — carry the forked primer's own files so a prime+fork
+            // chair can seal a fresher primer unioning them with this seat's reads.
+            primer_files: files,
+          };
+        }
       }
     }
 
@@ -2914,6 +2930,11 @@ export async function runGig(
     // contract-seat-primer-v1 (O1/I2) — the files a PRIME seat Read, captured from the invoker's
     // forwarded `seat_reads` event, so the seat-primer is sealed from exactly what the seat read.
     let primerReads: string[] | undefined;
+    // contract-rolling-seat-primer-v1 (O3) — the context size (input+cache_read+cache_creation) of the
+    // LAST usage the seat reported, captured from the invoker's forwarded `seat_context` event. Under an
+    // injected `run` seam the streamed assistant usages never reach onEvent, so the invoker parses the
+    // last one from the returned stdout and forwards it, the same way it forwards `seat_reads`.
+    let primerContextTokens: number | undefined;
     // contract-seat-primer-v1 (F2) — set when the invoker reported the primer's session could not be
     // resumed and fell back cold (the `fork_fallback` stream event). Recorded on chair_complete.
     let forkFellBackReason: string | undefined;
@@ -3141,6 +3162,12 @@ export async function runGig(
             if (ev.type === "seat_reads") {
               const r = (ev.raw as { reads?: unknown } | undefined)?.reads;
               primerReads = Array.isArray(r) ? r.filter((x): x is string => typeof x === "string") : [];
+            }
+            // contract-rolling-seat-primer-v1 (O3) — the seat's context size at seal, forwarded by the
+            // invoker (the injected `run` seam bypasses the streamed usages onEvent would otherwise fold).
+            if (ev.type === "seat_context") {
+              const c = (ev.raw as { context_tokens?: unknown } | undefined)?.context_tokens;
+              if (typeof c === "number") primerContextTokens = c;
             }
             // contract-seat-primer-v1 (F2) — the fork's primer session could not be resumed and it fell
             // back cold. Captured so chair_complete records the fallback (naming the session), not a
@@ -3611,10 +3638,28 @@ export async function runGig(
       const session_id = sessionUuidFor(gig_id, chair.role);
       const reads = primerReads ?? [];
       const commit = deps.tree_root ? gitInTree(deps.tree_root, ["rev-parse", "HEAD"]).trim() : "";
-      const files = reads.map((path) => ({
+      // contract-rolling-seat-primer-v1 (O2) — a chair that ALSO forked a primer (p.fork resolved) seals
+      // a FRESHER primer: the forked primer's files UNIONed with this seat's own reads, de-duped by path
+      // (forked first, then own reads), each RE-BLOBBED against the tree at seal. A chair that fell back
+      // cold (primer_too_large / primer_missing → no p.fork) unions nothing and seals only its own reads,
+      // which is the fresh, small primer the ceiling/first-primer path calls for. The `session_id` stays
+      // this build's own (gig, role) uuid — the fork branch the next build resumes.
+      const forkedPaths = (p.fork?.primer_files ?? []).map((f) => f.path);
+      const orderedPaths: string[] = [];
+      const seenPaths = new Set<string>();
+      for (const path of [...forkedPaths, ...reads]) {
+        if (!seenPaths.has(path)) { seenPaths.add(path); orderedPaths.push(path); }
+      }
+      const files = orderedPaths.map((path) => ({
         path,
         blob_sha: deps.tree_root ? gitInTree(deps.tree_root, ["hash-object", path]).trim() : "",
       }));
+      // contract-rolling-seat-primer-v1 (O3) — the context size of the LAST usage the seat reported:
+      // the invoker-forwarded value under an injected `run` seam, else the streamed fold. Recorded ONLY
+      // when a usage was actually reported — a seat that reported none has no "last usage" to stamp, so
+      // the field is omitted (the same conditional discipline as `session_id`), which also keeps a seat-
+      // primer type that never declared context_tokens sealing cleanly.
+      const contextTokens = primerContextTokens ?? (lastAssistantContext ?? undefined);
       deps.outputs.write({
         core_type: "Signal",
         domain_type: "seat-primer",
@@ -3629,6 +3674,9 @@ export async function runGig(
           agent_slug: producer_slug, area,
           ...(session_id !== undefined ? { session_id } : {}),
           commit, files,
+          // contract-rolling-seat-primer-v1 (O3) — the context size the seat carried at seal
+          // (input+cache_read+cache_creation of its LAST usage): what the next build's ceiling weighs.
+          ...(contextTokens !== undefined ? { context_tokens: contextTokens } : {}),
           source: `seat-primer://${producer_slug}/${area}`,
         },
       });

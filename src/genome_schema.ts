@@ -237,7 +237,13 @@ export const ChairSchema = z.object({
    *  byte-equivalent (a Zod object DROPS an undeclared key, so the fields must be declared here to be
    *  RETAINED through composition into the runtime Chair). */
   prime: z.object({ area: z.string() }).optional(),
-  fork_from: z.object({ primer: z.string() }).optional(),
+  // contract-rolling-seat-primer-v1 (O1/O4) — a chair may now BOTH prime an area AND fork the SAME
+  // area (the rolling primer: a build primes, the next forks it), so prime/fork_from are no longer
+  // mutually exclusive — composeStandard refuses only DIFFERING areas. `max_context_tokens` is a
+  // context ceiling on the fork: when the latest primer's recorded context size exceeds it, the chair
+  // runs COLD (no fork) rather than warm-starting a primer too large to be worth forking. OPTIONAL, so
+  // an absent ceiling forks the primer whatever its size (the standing behaviour).
+  fork_from: z.object({ primer: z.string(), max_context_tokens: z.number().optional() }).optional(),
 });
 export const PhaseSchema = z.object({ name: z.string(), chairs: z.array(ChairSchema) });
 /** Lifecycle status, shared by domain types and standards (#203). */

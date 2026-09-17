@@ -931,6 +931,33 @@ function captureReadPaths(stdout: string): string[] {
   return out;
 }
 
+/**
+ * contract-rolling-seat-primer-v1 (O3) — the context size (input + cache_read + cache_creation) of the
+ * LAST assistant usage in the run's stdout, parsed the SAME way `captureReadPaths` parses its Read
+ * events. Every seat-primer records this as `context_tokens`, so the next build's `max_context_tokens`
+ * ceiling can weigh the primer. Read through the RETURNED stdout (not the streaming `onEvent` path)
+ * because an injected `run` seam bypasses streaming — the sealer must see what the run actually
+ * returned. `undefined` when the run reported no usage (the runtime then falls back to its own
+ * streamed `lastAssistantContext`, or 0).
+ */
+function captureLastContext(stdout: string): number | undefined {
+  let last: number | undefined;
+  for (const raw of stdout.split("\n")) {
+    const line = raw.trim();
+    if (!line) continue;
+    let e: Record<string, unknown>;
+    try { e = JSON.parse(line) as Record<string, unknown>; } catch { continue; }
+    if (String(e["type"] ?? "") !== "assistant") continue;
+    const msg = e["message"];
+    if (!msg || typeof msg !== "object") continue;
+    const usage = (msg as { usage?: Record<string, number> }).usage;
+    if (usage && typeof usage === "object") {
+      last = (usage["input_tokens"] ?? 0) + (usage["cache_read_input_tokens"] ?? 0) + (usage["cache_creation_input_tokens"] ?? 0);
+    }
+  }
+  return last;
+}
+
 // The wall-clock bound on one chair's spawn. A tool-granted child has no inherent
 // terminus (it can search/loop), and the gig runs the spawn synchronously — so without
 // this bound one wedged child wedges the whole server. SIGKILL, not SIGTERM: a
@@ -1878,6 +1905,13 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
           type: "seat_reads",
           raw: { agent: a.slug, area: ctx.prime.area, reads: captureReadPaths(sealStdout) },
         } as AgentStreamEvent);
+        // contract-rolling-seat-primer-v1 (O3) — forward the seat's context size at seal the SAME way, so
+        // the runtime records it on the seat-primer even though the injected `run` seam bypassed the
+        // streamed usages. Emitted only when the run reported a usage; otherwise the runtime falls back.
+        const context_tokens = captureLastContext(sealStdout);
+        if (context_tokens !== undefined) {
+          ctx.onEvent?.({ type: "seat_context", raw: { context_tokens } } as AgentStreamEvent);
+        }
       }
 
       if (seal) {

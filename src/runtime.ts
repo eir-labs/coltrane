@@ -3763,13 +3763,25 @@ export async function runGig(
         const rel = toTreeRelative(raw);
         if (rel !== undefined && !readSet.has(rel)) { readSet.add(rel); readRel.push(rel); }
       }
-      // The forked primer's own blob per path — a carried file the seat did NOT re-read keeps THIS,
-      // never re-blobbed against the tree (contract-primer-reading-frontier-v1 I1).
-      const forkedBlob = new Map(forkedFiles.map((f) => [f.path, f.blob_sha] as const));
-      // Union: carried (forked) first, then the seat's own reads, de-duped by path.
+      // contract-carried-primer-paths-v1 (O1/I1/F1) — a CARRIED file obeys the SAME path rules as a
+      // read: normalize each forked path through the SAME toTreeRelative (absolute-under-tree_root →
+      // tree_root-relative POSIX; a path resolving OUTSIDE tree_root is dropped, never stored — F1)
+      // BEFORE de-duping, so a carried absolute spelling and a relative read of the same file collapse
+      // to one tree-relative key (I1). The blob map is keyed by the NORMALIZED path (first carried
+      // entry wins), so a carried file the seat did NOT re-read keeps the blob the forked primer
+      // recorded — never re-blobbed against the tree (O1; contract-primer-reading-frontier-v1 I1).
+      const carriedRel: string[] = [];
+      const forkedBlob = new Map<string, string>();
+      for (const f of forkedFiles) {
+        const rel = toTreeRelative(f.path);
+        if (rel === undefined) continue; // outside tree_root — never stored (F1)
+        if (!forkedBlob.has(rel)) forkedBlob.set(rel, f.blob_sha);
+        carriedRel.push(rel);
+      }
+      // Union: carried (forked) first, then the seat's own reads, de-duped by NORMALIZED path.
       const orderedPaths: string[] = [];
       const seenPaths = new Set<string>();
-      for (const path of [...forkedFiles.map((f) => f.path), ...readRel]) {
+      for (const path of [...carriedRel, ...readRel]) {
         if (!seenPaths.has(path)) { seenPaths.add(path); orderedPaths.push(path); }
       }
       // contract-primer-reading-frontier-v1 (O4/I1) — a file the seat READ before its frontier is sealed

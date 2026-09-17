@@ -1007,6 +1007,73 @@ function captureLastContext(stdout: string): number | undefined {
   return last;
 }
 
+/** The write tools whose first call ends a seat's READING (contract-primer-reading-frontier-v1 O1). */
+const FRONTIER_WRITE_TOOLS = new Set(["Write", "Edit", "MultiEdit", "NotebookEdit"]);
+
+/** The input+cache_read+cache_creation of an assistant line's usage, or undefined when it carries none. */
+function assistantContextOf(msg: unknown): number | undefined {
+  const u = (msg as { usage?: Record<string, number> } | undefined)?.usage;
+  if (!u || typeof u !== "object") return undefined;
+  return (u["input_tokens"] ?? 0) + (u["cache_read_input_tokens"] ?? 0) + (u["cache_creation_input_tokens"] ?? 0);
+}
+
+/**
+ * contract-primer-reading-frontier-v1 (O1/O3/O4/I2/I3/F1) — a seat-primer is forked at its READING
+ * FRONTIER: the point where the seat stopped reading and started writing. Parsed over the concatenated
+ * seal stdout (every spawn, in order — so a first write in a reserve continuation is found, I2):
+ *   · `frontier` — the uuid of the last `type:"user"` line before the FIRST assistant line whose content
+ *     calls a write tool (Write/Edit/MultiEdit/NotebookEdit). No write, or no user line before it (F1),
+ *     yields no frontier.
+ *   · `context_tokens` — WITH a frontier, the context of that first-write assistant line (its own usage,
+ *     or the last usage before it); WITHOUT one, the seat's LAST usage exactly as today (I3/F1).
+ *   · `reads` — WITH a frontier, the Read paths on assistant lines BEFORE the first write (so a file
+ *     first read after the frontier is dropped, O4); WITHOUT one, every Read as today.
+ * Derived by the engine from the stream, never typed by the model.
+ */
+function captureReadingFrontier(stdout: string): { frontier?: string | undefined; context_tokens?: number | undefined; reads: string[] } {
+  let lastUserUuid: string | undefined;
+  let lastUsageBefore: number | undefined;
+  const readsBefore: string[] = [];
+  const seen = new Set<string>();
+  let frontier: string | undefined;
+  let firstWriteContext: number | undefined;
+  let foundWrite = false;
+  for (const raw of stdout.split("\n")) {
+    const line = raw.trim();
+    if (!line) continue;
+    let e: Record<string, unknown>;
+    try { e = JSON.parse(line) as Record<string, unknown>; } catch { continue; }
+    const type = typeof e["type"] === "string" ? (e["type"] as string) : "";
+    if (type === "user") {
+      if (typeof e["uuid"] === "string") lastUserUuid = e["uuid"] as string;
+      continue;
+    }
+    const msg = e["message"];
+    if (type !== "assistant" || !msg || typeof msg !== "object") continue;
+    const content = (msg as { content?: Array<Record<string, unknown>> }).content ?? [];
+    const usage = assistantContextOf(msg);
+    if (content.some((b) => String(b["type"] ?? "") === "tool_use" && FRONTIER_WRITE_TOOLS.has(String(b["name"] ?? "")))) {
+      foundWrite = true;
+      frontier = lastUserUuid;                 // undefined ⇒ no user line before the write ⇒ no frontier (F1)
+      firstWriteContext = usage ?? lastUsageBefore;
+      break;
+    }
+    for (const b of content) {
+      if (String(b["type"] ?? "") !== "tool_use" || String(b["name"] ?? "") !== "Read") continue;
+      const input = (b["input"] && typeof b["input"] === "object" ? b["input"] : {}) as Record<string, unknown>;
+      const path = input["file_path"];
+      if (typeof path === "string" && path.length > 0 && !seen.has(path)) { seen.add(path); readsBefore.push(path); }
+    }
+    if (usage !== undefined) lastUsageBefore = usage;
+  }
+  // A frontier requires BOTH a write AND a user line before it. Otherwise the primer is as today:
+  // the last usage over the whole run, and every Read.
+  if (foundWrite && frontier !== undefined) {
+    return { frontier, context_tokens: firstWriteContext, reads: readsBefore };
+  }
+  return { context_tokens: captureLastContext(stdout), reads: captureReadPaths(stdout) };
+}
+
 // The wall-clock bound on one chair's spawn. A tool-granted child has no inherent
 // terminus (it can search/loop), and the gig runs the spawn synchronously — so without
 // this bound one wedged child wedges the whole server. SIGKILL, not SIGTERM: a
@@ -1228,6 +1295,31 @@ function resumeSessionLost(stdout: string): boolean {
 }
 
 /**
+ * contract-primer-reading-frontier-v1 (F2) — did a fork fail because its `--resume-session-at` named a
+ * message uuid the primer's session does not hold? claude 2.1.274 (probed 2026-09-18) exits 1 with the
+ * notice `No message found with message.uuid of: <uuid>` on stderr (so in the ChildExitError message),
+ * and a stdout result event that carries it ONLY in `errors: [...]` — there is no `result` text, so
+ * `resumeSessionLost` (which reads `result` alone) cannot see it. Detect it in EITHER place, next to
+ * `resumeSessionLost`, so the unresolvable-frontier fork takes the cold fallback rather than failing.
+ */
+function frontierNotFound(stdout: string, message: string): boolean {
+  const re = /no message found with message\.uuid of/i;
+  if (re.test(message)) return true;
+  for (const raw of stdout.split("\n")) {
+    const line = raw.trim();
+    if (!line) continue;
+    let e: Record<string, unknown>;
+    try { e = JSON.parse(line) as Record<string, unknown>; } catch { continue; }
+    if (e["type"] !== "result") continue;
+    const errs = e["errors"];
+    if (Array.isArray(errs) && errs.some((x) => typeof x === "string" && re.test(x))) return true;
+    const txt = typeof e["result"] === "string" ? (e["result"] as string) : "";
+    if (re.test(txt)) return true;
+  }
+  return false;
+}
+
+/**
  * Did a spawn fail because the `--session-id` it opened with is ALREADY IN USE? A chair's session id
  * is deterministic in `(gig_id, role)`, so a KILLED attempt that already opened it leaves the id live;
  * a resumed gig's first spawn re-opens it and the CLI refuses it (`Error: Session ID <uuid> is already
@@ -1254,7 +1346,7 @@ function sessionIdInUse(stdout: string, message: string): boolean {
 export function buildInvokerArgs(
   prompt: string,
   mcpConfigPath: string,
-  opts: { model?: string | undefined; allowed_tools?: readonly string[] | undefined; disallowed_tools?: readonly string[] | undefined; max_tool_calls?: number | undefined; effort?: Effort | undefined; session_id?: string | undefined; resume?: boolean | undefined; fork_from_session?: string | undefined },
+  opts: { model?: string | undefined; allowed_tools?: readonly string[] | undefined; disallowed_tools?: readonly string[] | undefined; max_tool_calls?: number | undefined; effort?: Effort | undefined; session_id?: string | undefined; resume?: boolean | undefined; fork_from_session?: string | undefined; resume_session_at?: string | undefined },
 ): string[] {
   // `-p` is a BOOLEAN flag and the prompt is a POSITIONAL argument, which is what makes the
   // large-prompt path clean: keep the flag, drop the positional, write it to stdin. The
@@ -1271,7 +1363,13 @@ export function buildInvokerArgs(
   // its own (gig, role) `--session-id`. Distinct from an amend `--resume` (which continues the SAME
   // session under the same id): a fork opens its own session forked FROM another's.
   if (opts.fork_from_session && opts.session_id) {
-    args.push("--resume", opts.fork_from_session, "--fork-session", "--session-id", opts.session_id);
+    args.push("--resume", opts.fork_from_session);
+    // contract-primer-reading-frontier-v1 (O2) — a fork of a primer that recorded a reading FRONTIER
+    // CUTS the resumed conversation there: `--resume-session-at <frontier>` starts the branch with the
+    // conversation as it stood after that message, so the fork loads what the primer READ, never what
+    // it then DID. A frontier-less primer carries none, so the whole session resumes exactly as today.
+    if (opts.resume_session_at) args.push("--resume-session-at", opts.resume_session_at);
+    args.push("--fork-session", "--session-id", opts.session_id);
   } else if (opts.session_id) {
     if (opts.resume) args.push("--resume", opts.session_id);
     else args.push("--session-id", opts.session_id);
@@ -1660,6 +1758,9 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
       // isFork is false and the spawn is byte-identical to today (no --fork-session — the I1 control).
       const forkFromSession = ctx.fork?.primer_session_id;
       const isFork = forkFromSession !== undefined && sessionId !== undefined;
+      // contract-primer-reading-frontier-v1 (O2) — the primer's reading frontier, if it recorded one:
+      // the fork's first spawn CUTS the resumed conversation there. Absent ⇒ the whole session resumes.
+      const forkFrontier = ctx.fork?.frontier;
       // #seat-effort (O3) — the runtime already resolved precedence onto ctx.effort; floor to medium
       // so an undeclared, untiered seat (or any hand-built ctx) still spawns with an explicit
       // --effort rather than the operator's settings-file effort. Hoisted so baseArgs and the cold
@@ -1678,6 +1779,8 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
         // cold arg list below carries no fork_from_session, so an unresumable primer (F2) falls back to
         // a plain fresh-session spawn with no --fork-session.
         ...(isFork ? { fork_from_session: forkFromSession } : {}),
+        // contract-primer-reading-frontier-v1 (O2) — cut the fork at the primer's frontier when it has one.
+        ...(isFork && forkFrontier !== undefined ? { resume_session_at: forkFrontier } : {}),
       });
       // contract-amend-resume-prompt-v1 (I2) — the cold arg list for a resume whose session is gone:
       // a FRESH --session-id spawn (resume:false) carrying the FULL prompt, because nothing else
@@ -1791,19 +1894,28 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
       // prompt (coldArgs carries no fork_from_session, so no --fork-session), NEVER failing the chair.
       // The `fork_fallback` event names the unresumable primer session so chair_complete records the
       // reason — a resume that did not happen, not a fork the record falsely claims.
-      const forkColdFallback = async (): Promise<{ stdout: string; budgetStopped: boolean }> => {
+      // contract-primer-reading-frontier-v1 (F2) — an `reason` overrides the default when the fallback is
+      // due to an unresolvable reading FRONTIER (not an unresumable session), so chair_complete names the
+      // frontier the fork could not cut at rather than a session that never failed.
+      const forkColdFallback = async (reason?: string): Promise<{ stdout: string; budgetStopped: boolean }> => {
         ctx.onEvent?.({
           type: "fork_fallback",
           raw: {
             agent: a.slug,
             primer_session_id: forkFromSession,
             forked: false,
-            reason: `the primer session ${forkFromSession} could not be resumed; re-running cold with ` +
+            reason: reason ??
+              `the primer session ${forkFromSession} could not be resumed; re-running cold with ` +
               `--session-id and the full prompt`,
           },
         } as AgentStreamEvent);
         return runTolerantOfBudgetStop(coldArgs, fullPrompt);
       };
+      // contract-primer-reading-frontier-v1 (F2) — the reason for an unresolvable-frontier cold fallback,
+      // naming the frontier so chair_complete.fork_fallback records exactly what could not be resolved.
+      const frontierFallbackReason = (): string =>
+        `the primer's reading frontier ${forkFrontier} could not be resolved in its session; re-running ` +
+        `cold with --session-id and the full prompt`;
 
       // contract-resumed-gig-session-v1 (O2/O3/F1) — a FIRST `--session-id` open can COLLIDE: the
       // chair's session id is deterministic in (gig_id, role), so a KILLED attempt that already opened
@@ -1852,6 +1964,10 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
         const first = await runTolerantOfBudgetStop(baseArgs, prompt);
         if (resumeRound && resumeSessionLost(first.stdout)) {
           ({ stdout, budgetStopped } = await resumeColdFallback());
+        } else if (isFork && forkFrontier !== undefined && frontierNotFound(first.stdout, "")) {
+          // contract-primer-reading-frontier-v1 (F2) — the fork's --resume-session-at named a uuid the
+          // primer session does not hold; re-run cold, naming the frontier.
+          ({ stdout, budgetStopped } = await forkColdFallback(frontierFallbackReason()));
         } else if (isFork && resumeSessionLost(first.stdout)) {
           // contract-seat-primer-v1 (F2) — the fork's --resume of the primer found no conversation.
           ({ stdout, budgetStopped } = await forkColdFallback());
@@ -1863,6 +1979,10 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
       } catch (e) {
         if (resumeRound && e instanceof ChildExitError && resumeSessionLost(e.stdout)) {
           ({ stdout, budgetStopped } = await resumeColdFallback());
+        } else if (isFork && forkFrontier !== undefined && e instanceof ChildExitError && frontierNotFound(e.stdout, e.message)) {
+          // contract-primer-reading-frontier-v1 (F2) — the fork exited 1 because --resume-session-at named
+          // a uuid the primer session does not hold (notice on stderr and in the result event's `errors`).
+          ({ stdout, budgetStopped } = await forkColdFallback(frontierFallbackReason()));
         } else if (isFork && e instanceof ChildExitError && resumeSessionLost(e.stdout)) {
           ({ stdout, budgetStopped } = await forkColdFallback());
         } else if (e instanceof ChildExitError && collided(e.stdout, e.message)) {
@@ -1962,16 +2082,24 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
       // one place the reads are), and before the seal branches so the reads reach the runtime whatever
       // the seat produced.
       if (ctx.prime) {
+        // contract-primer-reading-frontier-v1 (O1/O3/O4/I2/I3/F1) — parse the reading frontier over the
+        // concatenated seal stdout: the reads are cut to those before the first write, the context is the
+        // first-write context (or the last usage when there is no frontier), and the frontier uuid is
+        // forwarded on the seat_reads event so the runtime seals it onto the primer. A no-write/no-user
+        // seat yields no frontier and the reads/context are exactly as the rolling-primer laws expect.
+        const rf = captureReadingFrontier(sealStdout);
         ctx.onEvent?.({
           type: "seat_reads",
-          raw: { agent: a.slug, area: ctx.prime.area, reads: captureReadPaths(sealStdout) },
+          raw: {
+            agent: a.slug, area: ctx.prime.area, reads: rf.reads,
+            ...(rf.frontier !== undefined ? { frontier: rf.frontier } : {}),
+          },
         } as AgentStreamEvent);
         // contract-rolling-seat-primer-v1 (O3) — forward the seat's context size at seal the SAME way, so
         // the runtime records it on the seat-primer even though the injected `run` seam bypassed the
         // streamed usages. Emitted only when the run reported a usage; otherwise the runtime falls back.
-        const context_tokens = captureLastContext(sealStdout);
-        if (context_tokens !== undefined) {
-          ctx.onEvent?.({ type: "seat_context", raw: { context_tokens } } as AgentStreamEvent);
+        if (rf.context_tokens !== undefined) {
+          ctx.onEvent?.({ type: "seat_context", raw: { context_tokens: rf.context_tokens } } as AgentStreamEvent);
         }
       }
 

@@ -214,7 +214,10 @@ export interface AgentInvocationContext {
   // primer files whose working-tree blob changed since priming (the runtime decided this against
   // deps.tree_root), which buildPrompt names in the fork's prompt. Absent = a plain chair, or a fork
   // whose primer is missing (F1) — either way the spawn opens a fresh session and never --fork-sessions.
-  fork?: { primer_session_id: string; stale_paths: readonly string[] } | undefined;
+  // contract-primer-reading-frontier-v1 (O2/F2) — `frontier`, when the primer recorded one, is the
+  // message uuid the fork's `--resume-session-at` CUTS the resumed conversation at; absent ⇒ the whole
+  // primer session resumes as today.
+  fork?: { primer_session_id: string; stale_paths: readonly string[]; frontier?: string } | undefined;
 }
 
 // One parsed event from a chair's child process (a stream-json line). `type` is the
@@ -2454,7 +2457,7 @@ export async function runGig(
      *  invoker warm-starts by construction and chair_complete records `forked_from`/`primer_stale_paths`.
      *  contract-rolling-seat-primer-v1 (O2) — `primer_files` carries the forked primer's own files so a
      *  chair that ALSO primes the area can seal a FRESHER primer unioning them with its own reads. */
-    fork?: { primer_session_id: string; primer_id: string; primer_commit: string; stale_paths: string[]; primer_files: Array<{ path: string; blob_sha: string }> };
+    fork?: { primer_session_id: string; primer_id: string; primer_commit: string; stale_paths: string[]; primer_files: Array<{ path: string; blob_sha: string }>; frontier?: string };
     /** contract-seat-primer-v1 (F1) — a fork chair with NO primer for its agent+area. The chair runs
      *  cold and chair_complete records `fork_fallback: "primer_missing"`; never fails. */
     fork_fallback?: string;
@@ -2873,6 +2876,9 @@ export async function runGig(
             // contract-rolling-seat-primer-v1 (O2) — carry the forked primer's own files so a prime+fork
             // chair can seal a fresher primer unioning them with this seat's reads.
             primer_files: files,
+            // contract-primer-reading-frontier-v1 (O2/F2) — the primer's recorded reading frontier, so the
+            // fork's first spawn cuts the resumed conversation there. Absent ⇒ the whole session resumes.
+            ...(typeof pd["frontier"] === "string" ? { frontier: pd["frontier"] as string } : {}),
           };
         }
       }
@@ -2982,6 +2988,15 @@ export async function runGig(
     // injected `run` seam the streamed assistant usages never reach onEvent, so the invoker parses the
     // last one from the returned stdout and forwards it, the same way it forwards `seat_reads`.
     let primerContextTokens: number | undefined;
+    // contract-primer-reading-frontier-v1 (O1) — the reading frontier the invoker derived from the seat's
+    // stream (the last user line before its first write), forwarded on the `seat_reads` event and sealed
+    // onto the seat-primer. Absent when the seat called no write tool (I3) or had no user line before it (F1).
+    let primerFrontier: string | undefined;
+    // contract-primer-reading-frontier-v1 (O4/I1) — a PRIME chair's tree snapshot at chair START (git
+    // stash create, or HEAD when clean), so a file Read before the frontier is sealed at the blob it had
+    // when the chair began — not the post-edit blob the seat may have written after reading it. Undefined
+    // when there is no tree_root (no git resolution) or the snapshot could not be taken.
+    let primerStartSnapshot: string | undefined;
     // contract-seat-primer-v1 (F2) — set when the invoker reported the primer's session could not be
     // resumed and fell back cold (the `fork_fallback` stream event). Recorded on chair_complete.
     let forkFellBackReason: string | undefined;
@@ -3148,6 +3163,18 @@ export async function runGig(
         // agent ▷ none) and set the RESOLVED value on the ctx only when one exists, so an undeclared
         // seat carries no ceiling and the completions invoker runs it uncapped (I1).
         const resolvedMaxContext = resolveMaxContextTokens(deps.max_context_tokens, agent);
+        // contract-primer-reading-frontier-v1 (O4/I1) — snapshot the tree the moment BEFORE a PRIME seat
+        // runs (git stash create captures the working tree without touching it; empty output ⇒ a clean
+        // tree, so HEAD is the snapshot). A file the seat reads then edits is sealed at this pre-edit blob
+        // (git rev-parse <snapshot>:<path>), and a carried file the seat never re-reads keeps its forked
+        // blob — so a fork remembers exactly what the primer READ, not what it then DID. Best-effort: a
+        // tree that cannot be snapshotted leaves this undefined and the seal falls back to hash-object.
+        if (chair.prime && deps.tree_root !== undefined) {
+          try {
+            const created = gitInTree(deps.tree_root, ["stash", "create"]).trim();
+            primerStartSnapshot = created.length > 0 ? created : gitInTree(deps.tree_root, ["rev-parse", "HEAD"]).trim();
+          } catch { primerStartSnapshot = undefined; }
+        }
         data = await deps.invoke({
           agent, phase: phaseName, role: chair.role, gig_id, inputs, gig_input: gigInput, skills,
           missing_skills: p.missing_skills, // #241 — what did NOT resolve, so the prompt can't assert it
@@ -3188,7 +3215,7 @@ export async function runGig(
           // contract-seat-primer-v1 (O2/O4) — a FORK chair with a primer: the invoker warm-starts from
           // the primer's session and names the stale paths in the prompt. Absent on a plain chair or a
           // fork whose primer is missing (F1), so both spawn a fresh session and never --fork-session.
-          ...(p.fork ? { fork: { primer_session_id: p.fork.primer_session_id, stale_paths: p.fork.stale_paths } } : {}),
+          ...(p.fork ? { fork: { primer_session_id: p.fork.primer_session_id, stale_paths: p.fork.stale_paths, ...(p.fork.frontier !== undefined ? { frontier: p.fork.frontier } : {}) } } : {}),
           // The venue → dispatch wire: thread the realized room onto the chair's ctx ONLY when a
           // venue resolved, so the invoker narrows the spawn by construction; both fields stay
           // absent otherwise (the venue-less path is unchanged).
@@ -3216,6 +3243,9 @@ export async function runGig(
             if (ev.type === "seat_reads") {
               const r = (ev.raw as { reads?: unknown } | undefined)?.reads;
               primerReads = Array.isArray(r) ? r.filter((x): x is string => typeof x === "string") : [];
+              // contract-primer-reading-frontier-v1 (O1) — the frontier travels on the same event.
+              const f = (ev.raw as { frontier?: unknown } | undefined)?.frontier;
+              primerFrontier = typeof f === "string" ? f : undefined;
             }
             // contract-rolling-seat-primer-v1 (O3) — the seat's context size at seal, forwarded by the
             // invoker (the injected `run` seam bypasses the streamed usages onEvent would otherwise fold).
@@ -3698,7 +3728,7 @@ export async function runGig(
       // cold (primer_too_large / primer_missing → no p.fork) unions nothing and seals only its own reads,
       // which is the fresh, small primer the ceiling/first-primer path calls for. The `session_id` stays
       // this build's own (gig, role) uuid — the fork branch the next build resumes.
-      const forkedPaths = (p.fork?.primer_files ?? []).map((f) => f.path);
+      const forkedFiles = p.fork?.primer_files ?? [];
       // contract-seat-primer-paths-v1 (O1/I1/F1) — a seat-primer must name its files the way the
       // repository does, so ANY checkout of this commit can use it. A seat's Read event carries an
       // ABSOLUTE checkout path, which ties the primer to one machine's location. Normalize each read to
@@ -3716,16 +3746,40 @@ export async function runGig(
         if (rel === "" || rel.startsWith("..") || isAbsPath(rel)) return undefined; // outside tree_root
         return rel.split(pathSep).join("/");
       };
+      // The seat's OWN reads — already CUT to those before the reading frontier by the invoker
+      // (contract-primer-reading-frontier-v1 O4) — normalized to tree-relative and de-duped.
+      const readRel: string[] = [];
+      const readSet = new Set<string>();
+      for (const raw of reads) {
+        const rel = toTreeRelative(raw);
+        if (rel !== undefined && !readSet.has(rel)) { readSet.add(rel); readRel.push(rel); }
+      }
+      // The forked primer's own blob per path — a carried file the seat did NOT re-read keeps THIS,
+      // never re-blobbed against the tree (contract-primer-reading-frontier-v1 I1).
+      const forkedBlob = new Map(forkedFiles.map((f) => [f.path, f.blob_sha] as const));
+      // Union: carried (forked) first, then the seat's own reads, de-duped by path.
       const orderedPaths: string[] = [];
       const seenPaths = new Set<string>();
-      for (const raw of [...forkedPaths, ...reads]) {
-        const path = toTreeRelative(raw);
-        if (path !== undefined && !seenPaths.has(path)) { seenPaths.add(path); orderedPaths.push(path); }
+      for (const path of [...forkedFiles.map((f) => f.path), ...readRel]) {
+        if (!seenPaths.has(path)) { seenPaths.add(path); orderedPaths.push(path); }
       }
-      const files = orderedPaths.map((path) => ({
-        path,
-        blob_sha: deps.tree_root ? gitInTree(deps.tree_root, ["hash-object", path]).trim() : "",
-      }));
+      // contract-primer-reading-frontier-v1 (O4/I1) — a file the seat READ before its frontier is sealed
+      // at its CHAIR-START blob: `git rev-parse <snapshot>:<path>` against the pre-invoke snapshot, so a
+      // file read-then-edited keeps its pre-edit blob (what the fork remembers), and a path the snapshot
+      // does not hold (untracked at chair start) is hashed at seal. A carried file the seat did NOT
+      // re-read keeps the blob the forked primer recorded — the reseal never launders a stale file fresh.
+      const blobFor = (path: string): string => {
+        if (readSet.has(path)) {
+          if (deps.tree_root === undefined) return "";
+          if (primerStartSnapshot !== undefined) {
+            try { return gitInTree(deps.tree_root, ["rev-parse", `${primerStartSnapshot}:${path}`]).trim(); }
+            catch { /* untracked at chair start — hash at seal below */ }
+          }
+          try { return gitInTree(deps.tree_root, ["hash-object", path]).trim(); } catch { return ""; }
+        }
+        return forkedBlob.get(path) ?? "";
+      };
+      const files = orderedPaths.map((path) => ({ path, blob_sha: blobFor(path) }));
       // contract-rolling-seat-primer-v1 (O3) — the context size of the LAST usage the seat reported:
       // the invoker-forwarded value under an injected `run` seam, else the streamed fold. Recorded ONLY
       // when a usage was actually reported — a seat that reported none has no "last usage" to stamp, so
@@ -3749,6 +3803,10 @@ export async function runGig(
           // contract-rolling-seat-primer-v1 (O3) — the context size the seat carried at seal
           // (input+cache_read+cache_creation of its LAST usage): what the next build's ceiling weighs.
           ...(contextTokens !== undefined ? { context_tokens: contextTokens } : {}),
+          // contract-primer-reading-frontier-v1 (O1) — seal the reading frontier ONLY when the seat wrote
+          // (the invoker derived one); a read-only or user-less-write seat records none (I3/F1), so a
+          // frontier is never guessed.
+          ...(primerFrontier !== undefined ? { frontier: primerFrontier } : {}),
           source: `seat-primer://${producer_slug}/${area}`,
         },
       });

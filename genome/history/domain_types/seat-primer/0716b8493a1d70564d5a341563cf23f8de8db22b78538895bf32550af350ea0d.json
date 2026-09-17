@@ -1,6 +1,6 @@
 {
   "slug": "seat-primer",
-  "version": 2,
+  "version": 1,
   "extends": "Signal",
   "domain": "engine",
   "status": "active",
@@ -48,10 +48,6 @@
       },
       "source": {
         "type": "string"
-      },
-      "frontier": {
-        "type": "string",
-        "description": "uuid of the last user line before the seat's first write-tool call (Write, Edit, MultiEdit, NotebookEdit); a fork resumes the primer's session cut there with --resume-session-at, so it loads what the seat read and never what it then did. Absent when the seat wrote nothing or no user line preceded its first write: the fork then resumes the whole session."
       }
     }
   },

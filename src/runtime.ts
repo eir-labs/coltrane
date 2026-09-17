@@ -7,7 +7,7 @@ import { lineageAdoption } from "./lineage_adoption.js";
 import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { join as joinPath } from "node:path";
+import { join as joinPath, relative as relPath, isAbsolute as isAbsPath, sep as pathSep } from "node:path";
 import type { Standard, Agent, Chair } from "./composition.js";
 import { PRIMITIVE_OUTPUT_TYPE, CORE_TYPES } from "./core_types.js";
 import { executeSkillAsync } from "./skill_subprocess.js";
@@ -3669,10 +3669,28 @@ export async function runGig(
       // which is the fresh, small primer the ceiling/first-primer path calls for. The `session_id` stays
       // this build's own (gig, role) uuid — the fork branch the next build resumes.
       const forkedPaths = (p.fork?.primer_files ?? []).map((f) => f.path);
+      // contract-seat-primer-paths-v1 (O1/I1/F1) — a seat-primer must name its files the way the
+      // repository does, so ANY checkout of this commit can use it. A seat's Read event carries an
+      // ABSOLUTE checkout path, which ties the primer to one machine's location. Normalize each read to
+      // its tree_root-relative POSIX path (an already-relative read is resolved against tree_root first,
+      // so both spellings of the same file collapse to one key — I1), and DROP any path that resolves
+      // OUTSIDE tree_root — it is not part of the area and must never be stored, above all not as an
+      // absolute path escaping it (F1). With paths stored relative, the fork-time staleness hash
+      // (gitInTree hash-object) resolves them in the FORKING run's own checkout, so a primer sealed
+      // under one checkout is fresh in another of the same content (O2). Without a tree_root there is no
+      // anchor (and no git resolution downstream), so the raw path is kept unchanged.
+      const toTreeRelative = (raw: string): string | undefined => {
+        if (deps.tree_root === undefined) return raw;
+        const abs = isAbsPath(raw) ? raw : joinPath(deps.tree_root, raw);
+        const rel = relPath(deps.tree_root, abs);
+        if (rel === "" || rel.startsWith("..") || isAbsPath(rel)) return undefined; // outside tree_root
+        return rel.split(pathSep).join("/");
+      };
       const orderedPaths: string[] = [];
       const seenPaths = new Set<string>();
-      for (const path of [...forkedPaths, ...reads]) {
-        if (!seenPaths.has(path)) { seenPaths.add(path); orderedPaths.push(path); }
+      for (const raw of [...forkedPaths, ...reads]) {
+        const path = toTreeRelative(raw);
+        if (path !== undefined && !seenPaths.has(path)) { seenPaths.add(path); orderedPaths.push(path); }
       }
       const files = orderedPaths.map((path) => ({
         path,

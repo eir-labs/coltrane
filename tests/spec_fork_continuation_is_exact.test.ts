@@ -233,7 +233,6 @@ type Base = ReturnType<typeof makeStore>;
 const senseAgent = (slug: string) =>
   testAgent({ slug, primitives: ["SENSE"], input_types: [], output_types: ["raw-note"], domain: "demo" });
 const oneChair = (slug: string, chairExtra: Record<string, unknown> = {}) =>
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   composeStandard({
     slug: "fork-continuation-demo", domain: "demo", agents: [senseAgent(slug)],
     phases: [{ name: "sense", chairs: [{ role: "s", agent_slug: slug, depends_on: [], input_contract: [], output_contract: ["raw-note"], required_skills: [], ...chairExtra }] }],

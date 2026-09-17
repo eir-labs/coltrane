@@ -597,7 +597,6 @@ describe("chairs — runtime dispatch", () => {
     } as const;
     const { outputs, ledger } = setup();
     await expect(
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       runGig(std as any, {}, { outputs, ledger, invoke: stubInvoke }),
     ).rejects.toThrow(/input_contract|NeverProducedType/);
   });
@@ -623,7 +622,6 @@ describe("chairs — runtime dispatch", () => {
     } as const;
     const { outputs, ledger } = setup();
     await expect(
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       runGig(std as any, {}, { outputs, ledger, invoke: stubInvoke }),
     ).rejects.toThrow(/output_contract|Plan/);
   });
@@ -842,7 +840,6 @@ describe("chairs — migration (loader reject)", () => {
       phases: [{ name: "p1", agent: "a" }],
     };
     expect(() =>
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       composeStandard(legacyStandard as any),
     ).toThrow(/legacy|phase\.agent|not supported|chairs.*required/i);
   });

@@ -50,7 +50,6 @@ const chairDef = (slug: string, chairExtra: Record<string, unknown> = {}) => ({
   slug: "seat-primer-demo", domain: "demo", agents: [senseAgent(slug)],
   phases: [{ name: "sense", chairs: [{ role: "s", agent_slug: slug, depends_on: [], input_contract: [], output_contract: ["raw-note"], required_skills: [], ...chairExtra }] }],
 });
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const oneChair = (slug: string, chairExtra: Record<string, unknown> = {}) => composeStandard(chairDef(slug, chairExtra) as any);
 
 // ── stream-json builders: a priming seat READS files, then seals its raw-note in-band ──
@@ -257,10 +256,8 @@ describe("F2 — a primer whose session cannot be resumed falls back cold and re
 // F3). The slug-shape law below is unchanged and stays green.
 describe("F3 — composeStandard refuses prime+fork_from of DIFFERENT areas (same area allowed), or a non-slug area", () => {
   it("prime+fork_from of the SAME area is ADMITTED; DIFFERENT areas are refused, naming the chair and both areas", () => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const same = chairDef("roller", { role: "roll", prime: { area: "amend-loop" }, fork_from: { primer: "amend-loop" } }) as any;
     expect(() => composeStandard(same), "a build primes an area and forks the prior primer OF THAT area — the same-area chair is the rolling primer and must be admitted, not refused").not.toThrow();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const diff = chairDef("dual", { role: "dual", prime: { area: "area-a" }, fork_from: { primer: "area-b" } }) as any;
     expect(() => composeStandard(diff), "priming one area while forking a DIFFERENT one warm-starts from the wrong area's reading — refused, naming the chair").toThrow(/dual/);
     expect(() => composeStandard(diff), "the refusal must name the primed area").toThrow(/area-a/);
@@ -268,7 +265,6 @@ describe("F3 — composeStandard refuses prime+fork_from of DIFFERENT areas (sam
   });
 
   it("a fork_from area that is not a lowercase-hyphen slug is refused", () => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const bad = chairDef("seat", { fork_from: { primer: "Not A Slug" } }) as any;
     expect(() => composeStandard(bad), "a fork_from area that is not a lowercase-hyphen slug must be refused").toThrow(/fork_from|slug/i);
   });

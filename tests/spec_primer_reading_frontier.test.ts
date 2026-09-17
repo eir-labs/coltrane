@@ -67,12 +67,10 @@ const chairDef = (slug: string, chairExtra: Record<string, unknown> = {}) => ({
   slug: "primer-reading-frontier-demo", domain: "demo", agents: [senseAgent(slug)],
   phases: [{ name: "sense", chairs: [{ role: "s", agent_slug: slug, depends_on: [], input_contract: [], output_contract: ["raw-note"], required_skills: [], ...chairExtra }] }],
 });
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const oneChair = (slug: string, chairExtra: Record<string, unknown> = {}) => composeStandard(chairDef(slug, chairExtra) as any);
 // A fork-ONLY chair (fork_from, no prime) — composeStandard admits it today, so the fork-arg laws run.
 const forkOnly = (slug: string, area: string, forkExtra: Record<string, unknown> = {}) => {
   const std = oneChair(slug);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (std as any).phases[0].chairs[0].fork_from = { primer: area, ...forkExtra };
   return std;
 };
@@ -82,7 +80,6 @@ const forkOnly = (slug: string, area: string, forkExtra: Record<string, unknown>
 // post-attach the rolling laws use).
 const primeAndFork = (slug: string, area: string) => {
   const std = oneChair(slug, { role: "prime", prime: { area } });
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (std as any).phases[0].chairs[0].fork_from = { primer: area };
   return std;
 };

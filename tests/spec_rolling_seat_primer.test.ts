@@ -63,7 +63,6 @@ const chairDef = (slug: string, chairExtra: Record<string, unknown> = {}) => ({
   slug: "rolling-seat-primer-demo", domain: "demo", agents: [senseAgent(slug)],
   phases: [{ name: "sense", chairs: [{ role: "s", agent_slug: slug, depends_on: [], input_contract: [], output_contract: ["raw-note"], required_skills: [], ...chairExtra }] }],
 });
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const oneChair = (slug: string, chairExtra: Record<string, unknown> = {}) => composeStandard(chairDef(slug, chairExtra) as any);
 
 // The shape O1 will ADMIT — a chair that PRIMES an area AND FORKS the same area — built by attaching
@@ -73,14 +72,12 @@ const oneChair = (slug: string, chairExtra: Record<string, unknown> = {}) => com
 // carries fork_from's optional fields (e.g. `max_context_tokens`).
 const primeAndFork = (slug: string, area: string, forkExtra: Record<string, unknown> = {}) => {
   const std = oneChair(slug, { prime: { area } });
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (std as any).phases[0].chairs[0].fork_from = { primer: area, ...forkExtra };
   return std;
 };
 // A fork-ONLY chair (post-attached fork_from, no prime) — for the ceiling laws that need no reseal.
 const forkOnly = (slug: string, area: string, forkExtra: Record<string, unknown> = {}) => {
   const std = oneChair(slug);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (std as any).phases[0].chairs[0].fork_from = { primer: area, ...forkExtra };
   return std;
 };
@@ -148,7 +145,6 @@ const primerOf = (base: Base): Record<string, unknown> | undefined =>
 // ── O1 — composeStandard admits prime+fork of the SAME area, refuses DIFFERENT areas naming both ────
 describe("O1 — prime and fork_from may name the SAME area; only DIFFERENT areas are refused", () => {
   it("a chair that primes AND forks the SAME area is ADMITTED (a build primes and the next forks it)", () => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const same = chairDef("roller", { prime: { area: "amend-loop" }, fork_from: { primer: "amend-loop" } }) as any;
     expect(
       () => composeStandard(same),
@@ -158,7 +154,6 @@ describe("O1 — prime and fork_from may name the SAME area; only DIFFERENT area
   });
 
   it("prime and fork_from naming DIFFERENT areas is refused, naming the chair AND both areas", () => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const diff = chairDef("dual", { role: "dual", prime: { area: "area-a" }, fork_from: { primer: "area-b" } }) as any;
     expect(() => composeStandard(diff), "priming one area while forking a different one warm-starts from a reading of the wrong area — refused, naming the chair").toThrow(/dual/);
     expect(() => composeStandard(diff), "the refusal must name the primed area so the author sees the mismatch").toThrow(/area-a/);
@@ -281,7 +276,6 @@ describe("F1 — a prime+fork chair with no primer runs cold and its reads seal 
   it("prime+fork of the same area is admissible, and with no primer it colds, records primer_missing, and does not fail", async () => {
     // The admissibility is F1's premise: a build that primes-and-forks its area must be composable, or
     // the missing-primer path can never be reached. Red today — composeStandard refuses prime+fork.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const def = chairDef("roller", { prime: { area: "amend-loop" }, fork_from: { primer: "amend-loop" } }) as any;
     expect(() => composeStandard(def), "prime+fork of one area must be admissible for the no-primer-yet cold path to exist at all").not.toThrow();
     // The runtime cold-reseal: with no primer, the chair runs cold (primer_missing), seals the FIRST

@@ -56,7 +56,6 @@ const chairDef = (slug: string, chairExtra: Record<string, unknown> = {}) => ({
   slug: "seat-primer-paths-demo", domain: "demo", agents: [senseAgent(slug)],
   phases: [{ name: "sense", chairs: [{ role: "s", agent_slug: slug, depends_on: [], input_contract: [], output_contract: ["raw-note"], required_skills: [], ...chairExtra }] }],
 });
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const oneChair = (slug: string, chairExtra: Record<string, unknown> = {}) => composeStandard(chairDef(slug, chairExtra) as any);
 
 // ── stream-json builders: a priming seat READS files (paths as literally given), then seals in-band ──

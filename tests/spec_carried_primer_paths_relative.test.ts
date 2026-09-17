@@ -69,7 +69,6 @@ const chairDef = (slug: string, chairExtra: Record<string, unknown> = {}) => ({
   slug: "carried-primer-paths-demo", domain: "demo", agents: [senseAgent(slug)],
   phases: [{ name: "sense", chairs: [{ role: "s", agent_slug: slug, depends_on: [], input_contract: [], output_contract: ["raw-note"], required_skills: [], ...chairExtra }] }],
 });
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const oneChair = (slug: string, chairExtra: Record<string, unknown> = {}) => composeStandard(chairDef(slug, chairExtra) as any);
 // The shape contract-rolling-seat-primer-v1 (O1) admits — a chair that BOTH primes AND forks the same
 // area — built by attaching fork_from onto a validly-composed prime-only chair (composeStandard refuses
@@ -77,7 +76,6 @@ const oneChair = (slug: string, chairExtra: Record<string, unknown> = {}) => com
 // post-attach the frontier/rolling laws use).
 const primeAndFork = (slug: string, area: string) => {
   const std = oneChair(slug, { role: "prime", prime: { area } });
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (std as any).phases[0].chairs[0].fork_from = { primer: area };
   return std;
 };

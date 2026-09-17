@@ -84,13 +84,11 @@ const debate = (maxRounds: number) => composeStandard({
   phases: [
     { name: "defend", chairs: [{ role: "defend", agent_slug: "defend", depends_on: [], input_contract: ["topic"], output_contract: ["line"], required_skills: [] }] },
     { name: "floor", chairs: [{ role: "floor", agent_slug: "floor-keeper", depends_on: ["defend"], input_contract: ["line"], output_contract: ["floor"], required_skills: [] }] },
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
   ] as any as PhaseDef[],
 });
 // A single defend chair — one completions invocation with a session id, for the file-backed store law.
 const solo = () => composeStandard({
   slug: "solo-defend", domain: "demo", agents: [maker], input_types: ["topic"],
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   phases: [{ name: "defend", chairs: [{ role: "defend", agent_slug: "defend", depends_on: [], input_contract: ["topic"], output_contract: ["line"], required_skills: [] }] }] as any as PhaseDef[],
 });
 

@@ -22,7 +22,7 @@ import {
 } from "./mcp.js";
 import { createRegistry, loadRegistry, domainTypeDefect, type Registry, type DomainType } from "./registry.js";
 import { loadGenome, resolveGenome, type SkillRecord, type EvalRecord, type LoadError } from "./loader.js";
-import { SkillSchema, AgentObjectSchema, StandardSchema, DomainTypeSchema, ChartSchema, VenueSchema, VenueObjectSchema, venueDefect } from "./genome_schema.js";
+import { SkillSchema, AgentObjectSchema, StandardSchema, DomainTypeSchema, ChartSchema, VenueSchema, VenueObjectSchema, venueDefect, EffortSchema, type Effort } from "./genome_schema.js";
 import {
   composeChart, runChart, chartHash, chartEntrySeedTypes, dispatchTarget,
   type Chart, type Venue, type ChartPlan, type ChartResult, type ResolvedMovement,
@@ -45,13 +45,14 @@ import { standardSimulate } from "./simulate.js";
 import { runGig, BudgetExhausted, GigAborted, ResumeRefused, partialGigUsage, partialBudgetState, type AgentInvoker } from "./runtime.js";
 import { assembleRunDeps, resolveWorkingRepo } from "./run_deps.js";
 import { createCheckpointStore, createReuseStore, type CheckpointStore, type ReuseStore } from "./reuse.js";
-import { makeClaudeInvoker, killLiveChairChildren } from "./claude_invoker.js";
+import { killLiveChairChildren } from "./claude_invoker.js";
+import { selectChairInvoker } from "./invoker_selection.js";
 import { dockerComposeRealizer, type VenueRealizer } from "./venue_realizer.js";
 import { institutionPlacementResolver } from "./placement_institutions.js";
 import type { PlacementResolver } from "./placement.js";
 import { isDepth, DEPTHS, type Depth } from "./pricing.js";
 import type { ToolProvider } from "./tool_providers.js";
-import { ENGINE_MCP_SERVER } from "./tool_providers.js";
+import { ENGINE_MCP_SERVER, isHostBuiltin, toolBaseName } from "./tool_providers.js";
 import type { ToolHook, ToolCallContext, PreOutcome } from "./hooks.js";
 import {
   gigScopeRefusal,
@@ -313,6 +314,20 @@ function readDepth(v: unknown): { depth?: Depth; error?: string } {
   if (v === undefined || v === null || v === "") return {};
   if (!isDepth(v)) return { error: `unknown depth "${String(v)}" — expected one of: ${DEPTHS.join(", ")}` };
   return { depth: v };
+}
+
+/**
+ * #seat-effort (F2) — read an optional `effort` argument, mirroring `readDepth`. Absent/empty → no
+ * dispatch effort (the agent's own `effort` or its tier default stands). Present but not one of the
+ * five levels → an ERROR that names the field and the value, refused BEFORE anything runs: an
+ * unlisted effort must never quietly run at a guessed level. Validated against the one Zod source
+ * (EffortSchema), so the door and the genome load refuse the same set.
+ */
+function readEffort(v: unknown): { effort?: Effort; error?: string } {
+  if (v === undefined || v === null || v === "") return {};
+  const parsed = EffortSchema.safeParse(v);
+  if (!parsed.success) return { error: `unknown effort "${String(v)}" — expected one of: ${EffortSchema.options.join(", ")}` };
+  return { effort: parsed.data };
 }
 
 /**
@@ -938,14 +953,28 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
             };
           }
         }
-        // Optional budget arg — when present, runtime enforces per-gig cost-budget
-        // and raises BudgetExhausted on depletion (PR for T10 gap, see runtime.ts).
-        const budgetArg = args["budget"] as Record<string, unknown> | undefined;
-        let budget: { opening: number; base_cost?: number; k?: number } | undefined;
-        if (budgetArg && typeof budgetArg["opening"] === "number") {
-          budget = { opening: budgetArg["opening"] as number };
-          if (typeof budgetArg["base_cost"] === "number") budget.base_cost = budgetArg["base_cost"] as number;
-          if (typeof budgetArg["k"] === "number") budget.k = budgetArg["k"] as number;
+        // Optional budget arg — a per-gig ceiling in US DOLLARS, { max_usd }. Validated HERE, before
+        // anything runs (F1/F2): a malformed budget, or one carrying a retired append-unit field, is
+        // REFUSED naming the offending field/value — never silently run with no ceiling.
+        const budgetRaw = args["budget"];
+        let budget: { max_usd: number } | undefined;
+        if (budgetRaw !== undefined) {
+          if (typeof budgetRaw !== "object" || budgetRaw === null || Array.isArray(budgetRaw)) {
+            return { ok: false, requires_approval: approval, error: `gig_dispatch: budget must be an object naming max_usd in USD; got ${String(budgetRaw)} — set { max_usd: <dollars> }` };
+          }
+          const b = budgetRaw as Record<string, unknown>;
+          const retired = ["opening", "base_cost", "k", "pool"].filter((f) => f in b);
+          if (retired.length > 0) {
+            return { ok: false, requires_approval: approval, error: `gig_dispatch: budget carries the retired append-unit field(s) ${retired.map((f) => `"${f}"`).join(", ")} — budgets are now { max_usd } in US dollars; pass max_usd instead` };
+          }
+          const mu = b["max_usd"];
+          if (typeof mu !== "number") {
+            return { ok: false, requires_approval: approval, error: `gig_dispatch: budget.max_usd is required and must be a number of USD; got ${mu === undefined ? "undefined" : String(mu)}` };
+          }
+          if (!Number.isFinite(mu) || mu <= 0) {
+            return { ok: false, requires_approval: approval, error: `gig_dispatch: budget.max_usd must be a positive finite number of USD; got ${String(mu)}` };
+          }
+          budget = { max_usd: mu };
         }
         const gigInput = (args["input"] as Record<string, unknown>) ?? {};
         // #237 — `depth` was advertised here and never read. Every dispatch ran at full depth,
@@ -953,6 +982,24 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         const depthArg = readDepth(args["depth"]);
         if (depthArg.error) return { ok: false, requires_approval: approval, error: depthArg.error };
         const depth = depthArg.depth;
+        // #seat-effort (O1/F2) — `effort` is advertised on gig_dispatch (src/mcp.ts) and read here.
+        // An out-of-range value is refused BEFORE the chart/standard path spawns anything (F2); a
+        // valid one threads into runGig beside `depth` so the resolver (resolveEffort) sees it.
+        const effortArg = readEffort(args["effort"]);
+        if (effortArg.error) return { ok: false, requires_approval: approval, error: effortArg.error };
+        const effort = effortArg.effort;
+        // contract-seat-context-ceiling-v1 (O1/F1) — `max_context_tokens` is advertised on gig_dispatch
+        // (src/mcp.ts) and read here. A non-positive-integer is refused BEFORE anything spawns, naming
+        // the field and the offending value; a valid one threads into runGig beside `effort` so the
+        // resolver (resolveMaxContextTokens) sees it. Absent ⇒ no dispatch ceiling.
+        const rawCap = args["max_context_tokens"];
+        let max_context_tokens: number | undefined;
+        if (rawCap !== undefined && rawCap !== null) {
+          if (typeof rawCap !== "number" || !Number.isInteger(rawCap) || rawCap <= 0) {
+            return { ok: false, requires_approval: approval, error: `gig_dispatch: max_context_tokens must be a positive integer; got ${String(rawCap)}` };
+          }
+          max_context_tokens = rawCap;
+        }
 
         // ── reuse a sealed output instead of re-deriving it ──────────────────────────────
         // Both halves are opt-in, and both are named on the dispatch call so the decision is
@@ -1055,7 +1102,12 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
             // onto each chair's spawn. Absent = the substrate is skipped (server-less venues, or a
             // bare deps without a realizer wired).
             ...(deps.venueRealizer ? { venueRealizer: deps.venueRealizer } : {}),
-            ...(depth ? { depth } : {}), ...reuseWiring, ...humanWiring,
+            // The address-stamping tree (records-by-address), carried into the performance so each
+            // movement stamps against the same repository root the server was bootstrapped with —
+            // runChart forwards it to every movement via `...deps`. Threaded only when present, never
+            // process.cwd().
+            ...(deps.genome_dir ? { tree_root: deps.genome_dir } : {}),
+            ...(depth ? { depth } : {}), ...(effort ? { effort } : {}), ...(max_context_tokens !== undefined ? { max_context_tokens } : {}), ...reuseWiring, ...humanWiring,
           };
           /** The ARRANGEMENT's manifest. A chart has no single genome_hash or run_fingerprint — it
            *  has a chart_hash and one run per movement — so the reply says what a chart run is
@@ -1125,7 +1177,7 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
               if (e instanceof BudgetExhausted) {
                 const partial = partialGigUsage(e);
                 return { ok: false, requires_approval: approval, error: e.message,
-                  data: { budget_exhausted: true, agent_slug: e.agent_slug, balance: e.balance, cost: e.cost, budget_state: e.state,
+                  data: { budget_exhausted: true, agent_slug: e.agent_slug, unit: e.unit, max_usd: e.max_usd, spent_usd: e.spent_usd, budget_state: e.state,
                     ...(partial ? { usage: partial } : {}) } };
               }
               throw e;
@@ -1251,6 +1303,11 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
           toolProviders: deps.toolProviders, mcpServerConfigs: deps.mcpServerConfigs, // dispatch preflight resolves against the invoker's environment
           venue, venues: deps.venues, venueRealizer: deps.venueRealizer,
           repoUrl: dispatchRepoUrl,
+          // The address-stamping tree (records-by-address): the repository root this server was
+          // bootstrapped with. The CLI reaches this same door through `dispatchTool`, so its stamps
+          // resolve against the bootstrapped root too. Never process.cwd(): absent genome_dir → no
+          // tree_root, and a laws/changes seal then refuses `tree_root_unknown`.
+          tree_root: deps.genome_dir,
         });
 
         // The gig id this run seals under — minted ONCE for both doors so the single-flight lock
@@ -1290,7 +1347,7 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
           try {
             const res = await runGig(standard, gigInput, {
               ...dispatchDeps, gig_id: gigId,
-              ...(depth ? { depth } : {}), ...reuseWiring, ...humanWiring,
+              ...(depth ? { depth } : {}), ...(effort ? { effort } : {}), ...(max_context_tokens !== undefined ? { max_context_tokens } : {}), ...reuseWiring, ...humanWiring,
             });
             // Terminal (complete) frees the tree; a parked gig (awaiting_approval) RETAINS it.
             if (releaseLock && res.status !== "awaiting_approval") releaseLock();
@@ -1329,7 +1386,7 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
               // stopped, and the operator needs them in the same reply as the depletion notice.
               const partial = partialGigUsage(e);
               return { ok: false, requires_approval: approval, error: e.message,
-                data: { budget_exhausted: true, agent_slug: e.agent_slug, balance: e.balance, cost: e.cost, budget_state: e.state,
+                data: { budget_exhausted: true, agent_slug: e.agent_slug, unit: e.unit, max_usd: e.max_usd, spent_usd: e.spent_usd, budget_state: e.state,
                   ...(partial ? { usage: partial } : {}) } };
             }
             throw e;
@@ -1374,7 +1431,7 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         // A wire added to the shared assembler reaches this default async path by construction.
         const runPromise = runGig(standard, gigInput, {
           ...dispatchDeps,
-          gig_id: gigId, onProgress, signal: controller.signal, ...(depth ? { depth } : {}), ...reuseWiring, ...humanWiring,
+          gig_id: gigId, onProgress, signal: controller.signal, ...(depth ? { depth } : {}), ...(effort ? { effort } : {}), ...(max_context_tokens !== undefined ? { max_context_tokens } : {}), ...reuseWiring, ...humanWiring,
         });
         // A REFUSED resume must be answered in THIS reply, not discovered later by polling. The
         // gate throws in runGig's SYNCHRONOUS phase — before its first `await`, which is exactly
@@ -1781,8 +1838,39 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         const addProps =
           (extension?.schema?.properties as Record<string, unknown> | undefined) ??
           (args["fields_to_add"] as Record<string, unknown>) ?? {};
-        const nextProps = { ...baseProps, ...addProps };
-        const nextRequired = extension?.schema?.required ?? baseDef.required_fields;
+        // RECORDS BY ADDRESS — a field can be RETIRED through the genome's mouth, not only added. Each
+        // named field is removed from `properties` AND dropped from `required_fields` in the SAME call
+        // that applies any additions; the merge below then versions through proposeTypeChange, which
+        // classifies a removal as `breaking` (approval required). Two refusals guard it, BEFORE the
+        // version bumps and BEFORE the "changes nothing" guard: a name the type does not DECLARE cannot
+        // be retired, and a field cannot be retired while the same call still REQUIRES it (an explicit
+        // `extension.schema.required` naming it) — a type that requires a field it no longer declares is
+        // the contradiction domainTypeDefect would catch downstream, refused here by name instead.
+        const retire = Array.isArray(args["fields_to_retire"]) ? (args["fields_to_retire"] as string[]) : [];
+        const undeclared = retire.filter((f) => !Object.hasOwn(baseProps, f));
+        if (undeclared.length > 0) {
+          return {
+            ok: false, requires_approval: approval,
+            error:
+              `type_extend cannot retire ${undeclared.map((f) => `"${f}"`).join(", ")} from "${baseDef.slug}" — ` +
+              `the type does not declare ${undeclared.length > 1 ? "those fields" : "that field"}. A retirement names a property the type currently has.`,
+          };
+        }
+        const explicitRequired = extension?.schema?.required;
+        const retiredButRequired = explicitRequired ? retire.filter((f) => explicitRequired.includes(f)) : [];
+        if (retiredButRequired.length > 0) {
+          return {
+            ok: false, requires_approval: approval,
+            error:
+              `type_extend cannot both retire and require ${retiredButRequired.map((f) => `"${f}"`).join(", ")} in one call ` +
+              `on "${baseDef.slug}" — a field cannot be retired while the same call still lists it in required_fields. Drop it from \`required\` to retire it.`,
+          };
+        }
+        const retired = new Set(retire);
+        const nextProps = Object.fromEntries(
+          Object.entries({ ...baseProps, ...addProps }).filter(([k]) => !retired.has(k)),
+        );
+        const nextRequired = (explicitRequired ?? baseDef.required_fields).filter((f) => !retired.has(f));
         // A MUTATION THAT CHANGES NOTHING SAYS SO. `addProps` reads exactly two shapes —
         // `extension.schema.properties` and `fields_to_add`. An `extension` supplied in any OTHER
         // shape (top-level JSON Schema keywords, say) matches neither, so addProps is {} and the
@@ -1794,7 +1882,10 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         const addedNothing = Object.keys(addProps).length === 0;
         const requiredUnchanged =
           JSON.stringify([...nextRequired].sort()) === JSON.stringify([...baseDef.required_fields].sort());
-        if (addedNothing && requiredUnchanged) {
+        // A retirement (already validated to remove a declared property) IS a change, even with no
+        // additions and no required-set drift — so the "changes nothing" guard must not fire when one
+        // is present, or a lawful retirement would be refused as a no-op.
+        if (addedNothing && requiredUnchanged && retire.length === 0) {
           return {
             ok: false,
             requires_approval: approval,
@@ -2391,16 +2482,24 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
           if (args[key] !== undefined) built[key] = args[key];
         }
         const def = built as unknown as AgentDef;
-        // Governance gate: each allowed_tools slug must be registered. tool_propose
-        // alone does NOT register; tool_register lands the slug. Unknown slugs are
-        // rejected so the cage cannot grant scope to a tool the registry doesn't know.
+        // Governance gate: each allowed_tools slug must be registered OR be a host builtin the
+        // invoker knows (Read, Write(src/**), Bash(npx vitest run:*) — judged on the base name).
+        // tool_propose alone does NOT register; tool_register lands the slug. Unknown names are
+        // rejected so the cage cannot grant scope to a tool nothing provides. Host builtins were
+        // refused here until 2026-09-16, so no code-touching seat could be authored through this
+        // surface at all (every one in the genome was committed as a file instead). Registering one
+        // is not the cure: the registry is the engine's own tool surface, and `Read` is not an engine
+        // tool. Admitting a host builtin grants nothing by itself — dispatch still resolves every
+        // grant and fails closed, and a venue still narrows the set to its equipment.
         if (def.allowed_tools && def.allowed_tools.length > 0) {
-          const unknown = def.allowed_tools.filter((s) => !REGISTERED_TOOL_SLUGS.has(s));
+          const unknown = def.allowed_tools.filter(
+            (s) => !REGISTERED_TOOL_SLUGS.has(s) && !isHostBuiltin(toolBaseName(s)),
+          );
           if (unknown.length > 0) {
             return {
               ok: false,
               requires_approval: approval,
-              error: `agent_define: unknown/unregistered allowed_tools slug${unknown.length > 1 ? "s" : ""}: ${unknown.join(", ")} — call tool_propose then tool_register first`,
+              error: `agent_define: unknown/unregistered allowed_tools slug${unknown.length > 1 ? "s" : ""}: ${unknown.join(", ")} — not a host builtin and not registered; call tool_propose then tool_register first`,
             };
           }
         }
@@ -3993,27 +4092,37 @@ export function bootstrapServerDeps(genomeRoot?: string): ServerDeps {
     // Silence admits, so a genome with no institutions/ (which is most of them) is unaffected: every
     // placement is admitted and the run is byte-identical.
     placementResolver: institutionPlacementResolver(genome.institutions ?? new Map()),
-    invoke: makeClaudeInvoker({
+    // ONE selector for this door AND the drain (src/invoker_selection.ts). A completions URL in the
+    // environment seats the cheap chat-completions port so `coltrane dispatch` / `gig_dispatch` can
+    // reach a model priced in cents, exactly as `coltrane work` already could; its absence keeps the
+    // host-tool invoker below, configured byte-for-byte as it was — the Claude options are handed to
+    // the selector WHOLE and passed through untouched on that path, so this door's Claude behaviour
+    // is unchanged. The selector also loads the deployment's price table (COLTRANE_PRICES_FILE),
+    // failing startup if it is malformed — the propagation this bootstrap owes.
+    invoke: selectChairInvoker(process.env, {
       registry,
-      model: process.env["COLTRANE_MODEL"],
-      // #185 — per-agent grant resolution wires each agent's MCP servers into its spawn (coltrane's
-      // own server + any the deployment registers in .mcp.json). An unresolvable grant fails closed.
-      mcpServerConfigs,
-      toolProviders, // the genome→provider bridge (above) — makes in_house grants resolvable
-      // The production seal path: a model chair SEALS IN-BAND by calling output_write (validated at
-      // the full write boundary, corrected in-band), and the invoker captures what passed. The
-      // engine server config above is bridged into the spawn and its validate-mode env set, so the
-      // chair's output_write adjudicates-not-persists and the runtime seals exactly once.
-      sealVia: "output_write",
-      // per-chair wall-clock bound; COLTRANE_CHAIR_TIMEOUT_MS overrides for slow deployments
-      ...(process.env["COLTRANE_CHAIR_TIMEOUT_MS"] ? { timeout_ms: Number(process.env["COLTRANE_CHAIR_TIMEOUT_MS"]) } : {}),
-      // The reserve grant (#329) had no reachable caller: it was built, tested, and set by nothing,
-      // so a chair that spent its budget still died silently at the cap. This is the operator-level
-      // door to it. Absent = no reserve, which is the prior behaviour exactly — an extension nobody
-      // asked for is spend nobody authorised. The DURABLE fix is a per-chair `turn_reserve` declared
-      // in the standard (PR #331), because a budget is a property of the work rather than of the
-      // player; this env is the deployment-level stopgap until that lands, not a substitute for it.
-      ...(process.env["COLTRANE_TURN_RESERVE"] ? { turn_reserve: Number(process.env["COLTRANE_TURN_RESERVE"]) } : {}),
+      claude: {
+        registry,
+        model: process.env["COLTRANE_MODEL"],
+        // #185 — per-agent grant resolution wires each agent's MCP servers into its spawn (coltrane's
+        // own server + any the deployment registers in .mcp.json). An unresolvable grant fails closed.
+        mcpServerConfigs,
+        toolProviders, // the genome→provider bridge (above) — makes in_house grants resolvable
+        // The production seal path: a model chair SEALS IN-BAND by calling output_write (validated at
+        // the full write boundary, corrected in-band), and the invoker captures what passed. The
+        // engine server config above is bridged into the spawn and its validate-mode env set, so the
+        // chair's output_write adjudicates-not-persists and the runtime seals exactly once.
+        sealVia: "output_write",
+        // per-chair wall-clock bound; COLTRANE_CHAIR_TIMEOUT_MS overrides for slow deployments
+        ...(process.env["COLTRANE_CHAIR_TIMEOUT_MS"] ? { timeout_ms: Number(process.env["COLTRANE_CHAIR_TIMEOUT_MS"]) } : {}),
+        // The reserve grant (#329) had no reachable caller: it was built, tested, and set by nothing,
+        // so a chair that spent its budget still died silently at the cap. This is the operator-level
+        // door to it. Absent = no reserve, which is the prior behaviour exactly — an extension nobody
+        // asked for is spend nobody authorised. The DURABLE fix is a per-chair `turn_reserve` declared
+        // in the standard (PR #331), because a budget is a property of the work rather than of the
+        // player; this env is the deployment-level stopgap until that lands, not a substitute for it.
+        ...(process.env["COLTRANE_TURN_RESERVE"] ? { turn_reserve: Number(process.env["COLTRANE_TURN_RESERVE"]) } : {}),
+      },
     }),
     model_version: process.env["COLTRANE_MODEL"] ?? "claude-cli-default",
     skills: genome.skills, // ← skill substrate — runGig resolves agent.skill_slugs into prompt

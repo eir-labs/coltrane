@@ -32,6 +32,18 @@ export interface ModuleTest {
   test: string;
 }
 
+/**
+ * One dynamic import whose target is not (yet) a file in the set: `test` imports `module`, which does
+ * not exist. The RED idiom imports a module before it is built, so refusing (as a static import does)
+ * would make this repo unindexable and dropping would make a law for a module-to-be invisible to the
+ * seat that builds it. Recorded instead — never refused, never dropped. `module` names the SOURCE
+ * path the specifier points at (`.js` mapped to `.ts`), even though nothing answers it yet.
+ */
+export interface PendingModule {
+  module: string;
+  test: string;
+}
+
 /** One entry point: `symbol` is an export of `module` that no other module imports. */
 export interface EntryPoint {
   module: string;
@@ -48,6 +60,8 @@ export interface RepositoryIndex {
   files_to_exports: Record<string, string[]>;
   file_importers: ImporterEdge[];
   module_tests: ModuleTest[];
+  /** Dynamic imports in test files whose target is not in the set — never refused, never dropped. */
+  pending_modules: PendingModule[];
   entry_points: EntryPoint[];
   conventions_observed: string[];
   boundary: string[];
@@ -115,13 +129,17 @@ function resolveModule(resolvedTarget: string, fileSet: ReadonlySet<string>): st
 }
 
 // -- structural parse of the fixed import/export grammar -----------------------------------------
-type ParsedImport = { spec: string; symbols: string[] };
+type ParsedImport = { spec: string; symbols: string[]; dynamic: boolean };
 
 /**
  * Extract the named-import bindings and their module specifier from a source text. Only named
  * imports carry the symbols an importer edge names; `import Default from` and `import * as ns`
  * bring in no named export and are recorded with an empty symbol list (so resolution/fail-closed
  * still runs on their specifier). Bare (non-relative) specifiers are left to the caller to skip.
+ *
+ * A literal dynamic `import("spec")` is ALSO returned (marked `dynamic`): it is an edge like a
+ * static import, but the caller never refuses it (see PendingModule). It carries no named binding —
+ * the caller destructures the RESULT — so its symbol list is empty.
  */
 function parseImports(content: string): ParsedImport[] {
   const out: ParsedImport[] = [];
@@ -140,8 +158,25 @@ function parseImports(content: string): ParsedImport[] {
         if (name && /^[A-Za-z_$][\w$]*$/.test(name)) symbols.push(name);
       }
     }
-    out.push({ spec, symbols });
+    out.push({ spec, symbols, dynamic: false });
   }
+  // Dynamic imports: `import("spec")` / `await import('spec')`. The static form requires whitespace
+  // after `import` and a `from` clause, so it never matches `import(`; no double-count.
+  const dyn = /import\s*\(\s*["']([^"']+)["']\s*\)/g;
+  let d: RegExpExecArray | null;
+  while ((d = dyn.exec(content)) !== null) {
+    out.push({ spec: d[1]!, symbols: [], dynamic: true });
+  }
+  return out;
+}
+
+/** Extract the `export * from "spec"` barrel re-export specifiers (the flattening form only; a
+ *  namespaced `export * as ns from` does not flatten names and is not a barrel for per-name use). */
+function parseStarReexports(content: string): string[] {
+  const out: string[] = [];
+  const re = /export\s*\*\s*from\s+["']([^"']+)["']/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(content)) !== null) out.push(m[1]!);
   return out;
 }
 
@@ -175,6 +210,7 @@ function parseExports(content: string): string[] {
 const isRelative = (spec: string): boolean => spec.startsWith("./") || spec.startsWith("../");
 const edgeKey = (e: ImporterEdge): string => `${e.from} ${e.to} ${e.symbol}`;
 const mtKey = (m: ModuleTest): string => `${m.module} ${m.test}`;
+const pmKey = (m: PendingModule): string => `${m.module} ${m.test}`;
 const epKey = (e: EntryPoint): string => `${e.module} ${e.symbol}`;
 
 /**
@@ -188,7 +224,8 @@ export function compileRepositoryIndex(
 ): RepositoryIndex {
   const fileSet = new Set(files.map((f) => f.path));
 
-  // Resolve a relative specifier or FAIL CLOSED -- every endpoint of every edge must be a real file.
+  // Resolve a relative STATIC specifier or FAIL CLOSED -- every endpoint of every static edge must
+  // be a real file. Dynamic imports do NOT go through this: they are never refused (see below).
   const resolveOrThrow = (fromPath: string, spec: string): string => {
     const target = resolveModule(resolveRelative(fromPath, spec), fileSet);
     if (target === undefined) {
@@ -199,25 +236,83 @@ export function compileRepositoryIndex(
     return target;
   };
 
+  // PRE-PASS over source files: their exports, and their `export * from` barrel graph. Built before
+  // the main loop so a test processed before its source can still resolve a barrel-imported name to
+  // the module that DEFINES it, whatever the file order (determinism, I5).
   const filesToExports: Record<string, string[]> = {};
+  const reExports: Record<string, string[]> = {}; // barrel module -> modules it re-exports (resolved)
+  for (const f of files) {
+    if (isTestFile(f.path)) continue;
+    filesToExports[f.path] = parseExports(f.content);
+    const stars = parseStarReexports(f.content).filter((spec) => isRelative(spec));
+    // An unresolvable `export * from` is a dangling STATIC re-export -- fail closed like any static.
+    if (stars.length > 0) reExports[f.path] = stars.map((spec) => resolveOrThrow(f.path, spec));
+  }
+
+  // The module(s) that DEFINE `symbol` among what `barrel` re-exports, transitively. Empty when
+  // `barrel` re-exports nothing (an ordinary module) or nothing it reaches defines the name.
+  const definersOf = (barrel: string, symbol: string, seen: Set<string>): string[] => {
+    const out: string[] = [];
+    for (const target of reExports[barrel] ?? []) {
+      if (seen.has(target)) continue;
+      seen.add(target);
+      if ((filesToExports[target] ?? []).includes(symbol)) out.push(target);
+      out.push(...definersOf(target, symbol, seen)); // a re-exported module may itself be a barrel
+    }
+    return out;
+  };
+
   const edges = new Map<string, ImporterEdge>();
   const moduleTests = new Map<string, ModuleTest>();
+  const pendingModules = new Map<string, PendingModule>();
   const jsExtImport = { seen: false };
   const colocatedTests = { seen: false };
+
+  // Record a test->module link. The barrel entry itself may stay; PER IMPORTED NAME, a barrel import
+  // ALSO links the test to the module that defines each name. Linking every barrel importer to every
+  // re-exported module would make all barrel importers neighbours of every module -- no index.
+  const recordModuleTest = (module: string, test: string, symbols: readonly string[]): void => {
+    const mt: ModuleTest = { module, test };
+    moduleTests.set(mtKey(mt), mt);
+    colocatedTests.seen = true;
+    for (const symbol of symbols) {
+      for (const definer of definersOf(module, symbol, new Set<string>())) {
+        const d: ModuleTest = { module: definer, test };
+        moduleTests.set(mtKey(d), d);
+      }
+    }
+  };
 
   for (const f of files) {
     const imports = parseImports(f.content);
     for (const imp of imports) {
       if (!isRelative(imp.spec)) continue; // external/bare specifier -- not an in-tree edge
       if (/\.[cm]?jsx?$/.test(imp.spec)) jsExtImport.seen = true;
+
+      if (imp.dynamic) {
+        // A dynamic import is an edge like a static one, but is NEVER refused: this repo's RED laws
+        // import modules before they exist. An unresolved target in a TEST is recorded as PENDING (a
+        // law for a module-to-be, kept visible to the seat that will build it), never dropped.
+        const target = resolveModule(resolveRelative(f.path, imp.spec), fileSet);
+        if (target === undefined) {
+          if (isTestFile(f.path)) {
+            const module = resolveRelative(f.path, imp.spec).replace(/\.[cm]?jsx?$/, "") + ".ts";
+            const pm: PendingModule = { module, test: f.path };
+            pendingModules.set(pmKey(pm), pm);
+          }
+          continue;
+        }
+        // A test's resolved dynamic import feeds the module-to-tests index; a source file's binds no
+        // named symbol, so it yields no importer edge.
+        if (isTestFile(f.path) && !isTestFile(target)) recordModuleTest(target, f.path, imp.symbols);
+        continue;
+      }
+
+      // A STATIC relative import: unresolvable still refuses, exactly as before.
       const target = resolveOrThrow(f.path, imp.spec);
       if (isTestFile(f.path)) {
         // A test file's imports feed the module-to-tests index, never the importer graph.
-        if (!isTestFile(target)) {
-          const mt: ModuleTest = { module: target, test: f.path };
-          moduleTests.set(mtKey(mt), mt);
-          colocatedTests.seen = true;
-        }
+        if (!isTestFile(target)) recordModuleTest(target, f.path, imp.symbols);
       } else {
         // A source file's named imports are importer edges -- one per named symbol.
         for (const symbol of imp.symbols) {
@@ -225,10 +320,6 @@ export function compileRepositoryIndex(
           edges.set(edgeKey(e), e);
         }
       }
-    }
-
-    if (!isTestFile(f.path)) {
-      filesToExports[f.path] = parseExports(f.content);
     }
   }
 
@@ -259,6 +350,7 @@ export function compileRepositoryIndex(
     files_to_exports: canonExports,
     file_importers: [...edges.values()].sort((a, b) => edgeKey(a).localeCompare(edgeKey(b))),
     module_tests: [...moduleTests.values()].sort((a, b) => mtKey(a).localeCompare(mtKey(b))),
+    pending_modules: [...pendingModules.values()].sort((a, b) => pmKey(a).localeCompare(pmKey(b))),
     entry_points: entryPoints.sort((a, b) => epKey(a).localeCompare(epKey(b))),
     conventions_observed: conventions.sort(),
     boundary: [...fileSet].sort(),

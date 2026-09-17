@@ -170,6 +170,25 @@ export function domainTypeDefect(def: {
   // loader) and the third (type_extend) pass it.
   required_fields?: readonly string[];
 }): string | null {
+  // THE REFUSAL SENTINEL IS RESERVED. The runtime reads `{ok:false, refusal, message}` back from an
+  // invoker as a REASON rather than an output — a chair declining is not a malformed seal. That
+  // sentinel is narrow (all three, with the two strings typed), and it was safe only because no
+  // domain type happened to declare the triple. "Currently unoccupied" is a coincidence with good
+  // manners, not a guarantee, and `{ok, refusal, message}` is a perfectly natural shape for a type
+  // that reports a domain-level refusal — so the next author would have taken it in good faith and
+  // discovered the collision as a chair that vanished instead of sealing.
+  //
+  // Reserving it here rather than trusting the coincidence: this runs at BOTH doors into the type
+  // table, and only the FULL triple is refused — `ok` + `message` is ordinary vocabulary and stays
+  // legal.
+  const props = (def.schema as { properties?: Record<string, unknown> } | undefined)?.properties;
+  if (props && "ok" in props && "refusal" in props && "message" in props) {
+    return (
+      `declares the reserved triple {ok, refusal, message} — the runtime reads that shape from an ` +
+      `invoker as a typed REFUSAL, so a type carrying all three could never seal. Rename one field.`
+    );
+  }
+
   // #272 — a domain type must not be NAMED after a core.
   //
   // `coreTypeOf` answers "what core is this really" by short-circuiting on CORE_TYPES before

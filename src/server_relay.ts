@@ -560,6 +560,30 @@ export async function runRelay(opts: { entryPath: string }): Promise<void> {
     forwardToChild(line, msg);
   });
 
+  // THE CLIENT LEFT — EOF on our stdin. When Claude Code closes its end of the pipe, this readline
+  // emits `close`. The relay used to listen for `line` and nothing else, so it kept running, and its
+  // live server child (open handles of its own) kept it running: a client that exits without killing
+  // the process tree orphaned a relay AND a server to pid 1. Found live 2026-09-17 — ~2,200 orphaned
+  // relay hosts, 11GB, most of them more than a day old. So EOF on the client pipe ENDS the relay, and
+  // takes the CURRENT child with it: SIGTERM, escalate to SIGKILL if it lingers, then exit.
+  parentIn.once("close", () => {
+    const dying = child;
+    const leave = (): void => process.exit(0);
+    if (dying.exitCode !== null || dying.signalCode !== null) return leave();
+    dying.once("exit", leave);
+    try {
+      dying.kill("SIGTERM");
+    } catch {
+      return leave();
+    }
+    setTimeout(() => {
+      if (dying.exitCode === null && dying.signalCode === null) {
+        try { dying.kill("SIGKILL"); } catch { /* already gone */ }
+      }
+      leave();
+    }, GRACEFUL_EXIT_TIMEOUT_MS).unref();
+  });
+
   // Keep the process alive while the child is up.
   await new Promise<void>(() => {
     /* never resolves; the relay runs forever */

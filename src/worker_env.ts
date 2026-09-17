@@ -21,8 +21,10 @@
 // from this table — so the table is a declaration the code is held to, not a comment. This file
 // therefore reads NO environment itself; its three functions take the environment as an argument.
 
-/** Which host a value addresses — or "none" when it names no host at all. */
-export type EnvHost = "service" | "store" | "none";
+/** Which host a value addresses — or "none" when it names no host at all. "model" is the
+ *  chat-completions endpoint: a third host, named as one, because the whole point of this table is
+ *  that one variable names one host and two hosts are two variables. */
+export type EnvHost = "service" | "store" | "model" | "none";
 /** What kind of thing it is. A url is the only role that MUST name a host. */
 export type EnvRole = "url" | "credential" | "identity" | "tuning";
 /** When a worker must have it. "venue"/"player" are the two credential modes (Gap 4). */
@@ -106,6 +108,44 @@ export const WORKER_ENV_CONTRACT: readonly WorkerEnvVar[] = [
     legacy_names: ["FLY_APP_NAME"],
   },
   {
+    name: "COLTRANE_COMPLETIONS_URL",
+    host: "model",
+    role: "url",
+    required: "never",
+    meaning:
+      "Base URL of an OpenAI-compatible chat-completions endpoint. Its PRESENCE selects the cheap model port for a run; absent, the host-tool invoker runs as before. Names a model endpoint — never the store and never the service.",
+  },
+  {
+    name: "COLTRANE_COMPLETIONS_KEY",
+    host: "none",
+    role: "credential",
+    required: "conditional",
+    meaning:
+      "Bearer credential for the chat-completions endpoint; required only when COLTRANE_COMPLETIONS_URL is set.",
+  },
+  {
+    name: "COLTRANE_TIER_ECONOMY",
+    host: "none",
+    role: "tuning",
+    required: "never",
+    meaning:
+      "The concrete model id the economy tier resolves to on the completions port. Deployment-defined: the engine hardcodes no model names, because a standard says what the work IS and the executor is fungible.",
+  },
+  {
+    name: "COLTRANE_TIER_STANDARD",
+    host: "none",
+    role: "tuning",
+    required: "never",
+    meaning: "The concrete model id the standard tier resolves to on the completions port.",
+  },
+  {
+    name: "COLTRANE_TIER_PREMIUM",
+    host: "none",
+    role: "tuning",
+    required: "never",
+    meaning: "The concrete model id the premium tier resolves to on the completions port.",
+  },
+  {
     name: "COLTRANE_DRAIN_PG",
     host: "none",
     role: "credential",
@@ -128,6 +168,14 @@ export const WORKER_ENV_CONTRACT: readonly WorkerEnvVar[] = [
     required: "never",
     meaning:
       "Milliseconds the drain waits for a gig's opening header before proceeding; tunes drain startup latency.",
+  },
+  {
+    name: "COLTRANE_DRAIN_MAX_USD",
+    host: "none",
+    role: "tuning",
+    required: "never",
+    meaning:
+      "The per-gig budget ceiling a drained gig runs under, in US dollars (USD). A positive finite number caps settled spend for each gig; absent means no ceiling; anything else refuses drain startup.",
   },
   {
     name: "COLTRANE_MIRROR_DIR",

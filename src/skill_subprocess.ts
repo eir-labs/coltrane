@@ -223,7 +223,7 @@ export async function executeSkillAsync(
   skillDir: string,
   input: unknown,
   timeoutMs = 120_000,
-  opts: { signal?: AbortSignal | undefined; tierOverride?: number | undefined } = {},
+  opts: { signal?: AbortSignal | undefined; tierOverride?: number | undefined; cwd?: string | undefined } = {},
 ): Promise<ExecuteResult> {
   const started = Date.now();
   const abortResult = (): ExecuteResult => ({
@@ -244,8 +244,13 @@ export async function executeSkillAsync(
   return await new Promise<ExecuteResult>((resolve) => {
     assertSandboxCapableRuntime();
     const dir = realDir(skillDir);
+    // contract-skill-chair-runs-in-tree-v1 (O1/I1/I2) — when the caller names a working directory
+    // (the runtime forwards RunDeps.tree_root), spawn the child there so the skill's code half runs
+    // in the gig's tree, not the long-lived engine process's own directory. Absent a cwd the spawn
+    // is unchanged: the child inherits the parent's working directory, exactly as before (I2).
     const child = spawn("node", [...tierFlags(tier, dir), runnerPath(), dir], {
       stdio: ["pipe", "pipe", "pipe"], env: skillEnv(),
+      ...(opts.cwd !== undefined ? { cwd: opts.cwd } : {}),
     });
     // Mirror executeSkill's `maxBuffer: 64 MB`. Accumulating without a cap was a regression
     // against the function this replaces: tier 0 grants --allow-fs-read=*, so "print a large

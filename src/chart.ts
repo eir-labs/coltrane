@@ -990,6 +990,10 @@ export async function runChart(
     const priorMovementCp = deps.checkpoints?.read(movementGig);
     const resumeMovement = deps.resume_from !== undefined && (degenerate || priorMovementCp !== undefined);
     const movementDeps: RunDeps = {
+      // `...deps` forwards the parent run-deps to the movement, which is how the address-stamping tree
+      // (records-by-address, `tree_root`) reaches each movement: a movement stamps its sealed
+      // laws/changes against the SAME repository root the performance was dispatched with, never a
+      // per-movement default. Overridden below only for the fields a movement legitimately owns.
       ...deps,
       gig_id: movementGig,
       resume_from: resumeMovement ? movementGig : undefined,

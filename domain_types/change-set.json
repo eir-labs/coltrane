@@ -1,32 +1,12 @@
 {
   "slug": "change-set",
-  "version": 1,
+  "version": 3,
   "extends": "Artifact",
   "domain": "software-change",
   "status": "active",
-  "description": "The change itself, carried as content rather than applied — the seat that produces it holds a read-only grant, so the artefact is reviewable before anything mutates. departures is separate from rationale on purpose: a change that diverged from its plan and amended the record is honest, and a change that diverged silently is not distinguishable from one that did not.",
   "schema": {
     "type": "object",
     "properties": {
-      "diffs": {
-        "type": "array",
-        "description": "Per-path patch content, in unified-diff form.",
-        "items": {
-          "type": "object",
-          "properties": {
-            "path": {
-              "type": "string"
-            },
-            "patch": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "path",
-            "patch"
-          ]
-        }
-      },
       "tests_added": {
         "type": "array",
         "items": {
@@ -63,13 +43,44 @@
             "why"
           ]
         }
+      },
+      "changes": {
+        "type": "array",
+        "description": "The changed files, BY ADDRESS (contract-records-by-address-v1). A seat supplies {path, base}: the file and the commit its change is measured from. The ENGINE stamps, at seal, from RunDeps.tree_root: blob_sha (git hash-object of the file, or the literal \"deleted\"), patch_sha256 (sha256 of `git diff <base> -- <path>`) and bytes (that diff's length). A consumer reads the change with `git diff <base> -- <path>` and checks it against patch_sha256. No patch body is ever model output.",
+        "items": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string"
+            },
+            "base": {
+              "type": "string"
+            },
+            "blob_sha": {
+              "type": "string",
+              "description": "engine-stamped at seal"
+            },
+            "patch_sha256": {
+              "type": "string",
+              "description": "engine-stamped at seal"
+            },
+            "bytes": {
+              "type": "number",
+              "description": "engine-stamped at seal"
+            }
+          },
+          "required": [
+            "path",
+            "base"
+          ]
+        }
       }
     }
   },
   "required_fields": [
     "validation_criteria",
     "input_refs",
-    "diffs",
+    "changes",
     "rationale"
   ]
 }

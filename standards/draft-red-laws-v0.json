@@ -1,0 +1,68 @@
+{
+  "slug": "draft-red-laws-v0",
+  "domain": "spec-drafting",
+  "agent_slugs": [
+    "red-spec-drafter",
+    "red-law-reviewer"
+  ],
+  "phases": [
+    {
+      "name": "draft-laws",
+      "chairs": [
+        {
+          "role": "draft-laws",
+          "agent_slug": "red-spec-drafter",
+          "depends_on": [],
+          "input_contract": [
+            "subsystem-contract"
+          ],
+          "output_contract": [
+            "red-spec"
+          ],
+          "required_skills": [],
+          "turn_reserve": 16,
+          "prime": {
+            "area": "coltrane-engine"
+          },
+          "fork_from": {
+            "primer": "coltrane-engine",
+            "max_context_tokens": 150000
+          }
+        }
+      ]
+    },
+    {
+      "name": "review-laws",
+      "chairs": [
+        {
+          "role": "review-laws",
+          "agent_slug": "red-law-reviewer",
+          "depends_on": [
+            "draft-laws"
+          ],
+          "input_contract": [
+            "subsystem-contract",
+            "red-spec"
+          ],
+          "output_contract": [
+            "change-verdict"
+          ],
+          "required_skills": [],
+          "turn_reserve": 8
+        }
+      ]
+    }
+  ],
+  "status": "draft",
+  "input_types": [
+    "subsystem-contract",
+    "change-request"
+  ],
+  "output_types": [
+    "red-spec",
+    "change-verdict"
+  ],
+  "max_examine_rounds": 2,
+  "description": "Draft RED laws for a contract the operator has ALREADY decided, and have them reviewed by a seat that runs them, without publishing anything. The entry types are a subsystem-contract (obligations, invariants with how each is checkable, failure modes) and a change-request naming the existing law files the contract supersedes. Draft: red-spec-drafter writes a real test for every invariant and failure mode into tests/** and the argued half into docs/specs/**, rewrites the superseded laws, runs them, watches them fail, and seals a red-spec from `git diff --cached`. Review: red-law-reviewer RUNS every law and reads every file. It fails the verdict on an uncovered item, a skipped path the request asked for, a patch that does not match the staged tree, a law that is not observed red for the contract's reason, a test that could never fail, or a removed out-of-concern law. A failing review goes back to the drafter, up to max_examine_rounds. It does not publish: the operator commits the laws and adjusts the pinned law counts, then builds them with build-from-red-spec-v0. v0 first seated spec-reviewer, which holds no tools and so could never observe redness (gig 6ed46423); this composition replaces it.",
+  "reserve_pool": 30
+}

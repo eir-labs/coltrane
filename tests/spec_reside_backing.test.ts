@@ -233,3 +233,104 @@ describe("the local file backing is a real seat, not a stub", () => {
     expect(await seat.claim("any"), "two boxes both hold the same local seat").toBe(null);
   });
 });
+
+describe("the seam a deployment MUST implement is reachable from outside", () => {
+  // FILED BY THE WI-2 SEAT after building against it: the engine defines SeatBacking in
+  // dist/src/reside_backing.d.ts, the root index re-exports nothing from the reside path, and the
+  // exports map publishes no subpath — so a deployment cannot import the interface it is required
+  // to implement. It had to hand-copy the shape.
+  //
+  // THE RATCHET COULD NOT SEE THIS, and the reason is worth keeping. exported_symbols_are_reachable
+  // asks whether a symbol is called from somewhere INSIDE src/ or named on a public entrypoint.
+  // `resolveSeatBacking` is called by reside.ts, so it passes — while remaining unreachable to the
+  // one audience that has to satisfy it. Reachable-within and importable-from-outside are different
+  // properties; only the first had a law. Same shape as lossless-vs-legal, one boundary out.
+  it("the public entrypoint carries the backing seam", () => {
+    const index = readFileSync(join(SRC, "index.ts"), "utf8");
+    expect(index, "src/index.ts re-exports nothing from the reside path").toMatch(
+      /export \* from "\.\/reside(_backing)?\.js"/,
+    );
+  });
+
+  it("the members a hand-built backing must supply are namable by a consumer", async () => {
+    // The positive: not "the file exists" but "the names a deployment codes against are exported".
+    const mod = (await import("../src/index.js")) as Record<string, unknown>;
+    expect(mod["SEAT_MEMBERS"], "a deployment cannot enumerate what it must implement").toBeDefined();
+    expect(mod["resolveSeatBacking"]).toBeTypeOf("function");
+    expect(mod["selectResidencyBacking"]).toBeTypeOf("function");
+  });
+});
+
+describe("a hand-built backing may be async — the factory is awaited", () => {
+  // ALSO FILED BY THE WI-2 SEAT, from a box that would have refused at boot. resolveSeatBacking
+  // called `mod.residencyBacking()` without awaiting it, so an async factory — the obvious way to
+  // write one, since a backing opens connections — yielded a Promise, and the shape check then
+  // reported `no_backend at seam claim: the hand-built backing has no claim()`.
+  //
+  // The refusal was well-formed, typed, named a seam, and was WRONG: the backing had a claim, and
+  // the engine could not see it through the promise. A precise refusal about the wrong thing is
+  // worse than a vague one, because it sends the reader to the wrong file.
+  it("an async residencyBacking() resolves rather than refusing", async () => {
+    const R: ResideModule = await loadReside();
+    const whole = {
+      claim: async () => null,
+      heartbeat: async () => {},
+      release: async () => {},
+      cursorAdvance: async () => 0,
+    };
+    const res = await R.resolveSeatBacking(
+      { backing: "module", spec: "inline" },
+      { module: Promise.resolve(whole) as never },
+    );
+    expect(res.ok, "an async backing was refused for being a promise").toBe(true);
+  });
+
+  it("a partial async backing is still refused BY NAME — awaiting does not weaken the check", async () => {
+    const R: ResideModule = await loadReside();
+    const res = await R.resolveSeatBacking(
+      { backing: "module", spec: "inline" },
+      { module: Promise.resolve({ claim: async () => null }) as never },
+    );
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.seam).toMatch(/heartbeat|release|cursorAdvance/);
+  });
+});
+
+describe("THE CONSUMER PATH — stand where a deployment stands", () => {
+  // THE TEST I SHOULD HAVE WRITTEN FIRST. Two defects were filed against this seam by the first
+  // seat that built on it — the interface was not importable, and an async factory (the natural way
+  // to write one, since a backing opens connections) refused at boot naming the wrong seam. Both
+  // were invisible from inside: every law here imported from relative paths and passed objects in
+  // directly, so nothing ever stood where a deployment stands.
+  //
+  // A seam's audience is not this repo. Testing it only from inside is the same substitution as a
+  // law that proves a mechanism works without asking whether anything reaches it — which is the
+  // defect this whole branch exists to close, committed against my own deliverable.
+  it("a deployment can import, implement and run the seam from the package root alone", async () => {
+    const pkg = (await import("../src/index.js")) as Record<string, unknown>;
+
+    // 1. Everything a deployment must NAME is on the root export.
+    for (const sym of [
+      "SEAT_MEMBERS", "resolveSeatBacking", "selectResidencyBacking", "fileSeatBacking",
+      "createResidency", "RESIDE_REFUSALS", "RESIDENCY_DIR_VAR", "RESIDENCY_MODULE_VAR",
+    ]) {
+      expect(pkg[sym], `a deployment cannot reach "${sym}" from the package root`).toBeDefined();
+    }
+
+    // 2. A hand-built backing written the natural way — async factory, async members — resolves.
+    const resolve = pkg["resolveSeatBacking"] as (c: unknown, i: unknown) => Promise<{ ok: boolean; seat?: unknown; refusal?: string; seam?: string }>;
+    const factory = async () => ({
+      claim: async () => null, heartbeat: async () => {}, release: async () => {}, cursorAdvance: async () => 0,
+    });
+    const seat = await resolve({ backing: "module", spec: "inline" }, { module: factory() });
+    expect(seat.ok, `an async hand-built backing was refused: ${seat.refusal} at ${seat.seam}`).toBe(true);
+
+    // 3. And the loop it would construct refuses for a REASON THAT NAMES THE NEXT MISSING SEAM —
+    //    not for the seat it just supplied. A refusal pointing at the wrong file is worse than a
+    //    vague one, because it sends the reader somewhere there is nothing to find.
+    const create = pkg["createResidency"] as (o: unknown, d: unknown) => { boot: () => Promise<{ ok: boolean; seam?: string }> };
+    const booted = await create({ residency: "any" }, { ...(seat.seat as object) }).boot();
+    expect(booted.ok).toBe(false);
+    expect(booted.seam, "the refusal blamed a seam the deployment had already supplied").toBe("channelListener");
+  });
+});

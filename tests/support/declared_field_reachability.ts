@@ -521,5 +521,12 @@ export const PINNED_UNREAD_ENGINE_FIELDS = 23;
  * a count of defects. The honest test for a contract field is whether any SEALED OUTPUT ever carries
  * it — runtime evidence this static sweep cannot see. That check is worth building; this one is not
  * a substitute for it.
+ *
+ * 125 -> 120 on 2026-09-16, measured by running the analyzer with and without the new genome files:
+ * red-spec-attester, red-spec-builder and build-from-red-spec-v0 name criteria_unmet, departures,
+ * failures_verbatim, request_text and target_paths. No field became unread.
+ *
+ * 120 -> 119 on 2026-09-17, measured the same way: red-law-reviewer names inferred_not_run (a
+ * change-verdict field it must fill with what it could not execute). No field became unread.
  */
-export const PINNED_UNREAD_CONTRACT_FIELDS = 125;
+export const PINNED_UNREAD_CONTRACT_FIELDS = 119;

@@ -1169,6 +1169,12 @@ export async function workOnce(ctx: WorkerContext, deps: WorkOnceDeps): Promise<
         venues: genome.venues,
         venueRealizer: deps.venueRealizer,
         repoUrl: claim.venue ? workingRepo : undefined,
+        // The address-stamping tree (records-by-address): the drain's OWN working clone, the tree its
+        // chairs edited and the one `git diff`/`git rev-parse` must read to stamp a sealed change-set's
+        // `changes` or red-spec's `laws`. Never process.cwd(): when the Booker did not clone (a
+        // venue-populated room, or a claim naming no repository) there is no tree here, so tree_root is
+        // undefined and a laws/changes seal refuses `tree_root_unknown` rather than stamping the wrong tree.
+        tree_root: workspace?.dir,
       }),
       gig_id: claim.gig_id, // ← the run IS the queue row; the drained header completes it
       signal: aborter.signal,

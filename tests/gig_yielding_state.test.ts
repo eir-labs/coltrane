@@ -83,9 +83,12 @@ const runYieldingGig = async (opts: { draws: boolean; land: boolean }): Promise<
   try {
     const res = await runGig(standard, {}, {
       outputs: createOutputStore(registry), ledger: new MemoryLedger(), invoke,
-      budget: { opening: 1_000_000, pool: 20 } as unknown as import("../src").BudgetInput,
-      onProgress: (ev) => progress.push(ev),
-    });
+      // O6/I9 — the reserve pool opens from RunDeps.turn_pool with NO money budget. Cast because
+      // RunDeps does not name turn_pool until the enforcement lands — RED today: without a money
+      // budget there is no BudgetState, so no chair draws and the gig never reaches 'yielding'.
+      turn_pool: 20,
+      onProgress: (ev: GigProgressEvent) => progress.push(ev),
+    } as unknown as import("../src").RunDeps);
     return { progress, budget_state: res.budget_state as unknown as Record<string, unknown> | undefined, error: undefined };
   } catch (e) {
     return { progress, budget_state: partialBudgetState(e) as unknown as Record<string, unknown> | undefined, error: e };

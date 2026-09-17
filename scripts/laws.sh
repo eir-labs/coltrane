@@ -25,13 +25,13 @@ cd "$(dirname "$0")/.."
 
 # THE ROOT BAND — `npm test`, the one the verifier measured and the one carrying almost
 # every law in this repo.
-EXPECTED_LAWS="${EXPECTED_LAWS:-3584}"   # 3562 passing + 22 todo
-#   +1  mcp_tools_describe law 7 — a description that backticks an argument names one the verb's
-#       own input_schema declares. The prose sits beside a GENERATED schema: the schema moves with
-#       the handler, the description does not. Its first draft could not fail — it forgave any
+EXPECTED_LAWS="${EXPECTED_LAWS:-3873}"   # includes 22 todo
+#   +1  mcp_tools_describe law 7 (#535) — a description that backticks an argument names one the
+#       verb's own input_schema declares. The prose sits beside a GENERATED schema: the schema moves
+#       with the handler, the description does not. Its first draft could not fail — it forgave any
 #       token no tool anywhere declared, which is exactly what a renamed argument leaves behind.
 #       Sabotage said so (`current` -> `slug_current` stayed green); the exemption is gone.
-EXPECTED_FILES="${EXPECTED_FILES:-354}"
+EXPECTED_FILES="${EXPECTED_FILES:-404}"
 
 # THE OTHER BANDS. `vitest run` is ROOT-CONFIG ONLY — this repo's own workflow comments
 # record that four configs went unexecuted once for exactly that reason. So pinning only the

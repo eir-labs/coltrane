@@ -32,7 +32,7 @@ import { runReside } from "./reside.js";
 import { openLocalQueue, selectQueueBacking, LOCAL_QUEUE_DIR_VAR } from "./local_queue.js";
 import { workerCredentialMode } from "./worker_env.js";
 import { drainPreflight } from "./drain_preflight.js";
-import { makeClaudeInvoker } from "./claude_invoker.js";
+import { selectChairInvoker } from "./invoker_selection.js";
 import { dockerComposeRealizer } from "./venue_realizer.js";
 import { readFileSync } from "node:fs";
 
@@ -91,6 +91,8 @@ export const USAGE = `coltrane ${COLTRANE_VERSION}
 Options
   --input <json|@file|->                dispatch payload; @file reads a file, - reads stdin
   --depth <skim|standard|deep>          tighten the per-chair turn cap
+  --effort <low|medium|high|xhigh|max>  the reasoning effort the seat runs at
+  --max-context-tokens <n>              per-round context ceiling for a chat-completions seat
   --budget <dollars>                    per-gig ceiling; the run stops when it is gone
   --reuse                               allow chair-level reuse of prior sealed outputs
   --resume <gig-id>                     continue a gig that died mid-pipeline
@@ -331,11 +333,23 @@ export async function runCli(argv: readonly string[], io: CliIO): Promise<number
         ...(typeof flags["worker"] === "string" ? { worker: flags["worker"] } : {}),
       },
       {
+        // WHICH PORT RUNS THE CHAIRS is selected from environment PRESENCE, the same policy shape
+        // selectQueueBacking and selectResidencyBacking already use: a completions URL means the
+        // cheap model port, its absence means the host-tool invoker, and nothing is guessed. The one
+        // selector (src/invoker_selection.ts) is shared with the dispatch door so the drain and
+        // dispatch cannot drift on the choice. The tier→model map is deployment-defined — the engine
+        // names no model, because a standard says what the work IS and the executor is fungible; a
+        // tier the deployment did not map is a typed refusal at the chair, not a silent default. On
+        // the host-tool path the drain passes ITS OWN options (registry, model and timeout only),
+        // unchanged.
         makeInvoke: (registry) =>
-          makeClaudeInvoker({
+          selectChairInvoker(process.env, {
             registry,
-            model: process.env["COLTRANE_MODEL"],
-            ...(process.env["COLTRANE_CHAIR_TIMEOUT_MS"] ? { timeout_ms: Number(process.env["COLTRANE_CHAIR_TIMEOUT_MS"]) } : {}),
+            claude: {
+              registry,
+              model: process.env["COLTRANE_MODEL"],
+              ...(process.env["COLTRANE_CHAIR_TIMEOUT_MS"] ? { timeout_ms: Number(process.env["COLTRANE_CHAIR_TIMEOUT_MS"]) } : {}),
+            },
           }),
         // The SAME realizer the interactive path constructs at src/server.ts:3486 — one bootstrap,
         // so the drain and the server cannot drift on which substrate a venue-named room is stood up
@@ -463,6 +477,13 @@ export async function runCli(argv: readonly string[], io: CliIO): Promise<number
 
       const args: Record<string, unknown> = { standard_slug: standard, input: input.value };
       if (typeof flags["depth"] === "string") args["depth"] = flags["depth"];
+      // #seat-effort (O1) — forward --effort so the dispatched effort reaches the invocation as
+      // ctx.effort. An out-of-range value is refused by the gig_dispatch door (readEffort), not here.
+      if (typeof flags["effort"] === "string") args["effort"] = flags["effort"];
+      // contract-seat-context-ceiling-v1 (O1) — forward --max-context-tokens so the dispatched ceiling
+      // reaches the invocation as ctx.max_context_tokens. A non-positive-integer is refused by the
+      // gig_dispatch door (server.ts), not here; forwarding as a number lets that door validate it.
+      if (typeof flags["max-context-tokens"] === "string") args["max_context_tokens"] = Number(flags["max-context-tokens"]);
       if (typeof flags["resume"] === "string") args["resume_gig_id"] = flags["resume"];
       // #20 — --input NOT supplied (the readInput(undefined) path above yields {}, which is
       // indistinguishable from an explicit `--input {}`). Signal the omission so an approve-only
@@ -475,13 +496,36 @@ export async function runCli(argv: readonly string[], io: CliIO): Promise<number
       if (approvals.value) args["approvals"] = approvals.value;
       if (typeof flags["as"] === "string") args["approved_by"] = flags["as"];
       if (typeof flags["budget"] === "string") {
-        const opening = Number(flags["budget"]);
-        if (!Number.isFinite(opening) || opening <= 0) { line(io, `--budget must be a positive number`); return 2; }
-        args["budget"] = { opening };
+        const max_usd = Number(flags["budget"]);
+        if (!Number.isFinite(max_usd) || max_usd <= 0) { line(io, `--budget must be a positive number of dollars`); return 2; }
+        args["budget"] = { max_usd };
       }
 
+      // contract-spend-survives-v1 (O3) — the pre-dispatch high-water mark of durable chair_spend
+      // rows. A failed gig writes no gig row, but each settled chair left a chair_spend row (O1/O2),
+      // so the rows THIS dispatch added are those past this mark — which scopes the captured total to
+      // this run even on a shared, persistent ledger. (The gig id is minted inside gig_dispatch and
+      // is not returned on a chair-failure, so the mark, not a gig_id filter, is what isolates it.)
+      const chairSpendMark = deps.ledger.query({ kind: "chair_spend" }).length;
       const r = await call("gig_dispatch", args);
-      if (!r.ok) { line(io, `dispatch failed: ${r.error ?? "unknown error"}`); return 1; }
+      if (!r.ok) {
+        line(io, `dispatch failed: ${r.error ?? "unknown error"}`);
+        // Report what the FAILURE cost. Every chair that settled before the gig died left a durable
+        // chair_spend row; sum the captured ones in dollars and name how many invocations settled.
+        // When nothing was captured, SAY so — never "$0.00", the #235 lie that reads as "ran free".
+        const settledRows = deps.ledger.query({ kind: "chair_spend" }).slice(chairSpendMark);
+        const capturedRows = settledRows.filter((row) => (row as { captured?: boolean }).captured === true);
+        if (capturedRows.length > 0) {
+          const total = capturedRows.reduce(
+            (n, row) => n + ((row as { usage?: { total_cost_usd?: number } }).usage?.total_cost_usd ?? 0),
+            0,
+          );
+          line(io, `  captured spend: $${total.toFixed(2)} across ${settledRows.length} chair invocation(s) that settled`);
+        } else {
+          line(io, `  captured spend: not captured — no chair invocation settled a usage report before the failure`);
+        }
+        return 1;
+      }
       const d = r.data as {
         gig_id: string; status?: string; awaiting?: { phase: string; role: string };
         warnings?: string[]; manifest?: Record<string, unknown>;

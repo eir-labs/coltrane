@@ -36,7 +36,14 @@ const TESTS = join(process.cwd(), "tests");
 // unreachable while being fully importable by a consumer — so the ratchet sat three times looser
 // than the truth and would have absorbed a real orphan without noticing. Lowered per this file's
 // own instruction ("If it SHRANK, lower PINNED_ORPHANS").
-const PINNED_ORPHANS = 19;
+// 19 -> 20 on 2026-09-17, the same correction in the other direction, and the only kind of raise this
+// pin admits: no mechanism was added. compileRepositoryIndex (src/repo_index.ts) has had no src caller
+// since it landed, but its only law reached it through a computed `await import(href)`, which this
+// ratchet cannot see, so it did not count as tested. tests/spec_law_neighbourhood.test.ts imports it
+// statically and the existing orphan became visible. Wiring it (slice 4 of the seat-briefing plan,
+// the law-neighbourhood brief) must lower this back to 19. A raise that names no pre-existing orphan
+// made visible is a new mechanism without a caller and is refused.
+const PINNED_ORPHANS = 20;
 
 function readAll(dir: string, out: string[] = []): string[] {
   for (const e of readdirSync(dir, { withFileTypes: true })) {

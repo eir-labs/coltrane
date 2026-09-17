@@ -1,0 +1,61 @@
+{
+  "slug": "seat-primer",
+  "version": 1,
+  "extends": "Signal",
+  "domain": "engine",
+  "status": "active",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "agent_slug": {
+        "type": "string",
+        "description": "the agent whose seat read the area; a primer is forked only by chairs of this agent"
+      },
+      "area": {
+        "type": "string",
+        "description": "lowercase-hyphen area slug the primer covers"
+      },
+      "session_id": {
+        "type": "string",
+        "description": "the priming chair's (gig_id, role) session uuid; a fork resumes it with --fork-session"
+      },
+      "commit": {
+        "type": "string",
+        "description": "HEAD at seal"
+      },
+      "files": {
+        "type": "array",
+        "description": "every file the seat read (and, for a rolling primer, the forked primer's files), each with its git blob at seal; a changed blob is named to the fork as stale",
+        "items": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string"
+            },
+            "blob_sha": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "path",
+            "blob_sha"
+          ]
+        }
+      },
+      "context_tokens": {
+        "type": "number",
+        "description": "input + cache_read + cache_creation of the seat's last usage before sealing; compared with fork_from.max_context_tokens"
+      },
+      "source": {
+        "type": "string"
+      }
+    }
+  },
+  "required_fields": [
+    "agent_slug",
+    "area",
+    "session_id",
+    "commit",
+    "files"
+  ]
+}

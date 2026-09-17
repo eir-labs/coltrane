@@ -113,7 +113,11 @@ function missingMember(candidate: Partial<SeatBacking> | undefined): string | nu
  */
 export async function resolveSeatBacking(
   choice: ResidencyBackingChoice,
-  injected: { hosted?: Partial<SeatBacking>; module?: Partial<SeatBacking> } = {},
+  injected: {
+    hosted?: Partial<SeatBacking> | undefined;
+    /** May be a promise: a backing that opens connections is naturally async. */
+    module?: Partial<SeatBacking> | Promise<Partial<SeatBacking>> | undefined;
+  } = {},
 ): Promise<SeatResolution> {
   if (choice.backing === "conflict") {
     return { ok: false, refusal: "backing_conflict", seam: "backing", message: choice.why };
@@ -127,11 +131,20 @@ export async function resolveSeatBacking(
   }
 
   if (choice.backing === "module") {
-    let candidate = injected.module;
+    // AWAITED, because a backing OPENS THINGS. A factory that dials a store or reads a keyring is
+    // naturally async, and calling it without awaiting yielded a Promise whose shape check then
+    // reported `no_backend at seam claim — the hand-built backing has no claim()`. That refusal was
+    // typed, named a seam, and was WRONG: the backing had a claim and the engine could not see it
+    // through the promise. A precise refusal about the wrong thing is worse than a vague one,
+    // because it sends the reader to the wrong file. Found by the seat that had to build against it.
+    let candidate = await injected.module;
     if (!candidate) {
       try {
-        const mod = (await import(choice.spec)) as { residencyBacking?: () => Partial<SeatBacking>; default?: Partial<SeatBacking> };
-        candidate = typeof mod.residencyBacking === "function" ? mod.residencyBacking() : mod.default;
+        const mod = (await import(choice.spec)) as {
+          residencyBacking?: () => Partial<SeatBacking> | Promise<Partial<SeatBacking>>;
+          default?: Partial<SeatBacking> | Promise<Partial<SeatBacking>>;
+        };
+        candidate = await (typeof mod.residencyBacking === "function" ? mod.residencyBacking() : mod.default);
       } catch (e) {
         return {
           ok: false,

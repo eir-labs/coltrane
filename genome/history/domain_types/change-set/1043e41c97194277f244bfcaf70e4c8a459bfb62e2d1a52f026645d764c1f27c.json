@@ -1,0 +1,105 @@
+{
+  "slug": "change-set",
+  "version": 2,
+  "extends": "Artifact",
+  "domain": "software-change",
+  "status": "active",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "diffs": {
+        "type": "array",
+        "description": "Per-path patch content, in unified-diff form.",
+        "items": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string"
+            },
+            "patch": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "path",
+            "patch"
+          ]
+        }
+      },
+      "tests_added": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Checks introduced by this change, named so a verifier can run exactly them."
+      },
+      "rationale": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "The non-obvious choices this change makes, each with the reason it was made."
+      },
+      "departures": {
+        "type": "array",
+        "description": "Where the artefact left the plan, and why.",
+        "items": {
+          "type": "object",
+          "properties": {
+            "from_step": {
+              "type": "string"
+            },
+            "instead": {
+              "type": "string"
+            },
+            "why": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "from_step",
+            "instead",
+            "why"
+          ]
+        }
+      },
+      "changes": {
+        "type": "array",
+        "description": "The changed files, BY ADDRESS (contract-records-by-address-v1). A seat supplies {path, base}: the file and the commit its change is measured from. The ENGINE stamps, at seal, from RunDeps.tree_root: blob_sha (git hash-object of the file, or the literal \"deleted\"), patch_sha256 (sha256 of `git diff <base> -- <path>`) and bytes (that diff's length). A consumer reads the change with `git diff <base> -- <path>` and checks it against patch_sha256. No patch body is ever model output.",
+        "items": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string"
+            },
+            "base": {
+              "type": "string"
+            },
+            "blob_sha": {
+              "type": "string",
+              "description": "engine-stamped at seal"
+            },
+            "patch_sha256": {
+              "type": "string",
+              "description": "engine-stamped at seal"
+            },
+            "bytes": {
+              "type": "number",
+              "description": "engine-stamped at seal"
+            }
+          },
+          "required": [
+            "path",
+            "base"
+          ]
+        }
+      }
+    }
+  },
+  "required_fields": [
+    "validation_criteria",
+    "input_refs",
+    "changes",
+    "rationale"
+  ]
+}

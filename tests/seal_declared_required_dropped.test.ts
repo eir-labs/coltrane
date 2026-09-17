@@ -285,8 +285,12 @@ describe("#227 — the genome's declared required fields are dropped, not absent
     // and the adjudicated record of a work order's reconciliation (WO-F02's owed mechanism).
     // All 3 declare their required fields in `required_fields`, so they join `checked` and
     // none appears in the `lossy` census.
+    // 69 → 70: `seat-primer` (extends Signal) — the engine-sealed primer a build seat leaves behind
+    // (contract-seat-primer-v1, contract-rolling-seat-primer-v1): agent, area, session, commit and the
+    // blobs it read, forked warm by the next build. It declares its required fields (agent_slug, area,
+    // session_id, commit, files), so it joins `checked` and does not appear in the `lossy` census.
     expect(checked).toHaveLength(genome.domain_types.size);
-    expect(checked.length).toBe(69);
+    expect(checked.length).toBe(70);
   });
 });
 

@@ -174,6 +174,15 @@ export type GigProgressEvent =
       /** types actually SEALED */
       output_types: string[];
       duration_ms: number;
+      /**
+       * #seat-metrics — the ms from chair start to the FIRST write the chair's child emitted (a
+       * tool_use whose tool is Write/Edit/MultiEdit/NotebookEdit), and the context the seat carried
+       * then (input + cache_read + cache_creation of the last assistant usage BEFORE that write).
+       * A chair that never wrote records BOTH as null — present, never absent, never a stand-in 0,
+       * so "wrote at t=0" and "never wrote / never measured" cannot collide.
+       */
+      first_write_ms: number | null;
+      context_tokens_at_first_write: number | null;
       /** #243 — types the chair's output_contract PROMISED. Equal to output_types when the
        *  chair delivered everything; the difference is what `missing_output_types` names. */
       promised_output_types?: string[];
@@ -1996,6 +2005,8 @@ export async function runGig(
         emit({
           type: "chair_complete", phase: phase.name, role: hc.role, producer: deps.approved_by ?? "human",
           output_types: [domain_type], duration_ms: Date.now() - t0,
+          // A human seat forwards no agent write events, so there is nothing to measure: null, not 0.
+          first_write_ms: null, context_tokens_at_first_write: null,
         });
         // A sealed lineage-verdict either grounds an institution or does not. Decide it here,
         // where the verdict and the record it approved are both in hand, and report the answer
@@ -2157,8 +2168,14 @@ export async function runGig(
       const allChairs = standard.phases.flatMap((p) => p.chairs);
       const phaseNameOf = (role: string): string =>
         standard.phases.find((p) => p.chairs.some((c) => c.role === role))?.name ?? phase.name;
-      const primitivesOf = (slug: string | undefined): readonly string[] =>
-        standard.agents.find((a) => a.slug === slug)?.primitives ?? [];
+      // O3 — a verify SEAT is a chair whose output resolves to core type Verdict, whatever produces
+      // it (agent or skill chair). Keying on the agent's VERIFY primitive (as this did) meant a
+      // skill-backed verify chair sealing `pass: false` never triggered an amend: a skill chair
+      // binds no agent, so it has no primitive to match.
+      const producesVerdict = (c: Chair): boolean => {
+        const out = c.output_contract[0];
+        return !!out && (deps.outputs.coreTypeOf(out) ?? "") === "Verdict";
+      };
       const dropFromProduced = (recs: readonly OutputRecord[]): void => {
         for (const r of recs) {
           const idx = produced.indexOf(r);
@@ -2173,7 +2190,7 @@ export async function runGig(
         );
 
       for (const vch of phase.chairs) {
-        if (!primitivesOf(vch.agent_slug).includes("VERIFY")) continue;
+        if (!producesVerdict(vch)) continue;
         let verdict = failingVerdict(vch.role);
         if (!verdict) continue; // no verdict, or it passed — nothing to amend
         // The maker(s) to amend are the dependencies that produced the ARTIFACT this verdict
@@ -2196,8 +2213,14 @@ export async function runGig(
           // AMEND: each maker re-runs with the failing verdict fed in as an extra input, so
           // the seat that built the change fixes the exact thing the verify caught.
           for (const mk of makers) {
-            const prep = prepareChair(mk, phaseNameOf(mk.role));
-            if (!prep.inputs.includes(feedback)) prep.inputs.push(feedback);
+            // O1/I3 — carry the maker's OWN work from the round just judged, plus the failing
+            // verdict, INTO prepareChair, so both are among `inputs` when lookupReuse computes the
+            // key. Pushing the verdict in AFTER prep (as this did) left the amend key identical to
+            // round 1's, so a reuse-wired amend was served round 1's failing artifact from the
+            // cache. producedByRole holds ONLY the round just judged, so the amend carries exactly
+            // one prior artifact and one verdict, both the latest — never a pile of drafts.
+            const priorWork = producedByRole.get(mk.role) ?? [];
+            const prep = prepareChair(mk, phaseNameOf(mk.role), [...priorWork, feedback]);
             const recs = await invokeAndWriteChair(prep);
             dropFromProduced(producedByRole.get(mk.role) ?? []);
             producedByRole.set(mk.role, recs);
@@ -2386,7 +2409,7 @@ export async function runGig(
     }
   }
 
-  function prepareChair(chair: Chair, phaseName: string): PreparedChair {
+  function prepareChair(chair: Chair, phaseName: string, extraInputs: readonly OutputRecord[] = []): PreparedChair {
     // A skill-backed chair runs the skill's deterministic code half — no agent, no model.
     if (chair.skill_slug && (chair.agent_slug ?? "") === "") {
       const dir = deps.skill_dirs?.get(chair.skill_slug);
@@ -2403,6 +2426,9 @@ export async function runGig(
         inputs.push(...recs);
       }
       pullSeeds(chair, inputs, chair.input_contract);
+      // Amend carriage: extra inputs (the maker's own prior work + the failing verdict) join the
+      // frontier so they enter the reuse key — see the EXAMINE⇄AMEND block. Empty otherwise.
+      for (const ex of extraInputs) if (!inputs.includes(ex)) inputs.push(ex);
       if (chair.input_contract.length > 0) {
         for (const need of chair.input_contract) {
           // #156: a type satisfied by an upstream record OR by the gig payload (entry-chair seed).
@@ -2494,6 +2520,13 @@ export async function runGig(
       // upstream record — by type, as records, so provenance survives the movement boundary.
       pullSeeds(chair, inputs, [...chair.input_contract, ...agent.input_types]);
     }
+
+    // Amend carriage (O1/I3): the maker's own round-just-judged artifact and the failing verdict are
+    // threaded in as extra inputs so they enter `inputs` BEFORE lookupReuse — the amend key then
+    // describes what the maker actually receives, and a reuse-wired amend is no longer served round
+    // 1's failing artifact from the cache. Empty on every non-amend prep, so round-1 keys stay
+    // byte-identical (the I1 control).
+    for (const ex of extraInputs) if (!inputs.includes(ex)) inputs.push(ex);
 
     // Runtime input_contract check: every type the chair declares it expects
     // on input must be satisfied by its actual upstream inputs. Subtype-aware
@@ -2648,6 +2681,13 @@ export async function runGig(
     let chairReport: { model?: string; cost_usd?: number; tokens_used?: number } = {};
     const { chair, phaseName, inputs, skills, output_specs, producer_slug, domain } = p;
     const t0 = Date.now();
+    // #seat-metrics — the seat's FIRST write and the context it carried then, measured from the
+    // chair's forwarded agent events (below). Null until a write happens; a chair that never writes
+    // (or forwards no events, like a skill chair) leaves both null.
+    let firstWriteMs: number | null = null;
+    let contextAtFirstWrite: number | null = null;
+    let lastAssistantContext: number | null = null;
+    const WRITE_TOOLS = new Set(["Write", "Edit", "MultiEdit", "NotebookEdit"]);
 
     // ── REUSE HIT ────────────────────────────────────────────────────────────────────────
     // Everything that could refuse this was decided at prep, before a byte was written. What
@@ -2665,6 +2705,12 @@ export async function runGig(
         const rec = deps.outputs.write({
           core_type: spec.core_type,
           domain_type: o.domain_type,
+          // O4 — a recall keeps the version it was SEALED at. Omitting this let outputs.write default
+          // to 1, so a record sealed against a v2 type recalled as v1 — a DIFFERENT content_sha than
+          // the record it recalls. A pre-migration entry carries no version; on a HIT the current
+          // version equals the sealed one (else lookupReuse's re-hash would already have refused the
+          // entry), so the fallback re-hashes identically.
+          domain_type_version: o.domain_type_version ?? deps.outputs.typeVersionOf(o.domain_type),
           domain,
           gig_id,
           agent_slug: producer_slug,
@@ -2825,6 +2871,21 @@ export async function runGig(
           onEvent: (ev) => {
             sink.fold(ev);
             emit({ type: "agent_event", phase: phaseName, role: chair.role, event: ev });
+            // #seat-metrics — track the last assistant context and the FIRST write, BEFORE the
+            // budget early-return below (which fires whenever no budget is wired). An assistant
+            // event's raw.message.usage carries the context; the first Write/Edit/MultiEdit/
+            // NotebookEdit tool_use marks the first write and snapshots the context as of the last
+            // assistant usage before it.
+            if (ev.type === "assistant") {
+              const u = (ev.raw as { message?: { usage?: Record<string, number> } } | undefined)?.message?.usage;
+              if (u) {
+                lastAssistantContext =
+                  (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0);
+              }
+            } else if (firstWriteMs === null && ev.type === "tool_use" && ev.tool !== undefined && WRITE_TOOLS.has(ev.tool)) {
+              firstWriteMs = Date.now() - t0;
+              contextAtFirstWrite = lastAssistantContext;
+            }
             if (!budget) return;
             // A chair crossed its budget into a granted reserve. Set `yielding` (D1: one condition
             // at two scales — the gig is yielding IFF a seated chair is drawing reserve), convert the
@@ -3206,6 +3267,8 @@ export async function runGig(
           core_type: w.core_type, domain_type: w.domain_type, domain: w.domain,
           primitive: w.primitive, agent_slug: w.agent_slug, phase: phaseName,
           data: w.data, content_sha: w.content_sha, type_fingerprint: fp, source_output_id: w.id,
+          // O4 — carry the sealed version so a recall re-stamps it and hashes as the record it recalls.
+          domain_type_version: w.domain_type_version,
           ...(w.skill_provenance ? { skill_provenance: w.skill_provenance } : {}),
         });
       }
@@ -3228,6 +3291,8 @@ export async function runGig(
     emit({
       type: "chair_complete", phase: phaseName, role: chair.role, producer: producer_slug,
       output_types: written.map((w) => w.domain_type), duration_ms: Date.now() - t0,
+      first_write_ms: firstWriteMs,
+      context_tokens_at_first_write: contextAtFirstWrite,
       promised_output_types: output_specs.map((s) => s.domain_type),
       missing_output_types: missing,
       ...(unresolvedShaFields.length > 0 ? { unresolved_sha_fields: unresolvedShaFields } : {}),

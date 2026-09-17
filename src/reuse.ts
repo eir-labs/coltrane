@@ -331,6 +331,14 @@ export interface ReuseOutput {
   agent_slug: string;
   phase: string;
   data: Record<string, unknown>;
+  /**
+   * The domain_type_version the ORIGINAL record was sealed at. Folded into content_sha, so a recall
+   * must re-stamp it or the recalled record hashes as a DIFFERENT record (O4). Optional for
+   * back-compat: an entry written before this field existed carries none, and the recall falls back
+   * to the type's CURRENT version — which, on any cache HIT, equals the version it was sealed at
+   * (else the pre-write re-hash would already have refused the entry as content-sha-mismatch).
+   */
+  domain_type_version?: number;
   /** The content_sha the ORIGINAL seal produced. Re-derived on injection and compared. */
   content_sha: string;
   /** The shape `domain_type` had when this was sealed. Re-checked on every read. */

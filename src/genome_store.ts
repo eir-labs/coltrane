@@ -125,7 +125,11 @@ export const Q = {
   agents:
     "coltrane_agent_profiles?select=slug,version,status,primitives,input_types,output_types,domain," +
     "identity,method,constraints,depth_profile,permissions,behavioral_primitives,skill_slots,default_skills,carried_skills",
-  standards: "coltrane_standards?select=slug,version,status,domain,phases,input_types,output_types",
+  // O5 — max_examine_rounds and reserve_pool ride back through the store, or the file genome and the
+  // store genome are two different standards (the drain would never amend and its pool would vanish).
+  // NOTE (out of scope, hosted): the hosted coltrane_standards table needs these two columns before
+  // this select reaches the hosted drain; that migration lives outside this repo.
+  standards: "coltrane_standards?select=slug,version,status,domain,phases,input_types,output_types,max_examine_rounds,reserve_pool",
   // Same gap venues had, one class over: no `version`, no `org_id`. coltrane_skills is
   // versioned, so skill_evolve minting v2 leaves v1 on the table — and the loader, seeing
   // two rows for one slug, threw "duplicate skill slug" and named the SLUG. A live skill
@@ -350,6 +354,13 @@ export function reconstructGenome(rows: GenomeRows, pin?: GenomeLoadPin): Loaded
         try {
           if (!slug) throw new Error(`missing required "slug" field`);
           if (standards.has(slug)) throw new Error(`duplicate standard slug "${slug}"`);
+          // F2 — a malformed examine loop is a NAMED load error, never a loop silently disabled. A
+          // present max_examine_rounds must be a non-negative integer; the store row keeps it (O5).
+          const mer = r["max_examine_rounds"];
+          if (mer !== undefined && mer !== null && (typeof mer !== "number" || !Number.isInteger(mer) || mer < 0)) {
+            throw new Error(`field max_examine_rounds must be a non-negative integer, got ${JSON.stringify(mer)}`);
+          }
+          const rp = r["reserve_pool"];
           const phases = (r["phases"] ?? []) as readonly PhaseDef[];
           const chairAgentSlugs = [
             ...new Set(phases.flatMap((p) => (p.chairs ?? []).map((c) => c.agent_slug).filter((s): s is string => !!s))),
@@ -371,6 +382,10 @@ export function reconstructGenome(rows: GenomeRows, pin?: GenomeLoadPin): Loaded
               // satisfies. Dropping it fails composition at every entry chair (found live).
               ...(Array.isArray(r["input_types"]) ? { input_types: r["input_types"] as string[] } : {}),
               ...(Array.isArray(r["output_types"]) ? { output_types: r["output_types"] as string[] } : {}),
+              // O5 — carry the examine loop and reserve pool through compose (loss-free `...def`
+              // spread) so the reconstructed standard keeps both. Absent leaves them unset.
+              ...(typeof mer === "number" ? { max_examine_rounds: mer } : {}),
+              ...(typeof rp === "number" ? { reserve_pool: rp } : {}),
             }),
           );
         } catch (e) {

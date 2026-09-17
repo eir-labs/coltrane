@@ -84,15 +84,16 @@ export interface ModelPrice {
 }
 export type PriceTable = Readonly<Record<string, ModelPrice>>;
 
-export type TurnStop = "done" | "round_limit" | "timeout" | "aborted" | "transport_failed";
+export type TurnStop = "done" | "round_limit" | "timeout" | "aborted" | "transport_failed" | "context_limit";
 
-/** The five typed stops, exported so a caller can surface them without re-listing the literals. */
+/** The six typed stops, exported so a caller can surface them without re-listing the literals. */
 export const TURN_STOPS: readonly TurnStop[] = [
   "done",
   "round_limit",
   "timeout",
   "aborted",
   "transport_failed",
+  "context_limit",
 ];
 
 export interface RoundRecord {
@@ -135,6 +136,13 @@ export interface TurnLoopOptions {
   allow?: readonly string[];
   /** Model calls this turn may make. */
   max_rounds: number;
+  /**
+   * A context ceiling in tokens. After any round whose MEASURED context (input + cache_read +
+   * cache_write) exceeds this, the turn stops with `context_limit` before the next model call.
+   * Absent = no ceiling: the turn is bounded only by max_rounds, the timeout, or the model
+   * answering. A seat's context is the cost lever, so this is the seam that caps it.
+   */
+  max_context_tokens?: number;
   /** Per model call. Applies whether or not `signal` is supplied. */
   timeout_ms?: number;
   signal?: AbortSignal;
@@ -326,6 +334,19 @@ export async function runTurn(
     if (toolCalls.length === 0) {
       stop = "done";
       text = reply.message.content ?? "";
+      opts.onEvent?.({ type: "round_end", round, record });
+      break;
+    }
+
+    // CONTEXT CEILING. This round's MEASURED context crossed the ceiling; the turn stops here, before
+    // another model call is made. AFTER the done-check (a model that has answered needs no ceiling)
+    // and BEFORE the tool calls run — a turn over its context budget does no more work.
+    if (
+      opts.max_context_tokens !== undefined &&
+      record.context_tokens !== undefined &&
+      record.context_tokens > opts.max_context_tokens
+    ) {
+      stop = "context_limit";
       opts.onEvent?.({ type: "round_end", round, record });
       break;
     }

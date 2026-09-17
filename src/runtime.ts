@@ -2303,10 +2303,34 @@ export async function runGig(
           const out = c.output_contract[0];
           return !!out && (deps.outputs.coreTypeOf(out) ?? "") === "Artifact";
         };
-        const makers = vch.depends_on
+        const makerSet = vch.depends_on
           .map((role) => allChairs.find((c) => c.role === role))
           .filter((c): c is Chair => !!c && producesArtifact(c));
-        if (makers.length === 0) continue; // nothing to re-run — a verify with no maker to amend
+        if (makerSet.length === 0) continue; // nothing to re-run — a verify with no maker to amend
+        // contract-amend-nearest-makers-v1 (O1/I1/F1) — an amend round spends a seat ONLY where the
+        // verdict's fix can land. Of today's maker set, re-invoke only the makers that no OTHER maker in
+        // the set depends on, directly or transitively through depends_on. An upstream maker's inputs do
+        // not change between rounds, so re-running it re-does settled work AND replaces the exact record
+        // the downstream fix was built on (its sealed record must instead be carried unchanged — O2:
+        // producedByRole still holds it, and the amend loop below never touches a skipped maker's role,
+        // so prepareChair gathers it as-is). Independent makers keep no dependant in the set, so they all
+        // re-run as today (I1). A composed standard's depends_on graph is acyclic, so the maker set always
+        // has at least one sink — the narrowed selection is never empty and never the whole set (F1).
+        const chairByRole = new Map(allChairs.map((c) => [c.role, c] as const));
+        const transitiveDepsOf = (role: string): Set<string> => {
+          const seen = new Set<string>();
+          const stack = [...(chairByRole.get(role)?.depends_on ?? [])];
+          while (stack.length > 0) {
+            const r = stack.pop()!;
+            if (seen.has(r)) continue;
+            seen.add(r);
+            for (const d of chairByRole.get(r)?.depends_on ?? []) stack.push(d);
+          }
+          return seen;
+        };
+        const makers = makerSet.filter(
+          (m) => !makerSet.some((other) => other.role !== m.role && transitiveDepsOf(other.role).has(m.role)),
+        );
 
         for (let round = 1; round <= examineRounds && verdict; round++) {
           checkpoint();

@@ -25,7 +25,7 @@ cd "$(dirname "$0")/.."
 
 # THE ROOT BAND — `npm test`, the one the verifier measured and the one carrying almost
 # every law in this repo.
-EXPECTED_LAWS="${EXPECTED_LAWS:-3842}"   # includes 22 todo; RED until built: 3 skill-chair-runs-in-tree
+EXPECTED_LAWS="${EXPECTED_LAWS:-3842}"   # includes 22 todo
 EXPECTED_FILES="${EXPECTED_FILES:-399}"
 
 # THE OTHER BANDS. `vitest run` is ROOT-CONFIG ONLY — this repo's own workflow comments

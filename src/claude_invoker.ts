@@ -6,7 +6,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { writeFileSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHash } from "node:crypto";
 import { abortReasonText, type AgentInvocationContext, type AgentInvoker, type AgentStreamEvent } from "./runtime.js";
 import type { Registry } from "./registry.js";
 import type { Depth, ModelTier } from "./pricing.js";
@@ -1022,10 +1022,65 @@ export function promptViaStdin(prompt: string): boolean {
   return prompt.length > promptArgLimit();
 }
 
+/**
+ * The `claude` session id a chair's conversation is NAMED by, derived deterministically from
+ * `(gig_id, role)`. The same seat used twice in one gig derives the SAME uuid, so its second reach
+ * can `--resume` the conversation the first opened instead of re-reading cold; two roles in one gig,
+ * or one role across two gigs, never collide (a v5-shaped uuid over a `gig_id\x1frole` string).
+ *
+ * A gig-less invocation (no `gig_id`) returns undefined: with nothing to key the session on there is
+ * nothing to name and nothing to resume, so the spawn carries neither `--session-id` nor `--resume`.
+ * The uuid is a valid RFC 4122 string (version nibble 5, variant 8–b) so the CLI accepts it as a
+ * session id and the spec's UUID shape holds.
+ */
+export function sessionUuidFor(gig_id: string | undefined, role: string | undefined): string | undefined {
+  if (!gig_id) return undefined;
+  const h = createHash("sha1").update(`coltrane-chair-session${gig_id}${role ?? ""}`).digest();
+  h[6] = (h[6]! & 0x0f) | 0x50; // version 5
+  h[8] = (h[8]! & 0x3f) | 0x80; // RFC 4122 variant
+  const hex = h.subarray(0, 16).toString("hex");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
+}
+
+/**
+ * Rewrite a built arg list to RESUME a session rather than open one: drop `--session-id <uuid>` and
+ * add `--resume <uuid>`. A resume must not ALSO name a fresh session (the CLI reads that as opening,
+ * not continuing), so the `--session-id` pair is removed, never merely appended past.
+ */
+function withResume(args: readonly string[], sessionId: string): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === "--session-id") { i++; continue; } // drop the flag AND its value
+    out.push(args[i]!);
+  }
+  out.push("--resume", sessionId);
+  return out;
+}
+
+/**
+ * Did a `--resume` run fail because its session could not be found? The CLI reports a missing resume
+ * target as an error result whose text names it ("No conversation found with session ID …"). Read
+ * from the child's stream so it is caught whether the run resolved with the error result or threw a
+ * non-zero exit carrying the same stdout. Deliberately narrow — a result event's text, not any line —
+ * so an ordinary failure is never mistaken for a lost session (F1).
+ */
+function resumeSessionLost(stdout: string): boolean {
+  for (const raw of stdout.split("\n")) {
+    const line = raw.trim();
+    if (!line) continue;
+    let e: Record<string, unknown>;
+    try { e = JSON.parse(line) as Record<string, unknown>; } catch { continue; }
+    if (e["type"] !== "result") continue;
+    const txt = typeof e["result"] === "string" ? (e["result"] as string) : "";
+    if (/no conversation found|no such session|session .*not found/i.test(txt)) return true;
+  }
+  return false;
+}
+
 export function buildInvokerArgs(
   prompt: string,
   mcpConfigPath: string,
-  opts: { model?: string | undefined; allowed_tools?: readonly string[] | undefined; disallowed_tools?: readonly string[] | undefined; max_tool_calls?: number | undefined; effort?: Effort | undefined },
+  opts: { model?: string | undefined; allowed_tools?: readonly string[] | undefined; disallowed_tools?: readonly string[] | undefined; max_tool_calls?: number | undefined; effort?: Effort | undefined; session_id?: string | undefined; resume?: boolean | undefined },
 ): string[] {
   // `-p` is a BOOLEAN flag and the prompt is a POSITIONAL argument, which is what makes the
   // large-prompt path clean: keep the flag, drop the positional, write it to stdin. The
@@ -1033,6 +1088,14 @@ export function buildInvokerArgs(
   // stdin; keeping the flag states it, and costs nothing.
   const args = promptViaStdin(prompt) ? ["-p"] : ["-p", prompt];
   if (opts.model) args.push("--model", opts.model);
+  // contract-chair-session-continuity-v1 — NAME the chair's conversation so a second reach can
+  // resume it. Every spawn with a session id opens one with `--session-id`; a re-invocation that
+  // is resuming (the amend round) carries `--resume` instead — never both, or the CLI opens a
+  // fresh session rather than continuing. A gig-less spawn has no session id and carries neither.
+  if (opts.session_id) {
+    if (opts.resume) args.push("--resume", opts.session_id);
+    else args.push("--session-id", opts.session_id);
+  }
   // per-agent blast-radius cap: a runaway agent can't burn past its own turn budget.
   if (opts.max_tool_calls !== undefined) args.push("--max-turns", String(opts.max_tool_calls));
   // #seat-effort (O3/I2) — the spawn ALWAYS carries exactly one --effort, whatever depth or turn
@@ -1380,11 +1443,17 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
         const isBare = t === toolBaseName(t); // no scope parens → a bare tool name
         return !(isBare && allowBase.has(toolBaseName(t)));
       });
+      // contract-chair-session-continuity-v1 — the chair's own session, deterministic in (gig_id,
+      // role). A first invocation OPENS it (--session-id); an amend re-invocation (ctx.resume, set
+      // by the runtime) RESUMES it (--resume). Absent gig_id ⇒ no session ⇒ neither flag.
+      const sessionId = sessionUuidFor(ctx.gig_id, ctx.role);
+      const resumeRound = ctx.resume === true && sessionId !== undefined;
       const baseArgs = buildInvokerArgs(prompt, cfgPath, {
         model: resolveModel(a.model_tier, opts.model),
         allowed_tools: effectiveAllowed,
         disallowed_tools: disallowedTools,
         max_tool_calls: maxToolCalls,
+        ...(sessionId !== undefined ? { session_id: sessionId, resume: resumeRound } : {}),
         // #seat-effort (O3) — the runtime already resolved precedence onto ctx.effort; floor to
         // medium so an undeclared, untiered seat (or any hand-built ctx) still spawns with an
         // explicit --effort rather than the operator's settings-file effort.
@@ -1481,6 +1550,23 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
       // Once. The continuation names what already sealed so the chair does not redo it, and says
       // plainly that nothing follows — a chair that believes another extension is coming will spend
       // this one reaching rather than landing.
+      // F1 — the cold fallback for a resume whose session is gone: a FRESH spawn with --session-id
+      // and the FULL original prompt, recorded loudly so the fallback is never silent. Shared by the
+      // reserve continuation below (and available to any resume path) so the fallback is one shape.
+      const resumeColdFallback = async (): Promise<{ stdout: string; budgetStopped: boolean }> => {
+        ctx.onEvent?.({
+          type: "resume_fallback",
+          raw: {
+            agent: a.slug,
+            session_id: sessionId,
+            resumed: false,
+            reason: "the session named for --resume could not be found; re-running cold with " +
+              "--session-id and the full prompt",
+          },
+        } as AgentStreamEvent);
+        return runTolerantOfBudgetStop(baseArgs, prompt);
+      };
+
       if (budgetStopped && reserveTurns > 0 && seal !== undefined) {
         const sealedSoFar = captureOutputWrites(stdout, sealTypes);
         const already = Object.keys(sealedSoFar);
@@ -1488,6 +1574,12 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
           type: "budget_reserve_granted",
           raw: { agent: a.slug, reserve_turns: reserveTurns, sealed_before_grant: already },
         } as AgentStreamEvent);
+        // contract-chair-session-continuity-v1 (O2) — the continuation RESUMES the chair's own
+        // session and carries ONLY the reserve text. The original prompt is NOT re-sent: the resumed
+        // conversation already holds it, so re-sending it would pay the whole cold read the resume
+        // exists to avoid. When there is a session to resume (there always is on the seal path, which
+        // requires a gig_id), swap --session-id for --resume; otherwise the old fresh-spawn shape
+        // stands and the prompt is re-sent as before.
         const continuation =
           `You reached your turn budget and were stopped mid-run. You are now in RESERVE: ` +
           `${reserveTurns} turns remain and this is the LAST extension — it will not be extended ` +
@@ -1496,9 +1588,28 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
             ? `Already sealed through the write boundary, do NOT redo: [${already.join(", ")}].\n\n`
             : `Nothing sealed yet.\n\n`) +
           `Close out now: seal what you already have, and state plainly what you did NOT reach so ` +
-          `the record shows the boundary instead of implying coverage.\n\n${prompt}`;
-        const reserveArgs = withPrompt(withMaxTurns(baseArgs, reserveTurns), continuation);
-        const second = await runTolerantOfBudgetStop(reserveArgs, continuation);
+          `the record shows the boundary instead of implying coverage.` +
+          (sessionId !== undefined ? `` : `\n\n${prompt}`);
+        const reserveArgs = sessionId !== undefined
+          ? withPrompt(withMaxTurns(withResume(baseArgs, sessionId), reserveTurns), continuation)
+          : withPrompt(withMaxTurns(baseArgs, reserveTurns), continuation);
+        // F1 — a resume whose session cannot be found must fall back COLD (a fresh spawn with
+        // --session-id and the FULL original prompt) and never fail the chair. Detect the lost
+        // session from the reserve run's stream, whether it resolved with the error result or threw
+        // a non-zero exit carrying it, and re-run cold; loudly, so the fallback is recorded.
+        let second: { stdout: string; budgetStopped: boolean };
+        try {
+          second = await runTolerantOfBudgetStop(reserveArgs, continuation);
+          if (sessionId !== undefined && resumeSessionLost(second.stdout)) {
+            second = await resumeColdFallback();
+          }
+        } catch (e) {
+          if (sessionId !== undefined && e instanceof ChildExitError && resumeSessionLost(e.stdout)) {
+            second = await resumeColdFallback();
+          } else {
+            throw e;
+          }
+        }
         // Two streams, two different questions, and conflating them is a bug: the OUTCOME (did the
         // run complete?) is the last pass's to answer, while the WRITES are cumulative — the first
         // pass's payloads passed the boundary too, and a continuation that sealed nothing must not

@@ -12,7 +12,7 @@ import type { Standard, Agent, Chair } from "./composition.js";
 import { PRIMITIVE_OUTPUT_TYPE, CORE_TYPES } from "./core_types.js";
 import { executeSkillAsync } from "./skill_subprocess.js";
 import { loadSkillPackage } from "./skills.js";
-import { resolveModel } from "./claude_invoker.js";
+import { resolveModel, sessionUuidFor } from "./claude_invoker.js";
 import { resolveAgentGrants, type ToolProviderRegistry } from "./tool_providers.js";
 import { resolveAndRealize, type Realization, type RealizationOk } from "./venue_realize.js";
 import type { VenueRealizer, RealizationHandle, CredentialResolver } from "./venue_realizer.js";
@@ -176,6 +176,12 @@ export interface AgentInvocationContext {
   // resolves its continuation reserve as ctx.turn_reserve ?? opts.turn_reserve. Absent = no chair
   // reserve declared (falls through to the invoker-level default); 0 = declared but the pool was dry.
   turn_reserve?: number | undefined;
+  // contract-chair-session-continuity-v1 (O3) — set by the runtime on an AMEND re-invocation so the
+  // Claude invoker RESUMES the maker's own prior-round session (--resume <uuid>) instead of opening a
+  // fresh one. The session uuid is derived identically on both rounds from (gig_id, role), so the
+  // amend continues exactly the conversation round one opened. Absent = a first invocation, which
+  // opens the session; the invoker never resumes without it.
+  resume?: boolean | undefined;
 }
 
 // One parsed event from a chair's child process (a stream-json line). `type` is the
@@ -220,6 +226,11 @@ export type GigProgressEvent =
        *  runtime (dispatch ▷ agent ▷ tier ▷ medium). Present for a model chair; absent for a skill
        *  chair, which runs no model at an effort. */
       effort?: Effort;
+      /** contract-chair-session-continuity-v1 (O4) — the seat's `claude` session id (the uuid
+       *  derived from (gig_id, role)) and whether THIS invocation RESUMED it (an amend round) rather
+       *  than opening it. Present for a model chair; absent for a skill chair, which runs no session. */
+      session_id?: string;
+      resumed?: boolean;
     }
   | { type: "chair_failed"; phase: string; role: string; error: string }
   // #241 — one or more of the agent's declared skill_slugs resolved to no package. Not fatal
@@ -2256,7 +2267,9 @@ export async function runGig(
             // cache. producedByRole holds ONLY the round just judged, so the amend carries exactly
             // one prior artifact and one verdict, both the latest — never a pile of drafts.
             const priorWork = producedByRole.get(mk.role) ?? [];
-            const prep = prepareChair(mk, phaseNameOf(mk.role), [...priorWork, feedback]);
+            // contract-chair-session-continuity-v1 (O3/O5) — an amend RESUMES the maker's own session
+            // (the invoker gets ctx.resume) and is never served from the reuse cache.
+            const prep = prepareChair(mk, phaseNameOf(mk.role), [...priorWork, feedback], { resume: true });
             const recs = await invokeAndWriteChair(prep);
             dropFromProduced(producedByRole.get(mk.role) ?? []);
             producedByRole.set(mk.role, recs);
@@ -2313,6 +2326,10 @@ export async function runGig(
     /** Set on a HIT. Every record in it has already passed `validateWrite` and re-hashed to
      *  the content_sha the original seal produced, so `executeChair` only has to write. */
     reuse_hit?: { cache_key: string; source_gig_id: string; outputs: readonly ReuseOutput[] };
+    /** contract-chair-session-continuity-v1 (O3/O5) — this is an AMEND re-invocation, so the chair
+     *  RESUMES its own prior-round session and is NEVER served from the reuse cache (a resume carries
+     *  conversation the reuse key cannot describe). Set only on the examine⇄amend re-run. */
+    resume?: boolean;
   }
 
   // Resolve a chair's declared output types into seal-specs (type → core → primitive).
@@ -2445,7 +2462,7 @@ export async function runGig(
     }
   }
 
-  function prepareChair(chair: Chair, phaseName: string, extraInputs: readonly OutputRecord[] = []): PreparedChair {
+  function prepareChair(chair: Chair, phaseName: string, extraInputs: readonly OutputRecord[] = [], opts: { resume?: boolean } = {}): PreparedChair {
     // A skill-backed chair runs the skill's deterministic code half — no agent, no model.
     if (chair.skill_slug && (chair.agent_slug ?? "") === "") {
       const dir = deps.skill_dirs?.get(chair.skill_slug);
@@ -2660,6 +2677,12 @@ export async function runGig(
     // context, so charging it (or worse, refusing it for lack of allowance) would be the budget
     // enforcing a cost that is not going to be incurred.
     const lookup = lookupReuse({ chair, phaseName, inputs, output_specs, agent, skills, producer_slug: agent.slug, domain });
+    // contract-chair-session-continuity-v1 (O5) — a RESUMED (amend-round) invocation is NEVER served
+    // from the reuse cache: the seat resumes its own conversation, which carries what the failing
+    // verdict prompted it to reconsider, and none of that is in the reuse key. Serving the cached
+    // artifact would replay the very work the amend exists to redo. The key is still kept below (the
+    // amend's own output is cacheable on the round-one terms), only the HIT is withheld.
+    const effectiveHit = opts.resume ? undefined : lookup?.hit;
 
     // BUDGET GATE — the append-unit pre-invocation gate is GONE (O3). Payload size / base_cost / k
     // no longer decide whether a chair runs. The dollar ceiling is enforced against SETTLED spend at
@@ -2672,7 +2695,7 @@ export async function runGig(
     // can still lend (min(own reserve, pool_remaining - poolReserved)) and HELD; with no pool at all
     // (`budget` null) the declared reserve threads through directly.
     let reserveOffer: number | undefined;
-    if (chair.turn_reserve !== undefined && !lookup?.hit) {
+    if (chair.turn_reserve !== undefined && !effectiveHit) {
       if (budget) {
         const poolAvailable = Math.max(0, budget.pool_remaining - poolReserved);
         reserveOffer = Math.min(chair.turn_reserve, poolAvailable);
@@ -2687,7 +2710,8 @@ export async function runGig(
       missing_skills: missing, producer_slug: agent.slug, domain,
       ...(reserveOffer !== undefined ? { reserve_offer: reserveOffer } : {}),
       ...(lookup ? { reuse_key: lookup.key } : {}),
-      ...(lookup?.hit ? { reuse_hit: lookup.hit } : {}),
+      ...(effectiveHit ? { reuse_hit: effectiveHit } : {}),
+      ...(opts.resume ? { resume: true } : {}),
     };
   }
 
@@ -2901,6 +2925,9 @@ export async function runGig(
           // untouched — the #329 continuation path stays byte-identical).
           ...(p.chair.turn_budget !== undefined ? { turn_budget: p.chair.turn_budget } : {}),
           ...(p.reserve_offer !== undefined ? { turn_reserve: p.reserve_offer } : {}),
+          // contract-chair-session-continuity-v1 (O3) — an amend re-invocation resumes the maker's
+          // own prior-round session; the invoker reads this to pass --resume instead of --session-id.
+          ...(p.resume ? { resume: true } : {}),
           // The venue → dispatch wire: thread the realized room onto the chair's ctx ONLY when a
           // venue resolved, so the invoker narrows the spawn by construction; both fields stay
           // absent otherwise (the venue-less path is unchanged).
@@ -3345,6 +3372,14 @@ export async function runGig(
       // #seat-effort (O5) — record the effort the seat ran at (a model chair only; a skill chair
       // leaves it undefined and the field stays absent).
       ...(resolvedEffort !== undefined ? { effort: resolvedEffort } : {}),
+      // contract-chair-session-continuity-v1 (O4) — record the seat's session id (the uuid derived
+      // from (gig_id, role)) and whether THIS invocation resumed it. A model chair only; a skill
+      // chair (no p.agent) runs no session, so both fields stay absent. Computed here from the same
+      // (gig_id, role) the invoker derives the spawn's --session-id from, so the record and the
+      // spawn name one session.
+      ...(p.agent && sessionUuidFor(gig_id, chair.role) !== undefined
+        ? { session_id: sessionUuidFor(gig_id, chair.role)!, resumed: p.resume === true }
+        : {}),
     });
     return written;
   }

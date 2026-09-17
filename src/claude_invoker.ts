@@ -154,7 +154,13 @@ export function buildPrompt(
   // content (its pass:false and failing checks) — the one thing round one did not yet have. The cold
   // fallback for a lost session re-invokes buildPrompt with resume OFF, so the FULL prompt is still
   // reachable when the resume's conversation is gone (I2).
-  if (ctx.resume === true) {
+  // contract-resumed-gig-session-v1 (O1) — a re-VERIFY resume keeps the FULL prompt: it re-invokes
+  // with `resume` (so buildInvokerArgs emits --resume) but `resume_keep_prompt` set, meaning it re-reads
+  // the amended tree under its own identity rather than being handed a trimmed "here is the one new
+  // input" continuation. The trimmed branch below is for a MAKER amend, whose one new thing IS the
+  // failing verdict; a stateless door (chat-completions) that holds no conversation must still carry the
+  // seat's identity, which the trim would strip — so a keep-prompt resume falls through to the full stack.
+  if (ctx.resume === true && ctx.resume_keep_prompt !== true) {
     const failing = ctx.inputs.find(
       (o) => (o.data as { pass?: unknown } | undefined)?.pass === false,
     );
@@ -1102,6 +1108,30 @@ function resumeSessionLost(stdout: string): boolean {
   return false;
 }
 
+/**
+ * Did a spawn fail because the `--session-id` it opened with is ALREADY IN USE? A chair's session id
+ * is deterministic in `(gig_id, role)`, so a KILLED attempt that already opened it leaves the id live;
+ * a resumed gig's first spawn re-opens it and the CLI refuses it (`Error: Session ID <uuid> is already
+ * in use.`). Reported both as an error result in the stream AND in the non-zero exit message, so read
+ * both — the exit `message` and the result stream (like `resumeSessionLost`) — and catch it whichever
+ * carries it. This is the COLLISION case the LOST case (`resumeSessionLost`) does NOT cover; the two
+ * are disjoint (one names "already in use", the other "no conversation found").
+ */
+function sessionIdInUse(stdout: string, message: string): boolean {
+  const inUse = /session id .*is already in use/i;
+  if (inUse.test(message)) return true;
+  for (const raw of stdout.split("\n")) {
+    const line = raw.trim();
+    if (!line) continue;
+    let e: Record<string, unknown>;
+    try { e = JSON.parse(line) as Record<string, unknown>; } catch { continue; }
+    if (e["type"] !== "result") continue;
+    const txt = typeof e["result"] === "string" ? (e["result"] as string) : "";
+    if (inUse.test(txt)) return true;
+  }
+  return false;
+}
+
 export function buildInvokerArgs(
   prompt: string,
   mcpConfigPath: string,
@@ -1610,21 +1640,63 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
         return runTolerantOfBudgetStop(coldArgs, fullPrompt);
       };
 
+      // contract-resumed-gig-session-v1 (O2/O3/F1) — a FIRST `--session-id` open can COLLIDE: the
+      // chair's session id is deterministic in (gig_id, role), so a KILLED attempt that already opened
+      // it leaves the id live, and a resumed gig's first spawn re-opens it — the CLI refuses it
+      // ("already in use"). That is a RESUME, never a failure: re-spawn ONCE with `--resume` and a
+      // SHORT prompt (the previous attempt was interrupted, the current tree is authoritative), and
+      // emit a resume-on-collision event so chair_complete records the chair CONTINUED its session.
+      // If the resume then finds no conversation, the same cold fallback (F1) runs. Only a non-resume
+      // spawn with a session id can collide (a resume carries `--resume`, never `--session-id`).
+      const collisionResume = async (): Promise<{ stdout: string; budgetStopped: boolean }> => {
+        ctx.onEvent?.({
+          type: "resume_on_collision",
+          raw: {
+            agent: a.slug,
+            session_id: sessionId,
+            resumed: true,
+            reason: "the session named for --session-id was already in use — a killed prior attempt " +
+              "created it; re-spawning with --resume to continue that conversation",
+          },
+        } as AgentStreamEvent);
+        const retryPrompt =
+          `This chair's previous attempt was interrupted. The conversation you are resuming already ` +
+          `holds your disposition, identity, method, tools and the gig input, so this prompt carries ` +
+          `only what is new: the current working tree is authoritative — re-derive your output from ` +
+          `it and re-seal exactly as before.`;
+        const retryArgs = buildInvokerArgs(retryPrompt, cfgPath, { ...invokerOpts, session_id: sessionId!, resume: true });
+        try {
+          const retry = await runTolerantOfBudgetStop(retryArgs, retryPrompt);
+          return resumeSessionLost(retry.stdout) ? await resumeColdFallback() : retry;
+        } catch (e) {
+          if (e instanceof ChildExitError && resumeSessionLost(e.stdout)) return await resumeColdFallback();
+          throw e;
+        }
+      };
+
       // contract-amend-resume-prompt-v1 (I2/F1) — run the chair once. On an amend RESUME whose session
       // the seam reports gone (whether the run resolved with the error result or threw a non-zero exit
-      // carrying it), fall back COLD rather than failing the chair; every other spawn kind is untouched.
+      // carrying it), fall back COLD rather than failing the chair. On a FIRST open whose --session-id
+      // COLLIDES (contract-resumed-gig-session-v1 O2), resume it instead of failing. Every other spawn
+      // kind is untouched.
+      const collided = (s: string, m: string): boolean =>
+        !resumeRound && sessionId !== undefined && sessionIdInUse(s, m);
       let stdout: string;
       let budgetStopped: boolean;
       try {
         const first = await runTolerantOfBudgetStop(baseArgs, prompt);
         if (resumeRound && resumeSessionLost(first.stdout)) {
           ({ stdout, budgetStopped } = await resumeColdFallback());
+        } else if (collided(first.stdout, "")) {
+          ({ stdout, budgetStopped } = await collisionResume());
         } else {
           ({ stdout, budgetStopped } = first);
         }
       } catch (e) {
         if (resumeRound && e instanceof ChildExitError && resumeSessionLost(e.stdout)) {
           ({ stdout, budgetStopped } = await resumeColdFallback());
+        } else if (e instanceof ChildExitError && collided(e.stdout, e.message)) {
+          ({ stdout, budgetStopped } = await collisionResume());
         } else {
           throw e;
         }

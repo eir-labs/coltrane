@@ -182,6 +182,13 @@ export interface AgentInvocationContext {
   // amend continues exactly the conversation round one opened. Absent = a first invocation, which
   // opens the session; the invoker never resumes without it.
   resume?: boolean | undefined;
+  // contract-resumed-gig-session-v1 (O1) — set alongside `resume` on a re-VERIFY re-invocation. The
+  // spawn RESUMES the verify seat's session (--resume) like an amend, but buildPrompt keeps the FULL
+  // cold prompt rather than the maker's trimmed continuation: a re-verify re-derives its verdict from
+  // the amended tree under its own identity, and a stateless door (chat-completions) holds no prior
+  // conversation to carry that identity — trimming it would leave the seat unidentifiable. Absent on a
+  // maker amend, whose trimmed continuation is correct because the failing verdict is its one new input.
+  resume_keep_prompt?: boolean | undefined;
 }
 
 // One parsed event from a chair's child process (a stream-json line). `type` is the
@@ -2305,8 +2312,16 @@ export async function runGig(
             produced.push(...recs);
             noteCheckpointRole(mk.role, phaseNameOf(mk.role), recs);
           }
-          // RE-VERIFY the amended artifact.
-          const vprep = prepareChair(vch, phase.name, [], { round: round + 1 });
+          // RE-VERIFY the amended artifact. contract-resumed-gig-session-v1 (O1/I1) — the re-verify
+          // RESUMES the verifier's own round-one session (`resume: true`), never re-opens `--session-id`
+          // for a live id: the id is deterministic in (gig_id, role), so a second `--session-id` open
+          // collides ("already in use"). Resuming carries `--resume <uuid>` instead. `keep_prompt` keeps
+          // the FULL prompt rather than the maker's trimmed amend continuation: unlike a maker (whose
+          // failing verdict IS the one new thing to send), a re-verify re-reads the amended tree from its
+          // own identity, and a stateless door (chat-completions) that holds no conversation must still
+          // carry the verify seat's identity — the trimmed continuation would strip it. buildInvokerArgs
+          // still emits `--resume` (it keys on `resume`, not the prompt), so O1's arg law holds.
+          const vprep = prepareChair(vch, phase.name, [], { resume: true, keep_prompt: true, round: round + 1 });
           const vrecs = await invokeAndWriteChair(vprep);
           dropFromProduced(producedByRole.get(vch.role) ?? []);
           producedByRole.set(vch.role, vrecs);
@@ -2359,6 +2374,9 @@ export async function runGig(
      *  RESUMES its own prior-round session and is NEVER served from the reuse cache (a resume carries
      *  conversation the reuse key cannot describe). Set only on the examine⇄amend re-run. */
     resume?: boolean;
+    /** contract-resumed-gig-session-v1 (O1) — a re-VERIFY re-invocation: resumes the session (like
+     *  `resume`) but the invoker keeps the FULL prompt, not the maker's trimmed amend continuation. */
+    resume_keep_prompt?: boolean;
     /** contract-spend-survives-v1 (O1) — which round this invocation is, stamped on the chair_spend
      *  row: 1 on a first run, and the examine⇄amend re-run's round otherwise. Absent → 1. */
     round?: number;
@@ -2494,7 +2512,7 @@ export async function runGig(
     }
   }
 
-  function prepareChair(chair: Chair, phaseName: string, extraInputs: readonly OutputRecord[] = [], opts: { resume?: boolean; round?: number } = {}): PreparedChair {
+  function prepareChair(chair: Chair, phaseName: string, extraInputs: readonly OutputRecord[] = [], opts: { resume?: boolean; keep_prompt?: boolean; round?: number } = {}): PreparedChair {
     // A skill-backed chair runs the skill's deterministic code half — no agent, no model.
     if (chair.skill_slug && (chair.agent_slug ?? "") === "") {
       const dir = deps.skill_dirs?.get(chair.skill_slug);
@@ -2745,6 +2763,7 @@ export async function runGig(
       ...(lookup ? { reuse_key: lookup.key } : {}),
       ...(effectiveHit ? { reuse_hit: effectiveHit } : {}),
       ...(opts.resume ? { resume: true } : {}),
+      ...(opts.keep_prompt ? { resume_keep_prompt: true } : {}),
       ...(opts.round !== undefined ? { round: opts.round } : {}),
     };
   }
@@ -2789,6 +2808,11 @@ export async function runGig(
     // gone and fell back cold (the `resume_fallback` stream event). Recorded on chair_complete so the
     // fallback is observable rather than a resume the record falsely claims happened.
     let resumeFellBack = false;
+    // contract-resumed-gig-session-v1 (O3) — set when the invoker RESUMED a collided --session-id open
+    // (the `resume_on_collision` stream event): a first spawn whose deterministic session id was already
+    // in use continued the conversation instead of failing. `p.resume` is false on such a spawn (it is a
+    // first open, not an amend), so this is what makes chair_complete record the continuation truthfully.
+    let resumedOnCollision = false;
     const WRITE_TOOLS = new Set(["Write", "Edit", "MultiEdit", "NotebookEdit"]);
 
     // ── REUSE HIT ────────────────────────────────────────────────────────────────────────
@@ -2966,6 +2990,9 @@ export async function runGig(
           // contract-chair-session-continuity-v1 (O3) — an amend re-invocation resumes the maker's
           // own prior-round session; the invoker reads this to pass --resume instead of --session-id.
           ...(p.resume ? { resume: true } : {}),
+          // contract-resumed-gig-session-v1 (O1) — a re-verify resumes its session but keeps the full
+          // prompt; thread it so buildPrompt skips the maker's trimmed continuation for this seat.
+          ...(p.resume_keep_prompt ? { resume_keep_prompt: true } : {}),
           // The venue → dispatch wire: thread the realized room onto the chair's ctx ONLY when a
           // venue resolved, so the invoker narrows the spawn by construction; both fields stay
           // absent otherwise (the venue-less path is unchanged).
@@ -2985,6 +3012,9 @@ export async function runGig(
             // contract-amend-resume-prompt-v1 (F1) — the invoker's cold-fallback signal. Captured here
             // (the one seam every chair event flows through) so chair_complete can record it.
             if (ev.type === "resume_fallback") resumeFellBack = true;
+            // contract-resumed-gig-session-v1 (O3) — the invoker's collision-resume signal, captured on
+            // the same seam so chair_complete can record the chair CONTINUED its session.
+            if (ev.type === "resume_on_collision") resumedOnCollision = true;
             // #seat-metrics — track the last assistant context and the FIRST write, BEFORE the
             // budget early-return below (which fires whenever no budget is wired). An assistant
             // event's raw.message.usage carries the context; the first Write/Edit/MultiEdit/
@@ -3441,8 +3471,12 @@ export async function runGig(
       // chair (no p.agent) runs no session, so both fields stay absent. Computed here from the same
       // (gig_id, role) the invoker derives the spawn's --session-id from, so the record and the
       // spawn name one session.
+      // contract-resumed-gig-session-v1 (O3) — `resumed` is true when THIS invocation continued its
+      // session: either an amend round (`p.resume`) OR a first open whose deterministic id collided and
+      // was resumed on the spot (`resumedOnCollision`). The second case is a first spawn, so `p.resume`
+      // is false and only the collision signal tells the truth of it.
       ...(p.agent && sessionUuidFor(gig_id, chair.role) !== undefined
-        ? { session_id: sessionUuidFor(gig_id, chair.role)!, resumed: p.resume === true }
+        ? { session_id: sessionUuidFor(gig_id, chair.role)!, resumed: p.resume === true || resumedOnCollision }
         : {}),
       // contract-amend-resume-prompt-v1 (F1) — a resume that fell back cold is recorded (never silent),
       // and only then, so a normal spawn's chair_complete is byte-identical to before.

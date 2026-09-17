@@ -3507,6 +3507,15 @@ export async function runGig(
     // Only now does anything become durable.
     const written: OutputRecord[] = [];
     for (const { spec, slice } of resolved) {
+      // contract-chair-cost-once-v1 — one chair invocation is settled ONCE (its `result` event
+      // reports a single total_cost_usd), so its spend is attributed to exactly ONE sealed record.
+      // The FIRST record this invocation seals carries `chairReport.cost_usd` / `tokens_used`; every
+      // later record omits both and carries `cost_on`: the first record's id. Stamping the whole
+      // chairReport on every record made a chair of width N report its spend N times, so summing
+      // `cost_usd` over a gig double-counted every multi-output chair (coltrane-ui#242). `written` is
+      // this invocation's records in seal order, so it is empty exactly at the first record and its
+      // head is the cost carrier for the rest.
+      const costCarrier = written[0];
       const rec = deps.outputs.write({
         core_type: spec.core_type,
         domain_type: spec.domain_type,
@@ -3539,9 +3548,15 @@ export async function runGig(
               ...(p.agent.model_tier ? { model_tier: p.agent.model_tier } : {}),
               // Per-chair spend, declared in the record's own schema since it was written and
               // populated by nothing. The gig total cannot separate two chairs on two tiers,
-              // which is the only question per-chair routing asks.
-              ...(chairReport.cost_usd !== undefined ? { cost_usd: chairReport.cost_usd } : {}),
-              ...(chairReport.tokens_used !== undefined ? { tokens_used: chairReport.tokens_used } : {}),
+              // which is the only question per-chair routing asks. Attributed ONCE per invocation
+              // (contract-chair-cost-once-v1): the first record carries the settled cost + tokens;
+              // every later record carries `cost_on` at the carrier and no cost of its own.
+              ...(costCarrier === undefined
+                ? {
+                    ...(chairReport.cost_usd !== undefined ? { cost_usd: chairReport.cost_usd } : {}),
+                    ...(chairReport.tokens_used !== undefined ? { tokens_used: chairReport.tokens_used } : {}),
+                  }
+                : { cost_on: costCarrier.id }),
             }
           : {}),
         skill_provenance,

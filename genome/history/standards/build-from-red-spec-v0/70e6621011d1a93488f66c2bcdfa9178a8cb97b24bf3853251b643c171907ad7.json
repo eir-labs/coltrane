@@ -42,14 +42,7 @@
             "change-set"
           ],
           "required_skills": [],
-          "turn_reserve": 16,
-          "prime": {
-            "area": "coltrane-engine"
-          },
-          "fork_from": {
-            "primer": "coltrane-engine",
-            "max_context_tokens": 300000
-          }
+          "turn_reserve": 16
         }
       ]
     },

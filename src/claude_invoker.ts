@@ -337,6 +337,55 @@ export function buildPrompt(
   return layers.join("\n\n");
 }
 
+/**
+ * contract-reverify-resume-prompt-v1 (O1) — the SHORT prompt a RESUMED Claude re-verify spawn carries.
+ * A re-verify RESUMES the verifier's own round-one conversation (`ctx.resume` + `ctx.resume_keep_prompt`),
+ * which already holds its disposition, identity, method, tools and the gig input, so this re-sends NONE
+ * of them — no buildPrompt layer, no gig input. It states only what is new: the makers AMENDED their
+ * work, so the verdict must be re-derived from the CURRENT working tree; plus the chair's output
+ * contract (its output type, and the in-band `output_write` seal directive when this door seals that way).
+ *
+ * The trim lives HERE, on the resuming Claude side, NOT in the shared buildPrompt: buildPrompt keeps the
+ * full prompt for a keep-prompt resume (its trim branch keys on `resume_keep_prompt !== true`), so the
+ * stateless chat-completions door — which builds via buildPrompt and never reaches this function — keeps
+ * the full prompt it needs to place the seat (O2), and the cold fallback for a lost resume re-sends the
+ * full prompt built with resume OFF (F1). By construction this is a small fraction of the round-one
+ * prompt (I1). buildPrompt's Task/seal directive is mirrored here rather than shared because the two
+ * shapes diverge in what they re-send: the full stack vs. only-what-is-new.
+ */
+function buildReverifyResumePrompt(
+  sealTypes: readonly string[],
+  outputSchema: Record<string, unknown> | undefined,
+  outputSchemas: Record<string, Record<string, unknown> | undefined> | undefined,
+  seal: OutputWriteSeal | undefined,
+): string {
+  const types = sealTypes.length ? sealTypes : ["output"];
+  const contract = seal
+    ? `Re-seal each of your output types by calling the \`output_write\` tool — one call per type, ` +
+        `exactly as you did in round one:\n` +
+        types
+          .map((t) => {
+            const s = outputSchemas?.[t] ?? (types.length === 1 ? outputSchema : undefined);
+            const core = seal.core_by_type[t] ?? "";
+            return (
+              `- output_write({ "core_type": "${core}", "domain_type": "${t}", ` +
+              `"gig_id": "${seal.gig_id}", "phase": "${seal.phase}", "agent_slug": "${seal.agent_slug}", ` +
+              `"data": <object${s ? ` matching ${JSON.stringify(s)}` : ""}> })`
+            );
+          })
+          .join("\n")
+    : `Re-seal your output — ${types.map((t) => `"${t}"`).join(", ")} — exactly as you did in round one: ` +
+        `respond with ONLY the single JSON object (the output's data), no prose, no code fence.`;
+  return [
+    `# Re-verify (amend round)`,
+    `The makers AMENDED their work in response to your failing verdict. You are RESUMING the conversation ` +
+      `that already holds your disposition, identity, method, tools and the gig input, so this prompt ` +
+      `carries only what is new: re-derive your verdict from the CURRENT working tree — read the amended ` +
+      `artifact as it now stands, do not rely on what you saw in round one — and rule again.`,
+    `# Output contract\n${contract}`,
+  ].join("\n\n");
+}
+
 // ───────────────────────── JSON extraction (#221, #226) ─────────────────────────
 //
 // The old implementation took "the first balanced brace run" — string-blind, anchored on
@@ -1486,9 +1535,21 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
     // spawn carries a TRIMMED prompt (buildPrompt keys on ctx.resume); the FULL prompt is built with
     // resume OFF so the cold fallback for a lost resume session can re-send it (I2). On every
     // non-resume spawn the two are identical, so nothing else changes shape.
+    //
+    // contract-reverify-resume-prompt-v1 (O1/I1/F1) — a re-VERIFY resume (ctx.resume_keep_prompt) is a
+    // DIFFERENT trim: buildPrompt keeps the FULL prompt for a keep-prompt resume (so the stateless
+    // completions door keeps everything it needs — O2), so the trim to only-what-is-new has to be
+    // applied HERE, on the resuming Claude side. A MAKER amend resume (no keep_prompt) still takes
+    // buildPrompt's own trim. fullPrompt stays the full round-one prompt in every case, so the cold
+    // fallback for a lost resume re-sends the verifier's whole context (F1).
     const resumingWithSession = ctx.resume === true && sessionUuidFor(ctx.gig_id, ctx.role) !== undefined;
+    const reverifyResume = resumingWithSession && ctx.resume_keep_prompt === true;
     const fullPrompt = buildPrompt(resumingWithSession ? { ...ctx, resume: false } : ctx, schema, outputSchemas, seal);
-    const prompt = resumingWithSession ? buildPrompt(ctx, schema, outputSchemas, seal) : fullPrompt;
+    const prompt = reverifyResume
+      ? buildReverifyResumePrompt(sealTypes, schema, outputSchemas, seal)
+      : resumingWithSession
+        ? buildPrompt(ctx, schema, outputSchemas, seal)
+        : fullPrompt;
     // #221 — the key signal for candidate selection, derived from what we just resolved.
     // Threaded into BOTH extract calls below; threading only the injected-run one would
     // leave every real chair unscored.

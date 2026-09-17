@@ -35,7 +35,9 @@ import {
   extractJson,
   extractOptionsForChair,
   promptSchemaFor,
+  sessionUuidFor,
 } from "./claude_invoker.js";
+import type { TranscriptStore } from "./transcript_store.js";
 // The provider-neutral loop and the chat-completions wire it runs on. The invoker no longer carries
 // a loop of its own: it hands `runTurn` a port and a tool source and reads back typed stops. The
 // tool-name encoding lives in the port now (the one place that speaks the wire) and is re-exported
@@ -90,6 +92,11 @@ export interface CompletionsInvokerOptions {
   /** Served model id → USD per million tokens. Supplied by the deployment; absent = spend is
    *  UNPRICED (reported unpriced, never as $0). Handed straight to the loop's accounting. */
   prices?: PriceTable | undefined;
+  /** contract-completions-seat-transcript-v1 — where a seat's conversation is kept, so a maker amend
+   *  resumes the transcript it already had rather than being handed a trimmed "resuming the
+   *  conversation…" note over a request that holds none. Absent = no transcript is saved or resumed
+   *  (the stateless door as it was): a maker amend then falls back to the full cold prompt. */
+  transcripts?: TranscriptStore | undefined;
 }
 
 export type CompletionsRefusal =
@@ -188,8 +195,6 @@ export function makeCompletionsInvoker(opts: CompletionsInvokerOptions): AgentIn
       types.length > 1
         ? Object.fromEntries(types.map((t) => [t, promptSchemaFor(opts.registry, t)]))
         : undefined;
-    const prompt = buildPrompt(ctx, single, many);
-
     // THE OFFERED SET. The chair's grants — narrowed by the room when the chair sits in one (the SAME
     // venueEffectiveTools oracle claude_invoker uses, never a re-inlined intersection) — mapped so a
     // bare in-house grant addresses the engine server's tool. Those mapped grants ARE the loop's allow
@@ -206,7 +211,42 @@ export function makeCompletionsInvoker(opts: CompletionsInvokerOptions): AgentIn
     const maxRounds =
       ctx.turn_budget ?? ctx.agent.max_tool_calls ?? opts.maxToolRounds ?? DEFAULT_MAX_TOOL_ROUNDS;
 
-    const seed: TurnMessage[] = [{ role: "user", content: prompt }];
+    // contract-completions-seat-transcript-v1 — the seat's conversation lives in a store keyed by its
+    // (gig_id, role) session id, the SAME id the Claude door resumes under. A MAKER amend (`resume`,
+    // and NOT `resume_keep_prompt` — a re-verify keeps the full cold prompt, out of scope) resumes that
+    // saved transcript; everything else — a first invocation, a re-verify — seeds exactly the full
+    // prompt buildPrompt returns and never reads the store (I2's "only a resume reads" half).
+    const store = opts.transcripts;
+    const sid = sessionUuidFor(ctx.gig_id, ctx.role);
+    const isMakerAmend = ctx.resume === true && ctx.resume_keep_prompt !== true;
+    const loaded = isMakerAmend && store && sid ? store.load(sid) : undefined;
+    let seed: TurnMessage[];
+    if (isMakerAmend && loaded && loaded.length > 0) {
+      // O2 / I1 — re-send the saved transcript UNCHANGED as the prefix (a provider prefix cache can
+      // serve it), then EXACTLY ONE new user message: the trimmed amend prompt buildPrompt returns on a
+      // resume (its one new thing is the failing verdict). Append-only over the prior round.
+      seed = [...loaded, { role: "user", content: buildPrompt(ctx, single, many) }];
+    } else if (isMakerAmend) {
+      // F1 — a maker amend with no saved transcript (no store wired, or nothing under this id) has no
+      // conversation to resume. Seed the FULL cold prompt (buildPrompt with resume OFF: identity,
+      // method, gig input) — NEVER the resume-only prompt that claims a conversation the seat does not
+      // hold — and emit the SAME `resume_fallback` event the Claude invoker does, which the runtime
+      // folds into chair_complete.resume_fallback. The chair does not fail for this.
+      seed = [{ role: "user", content: buildPrompt({ ...ctx, resume: false }, single, many) }];
+      ctx.onEvent?.({
+        type: "resume_fallback",
+        raw: {
+          agent: ctx.agent.slug,
+          session_id: sid,
+          resumed: false,
+          reason:
+            "no saved transcript for this session — re-seeding cold with the full prompt rather than " +
+            "the resume-only prompt, which would claim a conversation that is not held",
+        },
+      });
+    } else {
+      seed = [{ role: "user", content: buildPrompt(ctx, single, many) }];
+    }
     const result = await runTurn(seed, {
       port,
       model,
@@ -225,6 +265,11 @@ export function makeCompletionsInvoker(opts: CompletionsInvokerOptions): AgentIn
       ...(opts.prices ? { prices: opts.prices } : {}),
       ...(opts.maxTokens !== undefined ? { max_tokens: opts.maxTokens } : {}),
     });
+
+    // O1 — save the seat's transcript under its (gig_id, role) session id AFTER the turn, whatever the
+    // stop, so a later maker amend resumes the conversation it actually had. runTurn.messages is the
+    // seed plus everything appended this turn (a new array). No store or no session id ⇒ nothing saved.
+    if (store && sid) store.save(sid, result.messages);
 
     // Settle what RAN, whatever the stop. The full prompt (uncached input + cache reads + cache
     // writes) preserves GigUsage.input_tokens' "whole prompt" meaning — reporting the uncached part

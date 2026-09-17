@@ -23,7 +23,10 @@ import type { Registry } from "./registry.js";
 import type { ModelPrice, PriceTable } from "./turn_loop.js";
 import { makeClaudeInvoker, type ClaudeInvokerOptions } from "./claude_invoker.js";
 import { makeCompletionsInvoker } from "./completions_invoker.js";
+import { makeFileTranscriptStore } from "./transcript_store.js";
 import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 
 /**
  * Load and VALIDATE a deployment's price table: served model id → USD per million tokens.
@@ -120,11 +123,20 @@ export function selectChairInvoker(env: EnvLike, opts: SelectChairInvokerOptions
     if (prem) tierMap["premium"] = prem;
     const pricesFile = env["COLTRANE_PRICES_FILE"];
     const timeoutRaw = env["COLTRANE_CHAIR_TIMEOUT_MS"];
+    // contract-completions-seat-transcript-v1 (O3) — a completions seat resumes across the door only if
+    // its conversation is kept somewhere. Wire the engine's file-backed store: COLTRANE_TRANSCRIPTS_DIR
+    // when set, else <COLTRANE_OUTPUTS_DIR or $HOME/.eir/coltrane_outputs>/transcripts — reading only
+    // the env object handed in, the same "the caller reads process.env, this file reads the object"
+    // discipline the rest of the selector keeps.
+    const transcriptsDir =
+      env["COLTRANE_TRANSCRIPTS_DIR"] ??
+      join(env["COLTRANE_OUTPUTS_DIR"] ?? join(env["HOME"] ?? env["USERPROFILE"] ?? homedir(), ".eir/coltrane_outputs"), "transcripts");
     return makeCompletionsInvoker({
       baseUrl: completionsUrl,
       apiKey: env["COLTRANE_COMPLETIONS_KEY"] ?? "",
       ...(opts.registry ? { registry: opts.registry } : {}),
       tierMap,
+      transcripts: makeFileTranscriptStore(transcriptsDir),
       // A price table is loaded and validated ONLY when configured. Absent = spend is reported
       // unpriced (never $0); malformed = loadPriceTable throws and the process refuses to start.
       ...(pricesFile ? { prices: loadPriceTable(pricesFile) } : {}),

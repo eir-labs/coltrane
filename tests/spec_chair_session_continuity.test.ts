@@ -14,7 +14,7 @@
 //   O5        a resumed (amend) invocation is never served from the reuse cache;
 //   F1        a resume whose session is gone falls back cold and loud, never failing the chair.
 import { describe, it, expect } from "vitest";
-import { makeClaudeInvoker, ChildExitError } from "../src/claude_invoker.js";
+import { makeClaudeInvoker, ChildExitError, sessionUuidFor } from "../src/claude_invoker.js";
 import { testAgent } from "./_support/agents.js";
 import { coreInvariantFields } from "./_support/specs.js";
 import { createMemoryReuseStore } from "../src/reuse.js";
@@ -159,22 +159,29 @@ describe("session continuity across the examine⇄amend loop and its records", (
     const calls: Array<{ args: string[]; prompt: string }> = [];
     let verifies = 0;
     // makeClaudeInvoker IS runGig's invoker here, so the amend re-invocation flows through the real
-    // spawn path; the seam captures each arg list. The seat line tags the role.
+    // spawn path. A spawn is tagged by its SESSION FLAG — the uuid after --session-id (round one) or
+    // --resume (an amend), compared with sessionUuidFor(gig, role) — never by prompt text: a resumed
+    // amend carries only what is new (contract-amend-resume-prompt-v1), so its prompt no longer names
+    // the seat, and a filter keyed on the seat line would silently miss it.
+    const sidFor = (role: string): string | undefined => sessionUuidFor("gig-o3", role);
+    const sessionOf = (args: readonly string[]): string | undefined => after(args, "--session-id") ?? after(args, "--resume");
     const run = (_b: string, args: string[]): string => {
       const prompt = args[args.indexOf("-p") + 1] ?? "";
       calls.push({ args, prompt });
-      if (prompt.includes('"plan" chair')) return JSON.stringify({ ...coreInvariantFields("Plan"), value: "plan" });
-      if (prompt.includes('"check" chair')) { verifies++; return JSON.stringify({ ...coreInvariantFields("Verdict"), pass: verifies >= 2, value: `v#${verifies}` }); }
+      const sess = sessionOf(args);
+      if (sess === sidFor("plan")) return JSON.stringify({ ...coreInvariantFields("Plan"), value: "plan" });
+      if (sess === sidFor("check")) { verifies++; return JSON.stringify({ ...coreInvariantFields("Verdict"), pass: verifies >= 2, value: `v#${verifies}` }); }
       return JSON.stringify({ ...coreInvariantFields("Artifact"), value: "art" });
     };
     await runGig(loop(2), {}, { ...registerTypes(), gig_id: "gig-o3", invoke: makeClaudeInvoker({ run }) });
 
-    const makers = calls.filter((c) => c.prompt.includes('"make" chair'));
+    const sid = sidFor("make");
+    const makers = calls.filter((c) => sessionOf(c.args) === sid);
     expect(makers.length, "the amend loop must re-run the maker after the failing verdict").toBe(2);
     const first = makers[0]!.args, second = makers[1]!.args;
     expect(second, "the amend spawn started the maker cold instead of resuming its round-one session").toContain("--resume");
-    const sid = after(first, "--session-id");
     expect(sid, "round one must open the maker's session").toMatch(UUID);
+    expect(after(first, "--session-id"), "round one must open the maker's OWN round-one session").toBe(sid);
     expect(after(second, "--resume"), "the amend must resume the maker's OWN round-one session").toBe(sid);
     expect(second, "a resumed amend must not also open a fresh session").not.toContain("--session-id");
   });

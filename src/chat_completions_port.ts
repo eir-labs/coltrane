@@ -199,7 +199,14 @@ function mapStop(finish: string | undefined): ModelReply["stop"] {
  */
 export function makeChatCompletionsPort(opts: ChatCompletionsPortOptions): ModelPort {
   const doFetch = opts.fetchFn ?? fetch;
-  const url = `${opts.baseUrl.replace(/\/+$/, "")}/chat/completions`;
+  // Strip trailing '/' in LINEAR time (CodeQL js/polynomial-redos, PR #534). The old `/\/+$/` regex
+  // retries its slash run from every start position, so a long run of INTERIOR slashes backtracks
+  // quadratically (measured 2,707 ms at 40,000 slashes). A backward char-code scan (47 === '/') is
+  // linear by construction and touches only the trailing run — interior slashes and the rest of the
+  // URL are left exactly as given.
+  let end = opts.baseUrl.length;
+  while (end > 0 && opts.baseUrl.charCodeAt(end - 1) === 47) end--;
+  const url = `${opts.baseUrl.slice(0, end)}/chat/completions`;
 
   return async (req: ModelRequest): Promise<ModelReply> => {
     // The offered list is the authority on what a wire name means: build the reverse map from it so

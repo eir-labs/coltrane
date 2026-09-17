@@ -153,6 +153,14 @@ export const AgentObjectSchema = z.object({
    *  src/runtime.ts) rather than inheriting the operator's settings file. An out-of-range value fails
    *  the parse naming this field — `defineAgent` rethrows it hard and the loader surfaces it (F1). */
   effort: EffortSchema.optional(),
+  /** contract-seat-context-ceiling-v1 (O1) — the per-round context ceiling (input + cache_read +
+   *  cache_write tokens) a chat-completions seat runs under, declared like `effort`: OPTIONAL with NO
+   *  default (absent means NONE, never a guessed ceiling), and declared HERE so a positive-integer
+   *  value round-trips instead of being stripped as an unknown key. Resolved dispatch ▷ agent ▷ none at
+   *  invocation (resolveMaxContextTokens, src/runtime.ts) and handed to runTurn by the completions
+   *  invoker. A non-positive or non-integer value fails the parse naming this field — `defineAgent`
+   *  rethrows it hard and the loader surfaces it naming the agent (F1). */
+  max_context_tokens: z.number().int().positive().optional(),
   browser_grant: BrowserGrantSchema.optional(),
 });
 

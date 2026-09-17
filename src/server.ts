@@ -988,6 +988,18 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         const effortArg = readEffort(args["effort"]);
         if (effortArg.error) return { ok: false, requires_approval: approval, error: effortArg.error };
         const effort = effortArg.effort;
+        // contract-seat-context-ceiling-v1 (O1/F1) — `max_context_tokens` is advertised on gig_dispatch
+        // (src/mcp.ts) and read here. A non-positive-integer is refused BEFORE anything spawns, naming
+        // the field and the offending value; a valid one threads into runGig beside `effort` so the
+        // resolver (resolveMaxContextTokens) sees it. Absent ⇒ no dispatch ceiling.
+        const rawCap = args["max_context_tokens"];
+        let max_context_tokens: number | undefined;
+        if (rawCap !== undefined && rawCap !== null) {
+          if (typeof rawCap !== "number" || !Number.isInteger(rawCap) || rawCap <= 0) {
+            return { ok: false, requires_approval: approval, error: `gig_dispatch: max_context_tokens must be a positive integer; got ${String(rawCap)}` };
+          }
+          max_context_tokens = rawCap;
+        }
 
         // ── reuse a sealed output instead of re-deriving it ──────────────────────────────
         // Both halves are opt-in, and both are named on the dispatch call so the decision is
@@ -1095,7 +1107,7 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
             // runChart forwards it to every movement via `...deps`. Threaded only when present, never
             // process.cwd().
             ...(deps.genome_dir ? { tree_root: deps.genome_dir } : {}),
-            ...(depth ? { depth } : {}), ...(effort ? { effort } : {}), ...reuseWiring, ...humanWiring,
+            ...(depth ? { depth } : {}), ...(effort ? { effort } : {}), ...(max_context_tokens !== undefined ? { max_context_tokens } : {}), ...reuseWiring, ...humanWiring,
           };
           /** The ARRANGEMENT's manifest. A chart has no single genome_hash or run_fingerprint — it
            *  has a chart_hash and one run per movement — so the reply says what a chart run is
@@ -1335,7 +1347,7 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
           try {
             const res = await runGig(standard, gigInput, {
               ...dispatchDeps, gig_id: gigId,
-              ...(depth ? { depth } : {}), ...(effort ? { effort } : {}), ...reuseWiring, ...humanWiring,
+              ...(depth ? { depth } : {}), ...(effort ? { effort } : {}), ...(max_context_tokens !== undefined ? { max_context_tokens } : {}), ...reuseWiring, ...humanWiring,
             });
             // Terminal (complete) frees the tree; a parked gig (awaiting_approval) RETAINS it.
             if (releaseLock && res.status !== "awaiting_approval") releaseLock();
@@ -1419,7 +1431,7 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         // A wire added to the shared assembler reaches this default async path by construction.
         const runPromise = runGig(standard, gigInput, {
           ...dispatchDeps,
-          gig_id: gigId, onProgress, signal: controller.signal, ...(depth ? { depth } : {}), ...(effort ? { effort } : {}), ...reuseWiring, ...humanWiring,
+          gig_id: gigId, onProgress, signal: controller.signal, ...(depth ? { depth } : {}), ...(effort ? { effort } : {}), ...(max_context_tokens !== undefined ? { max_context_tokens } : {}), ...reuseWiring, ...humanWiring,
         });
         // A REFUSED resume must be answered in THIS reply, not discovered later by polling. The
         // gate throws in runGig's SYNCHRONOUS phase — before its first `await`, which is exactly

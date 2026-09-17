@@ -63,6 +63,16 @@ function resolveEffort(dispatchEffort: Effort | undefined, agent: Agent): Effort
   }
 }
 
+// contract-seat-context-ceiling-v1 (O2) — the ONE place the context ceiling resolves, a sibling of
+// resolveEffort but with NO floor: dispatch ▷ agent ▷ none. Absent everywhere ⇒ `undefined`, which the
+// completions invoker reads as "no ceiling" and runs to done past any context (I1) — never a guessed
+// default. Set on AgentInvocationContext.max_context_tokens at the invoke ctx site, the same seam
+// `effort` threads through.
+function resolveMaxContextTokens(dispatchCap: number | undefined, agent: Agent): number | undefined {
+  if (dispatchCap !== undefined) return dispatchCap;
+  return agent.max_context_tokens;
+}
+
 // What an agent invocation sees. The invoker returns the output `data` (validated
 // downstream against the agent's declared output domain type). `skills` carries
 // the SkillRecords the runtime resolved from this agent's skill_slugs against the
@@ -138,6 +148,12 @@ export interface AgentInvocationContext {
   // Threads exactly as `depth` does. Always present on a runtime-built ctx; a hand-built ctx that
   // omits it makes the Claude invoker fall to `medium` at the spawn (O3).
   effort?: Effort | undefined;
+  // contract-seat-context-ceiling-v1 (O2/O3) — the RESOLVED per-round context ceiling this seat runs
+  // under (resolveMaxContextTokens: dispatch ▷ agent ▷ none). Present ONLY when a ceiling was declared
+  // somewhere; the chat-completions invoker hands it to runTurn as `max_context_tokens`, and absent
+  // means the turn runs uncapped exactly as today (I1). The Claude invoker ignores it (its CLI has no
+  // per-round context ceiling — out of scope).
+  max_context_tokens?: number | undefined;
   // ── the venue this chair is confined to (venue → dispatch wiring) ──────────────
   // When the gig names a venue, runGig resolves it, calls resolveAndRealize BEFORE this
   // invocation, and threads the resulting room here. The Claude invoker reads BOTH to confine
@@ -432,6 +448,13 @@ export interface RunDeps {
    * `depth`; the dispatch door threads it beside `depth` (src/server.ts).
    */
   effort?: Effort | undefined;
+  /**
+   * contract-seat-context-ceiling-v1 (O2) — the per-round context ceiling this gig was dispatched at,
+   * threaded to the resolver so a dispatch ceiling wins over the agent's declared `max_context_tokens`
+   * (resolveMaxContextTokens). Absent = no dispatch ceiling, so the agent's own field — or NONE — stands.
+   * Sibling of `effort`; the dispatch door threads it beside `effort` (src/server.ts).
+   */
+  max_context_tokens?: number | undefined;
 
   // ── the chart: this run is one MOVEMENT of a performance ───────────────────
   /**
@@ -3121,6 +3144,10 @@ export async function runGig(
         // #seat-effort (O2) — resolve precedence ONCE here and set the RESOLVED value on the ctx, the
         // same seam `depth` threads through. Captured so chair_complete records what the seat ran at.
         resolvedEffort = resolveEffort(deps.effort, agent);
+        // contract-seat-context-ceiling-v1 (O2) — resolve the context ceiling ONCE here (dispatch ▷
+        // agent ▷ none) and set the RESOLVED value on the ctx only when one exists, so an undeclared
+        // seat carries no ceiling and the completions invoker runs it uncapped (I1).
+        const resolvedMaxContext = resolveMaxContextTokens(deps.max_context_tokens, agent);
         data = await deps.invoke({
           agent, phase: phaseName, role: chair.role, gig_id, inputs, gig_input: gigInput, skills,
           missing_skills: p.missing_skills, // #241 — what did NOT resolve, so the prompt can't assert it
@@ -3140,6 +3167,9 @@ export async function runGig(
           // #seat-effort (O2) — the RESOLVED effort reaches the invoker on the ctx, always present
           // (resolveEffort floors to medium), so both invokers carry it without re-deriving.
           effort: resolvedEffort,
+          // contract-seat-context-ceiling-v1 (O2/O3) — the RESOLVED ceiling reaches the invoker on the
+          // ctx, present ONLY when declared (no floor), so an undeclared seat stays uncapped (I1).
+          ...(resolvedMaxContext !== undefined ? { max_context_tokens: resolvedMaxContext } : {}),
           // #turn-budget — the chair's own turn budget threads through exactly as `depth` does; the
           // reserve is the pool-capped OFFER, not the raw declaration, and is present only when the
           // chair declared a reserve (so a reserve-less chair leaves the invoker's opts-level default

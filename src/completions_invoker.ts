@@ -102,7 +102,11 @@ export type CompletionsRefusal =
   // legible chair failure rather than an empty-answer parse error.
   | "round_limit"
   | "timeout"
-  | "aborted";
+  | "aborted"
+  // contract-seat-context-ceiling-v1 (O4) — the turn loop stopped because the seat's per-round context
+  // crossed its declared max_context_tokens. Surfaced as a typed refusal (never a sealed partial) that
+  // names the tokens reached and the ceiling.
+  | "context_limit";
 
 export const COMPLETIONS_REFUSALS: readonly CompletionsRefusal[] = [
   "host_tool_denied",
@@ -112,6 +116,7 @@ export const COMPLETIONS_REFUSALS: readonly CompletionsRefusal[] = [
   "round_limit",
   "timeout",
   "aborted",
+  "context_limit",
 ];
 
 const refuse = (refusal: CompletionsRefusal, message: string): Record<string, unknown> => ({
@@ -212,6 +217,10 @@ export function makeCompletionsInvoker(opts: CompletionsInvokerOptions): AgentIn
       // #seat-effort (O4) — carry the resolved effort onto the model request. The runtime set it on
       // the ctx (resolveEffort); the provider wire mapping is a lower layer, out of scope.
       ...(ctx.effort ? { effort: ctx.effort } : {}),
+      // contract-seat-context-ceiling-v1 (O3) — hand the resolved ceiling to runTurn, which stops
+      // `context_limit` the round its measured context crosses it. Absent ⇒ nothing passed, so the turn
+      // runs uncapped exactly as today (I1).
+      ...(ctx.max_context_tokens !== undefined ? { max_context_tokens: ctx.max_context_tokens } : {}),
       ...(ctx.signal ? { signal: ctx.signal } : {}),
       ...(opts.prices ? { prices: opts.prices } : {}),
       ...(opts.maxTokens !== undefined ? { max_tokens: opts.maxTokens } : {}),
@@ -269,6 +278,18 @@ export function makeCompletionsInvoker(opts: CompletionsInvokerOptions): AgentIn
       return refuse(
         "transport_failed",
         `the completions endpoint failed: ${result.error ?? "no reason reported"}`,
+      );
+    }
+    // contract-seat-context-ceiling-v1 (O4) — a context_limit stop is a TYPED refusal that names the
+    // context tokens reached (the loop's peak) and the declared ceiling; it NEVER falls through to
+    // extractJson, so no partial answer is sealed as complete.
+    if (result.stop === "context_limit") {
+      return refuse(
+        "context_limit",
+        `chair "${ctx.agent.slug}" crossed its context ceiling: reached ` +
+          `${result.totals.peak_context_tokens} context token(s) against a ceiling of ` +
+          `${ctx.max_context_tokens}. No partial answer is sealed; raise the seat's ` +
+          `max_context_tokens or narrow the work.`,
       );
     }
 

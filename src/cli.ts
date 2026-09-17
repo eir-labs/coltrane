@@ -92,6 +92,7 @@ Options
   --input <json|@file|->                dispatch payload; @file reads a file, - reads stdin
   --depth <skim|standard|deep>          tighten the per-chair turn cap
   --effort <low|medium|high|xhigh|max>  the reasoning effort the seat runs at
+  --max-context-tokens <n>              per-round context ceiling for a chat-completions seat
   --budget <dollars>                    per-gig ceiling; the run stops when it is gone
   --reuse                               allow chair-level reuse of prior sealed outputs
   --resume <gig-id>                     continue a gig that died mid-pipeline
@@ -479,6 +480,10 @@ export async function runCli(argv: readonly string[], io: CliIO): Promise<number
       // #seat-effort (O1) — forward --effort so the dispatched effort reaches the invocation as
       // ctx.effort. An out-of-range value is refused by the gig_dispatch door (readEffort), not here.
       if (typeof flags["effort"] === "string") args["effort"] = flags["effort"];
+      // contract-seat-context-ceiling-v1 (O1) — forward --max-context-tokens so the dispatched ceiling
+      // reaches the invocation as ctx.max_context_tokens. A non-positive-integer is refused by the
+      // gig_dispatch door (server.ts), not here; forwarding as a number lets that door validate it.
+      if (typeof flags["max-context-tokens"] === "string") args["max_context_tokens"] = Number(flags["max-context-tokens"]);
       if (typeof flags["resume"] === "string") args["resume_gig_id"] = flags["resume"];
       // #20 — --input NOT supplied (the readInput(undefined) path above yields {}, which is
       // indistinguishable from an explicit `--input {}`). Signal the omission so an approve-only

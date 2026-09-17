@@ -77,7 +77,7 @@ d=json.load(open('$JSON_OUT'))
 # numTotalTestSuites counts DESCRIBE BLOCKS, not files (1338 vs 347) — the field name
 # invites the mistake, and I made it on the first run. testResults is one entry per FILE,
 # which is the thing 'a law file went missing' is about.
-# numTotalTests includes `todo` laws (3487 passed + 22 todo = 3509). Todos are DECLARED
+# numTotalTests includes 'todo' laws (3487 passed + 22 todo = 3509). Todos are DECLARED
 # laws — a todo silently deleted is a law silently abandoned — so they are counted.
 print(d.get('numTotalTests',-1), len(d.get('testResults',[])))
 ")

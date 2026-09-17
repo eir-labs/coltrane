@@ -209,6 +209,31 @@ export function makeChatCompletionsPort(opts: ChatCompletionsPortOptions): Model
   const url = `${opts.baseUrl.slice(0, end)}/chat/completions`;
 
   return async (req: ModelRequest): Promise<ModelReply> => {
+    // contract-tool-wire-name-collision-v1 (O3) — before building the reverse map or fetching, check
+    // that the request's tools INVERT: two tools that encode to one wire name would be sent as two
+    // identical function definitions, and `new Map(entries)` silently keeps only the last, so a reply
+    // naming that wire name resolves to whichever tool won. Fail closed HERE, the reachable layer the
+    // K6 witness named — throw (as this port's other unrecoverable argument faults do), naming both
+    // tools and the wire name they collapsed onto; never build the map from a set it cannot invert.
+    const wireNames = req.tools.map((t: ToolDef) => encodeToolName(t.name));
+    if (new Set(wireNames).size !== wireNames.length) {
+      const byWire = new Map<string, string[]>();
+      req.tools.forEach((t: ToolDef, i: number) => {
+        const w = wireNames[i]!;
+        const names = byWire.get(w);
+        if (names) names.push(t.name);
+        else byWire.set(w, [t.name]);
+      });
+      const detail = [...byWire.entries()]
+        .filter(([, names]) => names.length > 1)
+        .map(([w, names]) => `${names.join(", ")} → ${w}`)
+        .join("; ");
+      throw new Error(
+        `chat-completions tools collide on the wire (indistinguishable to the model): ${detail}. ` +
+          `Refusing rather than resolving a reply to whichever tool won the reverse map.`,
+      );
+    }
+
     // The offered list is the authority on what a wire name means: build the reverse map from it so
     // a reply resolves to the MCP name even when that name was too long to invert.
     const byWireName = new Map(req.tools.map((t: ToolDef) => [encodeToolName(t.name), t.name]));

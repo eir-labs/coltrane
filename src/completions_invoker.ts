@@ -113,7 +113,11 @@ export type CompletionsRefusal =
   // contract-seat-context-ceiling-v1 (O4) — the turn loop stopped because the seat's per-round context
   // crossed its declared max_context_tokens. Surfaced as a typed refusal (never a sealed partial) that
   // names the tokens reached and the ceiling.
-  | "context_limit";
+  | "context_limit"
+  // contract-tool-wire-name-collision-v1 (O2) — the offered set held two tools that encode to one wire
+  // name. Surfaced as a typed refusal naming the colliding tools, never an insertion-order winner, and
+  // caught before any model call.
+  | "tool_name_collision";
 
 export const COMPLETIONS_REFUSALS: readonly CompletionsRefusal[] = [
   "host_tool_denied",
@@ -124,6 +128,7 @@ export const COMPLETIONS_REFUSALS: readonly CompletionsRefusal[] = [
   "timeout",
   "aborted",
   "context_limit",
+  "tool_name_collision",
 ];
 
 const refuse = (refusal: CompletionsRefusal, message: string): Record<string, unknown> => ({
@@ -254,6 +259,9 @@ export function makeCompletionsInvoker(opts: CompletionsInvokerOptions): AgentIn
       allow,
       max_rounds: maxRounds,
       timeout_ms: timeoutMs,
+      // contract-tool-wire-name-collision-v1 (O2) — hand the loop the SAME encoding the port speaks, so
+      // it refuses an offered set two of whose tools collapse to one wire name before any model call.
+      wire_name: encodeToolName,
       // #seat-effort (O4) — carry the resolved effort onto the model request. The runtime set it on
       // the ctx (resolveEffort); the provider wire mapping is a lower layer, out of scope.
       ...(ctx.effort ? { effort: ctx.effort } : {}),
@@ -323,6 +331,17 @@ export function makeCompletionsInvoker(opts: CompletionsInvokerOptions): AgentIn
       return refuse(
         "transport_failed",
         `the completions endpoint failed: ${result.error ?? "no reason reported"}`,
+      );
+    }
+    // contract-tool-wire-name-collision-v1 (O2) — the offered set held two tools indistinguishable on
+    // the wire. A TYPED refusal naming the colliding tools, caught before any model call, never an
+    // insertion-order winner and never a sealed partial.
+    if (result.stop === "tool_name_collision") {
+      return refuse(
+        "tool_name_collision",
+        `chair "${ctx.agent.slug}" was offered tools that collide on the wire: ` +
+          `${result.error ?? "two tools encode to one wire name"}. Two tools that map to one wire ` +
+          `name cannot be told apart; refusing rather than running whichever won the reverse map.`,
       );
     }
     // contract-seat-context-ceiling-v1 (O4) — a context_limit stop is a TYPED refusal that names the

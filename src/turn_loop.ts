@@ -84,9 +84,16 @@ export interface ModelPrice {
 }
 export type PriceTable = Readonly<Record<string, ModelPrice>>;
 
-export type TurnStop = "done" | "round_limit" | "timeout" | "aborted" | "transport_failed" | "context_limit";
+export type TurnStop =
+  | "done"
+  | "round_limit"
+  | "timeout"
+  | "aborted"
+  | "transport_failed"
+  | "context_limit"
+  | "tool_name_collision";
 
-/** The six typed stops, exported so a caller can surface them without re-listing the literals. */
+/** The seven typed stops, exported so a caller can surface them without re-listing the literals. */
 export const TURN_STOPS: readonly TurnStop[] = [
   "done",
   "round_limit",
@@ -94,6 +101,7 @@ export const TURN_STOPS: readonly TurnStop[] = [
   "aborted",
   "transport_failed",
   "context_limit",
+  "tool_name_collision",
 ];
 
 export interface RoundRecord {
@@ -156,6 +164,14 @@ export interface TurnLoopOptions {
    * so this leaf file keeps its no-import posture; the level vocabulary lives in EffortSchema.
    */
   effort?: string;
+  /**
+   * contract-tool-wire-name-collision-v1 (O1) — the transport's MCP-name → wire-name encoding, supplied
+   * by the caller so this leaf file keeps its no-import posture. When present, the offered set is
+   * mapped through it once before the first model call; two offered tools that collapse to the same
+   * wire name are a refusal (`tool_name_collision`), never sent to the model as two indistinguishable
+   * function definitions. Absent = no check, and the turn behaves exactly as today.
+   */
+  wire_name?: (name: string) => string;
   onEvent?: (ev: TurnEvent) => void;
 }
 
@@ -247,6 +263,35 @@ export async function runTurn(
   const listed = opts.tools ? await opts.tools.list() : [];
   const offered = opts.allow ? listed.filter((t) => isAllowed(t.name, opts.allow!)) : [];
   const offeredNames = new Set(offered.map((t) => t.name));
+
+  // contract-tool-wire-name-collision-v1 (O1) — two OFFERED tools a seat cannot tell apart ON THE WIRE
+  // are a refusal, never an insertion-order winner. When a `wire_name` encoding is supplied, map the
+  // offered names through it BEFORE any model call: if two collapse onto one wire name the model would
+  // be sent two identical function definitions and a reply naming that wire name could not be inverted.
+  // Stop `tool_name_collision`, naming both MCP names and the wire name they share. No `wire_name` (F1),
+  // or a distinct set, leaves the turn exactly as today.
+  if (opts.wire_name) {
+    const wire = opts.wire_name;
+    const byWire = new Map<string, string[]>();
+    for (const t of offered) {
+      const w = wire(t.name);
+      const names = byWire.get(w);
+      if (names) names.push(t.name);
+      else byWire.set(w, [t.name]);
+    }
+    const collisions = [...byWire.entries()].filter(([, names]) => names.length > 1);
+    if (collisions.length > 0) {
+      const detail = collisions.map(([w, names]) => `${names.join(", ")} → ${w}`).join("; ");
+      return {
+        stop: "tool_name_collision",
+        messages: transcript,
+        text: "",
+        rounds,
+        totals,
+        error: `offered tools collide on the wire (indistinguishable to the model): ${detail}`,
+      };
+    }
+  }
 
   // Default stop is round_limit: the loop that completes its rounds still tool-calling ran out.
   let stop: TurnStop = "round_limit";

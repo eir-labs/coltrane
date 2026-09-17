@@ -13,6 +13,14 @@ export const BelbinRoleSchema = z.enum(["explorer", "analyst", "critic", "synthe
 export const CodeToolAccessSchema = z.enum(["none", "read", "write", "full"]);
 export const ModelTierSchema = z.enum(["economy", "standard", "premium"]);
 export const DepthSchema = z.enum(["skim", "quick", "standard", "deep"]);
+// #seat-effort — the reasoning effort a seat runs at, part of the genome and defined ONCE here (the
+// one Zod source). Precedence resolves dispatch ▷ agent ▷ tier default (economy low / standard medium
+// / premium high) ▷ medium onto AgentInvocationContext.effort at the runtime ctx site, and the value
+// always reaches the spawn as a single `--effort` pair — NEVER inherited from the operator's
+// ~/.claude/settings.json. The five levels are exactly what the `claude` CLI (2.1.274) accepts; an
+// unlisted level fails the parse (F1) and is refused at the dispatch door (F2), naming the field.
+export const EffortSchema = z.enum(["low", "medium", "high", "xhigh", "max"]);
+export type Effort = z.output<typeof EffortSchema>;
 
 // The caged-browser grant (the cage branch adds browser_grant to the agent; the schema is here so
 // the grant is validated like any field). Network grant for skills lives in the skill schema.
@@ -138,6 +146,21 @@ export const AgentObjectSchema = z.object({
   max_token_budget: z.number().optional(),
   code_tool_access: CodeToolAccessSchema.optional(),
   depth_profile: DepthSchema.optional(),
+  /** #seat-effort — the reasoning effort this seat declares. OPTIONAL with NO default, exactly like
+   *  `depth_profile` / `model_tier`: absent stays absent so every existing agent round-trips
+   *  byte-equivalent (a Zod object drops an undeclared key, so the field must be declared HERE to be
+   *  retained), and an undeclared seat resolves through its tier default at invocation (resolveEffort,
+   *  src/runtime.ts) rather than inheriting the operator's settings file. An out-of-range value fails
+   *  the parse naming this field — `defineAgent` rethrows it hard and the loader surfaces it (F1). */
+  effort: EffortSchema.optional(),
+  /** contract-seat-context-ceiling-v1 (O1) — the per-round context ceiling (input + cache_read +
+   *  cache_write tokens) a chat-completions seat runs under, declared like `effort`: OPTIONAL with NO
+   *  default (absent means NONE, never a guessed ceiling), and declared HERE so a positive-integer
+   *  value round-trips instead of being stripped as an unknown key. Resolved dispatch ▷ agent ▷ none at
+   *  invocation (resolveMaxContextTokens, src/runtime.ts) and handed to runTurn by the completions
+   *  invoker. A non-positive or non-integer value fails the parse naming this field — `defineAgent`
+   *  rethrows it hard and the loader surfaces it naming the agent (F1). */
+  max_context_tokens: z.number().int().positive().optional(),
   browser_grant: BrowserGrantSchema.optional(),
 });
 
@@ -214,6 +237,21 @@ export const ChairSchema = z.object({
    *  fail-closed, integer discipline as `turn_budget`. May be declared WITHOUT `turn_budget`: the
    *  budget then falls through the resolution tiers while the reserve still bounds the draw. */
   turn_reserve: z.number().int().nonnegative().optional(),
+  /** contract-seat-primer-v1 — the STANDING SEAT primers. A `prime` chair READS an area once and
+   *  seals a `seat-primer` record (the blobs it read); a later `fork_from` chair of the SAME agent
+   *  warm-starts from that primer instead of re-reading cold. The two are mutually exclusive and
+   *  `fork_from.primer` must be a lowercase-hyphen slug — composeStandard refuses a chair that breaks
+   *  either rule, naming the chair and the field. OPTIONAL so every existing chair record parses
+   *  byte-equivalent (a Zod object DROPS an undeclared key, so the fields must be declared here to be
+   *  RETAINED through composition into the runtime Chair). */
+  prime: z.object({ area: z.string() }).optional(),
+  // contract-rolling-seat-primer-v1 (O1/O4) — a chair may now BOTH prime an area AND fork the SAME
+  // area (the rolling primer: a build primes, the next forks it), so prime/fork_from are no longer
+  // mutually exclusive — composeStandard refuses only DIFFERING areas. `max_context_tokens` is a
+  // context ceiling on the fork: when the latest primer's recorded context size exceeds it, the chair
+  // runs COLD (no fork) rather than warm-starting a primer too large to be worth forking. OPTIONAL, so
+  // an absent ceiling forks the primer whatever its size (the standing behaviour).
+  fork_from: z.object({ primer: z.string(), max_context_tokens: z.number().optional() }).optional(),
 });
 export const PhaseSchema = z.object({ name: z.string(), chairs: z.array(ChairSchema) });
 /** Lifecycle status, shared by domain types and standards (#203). */

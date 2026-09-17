@@ -6,10 +6,11 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { writeFileSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHash } from "node:crypto";
 import { abortReasonText, type AgentInvocationContext, type AgentInvoker, type AgentStreamEvent } from "./runtime.js";
 import type { Registry } from "./registry.js";
 import type { Depth, ModelTier } from "./pricing.js";
+import type { Effort } from "./genome_schema.js";
 import type { CodeToolAccess } from "./composition.js";
 import { resolveAgentGrants, hostBuiltinDenials, toolBaseName, ENGINE_MCP_SERVER, type ToolProviderRegistry } from "./tool_providers.js";
 import { venueEffectiveTools } from "./chart.js";
@@ -144,6 +145,37 @@ export function buildPrompt(
   seal?: OutputWriteSeal,
 ): string {
   const a = ctx.agent;
+
+  // contract-amend-resume-prompt-v1 (O1/O2/I1) — a RESUMED amend carries ONLY what is new. The
+  // resumed conversation already holds # Disposition / # Identity / # Method / # Context and the gig
+  // input from round one, so re-sending them re-pays the whole cold read the resume exists to avoid
+  // (measured: the amend prompt was byte-for-byte the full round-one prompt). Emit a trimmed prompt:
+  // a short statement that this is an amend round of the same chair, plus the failing verdict's
+  // content (its pass:false and failing checks) — the one thing round one did not yet have. The cold
+  // fallback for a lost session re-invokes buildPrompt with resume OFF, so the FULL prompt is still
+  // reachable when the resume's conversation is gone (I2).
+  // contract-resumed-gig-session-v1 (O1) — a re-VERIFY resume keeps the FULL prompt: it re-invokes
+  // with `resume` (so buildInvokerArgs emits --resume) but `resume_keep_prompt` set, meaning it re-reads
+  // the amended tree under its own identity rather than being handed a trimmed "here is the one new
+  // input" continuation. The trimmed branch below is for a MAKER amend, whose one new thing IS the
+  // failing verdict; a stateless door (chat-completions) that holds no conversation must still carry the
+  // seat's identity, which the trim would strip — so a keep-prompt resume falls through to the full stack.
+  if (ctx.resume === true && ctx.resume_keep_prompt !== true) {
+    const failing = ctx.inputs.find(
+      (o) => (o.data as { pass?: unknown } | undefined)?.pass === false,
+    );
+    const verdictBlock = failing
+      ? JSON.stringify(failing.data)
+      : "(the failing verdict was not carried into this amend round)";
+    return [
+      `# Amend round`,
+      `This is an amend round of the same "${ctx.role ?? a.slug}" chair, resuming the conversation ` +
+        `that already holds your disposition, identity, method, tools and the gig input. Fix ONLY ` +
+        `what the verify below caught, then re-seal your output exactly as you did before.`,
+      `# Failing verdict\nThe verify FAILED (pass: false). Its failing checks are what to fix:\n${verdictBlock}`,
+    ].join("\n\n");
+  }
+
   const layers: string[] = [];
 
   // 1. Disposition — the Belbin cognitive-role pairing, held in tension (how you think).
@@ -152,9 +184,15 @@ export function buildPrompt(
     `# Disposition\nYou hold these cognitive modes in equal tension:\n${dispo}\nHold every mode active throughout your work; none dominates.`,
   );
 
-  // 2. Identity — who you are: the slug line plus the agent's own prose.
+  // 2. Identity — who you are: the slug line plus the agent's own prose. When the context carries
+  // a chair role, name the seat this invocation holds — and ONLY this seat. Two chairs seating the
+  // same agent in one phase share every other layer, so the seat line is what splits their prompts;
+  // without it the division of labour a standard declares between them exists only in the role
+  // names and each chair does the same work. A ctx without a role (hand-built literals, the
+  // text-seal path) renders no seat line, so those prompts stay valid and byte-identical.
+  const seatLine = ctx.role ? `\nYou are seated as the "${ctx.role}" chair in this phase.` : "";
   layers.push(
-    `# Identity\nYou are the agent "${a.slug}"${a.domain ? ` in the "${a.domain}" domain` : ""}.\n\n${a.identity}`,
+    `# Identity\nYou are the agent "${a.slug}"${a.domain ? ` in the "${a.domain}" domain` : ""}.${seatLine}\n\n${a.identity}`,
   );
 
   // 3. Method — how THIS agent does its job, the step-by-step.
@@ -285,7 +323,67 @@ export function buildPrompt(
     );
   }
 
+  // contract-seat-primer-v1 (O4) — a FORK warm-starts from a primer that already read this area; the
+  // files whose working-tree blob CHANGED since priming are named here so the seat re-reads exactly
+  // those, not the whole area cold. An empty stale set adds nothing (the primed reading still holds).
+  if (ctx.fork?.stale_paths && ctx.fork.stale_paths.length > 0) {
+    layers.push(
+      `# Changed since priming\nYou forked a primer that had already read this area. These files have ` +
+        `CHANGED since it was primed — RE-READ them before relying on them, the primer's copy is stale:\n` +
+        ctx.fork.stale_paths.map((p) => `- ${p}`).join("\n"),
+    );
+  }
+
   return layers.join("\n\n");
+}
+
+/**
+ * contract-reverify-resume-prompt-v1 (O1) — the SHORT prompt a RESUMED Claude re-verify spawn carries.
+ * A re-verify RESUMES the verifier's own round-one conversation (`ctx.resume` + `ctx.resume_keep_prompt`),
+ * which already holds its disposition, identity, method, tools and the gig input, so this re-sends NONE
+ * of them — no buildPrompt layer, no gig input. It states only what is new: the makers AMENDED their
+ * work, so the verdict must be re-derived from the CURRENT working tree; plus the chair's output
+ * contract (its output type, and the in-band `output_write` seal directive when this door seals that way).
+ *
+ * The trim lives HERE, on the resuming Claude side, NOT in the shared buildPrompt: buildPrompt keeps the
+ * full prompt for a keep-prompt resume (its trim branch keys on `resume_keep_prompt !== true`), so the
+ * stateless chat-completions door — which builds via buildPrompt and never reaches this function — keeps
+ * the full prompt it needs to place the seat (O2), and the cold fallback for a lost resume re-sends the
+ * full prompt built with resume OFF (F1). By construction this is a small fraction of the round-one
+ * prompt (I1). buildPrompt's Task/seal directive is mirrored here rather than shared because the two
+ * shapes diverge in what they re-send: the full stack vs. only-what-is-new.
+ */
+function buildReverifyResumePrompt(
+  sealTypes: readonly string[],
+  outputSchema: Record<string, unknown> | undefined,
+  outputSchemas: Record<string, Record<string, unknown> | undefined> | undefined,
+  seal: OutputWriteSeal | undefined,
+): string {
+  const types = sealTypes.length ? sealTypes : ["output"];
+  const contract = seal
+    ? `Re-seal each of your output types by calling the \`output_write\` tool — one call per type, ` +
+        `exactly as you did in round one:\n` +
+        types
+          .map((t) => {
+            const s = outputSchemas?.[t] ?? (types.length === 1 ? outputSchema : undefined);
+            const core = seal.core_by_type[t] ?? "";
+            return (
+              `- output_write({ "core_type": "${core}", "domain_type": "${t}", ` +
+              `"gig_id": "${seal.gig_id}", "phase": "${seal.phase}", "agent_slug": "${seal.agent_slug}", ` +
+              `"data": <object${s ? ` matching ${JSON.stringify(s)}` : ""}> })`
+            );
+          })
+          .join("\n")
+    : `Re-seal your output — ${types.map((t) => `"${t}"`).join(", ")} — exactly as you did in round one: ` +
+        `respond with ONLY the single JSON object (the output's data), no prose, no code fence.`;
+  return [
+    `# Re-verify (amend round)`,
+    `The makers AMENDED their work in response to your failing verdict. You are RESUMING the conversation ` +
+      `that already holds your disposition, identity, method, tools and the gig input, so this prompt ` +
+      `carries only what is new: re-derive your verdict from the CURRENT working tree — read the amended ` +
+      `artifact as it now stands, do not rely on what you saw in round one — and rule again.`,
+    `# Output contract\n${contract}`,
+  ].join("\n\n");
 }
 
 // ───────────────────────── JSON extraction (#221, #226) ─────────────────────────
@@ -850,6 +948,153 @@ export function captureOutputWrites(
   return blob;
 }
 
+/**
+ * contract-seat-primer-v1 (O1/I2) — the file paths a PRIME seat Read, parsed from the run's stdout the
+ * SAME way `captureOutputWrites` parses its `output_write` calls: a `Read` tool_use's `file_path`. The
+ * primer's `files` list is the SET of files the seat read, so paths are de-duped preserving first
+ * appearance. Read through the RETURNED stdout (not the streaming `onEvent` path) because an injected
+ * `run` seam bypasses streaming — the sealer must see what the run actually returned.
+ */
+function captureReadPaths(stdout: string): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of stdout.split("\n")) {
+    const line = raw.trim();
+    if (!line) continue;
+    let e: Record<string, unknown>;
+    try { e = JSON.parse(line) as Record<string, unknown>; } catch { continue; }
+    const type = typeof e["type"] === "string" ? (e["type"] as string) : "";
+    const msg = e["message"];
+    if ((type !== "assistant" && type !== "user") || !msg || typeof msg !== "object") continue;
+    const content = (msg as { content?: Array<Record<string, unknown>> }).content ?? [];
+    for (const b of content) {
+      if (String(b["type"] ?? "") !== "tool_use" || String(b["name"] ?? "") !== "Read") continue;
+      const input = (b["input"] && typeof b["input"] === "object" ? b["input"] : {}) as Record<string, unknown>;
+      const path = input["file_path"];
+      if (typeof path === "string" && path.length > 0 && !seen.has(path)) {
+        seen.add(path);
+        out.push(path);
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * contract-rolling-seat-primer-v1 (O3) — the context size (input + cache_read + cache_creation) of the
+ * LAST assistant usage in the run's stdout, parsed the SAME way `captureReadPaths` parses its Read
+ * events. Every seat-primer records this as `context_tokens`, so the next build's `max_context_tokens`
+ * ceiling can weigh the primer. Read through the RETURNED stdout (not the streaming `onEvent` path)
+ * because an injected `run` seam bypasses streaming — the sealer must see what the run actually
+ * returned. `undefined` when the run reported no usage (the runtime then falls back to its own
+ * streamed `lastAssistantContext`, or 0).
+ */
+function captureLastContext(stdout: string): number | undefined {
+  let last: number | undefined;
+  for (const raw of stdout.split("\n")) {
+    const line = raw.trim();
+    if (!line) continue;
+    let e: Record<string, unknown>;
+    try { e = JSON.parse(line) as Record<string, unknown>; } catch { continue; }
+    if (String(e["type"] ?? "") !== "assistant") continue;
+    const msg = e["message"];
+    if (!msg || typeof msg !== "object") continue;
+    const usage = (msg as { usage?: Record<string, number> }).usage;
+    if (usage && typeof usage === "object") {
+      last = (usage["input_tokens"] ?? 0) + (usage["cache_read_input_tokens"] ?? 0) + (usage["cache_creation_input_tokens"] ?? 0);
+    }
+  }
+  return last;
+}
+
+/** The write tools whose first call ends a seat's READING (contract-primer-reading-frontier-v1 O1). */
+const FRONTIER_WRITE_TOOLS = new Set(["Write", "Edit", "MultiEdit", "NotebookEdit"]);
+
+/**
+ * The input+cache_read+cache_creation of an assistant line's usage, or undefined when it carries none.
+ * contract-fork-continuation-is-exact-v1 (O2) — a usage reporting NONE of the three context fields
+ * (e.g. a write line carrying only `output_tokens`) contributes NO reading: it returns `undefined`, not
+ * `0`, so `usage ?? lastUsageBefore` falls through to the last REPORTED reading rather than discarding
+ * it. A usage reporting ANY of the three sums the ones present (a missing field as `0`), as today.
+ */
+function assistantContextOf(msg: unknown): number | undefined {
+  const u = (msg as { usage?: Record<string, number> } | undefined)?.usage;
+  if (!u || typeof u !== "object") return undefined;
+  if (u["input_tokens"] === undefined && u["cache_read_input_tokens"] === undefined && u["cache_creation_input_tokens"] === undefined) {
+    return undefined;
+  }
+  return (u["input_tokens"] ?? 0) + (u["cache_read_input_tokens"] ?? 0) + (u["cache_creation_input_tokens"] ?? 0);
+}
+
+/**
+ * contract-primer-reading-frontier-v1 (O1/O3/O4/I2/I3/F1) — a seat-primer is forked at its READING
+ * FRONTIER: the point where the seat stopped reading and started writing. Parsed over the concatenated
+ * seal stdout (every spawn, in order — so a first write in a reserve continuation is found, I2):
+ *   · `frontier` — the uuid of the last `type:"user"` line before the FIRST assistant line whose content
+ *     calls a write tool (Write/Edit/MultiEdit/NotebookEdit). No write, or no user line before it (F1),
+ *     yields no frontier.
+ *   · `context_tokens` — WITH a frontier, the context of that first-write assistant line (its own usage,
+ *     or the last usage before it); WITHOUT one, the seat's LAST usage exactly as today (I3/F1).
+ *   · `reads` — WITH a frontier, the Read paths on assistant lines BEFORE the FRONTIER line — the reads
+ *     the cut conversation holds. contract-fork-continuation-is-exact-v1 (O3): the frontier is the last
+ *     `user` line before the first write, so a Read in the write's OWN turn (after that user line, with
+ *     no user line between it and the write) is AFTER the frontier and is NOT recorded. Reads since the
+ *     last user line are PENDING; a user line commits them, and the first write discards the pending set.
+ *     WITHOUT a frontier, every Read as today.
+ * Derived by the engine from the stream, never typed by the model.
+ */
+function captureReadingFrontier(stdout: string): { frontier?: string | undefined; context_tokens?: number | undefined; reads: string[] } {
+  let lastUserUuid: string | undefined;
+  let lastUsageBefore: number | undefined;
+  const readsBefore: string[] = [];       // reads BEFORE the frontier line (committed at each user line)
+  let pendingReads: string[] = [];        // reads SINCE the last user line — not yet before a frontier
+  const seen = new Set<string>();
+  let frontier: string | undefined;
+  let firstWriteContext: number | undefined;
+  let foundWrite = false;
+  const commitPending = (): void => {
+    for (const p of pendingReads) if (!seen.has(p)) { seen.add(p); readsBefore.push(p); }
+    pendingReads = [];
+  };
+  for (const raw of stdout.split("\n")) {
+    const line = raw.trim();
+    if (!line) continue;
+    let e: Record<string, unknown>;
+    try { e = JSON.parse(line) as Record<string, unknown>; } catch { continue; }
+    const type = typeof e["type"] === "string" ? (e["type"] as string) : "";
+    if (type === "user") {
+      if (typeof e["uuid"] === "string") lastUserUuid = e["uuid"] as string;
+      // reads seen since the last user line are now BEFORE a user line ⇒ before any later frontier (O3)
+      commitPending();
+      continue;
+    }
+    const msg = e["message"];
+    if (type !== "assistant" || !msg || typeof msg !== "object") continue;
+    const content = (msg as { content?: Array<Record<string, unknown>> }).content ?? [];
+    const usage = assistantContextOf(msg);
+    if (content.some((b) => String(b["type"] ?? "") === "tool_use" && FRONTIER_WRITE_TOOLS.has(String(b["name"] ?? "")))) {
+      foundWrite = true;
+      frontier = lastUserUuid;                 // undefined ⇒ no user line before the write ⇒ no frontier (F1)
+      firstWriteContext = usage ?? lastUsageBefore;
+      // pendingReads (this write's OWN turn, after the frontier) are DISCARDED — the cut ends before them
+      break;
+    }
+    for (const b of content) {
+      if (String(b["type"] ?? "") !== "tool_use" || String(b["name"] ?? "") !== "Read") continue;
+      const input = (b["input"] && typeof b["input"] === "object" ? b["input"] : {}) as Record<string, unknown>;
+      const path = input["file_path"];
+      if (typeof path === "string" && path.length > 0 && !seen.has(path) && !pendingReads.includes(path)) { pendingReads.push(path); }
+    }
+    if (usage !== undefined) lastUsageBefore = usage;
+  }
+  // A frontier requires BOTH a write AND a user line before it. Otherwise the primer is as today:
+  // the last usage over the whole run, and every Read.
+  if (foundWrite && frontier !== undefined) {
+    return { frontier, context_tokens: firstWriteContext, reads: readsBefore };
+  }
+  return { context_tokens: captureLastContext(stdout), reads: captureReadPaths(stdout) };
+}
+
 // The wall-clock bound on one chair's spawn. A tool-granted child has no inherent
 // terminus (it can search/loop), and the gig runs the spawn synchronously — so without
 // this bound one wedged child wedges the whole server. SIGKILL, not SIGTERM: a
@@ -1015,10 +1260,122 @@ export function promptViaStdin(prompt: string): boolean {
   return prompt.length > promptArgLimit();
 }
 
+/**
+ * The `claude` session id a chair's conversation is NAMED by, derived deterministically from
+ * `(gig_id, role)`. The same seat used twice in one gig derives the SAME uuid, so its second reach
+ * can `--resume` the conversation the first opened instead of re-reading cold; two roles in one gig,
+ * or one role across two gigs, never collide (a v5-shaped uuid over a `gig_id\x1frole` string).
+ *
+ * A gig-less invocation (no `gig_id`) returns undefined: with nothing to key the session on there is
+ * nothing to name and nothing to resume, so the spawn carries neither `--session-id` nor `--resume`.
+ * The uuid is a valid RFC 4122 string (version nibble 5, variant 8–b) so the CLI accepts it as a
+ * session id and the spec's UUID shape holds.
+ */
+export function sessionUuidFor(gig_id: string | undefined, role: string | undefined): string | undefined {
+  if (!gig_id) return undefined;
+  const h = createHash("sha1").update(`coltrane-chair-session${gig_id}${role ?? ""}`).digest();
+  h[6] = (h[6]! & 0x0f) | 0x50; // version 5
+  h[8] = (h[8]! & 0x3f) | 0x80; // RFC 4122 variant
+  const hex = h.subarray(0, 16).toString("hex");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
+}
+
+/**
+ * Rewrite a built arg list to RESUME a session rather than open one: it must carry EXACTLY ONE
+ * `--resume <uuid>` naming the session to CONTINUE, and none of the flags that open or fork a fresh
+ * conversation. A resume must not ALSO name a fresh session (`--session-id`, which the CLI reads as
+ * opening, not continuing), nor re-run a warm start: for a FORK chair `baseArgs` is the first-spawn
+ * warm start `--resume <primer> --resume-session-at <frontier> --fork-session --session-id <own>`
+ * (contract-fork-continuation-is-exact-v1 O1), and a continuation of that chair's OWN session carries
+ * none of it — the warm start belongs to the FIRST spawn only. So every `--session-id`,
+ * `--resume-session-at` and inherited `--resume` PAIR is dropped (flag and value), `--fork-session`
+ * (valueless) is dropped, and a single `--resume <sessionId>` is appended.
+ */
+function withResume(args: readonly string[], sessionId: string): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    // drop each opening/warm-start flag AND its value — a continuation resumes ONE session and no more
+    if (args[i] === "--session-id" || args[i] === "--resume" || args[i] === "--resume-session-at") { i++; continue; }
+    if (args[i] === "--fork-session") continue; // valueless flag: the warm start belongs to the first spawn
+    out.push(args[i]!);
+  }
+  out.push("--resume", sessionId);
+  return out;
+}
+
+/**
+ * Did a `--resume` run fail because its session could not be found? The CLI reports a missing resume
+ * target as an error result whose text names it ("No conversation found with session ID …"). Read
+ * from the child's stream so it is caught whether the run resolved with the error result or threw a
+ * non-zero exit carrying the same stdout. Deliberately narrow — a result event's text, not any line —
+ * so an ordinary failure is never mistaken for a lost session (F1).
+ */
+function resumeSessionLost(stdout: string): boolean {
+  for (const raw of stdout.split("\n")) {
+    const line = raw.trim();
+    if (!line) continue;
+    let e: Record<string, unknown>;
+    try { e = JSON.parse(line) as Record<string, unknown>; } catch { continue; }
+    if (e["type"] !== "result") continue;
+    const txt = typeof e["result"] === "string" ? (e["result"] as string) : "";
+    if (/no conversation found|no such session|session .*not found/i.test(txt)) return true;
+  }
+  return false;
+}
+
+/**
+ * contract-primer-reading-frontier-v1 (F2) — did a fork fail because its `--resume-session-at` named a
+ * message uuid the primer's session does not hold? claude 2.1.274 (probed 2026-09-18) exits 1 with the
+ * notice `No message found with message.uuid of: <uuid>` on stderr (so in the ChildExitError message),
+ * and a stdout result event that carries it ONLY in `errors: [...]` — there is no `result` text, so
+ * `resumeSessionLost` (which reads `result` alone) cannot see it. Detect it in EITHER place, next to
+ * `resumeSessionLost`, so the unresolvable-frontier fork takes the cold fallback rather than failing.
+ */
+function frontierNotFound(stdout: string, message: string): boolean {
+  const re = /no message found with message\.uuid of/i;
+  if (re.test(message)) return true;
+  for (const raw of stdout.split("\n")) {
+    const line = raw.trim();
+    if (!line) continue;
+    let e: Record<string, unknown>;
+    try { e = JSON.parse(line) as Record<string, unknown>; } catch { continue; }
+    if (e["type"] !== "result") continue;
+    const errs = e["errors"];
+    if (Array.isArray(errs) && errs.some((x) => typeof x === "string" && re.test(x))) return true;
+    const txt = typeof e["result"] === "string" ? (e["result"] as string) : "";
+    if (re.test(txt)) return true;
+  }
+  return false;
+}
+
+/**
+ * Did a spawn fail because the `--session-id` it opened with is ALREADY IN USE? A chair's session id
+ * is deterministic in `(gig_id, role)`, so a KILLED attempt that already opened it leaves the id live;
+ * a resumed gig's first spawn re-opens it and the CLI refuses it (`Error: Session ID <uuid> is already
+ * in use.`). Reported both as an error result in the stream AND in the non-zero exit message, so read
+ * both — the exit `message` and the result stream (like `resumeSessionLost`) — and catch it whichever
+ * carries it. This is the COLLISION case the LOST case (`resumeSessionLost`) does NOT cover; the two
+ * are disjoint (one names "already in use", the other "no conversation found").
+ */
+function sessionIdInUse(stdout: string, message: string): boolean {
+  const inUse = /session id .*is already in use/i;
+  if (inUse.test(message)) return true;
+  for (const raw of stdout.split("\n")) {
+    const line = raw.trim();
+    if (!line) continue;
+    let e: Record<string, unknown>;
+    try { e = JSON.parse(line) as Record<string, unknown>; } catch { continue; }
+    if (e["type"] !== "result") continue;
+    const txt = typeof e["result"] === "string" ? (e["result"] as string) : "";
+    if (inUse.test(txt)) return true;
+  }
+  return false;
+}
+
 export function buildInvokerArgs(
   prompt: string,
   mcpConfigPath: string,
-  opts: { model?: string | undefined; allowed_tools?: readonly string[] | undefined; disallowed_tools?: readonly string[] | undefined; max_tool_calls?: number | undefined },
+  opts: { model?: string | undefined; allowed_tools?: readonly string[] | undefined; disallowed_tools?: readonly string[] | undefined; max_tool_calls?: number | undefined; effort?: Effort | undefined; session_id?: string | undefined; resume?: boolean | undefined; fork_from_session?: string | undefined; resume_session_at?: string | undefined },
 ): string[] {
   // `-p` is a BOOLEAN flag and the prompt is a POSITIONAL argument, which is what makes the
   // large-prompt path clean: keep the flag, drop the positional, write it to stdin. The
@@ -1026,8 +1383,33 @@ export function buildInvokerArgs(
   // stdin; keeping the flag states it, and costs nothing.
   const args = promptViaStdin(prompt) ? ["-p"] : ["-p", prompt];
   if (opts.model) args.push("--model", opts.model);
+  // contract-chair-session-continuity-v1 — NAME the chair's conversation so a second reach can
+  // resume it. Every spawn with a session id opens one with `--session-id`; a re-invocation that
+  // is resuming (the amend round) carries `--resume` instead — never both, or the CLI opens a
+  // fresh session rather than continuing. A gig-less spawn has no session id and carries neither.
+  // contract-seat-primer-v1 (O2) — a FORK chair's FIRST spawn WARM-STARTS: it `--resume`s the primer
+  // seat's session, `--fork-session`s that conversation into a NEW branch, and names THAT branch with
+  // its own (gig, role) `--session-id`. Distinct from an amend `--resume` (which continues the SAME
+  // session under the same id): a fork opens its own session forked FROM another's.
+  if (opts.fork_from_session && opts.session_id) {
+    args.push("--resume", opts.fork_from_session);
+    // contract-primer-reading-frontier-v1 (O2) — a fork of a primer that recorded a reading FRONTIER
+    // CUTS the resumed conversation there: `--resume-session-at <frontier>` starts the branch with the
+    // conversation as it stood after that message, so the fork loads what the primer READ, never what
+    // it then DID. A frontier-less primer carries none, so the whole session resumes exactly as today.
+    if (opts.resume_session_at) args.push("--resume-session-at", opts.resume_session_at);
+    args.push("--fork-session", "--session-id", opts.session_id);
+  } else if (opts.session_id) {
+    if (opts.resume) args.push("--resume", opts.session_id);
+    else args.push("--session-id", opts.session_id);
+  }
   // per-agent blast-radius cap: a runaway agent can't burn past its own turn budget.
   if (opts.max_tool_calls !== undefined) args.push("--max-turns", String(opts.max_tool_calls));
+  // #seat-effort (O3/I2) — the spawn ALWAYS carries exactly one --effort, whatever depth or turn
+  // budget applies. Floored to `medium` here so a hand-built ctx that resolved to no effort still
+  // gets an explicit level rather than inheriting the operator's ~/.claude/settings.json effortLevel
+  // — the measured defect. The invoke door passes the resolved `ctx.effort ?? "medium"`.
+  args.push("--effort", opts.effort ?? "medium");
   // the cage floor: no ambient MCP servers leak into the spawn, ever.
   args.push("--mcp-config", mcpConfigPath, "--strict-mcp-config");
   // The OTHER half of that floor, and it was missing. A seat's cwd is a freshly cloned repository
@@ -1046,6 +1428,15 @@ export function buildInvokerArgs(
   //
   // This is what makes one gig's write to a repo stop being every later gig's execution.
   args.push("--setting-sources", "user");
+  // contract-seat-memory-v1 (O1/I1) — a seat's writes are its grants; the operator's auto-memory is
+  // NOT a seat's to write. Measured: a `claude -p` seat spawned as chairs are (`--setting-sources
+  // user`) wrote ~/.claude/projects/<repo>/memory/, loaded by every later session in the repo.
+  // `--setting-sources user` bounds which settings FILES load; it does not turn the auto-memory tool
+  // off. Pass exactly ONE `--settings` whose JSON disables it, here at the single point every spawn
+  // kind is built from (first run, resumed amend, reserve continuation, cold fallback), so the pair
+  // rides through every arg-list transform. Disjoint from --setting-sources / --effort / the session
+  // flags, so the effort and session-continuity contracts are untouched.
+  args.push("--settings", JSON.stringify({ autoMemoryEnabled: false }));
   if (opts.allowed_tools && opts.allowed_tools.length > 0) args.push("--allowedTools", opts.allowed_tools.join(","));
   if (opts.disallowed_tools && opts.disallowed_tools.length > 0) args.push("--disallowedTools", opts.disallowed_tools.join(","));
   return args;
@@ -1267,7 +1658,25 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
           core_by_type: Object.fromEntries(sealTypes.map((t) => [t, coreTypeOf(t)])),
         }
       : undefined;
-    const prompt = buildPrompt(ctx, schema, outputSchemas, seal);
+    // contract-amend-resume-prompt-v1 — on an amend RESUME (ctx.resume, and a session to resume) the
+    // spawn carries a TRIMMED prompt (buildPrompt keys on ctx.resume); the FULL prompt is built with
+    // resume OFF so the cold fallback for a lost resume session can re-send it (I2). On every
+    // non-resume spawn the two are identical, so nothing else changes shape.
+    //
+    // contract-reverify-resume-prompt-v1 (O1/I1/F1) — a re-VERIFY resume (ctx.resume_keep_prompt) is a
+    // DIFFERENT trim: buildPrompt keeps the FULL prompt for a keep-prompt resume (so the stateless
+    // completions door keeps everything it needs — O2), so the trim to only-what-is-new has to be
+    // applied HERE, on the resuming Claude side. A MAKER amend resume (no keep_prompt) still takes
+    // buildPrompt's own trim. fullPrompt stays the full round-one prompt in every case, so the cold
+    // fallback for a lost resume re-sends the verifier's whole context (F1).
+    const resumingWithSession = ctx.resume === true && sessionUuidFor(ctx.gig_id, ctx.role) !== undefined;
+    const reverifyResume = resumingWithSession && ctx.resume_keep_prompt === true;
+    const fullPrompt = buildPrompt(resumingWithSession ? { ...ctx, resume: false } : ctx, schema, outputSchemas, seal);
+    const prompt = reverifyResume
+      ? buildReverifyResumePrompt(sealTypes, schema, outputSchemas, seal)
+      : resumingWithSession
+        ? buildPrompt(ctx, schema, outputSchemas, seal)
+        : fullPrompt;
     // #221 — the key signal for candidate selection, derived from what we just resolved.
     // Threaded into BOTH extract calls below; threading only the injected-run one would
     // leave every real chair unscored.
@@ -1353,20 +1762,62 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
       ];
       // NO OVER-DENIAL (LAW 5, and LAW 2's structural half): nothing the seat legitimately holds may be
       // denied — most sharply OUTPUT_WRITE_TOOL, which effectiveAllowed now carries on the seal path.
-      // Subtract the effective allow set — by exact name AND base name, so a scoped grant like
-      // `Bash(npx …)` still protects its `Bash` — then dedupe. code_tool_access-kept tools are NOT
-      // subtracted here: a venue that excludes a code tool must still deny it even under access "full".
+      // Subtract the effective allow set, then dedupe. The base-name half is right ONLY for a BARE deny
+      // (`Write`): emitting it would kill a scoped `Write(src/**)` grant of the same tool too, so a
+      // grant of that base — scoped or not — protects it. Applied to a SCOPED deny it is wrong:
+      // `Write(tests/**)` and `Write(src/**)` share the base `Write`, yet name different surfaces, so a
+      // scoped deny is removed ONLY by an EXACT-string grant. Without that split a seat could never be
+      // granted `src/**` while denied `tests/**` — the one shape a builder that must not weaken its own
+      // laws needs. code_tool_access-kept tools are NOT subtracted here: a venue that excludes a code
+      // tool must still deny it even under access "full".
       const allowExact = new Set(effectiveAllowed ?? []);
       const allowBase = new Set((effectiveAllowed ?? []).map(toolBaseName));
-      const disallowedTools = [...new Set(denyUnion)].filter(
-        (t) => !allowExact.has(t) && !allowBase.has(toolBaseName(t)),
-      );
-      const baseArgs = buildInvokerArgs(prompt, cfgPath, {
+      const disallowedTools = [...new Set(denyUnion)].filter((t) => {
+        if (allowExact.has(t)) return false; // an exact grant of the very string always protects it
+        const isBare = t === toolBaseName(t); // no scope parens → a bare tool name
+        return !(isBare && allowBase.has(toolBaseName(t)));
+      });
+      // contract-chair-session-continuity-v1 — the chair's own session, deterministic in (gig_id,
+      // role). A first invocation OPENS it (--session-id); an amend re-invocation (ctx.resume, set
+      // by the runtime) RESUMES it (--resume). Absent gig_id ⇒ no session ⇒ neither flag.
+      const sessionId = sessionUuidFor(ctx.gig_id, ctx.role);
+      const resumeRound = ctx.resume === true && sessionId !== undefined;
+      // contract-seat-primer-v1 (O2/I1) — a FORK chair (ctx.fork threaded, and this seat has a session)
+      // WARM-STARTS its first spawn from the primer's session. A plain chair carries no ctx.fork, so
+      // isFork is false and the spawn is byte-identical to today (no --fork-session — the I1 control).
+      const forkFromSession = ctx.fork?.primer_session_id;
+      const isFork = forkFromSession !== undefined && sessionId !== undefined;
+      // contract-primer-reading-frontier-v1 (O2) — the primer's reading frontier, if it recorded one:
+      // the fork's first spawn CUTS the resumed conversation there. Absent ⇒ the whole session resumes.
+      const forkFrontier = ctx.fork?.frontier;
+      // #seat-effort (O3) — the runtime already resolved precedence onto ctx.effort; floor to medium
+      // so an undeclared, untiered seat (or any hand-built ctx) still spawns with an explicit
+      // --effort rather than the operator's settings-file effort. Hoisted so baseArgs and the cold
+      // arg list below share ONE opts object rather than two parallel derivations.
+      const invokerOpts = {
         model: resolveModel(a.model_tier, opts.model),
         allowed_tools: effectiveAllowed,
         disallowed_tools: disallowedTools,
         max_tool_calls: maxToolCalls,
+        effort: ctx.effort ?? "medium",
+      };
+      const baseArgs = buildInvokerArgs(prompt, cfgPath, {
+        ...invokerOpts,
+        ...(sessionId !== undefined ? { session_id: sessionId, resume: resumeRound } : {}),
+        // contract-seat-primer-v1 (O2) — the fork warm-start rides on the FIRST spawn (baseArgs); the
+        // cold arg list below carries no fork_from_session, so an unresumable primer (F2) falls back to
+        // a plain fresh-session spawn with no --fork-session.
+        ...(isFork ? { fork_from_session: forkFromSession } : {}),
+        // contract-primer-reading-frontier-v1 (O2) — cut the fork at the primer's frontier when it has one.
+        ...(isFork && forkFrontier !== undefined ? { resume_session_at: forkFrontier } : {}),
       });
+      // contract-amend-resume-prompt-v1 (I2) — the cold arg list for a resume whose session is gone:
+      // a FRESH --session-id spawn (resume:false) carrying the FULL prompt, because nothing else
+      // carries the chair's context once the resume fell through. Identical to baseArgs on every
+      // non-resume spawn (same session flag, same full prompt), so it changes shape only on an amend.
+      const coldArgs = sessionId !== undefined
+        ? buildInvokerArgs(fullPrompt, cfgPath, { ...invokerOpts, session_id: sessionId, resume: false })
+        : baseArgs;
       // SEAT IN THE ROOM. When the substrate stood up a SEAT-BEARING room, ctx.seatExec names its
       // container and per-realization workspace, and the chair runs INSIDE it:
       // `docker exec -i -w <workspace> <container> claude …` — so the seat's cwd is the room's own
@@ -1427,21 +1878,152 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
             seal !== undefined &&
             e instanceof ChildExitError &&
             finalText(e.stdout).errorSubtype === BUDGET_STOP_SUBTYPE;
-          if (!recoverable) throw e;
-          return { stdout: (e as ChildExitError).stdout, budgetStopped: true };
+          if (recoverable) return { stdout: (e as ChildExitError).stdout, budgetStopped: true };
+          // A non-recoverable non-zero exit still carries the child's stream, and on the provider-
+          // usage-limit path that stream — NOT stderr — holds the only account of why the run stopped:
+          // the CLI emits the notice as a synthetic assistant message and/or an is_error result and
+          // writes nothing to stderr. The default runner builds its failure from stderr alone, so the
+          // operator was handed `claude exited 1:` with a blank reason for a failure that had a precise
+          // one. Fold the stream's notice into the failure so the reason — and when the limit resets —
+          // survives; keep it a ChildExitError so the stdout it carries is preserved. When the stream
+          // says nothing, the original error (which carries stderr) is rethrown unchanged, so an
+          // ordinary non-zero exit still reports stderr (the control).
+          if (e instanceof ChildExitError) {
+            const notice = providerNoticeFrom(e.stdout);
+            if (notice) {
+              const sep = e.message === "" || e.message.endsWith(" ") ? "" : " ";
+              throw new ChildExitError(`${e.message}${sep}${notice}`, e.stdout);
+            }
+          }
+          throw e;
         }
       };
 
-      let { stdout, budgetStopped } = await runTolerantOfBudgetStop(baseArgs, prompt);
+      // F1 — the cold fallback for a resume whose session is gone: a FRESH spawn with --session-id
+      // and the FULL prompt (coldArgs/fullPrompt), recorded loudly so the fallback is never silent.
+      // Shared by the main amend resume below AND the reserve continuation so the fallback is one
+      // shape; on the reserve path coldArgs === baseArgs and fullPrompt === prompt, so it is unchanged
+      // there. Defined before the first run so the main amend path can reach it.
+      const resumeColdFallback = async (): Promise<{ stdout: string; budgetStopped: boolean }> => {
+        ctx.onEvent?.({
+          type: "resume_fallback",
+          raw: {
+            agent: a.slug,
+            session_id: sessionId,
+            resumed: false,
+            reason: "the session named for --resume could not be found; re-running cold with " +
+              "--session-id and the full prompt",
+          },
+        } as AgentStreamEvent);
+        return runTolerantOfBudgetStop(coldArgs, fullPrompt);
+      };
+
+      // contract-seat-primer-v1 (F2) — a FORK whose primer session cannot be resumed (the run seam
+      // reports "no conversation" for its id) falls back COLD: a FRESH --session-id spawn with the full
+      // prompt (coldArgs carries no fork_from_session, so no --fork-session), NEVER failing the chair.
+      // The `fork_fallback` event names the unresumable primer session so chair_complete records the
+      // reason — a resume that did not happen, not a fork the record falsely claims.
+      // contract-primer-reading-frontier-v1 (F2) — an `reason` overrides the default when the fallback is
+      // due to an unresolvable reading FRONTIER (not an unresumable session), so chair_complete names the
+      // frontier the fork could not cut at rather than a session that never failed.
+      const forkColdFallback = async (reason?: string): Promise<{ stdout: string; budgetStopped: boolean }> => {
+        ctx.onEvent?.({
+          type: "fork_fallback",
+          raw: {
+            agent: a.slug,
+            primer_session_id: forkFromSession,
+            forked: false,
+            reason: reason ??
+              `the primer session ${forkFromSession} could not be resumed; re-running cold with ` +
+              `--session-id and the full prompt`,
+          },
+        } as AgentStreamEvent);
+        return runTolerantOfBudgetStop(coldArgs, fullPrompt);
+      };
+      // contract-primer-reading-frontier-v1 (F2) — the reason for an unresolvable-frontier cold fallback,
+      // naming the frontier so chair_complete.fork_fallback records exactly what could not be resolved.
+      const frontierFallbackReason = (): string =>
+        `the primer's reading frontier ${forkFrontier} could not be resolved in its session; re-running ` +
+        `cold with --session-id and the full prompt`;
+
+      // contract-resumed-gig-session-v1 (O2/O3/F1) — a FIRST `--session-id` open can COLLIDE: the
+      // chair's session id is deterministic in (gig_id, role), so a KILLED attempt that already opened
+      // it leaves the id live, and a resumed gig's first spawn re-opens it — the CLI refuses it
+      // ("already in use"). That is a RESUME, never a failure: re-spawn ONCE with `--resume` and a
+      // SHORT prompt (the previous attempt was interrupted, the current tree is authoritative), and
+      // emit a resume-on-collision event so chair_complete records the chair CONTINUED its session.
+      // If the resume then finds no conversation, the same cold fallback (F1) runs. Only a non-resume
+      // spawn with a session id can collide (a resume carries `--resume`, never `--session-id`).
+      const collisionResume = async (): Promise<{ stdout: string; budgetStopped: boolean }> => {
+        ctx.onEvent?.({
+          type: "resume_on_collision",
+          raw: {
+            agent: a.slug,
+            session_id: sessionId,
+            resumed: true,
+            reason: "the session named for --session-id was already in use — a killed prior attempt " +
+              "created it; re-spawning with --resume to continue that conversation",
+          },
+        } as AgentStreamEvent);
+        const retryPrompt =
+          `This chair's previous attempt was interrupted. The conversation you are resuming already ` +
+          `holds your disposition, identity, method, tools and the gig input, so this prompt carries ` +
+          `only what is new: the current working tree is authoritative — re-derive your output from ` +
+          `it and re-seal exactly as before.`;
+        const retryArgs = buildInvokerArgs(retryPrompt, cfgPath, { ...invokerOpts, session_id: sessionId!, resume: true });
+        try {
+          const retry = await runTolerantOfBudgetStop(retryArgs, retryPrompt);
+          return resumeSessionLost(retry.stdout) ? await resumeColdFallback() : retry;
+        } catch (e) {
+          if (e instanceof ChildExitError && resumeSessionLost(e.stdout)) return await resumeColdFallback();
+          throw e;
+        }
+      };
+
+      // contract-amend-resume-prompt-v1 (I2/F1) — run the chair once. On an amend RESUME whose session
+      // the seam reports gone (whether the run resolved with the error result or threw a non-zero exit
+      // carrying it), fall back COLD rather than failing the chair. On a FIRST open whose --session-id
+      // COLLIDES (contract-resumed-gig-session-v1 O2), resume it instead of failing. Every other spawn
+      // kind is untouched.
+      const collided = (s: string, m: string): boolean =>
+        !resumeRound && sessionId !== undefined && sessionIdInUse(s, m);
+      let stdout: string;
+      let budgetStopped: boolean;
+      try {
+        const first = await runTolerantOfBudgetStop(baseArgs, prompt);
+        if (resumeRound && resumeSessionLost(first.stdout)) {
+          ({ stdout, budgetStopped } = await resumeColdFallback());
+        } else if (isFork && forkFrontier !== undefined && frontierNotFound(first.stdout, "")) {
+          // contract-primer-reading-frontier-v1 (F2) — the fork's --resume-session-at named a uuid the
+          // primer session does not hold; re-run cold, naming the frontier.
+          ({ stdout, budgetStopped } = await forkColdFallback(frontierFallbackReason()));
+        } else if (isFork && resumeSessionLost(first.stdout)) {
+          // contract-seat-primer-v1 (F2) — the fork's --resume of the primer found no conversation.
+          ({ stdout, budgetStopped } = await forkColdFallback());
+        } else if (collided(first.stdout, "")) {
+          ({ stdout, budgetStopped } = await collisionResume());
+        } else {
+          ({ stdout, budgetStopped } = first);
+        }
+      } catch (e) {
+        if (resumeRound && e instanceof ChildExitError && resumeSessionLost(e.stdout)) {
+          ({ stdout, budgetStopped } = await resumeColdFallback());
+        } else if (isFork && forkFrontier !== undefined && e instanceof ChildExitError && frontierNotFound(e.stdout, e.message)) {
+          // contract-primer-reading-frontier-v1 (F2) — the fork exited 1 because --resume-session-at named
+          // a uuid the primer session does not hold (notice on stderr and in the result event's `errors`).
+          ({ stdout, budgetStopped } = await forkColdFallback(frontierFallbackReason()));
+        } else if (isFork && e instanceof ChildExitError && resumeSessionLost(e.stdout)) {
+          ({ stdout, budgetStopped } = await forkColdFallback());
+        } else if (e instanceof ChildExitError && collided(e.stdout, e.message)) {
+          ({ stdout, budgetStopped } = await collisionResume());
+        } else {
+          throw e;
+        }
+      }
       // Every stream whose writes count toward the seal. Diverges from `stdout` only when a reserve
       // was granted, which is the one case where a chair's output spans more than one invocation.
       let sealStdout = stdout;
 
-      // THE RESERVE GRANT. The chair spent its declared budget; rather than losing whatever it was
-      // mid-way through, it is told where it stands and given a bounded extension to close out.
-      // Once. The continuation names what already sealed so the chair does not redo it, and says
-      // plainly that nothing follows — a chair that believes another extension is coming will spend
-      // this one reaching rather than landing.
       if (budgetStopped && reserveTurns > 0 && seal !== undefined) {
         const sealedSoFar = captureOutputWrites(stdout, sealTypes);
         const already = Object.keys(sealedSoFar);
@@ -1449,6 +2031,12 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
           type: "budget_reserve_granted",
           raw: { agent: a.slug, reserve_turns: reserveTurns, sealed_before_grant: already },
         } as AgentStreamEvent);
+        // contract-chair-session-continuity-v1 (O2) — the continuation RESUMES the chair's own
+        // session and carries ONLY the reserve text. The original prompt is NOT re-sent: the resumed
+        // conversation already holds it, so re-sending it would pay the whole cold read the resume
+        // exists to avoid. When there is a session to resume (there always is on the seal path, which
+        // requires a gig_id), swap --session-id for --resume; otherwise the old fresh-spawn shape
+        // stands and the prompt is re-sent as before.
         const continuation =
           `You reached your turn budget and were stopped mid-run. You are now in RESERVE: ` +
           `${reserveTurns} turns remain and this is the LAST extension — it will not be extended ` +
@@ -1457,9 +2045,28 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
             ? `Already sealed through the write boundary, do NOT redo: [${already.join(", ")}].\n\n`
             : `Nothing sealed yet.\n\n`) +
           `Close out now: seal what you already have, and state plainly what you did NOT reach so ` +
-          `the record shows the boundary instead of implying coverage.\n\n${prompt}`;
-        const reserveArgs = withPrompt(withMaxTurns(baseArgs, reserveTurns), continuation);
-        const second = await runTolerantOfBudgetStop(reserveArgs, continuation);
+          `the record shows the boundary instead of implying coverage.` +
+          (sessionId !== undefined ? `` : `\n\n${prompt}`);
+        const reserveArgs = sessionId !== undefined
+          ? withPrompt(withMaxTurns(withResume(baseArgs, sessionId), reserveTurns), continuation)
+          : withPrompt(withMaxTurns(baseArgs, reserveTurns), continuation);
+        // F1 — a resume whose session cannot be found must fall back COLD (a fresh spawn with
+        // --session-id and the FULL original prompt) and never fail the chair. Detect the lost
+        // session from the reserve run's stream, whether it resolved with the error result or threw
+        // a non-zero exit carrying it, and re-run cold; loudly, so the fallback is recorded.
+        let second: { stdout: string; budgetStopped: boolean };
+        try {
+          second = await runTolerantOfBudgetStop(reserveArgs, continuation);
+          if (sessionId !== undefined && resumeSessionLost(second.stdout)) {
+            second = await resumeColdFallback();
+          }
+        } catch (e) {
+          if (sessionId !== undefined && e instanceof ChildExitError && resumeSessionLost(e.stdout)) {
+            second = await resumeColdFallback();
+          } else {
+            throw e;
+          }
+        }
         // Two streams, two different questions, and conflating them is a bug: the OUTCOME (did the
         // run complete?) is the last pass's to answer, while the WRITES are cumulative — the first
         // pass's payloads passed the boundary too, and a continuation that sealed nothing must not
@@ -1496,6 +2103,33 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
           `claude flagged its result with is_error — the payload is an error message, not an ` +
             `answer: ${outcome.apiErrorText.slice(0, 300)}`,
         );
+      }
+
+      // contract-seat-primer-v1 (O1/I2) — a PRIME seat's Read events, parsed from the run's stdout and
+      // emitted so the runtime seals the seat-primer from EXACTLY the files this seat read. Emitted on
+      // both seal and text paths (an injected `run` bypasses streaming, so the returned stdout is the
+      // one place the reads are), and before the seal branches so the reads reach the runtime whatever
+      // the seat produced.
+      if (ctx.prime) {
+        // contract-primer-reading-frontier-v1 (O1/O3/O4/I2/I3/F1) — parse the reading frontier over the
+        // concatenated seal stdout: the reads are cut to those before the first write, the context is the
+        // first-write context (or the last usage when there is no frontier), and the frontier uuid is
+        // forwarded on the seat_reads event so the runtime seals it onto the primer. A no-write/no-user
+        // seat yields no frontier and the reads/context are exactly as the rolling-primer laws expect.
+        const rf = captureReadingFrontier(sealStdout);
+        ctx.onEvent?.({
+          type: "seat_reads",
+          raw: {
+            agent: a.slug, area: ctx.prime.area, reads: rf.reads,
+            ...(rf.frontier !== undefined ? { frontier: rf.frontier } : {}),
+          },
+        } as AgentStreamEvent);
+        // contract-rolling-seat-primer-v1 (O3) — forward the seat's context size at seal the SAME way, so
+        // the runtime records it on the seat-primer even though the injected `run` seam bypassed the
+        // streamed usages. Emitted only when the run reported a usage; otherwise the runtime falls back.
+        if (rf.context_tokens !== undefined) {
+          ctx.onEvent?.({ type: "seat_context", raw: { context_tokens: rf.context_tokens } } as AgentStreamEvent);
+        }
       }
 
       if (seal) {
@@ -1558,7 +2192,13 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
             `The work you already did still counts. Do NOT redo it. Seal it now, by calling ` +
             `output_write — the only channel that seals:\n${calls}\n\n` +
             `This is the LAST attempt; it will not be offered again.\n\n${prompt}`;
-          const repairArgs = withPrompt(withMaxTurns(baseArgs, SEAL_REPAIR_TURNS), correction);
+          // contract-fork-continuation-is-exact-v1 (O1) — the repair CONTINUES the chair's own
+          // session, exactly as the reserve continuation does: resume `<own>`, and carry none of the
+          // warm start (`--session-id`, `--fork-session`, `--resume-session-at`, the primer `--resume`)
+          // that `baseArgs` holds for a fork chair. Only a gig-less spawn (no session) reuses baseArgs.
+          const repairArgs = sessionId !== undefined
+            ? withPrompt(withMaxTurns(withResume(baseArgs, sessionId), SEAL_REPAIR_TURNS), correction)
+            : withPrompt(withMaxTurns(baseArgs, SEAL_REPAIR_TURNS), correction);
           const repaired = await runTolerantOfBudgetStop(repairArgs, correction);
           // Cumulative, exactly as the reserve path is: a write that passed in either pass counts.
           sealStdout = `${sealStdout}\n${repaired.stdout}`;
@@ -1882,4 +2522,51 @@ function finalText(stdout: string): StreamOutcome {
   // and beat real assistant text. Nullish coalescing was the bug; emptiness is the test.
   if (result !== undefined && result.trim() !== "") return { text: result };
   return { text: answerBlock(assistant) };
+}
+
+/**
+ * The provider's own account of why a run stopped, read from the child's STREAM rather than stderr.
+ *
+ * When the Claude CLI hits the account's usage limit it writes NOTHING to stderr — it emits the
+ * notice as a synthetic assistant message (model `<synthetic>`) and/or an is_error result whose
+ * `result` field is the notice, then exits non-zero (measured on build gig 13ea0d99: its verify seat
+ * failed with `claude exited 1: `, and the session transcript ended on "You've hit your session
+ * limit · resets …"). Both carriers are read because the exact fields of the CLI's final event on
+ * this path were not captured, so a fix that read only one could miss whichever shape the day's CLI
+ * happens to take. Returns "" when the stream carries no such notice, so an ordinary non-zero exit's
+ * failure keeps reporting stderr unchanged.
+ *
+ * Deliberately narrow — a `<synthetic>` assistant, not any assistant text, and an is_error result,
+ * not any result — so a budget-stopped TEXT run's partial reasoning is never mistaken for a reason.
+ */
+function providerNoticeFrom(stdout: string): string {
+  const texts: string[] = [];
+  const push = (v: unknown): void => {
+    if (typeof v === "string" && v.trim() !== "") texts.push(v.trim());
+  };
+  for (const raw of stdout.split("\n")) {
+    const line = raw.trim();
+    if (!line) continue;
+    let e: Record<string, unknown>;
+    try { e = JSON.parse(line) as Record<string, unknown>; } catch { continue; /* non-json */ }
+    const type = typeof e["type"] === "string" ? (e["type"] as string) : "";
+    if (type === "result" && e["is_error"] === true) {
+      push(e["result"]);
+    } else if (type === "assistant" && e["message"] && typeof e["message"] === "object") {
+      const msg = e["message"] as { model?: unknown; content?: Array<Record<string, unknown>> };
+      if (msg.model === "<synthetic>") {
+        for (const b of msg.content ?? []) if (b["type"] === "text") push(b["text"]);
+      }
+    }
+  }
+  // Distinct, first-seen order — the limit notice usually rides BOTH carriers, and repeating it
+  // would only pad the failure line.
+  const seen = new Set<string>();
+  const distinct: string[] = [];
+  for (const t of texts) {
+    if (seen.has(t)) continue;
+    seen.add(t);
+    distinct.push(t);
+  }
+  return distinct.join(" — ");
 }

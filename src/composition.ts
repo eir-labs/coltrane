@@ -86,6 +86,14 @@ export interface Chair {
   /** The per-chair ceiling on draws from the gig reserve pool (mirrors `ChairSchema.turn_reserve`).
    *  A chair never draws more than this even when the pool is larger. */
   turn_reserve?: number;
+  /** contract-seat-primer-v1 — a PRIME chair reads an `area` once and seals a `seat-primer`
+   *  (mirrors `ChairSchema.prime`). Mutually exclusive with `fork_from`. */
+  prime?: { area: string };
+  /** contract-seat-primer-v1 — a FORK chair warm-starts from the most recent `seat-primer` its
+   *  agent sealed for `fork_from.primer` (an area slug; mirrors `ChairSchema.fork_from`).
+   *  contract-rolling-seat-primer-v1 (O4) — `max_context_tokens` is a context ceiling: a primer whose
+   *  recorded `context_tokens` exceeds it is REPLACED (cold run), never forked. Absent → fork any size. */
+  fork_from?: { primer: string; max_context_tokens?: number };
 }
 
 export interface PhaseDef {
@@ -298,6 +306,27 @@ export function composeStandard(def: {
         );
       }
       seenRoles.set(ch.role, ph.name);
+
+      // contract-rolling-seat-primer-v1 (O1) — a chair MAY declare both prime and fork_from when they
+      // name the SAME area: a build primes the area and forks the prior primer OF THAT area (the rolling
+      // primer itself). Refuse ONLY a chair whose primed area DIFFERS from the area it forks — a
+      // warm-start from a reading of the wrong area — naming the chair AND both areas so the author sees
+      // exactly which two disagree. (This rewrites contract-seat-primer-v1's F3, which refused ALL
+      // prime+fork chairs.) The fork_from slug check below is unchanged.
+      if (ch.prime && ch.fork_from && ch.prime.area !== ch.fork_from.primer) {
+        throw new CompositionError(
+          `standard ${def.slug}: chair "${ch.role}" primes area "${ch.prime.area}" but forks a primer of ` +
+            `a DIFFERENT area "${ch.fork_from.primer}" — a seat that primes and forks must name the SAME ` +
+            `area (a build primes an area and forks the prior primer OF THAT area). Make prime.area and ` +
+            `fork_from.primer the same slug, or drop one.`,
+        );
+      }
+      if (ch.fork_from && !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(ch.fork_from.primer)) {
+        throw new CompositionError(
+          `standard ${def.slug}: chair "${ch.role}" fork_from area "${ch.fork_from.primer}" is not a ` +
+            `lowercase-hyphen slug — a primer area is a slug like "amend-loop". Fix the fork_from field.`,
+        );
+      }
 
       // A skill-backed chair (skill_slug set, no agent_slug) runs the skill's deterministic
       // code half instead of an agent — skip the agent/required-skills checks for it. The

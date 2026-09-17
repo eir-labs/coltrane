@@ -5,11 +5,15 @@
 // that carries model_version + (empty, v0) eval_scores — honestly un-tempered.
 import { lineageAdoption } from "./lineage_adoption.js";
 import { randomUUID } from "node:crypto";
+import { performance } from "node:perf_hooks";
+import { execFileSync } from "node:child_process";
+import { existsSync } from "node:fs";
+import { join as joinPath, relative as relPath, isAbsolute as isAbsPath, sep as pathSep } from "node:path";
 import type { Standard, Agent, Chair } from "./composition.js";
 import { PRIMITIVE_OUTPUT_TYPE, CORE_TYPES } from "./core_types.js";
 import { executeSkillAsync } from "./skill_subprocess.js";
 import { loadSkillPackage } from "./skills.js";
-import { resolveModel } from "./claude_invoker.js";
+import { resolveModel, sessionUuidFor } from "./claude_invoker.js";
 import { resolveAgentGrants, type ToolProviderRegistry } from "./tool_providers.js";
 import { resolveAndRealize, type Realization, type RealizationOk } from "./venue_realize.js";
 import type { VenueRealizer, RealizationHandle, CredentialResolver } from "./venue_realizer.js";
@@ -39,8 +43,36 @@ import { drainGigHeader } from "./output_mirror.js";
 import { LEDGER_SCHEMA_VERSION, type Ledger, type GigUsage } from "./ledger.js";
 import { PlacementRefused, type PlacementResolver } from "./placement.js";
 import type { Depth } from "./pricing.js";
+import type { Effort } from "./genome_schema.js";
 import type { SkillRecord, EvalRecord } from "./loader.js";
 import { COLTRANE_VERSION } from "./version.js";
+
+// #seat-effort — the ONE place effort precedence resolves, mirroring how `depth` threads. The
+// RESOLVED value is set on AgentInvocationContext.effort and reaches both invokers. Order: the
+// dispatch effort wins, else the agent's declared effort, else the agent's tier default
+// (economy→low, standard→medium, premium→high), else `medium` for an untiered agent — never the
+// operator's ~/.claude/settings.json. Total by construction (always returns a level), which is what
+// makes an undeclared, untiered seat still carry an explicit effort to the spawn (O3).
+function resolveEffort(dispatchEffort: Effort | undefined, agent: Agent): Effort {
+  if (dispatchEffort) return dispatchEffort;
+  if (agent.effort) return agent.effort;
+  switch (agent.model_tier) {
+    case "economy": return "low";
+    case "standard": return "medium";
+    case "premium": return "high";
+    default: return "medium";
+  }
+}
+
+// contract-seat-context-ceiling-v1 (O2) — the ONE place the context ceiling resolves, a sibling of
+// resolveEffort but with NO floor: dispatch ▷ agent ▷ none. Absent everywhere ⇒ `undefined`, which the
+// completions invoker reads as "no ceiling" and runs to done past any context (I1) — never a guessed
+// default. Set on AgentInvocationContext.max_context_tokens at the invoke ctx site, the same seam
+// `effort` threads through.
+function resolveMaxContextTokens(dispatchCap: number | undefined, agent: Agent): number | undefined {
+  if (dispatchCap !== undefined) return dispatchCap;
+  return agent.max_context_tokens;
+}
 
 // What an agent invocation sees. The invoker returns the output `data` (validated
 // downstream against the agent's declared output domain type). `skills` carries
@@ -51,6 +83,15 @@ import { COLTRANE_VERSION } from "./version.js";
 export interface AgentInvocationContext {
   agent: Agent;
   phase: string;
+  /**
+   * The ROLE of the chair this invocation seats (Chair.role) — the seat's name within its phase.
+   * Threaded so buildPrompt can name the seat, and so two chairs seating the SAME agent in one
+   * phase do NOT receive byte-identical prompts: the division of labour a standard declares between
+   * them has to reach the model, not live only in the role names. Absent for a hand-built ctx (the
+   * text-seal literals and other tests that construct a context directly) — buildPrompt renders the
+   * seat only when a role is present, so those prompts stay valid and unchanged.
+   */
+  role?: string | undefined;
   // The id of the gig this chair runs under. Threaded so a model chair can seal its output
   // IN-BAND: the invoker tells the agent to call `output_write({ gig_id, phase, agent_slug, … })`,
   // and that gig_id is what ties the chair's write-boundary adjudication to this run. Absent for a
@@ -101,6 +142,19 @@ export interface AgentInvocationContext {
   // documented "skim first" cost practice had no mechanism behind it. Absent = the agent's
   // own profile stands.
   depth?: Depth | undefined;
+  // #seat-effort — the RESOLVED reasoning effort this seat runs at, set once by the runtime
+  // (resolveEffort: dispatch ▷ agent ▷ tier default ▷ medium) and carried here so the invoker
+  // reaches it without re-deriving. Both invokers read it: the Claude invoker floors it at the spawn
+  // and passes exactly one `--effort`, the completions invoker carries it on the model request.
+  // Threads exactly as `depth` does. Always present on a runtime-built ctx; a hand-built ctx that
+  // omits it makes the Claude invoker fall to `medium` at the spawn (O3).
+  effort?: Effort | undefined;
+  // contract-seat-context-ceiling-v1 (O2/O3) — the RESOLVED per-round context ceiling this seat runs
+  // under (resolveMaxContextTokens: dispatch ▷ agent ▷ none). Present ONLY when a ceiling was declared
+  // somewhere; the chat-completions invoker hands it to runTurn as `max_context_tokens`, and absent
+  // means the turn runs uncapped exactly as today (I1). The Claude invoker ignores it (its CLI has no
+  // per-round context ceiling — out of scope).
+  max_context_tokens?: number | undefined;
   // ── the venue this chair is confined to (venue → dispatch wiring) ──────────────
   // When the gig names a venue, runGig resolves it, calls resolveAndRealize BEFORE this
   // invocation, and threads the resulting room here. The Claude invoker reads BOTH to confine
@@ -139,6 +193,32 @@ export interface AgentInvocationContext {
   // resolves its continuation reserve as ctx.turn_reserve ?? opts.turn_reserve. Absent = no chair
   // reserve declared (falls through to the invoker-level default); 0 = declared but the pool was dry.
   turn_reserve?: number | undefined;
+  // contract-chair-session-continuity-v1 (O3) — set by the runtime on an AMEND re-invocation so the
+  // Claude invoker RESUMES the maker's own prior-round session (--resume <uuid>) instead of opening a
+  // fresh one. The session uuid is derived identically on both rounds from (gig_id, role), so the
+  // amend continues exactly the conversation round one opened. Absent = a first invocation, which
+  // opens the session; the invoker never resumes without it.
+  resume?: boolean | undefined;
+  // contract-resumed-gig-session-v1 (O1) — set alongside `resume` on a re-VERIFY re-invocation. The
+  // spawn RESUMES the verify seat's session (--resume) like an amend, but buildPrompt keeps the FULL
+  // cold prompt rather than the maker's trimmed continuation: a re-verify re-derives its verdict from
+  // the amended tree under its own identity, and a stateless door (chat-completions) holds no prior
+  // conversation to carry that identity — trimming it would leave the seat unidentifiable. Absent on a
+  // maker amend, whose trimmed continuation is correct because the failing verdict is its one new input.
+  resume_keep_prompt?: boolean | undefined;
+  // contract-seat-primer-v1 (O1/I2) — set on a PRIME chair. The invoker parses the seat's forwarded
+  // `Read` events from the run's stdout and emits them (a `seat_reads` stream event) so the runtime
+  // can seal the seat-primer record from exactly the files this seat read. Absent = a non-prime chair.
+  prime?: { area: string } | undefined;
+  // contract-seat-primer-v1 (O2/O4) — set on a FORK chair whose agent has a primer for the named area.
+  // `primer_session_id` is the primer seat's own session the fork --resumes; `stale_paths` are the
+  // primer files whose working-tree blob changed since priming (the runtime decided this against
+  // deps.tree_root), which buildPrompt names in the fork's prompt. Absent = a plain chair, or a fork
+  // whose primer is missing (F1) — either way the spawn opens a fresh session and never --fork-sessions.
+  // contract-primer-reading-frontier-v1 (O2/F2) — `frontier`, when the primer recorded one, is the
+  // message uuid the fork's `--resume-session-at` CUTS the resumed conversation at; absent ⇒ the whole
+  // primer session resumes as today.
+  fork?: { primer_session_id: string; stale_paths: readonly string[]; frontier?: string } | undefined;
 }
 
 // One parsed event from a chair's child process (a stream-json line). `type` is the
@@ -162,6 +242,15 @@ export type GigProgressEvent =
       /** types actually SEALED */
       output_types: string[];
       duration_ms: number;
+      /**
+       * #seat-metrics — the ms from chair start to the FIRST write the chair's child emitted (a
+       * tool_use whose tool is Write/Edit/MultiEdit/NotebookEdit), and the context the seat carried
+       * then (input + cache_read + cache_creation of the last assistant usage BEFORE that write).
+       * A chair that never wrote records BOTH as null — present, never absent, never a stand-in 0,
+       * so "wrote at t=0" and "never wrote / never measured" cannot collide.
+       */
+      first_write_ms: number | null;
+      context_tokens_at_first_write: number | null;
       /** #243 — types the chair's output_contract PROMISED. Equal to output_types when the
        *  chair delivered everything; the difference is what `missing_output_types` names. */
       promised_output_types?: string[];
@@ -170,6 +259,33 @@ export type GigProgressEvent =
       /** #240 — `*_sha` fields the engine could not tie to any consumed input or the gig
        *  payload. Sealed as "" rather than guessed; listed here so the gap is visible. */
       unresolved_sha_fields?: string[];
+      /** #seat-effort (O5) — the reasoning effort the seat actually ran at, as resolved by the
+       *  runtime (dispatch ▷ agent ▷ tier ▷ medium). Present for a model chair; absent for a skill
+       *  chair, which runs no model at an effort. */
+      effort?: Effort;
+      /** contract-chair-session-continuity-v1 (O4) — the seat's `claude` session id (the uuid
+       *  derived from (gig_id, role)) and whether THIS invocation RESUMED it (an amend round) rather
+       *  than opening it. Present for a model chair; absent for a skill chair, which runs no session. */
+      session_id?: string;
+      resumed?: boolean;
+      /** contract-amend-resume-prompt-v1 (F1) — set when this seat's amend RESUME found no session
+       *  and fell back COLD (a fresh --session-id spawn with the full prompt). The fallback never
+       *  fails the chair, but it is never silent either: this records that a resume was ATTEMPTED and
+       *  did not happen, rather than `resumed: true` claiming a continuation that never occurred.
+       *  Absent when no fallback fired. */
+      resume_fallback?: boolean;
+      /** contract-seat-primer-v1 (O3) — a forked chair records the primer it warm-started from: the
+       *  seat-primer record's id, the primer seat's own session_id, and the commit it sealed at.
+       *  Present only when the fork actually resumed the primer (absent on a cold fallback). */
+      forked_from?: { id: string; session_id: string; commit: string };
+      /** contract-seat-primer-v1 (O4) — the primer files whose working-tree blob differs from the
+       *  blob recorded at priming (empty when none changed). Named in the fork's prompt too. Present
+       *  on a successful fork. */
+      primer_stale_paths?: string[];
+      /** contract-seat-primer-v1 (F1/F2) — the fork could not warm-start (no primer for this
+       *  agent+area → "primer_missing", or the primer's session could not be resumed → a reason
+       *  naming that session). The chair ran COLD and did not fail; this records why, never silently. */
+      fork_fallback?: string;
     }
   | { type: "chair_failed"; phase: string; role: string; error: string }
   // #241 — one or more of the agent's declared skill_slugs resolved to no package. Not fatal
@@ -270,25 +386,25 @@ export interface RunDeps {
   // its contract. Absent = an unresolvable eval scores 0.0 (can't attest it held).
   evals?: ReadonlyMap<string, EvalRecord> | undefined;
   /**
-   * Optional cost-budget input. When omitted (default), no budget enforcement
-   * runs — preserving v0 back-compat. When present, the runtime tracks
-   * per-gig BudgetState matching budget-state.json schema: balance =
-   * opening - spent + credit.
+   * Optional cost-budget input, in US DOLLARS ({ max_usd }). When omitted (default), or when
+   * present without a `max_usd`, no dollar enforcement runs — preserving v0 back-compat.
    *
-   * The cycle is RESERVE → SETTLE (#232). At chair-prep the runtime computes
-   * cost-of-append (base + k*size(input)) and compares it against
-   * `balance - reserved`; short → BudgetExhausted. Passing chairs RESERVE the
-   * cost. `spent` moves only when a chair's invocation SUCCEEDS, which is what
-   * the contract always claimed and what the code did not do: prep runs
-   * eagerly for the whole ready batch, so a batch member tripping the gate
-   * used to leave every earlier member of that batch charged for work no
-   * invoker ever started.
+   * When a ceiling is set the runtime tracks per-gig settled spend (the invokers' own
+   * `result`-event USD) and, at each dispatch-batch boundary (O2), refuses to start the NEXT
+   * batch once settled spend reaches `max_usd` — the batch already running is never interrupted.
+   * There is no pre-invocation reservation and no append-unit proxy: payload size does not gate.
    *
-   * The final BudgetState is returned in GigResult.budget_state, and is also
-   * attached to a BudgetExhausted / mid-gig error so a FAILED gig can still
-   * report what it cost.
+   * The final BudgetState is returned in GigResult.budget_state, and is also attached to a
+   * BudgetExhausted / mid-gig error so a FAILED gig can still report what it cost.
    */
   budget?: BudgetInput | undefined;
+  /**
+   * O6 — the gig reserve POOL, in turns, decoupled from any money budget. When set it opens the
+   * pool and OVERRIDES `Standard.reserve_pool` deterministically (no max, no sum). Absent → the
+   * standard default, then 0 (no pool). A turn pool in play yields a BudgetState even with no
+   * dollar ceiling: its pool fields are filled, its dollar fields omitted.
+   */
+  turn_pool?: number | undefined;
   // Live progress sink. Fired at each gig milestone (phase/chair/agent-event/complete) so an
   // async dispatcher can surface a running gig's state. Absent = no progress emitted (the
   // synchronous path is unaffected). Guarded best-effort — a sink that throws is swallowed
@@ -329,6 +445,20 @@ export interface RunDeps {
    * the thing that actually spends. Absent = each agent's own `depth_profile` stands.
    */
   depth?: Depth | undefined;
+  /**
+   * #seat-effort — the reasoning effort this gig was dispatched at, threaded to the resolver so
+   * dispatch effort wins over the agent's declared effort and the tier default (resolveEffort).
+   * Absent = no dispatch effort, so the agent's own `effort` or its tier default stands. Sibling of
+   * `depth`; the dispatch door threads it beside `depth` (src/server.ts).
+   */
+  effort?: Effort | undefined;
+  /**
+   * contract-seat-context-ceiling-v1 (O2) — the per-round context ceiling this gig was dispatched at,
+   * threaded to the resolver so a dispatch ceiling wins over the agent's declared `max_context_tokens`
+   * (resolveMaxContextTokens). Absent = no dispatch ceiling, so the agent's own field — or NONE — stands.
+   * Sibling of `effort`; the dispatch door threads it beside `effort` (src/server.ts).
+   */
+  max_context_tokens?: number | undefined;
 
   // ── the chart: this run is one MOVEMENT of a performance ───────────────────
   /**
@@ -493,50 +623,42 @@ export interface RunDeps {
    * the room declines to populate (an empty read-only workspace) and no git credential is minted.
    */
   repoUrl?: string | undefined;
+  /**
+   * The directory whose git objects the SEAL stamps law and change addresses from (records-by-address,
+   * contract-records-by-address-v1). When a sealed `red-spec` record carries `laws` or a `change-set`
+   * record carries `changes`, the seal replaces those entries with ones the engine stamps from git in
+   * THIS directory — `blob_sha`/`tests` for a law, `blob_sha`/`patch_sha256`/`bytes` for a change —
+   * via `stampLawAddresses`/`stampChangeAddresses`. Stamping NEVER reads `process.cwd()`: a record
+   * carrying `laws`/`changes` sealed with no `tree_root` refuses with `tree_root_unknown`. Absent AND
+   * the sealed records carry only `diffs` (the pre-migration shape) = no stamping, byte-identical to
+   * before this field existed. Every door that runs a gig names the tree it stamps from; it is never
+   * an ambient host path.
+   */
+  tree_root?: string | undefined;
 }
 
 /**
- * Per-gig cost-budget input. Honors budget-state.json schema (PR #56). Only
- * `opening` is required for v0 enforcement; the rest are recomputed.
+ * Per-gig cost-budget input. A budget is US DOLLARS (operator decision 2026-09-16): the
+ * single field is `max_usd`, the per-gig dollar ceiling.
  *
- * COST FORMULA (v0, tunable):
- *   cost = base_cost + k * size_bytes(input)
- *   defaults: base_cost = 1, k = 0.1
+ * ENFORCEMENT (O2). The ceiling is checked against SETTLED spend — the invokers' own
+ * `result`-event `total_cost_usd`, reconciled at each dispatch-batch boundary — never a
+ * pre-invocation estimate. A batch already running is allowed to finish; the NEXT batch does
+ * not start once settled spend reaches `max_usd`. There is no append-unit proxy and no
+ * per-chair reservation: payload size does not decide whether a chair runs (I8/O3).
  *
- * Where size_bytes(input) = JSON.stringify(canonical context).length.
+ * The retired append-unit knobs (`opening`, `base_cost`, `k`) and the retired `pool` field are
+ * gone. The reserve pool now opens from `RunDeps.turn_pool` (else `Standard.reserve_pool`),
+ * needs no money budget, and is orthogonal to the dollar ledger — a draw moves
+ * `BudgetState.pool_remaining` only, never `spent_usd`.
  *
- * WHAT THIS IS AND IS NOT (#233). `opening`/`spent`/`balance` are SYNTHETIC APPEND UNITS —
- * see `BudgetState.unit`. They are not dollars and were never converted to dollars; an
- * `opening: 1000` that reads like a dollar figure to an operator is a coincidence of scale.
- * The real, settled figure is `BudgetState.settled_usd`, reconciled from the model's own
- * `result` events at each batch boundary. Two honest limits on the synthetic gate:
- *
- *   1. It is a proxy for prompt size, not a price. It has no model tier, no output side, no
- *      skills/charter/schema bytes — only the agent slug, phase, consumed input CONTENT and
- *      the gig payload. It is a rate limiter on context growth, nothing more.
- *   2. A USD figure cannot gate a chair before that chair runs, because `prepareChair` runs
- *      for the WHOLE ready batch before any invocation — a chair cannot see its batch
- *      siblings' settled cost. So reconciliation happens at BATCH BOUNDARIES, and any dollar
- *      bound built on it would be a cap plus one batch of slack, never a hard stop. No such
- *      bound is wired: there is no per-chair dollar estimator, and inventing one would be
- *      guessing. `settled_usd` reports; it does not enforce.
+ * `max_usd` is optional at the type level so a drain with no ceiling can pass `{}` ("no
+ * enforcement"); every door that accepts a budget validates it (a positive finite number)
+ * before anything runs.
  */
 export interface BudgetInput {
-  opening: number;
-  /** base cost per agent invocation, in append units. Default 1. */
-  base_cost?: number;
-  /** per-byte multiplier on consumed-input size, in append units. Default 0.1. */
-  k?: number;
-  /**
-   * #turn-budget — the gig-level reserve POOL, in turns: a shared quantity a budget-exhausted chair
-   * draws from, capped per chair by its own `turn_reserve`. This dispatch-payload value is the
-   * PRIMARY source and OVERRIDES `Standard.reserve_pool` deterministically when both are present
-   * (no max, no sum). Orthogonal to `opening`/`base_cost`/`k` — those are append-units, this is
-   * turns, and a draw moves `pool_remaining` only, never `spent`/`balance`. Absent → the standard
-   * default, then 0 (no pool). Distinct from 0 only in that 0 could equally be an authored empty
-   * pool; either way a chair reaching for a reserve finds nothing and is recorded as starved.
-   */
-  pool?: number;
+  /** The per-gig ceiling, in US dollars. Absent → no dollar enforcement. */
+  max_usd?: number;
 }
 
 /**
@@ -554,54 +676,48 @@ export interface ReserveDraw {
 }
 
 /**
- * Per-gig budget snapshot. Mirrors fields of domain_types/budget-state.json
- * (PR #56) that are runtime-tractable in v0. balance = opening - spent + credit.
+ * Per-gig budget snapshot. Present whenever a dollar ceiling OR a turn pool is in play (O6):
+ * the POOL fields (`pool_remaining`, `draws`) are filled regardless of money, and the DOLLAR
+ * fields (`max_usd`, `spent_usd`, `unit: "usd"`) only when a ceiling is set.
  *
- * The `agent_state` mirrors the budget-state.json enum:
- *   active           — currently spending, balance > cost-of-next-append
- *   yielding         — below cost-of-next-append, paused (used when partial)
- *   depleted         — balance <= 0 OR < cost-of-next-append, hard stop
+ * The `agent_state` enum:
+ *   active           — running normally
+ *   yielding         — a seated chair is currently drawing its reserve (D1)
+ *   depleted         — a drawing chair spent its reserve+pool without landing, OR the dollar
+ *                      ceiling stopped the next batch
  *   awaiting_grade   — work shipped, external grader contacted (v0 unused)
- *   settled          — cycle closed, closing populated (v0 set on success)
+ *   settled          — cycle closed on success
  */
 export interface BudgetState {
-  opening: number;
-  /** Cost of chairs that ACTUALLY RAN AND SUCCEEDED. Reserved-but-unsettled cost is not here. */
-  spent: number;
-  credit: number;
-  balance: number;
   agent_state: "active" | "yielding" | "depleted" | "awaiting_grade" | "settled";
   /** Slug of the agent whose invocation tripped depletion. null when solvent. */
   depleted_agent: string | null;
-  /** Wall-clock when balance first crossed below cost-of-next-append. null while solvent. */
+  /** Wall-clock when the gig crossed into depletion. null while solvent. */
   depleted_at: string | null;
-  base_cost: number;
-  k: number;
   /**
-   * #233 — the denomination of opening/spent/balance/base_cost/k, stated rather than assumed.
-   * These are a synthetic proxy for consumed context bytes. They are NOT dollars, and nothing
-   * converts between the two. Read `settled_usd` for money.
+   * The dollar ceiling this gig runs under, echoed onto the snapshot. Present ONLY when a
+   * ceiling is set (a turn-pool-only gig omits it).
    */
-  unit: "append-units";
+  max_usd?: number;
   /**
-   * #233 — REAL settled model spend for this gig so far, in USD, reconciled from the invokers'
-   * own `result` events at each dispatch-batch boundary. This is the number `src/ledger.ts`
-   * calls settled spend; the budget gate above never used it, even though it was live and
-   * in-scope. Reporting only — see the BudgetInput docstring for why it cannot gate.
-   * 0 when no invoker reported cost (stubbed invokers, skill-only gigs).
+   * REAL settled model spend for this gig so far, in USD, reconciled from the invokers' own
+   * `result` events at each dispatch-batch boundary. This is what the ceiling is enforced
+   * against (O2). Present ONLY under a ceiling; 0 when no invoker reported cost.
    */
-  settled_usd: number;
+  spent_usd?: number;
+  /** The denomination of the dollar fields, stated rather than assumed. Present ONLY under a ceiling. */
+  unit?: "usd";
   /**
-   * #turn-budget — turns remaining in the gig reserve pool (Item 2). Seeded from the dispatch
-   * `pool` (else `Standard.reserve_pool`, else 0), drawn down as chairs cross into reserve, never
-   * negative and never re-increased in v0 (strict draw-down, no preemption). Orthogonal to the
-   * append-unit ledger above: a draw moves ONLY this number.
+   * Turns remaining in the gig reserve pool. Seeded from `RunDeps.turn_pool` (else
+   * `Standard.reserve_pool`, else 0), drawn down as chairs cross into reserve, never negative and
+   * never re-increased in v0 (strict draw-down). Orthogonal to the dollar ledger: a draw moves
+   * ONLY this number, never `spent_usd`.
    */
   pool_remaining: number;
   /**
-   * #turn-budget — the attributable draw ledger (Item 2). One record per chair that reached for a
-   * reserve, granted or denied, so a post-run reader can see who drew, how much, and what the pool
-   * had left — and so a starved chair is visible rather than a silent no-op.
+   * The attributable draw ledger. One record per chair that reached for a reserve, granted or
+   * denied, so a post-run reader can see who drew, how much, and what the pool had left — and so
+   * a starved chair is visible rather than a silent no-op.
    */
   draws: ReserveDraw[];
 }
@@ -874,58 +990,183 @@ export function abortReasonText(signal: AbortSignal): string {
 }
 
 /**
- * Raised when a gig's budget cannot cover the next agent's cost-of-append.
- * Carries the agent_slug, the available balance, and the required cost so
- * the caller can render the exact reason. The in-memory BudgetState is
- * also attached for downstream telemetry.
+ * Raised when a gig's SETTLED dollar spend reaches its `max_usd` ceiling and the next batch may
+ * not start (O2/O5). Denominated in dollars: `spent_usd`, `max_usd`, `unit: "usd"`, and a message
+ * that names the amounts with `$` and `usd` — never append-units. The in-memory BudgetState is
+ * attached so a caller can render the full snapshot.
  */
 export class BudgetExhausted extends Error {
   public readonly agent_slug: string;
-  public readonly balance: number;
-  public readonly cost: number;
+  public readonly spent_usd: number;
+  public readonly max_usd: number;
+  public readonly unit: "usd" = "usd";
   public readonly state: BudgetState;
-  constructor(agent_slug: string, balance: number, cost: number, state: BudgetState) {
+  constructor(agent_slug: string, spent_usd: number, max_usd: number, state: BudgetState) {
     super(
-      `BudgetExhausted: agent "${agent_slug}" needs cost=${cost} but balance=${balance} (opening=${state.opening}, spent=${state.spent}, credit=${state.credit})`,
+      `BudgetExhausted: gig stopped before agent "${agent_slug}" — settled spend $${spent_usd} reached the $${max_usd} usd ceiling`,
     );
     this.name = "BudgetExhausted";
     this.agent_slug = agent_slug;
-    this.balance = balance;
-    this.cost = cost;
+    this.spent_usd = spent_usd;
+    this.max_usd = max_usd;
     this.state = state;
   }
 }
 
 /**
- * Cost-of-append for an agent invocation, in synthetic append units (see BudgetState.unit).
- * Deterministic function of the input context size — same input → same cost. Keeps cost
- * calculation inside the runtime (not the invoker) so budget enforcement cannot be spoofed by
- * a misbehaving invoker.
- *
- * #233 — this used to serialize `input_ids`: the UUIDs of the upstream outputs a chair
- * consumes, not their data. An upstream output contributed exactly 36 bytes whether it was a
- * one-line signal or a 40-page draft, so the proxy was not even monotonic in the thing that
- * drives real cost. It now measures the CONTENT the invoker actually receives.
- *
- * Still excluded, honestly: resolved skills, the agent charter, type schemas, model tier,
- * max_tool_calls, and the entire output side. This is a rate limiter on consumed context, not
- * a price. Money is `BudgetState.settled_usd`.
+ * Raised when a gig under a dollar ceiling cannot VERIFY its spend (F3): a settled invocation
+ * reported usage but no `total_cost_usd`, so the runtime cannot know whether the next batch is
+ * affordable. Fail-closed — no further batch starts. `reason` is the typed `budget_unverifiable`,
+ * and the message names the chairs whose dollar spend is unknown.
  */
-export function computeAppendCost(
-  ctx: { agent: Agent; phase: string; inputs: readonly OutputRecord[]; gig_input: Record<string, unknown> },
-  base_cost: number,
-  k: number,
-): number {
-  // Canonical serialization of what the invoker actually sees. JSON.stringify
-  // is sufficient for v0 — deterministic order isn't required since size is
-  // the only thing we extract, and Record key order in V8 is insertion-stable.
-  const size_bytes = JSON.stringify({
-    agent_slug: ctx.agent.slug,
-    phase: ctx.phase,
-    inputs: ctx.inputs.map((i) => i.data),
-    gig_input: ctx.gig_input,
-  }).length;
-  return base_cost + k * size_bytes;
+export class BudgetUnverifiable extends Error {
+  public readonly reason = "budget_unverifiable";
+  public readonly chairs: readonly string[];
+  public readonly state: BudgetState;
+  constructor(chairs: readonly string[], state: BudgetState) {
+    super(
+      `budget_unverifiable: cannot enforce the usd ceiling — chair(s) settled without reporting usd: ${chairs.join(", ")}`,
+    );
+    this.name = "BudgetUnverifiable";
+    this.chairs = chairs;
+    this.state = state;
+  }
+}
+
+/**
+ * The model that DID a chair's work: the model that WROTE the most output tokens across the chair's
+ * `modelUsage` breakdown — NOT whichever key the CLI listed first. Claude Code spends a small
+ * background call on a fast model before the real work, and that model is listed FIRST while writing
+ * almost nothing, so a first-key stamp names a model that did none of the chair's work. Output
+ * tokens are the honest signal of which model produced the answer. Ties break on the model id
+ * (lexicographic ascending), so the stamp is deterministic regardless of the breakdown's key order.
+ * An empty map (a transport that reported no per-model breakdown) yields undefined — nothing to
+ * stamp, exactly as before.
+ */
+export function workingModel(outputByModel: ReadonlyMap<string, number>): string | undefined {
+  let best: string | undefined;
+  let bestTokens = -1;
+  for (const [model, tokens] of outputByModel) {
+    if (tokens > bestTokens || (tokens === bestTokens && best !== undefined && model < best)) {
+      best = model;
+      bestTokens = tokens;
+    }
+  }
+  return best;
+}
+
+// ── records by address: the engine stamps WHAT the bytes are, from git, AT SEAL ─────────────────
+// A seat supplies only WHERE a law/change lives — {path, commit} for a law, {path, base} for a
+// change — and these two seal helpers read the bytes from git in `tree_root` and stamp the derived
+// fields (contract-records-by-address-v1). The bytes are never model output or a record field: an
+// attester used to re-emit ~150KB of verbatim patches into the record and hit the output-token cap
+// three times (gig c1771b13). Called from executeChair's seal loop, beside the *_sha backfill.
+//
+// Every git read runs in `tree_root` via execFileSync (no shell). A supplied field that DISAGREES
+// with git is refused (`law_bytes_mismatch`), never overwritten — the engine catches a lying seat
+// rather than silently clobbering its claim.
+type LawAddress = { path: string; commit: string; blob_sha?: string; tests?: string[] };
+type ChangeAddress = { path: string; base: string; blob_sha?: string; patch_sha256?: string; bytes?: number };
+
+function gitInTree(tree_root: string, args: readonly string[]): string {
+  return execFileSync("git", ["-C", tree_root, ...args]).toString();
+}
+
+// The it/test titles a law blob declares, in file order — the `tests` the reviewer is handed instead
+// of a sentence about the law. Matches `it(...)`/`test(...)` (with any `.only`/`.skip`/… chain) taking
+// a string literal as its first argument; the leading \b keeps `it`/`test` from matching inside a
+// longer identifier (submit, audit, …). Escaped quotes/backslashes in the title are unescaped.
+function testTitlesIn(body: string): string[] {
+  const re = /\b(?:it|test)(?:\.\w+)*\s*\(\s*(['"`])((?:\\.|(?!\1)[\s\S])*?)\1/g;
+  const titles: string[] = [];
+  for (let m = re.exec(body); m !== null; m = re.exec(body)) {
+    titles.push(m[2]!.replace(/\\(["'`\\])/g, "$1"));
+  }
+  return titles;
+}
+
+/**
+ * Stamp each law's `blob_sha` (`git rev-parse <commit>:<path>`) and `tests` (the it/test titles in
+ * that blob, in file order) from a supplied `{path, commit}`, reading git in `tree_root`.
+ * REFUSALS: no `tree_root` → `tree_root_unknown` (never a `process.cwd()` fallback); an address that
+ * does not resolve (unknown commit, or a path absent at that commit) → `law_record_unresolvable`
+ * naming `path@commit`; a seat-supplied `blob_sha`/`tests` that disagrees with git → `law_bytes_mismatch`
+ * naming the path and field.
+ */
+export function stampLawAddresses(
+  laws: readonly LawAddress[],
+  tree_root: string | undefined,
+): Array<Required<LawAddress>> {
+  if (tree_root === undefined) {
+    throw new RuntimeError(
+      "tree_root_unknown: a red-spec carrying `laws` cannot be stamped without a RunDeps.tree_root — the seal reads git objects from a named tree and never falls back to process.cwd().",
+    );
+  }
+  return laws.map((law) => {
+    let blob_sha: string;
+    try {
+      blob_sha = gitInTree(tree_root, ["rev-parse", `${law.commit}:${law.path}`]).trim();
+    } catch {
+      throw new RuntimeError(
+        `law_record_unresolvable: the law ${law.path}@${law.commit} does not resolve in tree_root — git holds no object for that <commit>:<path>. Nothing is sealed.`,
+      );
+    }
+    const body = gitInTree(tree_root, ["show", `${law.commit}:${law.path}`]);
+    const tests = testTitlesIn(body);
+    if (law.blob_sha !== undefined && law.blob_sha !== blob_sha) {
+      throw new RuntimeError(
+        `law_bytes_mismatch: the seat-supplied blob_sha for law ${law.path} (${law.blob_sha}) disagrees with the engine (${blob_sha}). A seat's claim is refused, never overwritten. Nothing is sealed.`,
+      );
+    }
+    if (law.tests !== undefined && (law.tests.length !== tests.length || law.tests.some((t, i) => t !== tests[i]))) {
+      throw new RuntimeError(
+        `law_bytes_mismatch: the seat-supplied tests for law ${law.path} disagree with the titles git holds in that blob. A seat's claim is refused, never overwritten. Nothing is sealed.`,
+      );
+    }
+    return { path: law.path, commit: law.commit, blob_sha, tests };
+  });
+}
+
+/**
+ * Stamp each change's `blob_sha` (`git hash-object` of the file in `tree_root`, or the literal
+ * `"deleted"` when the file is absent from the tree), `patch_sha256` (sha256 of `git diff <base> --
+ * <path>` in `tree_root`) and `bytes` (that diff's length) from a supplied `{path, base}`.
+ * REFUSALS: no `tree_root` → `tree_root_unknown`; a seat-supplied `blob_sha`/`patch_sha256`/`bytes`
+ * that disagrees with git → `law_bytes_mismatch` naming the path and field.
+ */
+export function stampChangeAddresses(
+  changes: readonly ChangeAddress[],
+  tree_root: string | undefined,
+): Array<Required<ChangeAddress>> {
+  if (tree_root === undefined) {
+    throw new RuntimeError(
+      "tree_root_unknown: a change-set carrying `changes` cannot be stamped without a RunDeps.tree_root — the seal reads git objects from a named tree and never falls back to process.cwd().",
+    );
+  }
+  return changes.map((change) => {
+    const blob_sha = existsSync(joinPath(tree_root, change.path))
+      ? gitInTree(tree_root, ["hash-object", change.path]).trim()
+      : "deleted";
+    const diff = gitInTree(tree_root, ["diff", change.base, "--", change.path]);
+    const patch_sha256 = sha256Hex(diff);
+    const bytes = Buffer.byteLength(diff, "utf8");
+    if (change.blob_sha !== undefined && change.blob_sha !== blob_sha) {
+      throw new RuntimeError(
+        `law_bytes_mismatch: the seat-supplied blob_sha for change ${change.path} (${change.blob_sha}) disagrees with the engine (${blob_sha}). A seat's claim is refused, never overwritten. Nothing is sealed.`,
+      );
+    }
+    if (change.patch_sha256 !== undefined && change.patch_sha256 !== patch_sha256) {
+      throw new RuntimeError(
+        `law_bytes_mismatch: the seat-supplied patch_sha256 for change ${change.path} disagrees with the sha256 of the real diff. A seat's claim is refused, never overwritten. Nothing is sealed.`,
+      );
+    }
+    if (change.bytes !== undefined && change.bytes !== bytes) {
+      throw new RuntimeError(
+        `law_bytes_mismatch: the seat-supplied bytes for change ${change.path} (${change.bytes}) disagrees with the engine (${bytes}). A seat's claim is refused, never overwritten. Nothing is sealed.`,
+      );
+    }
+    return { path: change.path, base: change.base, blob_sha, patch_sha256, bytes };
+  });
 }
 
 // Deterministic hash over the definitions a gig touches: the standard + its agents,
@@ -1144,10 +1385,45 @@ export async function runGig(
 
   // One sink per chair — `onEvent` is already per-chair, so attribution is expressible at the
   // only granularity that means anything. Returns whether THIS chair ever reported usage.
-  const makeUsageSink = (): { fold: (ev: AgentStreamEvent) => void; attributed: () => boolean } => {
+  const makeUsageSink = (): {
+    fold: (ev: AgentStreamEvent) => void;
+    attributed: () => boolean;
+    /** F3 — whether THIS chair reported a settled `total_cost_usd` at least once. Distinct from
+     *  `attributed`: a chair can report usage tokens (attributed) yet no cost (unverifiable). */
+    reportedCost: () => boolean;
+    /** What the transport SAID about this one chair — measured, never inferred. */
+    reported: () => { model?: string; cost_usd?: number; tokens_used?: number };
+    /** contract-spend-survives-v1 (O1) — this chair's OWN settled usage, as a GigUsage, for the
+     *  durable chair_spend row. Undefined when the chair reported no usage payload (captured:false),
+     *  so an unattributed chair carries no cost field rather than a $0 one (#235). */
+    usage: () => GigUsage | undefined;
+  } => {
     let saw = false;
+    let sawCost = false;
+    // contract-spend-survives-v1 (O1/I1) — this chair's own settled usage, accumulated ALONGSIDE the
+    // gig-wide `usage` fold below so the per-chair rows reconcile to the gig total by construction.
+    const chairOwnUsage: GigUsage = { input_tokens: 0, output_tokens: 0, total_cost_usd: 0, by_model: {} };
+    // Per-chair, alongside the gig-level fold. The gig's `by_model` cannot separate two chairs in
+    // one run, which is exactly the question per-chair routing asks. Output tokens per model id,
+    // accumulated across this chair's `result` events; `workingModel` picks the one that did the
+    // work (the argmax) at report time rather than trusting the CLI's first key.
+    const chairOutputByModel = new Map<string, number>();
+    let chairCost = 0;
+    let chairTokens = 0;
+    let chairSaw = false;
     return {
       attributed: () => saw,
+      reportedCost: () => sawCost,
+      usage: () => (chairSaw ? chairOwnUsage : undefined),
+      reported: () => {
+        if (!chairSaw) return {};
+        const model = workingModel(chairOutputByModel);
+        return {
+          ...(model !== undefined ? { model } : {}),
+          cost_usd: chairCost,
+          tokens_used: chairTokens,
+        };
+      },
       fold(ev: AgentStreamEvent): void {
         if (ev.type !== "result") return;
         const raw = ev.raw as Record<string, unknown> | undefined;
@@ -1165,17 +1441,42 @@ export async function runGig(
         // number this engine could produce about money.
         if (!hasCost && !hasTokens && !hasBreakdown) return;
 
+        chairSaw = true;
+        if (hasCost) sawCost = true;
+        chairTokens +=
+          (typeof inRaw === "number" ? inRaw : 0) + (typeof outRaw === "number" ? outRaw : 0);
+        chairCost += hasCost ? (costRaw as number) : 0;
+
         usage.input_tokens += typeof inRaw === "number" ? inRaw : 0;
         usage.output_tokens += typeof outRaw === "number" ? outRaw : 0;
         usage.total_cost_usd += hasCost ? (costRaw as number) : 0;
+        // The SAME fold, kept per-chair for the durable chair_spend row (O1/I1). Summing every
+        // chair's own usage reconstructs the gig-wide `usage` above, which is what I1 pins.
+        chairOwnUsage.input_tokens += typeof inRaw === "number" ? inRaw : 0;
+        chairOwnUsage.output_tokens += typeof outRaw === "number" ? outRaw : 0;
+        chairOwnUsage.total_cost_usd += hasCost ? (costRaw as number) : 0;
         // Per-model breakdown keyed by the ACTUAL model id that ran (not the configured tier).
         if (hasBreakdown) {
           for (const [model, m] of Object.entries(mu)) {
+            const outTok = typeof m["outputTokens"] === "number" ? (m["outputTokens"] as number) : 0;
             const slot = usage.by_model[model] ?? { input_tokens: 0, output_tokens: 0, cost_usd: 0 };
             slot.input_tokens += typeof m["inputTokens"] === "number" ? (m["inputTokens"] as number) : 0;
-            slot.output_tokens += typeof m["outputTokens"] === "number" ? (m["outputTokens"] as number) : 0;
+            slot.output_tokens += outTok;
             slot.cost_usd += typeof m["costUSD"] === "number" ? (m["costUSD"] as number) : 0;
             usage.by_model[model] = slot;
+            // Per-chair by_model, keyed the same way, so the chair_spend row's own breakdown stands
+            // on its own rather than pointing back at the gig-wide total.
+            const cslot = chairOwnUsage.by_model[model] ?? { input_tokens: 0, output_tokens: 0, cost_usd: 0 };
+            cslot.input_tokens += typeof m["inputTokens"] === "number" ? (m["inputTokens"] as number) : 0;
+            cslot.output_tokens += outTok;
+            cslot.cost_usd += typeof m["costUSD"] === "number" ? (m["costUSD"] as number) : 0;
+            chairOwnUsage.by_model[model] = cslot;
+            // The stamp is the model that WROTE this chair's output, decided at report time by
+            // `workingModel` (argmax over output tokens). The CLI lists a fast background call's
+            // model FIRST though it writes almost nothing, so the old first-key `??=` stamped a
+            // model that did none of the work. Accumulate per-model output; the gig-level `by_model`
+            // total above is untouched.
+            chairOutputByModel.set(model, (chairOutputByModel.get(model) ?? 0) + outTok);
           }
         } else {
           // The scalars moved but `by_model` did not — the breakdown cannot sum to the total.
@@ -1324,41 +1625,38 @@ export async function runGig(
     throw new GigAborted(gig_id, reason, finalizeUsage(), produced);
   };
 
-  // Budget state. When deps.budget is undefined, enforcement is OFF (back-compat).
-  // When present, we track an in-memory BudgetState mirroring budget-state.json.
-  // #turn-budget — the gig reserve pool opens from the dispatch payload FIRST, then the standard's
-  // default, then 0. `??` (not max/sum) so the dispatch declaration wins deterministically when both
-  // are present and absent stays distinct from a declared 0.
-  const poolOpening = deps.budget?.pool ?? standard.reserve_pool ?? 0;
-  const budget: BudgetState | null = deps.budget
+  // Budget state (budget-in-dollars). A DOLLAR ceiling is in play iff `deps.budget.max_usd` is set;
+  // a TURN POOL is in play iff `turn_pool` or `Standard.reserve_pool` names one. The snapshot exists
+  // whenever EITHER is present (O6): pool fields always, dollar fields only under a ceiling.
+  //
+  // O6 — the pool opens from RunDeps.turn_pool FIRST, then the standard default. `??` (not max/sum)
+  // so the dispatch declaration wins deterministically, and absence stays distinct from a declared 0.
+  const maxUsd = deps.budget?.max_usd;
+  const hasCeiling = typeof maxUsd === "number";
+  const poolSource = deps.turn_pool ?? standard.reserve_pool; // undefined when neither names one
+  const poolInPlay = poolSource !== undefined;
+  const poolOpening = poolSource ?? 0;
+  const budget: BudgetState | null = (hasCeiling || poolInPlay)
     ? {
-        opening: deps.budget.opening,
-        spent: 0,
-        credit: 0,
-        balance: deps.budget.opening,
         agent_state: "active",
         depleted_agent: null,
         depleted_at: null,
-        base_cost: deps.budget.base_cost ?? 1,
-        k: deps.budget.k ?? 0.1,
-        unit: "append-units",
-        settled_usd: 0,
         pool_remaining: poolOpening,
         draws: [],
+        ...(hasCeiling ? { max_usd: maxUsd, spent_usd: 0, unit: "usd" as const } : {}),
       }
     : null;
-  // #turn-budget — reserve turns HELD by prepared-but-not-yet-settled chairs, the pool's mirror of
-  // the append-unit `reserved` above. `prepareChair` runs synchronously for the whole ready batch
-  // before any invoke, so an offer computed against `pool_remaining - poolReserved` cannot let two
-  // parallel chairs over-lend the same turns. A grant converts the hold to a real draw-down; a
-  // no-draw or denial releases it. Conservation therefore holds for every ordering, not by luck.
+  // #turn-budget — reserve turns HELD by prepared-but-not-yet-settled chairs. `prepareChair` runs
+  // synchronously for the whole ready batch before any invoke, so an offer computed against
+  // `pool_remaining - poolReserved` cannot let two parallel chairs over-lend the same turns. A grant
+  // converts the hold to a real draw-down; a no-draw or denial releases it. Conservation therefore
+  // holds for every ordering, not by luck.
   let poolReserved = 0;
-  // #232 — cost RESERVED by chairs that passed the gate but have not settled. `prepareChair`
-  // runs eagerly for the whole ready batch, so the gate must see its batch siblings' holds;
-  // but a hold is not spend. It converts to `spent` only when the invocation succeeds, and is
-  // released (never charged) when it fails or when a later sibling trips the gate and the
-  // batch is abandoned before a single invoker is called.
-  let reserved = 0;
+  // F3 — under a ceiling, the agent slugs of chairs that SETTLED (reported usage) but reported NO
+  // usd. Their dollar spend is unknown, so the next batch cannot be verified affordable and must not
+  // start; this list is what BudgetUnverifiable names. A fully-stubbed chair that reports no usage at
+  // all is not here — that is every no-cost test fixture, and it completes as before.
+  const unverifiedChairs: string[] = [];
 
   // Resolve agent-by-slug once.
   const agentBySlug = new Map(standard.agents.map((a) => [a.slug, a]));
@@ -1815,7 +2113,11 @@ export async function runGig(
         const core = deps.outputs.coreTypeOf(domain_type) ?? domain_type;
         const primitive = CORE_TO_PRIMITIVE[core] ?? "JUDGE";
         const approvalInputs: OutputRecord[] = hc.depends_on.flatMap((d) => producedByRole.get(d) ?? []);
-        const t0 = Date.now();
+        // contract-seat-time-monotonic-v1 (O2) — seat time is measured on the monotonic clock
+        // (performance.now), never Date.now: a wall-clock jump during the seat (lid sleep, NTP step)
+        // is machine time, not seat time. Rounded to whole ms at the difference, since performance.now
+        // is fractional.
+        const t0 = performance.now();
         emit({ type: "chair_start", phase: phase.name, role: hc.role, producer: deps.approved_by ?? "human" });
         const rec = deps.outputs.write({
           core_type: core,
@@ -1835,7 +2137,9 @@ export async function runGig(
         produced.push(rec);
         emit({
           type: "chair_complete", phase: phase.name, role: hc.role, producer: deps.approved_by ?? "human",
-          output_types: [domain_type], duration_ms: Date.now() - t0,
+          output_types: [domain_type], duration_ms: Math.round(performance.now() - t0),
+          // A human seat forwards no agent write events, so there is nothing to measure: null, not 0.
+          first_write_ms: null, context_tokens_at_first_write: null,
         });
         // A sealed lineage-verdict either grounds an institution or does not. Decide it here,
         // where the verdict and the record it approved are both in hand, and report the answer
@@ -1907,6 +2211,28 @@ export async function runGig(
         ready = ready.filter((c) => chosenRoles.has(c.role));
       }
 
+      // ── BUDGET BATCH-BOUNDARY GATE (O2/F3) ──────────────────────────────────────────────────
+      // The dollar ceiling is checked HERE, before this ready batch starts, against SETTLED spend
+      // (reconciled at each prior batch boundary). The batch already running is never interrupted;
+      // it is the NEXT batch that does not start. Two fail-closed conditions, both naming the chair
+      // that would have run next:
+      //   F3 — a prior settled invocation reported no usd, so affordability is UNVERIFIABLE; and
+      //   O2 — settled spend has reached max_usd.
+      if (hasCeiling && budget) {
+        if (unverifiedChairs.length > 0) {
+          budget.agent_state = "depleted";
+          budget.depleted_agent = ready[0]?.agent_slug ?? null;
+          budget.depleted_at = new Date().toISOString();
+          throw new BudgetUnverifiable([...unverifiedChairs], budget);
+        }
+        if ((budget.spent_usd ?? 0) >= (maxUsd as number)) {
+          budget.agent_state = "depleted";
+          budget.depleted_agent = ready[0]?.agent_slug ?? null;
+          budget.depleted_at = new Date().toISOString();
+          throw new BudgetExhausted(ready[0]?.agent_slug ?? "?", budget.spent_usd ?? 0, maxUsd as number, budget);
+        }
+      }
+
       // Per-chair work happens in two stages so non-invocation failures
       // (BudgetExhausted, contract violations, programming-level errors like
       // TypeError from a circular gig_input) propagate UNWRAPPED through the
@@ -1935,10 +2261,10 @@ export async function runGig(
           noteCheckpointRole(ch.role, phase.name, r.value);
         }
       }
-      // #233 — BATCH BOUNDARY is the only point at which real settled dollars can be
-      // reconciled into the budget: prepareChair ran for every chair in this batch before any
-      // of them was invoked, so no chair could have seen its siblings' cost. Reporting only.
-      if (budget) budget.settled_usd = usage.total_cost_usd;
+      // O2 — BATCH BOUNDARY reconcile: the settled dollars this batch added are folded into the
+      // snapshot here, so the NEXT batch's gate (top of the while loop) sees them. prepareChair ran
+      // for every chair in this batch before any was invoked, so no chair saw its siblings' cost.
+      if (budget && hasCeiling) budget.spent_usd = usage.total_cost_usd;
 
       // Bank progress BEFORE the failure throw below. A batch whose siblings succeeded has
       // durable outputs either way; the checkpoint is what makes them reachable next time,
@@ -1975,8 +2301,14 @@ export async function runGig(
       const allChairs = standard.phases.flatMap((p) => p.chairs);
       const phaseNameOf = (role: string): string =>
         standard.phases.find((p) => p.chairs.some((c) => c.role === role))?.name ?? phase.name;
-      const primitivesOf = (slug: string | undefined): readonly string[] =>
-        standard.agents.find((a) => a.slug === slug)?.primitives ?? [];
+      // O3 — a verify SEAT is a chair whose output resolves to core type Verdict, whatever produces
+      // it (agent or skill chair). Keying on the agent's VERIFY primitive (as this did) meant a
+      // skill-backed verify chair sealing `pass: false` never triggered an amend: a skill chair
+      // binds no agent, so it has no primitive to match.
+      const producesVerdict = (c: Chair): boolean => {
+        const out = c.output_contract[0];
+        return !!out && (deps.outputs.coreTypeOf(out) ?? "") === "Verdict";
+      };
       const dropFromProduced = (recs: readonly OutputRecord[]): void => {
         for (const r of recs) {
           const idx = produced.indexOf(r);
@@ -1991,7 +2323,7 @@ export async function runGig(
         );
 
       for (const vch of phase.chairs) {
-        if (!primitivesOf(vch.agent_slug).includes("VERIFY")) continue;
+        if (!producesVerdict(vch)) continue;
         let verdict = failingVerdict(vch.role);
         if (!verdict) continue; // no verdict, or it passed — nothing to amend
         // The maker(s) to amend are the dependencies that produced the ARTIFACT this verdict
@@ -2002,10 +2334,34 @@ export async function runGig(
           const out = c.output_contract[0];
           return !!out && (deps.outputs.coreTypeOf(out) ?? "") === "Artifact";
         };
-        const makers = vch.depends_on
+        const makerSet = vch.depends_on
           .map((role) => allChairs.find((c) => c.role === role))
           .filter((c): c is Chair => !!c && producesArtifact(c));
-        if (makers.length === 0) continue; // nothing to re-run — a verify with no maker to amend
+        if (makerSet.length === 0) continue; // nothing to re-run — a verify with no maker to amend
+        // contract-amend-nearest-makers-v1 (O1/I1/F1) — an amend round spends a seat ONLY where the
+        // verdict's fix can land. Of today's maker set, re-invoke only the makers that no OTHER maker in
+        // the set depends on, directly or transitively through depends_on. An upstream maker's inputs do
+        // not change between rounds, so re-running it re-does settled work AND replaces the exact record
+        // the downstream fix was built on (its sealed record must instead be carried unchanged — O2:
+        // producedByRole still holds it, and the amend loop below never touches a skipped maker's role,
+        // so prepareChair gathers it as-is). Independent makers keep no dependant in the set, so they all
+        // re-run as today (I1). A composed standard's depends_on graph is acyclic, so the maker set always
+        // has at least one sink — the narrowed selection is never empty and never the whole set (F1).
+        const chairByRole = new Map(allChairs.map((c) => [c.role, c] as const));
+        const transitiveDepsOf = (role: string): Set<string> => {
+          const seen = new Set<string>();
+          const stack = [...(chairByRole.get(role)?.depends_on ?? [])];
+          while (stack.length > 0) {
+            const r = stack.pop()!;
+            if (seen.has(r)) continue;
+            seen.add(r);
+            for (const d of chairByRole.get(r)?.depends_on ?? []) stack.push(d);
+          }
+          return seen;
+        };
+        const makers = makerSet.filter(
+          (m) => !makerSet.some((other) => other.role !== m.role && transitiveDepsOf(other.role).has(m.role)),
+        );
 
         for (let round = 1; round <= examineRounds && verdict; round++) {
           checkpoint();
@@ -2014,22 +2370,41 @@ export async function runGig(
           // AMEND: each maker re-runs with the failing verdict fed in as an extra input, so
           // the seat that built the change fixes the exact thing the verify caught.
           for (const mk of makers) {
-            const prep = prepareChair(mk, phaseNameOf(mk.role));
-            if (!prep.inputs.includes(feedback)) prep.inputs.push(feedback);
+            // O1/I3 — carry the maker's OWN work from the round just judged, plus the failing
+            // verdict, INTO prepareChair, so both are among `inputs` when lookupReuse computes the
+            // key. Pushing the verdict in AFTER prep (as this did) left the amend key identical to
+            // round 1's, so a reuse-wired amend was served round 1's failing artifact from the
+            // cache. producedByRole holds ONLY the round just judged, so the amend carries exactly
+            // one prior artifact and one verdict, both the latest — never a pile of drafts.
+            const priorWork = producedByRole.get(mk.role) ?? [];
+            // contract-chair-session-continuity-v1 (O3/O5) — an amend RESUMES the maker's own session
+            // (the invoker gets ctx.resume) and is never served from the reuse cache.
+            // O1 — the initial invocation is round 1 (the default), so the amend loop's iteration
+            // `round` (1-based) stamps round `round + 1`: each re-run of a seat gets a distinct,
+            // monotonic round and no two chair_spend rows for one role collide.
+            const prep = prepareChair(mk, phaseNameOf(mk.role), [...priorWork, feedback], { resume: true, round: round + 1 });
             const recs = await invokeAndWriteChair(prep);
             dropFromProduced(producedByRole.get(mk.role) ?? []);
             producedByRole.set(mk.role, recs);
             produced.push(...recs);
             noteCheckpointRole(mk.role, phaseNameOf(mk.role), recs);
           }
-          // RE-VERIFY the amended artifact.
-          const vprep = prepareChair(vch, phase.name);
+          // RE-VERIFY the amended artifact. contract-resumed-gig-session-v1 (O1/I1) — the re-verify
+          // RESUMES the verifier's own round-one session (`resume: true`), never re-opens `--session-id`
+          // for a live id: the id is deterministic in (gig_id, role), so a second `--session-id` open
+          // collides ("already in use"). Resuming carries `--resume <uuid>` instead. `keep_prompt` keeps
+          // the FULL prompt rather than the maker's trimmed amend continuation: unlike a maker (whose
+          // failing verdict IS the one new thing to send), a re-verify re-reads the amended tree from its
+          // own identity, and a stateless door (chat-completions) that holds no conversation must still
+          // carry the verify seat's identity — the trimmed continuation would strip it. buildInvokerArgs
+          // still emits `--resume` (it keys on `resume`, not the prompt), so O1's arg law holds.
+          const vprep = prepareChair(vch, phase.name, [], { resume: true, keep_prompt: true, round: round + 1 });
           const vrecs = await invokeAndWriteChair(vprep);
           dropFromProduced(producedByRole.get(vch.role) ?? []);
           producedByRole.set(vch.role, vrecs);
           produced.push(...vrecs);
           noteCheckpointRole(vch.role, phase.name, vrecs);
-          if (budget) budget.settled_usd = usage.total_cost_usd;
+          if (budget && hasCeiling) budget.spent_usd = usage.total_cost_usd;
           saveCheckpoint();
           verdict = failingVerdict(vch.role); // undefined once it passes → loop ends
         }
@@ -2058,9 +2433,6 @@ export async function runGig(
     // #241 — declared skill slugs that resolved to no package. Threaded to the invocation
     // context so the prompt can never name a skill the agent does not actually hold.
     missing_skills: readonly string[];
-    /** #232 — append-unit cost RESERVED for this chair at prep. Settled to `spent` only on
-     *  success; released without charge otherwise. Absent when no budget is enforced. */
-    cost?: number;
     /** #turn-budget — the reserve turns OFFERED this chair, min(chair.turn_reserve, pool available)
      *  at prep. Threaded onto the invocation as ctx.turn_reserve AND held against `poolReserved`
      *  until the chair's draw settles. Absent when the chair declared no `turn_reserve`. */
@@ -2075,6 +2447,29 @@ export async function runGig(
     /** Set on a HIT. Every record in it has already passed `validateWrite` and re-hashed to
      *  the content_sha the original seal produced, so `executeChair` only has to write. */
     reuse_hit?: { cache_key: string; source_gig_id: string; outputs: readonly ReuseOutput[] };
+    /** contract-chair-session-continuity-v1 (O3/O5) — this is an AMEND re-invocation, so the chair
+     *  RESUMES its own prior-round session and is NEVER served from the reuse cache (a resume carries
+     *  conversation the reuse key cannot describe). Set only on the examine⇄amend re-run. */
+    resume?: boolean;
+    /** contract-resumed-gig-session-v1 (O1) — a re-VERIFY re-invocation: resumes the session (like
+     *  `resume`) but the invoker keeps the FULL prompt, not the maker's trimmed amend continuation. */
+    resume_keep_prompt?: boolean;
+    /** contract-spend-survives-v1 (O1) — which round this invocation is, stamped on the chair_spend
+     *  row: 1 on a first run, and the examine⇄amend re-run's round otherwise. Absent → 1. */
+    round?: number;
+    /** contract-seat-primer-v1 (O2/O3/O4) — a fork chair whose agent has a primer for its area.
+     *  Resolved at prep (the lookup + the blob-staleness comparison against deps.tree_root) so the
+     *  invoker warm-starts by construction and chair_complete records `forked_from`/`primer_stale_paths`.
+     *  contract-rolling-seat-primer-v1 (O2) — `primer_files` carries the forked primer's own files so a
+     *  chair that ALSO primes the area can seal a FRESHER primer unioning them with its own reads. */
+    fork?: { primer_session_id: string; primer_id: string; primer_commit: string; stale_paths: string[]; primer_files: Array<{ path: string; blob_sha: string }>; frontier?: string };
+    /** contract-seat-primer-v1 (F1) — a fork chair with NO primer for its agent+area. The chair runs
+     *  cold and chair_complete records `fork_fallback: "primer_missing"`; never fails. */
+    fork_fallback?: string;
+    /** contract-seat-primer-v1 (O5) — a fork whose reuse key WOULD hit. The hit is recorded (the cache
+     *  is live) but NEVER served: a fork carries warm conversation the reuse key cannot describe, so
+     *  serving the cached artifact would replay the very reading the fork exists to reuse. */
+    fork_reuse_withheld?: { cache_key: string; source_gig_id: string; output_types: string[] };
   }
 
   // Resolve a chair's declared output types into seal-specs (type → core → primitive).
@@ -2191,6 +2586,26 @@ export async function runGig(
   }
 
   /**
+   * contract-seat-primer-v1 (O2/I3) — the MOST RECENT `seat-primer` this agent sealed for `area`,
+   * across gigs. Agent-specific by construction: a chair never forks a primer sealed by a DIFFERENT
+   * agent, even for the same area (I3), because the (agent_slug, area) filter admits only its own.
+   * "Most recent" so re-priming an area updates every later fork — staleness is decided per blob at
+   * fork time, not pinned to one primer id. Returns undefined when the agent has never primed the area.
+   */
+  function mostRecentSeatPrimer(agentSlug: string, area: string): OutputRecord | undefined {
+    let best: OutputRecord | undefined;
+    for (const r of deps.outputs.all()) {
+      if (r.domain_type !== "seat-primer") continue;
+      const d = r.data as Record<string, unknown>;
+      if (d["agent_slug"] !== agentSlug || d["area"] !== area) continue;
+      // `>=` prefers the later-iterated record on an equal timestamp; all() is insertion-ordered, so
+      // the newest primer wins even when two sealed in the same millisecond.
+      if (!best || r.created_at >= best.created_at) best = r;
+    }
+    return best;
+  }
+
+  /**
    * Offer an ENTRY chair the seeds a chart edge carried in.
    *
    * Scoped to a chair with no `depends_on`: a chair that named its upstream roles asked for those
@@ -2207,7 +2622,7 @@ export async function runGig(
     }
   }
 
-  function prepareChair(chair: Chair, phaseName: string): PreparedChair {
+  function prepareChair(chair: Chair, phaseName: string, extraInputs: readonly OutputRecord[] = [], opts: { resume?: boolean; keep_prompt?: boolean; round?: number } = {}): PreparedChair {
     // A skill-backed chair runs the skill's deterministic code half — no agent, no model.
     if (chair.skill_slug && (chair.agent_slug ?? "") === "") {
       const dir = deps.skill_dirs?.get(chair.skill_slug);
@@ -2224,6 +2639,9 @@ export async function runGig(
         inputs.push(...recs);
       }
       pullSeeds(chair, inputs, chair.input_contract);
+      // Amend carriage: extra inputs (the maker's own prior work + the failing verdict) join the
+      // frontier so they enter the reuse key — see the EXAMINE⇄AMEND block. Empty otherwise.
+      for (const ex of extraInputs) if (!inputs.includes(ex)) inputs.push(ex);
       if (chair.input_contract.length > 0) {
         for (const need of chair.input_contract) {
           // #156: a type satisfied by an upstream record OR by the gig payload (entry-chair seed).
@@ -2260,6 +2678,7 @@ export async function runGig(
         producer_slug: chair.skill_slug!, domain: standard.domain,
         ...(skillReuse ? { reuse_key: skillReuse.key } : {}),
         ...(skillReuse?.hit ? { reuse_hit: skillReuse.hit } : {}),
+        ...(opts.round !== undefined ? { round: opts.round } : {}),
       };
     }
 
@@ -2315,6 +2734,13 @@ export async function runGig(
       // upstream record — by type, as records, so provenance survives the movement boundary.
       pullSeeds(chair, inputs, [...chair.input_contract, ...agent.input_types]);
     }
+
+    // Amend carriage (O1/I3): the maker's own round-just-judged artifact and the failing verdict are
+    // threaded in as extra inputs so they enter `inputs` BEFORE lookupReuse — the amend key then
+    // describes what the maker actually receives, and a reuse-wired amend is no longer served round
+    // 1's failing artifact from the cache. Empty on every non-amend prep, so round-1 keys stay
+    // byte-identical (the I1 control).
+    for (const ex of extraInputs) if (!inputs.includes(ex)) inputs.push(ex);
 
     // Runtime input_contract check: every type the chair declares it expects
     // on input must be satisfied by its actual upstream inputs. Subtype-aware
@@ -2413,37 +2839,83 @@ export async function runGig(
     // enforcing a cost that is not going to be incurred.
     const lookup = lookupReuse({ chair, phaseName, inputs, output_specs, agent, skills, producer_slug: agent.slug, domain });
 
-    // BUDGET GATE — pre-invocation, and a RESERVATION only (#232). Synchronous so
-    // BudgetExhausted (and a TypeError thrown from JSON.stringify on a circular gig_input)
-    // propagate unwrapped to the caller rather than being aggregated as a chair failure.
-    //
-    // The gate compares against `balance - reserved` so a batch of parallel chairs cannot each
-    // spend the same balance; the hold converts to `spent` only in settleChairCost, after the
-    // invoker actually returns. Before this, `spent += cost` happened HERE — so when a later
-    // member of an eagerly-prepared batch tripped the gate, every earlier member was already
-    // charged and `invokeAndWriteChair` then ran for nobody. The operator saw spend for work
-    // that never started, and that inflated figure is what BudgetExhausted.state reported.
-    let reservedCost: number | undefined;
-    if (budget && !lookup?.hit) {
-      const cost = computeAppendCost({ agent, phase: phaseName, inputs, gig_input: gigInput }, budget.base_cost, budget.k);
-      const available = budget.balance - reserved;
-      if (available < cost) {
-        budget.agent_state = "depleted";
-        budget.depleted_agent = agent.slug;
-        budget.depleted_at = new Date().toISOString();
-        throw new BudgetExhausted(agent.slug, available, cost, budget);
+    // contract-seat-primer-v1 (O2/O3/O4/F1) — FORK WIRING. A chair with fork_from looks up the most
+    // recent seat-primer for (its agent, area) across gigs and warm-starts from it. Resolved here so
+    // the reuse gate below can withhold the hit (O5) and so the invocation carries the primer session
+    // and the blob-stale paths. A fork with NO primer (F1) records `primer_missing` and runs cold.
+    let fork: PreparedChair["fork"];
+    let fork_fallback: string | undefined;
+    if (chair.fork_from) {
+      const area = chair.fork_from.primer;
+      const primer = mostRecentSeatPrimer(agent.slug, area);
+      if (!primer) {
+        fork_fallback = "primer_missing";
+      } else {
+        const pd = primer.data as Record<string, unknown>;
+        // contract-rolling-seat-primer-v1 (O4/I1) — a `max_context_tokens` ceiling REPLACES a bloated
+        // primer instead of forking it: when the primer's recorded context size exceeds the ceiling, the
+        // chair does NOT fork — it runs COLD (a fresh `--session-id`, its full prompt) and records
+        // `primer_too_large`. Absent ceiling (I1) → the fork happens whatever the size, so size gates the
+        // fork ONLY through this ceiling.
+        const ceiling = chair.fork_from.max_context_tokens;
+        const primer_context = typeof pd["context_tokens"] === "number" ? (pd["context_tokens"] as number) : 0;
+        if (ceiling !== undefined && primer_context > ceiling) {
+          fork_fallback = "primer_too_large";
+        } else {
+          // O4 — staleness is decided by BLOBS against the working tree, through the SAME gitInTree seam
+          // the law/change stampers use. A file git can no longer hash (removed since priming) is stale.
+          const files = Array.isArray(pd["files"]) ? (pd["files"] as Array<{ path: string; blob_sha: string }>) : [];
+          const stale_paths = files
+            .filter((f) => {
+              if (deps.tree_root === undefined) return false;
+              let current: string;
+              try { current = gitInTree(deps.tree_root, ["hash-object", f.path]).trim(); } catch { return true; }
+              return current !== f.blob_sha;
+            })
+            .map((f) => f.path);
+          fork = {
+            primer_session_id: String(pd["session_id"] ?? ""),
+            primer_id: primer.id,
+            primer_commit: String(pd["commit"] ?? ""),
+            stale_paths,
+            // contract-rolling-seat-primer-v1 (O2) — carry the forked primer's own files so a prime+fork
+            // chair can seal a fresher primer unioning them with this seat's reads.
+            primer_files: files,
+            // contract-primer-reading-frontier-v1 (O2/F2) — the primer's recorded reading frontier, so the
+            // fork's first spawn cuts the resumed conversation there. Absent ⇒ the whole session resumes.
+            ...(typeof pd["frontier"] === "string" ? { frontier: pd["frontier"] as string } : {}),
+          };
+        }
       }
-      reserved += cost;
-      reservedCost = cost;
     }
+
+    // contract-chair-session-continuity-v1 (O5) — a RESUMED (amend-round) invocation is NEVER served
+    // from the reuse cache: the seat resumes its own conversation, which carries what the failing
+    // verdict prompted it to reconsider, and none of that is in the reuse key. Serving the cached
+    // artifact would replay the very work the amend exists to redo. The key is still kept below (the
+    // amend's own output is cacheable on the round-one terms), only the HIT is withheld.
+    // contract-seat-primer-v1 (O5) — the SAME withholding for a FORK: a warm-started conversation the
+    // reuse key cannot describe would replay the very reading the fork exists to reuse. The hit is
+    // withheld here AND recorded (below, in executeChair) so the cache-was-live signal survives — a
+    // fork always invokes, even on a key that would otherwise hit.
+    const effectiveHit = (opts.resume || fork) ? undefined : lookup?.hit;
+    // O5 — record the withheld fork hit so executeChair marks the cache LIVE without serving it.
+    const fork_reuse_withheld = fork && lookup?.hit
+      ? { cache_key: lookup.hit.cache_key, source_gig_id: lookup.hit.source_gig_id, output_types: lookup.hit.outputs.map((o) => o.domain_type) }
+      : undefined;
+
+    // BUDGET GATE — the append-unit pre-invocation gate is GONE (O3). Payload size / base_cost / k
+    // no longer decide whether a chair runs. The dollar ceiling is enforced against SETTLED spend at
+    // BATCH BOUNDARIES (O2, in the dispatch loop), not per-chair here. This block now only computes
+    // the reserve OFFER against the gig pool.
 
     // #turn-budget — RESERVE OFFER. Only a chair that DECLARED a `turn_reserve` reaches for the pool;
     // one that declared none threads no ctx.turn_reserve, so the invoker's own opts-level reserve is
-    // undisturbed (the #329 continuation path). When a budget is enforced the offer is capped to what
-    // the pool can still lend (min(own reserve, pool_remaining - poolReserved)) and HELD; with no
-    // budget there is no pool to cap against, so the declared reserve threads through directly.
+    // undisturbed (the #329 continuation path). When a pool is in play the offer is capped to what it
+    // can still lend (min(own reserve, pool_remaining - poolReserved)) and HELD; with no pool at all
+    // (`budget` null) the declared reserve threads through directly.
     let reserveOffer: number | undefined;
-    if (chair.turn_reserve !== undefined && !lookup?.hit) {
+    if (chair.turn_reserve !== undefined && !effectiveHit) {
       if (budget) {
         const poolAvailable = Math.max(0, budget.pool_remaining - poolReserved);
         reserveOffer = Math.min(chair.turn_reserve, poolAvailable);
@@ -2456,41 +2928,24 @@ export async function runGig(
     return {
       chair, phaseName, agent, primitive, domain_type, output_specs, inputs, skills,
       missing_skills: missing, producer_slug: agent.slug, domain,
-      ...(reservedCost !== undefined ? { cost: reservedCost } : {}),
       ...(reserveOffer !== undefined ? { reserve_offer: reserveOffer } : {}),
       ...(lookup ? { reuse_key: lookup.key } : {}),
-      ...(lookup?.hit ? { reuse_hit: lookup.hit } : {}),
+      ...(effectiveHit ? { reuse_hit: effectiveHit } : {}),
+      ...(opts.resume ? { resume: true } : {}),
+      ...(opts.keep_prompt ? { resume_keep_prompt: true } : {}),
+      ...(opts.round !== undefined ? { round: opts.round } : {}),
+      ...(fork ? { fork } : {}),
+      ...(fork_fallback !== undefined ? { fork_fallback } : {}),
+      ...(fork_reuse_withheld ? { fork_reuse_withheld } : {}),
     };
-  }
-
-  // #232 — convert a chair's reservation into settled spend, or release it. `spent` moves ONLY
-  // for a chair whose invocation actually returned, which is what the budget contract always
-  // claimed. A chair that was prepared and then never invoked (its batch sibling tripped the
-  // gate) never reaches here at all — so it is never charged, which is the point.
-  function settleChairCost(p: PreparedChair, succeeded: boolean): void {
-    if (!budget || p.cost === undefined) return;
-    reserved -= p.cost;
-    if (!succeeded) return;
-    budget.spent += p.cost;
-    budget.balance = budget.opening - budget.spent + budget.credit;
   }
 
   // Stage 2 — actual invocation + post-invocation output_contract check + write.
   // Errors here ARE aggregated by Promise.allSettled and surfaced as a phase-
-  // level RuntimeError naming every failing chair role.
-  //
-  // The thin wrapper is where a chair's budget RESERVATION settles (#232): a hold becomes
-  // `spent` on success and is released on failure. Both paths must run, so the accounting
-  // cannot drift no matter how the chair ends.
+  // level RuntimeError naming every failing chair role. There is no per-chair budget
+  // reservation to settle any more — the ceiling is a batch-boundary check on settled USD.
   async function invokeAndWriteChair(p: PreparedChair): Promise<OutputRecord[]> {
-    try {
-      const written = await executeChair(p);
-      settleChairCost(p, true);
-      return written;
-    } catch (e) {
-      settleChairCost(p, false);
-      throw e;
-    }
+    return executeChair(p);
     // THE ROOM IS NOT TORN DOWN HERE. It used to be, in this chair-level `finally`, described as
     // "idempotent and a no-op when no venue was named". Idempotent yes; a no-op no —
     // `src/venue_realize.ts` sets `torn = true`, and `canReach()` is `!torn && egress.includes(...)`.
@@ -2506,8 +2961,55 @@ export async function runGig(
   }
 
   async function executeChair(p: PreparedChair): Promise<OutputRecord[]> {
+    // What the transport SAID about this chair, hoisted out of the invocation block so the seal
+    // can prefer a measurement over the tier table's guess. Empty for a skill-backed chair.
+    let chairReport: { model?: string; cost_usd?: number; tokens_used?: number } = {};
     const { chair, phaseName, inputs, skills, output_specs, producer_slug, domain } = p;
-    const t0 = Date.now();
+    // contract-seat-time-monotonic-v1 (O1) — the chair's timings (first_write_ms, duration_ms below)
+    // are monotonic differences (performance.now), never Date.now: a wall-clock jump mid-chair is
+    // machine time, not seat time. Rounded to whole ms at each difference, since performance.now is
+    // fractional.
+    const t0 = performance.now();
+    // #seat-metrics — the seat's FIRST write and the context it carried then, measured from the
+    // chair's forwarded agent events (below). Null until a write happens; a chair that never writes
+    // (or forwards no events, like a skill chair) leaves both null.
+    let firstWriteMs: number | null = null;
+    let contextAtFirstWrite: number | null = null;
+    let lastAssistantContext: number | null = null;
+    // #seat-effort (O5) — the effort the model chair resolved to, captured at the invoke ctx site
+    // (below) so the chair_complete emit can record what the seat ran at. Stays undefined for a skill
+    // chair, which runs no model at an effort.
+    let resolvedEffort: Effort | undefined;
+    // contract-amend-resume-prompt-v1 (F1) — set when the invoker reports a resume whose session was
+    // gone and fell back cold (the `resume_fallback` stream event). Recorded on chair_complete so the
+    // fallback is observable rather than a resume the record falsely claims happened.
+    let resumeFellBack = false;
+    // contract-resumed-gig-session-v1 (O3) — set when the invoker RESUMED a collided --session-id open
+    // (the `resume_on_collision` stream event): a first spawn whose deterministic session id was already
+    // in use continued the conversation instead of failing. `p.resume` is false on such a spawn (it is a
+    // first open, not an amend), so this is what makes chair_complete record the continuation truthfully.
+    let resumedOnCollision = false;
+    // contract-seat-primer-v1 (O1/I2) — the files a PRIME seat Read, captured from the invoker's
+    // forwarded `seat_reads` event, so the seat-primer is sealed from exactly what the seat read.
+    let primerReads: string[] | undefined;
+    // contract-rolling-seat-primer-v1 (O3) — the context size (input+cache_read+cache_creation) of the
+    // LAST usage the seat reported, captured from the invoker's forwarded `seat_context` event. Under an
+    // injected `run` seam the streamed assistant usages never reach onEvent, so the invoker parses the
+    // last one from the returned stdout and forwards it, the same way it forwards `seat_reads`.
+    let primerContextTokens: number | undefined;
+    // contract-primer-reading-frontier-v1 (O1) — the reading frontier the invoker derived from the seat's
+    // stream (the last user line before its first write), forwarded on the `seat_reads` event and sealed
+    // onto the seat-primer. Absent when the seat called no write tool (I3) or had no user line before it (F1).
+    let primerFrontier: string | undefined;
+    // contract-primer-reading-frontier-v1 (O4/I1) — a PRIME chair's tree snapshot at chair START (git
+    // stash create, or HEAD when clean), so a file Read before the frontier is sealed at the blob it had
+    // when the chair began — not the post-edit blob the seat may have written after reading it. Undefined
+    // when there is no tree_root (no git resolution) or the snapshot could not be taken.
+    let primerStartSnapshot: string | undefined;
+    // contract-seat-primer-v1 (F2) — set when the invoker reported the primer's session could not be
+    // resumed and fell back cold (the `fork_fallback` stream event). Recorded on chair_complete.
+    let forkFellBackReason: string | undefined;
+    const WRITE_TOOLS = new Set(["Write", "Edit", "MultiEdit", "NotebookEdit"]);
 
     // ── REUSE HIT ────────────────────────────────────────────────────────────────────────
     // Everything that could refuse this was decided at prep, before a byte was written. What
@@ -2525,6 +3027,12 @@ export async function runGig(
         const rec = deps.outputs.write({
           core_type: spec.core_type,
           domain_type: o.domain_type,
+          // O4 — a recall keeps the version it was SEALED at. Omitting this let outputs.write default
+          // to 1, so a record sealed against a v2 type recalled as v1 — a DIFFERENT content_sha than
+          // the record it recalls. A pre-migration entry carries no version; on a HIT the current
+          // version equals the sealed one (else lookupReuse's re-hash would already have refused the
+          // entry), so the fallback re-hashes identically.
+          domain_type_version: o.domain_type_version ?? deps.outputs.typeVersionOf(o.domain_type),
           domain,
           gig_id,
           agent_slug: producer_slug,
@@ -2565,6 +3073,16 @@ export async function runGig(
 
     const producerHint = chair.skill_slug || p.agent?.slug || chair.agent_slug || chair.role;
     emit({ type: "chair_start", phase: phaseName, role: chair.role, producer: producerHint });
+    // contract-seat-primer-v1 (O5) — a fork whose reuse key WOULD hit: the cache is LIVE (record the
+    // hit so the signal survives) but the fork is NEVER served — it invokes below, carrying warm
+    // conversation the reuse key cannot describe.
+    if (p.fork_reuse_withheld) {
+      reuseReport.hits.push({
+        phase: phaseName, role: chair.role,
+        cache_key: p.fork_reuse_withheld.cache_key, source_gig_id: p.fork_reuse_withheld.source_gig_id,
+        output_types: p.fork_reuse_withheld.output_types,
+      });
+    }
     let data: Record<string, unknown>;
     // Skill-backed chairs record which skill (version + verified code_hash + tier) sealed the
     // output, so the ledger entry traces back to the exact SkillChainEvent. Undefined for agents.
@@ -2582,7 +3100,13 @@ export async function runGig(
       // even be DELIVERED. `gig_abort` during a skill chair was a promise the engine could
       // not keep — #249's shape again, but a missing opportunity to kill rather than a
       // missing kill.
-      const r = await executeSkillAsync(p.skill_dir, skillInput, 120_000, { signal: deps.signal });
+      // contract-skill-chair-runs-in-tree-v1 (O1/I1) — a skill chair's code half runs in the GIG'S
+      // tree: forward RunDeps.tree_root as the child's working directory when the run has one. A run
+      // with no tree_root passes no cwd, so the child inherits the engine process's directory (I2).
+      const r = await executeSkillAsync(p.skill_dir, skillInput, 120_000, {
+        signal: deps.signal,
+        ...(deps.tree_root !== undefined ? { cwd: deps.tree_root } : {}),
+      });
       if (!r.ok) throw new RuntimeError(`skill chair "${chair.role}" ("${chair.skill_slug}") failed: ${r.error}`);
       data = (r.output && typeof r.output === "object" ? r.output : {}) as Record<string, unknown>;
       const pkg = loadSkillPackage(p.skill_dir);
@@ -2646,9 +3170,28 @@ export async function runGig(
           }
           placedHydration = decision.hydration;
         }
-        
+
+        // #seat-effort (O2) — resolve precedence ONCE here and set the RESOLVED value on the ctx, the
+        // same seam `depth` threads through. Captured so chair_complete records what the seat ran at.
+        resolvedEffort = resolveEffort(deps.effort, agent);
+        // contract-seat-context-ceiling-v1 (O2) — resolve the context ceiling ONCE here (dispatch ▷
+        // agent ▷ none) and set the RESOLVED value on the ctx only when one exists, so an undeclared
+        // seat carries no ceiling and the completions invoker runs it uncapped (I1).
+        const resolvedMaxContext = resolveMaxContextTokens(deps.max_context_tokens, agent);
+        // contract-primer-reading-frontier-v1 (O4/I1) — snapshot the tree the moment BEFORE a PRIME seat
+        // runs (git stash create captures the working tree without touching it; empty output ⇒ a clean
+        // tree, so HEAD is the snapshot). A file the seat reads then edits is sealed at this pre-edit blob
+        // (git rev-parse <snapshot>:<path>), and a carried file the seat never re-reads keeps its forked
+        // blob — so a fork remembers exactly what the primer READ, not what it then DID. Best-effort: a
+        // tree that cannot be snapshotted leaves this undefined and the seal falls back to hash-object.
+        if (chair.prime && deps.tree_root !== undefined) {
+          try {
+            const created = gitInTree(deps.tree_root, ["stash", "create"]).trim();
+            primerStartSnapshot = created.length > 0 ? created : gitInTree(deps.tree_root, ["rev-parse", "HEAD"]).trim();
+          } catch { primerStartSnapshot = undefined; }
+        }
         data = await deps.invoke({
-          agent, phase: phaseName, gig_id, inputs, gig_input: gigInput, skills,
+          agent, phase: phaseName, role: chair.role, gig_id, inputs, gig_input: gigInput, skills,
           missing_skills: p.missing_skills, // #241 — what did NOT resolve, so the prompt can't assert it
           // THE SEAT IS WHERE THE INSTITUTION'S DATA ENTERS. Validated at compose time (the dead-slot
           // refusal) and, until now, dropped on the floor immediately afterwards.
@@ -2663,12 +3206,31 @@ export async function runGig(
           // itself, so an invoker can kill its child and shape what it asks the model for.
           ...(deps.signal ? { signal: deps.signal } : {}),
           ...(deps.depth ? { depth: deps.depth } : {}),
+          // #seat-effort (O2) — the RESOLVED effort reaches the invoker on the ctx, always present
+          // (resolveEffort floors to medium), so both invokers carry it without re-deriving.
+          effort: resolvedEffort,
+          // contract-seat-context-ceiling-v1 (O2/O3) — the RESOLVED ceiling reaches the invoker on the
+          // ctx, present ONLY when declared (no floor), so an undeclared seat stays uncapped (I1).
+          ...(resolvedMaxContext !== undefined ? { max_context_tokens: resolvedMaxContext } : {}),
           // #turn-budget — the chair's own turn budget threads through exactly as `depth` does; the
           // reserve is the pool-capped OFFER, not the raw declaration, and is present only when the
           // chair declared a reserve (so a reserve-less chair leaves the invoker's opts-level default
           // untouched — the #329 continuation path stays byte-identical).
           ...(p.chair.turn_budget !== undefined ? { turn_budget: p.chair.turn_budget } : {}),
           ...(p.reserve_offer !== undefined ? { turn_reserve: p.reserve_offer } : {}),
+          // contract-chair-session-continuity-v1 (O3) — an amend re-invocation resumes the maker's
+          // own prior-round session; the invoker reads this to pass --resume instead of --session-id.
+          ...(p.resume ? { resume: true } : {}),
+          // contract-resumed-gig-session-v1 (O1) — a re-verify resumes its session but keeps the full
+          // prompt; thread it so buildPrompt skips the maker's trimmed continuation for this seat.
+          ...(p.resume_keep_prompt ? { resume_keep_prompt: true } : {}),
+          // contract-seat-primer-v1 (O1/I2) — a PRIME chair: the invoker parses its Read events and
+          // emits them so the runtime seals the seat-primer from exactly what this seat read.
+          ...(chair.prime ? { prime: chair.prime } : {}),
+          // contract-seat-primer-v1 (O2/O4) — a FORK chair with a primer: the invoker warm-starts from
+          // the primer's session and names the stale paths in the prompt. Absent on a plain chair or a
+          // fork whose primer is missing (F1), so both spawn a fresh session and never --fork-session.
+          ...(p.fork ? { fork: { primer_session_id: p.fork.primer_session_id, stale_paths: p.fork.stale_paths, ...(p.fork.frontier !== undefined ? { frontier: p.fork.frontier } : {}) } } : {}),
           // The venue → dispatch wire: thread the realized room onto the chair's ctx ONLY when a
           // venue resolved, so the invoker narrows the spawn by construction; both fields stay
           // absent otherwise (the venue-less path is unchanged).
@@ -2685,6 +3247,49 @@ export async function runGig(
           onEvent: (ev) => {
             sink.fold(ev);
             emit({ type: "agent_event", phase: phaseName, role: chair.role, event: ev });
+            // contract-amend-resume-prompt-v1 (F1) — the invoker's cold-fallback signal. Captured here
+            // (the one seam every chair event flows through) so chair_complete can record it.
+            if (ev.type === "resume_fallback") resumeFellBack = true;
+            // contract-resumed-gig-session-v1 (O3) — the invoker's collision-resume signal, captured on
+            // the same seam so chair_complete can record the chair CONTINUED its session.
+            if (ev.type === "resume_on_collision") resumedOnCollision = true;
+            // contract-seat-primer-v1 (O1/I2) — a PRIME seat's forwarded reads, so the seat-primer is
+            // sealed (below) from exactly the files it Read.
+            if (ev.type === "seat_reads") {
+              const r = (ev.raw as { reads?: unknown } | undefined)?.reads;
+              primerReads = Array.isArray(r) ? r.filter((x): x is string => typeof x === "string") : [];
+              // contract-primer-reading-frontier-v1 (O1) — the frontier travels on the same event.
+              const f = (ev.raw as { frontier?: unknown } | undefined)?.frontier;
+              primerFrontier = typeof f === "string" ? f : undefined;
+            }
+            // contract-rolling-seat-primer-v1 (O3) — the seat's context size at seal, forwarded by the
+            // invoker (the injected `run` seam bypasses the streamed usages onEvent would otherwise fold).
+            if (ev.type === "seat_context") {
+              const c = (ev.raw as { context_tokens?: unknown } | undefined)?.context_tokens;
+              if (typeof c === "number") primerContextTokens = c;
+            }
+            // contract-seat-primer-v1 (F2) — the fork's primer session could not be resumed and it fell
+            // back cold. Captured so chair_complete records the fallback (naming the session), not a
+            // fork that never happened.
+            if (ev.type === "fork_fallback") {
+              const reason = (ev.raw as { reason?: unknown } | undefined)?.reason;
+              forkFellBackReason = typeof reason === "string" ? reason : "the primer session could not be resumed";
+            }
+            // #seat-metrics — track the last assistant context and the FIRST write, BEFORE the
+            // budget early-return below (which fires whenever no budget is wired). An assistant
+            // event's raw.message.usage carries the context; the first Write/Edit/MultiEdit/
+            // NotebookEdit tool_use marks the first write and snapshots the context as of the last
+            // assistant usage before it.
+            if (ev.type === "assistant") {
+              const u = (ev.raw as { message?: { usage?: Record<string, number> } } | undefined)?.message?.usage;
+              if (u) {
+                lastAssistantContext =
+                  (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0);
+              }
+            } else if (firstWriteMs === null && ev.type === "tool_use" && ev.tool !== undefined && WRITE_TOOLS.has(ev.tool)) {
+              firstWriteMs = Math.round(performance.now() - t0);
+              contextAtFirstWrite = lastAssistantContext;
+            }
             if (!budget) return;
             // A chair crossed its budget into a granted reserve. Set `yielding` (D1: one condition
             // at two scales — the gig is yielding IFF a seated chair is drawing reserve), convert the
@@ -2716,6 +3321,11 @@ export async function runGig(
         throw e;
       } finally {
         if (sink.attributed()) attributedInvocations++;
+        // F3 — under a ceiling, a chair that reported usage but NO settled usd leaves the next
+        // batch unverifiable: the runtime cannot know whether it is affordable. Record it (never
+        // silent). A chair that reported nothing at all (a plain stub) is not here.
+        if (hasCeiling && sink.attributed() && !sink.reportedCost()) unverifiedChairs.push(agent.slug);
+        chairReport = sink.reported();
       }
       // The drawing chair LANDED within its reserve → clear yielding back to `active` (O12/INV16).
       // The gig-end success path then settles it; an idle chair that held but never drew releases here.
@@ -2724,6 +3334,29 @@ export async function runGig(
         emit({ type: "budget_state", phase: phaseName, role: chair.role, agent_state: "active", pool_remaining: budget.pool_remaining });
       }
       releaseHold();
+      // ── contract-spend-survives-v1 (O1/I2/O2/F1) — the DURABLE chair_spend row ─────────────────
+      // Appended the moment THIS chair's invocation settled — before the next chair is invoked, and
+      // before the output_contract check below (which can throw) — so a kill or a failure on a later
+      // chair leaves this one's captured spend behind. An attributed chair carries its own usage; an
+      // unattributed one seals captured:false with NO cost, never a $0 row (#235). The gig-wide fold
+      // still writes the single gig row on success; these rows are the per-chair record that survives
+      // when that row is never sealed. Appended only for a model invocation — a skill chair runs no
+      // model and settles no spend — and never for a reuse hit (which returns before reaching here).
+      const chairSettledUsage = sink.usage();
+      deps.ledger.append({
+        kind: "chair_spend",
+        schema_version: LEDGER_SCHEMA_VERSION,
+        entry_id: `chair_spend:${gig_id}:${chair.role}:${p.round ?? 1}:${randomUUID()}`,
+        gig_id,
+        role: chair.role,
+        phase: phaseName,
+        round: p.round ?? 1,
+        captured: sink.attributed(),
+        output_hashes: [],
+        started_at: new Date(t0).toISOString(),
+        finished_at: new Date().toISOString(),
+        ...(chairSettledUsage ? { usage: chairSettledUsage } : {}),
+      });
       // Runtime output_contract check: every type the chair promised must be covered by the
       // bound agent's declared output_types (compose-time mirror; a hand-rolled literal could
       // still ship a mismatch).
@@ -2836,6 +3469,28 @@ export async function runGig(
     // #243 — DECIDE BEFORE SEALING. Every check that can throw now runs against resolved
     // slices while nothing has been written yet.
     //
+    // AN INVOKER'S TYPED REFUSAL IS A REASON, NOT A MALFORMED OUTPUT. An invoker that declines —
+    // a chair granting a tool that port does not carry, a tier the deployment never mapped, an
+    // upstream that could not be reached — returns `{ok:false, refusal, message}` rather than
+    // throwing, so the refusal is a value the engine can act on. Without this it fell straight
+    // through to the seal path and the operator was told
+    //
+    //   cannot seal "p": ... additionalProperties: must NOT have additional properties 'refusal'
+    //
+    // which is the shape complaint of the very object carrying the answer. The reason was present
+    // and nothing read it — a refusal typed and then discarded is the same defect as a mechanism
+    // nothing reaches, one seam over.
+    //
+    // Narrow on purpose: `ok === false` with BOTH a string refusal and a string message. A domain
+    // type is free to have an `ok` field; it is not plausibly carrying all three.
+    const refusal = data["refusal"];
+    const refusalWhy = data["message"];
+    if (data["ok"] === false && typeof refusal === "string" && typeof refusalWhy === "string") {
+      throw new RuntimeError(
+        `chair "${chair.role}" refused: ${refusal} — ${refusalWhy}`,
+      );
+    }
+
     // The floor check used to sit AFTER the write loop, which created a failure class that did
     // not previously exist: a chair delivering part of its contract sealed those records,
     // append-flushed them to `outputs/<gig_id>.jsonl`, and only THEN threw — so the gig failed
@@ -2846,7 +3501,36 @@ export async function runGig(
     const resolved: Array<{ spec: (typeof output_specs)[number]; slice: Record<string, unknown> }> = [];
     for (const spec of output_specs) {
       const keyed = data[spec.domain_type];
-      const raw = keyed !== undefined && keyed !== null ? keyed : single ? data : undefined;
+      // WRAPPER vs FIELD — THE TYPE'S OWN SCHEMA DECIDES, never the data's shape. A chair may return
+      // its record bare, or keyed under its type slug (`{ <type>: <record> }`). But a record whose
+      // OWN schema declares a field named like its type (a type `line` with a `line` field) puts a
+      // value under `data[<type>]` that is a FIELD, not a wrapper — and the shape alone cannot tell
+      // the two apart (law 2: an OBJECT field looks exactly like a wrapped record). The schema can:
+      // the keyed value is a wrapper only if it VALIDATES as a record of the type while the whole
+      // `data` does not. So when `data[<type>]` cannot itself be a record of this type but the whole
+      // `data` can, `data[<type>]` is a field and the whole record seals; otherwise the keyed wrapper
+      // is honoured (control law 3), and multi-output (`single` false) is untouched — its blob is
+      // keyed by construction. An array under the key is the multi-record seal list; honour it as-is.
+      let raw: unknown;
+      if (keyed === undefined || keyed === null) {
+        raw = single ? data : undefined;
+      } else if (single && !Array.isArray(keyed)) {
+        const keyedIsRecord =
+          typeof keyed === "object" &&
+          deps.outputs.validateWrite({
+            core_type: spec.core_type,
+            domain_type: spec.domain_type,
+            data: keyed as Record<string, unknown>,
+          }).valid;
+        const wholeIsRecord = deps.outputs.validateWrite({
+          core_type: spec.core_type,
+          domain_type: spec.domain_type,
+          data,
+        }).valid;
+        raw = !keyedIsRecord && wholeIsRecord ? data : keyed;
+      } else {
+        raw = keyed;
+      }
       if (raw === undefined || raw === null) continue;
       // MULTI-RECORD SEAL. captureOutputWrites hands the runtime a LIST of records per declared type
       // — a chair may seal MANY records of one type (gig 8baced9d's lineage scout made 15 accepted
@@ -2866,6 +3550,21 @@ export async function runGig(
     // backfillShas refuses an ambiguous provenance field. Run it over EVERY slice up front so
     // that throw also lands before the first write, rather than midway through them.
     for (const { slice } of resolved) backfillShas(slice);
+
+    // RECORDS BY ADDRESS — the seal stamps law/change addresses from git, beside the *_sha backfill
+    // and before any validateWrite or write, so a stamping refusal fails the chair with its typed
+    // reason and nothing is sealed. A sealed `red-spec` carrying `laws` (or a `change-set` carrying
+    // `changes`) has those entries REPLACED with the engine-stamped ones; a record carrying only
+    // `diffs` and no `laws`/`changes` is left exactly as today (the pre-migration shape this gig's
+    // own attester and builder still seal). tree_root is required only once a record actually carries
+    // an address — a stamp with no tree_root refuses (`tree_root_unknown`), never reads process.cwd().
+    for (const { spec, slice } of resolved) {
+      if (spec.domain_type === "red-spec" && Array.isArray(slice["laws"])) {
+        slice["laws"] = stampLawAddresses(slice["laws"] as unknown as LawAddress[], deps.tree_root);
+      } else if (spec.domain_type === "change-set" && Array.isArray(slice["changes"])) {
+        slice["changes"] = stampChangeAddresses(slice["changes"] as unknown as ChangeAddress[], deps.tree_root);
+      }
+    }
 
     // The output_contract is a FLOOR, not merely a selector. `written.length === 0` alone let a
     // chair that promised two types and sealed one complete silently. The old in-code
@@ -2934,6 +3633,15 @@ export async function runGig(
     // Only now does anything become durable.
     const written: OutputRecord[] = [];
     for (const { spec, slice } of resolved) {
+      // contract-chair-cost-once-v1 — one chair invocation is settled ONCE (its `result` event
+      // reports a single total_cost_usd), so its spend is attributed to exactly ONE sealed record.
+      // The FIRST record this invocation seals carries `chairReport.cost_usd` / `tokens_used`; every
+      // later record omits both and carries `cost_on`: the first record's id. Stamping the whole
+      // chairReport on every record made a chair of width N report its spend N times, so summing
+      // `cost_usd` over a gig double-counted every multi-output chair (coltrane-ui#242). `written` is
+      // this invocation's records in seal order, so it is empty exactly at the first record and its
+      // head is the cost carrier for the rest.
+      const costCarrier = written[0];
       const rec = deps.outputs.write({
         core_type: spec.core_type,
         domain_type: spec.domain_type,
@@ -2953,10 +3661,28 @@ export async function runGig(
         // WHICH model produced this, resolved through the invoker's own function so the stamp
         // and the spawn cannot disagree. Absent for a skill-backed chair — no model ran, and
         // absent must mean unknown rather than "the default".
+        // WHICH model produced this. The transport's own word wins: `resolveModel` is one
+        // invoker's tier table, and the runtime calls it for EVERY invoker — so a chair served by
+        // any other port used to seal a stamp naming a model it never touched. The fallback stays
+        // (a transport may report nothing) but it no longer masquerades as a measurement:
+        // `model_reported` says which of the two this is. Absent for skill-backed chairs — no
+        // model ran, and absent must mean unknown rather than "the default".
         ...(p.agent
           ? {
-              model: resolveModel(p.agent.model_tier, deps.model_version),
+              model: chairReport.model ?? resolveModel(p.agent.model_tier, deps.model_version),
+              ...(chairReport.model !== undefined ? { model_reported: true } : {}),
               ...(p.agent.model_tier ? { model_tier: p.agent.model_tier } : {}),
+              // Per-chair spend, declared in the record's own schema since it was written and
+              // populated by nothing. The gig total cannot separate two chairs on two tiers,
+              // which is the only question per-chair routing asks. Attributed ONCE per invocation
+              // (contract-chair-cost-once-v1): the first record carries the settled cost + tokens;
+              // every later record carries `cost_on` at the carrier and no cost of its own.
+              ...(costCarrier === undefined
+                ? {
+                    ...(chairReport.cost_usd !== undefined ? { cost_usd: chairReport.cost_usd } : {}),
+                    ...(chairReport.tokens_used !== undefined ? { tokens_used: chairReport.tokens_used } : {}),
+                  }
+                : { cost_on: costCarrier.id }),
             }
           : {}),
         skill_provenance,
@@ -2983,6 +3709,8 @@ export async function runGig(
           core_type: w.core_type, domain_type: w.domain_type, domain: w.domain,
           primitive: w.primitive, agent_slug: w.agent_slug, phase: phaseName,
           data: w.data, content_sha: w.content_sha, type_fingerprint: fp, source_output_id: w.id,
+          // O4 — carry the sealed version so a recall re-stamps it and hashes as the record it recalls.
+          domain_type_version: w.domain_type_version,
           ...(w.skill_provenance ? { skill_provenance: w.skill_provenance } : {}),
         });
       }
@@ -2999,15 +3727,161 @@ export async function runGig(
         }
       }
     }
+    // contract-seat-primer-v1 (O1/I2) — a PRIME chair seals a `seat-primer` record DERIVED by the
+    // engine (never typed by the model): its own (gig, role) session, HEAD at seal, and the files its
+    // seat Read, each with the `git hash-object` blob in the tree at seal. The reads arrive through the
+    // invoker's `seat_reads` event (captured above); the record is sealed HERE, through the same write
+    // boundary a derived output crosses, so it enters this gig's store and any later fork can find it.
+    if (chair.prime) {
+      const area = chair.prime.area;
+      const session_id = sessionUuidFor(gig_id, chair.role);
+      const reads = primerReads ?? [];
+      const commit = deps.tree_root ? gitInTree(deps.tree_root, ["rev-parse", "HEAD"]).trim() : "";
+      // contract-rolling-seat-primer-v1 (O2) — a chair that ALSO forked a primer (p.fork resolved) seals
+      // a FRESHER primer: the forked primer's files UNIONed with this seat's own reads, de-duped by path
+      // (forked first, then own reads), each RE-BLOBBED against the tree at seal. A chair that fell back
+      // cold (primer_too_large / primer_missing → no p.fork) unions nothing and seals only its own reads,
+      // which is the fresh, small primer the ceiling/first-primer path calls for. The `session_id` stays
+      // this build's own (gig, role) uuid — the fork branch the next build resumes.
+      const forkedFiles = p.fork?.primer_files ?? [];
+      // contract-seat-primer-paths-v1 (O1/I1/F1) — a seat-primer must name its files the way the
+      // repository does, so ANY checkout of this commit can use it. A seat's Read event carries an
+      // ABSOLUTE checkout path, which ties the primer to one machine's location. Normalize each read to
+      // its tree_root-relative POSIX path (an already-relative read is resolved against tree_root first,
+      // so both spellings of the same file collapse to one key — I1), and DROP any path that resolves
+      // OUTSIDE tree_root — it is not part of the area and must never be stored, above all not as an
+      // absolute path escaping it (F1). With paths stored relative, the fork-time staleness hash
+      // (gitInTree hash-object) resolves them in the FORKING run's own checkout, so a primer sealed
+      // under one checkout is fresh in another of the same content (O2). Without a tree_root there is no
+      // anchor (and no git resolution downstream), so the raw path is kept unchanged.
+      const toTreeRelative = (raw: string): string | undefined => {
+        if (deps.tree_root === undefined) return raw;
+        const abs = isAbsPath(raw) ? raw : joinPath(deps.tree_root, raw);
+        const rel = relPath(deps.tree_root, abs);
+        if (rel === "" || rel.startsWith("..") || isAbsPath(rel)) return undefined; // outside tree_root
+        return rel.split(pathSep).join("/");
+      };
+      // The seat's OWN reads — already CUT to those before the reading frontier by the invoker
+      // (contract-primer-reading-frontier-v1 O4) — normalized to tree-relative and de-duped.
+      const readRel: string[] = [];
+      const readSet = new Set<string>();
+      for (const raw of reads) {
+        const rel = toTreeRelative(raw);
+        if (rel !== undefined && !readSet.has(rel)) { readSet.add(rel); readRel.push(rel); }
+      }
+      // contract-carried-primer-paths-v1 (O1/I1/F1) — a CARRIED file obeys the SAME path rules as a
+      // read: normalize each forked path through the SAME toTreeRelative (absolute-under-tree_root →
+      // tree_root-relative POSIX; a path resolving OUTSIDE tree_root is dropped, never stored — F1)
+      // BEFORE de-duping, so a carried absolute spelling and a relative read of the same file collapse
+      // to one tree-relative key (I1). The blob map is keyed by the NORMALIZED path (first carried
+      // entry wins), so a carried file the seat did NOT re-read keeps the blob the forked primer
+      // recorded — never re-blobbed against the tree (O1; contract-primer-reading-frontier-v1 I1).
+      const carriedRel: string[] = [];
+      const forkedBlob = new Map<string, string>();
+      for (const f of forkedFiles) {
+        const rel = toTreeRelative(f.path);
+        if (rel === undefined) continue; // outside tree_root — never stored (F1)
+        if (!forkedBlob.has(rel)) forkedBlob.set(rel, f.blob_sha);
+        carriedRel.push(rel);
+      }
+      // Union: carried (forked) first, then the seat's own reads, de-duped by NORMALIZED path.
+      const orderedPaths: string[] = [];
+      const seenPaths = new Set<string>();
+      for (const path of [...carriedRel, ...readRel]) {
+        if (!seenPaths.has(path)) { seenPaths.add(path); orderedPaths.push(path); }
+      }
+      // contract-primer-reading-frontier-v1 (O4/I1) — a file the seat READ before its frontier is sealed
+      // at its CHAIR-START blob: `git rev-parse <snapshot>:<path>` against the pre-invoke snapshot, so a
+      // file read-then-edited keeps its pre-edit blob (what the fork remembers), and a path the snapshot
+      // does not hold (untracked at chair start) is hashed at seal. A carried file the seat did NOT
+      // re-read keeps the blob the forked primer recorded — the reseal never launders a stale file fresh.
+      const blobFor = (path: string): string => {
+        if (readSet.has(path)) {
+          if (deps.tree_root === undefined) return "";
+          if (primerStartSnapshot !== undefined) {
+            try { return gitInTree(deps.tree_root, ["rev-parse", `${primerStartSnapshot}:${path}`]).trim(); }
+            catch { /* untracked at chair start — hash at seal below */ }
+          }
+          try { return gitInTree(deps.tree_root, ["hash-object", path]).trim(); } catch { return ""; }
+        }
+        return forkedBlob.get(path) ?? "";
+      };
+      const files = orderedPaths.map((path) => ({ path, blob_sha: blobFor(path) }));
+      // contract-rolling-seat-primer-v1 (O3) — the context size of the LAST usage the seat reported:
+      // the invoker-forwarded value under an injected `run` seam, else the streamed fold. Recorded ONLY
+      // when a usage was actually reported — a seat that reported none has no "last usage" to stamp, so
+      // the field is omitted (the same conditional discipline as `session_id`), which also keeps a seat-
+      // primer type that never declared context_tokens sealing cleanly.
+      const contextTokens = primerContextTokens ?? (lastAssistantContext ?? undefined);
+      deps.outputs.write({
+        core_type: "Signal",
+        domain_type: "seat-primer",
+        domain,
+        gig_id,
+        agent_slug: producer_slug,
+        from_role: chair.role,
+        phase: phaseName,
+        primitive: CORE_TO_PRIMITIVE["Signal"] ?? "SENSE",
+        // `source` is the Signal core's substance floor; the rest is the derived primer.
+        data: {
+          agent_slug: producer_slug, area,
+          ...(session_id !== undefined ? { session_id } : {}),
+          commit, files,
+          // contract-rolling-seat-primer-v1 (O3) — the context size the seat carried at seal
+          // (input+cache_read+cache_creation of its LAST usage): what the next build's ceiling weighs.
+          ...(contextTokens !== undefined ? { context_tokens: contextTokens } : {}),
+          // contract-primer-reading-frontier-v1 (O1) — seal the reading frontier ONLY when the seat wrote
+          // (the invoker derived one); a read-only or user-less-write seat records none (I3/F1), so a
+          // frontier is never guessed.
+          ...(primerFrontier !== undefined ? { frontier: primerFrontier } : {}),
+          source: `seat-primer://${producer_slug}/${area}`,
+        },
+      });
+    }
     // A DECLARED-optional absence is still a fact about this run. Legitimising a shortfall is
     // not the same as hiding it, so it keeps its row in the manifest.
     if (missing.length > 0) unfulfilledOutputs.push({ role: chair.role, phase: phaseName, missing });
+    // contract-seat-primer-v1 (O3/O4/F1/F2) — a fork that WARM-STARTED records where it forked from and
+    // the paths stale since priming; a fork that FELL BACK cold (no primer, or an unresumable session)
+    // records the fallback instead. `forkFellBackReason` is set by the invoker's cold-fallback event
+    // (F2); `p.fork_fallback` is the prep-time "primer_missing" (F1). A cold fallback did NOT fork, so
+    // it records neither forked_from nor primer_stale_paths.
+    const forkFellBack = forkFellBackReason !== undefined;
     emit({
       type: "chair_complete", phase: phaseName, role: chair.role, producer: producer_slug,
-      output_types: written.map((w) => w.domain_type), duration_ms: Date.now() - t0,
+      output_types: written.map((w) => w.domain_type), duration_ms: Math.round(performance.now() - t0),
+      first_write_ms: firstWriteMs,
+      context_tokens_at_first_write: contextAtFirstWrite,
       promised_output_types: output_specs.map((s) => s.domain_type),
       missing_output_types: missing,
       ...(unresolvedShaFields.length > 0 ? { unresolved_sha_fields: unresolvedShaFields } : {}),
+      // #seat-effort (O5) — record the effort the seat ran at (a model chair only; a skill chair
+      // leaves it undefined and the field stays absent).
+      ...(resolvedEffort !== undefined ? { effort: resolvedEffort } : {}),
+      // contract-chair-session-continuity-v1 (O4) — record the seat's session id (the uuid derived
+      // from (gig_id, role)) and whether THIS invocation resumed it. A model chair only; a skill
+      // chair (no p.agent) runs no session, so both fields stay absent. Computed here from the same
+      // (gig_id, role) the invoker derives the spawn's --session-id from, so the record and the
+      // spawn name one session.
+      // contract-resumed-gig-session-v1 (O3) — `resumed` is true when THIS invocation continued its
+      // session: either an amend round (`p.resume`) OR a first open whose deterministic id collided and
+      // was resumed on the spot (`resumedOnCollision`). The second case is a first spawn, so `p.resume`
+      // is false and only the collision signal tells the truth of it.
+      ...(p.agent && sessionUuidFor(gig_id, chair.role) !== undefined
+        ? { session_id: sessionUuidFor(gig_id, chair.role)!, resumed: p.resume === true || resumedOnCollision }
+        : {}),
+      // contract-amend-resume-prompt-v1 (F1) — a resume that fell back cold is recorded (never silent),
+      // and only then, so a normal spawn's chair_complete is byte-identical to before.
+      ...(resumeFellBack ? { resume_fallback: true } : {}),
+      // contract-seat-primer-v1 (O3/O4) — a fork that warm-started names its primer and the stale paths.
+      ...(p.fork && !forkFellBack
+        ? {
+            forked_from: { id: p.fork.primer_id, session_id: p.fork.primer_session_id, commit: p.fork.primer_commit },
+            primer_stale_paths: p.fork.stale_paths,
+          }
+        : {}),
+      // contract-seat-primer-v1 (F1/F2) — a fork that could not warm-start records why (never silent).
+      ...(forkFellBack ? { fork_fallback: forkFellBackReason! } : p.fork_fallback !== undefined ? { fork_fallback: p.fork_fallback } : {}),
     });
     return written;
   }
@@ -3072,6 +3946,10 @@ export async function runGig(
     // invokers, or a run whose every invocation reported no usage payload). #235: an absent
     // usage block means "not captured", never "$0.00".
     ...(settledUsage ? { usage: settledUsage } : {}),
+    // contract-spend-survives-v1 (O4) — a RESUMED gig's row carries what the killed attempt spent,
+    // read from the checkpoint (resumedFrom.prior_usage) and kept BESIDE this run's own `usage`,
+    // never folded in (#235/#236). Absent on a cold run.
+    ...(resumedFrom?.prior_usage !== undefined ? { prior_usage: resumedFrom.prior_usage } : {}),
   });
 
   // Drain the gig HEADER to the sink (fire-and-forget, like every output before it) — the
@@ -3090,12 +3968,12 @@ export async function runGig(
     if (process.env["COLTRANE_DRAIN_DEBUG"]) console.error(`[drain] gig header ${gig_id}: ${String(e)}`);
   });
 
-  // Cycle complete — when a budget was supplied, mark it `settled` and
-  // surface the final state in the manifest. `settled` mirrors the
-  // budget-state.json cycle terminal-state semantics for a closed cycle.
+  // Cycle complete — when a snapshot exists (a ceiling OR a pool), mark it `settled` and surface
+  // the final state in the manifest. Under a ceiling, the settled dollars are reconciled one last
+  // time; a pool-only snapshot carries no dollar figure.
   if (budget) {
     budget.agent_state = "settled";
-    budget.settled_usd = usage.total_cost_usd; // #233 — final reconciliation of REAL dollars
+    if (hasCeiling) budget.spent_usd = usage.total_cost_usd;
   }
 
   // The gig finished, so there is nothing left to resume — drop its checkpoint. Without this

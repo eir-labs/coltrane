@@ -58,6 +58,16 @@ export interface PostgrestContext {
   baseUrl: string;
   anonKey: string;
   bearer: string;
+  /**
+   * WHO IS ACTING, by org UUID. RLS scopes rows to what this caller may SEE, which for a member of
+   * two orgs is both — and a venue slug is unique per org, not globally. Without this, a name held
+   * by two orgs resolved to neither (correctly: the engine will not pick by row order) and the room
+   * simply vanished from the genome.
+   *
+   * A UUID, never a slug: slugs are exactly what collides. Absent means the load stays unpinned and
+   * a contested name still refuses — ambient org context is a refusal condition, not a default.
+   */
+  acting_org_id?: string | undefined;
 }
 
 const CLASS_SUBDIR: Record<GenomeClass, string> = {
@@ -115,7 +125,11 @@ export const Q = {
   agents:
     "coltrane_agent_profiles?select=slug,version,status,primitives,input_types,output_types,domain," +
     "identity,method,constraints,depth_profile,permissions,behavioral_primitives,skill_slots,default_skills,carried_skills",
-  standards: "coltrane_standards?select=slug,version,status,domain,phases,input_types,output_types",
+  // O5 — max_examine_rounds and reserve_pool ride back through the store, or the file genome and the
+  // store genome are two different standards (the drain would never amend and its pool would vanish).
+  // NOTE (out of scope, hosted): the hosted coltrane_standards table needs these two columns before
+  // this select reaches the hosted drain; that migration lives outside this repo.
+  standards: "coltrane_standards?select=slug,version,status,domain,phases,input_types,output_types,max_examine_rounds,reserve_pool",
   // Same gap venues had, one class over: no `version`, no `org_id`. coltrane_skills is
   // versioned, so skill_evolve minting v2 leaves v1 on the table — and the loader, seeing
   // two rows for one slug, threw "duplicate skill slug" and named the SLUG. A live skill
@@ -216,7 +230,22 @@ export interface GenomeRows {
 
 /** Reconstruct the loader's in-memory genome shape from store rows — ONE reconstruction,
  *  shared by every backing, so a JWT-loaded genome and a ctk-loaded genome cannot drift. */
-export function reconstructGenome(rows: GenomeRows): LoadedGenome {
+/**
+ * Who is loading. A venue is `(org_id, slug)` in the store and was `slug` alone here — two layers
+ * with different beliefs about whether a venue name is unique, and the store's answer is no.
+ *
+ * The org is a UUID, never a slug: slugs are exactly the thing that collides across orgs, so
+ * resolving by one would move the ambiguity rather than close it.
+ *
+ * OPTIONAL, and absent means DECLINE. An unpinned load still refuses a contested name rather than
+ * taking the first row — the PIN LAW's own rule, that ambient or defaulted org context is a
+ * refusal condition, finally carried into this layer.
+ */
+export interface GenomeLoadPin {
+  acting_org_id?: string | undefined;
+}
+
+export function reconstructGenome(rows: GenomeRows, pin?: GenomeLoadPin): LoadedGenome {
   const { core_types: coreRows, domain_types: typeRows, agents: agentRows, standards: standardRows, skills: skillRows } = rows;
   const load_errors: LoadError[] = [];
 
@@ -325,6 +354,13 @@ export function reconstructGenome(rows: GenomeRows): LoadedGenome {
         try {
           if (!slug) throw new Error(`missing required "slug" field`);
           if (standards.has(slug)) throw new Error(`duplicate standard slug "${slug}"`);
+          // F2 — a malformed examine loop is a NAMED load error, never a loop silently disabled. A
+          // present max_examine_rounds must be a non-negative integer; the store row keeps it (O5).
+          const mer = r["max_examine_rounds"];
+          if (mer !== undefined && mer !== null && (typeof mer !== "number" || !Number.isInteger(mer) || mer < 0)) {
+            throw new Error(`field max_examine_rounds must be a non-negative integer, got ${JSON.stringify(mer)}`);
+          }
+          const rp = r["reserve_pool"];
           const phases = (r["phases"] ?? []) as readonly PhaseDef[];
           const chairAgentSlugs = [
             ...new Set(phases.flatMap((p) => (p.chairs ?? []).map((c) => c.agent_slug).filter((s): s is string => !!s))),
@@ -346,6 +382,10 @@ export function reconstructGenome(rows: GenomeRows): LoadedGenome {
               // satisfies. Dropping it fails composition at every entry chair (found live).
               ...(Array.isArray(r["input_types"]) ? { input_types: r["input_types"] as string[] } : {}),
               ...(Array.isArray(r["output_types"]) ? { output_types: r["output_types"] as string[] } : {}),
+              // O5 — carry the examine loop and reserve pool through compose (loss-free `...def`
+              // spread) so the reconstructed standard keeps both. Absent leaves them unset.
+              ...(typeof mer === "number" ? { max_examine_rounds: mer } : {}),
+              ...(typeof rp === "number" ? { reserve_pool: rp } : {}),
             }),
           );
         } catch (e) {
@@ -451,6 +491,26 @@ export function reconstructGenome(rows: GenomeRows): LoadedGenome {
     return st === undefined || st === null || st === "active";
   });
 
+  // WI-11 · A ROOM BELONGS TO AN ORG. The store keys venues (org_id, slug, version); this layer
+  // keyed them by slug alone, and the two layers disagreed about whether a venue name is unique.
+  // The store is right: `verifier-desk` in two orgs is two rooms, not a duplicate — both were
+  // opened deliberately, the later one by hand.
+  //
+  // So a pinned load scopes to the acting org FIRST, and another org's room simply is not this
+  // genome's room. What remains after scoping is a genuine same-org collision, and that still
+  // refuses below.
+  //
+  // The pin is a UUID because slugs are precisely what collides here; accepting one would move the
+  // ambiguity rather than close it. An unrecognisable pin scopes to nothing rather than silently
+  // loading everything — absent and malformed must both mean DECLINE, which is the PIN LAW's own
+  // rule ("ambient or defaulted context is a refusal condition") reaching this layer at last.
+  const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const actingOrg = pin?.acting_org_id;
+  const scopedVenueRows =
+    actingOrg === undefined
+      ? liveVenueRows
+      : liveVenueRows.filter((r) => UUID.test(actingOrg) && r["org_id"] === actingOrg);
+
   // A2 · TWO ACTIVE ROWS CLAIMING ONE NAME IS AN AMBIGUITY, NOT A RACE. Previously the
   // second arrival threw "duplicate venue slug" and which room the genome held was a
   // function of row order — a fact nobody declared. There is no caller and no org context
@@ -458,7 +518,7 @@ export function reconstructGenome(rows: GenomeRows): LoadedGenome {
   // be a coin toss wearing a determinism costume. It refuses, naming every claimant, on the
   // precedent set for principals: attribution is a fact, not a coin toss.
   const bySlug = new Map<string, Row[]>();
-  for (const r of liveVenueRows) {
+  for (const r of scopedVenueRows) {
     const k = typeof r["slug"] === "string" ? r["slug"] : "?";
     bySlug.set(k, [...(bySlug.get(k) ?? []), r]);
   }
@@ -471,7 +531,7 @@ export function reconstructGenome(rows: GenomeRows): LoadedGenome {
     }
   }
 
-  for (const r of liveVenueRows) {
+  for (const r of scopedVenueRows) {
     const slug = typeof r["slug"] === "string" ? r["slug"] : null;
     const path = `postgrest:coltrane_venues/${slug ?? "?"}`;
     if (slug !== null && (bySlug.get(slug)?.length ?? 0) > 1) continue;  // already reported
@@ -546,7 +606,10 @@ export function postgrestGenomeStore(ctx: PostgrestContext): GenomeStore {
         restGet(ctx, Q.charts),
         restGet(ctx, Q.venues),
       ]);
-      return reconstructGenome({ core_types, domain_types, agents, standards, skills, charts, venues });
+      return reconstructGenome(
+        { core_types, domain_types, agents, standards, skills, charts, venues },
+        { acting_org_id: ctx.acting_org_id },
+      );
     },
 
     async upsert(cls: GenomeClass, payload: Record<string, unknown>, org_slug?: string): Promise<void> {
@@ -577,7 +640,12 @@ export function postgrestGenomeStore(ctx: PostgrestContext): GenomeStore {
  *  hash inside the store and returns the org's rows. Same reconstruction as every backing.
  *  Read-only by design: an agent token does not author genome (authoring is a member act,
  *  governed by the upsert RPC as auth.uid()). */
-export function rpcGenomeStore(ctx: { baseUrl: string; anonKey: string; agentToken: string }): GenomeStore {
+/** The agent-token backing. An agent token is issued per-agent within ONE org, so its acting org is
+ *  known to whoever minted it — passed here rather than re-derived, because a second derivation is a
+ *  second belief about who is acting. */
+export function rpcGenomeStore(
+  ctx: { baseUrl: string; anonKey: string; agentToken: string; acting_org_id?: string | undefined },
+): GenomeStore {
   return {
     async load(): Promise<LoadedGenome> {
       const res = await fetch(`${ctx.baseUrl}/rest/v1/rpc/coltrane_mcp_genome`, {
@@ -600,7 +668,16 @@ export function rpcGenomeStore(ctx: { baseUrl: string; anonKey: string; agentTok
         } catch { /* keep the raw text */ }
         throw new GenomeLoadError(`genome load (agent token): ${message}`);
       }
-      const rows = JSON.parse(text) as Partial<GenomeRows>;
+      const rows = JSON.parse(text) as Partial<GenomeRows> & { org_id?: unknown };
+      // THE ANSWER NAMES ITS OWN ORG. `coltrane_mcp_genome` authenticates a `ctk_`, and
+      // `coltrane_agent_token.org_id` is `uuid NOT NULL` with one row per key — so a token resolves
+      // to exactly one organization BY CONSTRUCTION. Nothing selects, so nothing can select wrong.
+      //
+      // This is what lets the drain pin itself. Its claim carries `acting_for` (an agent slug) and
+      // no org, and it does not need one: the genome answer it is already reading names the org,
+      // from the authoritative source. No third repo, no second resolution path, and the caller's
+      // explicit pin still wins when one was given.
+      const answeredOrg = typeof rows.org_id === "string" ? rows.org_id : undefined;
       return reconstructGenome({
         core_types: rows.core_types ?? [],
         domain_types: rows.domain_types ?? [],
@@ -609,7 +686,7 @@ export function rpcGenomeStore(ctx: { baseUrl: string; anonKey: string; agentTok
         skills: rows.skills ?? [],
         charts: rows.charts ?? [],
         venues: rows.venues ?? [],
-      });
+      }, { acting_org_id: ctx.acting_org_id ?? answeredOrg });
     },
     async upsert(): Promise<void> {
       throw new Error("an agent token does not author genome — authoring is a member act through the governed upsert");

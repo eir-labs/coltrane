@@ -63,6 +63,19 @@ export interface OutputRecord {
   created_at: string;
   cost_usd?: number | undefined;
   tokens_used?: number | undefined;
+  /**
+   * The sibling record of the SAME chair invocation that carries this invocation's settled
+   * `cost_usd` / `tokens_used`. One chair invocation is settled ONCE (its `result` event reports a
+   * single total_cost_usd), so when it seals many records exactly the FIRST carries the spend and
+   * every other carries `cost_on`: the first's id — never the spend itself. Summing `cost_usd` over
+   * a gig's sealed records then equals the sum of its settled chair costs, instead of double-counting
+   * every multi-output chair by its width (coltrane-ui#242).
+   *
+   * Absent on a record that CARRIES the cost — the first of a multi-output invocation, and the one
+   * record of a single-output chair (there is no other record to point at). Absent, therefore, on
+   * every record sealed before this existed.
+   */
+  cost_on?: string | undefined;
   duration_ms?: number | undefined;
   /**
    * WHICH model produced this output, and the tier that selected it.
@@ -78,6 +91,13 @@ export interface OutputRecord {
    */
   model?: string | undefined;
   model_tier?: string | undefined;
+  /**
+   * TRUE when `model` is what the transport SAID it ran; absent when it is the tier resolution's
+   * best guess. The distinction is load-bearing for cost work: a per-chair figure attributed to an
+   * inferred model is not a measurement, and a comparison built on it compares nothing. Same
+   * discipline as the gig usage's `partial` / `by_model_partial` flags.
+   */
+  model_reported?: boolean | undefined;
   // When the producer is a skill-backed chair (deterministic code, no model), this pins
   // WHICH skill produced the output — slug + version + verified code_hash + permission tier.
   // It closes the chair→skill provenance gap: an audit can trace the ledger entry back to the
@@ -121,10 +141,14 @@ export interface OutputWrite {
   input_shas?: string[] | undefined;
   cost_usd?: number | undefined;
   tokens_used?: number | undefined;
+  /** See OutputRecord.cost_on — the sibling record of the same invocation that carries the settled
+   *  cost. Set on a non-first record of a multi-output seal; absent on the record that carries the cost. */
+  cost_on?: string | undefined;
   duration_ms?: number | undefined;
   /** See OutputRecord.model — which model produced this, and the tier that selected it. */
   model?: string | undefined;
   model_tier?: string | undefined;
+  model_reported?: boolean | undefined;
   skill_provenance?: { slug: string; version: number; code_hash: string; tier: number } | undefined;
   /** See OutputRecord.reused_from — recall, not derivation. */
   reused_from?: { output_id: string; gig_id: string; cache_key: string } | undefined;
@@ -787,6 +811,7 @@ export function createOutputStore(registry: Registry, options?: OutputStoreOptio
         created_at: new Date().toISOString(),
         cost_usd: o.cost_usd,
         tokens_used: o.tokens_used,
+        cost_on: o.cost_on,
         duration_ms: o.duration_ms,
         model: o.model,
         model_tier: o.model_tier,

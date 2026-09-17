@@ -408,7 +408,7 @@ describe("chairs — runtime dispatch", () => {
     expect(res.status).toBe("complete");
     expect(res.outputs.length).toBe(1);
     expect(res.outputs[0]!.agent_slug).toBe("a");
-    expect(ledger.count()).toBe(1);
+    expect(ledger.query({ kind: "gig" }).length, "one gig row; chair_spend rows are counted separately").toBe(1);
   });
 
   it("multi-chair phase dispatches all parallel-eligible chairs concurrently", async () => {
@@ -597,7 +597,6 @@ describe("chairs — runtime dispatch", () => {
     } as const;
     const { outputs, ledger } = setup();
     await expect(
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       runGig(std as any, {}, { outputs, ledger, invoke: stubInvoke }),
     ).rejects.toThrow(/input_contract|NeverProducedType/);
   });
@@ -623,7 +622,6 @@ describe("chairs — runtime dispatch", () => {
     } as const;
     const { outputs, ledger } = setup();
     await expect(
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       runGig(std as any, {}, { outputs, ledger, invoke: stubInvoke }),
     ).rejects.toThrow(/output_contract|Plan/);
   });
@@ -842,7 +840,6 @@ describe("chairs — migration (loader reject)", () => {
       phases: [{ name: "p1", agent: "a" }],
     };
     expect(() =>
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       composeStandard(legacyStandard as any),
     ).toThrow(/legacy|phase\.agent|not supported|chairs.*required/i);
   });

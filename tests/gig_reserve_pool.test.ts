@@ -4,8 +4,9 @@
 // larger (theft is impossible), and the pool CAN empty so a later chair finds nothing (starvation is
 // reachable and must be VISIBLE, never silent).
 //
-// The pool lives on the dispatch payload (RunDeps.budget.pool — the primary source) with an optional
-// standard-level default (Standard.reserve_pool); dispatch overrides the default (F5). The runtime
+// The pool lives on the dispatch deps (RunDeps.turn_pool — the primary source, O6/I9; migrated off
+// the retired RunDeps.budget.pool) with an optional standard-level default (Standard.reserve_pool);
+// the dispatch value overrides the default (F5). The runtime
 // caps each seated chair's offered reserve to `min(chair.turn_reserve, pool_remaining)` and threads
 // THAT as ctx.turn_reserve into the invoker (the existing reserve-grant machinery consumes it). When
 // the invoker actually grants (its budget_reserve_granted event fires), the runtime decrements the
@@ -66,6 +67,7 @@ const runPoolGig = async (opts: {
   reserves: number[];
   pool?: number | undefined;
   standardDefaultPool?: number | undefined;
+  max_usd?: number | undefined;
 }): Promise<{ offered: Array<number | undefined>; budget_state: Record<string, unknown> | undefined }> => {
   const offered: Array<number | undefined> = [];
   const invoke: AgentInvoker = (c) => {
@@ -101,14 +103,19 @@ const runPoolGig = async (opts: {
 
   const registry = createRegistry();
   registry.registerType(hit);
-  const res = await runGig(standard, {}, {
+  // O6/I9 — the reserve pool now opens from RunDeps.turn_pool with NO money budget, overriding
+  // Standard.reserve_pool deterministically. A money ceiling (max_usd) is threaded ONLY when a test
+  // needs to prove a draw is orthogonal to the dollar ledger (INV18). Cast because RunDeps does not
+  // name turn_pool until the enforcement lands — RED today, which is exactly the O6 point: without a
+  // money budget there is no BudgetState at all, so the pool never opens and no draw is recorded.
+  const deps = {
     outputs: createOutputStore(registry),
     ledger: new MemoryLedger(),
     invoke,
-    // Big append-unit opening so the ORTHOGONAL append-unit gate never trips; `pool` is the new
-    // dispatch-level reserve pool (Item 2), carried on the same dispatch budget input.
-    budget: { opening: 1_000_000, ...(opts.pool !== undefined ? { pool: opts.pool } : {}) } as unknown as import("../src").BudgetInput,
-  });
+    ...(opts.pool !== undefined ? { turn_pool: opts.pool } : {}),
+    ...(opts.max_usd !== undefined ? { budget: { max_usd: opts.max_usd } } : {}),
+  } as unknown as import("../src").RunDeps;
+  const res = await runGig(standard, {}, deps);
   return { offered, budget_state: res.budget_state as unknown as Record<string, unknown> | undefined };
 };
 
@@ -199,14 +206,19 @@ describe("the gig reserve pool obeys the governor's two constraints as laws", ()
     expect(draws.some((d) => d.denied), "the starved second chair produced no visible denied-draw record").toBe(true);
   });
 
-  it("INV18 — a reserve draw is ORTHOGONAL to the append-unit budget: it moves the pool, not spent", async () => {
-    // Two identical gigs; one draws from a pool, one has no pool. The append-unit accounting
-    // (spent/balance) must be identical — a turn draw is not an append-unit spend.
-    const withPool = await runPoolGig({ reserves: [3], pool: 5 });
-    const noPool = await runPoolGig({ reserves: [3] });
-    expect(withPool.budget_state?.["spent"], "a turn-reserve draw changed the append-unit spend — the two ledgers are conflated").toBe(noPool.budget_state?.["spent"]);
-    expect(withPool.budget_state?.["balance"], "a turn-reserve draw changed the append-unit balance — the two ledgers are conflated").toBe(noPool.budget_state?.["balance"]);
-    expect(withPool.budget_state?.["pool_remaining"], "the draw did not decrement the pool it was supposed to move").toBe(2);
+  it("INV18 — a reserve draw moves the POOL, never the dollar ledger, when a ceiling is also set", async () => {
+    // Re-stated for the budget-in-dollars contract: the append-unit `spent`/`balance` are retired, so
+    // orthogonality is now stated against the DOLLAR field spent_usd. With a $1 ceiling set AND a pool
+    // of 5, a chair drawing 3 turns moves pool_remaining (5→2) but must NOT move spent_usd — spent_usd
+    // is the invokers' settled USD (here $0: the pool invoker reports a reserve grant, not a result
+    // event), never the turn draw. A no-draw control (reserve 0) fixes the dollar reference.
+    // RED today: no turn_pool wire, and no dollar-denominated budget state — spent_usd is absent and
+    // pool_remaining never moves.
+    const drew = await runPoolGig({ reserves: [3], pool: 5, max_usd: 1 });
+    const noDraw = await runPoolGig({ reserves: [0], pool: 5, max_usd: 1 });
+    expect(drew.budget_state?.["spent_usd"], "a turn-reserve draw leaked into the dollar spend — the two ledgers are conflated").toBe(noDraw.budget_state?.["spent_usd"]);
+    expect(drew.budget_state?.["spent_usd"], "no invoker reported USD, so the settled dollar spend must be exactly 0").toBe(0);
+    expect(drew.budget_state?.["pool_remaining"], "the draw did not decrement the pool it was supposed to move").toBe(2);
   });
 });
 

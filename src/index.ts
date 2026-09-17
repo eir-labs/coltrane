@@ -29,6 +29,15 @@ export * from "./gig_conformance.js";
 export * from "./chart.js";
 export * from "./claude_invoker.js";
 export * from "./bifrost_invoker.js";
+export * from "./turn_loop.js";
+export * from "./chat_completions_port.js";
+export * from "./completions_invoker.js";
+// THE SEAM A DEPLOYMENT MUST IMPLEMENT HAS TO BE IMPORTABLE BY ONE. `resolveSeatBacking` and
+// friends were reachable from inside src/ — which satisfied the orphan ratchet and left the only
+// audience that has to satisfy the interface unable to name it. Reachable-within and
+// importable-from-outside are different properties; the ratchet only ever asked the first.
+export * from "./reside_backing.js";
+export * from "./reside.js";
 export * from "./circle_of_fifths.js";
 export * from "./modulation_path.js";
 export * from "./tensor_read.js";

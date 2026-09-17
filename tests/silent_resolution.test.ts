@@ -98,7 +98,7 @@ describe("#242 — a chair's required_skills must be enforced at runtime, not ju
     const { outputs, ledger } = harness([T("note", "Interpretation")]);
     const invoke: AgentInvoker = () => ({ v: "x", ...CLAIMS });
     const err = await runGig(std(), {}, {
-      outputs, ledger, invoke, skills: skillMap(), budget: { opening: 1_000 },
+      outputs, ledger, invoke, skills: skillMap(), budget: { max_usd: 1 },
     }).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(Error);
     // The error is the required-skill failure, NOT BudgetExhausted — i.e. the decision

@@ -1,0 +1,93 @@
+{
+  "slug": "build-from-red-spec-v0",
+  "domain": "software-change",
+  "agent_slugs": [
+    "red-spec-attester",
+    "red-spec-builder",
+    "change-verifier"
+  ],
+  "phases": [
+    {
+      "name": "attest-laws",
+      "chairs": [
+        {
+          "role": "attest-laws",
+          "agent_slug": "red-spec-attester",
+          "depends_on": [],
+          "input_contract": [
+            "change-request"
+          ],
+          "output_contract": [
+            "red-spec"
+          ],
+          "required_skills": [],
+          "turn_reserve": 8
+        }
+      ]
+    },
+    {
+      "name": "build",
+      "chairs": [
+        {
+          "role": "build-change",
+          "agent_slug": "red-spec-builder",
+          "depends_on": [
+            "attest-laws"
+          ],
+          "input_contract": [
+            "change-plan",
+            "red-spec"
+          ],
+          "output_contract": [
+            "change-set"
+          ],
+          "required_skills": [],
+          "turn_reserve": 16,
+          "prime": {
+            "area": "coltrane-engine"
+          },
+          "fork_from": {
+            "primer": "coltrane-engine",
+            "max_context_tokens": 300000
+          }
+        }
+      ]
+    },
+    {
+      "name": "verify",
+      "chairs": [
+        {
+          "role": "verify-change",
+          "agent_slug": "change-verifier",
+          "depends_on": [
+            "attest-laws",
+            "build-change"
+          ],
+          "input_contract": [
+            "change-plan",
+            "change-set",
+            "red-spec"
+          ],
+          "output_contract": [
+            "change-verdict"
+          ],
+          "required_skills": [],
+          "turn_reserve": 10
+        }
+      ]
+    }
+  ],
+  "status": "draft",
+  "input_types": [
+    "change-request",
+    "change-plan"
+  ],
+  "output_types": [
+    "red-spec",
+    "change-set",
+    "change-verdict"
+  ],
+  "max_examine_rounds": 3,
+  "description": "Build a change against RED laws that are ALREADY committed, reviewed and sequenced, and loop until the verify seat's run says green or the rounds are spent. The entry types are the change-request, which names the commit holding the laws, and a change-plan (typically sealed by spec-review-and-sequence-v0). It is for the case software-change-pr-v1 cannot take: that loop always re-drafts laws, and its builder cannot run them. Attest: a read-only seat seals the committed laws from git, never from the working tree, so every amend round re-seals the same text. Build: a seat writes src/** and docs/**, runs the laws and tsc as it goes, and holds no tests/** grant. Verify: change-verifier runs the checks and compares every sealed law against the tree, so a weakened law fails the verdict. A failing verdict re-runs the builder with the verdict fed back, up to max_examine_rounds. It does not publish: the operator reviews the working tree and commits. Known limits: the attester is also re-run in each amend round, because the verify seat depends on it; and `tests/**` is excluded from the builder by allow scoping, not by explicit denial, so the verifier's weakened-law check is the enforcing backstop.",
+  "reserve_pool": 40
+}

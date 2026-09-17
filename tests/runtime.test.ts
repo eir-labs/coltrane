@@ -98,8 +98,10 @@ describe("runtime: gig execution end-to-end", () => {
   it("records one immutable ledger entry with deterministic genome_hash + run_fingerprint", async () => {
     const { outputs, ledger } = setup();
     const res = await runGig(standard, {}, { outputs, ledger, invoke: mockInvoke, model_version: "claude-opus-4-7" });
-    expect(ledger.count()).toBe(1);
-    const entry = ledger.query({ gig_id: res.gig_id })[0]!;
+    // One GIG row. chair_spend rows share the gig_id (contract-spend-survives-v1), so count and
+    // select the gig row by kind rather than taking the ledger total or the first row for the gig.
+    expect(ledger.query({ kind: "gig" }).length).toBe(1);
+    const entry = ledger.query({ gig_id: res.gig_id, kind: "gig" })[0]!;
     expect(entry.genome_hash).toBe(res.genome_hash);
     expect(entry.run_fingerprint).toBe(res.run_fingerprint);
     expect(entry.output_hashes.length).toBe(2);

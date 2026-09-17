@@ -1,81 +1,87 @@
-// A PATCH FIELD CARRIES A PATCH, NOT A SENTENCE ABOUT ONE.
+// A LAW IS CARRIED BY ADDRESS, AND AN ADDRESS ALWAYS RESOLVES TO THE EXACT LAW — NEVER A SENTENCE.
 //
-// `red-spec.diffs[].patch` was typed `{ "type": "string" }` — anything at all. The
-// spec-drafting-v1 review chair reads test bodies OUT OF THOSE DIFFS: its method says "read each
-// red test in the diffs and confirm it asserts the contract's behavior against a real callsite".
-// So the diffs are not documentation of the change, they are the EVIDENCE the gate adjudicates.
+// SUPERSEDED, AND WHY. The old law here defended `red-spec.diffs[].patch`: the field was typed
+// `{ "type": "string" }`, so a drafter could seal a one-line SUMMARY ("full unified diff captured from
+// `git diff --cached` … content present verbatim in the working tree") where the diff belonged. The
+// review chair reads test bodies OUT OF THAT FIELD, so a summary STARVED the gate — it had nothing to
+// read (gig 34ff466b). The structural fix was "a patch must contain a `+`/`-` line."
 //
-// Observed on gig 34ff466b (the local-queue contract): every patch sealed as a one-line summary —
+// The records-by-address contract retires `diffs` entirely: a red-spec now carries `laws:
+// [{path, commit, blob_sha, tests}]` and no patch body reaches a record at all (contract
+// records-by-address-v1, O1/O5). So the starvation guarantee has to survive in ADDRESS FORM — and it
+// does, MORE strongly: there is no free-text patch field for prose to hide in, and a sealed address
+// ALWAYS resolves to the exact committed bytes (git show <commit>:<path>), pinned by the engine-stamped
+// blob_sha. A reviewing seat is handed the law, never a sentence about the law; and an address that
+// does not resolve refuses loudly rather than degrading to a placeholder.
 //
-//   "new file mode 100644 (231 lines) — full unified diff captured from `git diff --cached` this
-//    run; content present verbatim in the working tree at this path"
-//
-// — which is a true sentence and useless as evidence. The reviewer refused, correctly, marking
-// NON-TAUTOLOGY and REDNESS "NOT RUN" because it had nothing to read. The gate did not fail; it
-// was starved. And the seal accepted the starvation silently, because the type asked only for a
-// string.
-//
-// This is the shape this codebase keeps closing: a field that exists to carry evidence, holding
-// prose ABOUT the evidence, with nothing that can tell the difference. Same as an archive grade
-// guarded by a well-formed date, same as `validated` being read as `sealed`.
-//
-// THE DISCRIMINATOR IS STRUCTURAL, NOT SEMANTIC. A unified diff of an added file has one `+` line
-// per added line; the observed prose had ZERO newlines. So: a patch must contain a line beginning
-// with `+` or `-`. That is checkable, cheap, and cannot be satisfied by a fluent sentence. It does
-// NOT try to judge whether the diff is honest — only that a diff is what was supplied.
+// These laws are RED by design: the type is still v2 (carries `diffs`) and the stamping mechanism does
+// not exist yet. Each law that needs the mechanism leads with the assertion that it is absent, stating
+// the contract's reason, so the file collects and fails on the contract rather than on a TypeError.
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRegistry } from "../src/registry.js";
 import { loadGenome } from "../src/loader.js";
+import * as runtime from "../src/runtime.js";
 
 const REPO_ROOT = fileURLToPath(new URL("..", import.meta.url));
-
 const genome = loadGenome(REPO_ROOT);
 const registry = createRegistry([...genome.domain_types.values()] as never);
 
-const REAL_PATCH =
-  "new file mode 100644\n--- /dev/null\n+++ b/tests/x.test.ts\n@@ -0,0 +1,2 @@\n" +
-  '+import { it } from "vitest";\n+it("x", () => { expect(1).toBe(1); });';
-const PROSE_PATCH =
-  "new file mode 100644 (231 lines) — full unified diff captured from `git diff --cached` this " +
-  "run; content present verbatim in the working tree at this path";
+type Law = { path: string; commit: string; blob_sha?: string; tests?: string[] };
+type StampLaws = (laws: readonly Law[], tree_root: string | undefined) => Array<Required<Law>>;
+const stampLawAddresses = (runtime as unknown as Record<string, unknown>)["stampLawAddresses"] as StampLaws | undefined;
 
-const redSpec = (patch: string) => ({
-  core_type: "Artifact",
-  domain_type: "red-spec",
-  primitive: "CREATE",
-  domain: "spec-drafting",
-  data: {
-    validation_criteria: ["every invariant has a failing test"],
-    input_refs: ["grounding-dossier-x"],
-    coverage_map: [{ invariant_id: "I1", test_name: "x asserts", test_file: "tests/x.test.ts" }],
-    testing_method: "property-based where universal",
-    diffs: [{ path: "tests/x.test.ts", patch }],
-  },
-});
+const GIT_ENV = { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" };
+function newRepo(): string {
+  const dir = mkdtempSync(join(tmpdir(), "addr-o5-"));
+  execFileSync("git", ["init", "--quiet", "--initial-branch=main", dir]);
+  return dir;
+}
+const git = (repo: string, args: string[]): string => execFileSync("git", ["-C", repo, ...args], { env: GIT_ENV }).toString();
+function writeIn(repo: string, path: string, content: string): void {
+  const full = join(repo, path);
+  mkdirSync(dirname(full), { recursive: true });
+  writeFileSync(full, content);
+}
 
-describe("red-spec.diffs[].patch carries a patch", () => {
-  it("the type ships and the fixture is well-formed — the law is not vacuous", () => {
-    const dt = genome.domain_types.get("red-spec");
-    expect(dt, "domain_types/red-spec.json is not loaded").toBeDefined();
-    const items = (dt!.schema as { properties?: Record<string, { items?: unknown }> })
-      .properties?.["diffs"]?.items;
-    expect(items, "red-spec declares no diffs[].items shape").toBeDefined();
-  });
-
-  it("ACCEPTS a real unified diff — the constraint does not reject legitimate evidence", () => {
-    const v = registry.validate(redSpec(REAL_PATCH) as never);
-    expect(v.valid, `a real patch was refused: ${JSON.stringify(v)}`).toBe(true);
-  });
-
-  it("REFUSES a one-line summary standing in for the diff — prose is not evidence", () => {
-    const v = registry.validate(redSpec(PROSE_PATCH) as never);
+describe("a law is carried by address, and the address resolves to the exact law (O5)", () => {
+  it("O5 — a sealed law address resolves to the EXACT committed bytes: the reviewer is handed the law, not a sentence", () => {
+    // The starvation guarantee, in address form. Red today: the engine stamps nothing from an address.
     expect(
-      v.valid,
-      "a patch consisting of a sentence ABOUT the diff was accepted — the review chair reads test " +
-        "bodies out of this field, so a summary here starves the gate rather than informing it",
-    ).toBe(false);
+      typeof stampLawAddresses,
+      "a sealed address must resolve to exact bytes (blob_sha = git rev-parse <commit>:<path>) so a reviewer can never be handed a summary — src/runtime.ts exports no such mechanism",
+    ).toBe("function");
+    const repo = newRepo();
+    try {
+      const body = `import { it, expect } from "vitest";\nit("a real law body", () => { expect(2).toBe(2); });\n`;
+      writeIn(repo, "tests/law.test.ts", body);
+      git(repo, ["add", "-A"]); git(repo, ["commit", "--quiet", "-m", "seed"]);
+      const commit = git(repo, ["rev-parse", "HEAD"]).trim();
+      const stamped = stampLawAddresses!([{ path: "tests/law.test.ts", commit }], repo);
+      // The engine's stamp pins the exact object, and the reviewer's own re-acquisition returns the
+      // exact bytes — there is nowhere for a "sentence about the law" to stand in.
+      expect(stamped[0]!.blob_sha).toBe(git(repo, ["rev-parse", `${commit}:tests/law.test.ts`]).trim());
+      expect(git(repo, ["show", `${commit}:tests/law.test.ts`]), "the address resolves to the exact committed law").toBe(body);
+      expect(stamped[0]!.tests, "and the stamped titles are read from the real blob").toEqual(["a real law body"]);
+    } finally { rmSync(repo, { recursive: true, force: true }); }
+  });
+
+  it("O5 — the v3 red-spec has no free-text patch field: a record carrying a prose `patch`/`diffs` is refused", () => {
+    // The old hole was a string `patch` that accepted a summary. In address form that field does not
+    // exist, so the starvation cannot recur. Red today: the type still REQUIRES `diffs`, so the
+    // prose-carrying record is (wrongly, per the contract) accepted and the address record refused.
+    const prose = {
+      validation_criteria: ["x"], input_refs: ["y"],
+      diffs: [{ path: "tests/law.test.ts", patch: "full unified diff captured from `git diff --cached`; content present verbatim in the tree" }],
+      coverage_map: [{ invariant_id: "I1", test_name: "t", test_file: "f" }],
+      testing_method: "m",
+    };
+    const v = registry.validate({ core_type: "Artifact", domain_type: "red-spec", data: prose } as never);
+    expect(v.valid, "a red-spec carrying a prose `patch` in `diffs` was accepted — the contract retired `diffs` for `laws`").toBe(false);
+    expect(v.errors.join(" "), "the refusal must name the missing `laws` field").toMatch(/\blaws\b/);
   });
 });

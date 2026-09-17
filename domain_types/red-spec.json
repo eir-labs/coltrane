@@ -1,6 +1,6 @@
 {
   "slug": "red-spec",
-  "version": 2,
+  "version": 4,
   "extends": "Artifact",
   "domain": "spec-drafting",
   "status": "active",
@@ -10,27 +10,6 @@
       "spec_doc": {
         "type": "string",
         "description": "The written spec (path added by the diffs)."
-      },
-      "diffs": {
-        "type": "array",
-        "description": "Per-path unified diffs: the RED test files (real assertions, failing because unimplemented) and the spec doc.",
-        "items": {
-          "type": "object",
-          "properties": {
-            "path": {
-              "type": "string"
-            },
-            "patch": {
-              "type": "string",
-              "description": "The unified diff itself, not a description of it. The spec-drafting review chair reads test bodies OUT OF THIS FIELD ('read each red test in the diffs'), so this is the evidence the gate adjudicates, not documentation of the change. Observed on gig 34ff466b: every patch sealed as a one-line summary ('full unified diff captured from git diff --cached ... content present verbatim in the working tree at this path') — true, and useless as evidence. The reviewer refused, correctly, marking NON-TAUTOLOGY and REDNESS 'NOT RUN'. The gate was not failed, it was STARVED, and the seal accepted that silently because the type asked only for a string.",
-              "pattern": "(^|\\n)[+-]"
-            }
-          },
-          "required": [
-            "path",
-            "patch"
-          ]
-        }
       },
       "coverage_map": {
         "type": "array",
@@ -65,13 +44,43 @@
         "items": {
           "type": "string"
         }
+      },
+      "laws": {
+        "type": "array",
+        "description": "The RED laws, BY ADDRESS (contract-records-by-address-v1). A seat supplies {path, commit}: where the committed law file is. The ENGINE stamps, at seal, from RunDeps.tree_root: blob_sha (git rev-parse <commit>:<path>) and tests (the it/test titles in that blob, in file order). A reviewing seat reads the exact law with `git show <commit>:<path>` and checks it against blob_sha. No patch body is ever model output: gig c1771b13's attester hit the 32,000 output-token cap three times re-typing ~150KB of patches into the retired `diffs` field.",
+        "items": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string"
+            },
+            "commit": {
+              "type": "string"
+            },
+            "blob_sha": {
+              "type": "string",
+              "description": "engine-stamped at seal; a seat-supplied value that disagrees with git is refused (law_bytes_mismatch)"
+            },
+            "tests": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "engine-stamped at seal: the it/test titles in the blob, in file order"
+            }
+          },
+          "required": [
+            "path",
+            "commit"
+          ]
+        }
       }
     }
   },
   "required_fields": [
     "validation_criteria",
     "input_refs",
-    "diffs",
+    "laws",
     "coverage_map",
     "testing_method"
   ]

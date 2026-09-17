@@ -939,14 +939,28 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
             };
           }
         }
-        // Optional budget arg — when present, runtime enforces per-gig cost-budget
-        // and raises BudgetExhausted on depletion (PR for T10 gap, see runtime.ts).
-        const budgetArg = args["budget"] as Record<string, unknown> | undefined;
-        let budget: { opening: number; base_cost?: number; k?: number } | undefined;
-        if (budgetArg && typeof budgetArg["opening"] === "number") {
-          budget = { opening: budgetArg["opening"] as number };
-          if (typeof budgetArg["base_cost"] === "number") budget.base_cost = budgetArg["base_cost"] as number;
-          if (typeof budgetArg["k"] === "number") budget.k = budgetArg["k"] as number;
+        // Optional budget arg — a per-gig ceiling in US DOLLARS, { max_usd }. Validated HERE, before
+        // anything runs (F1/F2): a malformed budget, or one carrying a retired append-unit field, is
+        // REFUSED naming the offending field/value — never silently run with no ceiling.
+        const budgetRaw = args["budget"];
+        let budget: { max_usd: number } | undefined;
+        if (budgetRaw !== undefined) {
+          if (typeof budgetRaw !== "object" || budgetRaw === null || Array.isArray(budgetRaw)) {
+            return { ok: false, requires_approval: approval, error: `gig_dispatch: budget must be an object naming max_usd in USD; got ${String(budgetRaw)} — set { max_usd: <dollars> }` };
+          }
+          const b = budgetRaw as Record<string, unknown>;
+          const retired = ["opening", "base_cost", "k", "pool"].filter((f) => f in b);
+          if (retired.length > 0) {
+            return { ok: false, requires_approval: approval, error: `gig_dispatch: budget carries the retired append-unit field(s) ${retired.map((f) => `"${f}"`).join(", ")} — budgets are now { max_usd } in US dollars; pass max_usd instead` };
+          }
+          const mu = b["max_usd"];
+          if (typeof mu !== "number") {
+            return { ok: false, requires_approval: approval, error: `gig_dispatch: budget.max_usd is required and must be a number of USD; got ${mu === undefined ? "undefined" : String(mu)}` };
+          }
+          if (!Number.isFinite(mu) || mu <= 0) {
+            return { ok: false, requires_approval: approval, error: `gig_dispatch: budget.max_usd must be a positive finite number of USD; got ${String(mu)}` };
+          }
+          budget = { max_usd: mu };
         }
         const gigInput = (args["input"] as Record<string, unknown>) ?? {};
         // #237 — `depth` was advertised here and never read. Every dispatch ran at full depth,
@@ -1131,7 +1145,7 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
               if (e instanceof BudgetExhausted) {
                 const partial = partialGigUsage(e);
                 return { ok: false, requires_approval: approval, error: e.message,
-                  data: { budget_exhausted: true, agent_slug: e.agent_slug, balance: e.balance, cost: e.cost, budget_state: e.state,
+                  data: { budget_exhausted: true, agent_slug: e.agent_slug, unit: e.unit, max_usd: e.max_usd, spent_usd: e.spent_usd, budget_state: e.state,
                     ...(partial ? { usage: partial } : {}) } };
               }
               throw e;
@@ -1340,7 +1354,7 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
               // stopped, and the operator needs them in the same reply as the depletion notice.
               const partial = partialGigUsage(e);
               return { ok: false, requires_approval: approval, error: e.message,
-                data: { budget_exhausted: true, agent_slug: e.agent_slug, balance: e.balance, cost: e.cost, budget_state: e.state,
+                data: { budget_exhausted: true, agent_slug: e.agent_slug, unit: e.unit, max_usd: e.max_usd, spent_usd: e.spent_usd, budget_state: e.state,
                   ...(partial ? { usage: partial } : {}) } };
             }
             throw e;

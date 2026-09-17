@@ -170,6 +170,14 @@ export const WORKER_ENV_CONTRACT: readonly WorkerEnvVar[] = [
       "Milliseconds the drain waits for a gig's opening header before proceeding; tunes drain startup latency.",
   },
   {
+    name: "COLTRANE_DRAIN_MAX_USD",
+    host: "none",
+    role: "tuning",
+    required: "never",
+    meaning:
+      "The per-gig budget ceiling a drained gig runs under, in US dollars (USD). A positive finite number caps settled spend for each gig; absent means no ceiling; anything else refuses drain startup.",
+  },
+  {
     name: "COLTRANE_MIRROR_DIR",
     host: "none",
     role: "tuning",

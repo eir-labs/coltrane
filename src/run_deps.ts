@@ -43,28 +43,30 @@ export function engineToolProviders(): ToolProviderRegistry {
   );
 }
 
-/** Default ceiling for a drained gig, in append units. */
-const DEFAULT_DRAIN_OPENING = 2000;
-
 /**
- * The budget a drained gig runs under.
+ * The budget a drained gig runs under, in US DOLLARS (budget-in-dollars contract, I7/F4).
  *
- * On the server this comes from the DISPATCH PAYLOAD — a caller names it, and a caller who names
- * nothing gets no enforcement, which is defensible when a human is watching the reply.
+ * A gig that names its own dollar ceiling wins. Otherwise the drain reads `COLTRANE_DRAIN_MAX_USD`:
+ *   * a positive finite number → that per-gig dollar ceiling;
+ *   * absent → NO ceiling (the retired 2000 append-unit default is gone — an unattended box under a
+ *     dollar ceiling is bounded by the operator's env, not by a synthetic size proxy);
+ *   * anything else (not a number, zero, negative, Infinity) → REFUSE startup, naming the variable,
+ *     rather than silently running with the wrong (or no) ceiling.
  *
- * A drain has no such human. So absence means the DEFAULT here rather than "off": an unattended box
- * that can spend without limit is the one thing it must not be. A gig that names its own budget
- * still wins, because the dispatcher knows more about the work than this constant does.
- *
- * COLTRANE_DRAIN_OPENING overrides. Set it deliberately high rather than removing it — the point is
- * that a ceiling EXISTS, not that this particular number is right.
+ * Returns a { max_usd } when a ceiling applies, or {} (no enforcement) when none does — never
+ * undefined, so a caller reading `.max_usd` off the result never trips on undefined.
  */
 export function drainBudget(input: Record<string, unknown> | undefined): BudgetInput {
-  const named = (input?.["budget"] as { opening?: unknown } | undefined)?.["opening"];
-  if (typeof named === "number" && Number.isFinite(named) && named > 0) return { opening: named };
+  const named = (input?.["budget"] as { max_usd?: unknown } | undefined)?.["max_usd"];
+  if (typeof named === "number" && Number.isFinite(named) && named > 0) return { max_usd: named };
 
-  const env = Number(process.env["COLTRANE_DRAIN_OPENING"]);
-  return { opening: Number.isFinite(env) && env > 0 ? env : DEFAULT_DRAIN_OPENING };
+  const raw = process.env["COLTRANE_DRAIN_MAX_USD"];
+  if (raw === undefined || raw === "") return {};
+  const env = Number(raw);
+  if (!Number.isFinite(env) || env <= 0) {
+    throw new Error(`COLTRANE_DRAIN_MAX_USD must be a positive finite number of USD; got "${raw}"`);
+  }
+  return { max_usd: env };
 }
 
 /**

@@ -282,25 +282,25 @@ export interface RunDeps {
   // its contract. Absent = an unresolvable eval scores 0.0 (can't attest it held).
   evals?: ReadonlyMap<string, EvalRecord> | undefined;
   /**
-   * Optional cost-budget input. When omitted (default), no budget enforcement
-   * runs — preserving v0 back-compat. When present, the runtime tracks
-   * per-gig BudgetState matching budget-state.json schema: balance =
-   * opening - spent + credit.
+   * Optional cost-budget input, in US DOLLARS ({ max_usd }). When omitted (default), or when
+   * present without a `max_usd`, no dollar enforcement runs — preserving v0 back-compat.
    *
-   * The cycle is RESERVE → SETTLE (#232). At chair-prep the runtime computes
-   * cost-of-append (base + k*size(input)) and compares it against
-   * `balance - reserved`; short → BudgetExhausted. Passing chairs RESERVE the
-   * cost. `spent` moves only when a chair's invocation SUCCEEDS, which is what
-   * the contract always claimed and what the code did not do: prep runs
-   * eagerly for the whole ready batch, so a batch member tripping the gate
-   * used to leave every earlier member of that batch charged for work no
-   * invoker ever started.
+   * When a ceiling is set the runtime tracks per-gig settled spend (the invokers' own
+   * `result`-event USD) and, at each dispatch-batch boundary (O2), refuses to start the NEXT
+   * batch once settled spend reaches `max_usd` — the batch already running is never interrupted.
+   * There is no pre-invocation reservation and no append-unit proxy: payload size does not gate.
    *
-   * The final BudgetState is returned in GigResult.budget_state, and is also
-   * attached to a BudgetExhausted / mid-gig error so a FAILED gig can still
-   * report what it cost.
+   * The final BudgetState is returned in GigResult.budget_state, and is also attached to a
+   * BudgetExhausted / mid-gig error so a FAILED gig can still report what it cost.
    */
   budget?: BudgetInput | undefined;
+  /**
+   * O6 — the gig reserve POOL, in turns, decoupled from any money budget. When set it opens the
+   * pool and OVERRIDES `Standard.reserve_pool` deterministically (no max, no sum). Absent → the
+   * standard default, then 0 (no pool). A turn pool in play yields a BudgetState even with no
+   * dollar ceiling: its pool fields are filled, its dollar fields omitted.
+   */
+  turn_pool?: number | undefined;
   // Live progress sink. Fired at each gig milestone (phase/chair/agent-event/complete) so an
   // async dispatcher can surface a running gig's state. Absent = no progress emitted (the
   // synchronous path is unaffected). Guarded best-effort — a sink that throws is swallowed
@@ -520,47 +520,27 @@ export interface RunDeps {
 }
 
 /**
- * Per-gig cost-budget input. Honors budget-state.json schema (PR #56). Only
- * `opening` is required for v0 enforcement; the rest are recomputed.
+ * Per-gig cost-budget input. A budget is US DOLLARS (operator decision 2026-09-16): the
+ * single field is `max_usd`, the per-gig dollar ceiling.
  *
- * COST FORMULA (v0, tunable):
- *   cost = base_cost + k * size_bytes(input)
- *   defaults: base_cost = 1, k = 0.1
+ * ENFORCEMENT (O2). The ceiling is checked against SETTLED spend — the invokers' own
+ * `result`-event `total_cost_usd`, reconciled at each dispatch-batch boundary — never a
+ * pre-invocation estimate. A batch already running is allowed to finish; the NEXT batch does
+ * not start once settled spend reaches `max_usd`. There is no append-unit proxy and no
+ * per-chair reservation: payload size does not decide whether a chair runs (I8/O3).
  *
- * Where size_bytes(input) = JSON.stringify(canonical context).length.
+ * The retired append-unit knobs (`opening`, `base_cost`, `k`) and the retired `pool` field are
+ * gone. The reserve pool now opens from `RunDeps.turn_pool` (else `Standard.reserve_pool`),
+ * needs no money budget, and is orthogonal to the dollar ledger — a draw moves
+ * `BudgetState.pool_remaining` only, never `spent_usd`.
  *
- * WHAT THIS IS AND IS NOT (#233). `opening`/`spent`/`balance` are SYNTHETIC APPEND UNITS —
- * see `BudgetState.unit`. They are not dollars and were never converted to dollars; an
- * `opening: 1000` that reads like a dollar figure to an operator is a coincidence of scale.
- * The real, settled figure is `BudgetState.settled_usd`, reconciled from the model's own
- * `result` events at each batch boundary. Two honest limits on the synthetic gate:
- *
- *   1. It is a proxy for prompt size, not a price. It has no model tier, no output side, no
- *      skills/charter/schema bytes — only the agent slug, phase, consumed input CONTENT and
- *      the gig payload. It is a rate limiter on context growth, nothing more.
- *   2. A USD figure cannot gate a chair before that chair runs, because `prepareChair` runs
- *      for the WHOLE ready batch before any invocation — a chair cannot see its batch
- *      siblings' settled cost. So reconciliation happens at BATCH BOUNDARIES, and any dollar
- *      bound built on it would be a cap plus one batch of slack, never a hard stop. No such
- *      bound is wired: there is no per-chair dollar estimator, and inventing one would be
- *      guessing. `settled_usd` reports; it does not enforce.
+ * `max_usd` is optional at the type level so a drain with no ceiling can pass `{}` ("no
+ * enforcement"); every door that accepts a budget validates it (a positive finite number)
+ * before anything runs.
  */
 export interface BudgetInput {
-  opening: number;
-  /** base cost per agent invocation, in append units. Default 1. */
-  base_cost?: number;
-  /** per-byte multiplier on consumed-input size, in append units. Default 0.1. */
-  k?: number;
-  /**
-   * #turn-budget — the gig-level reserve POOL, in turns: a shared quantity a budget-exhausted chair
-   * draws from, capped per chair by its own `turn_reserve`. This dispatch-payload value is the
-   * PRIMARY source and OVERRIDES `Standard.reserve_pool` deterministically when both are present
-   * (no max, no sum). Orthogonal to `opening`/`base_cost`/`k` — those are append-units, this is
-   * turns, and a draw moves `pool_remaining` only, never `spent`/`balance`. Absent → the standard
-   * default, then 0 (no pool). Distinct from 0 only in that 0 could equally be an authored empty
-   * pool; either way a chair reaching for a reserve finds nothing and is recorded as starved.
-   */
-  pool?: number;
+  /** The per-gig ceiling, in US dollars. Absent → no dollar enforcement. */
+  max_usd?: number;
 }
 
 /**
@@ -578,54 +558,48 @@ export interface ReserveDraw {
 }
 
 /**
- * Per-gig budget snapshot. Mirrors fields of domain_types/budget-state.json
- * (PR #56) that are runtime-tractable in v0. balance = opening - spent + credit.
+ * Per-gig budget snapshot. Present whenever a dollar ceiling OR a turn pool is in play (O6):
+ * the POOL fields (`pool_remaining`, `draws`) are filled regardless of money, and the DOLLAR
+ * fields (`max_usd`, `spent_usd`, `unit: "usd"`) only when a ceiling is set.
  *
- * The `agent_state` mirrors the budget-state.json enum:
- *   active           — currently spending, balance > cost-of-next-append
- *   yielding         — below cost-of-next-append, paused (used when partial)
- *   depleted         — balance <= 0 OR < cost-of-next-append, hard stop
+ * The `agent_state` enum:
+ *   active           — running normally
+ *   yielding         — a seated chair is currently drawing its reserve (D1)
+ *   depleted         — a drawing chair spent its reserve+pool without landing, OR the dollar
+ *                      ceiling stopped the next batch
  *   awaiting_grade   — work shipped, external grader contacted (v0 unused)
- *   settled          — cycle closed, closing populated (v0 set on success)
+ *   settled          — cycle closed on success
  */
 export interface BudgetState {
-  opening: number;
-  /** Cost of chairs that ACTUALLY RAN AND SUCCEEDED. Reserved-but-unsettled cost is not here. */
-  spent: number;
-  credit: number;
-  balance: number;
   agent_state: "active" | "yielding" | "depleted" | "awaiting_grade" | "settled";
   /** Slug of the agent whose invocation tripped depletion. null when solvent. */
   depleted_agent: string | null;
-  /** Wall-clock when balance first crossed below cost-of-next-append. null while solvent. */
+  /** Wall-clock when the gig crossed into depletion. null while solvent. */
   depleted_at: string | null;
-  base_cost: number;
-  k: number;
   /**
-   * #233 — the denomination of opening/spent/balance/base_cost/k, stated rather than assumed.
-   * These are a synthetic proxy for consumed context bytes. They are NOT dollars, and nothing
-   * converts between the two. Read `settled_usd` for money.
+   * The dollar ceiling this gig runs under, echoed onto the snapshot. Present ONLY when a
+   * ceiling is set (a turn-pool-only gig omits it).
    */
-  unit: "append-units";
+  max_usd?: number;
   /**
-   * #233 — REAL settled model spend for this gig so far, in USD, reconciled from the invokers'
-   * own `result` events at each dispatch-batch boundary. This is the number `src/ledger.ts`
-   * calls settled spend; the budget gate above never used it, even though it was live and
-   * in-scope. Reporting only — see the BudgetInput docstring for why it cannot gate.
-   * 0 when no invoker reported cost (stubbed invokers, skill-only gigs).
+   * REAL settled model spend for this gig so far, in USD, reconciled from the invokers' own
+   * `result` events at each dispatch-batch boundary. This is what the ceiling is enforced
+   * against (O2). Present ONLY under a ceiling; 0 when no invoker reported cost.
    */
-  settled_usd: number;
+  spent_usd?: number;
+  /** The denomination of the dollar fields, stated rather than assumed. Present ONLY under a ceiling. */
+  unit?: "usd";
   /**
-   * #turn-budget — turns remaining in the gig reserve pool (Item 2). Seeded from the dispatch
-   * `pool` (else `Standard.reserve_pool`, else 0), drawn down as chairs cross into reserve, never
-   * negative and never re-increased in v0 (strict draw-down, no preemption). Orthogonal to the
-   * append-unit ledger above: a draw moves ONLY this number.
+   * Turns remaining in the gig reserve pool. Seeded from `RunDeps.turn_pool` (else
+   * `Standard.reserve_pool`, else 0), drawn down as chairs cross into reserve, never negative and
+   * never re-increased in v0 (strict draw-down). Orthogonal to the dollar ledger: a draw moves
+   * ONLY this number, never `spent_usd`.
    */
   pool_remaining: number;
   /**
-   * #turn-budget — the attributable draw ledger (Item 2). One record per chair that reached for a
-   * reserve, granted or denied, so a post-run reader can see who drew, how much, and what the pool
-   * had left — and so a starved chair is visible rather than a silent no-op.
+   * The attributable draw ledger. One record per chair that reached for a reserve, granted or
+   * denied, so a post-run reader can see who drew, how much, and what the pool had left — and so
+   * a starved chair is visible rather than a silent no-op.
    */
   draws: ReserveDraw[];
 }
@@ -898,58 +872,47 @@ export function abortReasonText(signal: AbortSignal): string {
 }
 
 /**
- * Raised when a gig's budget cannot cover the next agent's cost-of-append.
- * Carries the agent_slug, the available balance, and the required cost so
- * the caller can render the exact reason. The in-memory BudgetState is
- * also attached for downstream telemetry.
+ * Raised when a gig's SETTLED dollar spend reaches its `max_usd` ceiling and the next batch may
+ * not start (O2/O5). Denominated in dollars: `spent_usd`, `max_usd`, `unit: "usd"`, and a message
+ * that names the amounts with `$` and `usd` — never append-units. The in-memory BudgetState is
+ * attached so a caller can render the full snapshot.
  */
 export class BudgetExhausted extends Error {
   public readonly agent_slug: string;
-  public readonly balance: number;
-  public readonly cost: number;
+  public readonly spent_usd: number;
+  public readonly max_usd: number;
+  public readonly unit: "usd" = "usd";
   public readonly state: BudgetState;
-  constructor(agent_slug: string, balance: number, cost: number, state: BudgetState) {
+  constructor(agent_slug: string, spent_usd: number, max_usd: number, state: BudgetState) {
     super(
-      `BudgetExhausted: agent "${agent_slug}" needs cost=${cost} but balance=${balance} (opening=${state.opening}, spent=${state.spent}, credit=${state.credit})`,
+      `BudgetExhausted: gig stopped before agent "${agent_slug}" — settled spend $${spent_usd} reached the $${max_usd} usd ceiling`,
     );
     this.name = "BudgetExhausted";
     this.agent_slug = agent_slug;
-    this.balance = balance;
-    this.cost = cost;
+    this.spent_usd = spent_usd;
+    this.max_usd = max_usd;
     this.state = state;
   }
 }
 
 /**
- * Cost-of-append for an agent invocation, in synthetic append units (see BudgetState.unit).
- * Deterministic function of the input context size — same input → same cost. Keeps cost
- * calculation inside the runtime (not the invoker) so budget enforcement cannot be spoofed by
- * a misbehaving invoker.
- *
- * #233 — this used to serialize `input_ids`: the UUIDs of the upstream outputs a chair
- * consumes, not their data. An upstream output contributed exactly 36 bytes whether it was a
- * one-line signal or a 40-page draft, so the proxy was not even monotonic in the thing that
- * drives real cost. It now measures the CONTENT the invoker actually receives.
- *
- * Still excluded, honestly: resolved skills, the agent charter, type schemas, model tier,
- * max_tool_calls, and the entire output side. This is a rate limiter on consumed context, not
- * a price. Money is `BudgetState.settled_usd`.
+ * Raised when a gig under a dollar ceiling cannot VERIFY its spend (F3): a settled invocation
+ * reported usage but no `total_cost_usd`, so the runtime cannot know whether the next batch is
+ * affordable. Fail-closed — no further batch starts. `reason` is the typed `budget_unverifiable`,
+ * and the message names the chairs whose dollar spend is unknown.
  */
-export function computeAppendCost(
-  ctx: { agent: Agent; phase: string; inputs: readonly OutputRecord[]; gig_input: Record<string, unknown> },
-  base_cost: number,
-  k: number,
-): number {
-  // Canonical serialization of what the invoker actually sees. JSON.stringify
-  // is sufficient for v0 — deterministic order isn't required since size is
-  // the only thing we extract, and Record key order in V8 is insertion-stable.
-  const size_bytes = JSON.stringify({
-    agent_slug: ctx.agent.slug,
-    phase: ctx.phase,
-    inputs: ctx.inputs.map((i) => i.data),
-    gig_input: ctx.gig_input,
-  }).length;
-  return base_cost + k * size_bytes;
+export class BudgetUnverifiable extends Error {
+  public readonly reason = "budget_unverifiable";
+  public readonly chairs: readonly string[];
+  public readonly state: BudgetState;
+  constructor(chairs: readonly string[], state: BudgetState) {
+    super(
+      `budget_unverifiable: cannot enforce the usd ceiling — chair(s) settled without reporting usd: ${chairs.join(", ")}`,
+    );
+    this.name = "BudgetUnverifiable";
+    this.chairs = chairs;
+    this.state = state;
+  }
 }
 
 /**
@@ -1307,10 +1270,14 @@ export async function runGig(
   const makeUsageSink = (): {
     fold: (ev: AgentStreamEvent) => void;
     attributed: () => boolean;
+    /** F3 — whether THIS chair reported a settled `total_cost_usd` at least once. Distinct from
+     *  `attributed`: a chair can report usage tokens (attributed) yet no cost (unverifiable). */
+    reportedCost: () => boolean;
     /** What the transport SAID about this one chair — measured, never inferred. */
     reported: () => { model?: string; cost_usd?: number; tokens_used?: number };
   } => {
     let saw = false;
+    let sawCost = false;
     // Per-chair, alongside the gig-level fold. The gig's `by_model` cannot separate two chairs in
     // one run, which is exactly the question per-chair routing asks. Output tokens per model id,
     // accumulated across this chair's `result` events; `workingModel` picks the one that did the
@@ -1321,6 +1288,7 @@ export async function runGig(
     let chairSaw = false;
     return {
       attributed: () => saw,
+      reportedCost: () => sawCost,
       reported: () => {
         if (!chairSaw) return {};
         const model = workingModel(chairOutputByModel);
@@ -1348,6 +1316,7 @@ export async function runGig(
         if (!hasCost && !hasTokens && !hasBreakdown) return;
 
         chairSaw = true;
+        if (hasCost) sawCost = true;
         chairTokens +=
           (typeof inRaw === "number" ? inRaw : 0) + (typeof outRaw === "number" ? outRaw : 0);
         chairCost += hasCost ? (costRaw as number) : 0;
@@ -1518,41 +1487,38 @@ export async function runGig(
     throw new GigAborted(gig_id, reason, finalizeUsage(), produced);
   };
 
-  // Budget state. When deps.budget is undefined, enforcement is OFF (back-compat).
-  // When present, we track an in-memory BudgetState mirroring budget-state.json.
-  // #turn-budget — the gig reserve pool opens from the dispatch payload FIRST, then the standard's
-  // default, then 0. `??` (not max/sum) so the dispatch declaration wins deterministically when both
-  // are present and absent stays distinct from a declared 0.
-  const poolOpening = deps.budget?.pool ?? standard.reserve_pool ?? 0;
-  const budget: BudgetState | null = deps.budget
+  // Budget state (budget-in-dollars). A DOLLAR ceiling is in play iff `deps.budget.max_usd` is set;
+  // a TURN POOL is in play iff `turn_pool` or `Standard.reserve_pool` names one. The snapshot exists
+  // whenever EITHER is present (O6): pool fields always, dollar fields only under a ceiling.
+  //
+  // O6 — the pool opens from RunDeps.turn_pool FIRST, then the standard default. `??` (not max/sum)
+  // so the dispatch declaration wins deterministically, and absence stays distinct from a declared 0.
+  const maxUsd = deps.budget?.max_usd;
+  const hasCeiling = typeof maxUsd === "number";
+  const poolSource = deps.turn_pool ?? standard.reserve_pool; // undefined when neither names one
+  const poolInPlay = poolSource !== undefined;
+  const poolOpening = poolSource ?? 0;
+  const budget: BudgetState | null = (hasCeiling || poolInPlay)
     ? {
-        opening: deps.budget.opening,
-        spent: 0,
-        credit: 0,
-        balance: deps.budget.opening,
         agent_state: "active",
         depleted_agent: null,
         depleted_at: null,
-        base_cost: deps.budget.base_cost ?? 1,
-        k: deps.budget.k ?? 0.1,
-        unit: "append-units",
-        settled_usd: 0,
         pool_remaining: poolOpening,
         draws: [],
+        ...(hasCeiling ? { max_usd: maxUsd, spent_usd: 0, unit: "usd" as const } : {}),
       }
     : null;
-  // #turn-budget — reserve turns HELD by prepared-but-not-yet-settled chairs, the pool's mirror of
-  // the append-unit `reserved` above. `prepareChair` runs synchronously for the whole ready batch
-  // before any invoke, so an offer computed against `pool_remaining - poolReserved` cannot let two
-  // parallel chairs over-lend the same turns. A grant converts the hold to a real draw-down; a
-  // no-draw or denial releases it. Conservation therefore holds for every ordering, not by luck.
+  // #turn-budget — reserve turns HELD by prepared-but-not-yet-settled chairs. `prepareChair` runs
+  // synchronously for the whole ready batch before any invoke, so an offer computed against
+  // `pool_remaining - poolReserved` cannot let two parallel chairs over-lend the same turns. A grant
+  // converts the hold to a real draw-down; a no-draw or denial releases it. Conservation therefore
+  // holds for every ordering, not by luck.
   let poolReserved = 0;
-  // #232 — cost RESERVED by chairs that passed the gate but have not settled. `prepareChair`
-  // runs eagerly for the whole ready batch, so the gate must see its batch siblings' holds;
-  // but a hold is not spend. It converts to `spent` only when the invocation succeeds, and is
-  // released (never charged) when it fails or when a later sibling trips the gate and the
-  // batch is abandoned before a single invoker is called.
-  let reserved = 0;
+  // F3 — under a ceiling, the agent slugs of chairs that SETTLED (reported usage) but reported NO
+  // usd. Their dollar spend is unknown, so the next batch cannot be verified affordable and must not
+  // start; this list is what BudgetUnverifiable names. A fully-stubbed chair that reports no usage at
+  // all is not here — that is every no-cost test fixture, and it completes as before.
+  const unverifiedChairs: string[] = [];
 
   // Resolve agent-by-slug once.
   const agentBySlug = new Map(standard.agents.map((a) => [a.slug, a]));
@@ -2101,6 +2067,28 @@ export async function runGig(
         ready = ready.filter((c) => chosenRoles.has(c.role));
       }
 
+      // ── BUDGET BATCH-BOUNDARY GATE (O2/F3) ──────────────────────────────────────────────────
+      // The dollar ceiling is checked HERE, before this ready batch starts, against SETTLED spend
+      // (reconciled at each prior batch boundary). The batch already running is never interrupted;
+      // it is the NEXT batch that does not start. Two fail-closed conditions, both naming the chair
+      // that would have run next:
+      //   F3 — a prior settled invocation reported no usd, so affordability is UNVERIFIABLE; and
+      //   O2 — settled spend has reached max_usd.
+      if (hasCeiling && budget) {
+        if (unverifiedChairs.length > 0) {
+          budget.agent_state = "depleted";
+          budget.depleted_agent = ready[0]?.agent_slug ?? null;
+          budget.depleted_at = new Date().toISOString();
+          throw new BudgetUnverifiable([...unverifiedChairs], budget);
+        }
+        if ((budget.spent_usd ?? 0) >= (maxUsd as number)) {
+          budget.agent_state = "depleted";
+          budget.depleted_agent = ready[0]?.agent_slug ?? null;
+          budget.depleted_at = new Date().toISOString();
+          throw new BudgetExhausted(ready[0]?.agent_slug ?? "?", budget.spent_usd ?? 0, maxUsd as number, budget);
+        }
+      }
+
       // Per-chair work happens in two stages so non-invocation failures
       // (BudgetExhausted, contract violations, programming-level errors like
       // TypeError from a circular gig_input) propagate UNWRAPPED through the
@@ -2129,10 +2117,10 @@ export async function runGig(
           noteCheckpointRole(ch.role, phase.name, r.value);
         }
       }
-      // #233 — BATCH BOUNDARY is the only point at which real settled dollars can be
-      // reconciled into the budget: prepareChair ran for every chair in this batch before any
-      // of them was invoked, so no chair could have seen its siblings' cost. Reporting only.
-      if (budget) budget.settled_usd = usage.total_cost_usd;
+      // O2 — BATCH BOUNDARY reconcile: the settled dollars this batch added are folded into the
+      // snapshot here, so the NEXT batch's gate (top of the while loop) sees them. prepareChair ran
+      // for every chair in this batch before any was invoked, so no chair saw its siblings' cost.
+      if (budget && hasCeiling) budget.spent_usd = usage.total_cost_usd;
 
       // Bank progress BEFORE the failure throw below. A batch whose siblings succeeded has
       // durable outputs either way; the checkpoint is what makes them reachable next time,
@@ -2223,7 +2211,7 @@ export async function runGig(
           producedByRole.set(vch.role, vrecs);
           produced.push(...vrecs);
           noteCheckpointRole(vch.role, phase.name, vrecs);
-          if (budget) budget.settled_usd = usage.total_cost_usd;
+          if (budget && hasCeiling) budget.spent_usd = usage.total_cost_usd;
           saveCheckpoint();
           verdict = failingVerdict(vch.role); // undefined once it passes → loop ends
         }
@@ -2252,9 +2240,6 @@ export async function runGig(
     // #241 — declared skill slugs that resolved to no package. Threaded to the invocation
     // context so the prompt can never name a skill the agent does not actually hold.
     missing_skills: readonly string[];
-    /** #232 — append-unit cost RESERVED for this chair at prep. Settled to `spent` only on
-     *  success; released without charge otherwise. Absent when no budget is enforced. */
-    cost?: number;
     /** #turn-budget — the reserve turns OFFERED this chair, min(chair.turn_reserve, pool available)
      *  at prep. Threaded onto the invocation as ctx.turn_reserve AND held against `poolReserved`
      *  until the chair's draw settles. Absent when the chair declared no `turn_reserve`. */
@@ -2607,35 +2592,16 @@ export async function runGig(
     // enforcing a cost that is not going to be incurred.
     const lookup = lookupReuse({ chair, phaseName, inputs, output_specs, agent, skills, producer_slug: agent.slug, domain });
 
-    // BUDGET GATE — pre-invocation, and a RESERVATION only (#232). Synchronous so
-    // BudgetExhausted (and a TypeError thrown from JSON.stringify on a circular gig_input)
-    // propagate unwrapped to the caller rather than being aggregated as a chair failure.
-    //
-    // The gate compares against `balance - reserved` so a batch of parallel chairs cannot each
-    // spend the same balance; the hold converts to `spent` only in settleChairCost, after the
-    // invoker actually returns. Before this, `spent += cost` happened HERE — so when a later
-    // member of an eagerly-prepared batch tripped the gate, every earlier member was already
-    // charged and `invokeAndWriteChair` then ran for nobody. The operator saw spend for work
-    // that never started, and that inflated figure is what BudgetExhausted.state reported.
-    let reservedCost: number | undefined;
-    if (budget && !lookup?.hit) {
-      const cost = computeAppendCost({ agent, phase: phaseName, inputs, gig_input: gigInput }, budget.base_cost, budget.k);
-      const available = budget.balance - reserved;
-      if (available < cost) {
-        budget.agent_state = "depleted";
-        budget.depleted_agent = agent.slug;
-        budget.depleted_at = new Date().toISOString();
-        throw new BudgetExhausted(agent.slug, available, cost, budget);
-      }
-      reserved += cost;
-      reservedCost = cost;
-    }
+    // BUDGET GATE — the append-unit pre-invocation gate is GONE (O3). Payload size / base_cost / k
+    // no longer decide whether a chair runs. The dollar ceiling is enforced against SETTLED spend at
+    // BATCH BOUNDARIES (O2, in the dispatch loop), not per-chair here. This block now only computes
+    // the reserve OFFER against the gig pool.
 
     // #turn-budget — RESERVE OFFER. Only a chair that DECLARED a `turn_reserve` reaches for the pool;
     // one that declared none threads no ctx.turn_reserve, so the invoker's own opts-level reserve is
-    // undisturbed (the #329 continuation path). When a budget is enforced the offer is capped to what
-    // the pool can still lend (min(own reserve, pool_remaining - poolReserved)) and HELD; with no
-    // budget there is no pool to cap against, so the declared reserve threads through directly.
+    // undisturbed (the #329 continuation path). When a pool is in play the offer is capped to what it
+    // can still lend (min(own reserve, pool_remaining - poolReserved)) and HELD; with no pool at all
+    // (`budget` null) the declared reserve threads through directly.
     let reserveOffer: number | undefined;
     if (chair.turn_reserve !== undefined && !lookup?.hit) {
       if (budget) {
@@ -2650,41 +2616,18 @@ export async function runGig(
     return {
       chair, phaseName, agent, primitive, domain_type, output_specs, inputs, skills,
       missing_skills: missing, producer_slug: agent.slug, domain,
-      ...(reservedCost !== undefined ? { cost: reservedCost } : {}),
       ...(reserveOffer !== undefined ? { reserve_offer: reserveOffer } : {}),
       ...(lookup ? { reuse_key: lookup.key } : {}),
       ...(lookup?.hit ? { reuse_hit: lookup.hit } : {}),
     };
   }
 
-  // #232 — convert a chair's reservation into settled spend, or release it. `spent` moves ONLY
-  // for a chair whose invocation actually returned, which is what the budget contract always
-  // claimed. A chair that was prepared and then never invoked (its batch sibling tripped the
-  // gate) never reaches here at all — so it is never charged, which is the point.
-  function settleChairCost(p: PreparedChair, succeeded: boolean): void {
-    if (!budget || p.cost === undefined) return;
-    reserved -= p.cost;
-    if (!succeeded) return;
-    budget.spent += p.cost;
-    budget.balance = budget.opening - budget.spent + budget.credit;
-  }
-
   // Stage 2 — actual invocation + post-invocation output_contract check + write.
   // Errors here ARE aggregated by Promise.allSettled and surfaced as a phase-
-  // level RuntimeError naming every failing chair role.
-  //
-  // The thin wrapper is where a chair's budget RESERVATION settles (#232): a hold becomes
-  // `spent` on success and is released on failure. Both paths must run, so the accounting
-  // cannot drift no matter how the chair ends.
+  // level RuntimeError naming every failing chair role. There is no per-chair budget
+  // reservation to settle any more — the ceiling is a batch-boundary check on settled USD.
   async function invokeAndWriteChair(p: PreparedChair): Promise<OutputRecord[]> {
-    try {
-      const written = await executeChair(p);
-      settleChairCost(p, true);
-      return written;
-    } catch (e) {
-      settleChairCost(p, false);
-      throw e;
-    }
+    return executeChair(p);
     // THE ROOM IS NOT TORN DOWN HERE. It used to be, in this chair-level `finally`, described as
     // "idempotent and a no-op when no venue was named". Idempotent yes; a no-op no —
     // `src/venue_realize.ts` sets `torn = true`, and `canReach()` is `!torn && egress.includes(...)`.
@@ -2913,6 +2856,10 @@ export async function runGig(
         throw e;
       } finally {
         if (sink.attributed()) attributedInvocations++;
+        // F3 — under a ceiling, a chair that reported usage but NO settled usd leaves the next
+        // batch unverifiable: the runtime cannot know whether it is affordable. Record it (never
+        // silent). A chair that reported nothing at all (a plain stub) is not here.
+        if (hasCeiling && sink.attributed() && !sink.reportedCost()) unverifiedChairs.push(agent.slug);
         chairReport = sink.reported();
       }
       // The drawing chair LANDED within its reserve → clear yielding back to `active` (O12/INV16).
@@ -3366,12 +3313,12 @@ export async function runGig(
     if (process.env["COLTRANE_DRAIN_DEBUG"]) console.error(`[drain] gig header ${gig_id}: ${String(e)}`);
   });
 
-  // Cycle complete — when a budget was supplied, mark it `settled` and
-  // surface the final state in the manifest. `settled` mirrors the
-  // budget-state.json cycle terminal-state semantics for a closed cycle.
+  // Cycle complete — when a snapshot exists (a ceiling OR a pool), mark it `settled` and surface
+  // the final state in the manifest. Under a ceiling, the settled dollars are reconciled one last
+  // time; a pool-only snapshot carries no dollar figure.
   if (budget) {
     budget.agent_state = "settled";
-    budget.settled_usd = usage.total_cost_usd; // #233 — final reconciliation of REAL dollars
+    if (hasCeiling) budget.spent_usd = usage.total_cost_usd;
   }
 
   // The gig finished, so there is nothing left to resume — drop its checkpoint. Without this

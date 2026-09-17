@@ -487,9 +487,9 @@ export async function runCli(argv: readonly string[], io: CliIO): Promise<number
       if (approvals.value) args["approvals"] = approvals.value;
       if (typeof flags["as"] === "string") args["approved_by"] = flags["as"];
       if (typeof flags["budget"] === "string") {
-        const opening = Number(flags["budget"]);
-        if (!Number.isFinite(opening) || opening <= 0) { line(io, `--budget must be a positive number`); return 2; }
-        args["budget"] = { opening };
+        const max_usd = Number(flags["budget"]);
+        if (!Number.isFinite(max_usd) || max_usd <= 0) { line(io, `--budget must be a positive number of dollars`); return 2; }
+        args["budget"] = { max_usd };
       }
 
       const r = await call("gig_dispatch", args);

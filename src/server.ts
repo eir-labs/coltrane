@@ -22,7 +22,7 @@ import {
 } from "./mcp.js";
 import { createRegistry, loadRegistry, domainTypeDefect, type Registry, type DomainType } from "./registry.js";
 import { loadGenome, resolveGenome, type SkillRecord, type EvalRecord, type LoadError } from "./loader.js";
-import { SkillSchema, AgentObjectSchema, StandardSchema, DomainTypeSchema, ChartSchema, VenueSchema, VenueObjectSchema, venueDefect } from "./genome_schema.js";
+import { SkillSchema, AgentObjectSchema, StandardSchema, DomainTypeSchema, ChartSchema, VenueSchema, VenueObjectSchema, venueDefect, EffortSchema, type Effort } from "./genome_schema.js";
 import {
   composeChart, runChart, chartHash, chartEntrySeedTypes, dispatchTarget,
   type Chart, type Venue, type ChartPlan, type ChartResult, type ResolvedMovement,
@@ -314,6 +314,20 @@ function readDepth(v: unknown): { depth?: Depth; error?: string } {
   if (v === undefined || v === null || v === "") return {};
   if (!isDepth(v)) return { error: `unknown depth "${String(v)}" — expected one of: ${DEPTHS.join(", ")}` };
   return { depth: v };
+}
+
+/**
+ * #seat-effort (F2) — read an optional `effort` argument, mirroring `readDepth`. Absent/empty → no
+ * dispatch effort (the agent's own `effort` or its tier default stands). Present but not one of the
+ * five levels → an ERROR that names the field and the value, refused BEFORE anything runs: an
+ * unlisted effort must never quietly run at a guessed level. Validated against the one Zod source
+ * (EffortSchema), so the door and the genome load refuse the same set.
+ */
+function readEffort(v: unknown): { effort?: Effort; error?: string } {
+  if (v === undefined || v === null || v === "") return {};
+  const parsed = EffortSchema.safeParse(v);
+  if (!parsed.success) return { error: `unknown effort "${String(v)}" — expected one of: ${EffortSchema.options.join(", ")}` };
+  return { effort: parsed.data };
 }
 
 /**
@@ -968,6 +982,12 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         const depthArg = readDepth(args["depth"]);
         if (depthArg.error) return { ok: false, requires_approval: approval, error: depthArg.error };
         const depth = depthArg.depth;
+        // #seat-effort (O1/F2) — `effort` is advertised on gig_dispatch (src/mcp.ts) and read here.
+        // An out-of-range value is refused BEFORE the chart/standard path spawns anything (F2); a
+        // valid one threads into runGig beside `depth` so the resolver (resolveEffort) sees it.
+        const effortArg = readEffort(args["effort"]);
+        if (effortArg.error) return { ok: false, requires_approval: approval, error: effortArg.error };
+        const effort = effortArg.effort;
 
         // ── reuse a sealed output instead of re-deriving it ──────────────────────────────
         // Both halves are opt-in, and both are named on the dispatch call so the decision is
@@ -1075,7 +1095,7 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
             // runChart forwards it to every movement via `...deps`. Threaded only when present, never
             // process.cwd().
             ...(deps.genome_dir ? { tree_root: deps.genome_dir } : {}),
-            ...(depth ? { depth } : {}), ...reuseWiring, ...humanWiring,
+            ...(depth ? { depth } : {}), ...(effort ? { effort } : {}), ...reuseWiring, ...humanWiring,
           };
           /** The ARRANGEMENT's manifest. A chart has no single genome_hash or run_fingerprint — it
            *  has a chart_hash and one run per movement — so the reply says what a chart run is
@@ -1315,7 +1335,7 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
           try {
             const res = await runGig(standard, gigInput, {
               ...dispatchDeps, gig_id: gigId,
-              ...(depth ? { depth } : {}), ...reuseWiring, ...humanWiring,
+              ...(depth ? { depth } : {}), ...(effort ? { effort } : {}), ...reuseWiring, ...humanWiring,
             });
             // Terminal (complete) frees the tree; a parked gig (awaiting_approval) RETAINS it.
             if (releaseLock && res.status !== "awaiting_approval") releaseLock();
@@ -1399,7 +1419,7 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         // A wire added to the shared assembler reaches this default async path by construction.
         const runPromise = runGig(standard, gigInput, {
           ...dispatchDeps,
-          gig_id: gigId, onProgress, signal: controller.signal, ...(depth ? { depth } : {}), ...reuseWiring, ...humanWiring,
+          gig_id: gigId, onProgress, signal: controller.signal, ...(depth ? { depth } : {}), ...(effort ? { effort } : {}), ...reuseWiring, ...humanWiring,
         });
         // A REFUSED resume must be answered in THIS reply, not discovered later by polling. The
         // gate throws in runGig's SYNCHRONOUS phase — before its first `await`, which is exactly

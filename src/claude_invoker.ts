@@ -10,6 +10,7 @@ import { randomUUID } from "node:crypto";
 import { abortReasonText, type AgentInvocationContext, type AgentInvoker, type AgentStreamEvent } from "./runtime.js";
 import type { Registry } from "./registry.js";
 import type { Depth, ModelTier } from "./pricing.js";
+import type { Effort } from "./genome_schema.js";
 import type { CodeToolAccess } from "./composition.js";
 import { resolveAgentGrants, hostBuiltinDenials, toolBaseName, ENGINE_MCP_SERVER, type ToolProviderRegistry } from "./tool_providers.js";
 import { venueEffectiveTools } from "./chart.js";
@@ -1024,7 +1025,7 @@ export function promptViaStdin(prompt: string): boolean {
 export function buildInvokerArgs(
   prompt: string,
   mcpConfigPath: string,
-  opts: { model?: string | undefined; allowed_tools?: readonly string[] | undefined; disallowed_tools?: readonly string[] | undefined; max_tool_calls?: number | undefined },
+  opts: { model?: string | undefined; allowed_tools?: readonly string[] | undefined; disallowed_tools?: readonly string[] | undefined; max_tool_calls?: number | undefined; effort?: Effort | undefined },
 ): string[] {
   // `-p` is a BOOLEAN flag and the prompt is a POSITIONAL argument, which is what makes the
   // large-prompt path clean: keep the flag, drop the positional, write it to stdin. The
@@ -1034,6 +1035,11 @@ export function buildInvokerArgs(
   if (opts.model) args.push("--model", opts.model);
   // per-agent blast-radius cap: a runaway agent can't burn past its own turn budget.
   if (opts.max_tool_calls !== undefined) args.push("--max-turns", String(opts.max_tool_calls));
+  // #seat-effort (O3/I2) — the spawn ALWAYS carries exactly one --effort, whatever depth or turn
+  // budget applies. Floored to `medium` here so a hand-built ctx that resolved to no effort still
+  // gets an explicit level rather than inheriting the operator's ~/.claude/settings.json effortLevel
+  // — the measured defect. The invoke door passes the resolved `ctx.effort ?? "medium"`.
+  args.push("--effort", opts.effort ?? "medium");
   // the cage floor: no ambient MCP servers leak into the spawn, ever.
   args.push("--mcp-config", mcpConfigPath, "--strict-mcp-config");
   // The OTHER half of that floor, and it was missing. A seat's cwd is a freshly cloned repository
@@ -1379,6 +1385,10 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
         allowed_tools: effectiveAllowed,
         disallowed_tools: disallowedTools,
         max_tool_calls: maxToolCalls,
+        // #seat-effort (O3) — the runtime already resolved precedence onto ctx.effort; floor to
+        // medium so an undeclared, untiered seat (or any hand-built ctx) still spawns with an
+        // explicit --effort rather than the operator's settings-file effort.
+        effort: ctx.effort ?? "medium",
       });
       // SEAT IN THE ROOM. When the substrate stood up a SEAT-BEARING room, ctx.seatExec names its
       // container and per-realization workspace, and the chair runs INSIDE it:

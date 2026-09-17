@@ -91,6 +91,7 @@ export const USAGE = `coltrane ${COLTRANE_VERSION}
 Options
   --input <json|@file|->                dispatch payload; @file reads a file, - reads stdin
   --depth <skim|standard|deep>          tighten the per-chair turn cap
+  --effort <low|medium|high|xhigh|max>  the reasoning effort the seat runs at
   --budget <dollars>                    per-gig ceiling; the run stops when it is gone
   --reuse                               allow chair-level reuse of prior sealed outputs
   --resume <gig-id>                     continue a gig that died mid-pipeline
@@ -475,6 +476,9 @@ export async function runCli(argv: readonly string[], io: CliIO): Promise<number
 
       const args: Record<string, unknown> = { standard_slug: standard, input: input.value };
       if (typeof flags["depth"] === "string") args["depth"] = flags["depth"];
+      // #seat-effort (O1) — forward --effort so the dispatched effort reaches the invocation as
+      // ctx.effort. An out-of-range value is refused by the gig_dispatch door (readEffort), not here.
+      if (typeof flags["effort"] === "string") args["effort"] = flags["effort"];
       if (typeof flags["resume"] === "string") args["resume_gig_id"] = flags["resume"];
       // #20 — --input NOT supplied (the readInput(undefined) path above yields {}, which is
       // indistinguishable from an explicit `--input {}`). Signal the omission so an approve-only

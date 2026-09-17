@@ -209,6 +209,9 @@ export function makeCompletionsInvoker(opts: CompletionsInvokerOptions): AgentIn
       allow,
       max_rounds: maxRounds,
       timeout_ms: timeoutMs,
+      // #seat-effort (O4) — carry the resolved effort onto the model request. The runtime set it on
+      // the ctx (resolveEffort); the provider wire mapping is a lower layer, out of scope.
+      ...(ctx.effort ? { effort: ctx.effort } : {}),
       ...(ctx.signal ? { signal: ctx.signal } : {}),
       ...(opts.prices ? { prices: opts.prices } : {}),
       ...(opts.maxTokens !== undefined ? { max_tokens: opts.maxTokens } : {}),

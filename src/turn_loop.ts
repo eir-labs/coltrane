@@ -148,6 +148,14 @@ export interface TurnLoopOptions {
   signal?: AbortSignal;
   prices?: PriceTable;
   max_tokens?: number;
+  /**
+   * #seat-effort (O4) — the resolved reasoning effort the seat runs at, carried on the model request
+   * the completions invoker hands the loop. A provider-neutral pass-through: the loop never
+   * interprets it (the level was validated upstream at the dispatch door / genome schema), and the
+   * PROVIDER WIRE MAPPING of effort is a lower layer, out of scope here. Typed `string` deliberately
+   * so this leaf file keeps its no-import posture; the level vocabulary lives in EffortSchema.
+   */
+  effort?: string;
   onEvent?: (ev: TurnEvent) => void;
 }
 

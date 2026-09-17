@@ -42,8 +42,26 @@ import { drainGigHeader } from "./output_mirror.js";
 import { LEDGER_SCHEMA_VERSION, type Ledger, type GigUsage } from "./ledger.js";
 import { PlacementRefused, type PlacementResolver } from "./placement.js";
 import type { Depth } from "./pricing.js";
+import type { Effort } from "./genome_schema.js";
 import type { SkillRecord, EvalRecord } from "./loader.js";
 import { COLTRANE_VERSION } from "./version.js";
+
+// #seat-effort — the ONE place effort precedence resolves, mirroring how `depth` threads. The
+// RESOLVED value is set on AgentInvocationContext.effort and reaches both invokers. Order: the
+// dispatch effort wins, else the agent's declared effort, else the agent's tier default
+// (economy→low, standard→medium, premium→high), else `medium` for an untiered agent — never the
+// operator's ~/.claude/settings.json. Total by construction (always returns a level), which is what
+// makes an undeclared, untiered seat still carry an explicit effort to the spawn (O3).
+function resolveEffort(dispatchEffort: Effort | undefined, agent: Agent): Effort {
+  if (dispatchEffort) return dispatchEffort;
+  if (agent.effort) return agent.effort;
+  switch (agent.model_tier) {
+    case "economy": return "low";
+    case "standard": return "medium";
+    case "premium": return "high";
+    default: return "medium";
+  }
+}
 
 // What an agent invocation sees. The invoker returns the output `data` (validated
 // downstream against the agent's declared output domain type). `skills` carries
@@ -113,6 +131,13 @@ export interface AgentInvocationContext {
   // documented "skim first" cost practice had no mechanism behind it. Absent = the agent's
   // own profile stands.
   depth?: Depth | undefined;
+  // #seat-effort — the RESOLVED reasoning effort this seat runs at, set once by the runtime
+  // (resolveEffort: dispatch ▷ agent ▷ tier default ▷ medium) and carried here so the invoker
+  // reaches it without re-deriving. Both invokers read it: the Claude invoker floors it at the spawn
+  // and passes exactly one `--effort`, the completions invoker carries it on the model request.
+  // Threads exactly as `depth` does. Always present on a runtime-built ctx; a hand-built ctx that
+  // omits it makes the Claude invoker fall to `medium` at the spawn (O3).
+  effort?: Effort | undefined;
   // ── the venue this chair is confined to (venue → dispatch wiring) ──────────────
   // When the gig names a venue, runGig resolves it, calls resolveAndRealize BEFORE this
   // invocation, and threads the resulting room here. The Claude invoker reads BOTH to confine
@@ -191,6 +216,10 @@ export type GigProgressEvent =
       /** #240 — `*_sha` fields the engine could not tie to any consumed input or the gig
        *  payload. Sealed as "" rather than guessed; listed here so the gap is visible. */
       unresolved_sha_fields?: string[];
+      /** #seat-effort (O5) — the reasoning effort the seat actually ran at, as resolved by the
+       *  runtime (dispatch ▷ agent ▷ tier ▷ medium). Present for a model chair; absent for a skill
+       *  chair, which runs no model at an effort. */
+      effort?: Effort;
     }
   | { type: "chair_failed"; phase: string; role: string; error: string }
   // #241 — one or more of the agent's declared skill_slugs resolved to no package. Not fatal
@@ -350,6 +379,13 @@ export interface RunDeps {
    * the thing that actually spends. Absent = each agent's own `depth_profile` stands.
    */
   depth?: Depth | undefined;
+  /**
+   * #seat-effort — the reasoning effort this gig was dispatched at, threaded to the resolver so
+   * dispatch effort wins over the agent's declared effort and the tier default (resolveEffort).
+   * Absent = no dispatch effort, so the agent's own `effort` or its tier default stands. Sibling of
+   * `depth`; the dispatch door threads it beside `depth` (src/server.ts).
+   */
+  effort?: Effort | undefined;
 
   // ── the chart: this run is one MOVEMENT of a performance ───────────────────
   /**
@@ -2687,6 +2723,10 @@ export async function runGig(
     let firstWriteMs: number | null = null;
     let contextAtFirstWrite: number | null = null;
     let lastAssistantContext: number | null = null;
+    // #seat-effort (O5) — the effort the model chair resolved to, captured at the invoke ctx site
+    // (below) so the chair_complete emit can record what the seat ran at. Stays undefined for a skill
+    // chair, which runs no model at an effort.
+    let resolvedEffort: Effort | undefined;
     const WRITE_TOOLS = new Set(["Write", "Edit", "MultiEdit", "NotebookEdit"]);
 
     // ── REUSE HIT ────────────────────────────────────────────────────────────────────────
@@ -2832,7 +2872,10 @@ export async function runGig(
           }
           placedHydration = decision.hydration;
         }
-        
+
+        // #seat-effort (O2) — resolve precedence ONCE here and set the RESOLVED value on the ctx, the
+        // same seam `depth` threads through. Captured so chair_complete records what the seat ran at.
+        resolvedEffort = resolveEffort(deps.effort, agent);
         data = await deps.invoke({
           agent, phase: phaseName, role: chair.role, gig_id, inputs, gig_input: gigInput, skills,
           missing_skills: p.missing_skills, // #241 — what did NOT resolve, so the prompt can't assert it
@@ -2849,6 +2892,9 @@ export async function runGig(
           // itself, so an invoker can kill its child and shape what it asks the model for.
           ...(deps.signal ? { signal: deps.signal } : {}),
           ...(deps.depth ? { depth: deps.depth } : {}),
+          // #seat-effort (O2) — the RESOLVED effort reaches the invoker on the ctx, always present
+          // (resolveEffort floors to medium), so both invokers carry it without re-deriving.
+          effort: resolvedEffort,
           // #turn-budget — the chair's own turn budget threads through exactly as `depth` does; the
           // reserve is the pool-capped OFFER, not the raw declaration, and is present only when the
           // chair declared a reserve (so a reserve-less chair leaves the invoker's opts-level default
@@ -3296,6 +3342,9 @@ export async function runGig(
       promised_output_types: output_specs.map((s) => s.domain_type),
       missing_output_types: missing,
       ...(unresolvedShaFields.length > 0 ? { unresolved_sha_fields: unresolvedShaFields } : {}),
+      // #seat-effort (O5) — record the effort the seat ran at (a model chair only; a skill chair
+      // leaves it undefined and the field stays absent).
+      ...(resolvedEffort !== undefined ? { effort: resolvedEffort } : {}),
     });
     return written;
   }

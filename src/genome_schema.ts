@@ -13,6 +13,14 @@ export const BelbinRoleSchema = z.enum(["explorer", "analyst", "critic", "synthe
 export const CodeToolAccessSchema = z.enum(["none", "read", "write", "full"]);
 export const ModelTierSchema = z.enum(["economy", "standard", "premium"]);
 export const DepthSchema = z.enum(["skim", "quick", "standard", "deep"]);
+// #seat-effort — the reasoning effort a seat runs at, part of the genome and defined ONCE here (the
+// one Zod source). Precedence resolves dispatch ▷ agent ▷ tier default (economy low / standard medium
+// / premium high) ▷ medium onto AgentInvocationContext.effort at the runtime ctx site, and the value
+// always reaches the spawn as a single `--effort` pair — NEVER inherited from the operator's
+// ~/.claude/settings.json. The five levels are exactly what the `claude` CLI (2.1.274) accepts; an
+// unlisted level fails the parse (F1) and is refused at the dispatch door (F2), naming the field.
+export const EffortSchema = z.enum(["low", "medium", "high", "xhigh", "max"]);
+export type Effort = z.output<typeof EffortSchema>;
 
 // The caged-browser grant (the cage branch adds browser_grant to the agent; the schema is here so
 // the grant is validated like any field). Network grant for skills lives in the skill schema.
@@ -138,6 +146,13 @@ export const AgentObjectSchema = z.object({
   max_token_budget: z.number().optional(),
   code_tool_access: CodeToolAccessSchema.optional(),
   depth_profile: DepthSchema.optional(),
+  /** #seat-effort — the reasoning effort this seat declares. OPTIONAL with NO default, exactly like
+   *  `depth_profile` / `model_tier`: absent stays absent so every existing agent round-trips
+   *  byte-equivalent (a Zod object drops an undeclared key, so the field must be declared HERE to be
+   *  retained), and an undeclared seat resolves through its tier default at invocation (resolveEffort,
+   *  src/runtime.ts) rather than inheriting the operator's settings file. An out-of-range value fails
+   *  the parse naming this field — `defineAgent` rethrows it hard and the loader surfaces it (F1). */
+  effort: EffortSchema.optional(),
   browser_grant: BrowserGrantSchema.optional(),
 });
 

@@ -25,8 +25,13 @@ cd "$(dirname "$0")/.."
 
 # THE ROOT BAND — `npm test`, the one the verifier measured and the one carrying almost
 # every law in this repo.
-EXPECTED_LAWS="${EXPECTED_LAWS:-3860}"   # includes 22 todo
-EXPECTED_FILES="${EXPECTED_FILES:-402}"
+EXPECTED_LAWS="${EXPECTED_LAWS:-3873}"   # includes 22 todo
+#   +1  mcp_tools_describe law 7 (#535) — a description that backticks an argument names one the
+#       verb's own input_schema declares. The prose sits beside a GENERATED schema: the schema moves
+#       with the handler, the description does not. Its first draft could not fail — it forgave any
+#       token no tool anywhere declared, which is exactly what a renamed argument leaves behind.
+#       Sabotage said so (`current` -> `slug_current` stayed green); the exemption is gone.
+EXPECTED_FILES="${EXPECTED_FILES:-404}"
 
 # THE OTHER BANDS. `vitest run` is ROOT-CONFIG ONLY — this repo's own workflow comments
 # record that four configs went unexecuted once for exactly that reason. So pinning only the
@@ -79,6 +84,13 @@ d=json.load(open('$JSON_OUT'))
 # which is the thing 'a law file went missing' is about.
 # numTotalTests includes 'todo' laws (3487 passed + 22 todo = 3509). Todos are DECLARED
 # laws — a todo silently deleted is a law silently abandoned — so they are counted.
+#
+# NO BACKTICKS AND NO DOUBLE QUOTES ANYWHERE IN THIS BLOCK. The python source sits inside a
+# double-quoted bash string, so bash reads every character of it first: a backtick here is
+# command substitution (one word in a comment was being RUN, printing a command-not-found
+# line over the counts this script exists to report), and a double quote ENDS the argument,
+# which breaks the read below and exits the whole script under set -e. Both were committed
+# here, the second while fixing the first.
 print(d.get('numTotalTests',-1), len(d.get('testResults',[])))
 ")
 

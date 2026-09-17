@@ -11,6 +11,8 @@ export type MCPCategory =
 export interface MCPToolDef {
   slug: string;
   category: MCPCategory;
+  /** What this verb does, in the words a caller chooses it by. Required — see TOOL_DESCRIPTIONS. */
+  description: string;
   input_schema: object;
   output_schema: object;
 }
@@ -39,7 +41,7 @@ const pickProps = (src: Record<string, string>, keys: readonly string[]): Record
 // handlers that read args["reason"] are proposal_create and gig_abort (#234).
 const DT_AUTHORED = pickProps(zodToMcpProps(DomainTypeSchema), ["slug", "extends", "domain", "schema", "required_fields"]);
 
-export const MCP_TOOLS: readonly MCPToolDef[] = [
+const TOOL_DEFS: readonly Omit<MCPToolDef, "description">[] = [
   { slug: "type_resolve",                  category: "understand", input_schema: obj({ core_type: "string", extends: "string", domain: "string", required_fields: "array" }), output_schema: obj({ action: "string", candidates: "array", recommendation: "object" }) },
   { slug: "type_browse",                   category: "understand", input_schema: obj({ domain: "string", extends: "string", status: "string", min_usage: "number" }), output_schema: obj({ types: "array", stats: "object" }) },
   { slug: "tool_registry_browse",          category: "understand", input_schema: obj({ category: "string" }), output_schema: obj({ tools: "array", usage_stats: "array", dependency_map: "object" }) },
@@ -275,6 +277,156 @@ export const MCP_TOOLS: readonly MCPToolDef[] = [
   { slug: "org_use",                       category: "manage_context", input_schema: obj({ org_slug: "string" }), output_schema: obj({ org_slug: "string", set: "boolean" }) },
 { slug: "charter_suggest_update", category: "manage_context", input_schema: obj({ field: "string", current_value: "string", suggested_value: "string", evidence: "object" }), output_schema: obj({ proposal_id: "string" }) },
 ];
+
+// ── WHAT EACH VERB DOES ────────────────────────────────────────────────────────────────────────
+//
+// THE DEFECT THIS CLOSES. Every tool the engine advertises described itself by its CATEGORY:
+// createToolSurface built `description: `${t.category} tool`` (server.ts), so all 54 verbs
+// reached every MCP client as "run tool", "build tool", "understand tool", "improve tool" or
+// "manage_context tool". The description is the field a model reads to choose a verb, so the
+// surface offered fifty-four choices and five distinct hints — over stdio and over the hosted
+// endpoint alike. It was never a placeholder awaiting content; it was computed, so nothing
+// looked unfinished and nothing could notice.
+//
+// These are keyed by slug rather than inlined because the defs above are already single lines
+// carrying two generated schemas, and a reader comparing wording across fifty-four verbs needs
+// them in one place. ABSENT MUST MEAN DECLINE: a slug with no entry throws at module load
+// (below) rather than falling back to something plausible, and `tests/mcp_tools_describe.test.ts`
+// refuses a description that merely restates the category or the slug.
+export const TOOL_DESCRIPTIONS: Record<string, string> = {
+  // understand — read the genome and the chain
+  type_resolve:
+    "Given a shape you need, find the domain type that already covers it. Returns ranked candidates and a recommendation: reuse an existing type, extend one, or register a new one. Call this before type_register so the registry does not grow a near-duplicate.",
+  type_browse:
+    "List registered domain types, filtered by domain, the core type they extend, status, or how heavily they are used.",
+  tool_registry_browse:
+    "List the engine's own tool registry: every verb, its category, usage statistics and dependency map.",
+  standard_browse:
+    "List standards (multi-phase workflows), filtered by domain and status. Shallow rows — use standard_inspect for one standard's full shape.",
+  standard_inspect:
+    "One standard's whole record: every phase with each chair's seat (role, the agent or human filling it, input and output contracts), its type surface, its evals and its description.",
+  agent_browse:
+    "List agent definitions, filtered by domain or cognitive primitive.",
+  chart_browse:
+    "List charts — arrangements that perform several standards as one gig. Each row carries the movements' standards, how many edges and gates the arrangement has, the venue it is held in, and a chart_hash prefix to tell two arrangements apart.",
+  venue_browse:
+    "List venues, the configured performance spaces. Each row carries whose institution owns the room, how much equipment it holds at all (the tool ceiling), whether anything may leave it, and its lifecycle.",
+  output_query:
+    "Query sealed outputs, filtered by domain type, gig, agent or a data filter. Payloads are CARRIED BY DEFAULT — pass include_data:false for the compact rows (id, gig, agent, phase, content_sha, preview) when you are traversing rather than reading. Addressing one output by output_id or content_sha returns its full payload regardless of the flag.",
+  output_trace:
+    "Walk an output's provenance graph — back to the root signals it consumed, or forward to what consumed it. Crosses a chart's movement boundaries, and NAMES any referenced content_sha this store does not hold rather than dropping it: a hole in the chain is reported.",
+  charter_read:
+    "Read the charter: the audience's products, goals, pain points, tech stack and access grants.",
+  execution_history_read:
+    "Read the append-only execution ledger — past gigs filtered by gig id, standard, genome hash or time window.",
+  access_grant_check:
+    "Check a plan against an access grant: whether it is permitted, which permissions are missing, and how long the grant has left.",
+  gig_logs:
+    "Per-chair logs for one gig — what each seat actually did, phase by phase.",
+  skill_browse:
+    "List the skill packages in the shared repertoire.",
+  skill_inspect:
+    "One skill's whole record: its hydration slots, permission tier, determinism ratio, fixtures and code hash.",
+
+  // build — author definitions
+  type_register:
+    "Register a new domain type extending one of the six core types. Its required_fields become the contract every sealed output of that type is checked against at the write path.",
+  type_extend:
+    "Add fields to an existing domain type, producing a NEW version with a changelog entry rather than mutating the one already in use.",
+  agent_define:
+    "Define an agent: what it consumes and produces, its cognitive primitives, its disposition (exactly two roles in tension), its tool grant and its model tier. The tool grant is a ceiling, not a suggestion.",
+  agent_evolve:
+    "Change an existing agent under the typed rules that govern it, producing a new version. Returns a cascade check naming every standard the change reaches — evolution goes through here, never through prompt drift.",
+  standard_compose:
+    "Compose a standard: a graph of phases whose chairs bind producers to an input and output contract, written in type slugs. Refused at COMPOSE time if a chair asks for a shape nothing upstream produces, rather than at minute nine of a run.",
+  chart_define:
+    "Define a chart: one gig performed as several standards, with typed edges between movements, arrangement-level approval gates, a budget envelope and the venue it is held in. validation_result carries the structured violation list, not a boolean — a chart is refused for one named reason at one named place.",
+  venue_define:
+    "Define a venue: the deny-by-default tool CEILING, ingress and egress origins, digest-pinned installs, credential surface and lifecycle. A venue can only ever narrow a seated agent, never widen one.",
+  standard_simulate:
+    "Walk a standard's graph without running it: its phases, estimated cost and duration, and the BASIS that estimate came from — a measured mean of real runs, the standard's real structure, or a per-slug guess. Cheap to run before a dispatch is not.",
+  agent_promote:
+    "Move an agent definition one step along its lifecycle: name the target `status` and the `current` one you believe it holds. The chain is draft, review, approved, active, retired — promotion is not a jump to active.",
+  standard_promote:
+    "Move a standard along its lifecycle — draft, active, retired — by naming the target `status` and the `current` one you believe it holds. Reaching active is what makes it dispatchable; compose and simulate first, because promotion does not re-check the graph.",
+  skill_define:
+    "Define a skill package: reusable capability, including executable code, with hydration slots filled at seating or dispatch instead of hard-coding one house's data.",
+  skill_evolve:
+    "Change a skill's code. The candidate runs against the CURRENT fixtures in a throwaway copy and lands only if it passes — a skill cannot regress through this door.",
+  skill_promote:
+    "Promote a skill package once its fixtures clear the threshold for the status being requested.",
+
+  // run — dispatch work and watch it
+  gig_dispatch:
+    "Run a standard. Returns the gig id immediately. `depth` tightens turn caps for cheap iteration, `budget` sets a ceiling in append units (a rate limiter on context growth, not dollars), `reuse` serves a chair from a prior sealed output whose producer and inputs hash the same, and `resume_gig_id` continues a gig that stopped — refused, never silently run cold, if the genome, its producers, the payload, the model or a consumed type moved since. A gig reaching a chair a human holds PARKS rather than failing.",
+  gig_monitor:
+    "Where a gig is now: its phase, its chairs, and whether it is running, parked at a human chair, complete, aborted or failed.",
+  gig_abort:
+    "Stop a running gig. A real kill signal, not a flag checked at the top of the next loop after the next model call has already been paid for.",
+  gig_cancel:
+    "Cancel a QUEUED gig before a worker claims it, so no worker ever runs it. Only a queued gig can be cancelled — a running one is stopped with gig_abort.",
+  gig_approve:
+    "Supply the verdict a parked human chair is waiting for, keyed by chair role. The verdict then seals through the same gate as every other output, recorded against who gave it.",
+  venue_credential_mint:
+    "Mint a scoped credential for one venue instance — the room's own environment, never a standing key.",
+  org_hire:
+    "Seat an agent as a member of an organization.",
+  output_write:
+    "Seal an output. The write path enforces the core type's substance floor — a Verdict without a method on every check, an Interpretation without claims, is REFUSED and the run stops. Not a warning, not a score you can override.",
+  skill_execute:
+    "Run a skill package against an input. `mode:\"test\"` runs the skill's own fixtures instead of a caller's input and reports the threshold it would be held to at promotion, so \"why was I refused\" is one call.",
+
+  // improve — measure and evolve what is running
+  agent_validate_pipeline:
+    "Check that a set of agents composes into a satisfiable pipeline: every chair's input produced upstream, and no cycles.",
+  health_check:
+    "One entity's health over a window — output and execution counts, usage, success rate, cost and trend, each with the BASIS it was computed from. An unmeasured quantity reports null rather than a confident zero.",
+  system_health:
+    "What the engine believes its own state to be: genome, store and ledger.",
+  genome_reload:
+    "Re-read the genome from disk without restarting the server, and report what changed.",
+  server_restart:
+    "Restart the MCP server process, so a change to the engine or its wiring takes effect without the client reconnecting by hand.",
+  system_audit:
+    "Audit the chain: ledger integrity, and what the record says about itself.",
+  proposal_create:
+    "File a proposal against the genome for a human to rule on.",
+  tool_propose:
+    "Propose a new tool for the registry, for a human to rule on. Proposing is not registering — tool_register is the separate, approved act.",
+  tool_register:
+    "Register a proposed tool once it has been approved.",
+  tool_deprecate_propose:
+    "Propose retiring a tool from the registry.",
+  capability_research:
+    "Research a capability you need: what already matches, whether there is a real gap, the approaches available and the MCP options, with a recommendation.",
+  session_review_write:
+    "Record a quality review against one sealed output — the scores, the agent version that produced it, and the notes. This is the evidence improvement_report and learning_synthesize later read.",
+  improvement_report:
+    "Compare versions of a producer, or model tiers, on cost and quality together over the outputs each ACTUALLY produced. A quantity with no reviews behind it reports null, never 0.",
+  learning_synthesize:
+    "Synthesize an agent's accumulated session reviews into a summary, judge whether the evidence is yet sufficient, and optionally raise the evolution proposal it supports.",
+
+  // manage_context — what the work is for
+  org_use:
+    "Set the working organization ONCE; every later write path resolves it without being told. An explicit org_slug on a call is an override, never a requirement.",
+  charter_suggest_update:
+    "Suggest a charter change as evidence accrues.",
+};
+
+// ABSENT MUST MEAN DECLINE. A verb with no description does not get a plausible default — the
+// module refuses to load, at import, naming the slug. That is the failure mode the computed
+// `${category} tool` string denied us for the whole life of the surface: it always produced
+// SOMETHING, so a missing description was indistinguishable from a written one.
+export const MCP_TOOLS: readonly MCPToolDef[] = TOOL_DEFS.map((t) => {
+  const description = TOOL_DESCRIPTIONS[t.slug];
+  if (!description) {
+    throw new Error(
+      `MCP tool "${t.slug}" has no description — every advertised verb must say what it does, ` +
+        `because the description is what a caller chooses it by (src/mcp.ts TOOL_DESCRIPTIONS).`,
+    );
+  }
+  return { ...t, description };
+});
 
 // Lifecycle promotion order — forward-only. agent/standard share the same chain;
 // skill includes the explicit `testing` step before active.

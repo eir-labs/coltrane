@@ -5,6 +5,7 @@
 // that carries model_version + (empty, v0) eval_scores — honestly un-tempered.
 import { lineageAdoption } from "./lineage_adoption.js";
 import { randomUUID } from "node:crypto";
+import { performance } from "node:perf_hooks";
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join as joinPath, relative as relPath, isAbsolute as isAbsPath, sep as pathSep } from "node:path";
@@ -2112,7 +2113,11 @@ export async function runGig(
         const core = deps.outputs.coreTypeOf(domain_type) ?? domain_type;
         const primitive = CORE_TO_PRIMITIVE[core] ?? "JUDGE";
         const approvalInputs: OutputRecord[] = hc.depends_on.flatMap((d) => producedByRole.get(d) ?? []);
-        const t0 = Date.now();
+        // contract-seat-time-monotonic-v1 (O2) — seat time is measured on the monotonic clock
+        // (performance.now), never Date.now: a wall-clock jump during the seat (lid sleep, NTP step)
+        // is machine time, not seat time. Rounded to whole ms at the difference, since performance.now
+        // is fractional.
+        const t0 = performance.now();
         emit({ type: "chair_start", phase: phase.name, role: hc.role, producer: deps.approved_by ?? "human" });
         const rec = deps.outputs.write({
           core_type: core,
@@ -2132,7 +2137,7 @@ export async function runGig(
         produced.push(rec);
         emit({
           type: "chair_complete", phase: phase.name, role: hc.role, producer: deps.approved_by ?? "human",
-          output_types: [domain_type], duration_ms: Date.now() - t0,
+          output_types: [domain_type], duration_ms: Math.round(performance.now() - t0),
           // A human seat forwards no agent write events, so there is nothing to measure: null, not 0.
           first_write_ms: null, context_tokens_at_first_write: null,
         });
@@ -2960,7 +2965,11 @@ export async function runGig(
     // can prefer a measurement over the tier table's guess. Empty for a skill-backed chair.
     let chairReport: { model?: string; cost_usd?: number; tokens_used?: number } = {};
     const { chair, phaseName, inputs, skills, output_specs, producer_slug, domain } = p;
-    const t0 = Date.now();
+    // contract-seat-time-monotonic-v1 (O1) — the chair's timings (first_write_ms, duration_ms below)
+    // are monotonic differences (performance.now), never Date.now: a wall-clock jump mid-chair is
+    // machine time, not seat time. Rounded to whole ms at each difference, since performance.now is
+    // fractional.
+    const t0 = performance.now();
     // #seat-metrics — the seat's FIRST write and the context it carried then, measured from the
     // chair's forwarded agent events (below). Null until a write happens; a chair that never writes
     // (or forwards no events, like a skill chair) leaves both null.
@@ -3272,7 +3281,7 @@ export async function runGig(
                   (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0);
               }
             } else if (firstWriteMs === null && ev.type === "tool_use" && ev.tool !== undefined && WRITE_TOOLS.has(ev.tool)) {
-              firstWriteMs = Date.now() - t0;
+              firstWriteMs = Math.round(performance.now() - t0);
               contextAtFirstWrite = lastAssistantContext;
             }
             if (!budget) return;
@@ -3822,7 +3831,7 @@ export async function runGig(
     const forkFellBack = forkFellBackReason !== undefined;
     emit({
       type: "chair_complete", phase: phaseName, role: chair.role, producer: producer_slug,
-      output_types: written.map((w) => w.domain_type), duration_ms: Date.now() - t0,
+      output_types: written.map((w) => w.domain_type), duration_ms: Math.round(performance.now() - t0),
       first_write_ms: firstWriteMs,
       context_tokens_at_first_write: contextAtFirstWrite,
       promised_output_types: output_specs.map((s) => s.domain_type),

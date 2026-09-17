@@ -86,7 +86,9 @@ describe("#236 — a failed gig still reports what it actually spent", () => {
     expect(usage!["input_tokens"]).toBe(9000);
 
     // the deliberate invariant is untouched: an un-sealed gig writes no ledger row
-    expect(d.ledger.query({}).length, "no ledger row for a crashed gig — that stays true").toBe(0);
+    // chair_spend rows (contract-spend-survives-v1) now record what the chairs spent; the un-sealed
+    // signal is the absence of a GIG row, so that is what this counts.
+    expect(d.ledger.query({ kind: "gig" }).length, "no gig row for a crashed gig — that stays true").toBe(0);
   });
 
   it("the thrown error carries the partial usage, so a synchronous caller sees it too", async () => {

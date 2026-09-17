@@ -1337,9 +1337,16 @@ export async function runGig(
     reportedCost: () => boolean;
     /** What the transport SAID about this one chair — measured, never inferred. */
     reported: () => { model?: string; cost_usd?: number; tokens_used?: number };
+    /** contract-spend-survives-v1 (O1) — this chair's OWN settled usage, as a GigUsage, for the
+     *  durable chair_spend row. Undefined when the chair reported no usage payload (captured:false),
+     *  so an unattributed chair carries no cost field rather than a $0 one (#235). */
+    usage: () => GigUsage | undefined;
   } => {
     let saw = false;
     let sawCost = false;
+    // contract-spend-survives-v1 (O1/I1) — this chair's own settled usage, accumulated ALONGSIDE the
+    // gig-wide `usage` fold below so the per-chair rows reconcile to the gig total by construction.
+    const chairOwnUsage: GigUsage = { input_tokens: 0, output_tokens: 0, total_cost_usd: 0, by_model: {} };
     // Per-chair, alongside the gig-level fold. The gig's `by_model` cannot separate two chairs in
     // one run, which is exactly the question per-chair routing asks. Output tokens per model id,
     // accumulated across this chair's `result` events; `workingModel` picks the one that did the
@@ -1351,6 +1358,7 @@ export async function runGig(
     return {
       attributed: () => saw,
       reportedCost: () => sawCost,
+      usage: () => (chairSaw ? chairOwnUsage : undefined),
       reported: () => {
         if (!chairSaw) return {};
         const model = workingModel(chairOutputByModel);
@@ -1386,6 +1394,11 @@ export async function runGig(
         usage.input_tokens += typeof inRaw === "number" ? inRaw : 0;
         usage.output_tokens += typeof outRaw === "number" ? outRaw : 0;
         usage.total_cost_usd += hasCost ? (costRaw as number) : 0;
+        // The SAME fold, kept per-chair for the durable chair_spend row (O1/I1). Summing every
+        // chair's own usage reconstructs the gig-wide `usage` above, which is what I1 pins.
+        chairOwnUsage.input_tokens += typeof inRaw === "number" ? inRaw : 0;
+        chairOwnUsage.output_tokens += typeof outRaw === "number" ? outRaw : 0;
+        chairOwnUsage.total_cost_usd += hasCost ? (costRaw as number) : 0;
         // Per-model breakdown keyed by the ACTUAL model id that ran (not the configured tier).
         if (hasBreakdown) {
           for (const [model, m] of Object.entries(mu)) {
@@ -1395,6 +1408,13 @@ export async function runGig(
             slot.output_tokens += outTok;
             slot.cost_usd += typeof m["costUSD"] === "number" ? (m["costUSD"] as number) : 0;
             usage.by_model[model] = slot;
+            // Per-chair by_model, keyed the same way, so the chair_spend row's own breakdown stands
+            // on its own rather than pointing back at the gig-wide total.
+            const cslot = chairOwnUsage.by_model[model] ?? { input_tokens: 0, output_tokens: 0, cost_usd: 0 };
+            cslot.input_tokens += typeof m["inputTokens"] === "number" ? (m["inputTokens"] as number) : 0;
+            cslot.output_tokens += outTok;
+            cslot.cost_usd += typeof m["costUSD"] === "number" ? (m["costUSD"] as number) : 0;
+            chairOwnUsage.by_model[model] = cslot;
             // The stamp is the model that WROTE this chair's output, decided at report time by
             // `workingModel` (argmax over output tokens). The CLI lists a fast background call's
             // model FIRST though it writes almost nothing, so the old first-key `??=` stamped a
@@ -2275,7 +2295,10 @@ export async function runGig(
             const priorWork = producedByRole.get(mk.role) ?? [];
             // contract-chair-session-continuity-v1 (O3/O5) — an amend RESUMES the maker's own session
             // (the invoker gets ctx.resume) and is never served from the reuse cache.
-            const prep = prepareChair(mk, phaseNameOf(mk.role), [...priorWork, feedback], { resume: true });
+            // O1 — the initial invocation is round 1 (the default), so the amend loop's iteration
+            // `round` (1-based) stamps round `round + 1`: each re-run of a seat gets a distinct,
+            // monotonic round and no two chair_spend rows for one role collide.
+            const prep = prepareChair(mk, phaseNameOf(mk.role), [...priorWork, feedback], { resume: true, round: round + 1 });
             const recs = await invokeAndWriteChair(prep);
             dropFromProduced(producedByRole.get(mk.role) ?? []);
             producedByRole.set(mk.role, recs);
@@ -2283,7 +2306,7 @@ export async function runGig(
             noteCheckpointRole(mk.role, phaseNameOf(mk.role), recs);
           }
           // RE-VERIFY the amended artifact.
-          const vprep = prepareChair(vch, phase.name);
+          const vprep = prepareChair(vch, phase.name, [], { round: round + 1 });
           const vrecs = await invokeAndWriteChair(vprep);
           dropFromProduced(producedByRole.get(vch.role) ?? []);
           producedByRole.set(vch.role, vrecs);
@@ -2336,6 +2359,9 @@ export async function runGig(
      *  RESUMES its own prior-round session and is NEVER served from the reuse cache (a resume carries
      *  conversation the reuse key cannot describe). Set only on the examine⇄amend re-run. */
     resume?: boolean;
+    /** contract-spend-survives-v1 (O1) — which round this invocation is, stamped on the chair_spend
+     *  row: 1 on a first run, and the examine⇄amend re-run's round otherwise. Absent → 1. */
+    round?: number;
   }
 
   // Resolve a chair's declared output types into seal-specs (type → core → primitive).
@@ -2468,7 +2494,7 @@ export async function runGig(
     }
   }
 
-  function prepareChair(chair: Chair, phaseName: string, extraInputs: readonly OutputRecord[] = [], opts: { resume?: boolean } = {}): PreparedChair {
+  function prepareChair(chair: Chair, phaseName: string, extraInputs: readonly OutputRecord[] = [], opts: { resume?: boolean; round?: number } = {}): PreparedChair {
     // A skill-backed chair runs the skill's deterministic code half — no agent, no model.
     if (chair.skill_slug && (chair.agent_slug ?? "") === "") {
       const dir = deps.skill_dirs?.get(chair.skill_slug);
@@ -2524,6 +2550,7 @@ export async function runGig(
         producer_slug: chair.skill_slug!, domain: standard.domain,
         ...(skillReuse ? { reuse_key: skillReuse.key } : {}),
         ...(skillReuse?.hit ? { reuse_hit: skillReuse.hit } : {}),
+        ...(opts.round !== undefined ? { round: opts.round } : {}),
       };
     }
 
@@ -2718,6 +2745,7 @@ export async function runGig(
       ...(lookup ? { reuse_key: lookup.key } : {}),
       ...(effectiveHit ? { reuse_hit: effectiveHit } : {}),
       ...(opts.resume ? { resume: true } : {}),
+      ...(opts.round !== undefined ? { round: opts.round } : {}),
     };
   }
 
@@ -3016,6 +3044,29 @@ export async function runGig(
         emit({ type: "budget_state", phase: phaseName, role: chair.role, agent_state: "active", pool_remaining: budget.pool_remaining });
       }
       releaseHold();
+      // ── contract-spend-survives-v1 (O1/I2/O2/F1) — the DURABLE chair_spend row ─────────────────
+      // Appended the moment THIS chair's invocation settled — before the next chair is invoked, and
+      // before the output_contract check below (which can throw) — so a kill or a failure on a later
+      // chair leaves this one's captured spend behind. An attributed chair carries its own usage; an
+      // unattributed one seals captured:false with NO cost, never a $0 row (#235). The gig-wide fold
+      // still writes the single gig row on success; these rows are the per-chair record that survives
+      // when that row is never sealed. Appended only for a model invocation — a skill chair runs no
+      // model and settles no spend — and never for a reuse hit (which returns before reaching here).
+      const chairSettledUsage = sink.usage();
+      deps.ledger.append({
+        kind: "chair_spend",
+        schema_version: LEDGER_SCHEMA_VERSION,
+        entry_id: `chair_spend:${gig_id}:${chair.role}:${p.round ?? 1}:${randomUUID()}`,
+        gig_id,
+        role: chair.role,
+        phase: phaseName,
+        round: p.round ?? 1,
+        captured: sink.attributed(),
+        output_hashes: [],
+        started_at: new Date(t0).toISOString(),
+        finished_at: new Date().toISOString(),
+        ...(chairSettledUsage ? { usage: chairSettledUsage } : {}),
+      });
       // Runtime output_contract check: every type the chair promised must be covered by the
       // bound agent's declared output_types (compose-time mirror; a hand-rolled literal could
       // still ship a mismatch).
@@ -3460,6 +3511,10 @@ export async function runGig(
     // invokers, or a run whose every invocation reported no usage payload). #235: an absent
     // usage block means "not captured", never "$0.00".
     ...(settledUsage ? { usage: settledUsage } : {}),
+    // contract-spend-survives-v1 (O4) — a RESUMED gig's row carries what the killed attempt spent,
+    // read from the checkpoint (resumedFrom.prior_usage) and kept BESIDE this run's own `usage`,
+    // never folded in (#235/#236). Absent on a cold run.
+    ...(resumedFrom?.prior_usage !== undefined ? { prior_usage: resumedFrom.prior_usage } : {}),
   });
 
   // Drain the gig HEADER to the sink (fire-and-forget, like every output before it) — the

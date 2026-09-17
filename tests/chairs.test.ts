@@ -408,7 +408,7 @@ describe("chairs — runtime dispatch", () => {
     expect(res.status).toBe("complete");
     expect(res.outputs.length).toBe(1);
     expect(res.outputs[0]!.agent_slug).toBe("a");
-    expect(ledger.count()).toBe(1);
+    expect(ledger.query({ kind: "gig" }).length, "one gig row; chair_spend rows are counted separately").toBe(1);
   });
 
   it("multi-chair phase dispatches all parallel-eligible chairs concurrently", async () => {

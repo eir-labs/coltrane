@@ -44,7 +44,7 @@ export interface GigUsage {
  * `genome_hash`/`run_fingerprint` exist ONLY on `kind:"gig"`, so there is nowhere to put a
  * sentinel on a promotion or an abort.
  */
-export type LedgerEntryKind = "gig" | "genome_mutation" | "governance";
+export type LedgerEntryKind = "gig" | "genome_mutation" | "governance" | "chair_spend";
 
 export const LEDGER_SCHEMA_VERSION = 2;
 
@@ -115,6 +115,16 @@ export interface GigLedgerEntry extends LedgerEntryBase {
   // Settled model spend (#195). Present for gigs with ≥1 real model invocation; the result
   // events carry it (usage + total_cost_usd) and it used to be forwarded-but-dropped.
   usage?: GigUsage;
+  /**
+   * What the EARLIER attempt(s) of a RESUMED gig had spent, banked on the checkpoint this run
+   * restored from (contract-spend-survives-v1 O4). Kept BESIDE `usage`, never folded into it:
+   * `usage` is what THIS run's chairs settled, `prior_usage` is what the killed attempt settled,
+   * and adding them would erase the distinction (#235/#236). Absent on a cold (non-resumed) run.
+   * Typed `unknown` because it travels verbatim from the checkpoint's own `prior_usage: unknown`
+   * (src/reuse.ts) — the row records it faithfully rather than re-asserting a shape the checkpoint
+   * did not guarantee.
+   */
+  prior_usage?: unknown;
 }
 
 /** A definition entered the substrate. Identity is the canonical hash chain, NOT a run
@@ -149,7 +159,45 @@ export interface GovernanceLedgerEntry extends LedgerEntryBase {
   detail?: Record<string, unknown>;
 }
 
-export type LedgerEntry = GigLedgerEntry | GenomeMutationLedgerEntry | GovernanceLedgerEntry;
+/**
+ * A single chair invocation SETTLED (contract-spend-survives-v1). One row per settled chair,
+ * appended the moment the invocation returns — BEFORE the next chair is invoked — so a process
+ * killed on a later chair leaves every earlier chair's captured spend durable. This is the fix
+ * for the loss the gig row alone could not prevent: the gig row is written ONCE, on the success
+ * path, so a gig that died on chair N lost the spend of chairs 1..N-1 (#235/#236, docs/specs/
+ * spend-survives.red-spec.md). For a completed gig these rows' captured cost reconciles to the
+ * gig row's `usage.total_cost_usd`; for a failed gig they survive though no gig row is ever sealed.
+ *
+ * Rides on the runtime/gigLedger side (SplitLedger routes it with `gig`), never the genome ledger —
+ * it is machine-local run accounting, not genome provenance.
+ */
+export interface ChairSpendLedgerEntry extends LedgerEntryBase {
+  kind: "chair_spend";
+  /** The gig this chair ran under. Shared with the gig row so `query({gig_id})` reaches both. */
+  gig_id: string;
+  /** WHICH seat spent — the chair's role. */
+  role: string;
+  /** The phase the seat sat in. */
+  phase: string;
+  /** 1 on a first run; the amend re-invocation's round otherwise. Distinguishes a seat's repeated
+   *  settlements across the examine⇄amend loop so two rows for one role are not conflated. */
+  round: number;
+  /**
+   * Whether this invocation reported a usable usage payload. `false` means the spend is UNKNOWN,
+   * not $0 (#235): an unattributed chair seals `captured:false` and carries NO `usage`, so it can
+   * never be summed as a $0 row and adds nothing to any reconciliation.
+   */
+  captured: boolean;
+  /** The chair's OWN settled spend. Present ONLY when `captured` — an uncaptured chair carries no
+   *  cost field at all, which is what keeps "not captured" from masquerading as "$0.00". */
+  usage?: GigUsage;
+}
+
+export type LedgerEntry =
+  | GigLedgerEntry
+  | GenomeMutationLedgerEntry
+  | GovernanceLedgerEntry
+  | ChairSpendLedgerEntry;
 
 export interface LedgerQuery {
   kind?: LedgerEntryKind;
@@ -296,9 +344,9 @@ function rejectGigIdentity(row: Record<string, unknown>, kind: string): void {
 export function validateEntry(entry: LedgerEntry): void {
   const row = entry as unknown as Record<string, unknown>;
   const kind = row["kind"];
-  if (kind !== "gig" && kind !== "genome_mutation" && kind !== "governance") {
+  if (kind !== "gig" && kind !== "genome_mutation" && kind !== "governance" && kind !== "chair_spend") {
     throw new LedgerError(
-      `ledger entry requires kind ∈ {gig, genome_mutation, governance}; got ${JSON.stringify(kind)}`,
+      `ledger entry requires kind ∈ {gig, genome_mutation, governance, chair_spend}; got ${JSON.stringify(kind)}`,
     );
   }
   if (!isNonEmptyString(row["entry_id"])) throw new LedgerError("ledger entry requires entry_id");
@@ -311,6 +359,23 @@ export function validateEntry(entry: LedgerEntry): void {
     if (!isNonEmptyString(row["standard_slug"])) throw new LedgerError("gig entry requires standard_slug");
     requireHex(row, "genome_hash", "gig");
     requireHex(row, "run_fingerprint", "gig");
+    return;
+  }
+
+  if (kind === "chair_spend") {
+    // Per-chair settled-spend accounting, NOT a run: it names its gig and seat but carries no
+    // reproducibility identity, so the gig-identity rejection below applies to it too.
+    if (!isNonEmptyString(row["gig_id"])) throw new LedgerError("chair_spend entry requires gig_id");
+    if (!isNonEmptyString(row["role"])) throw new LedgerError("chair_spend entry requires role");
+    if (!isNonEmptyString(row["phase"])) throw new LedgerError("chair_spend entry requires phase");
+    if (typeof row["round"] !== "number") throw new LedgerError("chair_spend entry requires round (a number)");
+    if (typeof row["captured"] !== "boolean") {
+      throw new LedgerError(
+        "chair_spend entry requires captured (a boolean) — an unattributed chair is captured:false, " +
+          "never a $0 row (#235)",
+      );
+    }
+    rejectGigIdentity(row, "chair_spend");
     return;
   }
 
@@ -611,7 +676,9 @@ export class SplitLedger implements Ledger {
   query(filter?: LedgerQuery): LedgerEntry[];
   query(filter: LedgerQuery = {}): LedgerEntry[] {
     if (filter.kind === "genome_mutation") return this.genomeLedger.query(filter);
-    if (filter.kind === "gig" || filter.kind === "governance") return this.gigLedger.query(filter);
+    // chair_spend rides with gig/governance on the runtime side (see append), so a kind-filtered
+    // read of it short-circuits to the gig ledger and never parses the genome file.
+    if (filter.kind === "gig" || filter.kind === "governance" || filter.kind === "chair_spend") return this.gigLedger.query(filter);
     return [...this.genomeLedger.query(filter), ...this.gigLedger.query(filter)];
   }
 

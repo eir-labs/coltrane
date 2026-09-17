@@ -496,8 +496,31 @@ export async function runCli(argv: readonly string[], io: CliIO): Promise<number
         args["budget"] = { max_usd };
       }
 
+      // contract-spend-survives-v1 (O3) — the pre-dispatch high-water mark of durable chair_spend
+      // rows. A failed gig writes no gig row, but each settled chair left a chair_spend row (O1/O2),
+      // so the rows THIS dispatch added are those past this mark — which scopes the captured total to
+      // this run even on a shared, persistent ledger. (The gig id is minted inside gig_dispatch and
+      // is not returned on a chair-failure, so the mark, not a gig_id filter, is what isolates it.)
+      const chairSpendMark = deps.ledger.query({ kind: "chair_spend" }).length;
       const r = await call("gig_dispatch", args);
-      if (!r.ok) { line(io, `dispatch failed: ${r.error ?? "unknown error"}`); return 1; }
+      if (!r.ok) {
+        line(io, `dispatch failed: ${r.error ?? "unknown error"}`);
+        // Report what the FAILURE cost. Every chair that settled before the gig died left a durable
+        // chair_spend row; sum the captured ones in dollars and name how many invocations settled.
+        // When nothing was captured, SAY so — never "$0.00", the #235 lie that reads as "ran free".
+        const settledRows = deps.ledger.query({ kind: "chair_spend" }).slice(chairSpendMark);
+        const capturedRows = settledRows.filter((row) => (row as { captured?: boolean }).captured === true);
+        if (capturedRows.length > 0) {
+          const total = capturedRows.reduce(
+            (n, row) => n + ((row as { usage?: { total_cost_usd?: number } }).usage?.total_cost_usd ?? 0),
+            0,
+          );
+          line(io, `  captured spend: $${total.toFixed(2)} across ${settledRows.length} chair invocation(s) that settled`);
+        } else {
+          line(io, `  captured spend: not captured — no chair invocation settled a usage report before the failure`);
+        }
+        return 1;
+      }
       const d = r.data as {
         gig_id: string; status?: string; awaiting?: { phase: string; role: string };
         warnings?: string[]; manifest?: Record<string, unknown>;

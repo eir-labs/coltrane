@@ -48,7 +48,7 @@
           },
           "fork_from": {
             "primer": "coltrane-engine",
-            "max_context_tokens": 150000
+            "max_context_tokens": 300000
           }
         }
       ]

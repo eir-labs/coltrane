@@ -160,7 +160,6 @@ function writeSurfaceV2(repo: string): void {
   writeIn(repo, "src/cli.ts", cliFile(["--input", "--depth", "--budget"]));
   writeIn(repo, "src/worker_env.ts", workerEnvFile(["COLTRANE_STORE_URL", "COLTRANE_STORE_ANON", "COLTRANE_SERVICE_URL"]));
   writeIn(repo, "domain_types/claim-draft.json", domainTypeFile("claim-draft", 2));
-  writeIn(repo, "scripts/laws.sh", lawsFile(150, 12));
 }
 
 /** A two-tag fixture: v0.1.0 (the v1 surface) then v0.2.0 (the v2 surface), with a real commit
@@ -172,6 +171,9 @@ function twoTagRepo(): string {
   tag(repo, "v0.1.0");
   writeSurfaceV2(repo);
   commit(repo, "feat: swap type_browse for agent_browse", "2026-02-01T00:00:00Z");
+  // The law counts move in their OWN commit, so the range genuinely holds two commits: `git commit`
+  // exits non-zero on an empty tree, which killed this fixture before it reached the compiler.
+  writeIn(repo, "scripts/laws.sh", lawsFile(150, 12));
   commit(repo, "chore: bump the law counts", "2026-02-02T00:00:00Z");
   tag(repo, "v0.2.0");
   return repo;
@@ -420,7 +422,9 @@ describe("release record — an absent or unparseable surface file is null, not 
     expect(second.surface.mcp_tool_args, "and its args list too").toBeNull();
     // other surfaces read from other files still compile.
     expect(second.surface.cli_flags, "an unparseable mcp.ts does not null the CLI surface").not.toBeNull();
-    expect(second.laws.after).toBe(150);
+    // This fixture never moves the law counts — v0.1.0's 100/10 still stand at v0.2.0. The point is
+    // that a garbled mcp.ts does not stop the rest of the record compiling.
+    expect(second.laws.after, "the law count still reads at a tag whose mcp.ts is garbled").toBe(100);
   });
 });
 

@@ -1,0 +1,59 @@
+{
+  "slug": "release-notes-v0",
+  "domain": "release",
+  "agent_slugs": [
+    "release-writer",
+    "release-note-verifier"
+  ],
+  "phases": [
+    {
+      "name": "write",
+      "chairs": [
+        {
+          "role": "write-note",
+          "agent_slug": "release-writer",
+          "depends_on": [],
+          "input_contract": [
+            "release-record"
+          ],
+          "output_contract": [
+            "release-note"
+          ],
+          "required_skills": [],
+          "turn_reserve": 4
+        }
+      ]
+    },
+    {
+      "name": "check",
+      "chairs": [
+        {
+          "role": "check-note",
+          "agent_slug": "release-note-verifier",
+          "depends_on": [
+            "write-note"
+          ],
+          "input_contract": [
+            "release-record",
+            "release-note"
+          ],
+          "output_contract": [
+            "release-note-verdict"
+          ],
+          "required_skills": [],
+          "turn_reserve": 4
+        }
+      ]
+    }
+  ],
+  "status": "draft",
+  "input_types": [
+    "release-record"
+  ],
+  "output_types": [
+    "release-note",
+    "release-note-verdict"
+  ],
+  "max_examine_rounds": 2,
+  "description": "Two registers of one release, written from a record compiled out of git and refused when the prose outruns it. The input is a release-record (src/releases.ts, compileReleases): the commits a tag carries, the law counts at both ends, and the surface that changed — tool slugs and arguments, CLI flags, environment variables, domain types as slug@version — with any surface it could not read named rather than silently empty. The writer seals a plain register for someone using coltrane and a formal one for someone auditing it, plus `claims`: every factual statement paired with the record path that supports it. The verify seat resolves each path against the record, adds any assertion that carries no evidence entry, names any surface change neither register mentions, and fails the note rather than letting it publish. A failing verdict re-runs the writer with the verdict fed back, up to max_examine_rounds. Both seats are TOOL-LESS by construction: everything true about a release is already in the record, which is what lets this standard run on a cheap chat-completions seat. It publishes nothing — the note is sealed to the ledger and the changelog reads it from there."
+}

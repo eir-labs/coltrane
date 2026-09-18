@@ -61,7 +61,8 @@
       "types": "./dist/src/genome_schema.d.ts",
       "import": "./dist/src/genome_schema.js",
       "default": "./dist/src/genome_schema.js"
-    }
+    },
+    "./releases.json": "./releases.json"
   },
   "files": [
     "dist/src",
@@ -76,13 +77,14 @@
     "tours",
     "evals",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "releases.json"
   ],
   "publishConfig": {
     "access": "public"
   },
   "scripts": {
-    "build": "tsc && cp src/skill_runner.mjs dist/src/ && chmod +x dist/src/server_entry.js dist/src/server_relay.js dist/src/cli_entry.js",
+    "build": "tsc && cp src/skill_runner.mjs dist/src/ && chmod +x dist/src/server_entry.js dist/src/server_relay.js dist/src/cli_entry.js && node scripts/emit_releases.mjs --allow-unavailable",
     "dev": "tsc --watch",
     "prepare": "npm run build",
     "test": "bash scripts/laws.sh",

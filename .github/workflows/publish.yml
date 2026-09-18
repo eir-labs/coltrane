@@ -83,6 +83,12 @@ jobs:
       # (as the first draft did) broke tests/pack_content_audit for a CI-only reason.
       - run: npm run verify
 
+      # The history the package SHIPS, written from the tree at each tag plus the release being
+      # published — which has no tag yet, because the tag is pushed at the end of this job. Runs after
+      # verify (which builds dist/) and before publish, so the tarball carries it.
+      - if: steps.check.outputs.publish == 'true'
+        run: node scripts/emit_releases.mjs --pending "${{ steps.ver.outputs.version }}"
+
       # Trusted publishing needs npm >= 11.5.1; upgrade only now, past verify.
       - if: steps.check.outputs.publish == 'true'
         run: npm install -g npm@latest

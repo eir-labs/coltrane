@@ -22,7 +22,14 @@ const skillDir = argv[2];
 async function main() {
   let raw = "";
   for await (const chunk of stdin) raw += chunk;
-  const input = raw.trim() ? JSON.parse(raw) : {};
+  const payload = raw.trim() ? JSON.parse(raw) : {};
+  // The parent may wrap the input in an envelope carrying CONTEXT — today `upstream`, the list of
+  // upstream outputs by role — so a skill can see N same-type inputs individually instead of only
+  // the Object.assign merge (which silently collapses them). A bare payload is the legacy shape and
+  // still calls run(input) with no context; a skill that ignores its second argument is unchanged.
+  const isEnvelope = payload && typeof payload === "object" && payload.__coltrane_skill_envelope === 1;
+  const input = isEnvelope ? payload.input : payload;
+  const context = isEnvelope ? payload.context : undefined;
 
   const dir = isAbsolute(skillDir) ? skillDir : resolve(skillDir);
   const mod = await import(pathToFileURL(join(dir, "skill.mjs")).href);
@@ -30,7 +37,7 @@ async function main() {
   if (typeof run !== "function") {
     throw new Error(`skill at ${skillDir} exports no default run() function`);
   }
-  const output = await run(input);
+  const output = context === undefined ? await run(input) : await run(input, context);
   stdout.write(JSON.stringify({ ok: true, output }));
 }
 

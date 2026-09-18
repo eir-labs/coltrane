@@ -36,6 +36,10 @@ export interface SkillFixture {
   id: string;
   description?: string;
   input: unknown;
+  /** Optional second argument to run(): the context the runtime would supply (today `upstream`,
+   *  the upstream outputs by role). A fixture that declares it exercises the per-role path; one
+   *  that omits it exercises the legacy run(input) path. */
+  context?: unknown;
   expected_output?: unknown;
   assertions?: { path: string; op: string; value?: unknown }[];
 }
@@ -172,7 +176,7 @@ export function loadFixtures(skillDir: string): SkillFixture[] {
 /** Run a skill's execution half in a permission-scoped subprocess. `tierOverride` runs the
  *  skill at a tier other than its declared one — used by the cage matrix to exercise one
  *  capability probe across every tier. */
-export function executeSkill(skillDir: string, input: unknown, timeoutMs = 120_000, tierOverride?: number): ExecuteResult {
+export function executeSkill(skillDir: string, input: unknown, timeoutMs = 120_000, tierOverride?: number, context?: unknown): ExecuteResult {
   const meta = readSkillMeta(skillDir);
   const tier = tierOverride ?? (meta.permission?.tier ?? 0);
   // the skill's own meta.timeout_ms caps the caller's timeout — a runaway code half can't
@@ -183,7 +187,7 @@ export function executeSkill(skillDir: string, input: unknown, timeoutMs = 120_0
   assertSandboxCapableRuntime();
   const dir = realDir(skillDir);
   const res = spawnSync("node", [...tierFlags(tier, dir), runnerPath(), dir], {
-    input: JSON.stringify(input),
+    input: JSON.stringify(context === undefined ? input : { __coltrane_skill_envelope: 1, input, context }),
     encoding: "utf-8",
     maxBuffer: 64 * 1024 * 1024,
     timeout,
@@ -223,7 +227,7 @@ export async function executeSkillAsync(
   skillDir: string,
   input: unknown,
   timeoutMs = 120_000,
-  opts: { signal?: AbortSignal | undefined; tierOverride?: number | undefined; cwd?: string | undefined } = {},
+  opts: { signal?: AbortSignal | undefined; tierOverride?: number | undefined; cwd?: string | undefined; context?: SkillContext | undefined } = {},
 ): Promise<ExecuteResult> {
   const started = Date.now();
   const abortResult = (): ExecuteResult => ({
@@ -322,8 +326,20 @@ export async function executeSkillAsync(
     child.stdin.on("error", () => {
       /* the child may exit before we finish writing; `close` reports the real outcome */
     });
-    child.stdin.end(JSON.stringify(input));
+    // With a context the input travels in an envelope the runner unwraps into run(input, context);
+    // without one the bare input goes over the wire exactly as before (fixtures, legacy callers).
+    child.stdin.end(JSON.stringify(opts.context === undefined ? input : { __coltrane_skill_envelope: 1, input, context: opts.context }));
   });
+}
+
+/**
+ * What a skill may read BESIDE its merged input. `upstream` is the runtime's answer to the merge's
+ * one lie: `Object.assign` over N upstream outputs keeps only the last same-key value, so two chairs
+ * sealing the same domain type collapse to one and the skill cannot tell. Here they arrive one by
+ * one — role, domain type, data — in dependency order. Additive: the merge is unchanged.
+ */
+export interface SkillContext {
+  upstream: readonly { role: string | undefined; domain_type: string; data: Record<string, unknown> }[];
 }
 
 /** The human-readable cause behind an abort, whatever shape the aborter used. */
@@ -395,7 +411,7 @@ export function runSkillFixtures(skillDir: string): FixtureReport {
   let deterministic = true;
 
   for (const fx of fixtures) {
-    const runs = Array.from({ length: DETERMINISM_RUNS }, () => executeSkill(skillDir, fx.input));
+    const runs = Array.from({ length: DETERMINISM_RUNS }, () => executeSkill(skillDir, fx.input, undefined, undefined, fx.context));
     const r1 = runs[0]!;
     const stable = runs.every((r) => r.ok) && runs.every((r) => deepEqual(r.output, r1.output));
     const matchesExpected = fx.expected_output === undefined || deepEqual(r1.output, fx.expected_output);

@@ -458,3 +458,40 @@ describe("release surface — a present-but-unreadable surface is NAMED, not sil
     expect(first.surface_unread, "the readable CLI surface is not named unread").not.toContain("cli_flags");
   });
 });
+
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────────
+// Found by running the compiler against this repository at HEAD: v0.24.31 reported
+// `gig_dispatch.properties`, `gig_dispatch.type` and `gig_dispatch.description` as added arguments.
+// They are not arguments. They are JSON-Schema keywords INSIDE gig_dispatch's nested `budget` object
+// (`budget: { type: "object", description: "…", properties: { max_usd: … } }`), which the flat
+// `(\w+)\s*:` scan cannot tell from a top-level argument. A changelog that names arguments no tool
+// has is worse than one that names none: it is confidently wrong in public.
+describe("release surface — only TOP-LEVEL arguments are arguments (O1)", () => {
+  it("O1 — a nested object argument yields its own name, never the JSON-Schema keywords inside it", () => {
+    const compileReleases = compiler();
+    const repo = newRepo("relsurf-nested-");
+    // gig_dispatch's real shape, reduced: two flat arguments and one NESTED object argument.
+    writeIn(repo, "src/mcp.ts",
+      'const TOOL_DEFS: readonly Omit<MCPToolDef, "description">[] = [\n' +
+      '  { slug: "gig_dispatch", category: "run", input_schema: obj({ standard_slug: "string", wait: "boolean", ' +
+      'budget: { type: "object", description: "per-gig cost ceiling in US dollars", properties: { max_usd: { type: "number" } } } }) },\n' +
+      '];\n' +
+      'export const MCP_TOOLS: readonly MCPToolDef[] = TOOL_DEFS.map((t) => t);\n');
+    commit(repo, "chore: seed", "2026-01-01T00:00:00Z");
+    tag(repo, "v0.1.0");
+
+    const [only] = compileReleases({ tree_root: repo });
+    const args = only!.surface.mcp_tool_args;
+    expect(args, "the tool registry parsed").not.toBeNull();
+    const added = args!.added;
+    expect(added, "the nested argument is named by ITS OWN key").toContain("gig_dispatch.budget");
+    for (const keyword of ["type", "properties", "description"]) {
+      expect(added,
+        `"gig_dispatch.${keyword}" is a JSON-Schema keyword inside the nested budget object, not an argument gig_dispatch accepts — a changelog naming it is confidently wrong in public`,
+      ).not.toContain(`gig_dispatch.${keyword}`);
+    }
+    expect(added.filter((a) => a.startsWith("gig_dispatch.")).sort(),
+      "exactly the three top-level arguments").toEqual(["gig_dispatch.budget", "gig_dispatch.standard_slug", "gig_dispatch.wait"]);
+  });
+});

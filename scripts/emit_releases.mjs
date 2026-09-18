@@ -20,6 +20,9 @@ import { writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { releasesJson } from "../dist/src/releases.js";
 
+// Every line this script prints goes to STDERR. `npm pack --dry-run --json` runs `prepare`, which runs
+// the build, which runs this — and anything on stdout lands inside the JSON the pack audits parse.
+
 const argv = process.argv.slice(2);
 const flag = (name) => {
   const i = argv.indexOf(`--${name}`);
@@ -56,14 +59,14 @@ try {
     process.exit(2);
   }
   writeFileSync(out, `${JSON.stringify({ generated_from: "compileReleases", releases: [], unavailable: reason }, null, 2)}\n`);
-  console.log(`emit_releases: history unavailable → ${out} (${reason})`);
+  console.error(`emit_releases: history unavailable → ${out} (${reason})`);
   process.exit(0);
 }
 writeFileSync(out, json);
 
 const { releases } = JSON.parse(json);
 const newest = releases[0];
-console.log(
+console.error(
   `emit_releases: ${releases.length} release(s) → ${out}` +
     (newest ? ` (newest ${newest.tag}${newest.pending ? ", pending" : ""})` : ""),
 );

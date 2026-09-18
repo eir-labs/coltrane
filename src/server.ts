@@ -42,7 +42,7 @@ import {
 } from "./ledger.js";
 import { sealDrill } from "./seal_drill.js";
 import { standardSimulate } from "./simulate.js";
-import { runGig, BudgetExhausted, GigAborted, ResumeRefused, partialGigUsage, partialBudgetState, type AgentInvoker } from "./runtime.js";
+import { runGig, BudgetExhausted, GigAborted, ResumeRefused, partialGigUsage, partialBudgetState, partitionGigInputKeys, unknownGigInputMessage, type AgentInvoker } from "./runtime.js";
 import { assembleRunDeps, resolveWorkingRepo } from "./run_deps.js";
 import { createCheckpointStore, createReuseStore, type CheckpointStore, type ReuseStore } from "./reuse.js";
 import { killLiveChairChildren } from "./claude_invoker.js";
@@ -3525,6 +3525,15 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
 export interface SurfaceToolResult extends ToolResult {
   /** Set when the tool exists but its semantics are local-process and deps.hosted is true. */
   hosted_unsupported?: boolean;
+  /** contract-post-time-gig-input-v1 (O3) — undeclared payload keys the engine will IGNORE, sorted,
+   *  named at POST time so the caller who can still fix the key is told, rather than the worker later. */
+  undeclared_input_keys?: string[];
+  /** contract-post-time-gig-input-v1 (F1) — false when the hosted door could NOT resolve the standard's
+   *  declared inputs (unknown slug, no reader, or the read failed). The gig is queued and the preflight
+   *  backstops it; the reply never IMPLIES a check it could not run. Absent when the payload was checked. */
+  input_validated?: boolean;
+  /** contract-post-time-gig-input-v1 (F1) — why the payload could not be validated at post time. */
+  reason?: string;
 }
 
 export interface ToolSurfaceDeps extends ServerDeps {
@@ -3533,6 +3542,17 @@ export interface ToolSurfaceDeps extends ServerDeps {
   /** Hosted gig queuing: queue a run (e.g. postgrestQueueGig(ctx) → the coltrane_gig_dispatch
    *  RPC). Without it, hosted gig_dispatch is an honest typed error — it NEVER spawns. */
   queueGig?: ((args: Record<string, unknown>) => Promise<Record<string, unknown>>) | undefined;
+  /** contract-post-time-gig-input-v1 (O4): the host-wired reader of a standard's declared gig inputs,
+   *  consulted ONLY when `deps.standards` does not hold the slug. The engine DEFINES the seam; the host
+   *  WIRES it (the same idiom as `queueGig`) — one narrow read of one standard's declared inputs, no
+   *  other genome class fetched. Returns the input type slugs. A read that CANNOT answer is expressed by
+   *  the host NOT wiring the seam (or the read rejecting), which the door treats as "unresolved" (F1);
+   *  the return is typed `Promise<string[]>` to match the sealed law's `HostedDepsX`, and the door still
+   *  defends at runtime against a reader that answers `undefined`. No `| undefined` on the property (the
+   *  other hosted seams carry it): under exactOptionalPropertyTypes the sealed law intersects
+   *  `ToolSurfaceDeps` with `declaredGigInputs?: (slug) => Promise<string[]>`, and an explicit `undefined`
+   *  makes `ToolSurfaceDeps` unassignable to that intersection (TS2375). */
+  declaredGigInputs?: (standard_slug: string) => Promise<string[]>;
   /** Hosted member approval: approve a parked gig (e.g. postgrestApproveGig(ctx) → the
    *  coltrane_gig_approve RPC, which is member-JWT-only). Parallel to queueGig — the engine
    *  passes through, the store authorizes (an agent token is refused there). Without it, hosted
@@ -3766,6 +3786,78 @@ async function callSurfaceTool(
       // Hosted dispatch NEVER spawns. With a queue seam it queues (the gig table is the
       // queue; a drain worker claims and runs); without one it says so, typed.
       if (deps.queueGig) {
+        // contract-post-time-gig-input-v1 — validate the payload BEFORE it is queued, in the SAME
+        // words as runGig's preflight, so the caller who can still fix the key is the one who is told
+        // (not the worker, later). Everything below the guard queues exactly as today; a throw on this
+        // path would reach the caller as an opaque `tool failed`, so every refusal here is a typed JSON
+        // reply and NEVER an exception.
+        // DOT access on purpose (not a bracket-and-string index): the advertised_args_are_read parser
+        // slurps the last dispatchTool case (venue_credential_mint) to end-of-file, and a bracket read
+        // of a string-literal key here would be miscounted as that tool reading an arg it does not
+        // advertise — this comment must not spell that index pattern out either, or the parser counts
+        // the explanation as an instance of it. gig_dispatch advertises both keys; dot access keeps the
+        // read where it belongs. (Same reason org_hire above reads its args by dot.)
+        const input = args.input;
+        const isPayloadObject = typeof input === "object" && input !== null && !Array.isArray(input);
+        if (isPayloadObject) {
+          const standard_slug = String(args.standard_slug ?? "");
+          const payload = input as Record<string, unknown>;
+          // (O4) declared inputs from deps.standards FIRST; only on a miss, exactly one narrow read of
+          // the host-wired reader. The reader may throw or answer undefined — either means "unresolved".
+          let declared: readonly string[] | undefined;
+          const held = deps.standards?.get(standard_slug);
+          if (held) {
+            declared = held.input_types ?? [];
+          } else if (deps.declaredGigInputs) {
+            try {
+              declared = await deps.declaredGigInputs(standard_slug);
+            } catch {
+              declared = undefined; // a failed read is "could not check", never a guess or a refusal
+            }
+          }
+          if (declared === undefined) {
+            // (F1) neither source could supply the declared inputs. Do NOT guess and do NOT refuse:
+            // queue as today and SAY the payload was not validated, so the reply never implies a check
+            // it could not run. The preflight remains the backstop when the worker runs the gig.
+            try {
+              const data = await deps.queueGig(args);
+              return {
+                ok: true,
+                data,
+                input_validated: false,
+                reason:
+                  `the payload was not validated at post time: standard "${standard_slug}" is not on this ` +
+                  `surface (deps.standards) and no declaredGigInputs reader resolved its declared inputs. ` +
+                  `The gig is queued and runGig's preflight validates it when the worker runs it.`,
+              };
+            } catch (e) {
+              return { ok: false, error: e instanceof Error ? e.message : String(e) };
+            }
+          }
+          // The SAME partition the preflight runs: a near miss refuses, other undeclared keys are named.
+          const part = partitionGigInputKeys(Object.keys(payload), declared, (d) => payload[d] !== undefined);
+          if (part.nearMiss !== undefined) {
+            // (O1/O2) a typed refusal in the preflight's exact words — NOTHING is queued, nothing throws.
+            return {
+              ok: false,
+              refusal: "unknown_gig_input",
+              error: unknownGigInputMessage(part.nearMiss.key, part.nearMiss.declaredKey, standard_slug),
+            };
+          }
+          // (O3/I2) no near miss: queue the UNCHANGED args, and name the harmless undeclared keys (sorted)
+          // on the reply so the caller learns at post time what the engine will ignore. A clean payload
+          // adds nothing — `undeclared_input_keys` is present only when there is at least one extra.
+          try {
+            const data = await deps.queueGig(args);
+            return part.extras.length > 0
+              ? { ok: true, data, undeclared_input_keys: part.extras }
+              : { ok: true, data };
+          } catch (e) {
+            return { ok: false, error: e instanceof Error ? e.message : String(e) };
+          }
+        }
+        // (F2) an absent or non-object payload is a shape the door already handles — no new refusal,
+        // queued exactly as today.
         try {
           const data = await deps.queueGig(args);
           return { ok: true, data };

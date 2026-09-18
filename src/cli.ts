@@ -551,6 +551,23 @@ export async function runCli(argv: readonly string[], io: CliIO): Promise<number
           (m.usage?.total_cost_usd !== undefined ? `, $${m.usage.total_cost_usd.toFixed(2)}` : "") +
           (m.run_fingerprint ? `, fingerprint ${m.run_fingerprint.slice(0, 12)}` : ""));
       }
+      // contract-unknown-gig-input-v1 (O2, CLI) — a completing dispatch NAMES the payload keys the
+      // standard did not declare, so harmless metadata is never silently dropped. The runtime emits a
+      // progress event for direct callers, but the synchronous (--wait) server path wires no onProgress
+      // and returns only a manifest, so the CLI recomputes the same partition from the standard it holds
+      // and the payload it sent. A near-miss collision never reaches here — the runtime refuses it, so
+      // the dispatch fails and returns above — so on this completing path every undeclared key is a
+      // harmless extra. Nothing is printed when there are none.
+      const dispatchedStandard = deps.standards?.get(standard);
+      const payload = input.value && typeof input.value === "object" ? (input.value as Record<string, unknown>) : {};
+      if (dispatchedStandard) {
+        const declared = new Set(dispatchedStandard.input_types ?? []);
+        const undeclared = Object.keys(payload).filter((k) => !declared.has(k)).sort();
+        if (undeclared.length > 0) {
+          line(io, `note: ${undeclared.length} dispatch payload key(s) not declared by standard "${standard}", named not dropped: ` +
+            undeclared.map((k) => `"${k}"`).join(", "));
+        }
+      }
       return 0;
     }
 

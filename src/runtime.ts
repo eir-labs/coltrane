@@ -1609,6 +1609,41 @@ export async function runGig(
     try { deps.onProgress?.(ev); } catch { /* observability must not fail the gig */ }
   };
 
+  // contract-unknown-gig-input-v1 — no dispatch payload key is silently ignored. At preflight, after
+  // the missing-input check above and before any chair is prepared or invoked, partition the payload's
+  // keys against the standard's declared inputs.
+  //   O1/I2/F1: a key that is not declared but NORMALIZES to a declared key that is ALSO present is a
+  //     NEAR MISS — one of the two spellings is being dropped and the caller cannot see which — so the
+  //     gig is refused with a typed error, at t=0, before a chair burns real money. It is a DIFFERENT
+  //     error from MissingGigInput: that path fired above only when a declared key was ABSENT, so a
+  //     near-miss for an absent key never reaches here and its MissingGigInput hint is untouched.
+  //   O2/I1/I3: every OTHER undeclared key is an EXTRA — named on ONE progress event carrying all of
+  //     them sorted, never refused (harmless metadata keeps the gig running). A refused near-miss is
+  //     never in `extras`, so it is never also reported as an extra (F1 — never twice for one key).
+  {
+    const declaredPresent = [...standardInputs].filter((d) => gigInput[d] !== undefined);
+    const extras: string[] = [];
+    for (const key of Object.keys(gigInput)) {
+      if (standardInputs.has(key)) continue; // a declared key is read, never undeclared
+      const collidesWith = declaredPresent.find((d) => normalizeKey(d) === normalizeKey(key));
+      if (collidesWith !== undefined) {
+        throw new RuntimeError(
+          `dispatch payload key "${key}" is not declared by standard "${standard.slug}", but normalizes to declared gig input "${collidesWith}", which is ALSO present — one of the two spellings is being dropped and the caller cannot see which. Gig input keys are the hyphenated type slug, so rename "${key}" to "${collidesWith}" or drop it.`,
+        );
+      }
+      extras.push(key);
+    }
+    // The `undeclared_gig_input` variant is intentionally NOT in the GigProgressEvent union: adding it
+    // there would force a matching case in every exhaustive switch over the union (gig_tracker.ts),
+    // which this change's grant (src/runtime.ts, src/cli.ts) may not touch. It is emitted through a
+    // widening cast — exactly the shape the laws read via `evType`/`keysOf` — so a sink that recognises
+    // it sees `{ type, standard, keys }` and one that does not simply no-ops on an unknown `type`.
+    if (extras.length > 0) {
+      const ev = { type: "undeclared_gig_input", standard: standard.slug, keys: extras.sort() };
+      emit(ev as unknown as GigProgressEvent);
+    }
+  }
+
   // #249/#250 — the cancellation checkpoint. Level 1 of the abort chain: cheap, deterministic,
   // and where MOST of the post-abort spend was going. A standard with P sequential phases could
   // burn P x DEFAULT_CHAIR_TIMEOUT_MS after gig_abort returned, because nothing between phases

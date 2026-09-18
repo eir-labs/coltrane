@@ -1264,6 +1264,45 @@ export function outputSatisfiesType(output: OutputRecord, declared: string): boo
   return false;
 }
 
+// contract-unknown-gig-input-v1 / contract-post-time-gig-input-v1 — the near-miss vocabulary, shared.
+// The LOCAL preflight (below, in runGig) and the HOSTED dispatch door (src/server.ts) partition the
+// same payload against the same declared inputs; extracting the partition and its message here is what
+// makes the two doors identical BY CONSTRUCTION rather than by two copies drifting apart (O2).
+
+/** Normalize a gig-input key for near-miss detection: case, hyphens, underscores and spaces removed,
+ *  so `grant_requirements` and `grant-requirements` collapse to one string. Byte-for-byte the regex the
+ *  preflight's `missingGigInput` hint uses, so the two never disagree about what "resembles" means. */
+const normalizeGigInputKey = (k: string): string => k.toLowerCase().replace(/[_\-\s]/g, "");
+
+/** The near-miss refusal message. BOTH doors call this so the refusal reads identically down to the
+ *  character, whichever door caught it — the preflight throws it inside a RuntimeError, the hosted door
+ *  returns it as a typed JSON refusal. */
+export function unknownGigInputMessage(offendingKey: string, declaredKey: string, standardSlug: string): string {
+  return `dispatch payload key "${offendingKey}" is not declared by standard "${standardSlug}", but normalizes to declared gig input "${declaredKey}", which is ALSO present — one of the two spellings is being dropped and the caller cannot see which. Gig input keys are the hyphenated type slug, so rename "${offendingKey}" to "${declaredKey}" or drop it.`;
+}
+
+/** Partition a dispatch payload's keys against a standard's declared inputs, exactly as the preflight
+ *  does. A key that is not declared but NORMALIZES to a declared key which is ALSO present is a NEAR
+ *  MISS (the first one found is returned; the caller refuses on it). Every OTHER undeclared key is an
+ *  EXTRA, returned sorted. A refused near-miss is never also an extra. `isPresent` answers whether a
+ *  declared key carries a value in the payload — the collision only bites when both spellings are present. */
+export function partitionGigInputKeys(
+  payloadKeys: readonly string[],
+  declaredInputs: readonly string[],
+  isPresent: (declaredKey: string) => boolean,
+): { nearMiss?: { key: string; declaredKey: string }; extras: string[] } {
+  const declaredSet = new Set(declaredInputs);
+  const declaredPresent = declaredInputs.filter((d) => isPresent(d));
+  const extras: string[] = [];
+  for (const key of payloadKeys) {
+    if (declaredSet.has(key)) continue; // a declared key is read, never undeclared
+    const declaredKey = declaredPresent.find((d) => normalizeGigInputKey(d) === normalizeGigInputKey(key));
+    if (declaredKey !== undefined) return { nearMiss: { key, declaredKey }, extras: [] };
+    extras.push(key);
+  }
+  return { extras: extras.sort() };
+}
+
 export async function runGig(
   standard: Standard,
   gigInput: Record<string, unknown>,
@@ -1621,25 +1660,22 @@ export async function runGig(
   //     them sorted, never refused (harmless metadata keeps the gig running). A refused near-miss is
   //     never in `extras`, so it is never also reported as an extra (F1 — never twice for one key).
   {
-    const declaredPresent = [...standardInputs].filter((d) => gigInput[d] !== undefined);
-    const extras: string[] = [];
-    for (const key of Object.keys(gigInput)) {
-      if (standardInputs.has(key)) continue; // a declared key is read, never undeclared
-      const collidesWith = declaredPresent.find((d) => normalizeKey(d) === normalizeKey(key));
-      if (collidesWith !== undefined) {
-        throw new RuntimeError(
-          `dispatch payload key "${key}" is not declared by standard "${standard.slug}", but normalizes to declared gig input "${collidesWith}", which is ALSO present — one of the two spellings is being dropped and the caller cannot see which. Gig input keys are the hyphenated type slug, so rename "${key}" to "${collidesWith}" or drop it.`,
-        );
-      }
-      extras.push(key);
+    // contract-post-time-gig-input-v1 (O2) — the partition and its refusal message now live in the
+    // shared `partitionGigInputKeys` / `unknownGigInputMessage` builders, which the hosted dispatch
+    // door (src/server.ts) also calls, so the two doors cannot drift into two vocabularies. The
+    // behaviour here is unchanged: a near miss throws the same RuntimeError, the extras emit the same
+    // event. `isPresent` is `gigInput[d] !== undefined`, exactly the collision predicate as before.
+    const part = partitionGigInputKeys([...Object.keys(gigInput)], [...standardInputs], (d) => gigInput[d] !== undefined);
+    if (part.nearMiss !== undefined) {
+      throw new RuntimeError(unknownGigInputMessage(part.nearMiss.key, part.nearMiss.declaredKey, standard.slug));
     }
     // The `undeclared_gig_input` variant is intentionally NOT in the GigProgressEvent union: adding it
     // there would force a matching case in every exhaustive switch over the union (gig_tracker.ts),
     // which this change's grant (src/runtime.ts, src/cli.ts) may not touch. It is emitted through a
     // widening cast — exactly the shape the laws read via `evType`/`keysOf` — so a sink that recognises
     // it sees `{ type, standard, keys }` and one that does not simply no-ops on an unknown `type`.
-    if (extras.length > 0) {
-      const ev = { type: "undeclared_gig_input", standard: standard.slug, keys: extras.sort() };
+    if (part.extras.length > 0) {
+      const ev = { type: "undeclared_gig_input", standard: standard.slug, keys: part.extras };
       emit(ev as unknown as GigProgressEvent);
     }
   }

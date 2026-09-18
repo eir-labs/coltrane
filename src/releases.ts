@@ -64,6 +64,31 @@ export interface ReleaseRecord {
    *  every present surface read. Named so a changelog can say "could not read the tool registry here"
    *  instead of showing a silent gap that reads as "nothing changed". */
   surface_unread: string[];
+  /** `false` for a tagged release; `true` for the one PENDING record `compileReleases({ pending })`
+   *  appends — the version about to be published, compiled from HEAD before its tag is pushed. The
+   *  field is always present so a consumer never has to guess whether a record is settled. */
+  pending: boolean;
+}
+
+/** One claim in a release note, and the evidence path that backs it. `value` is the string a writing
+ *  seat recorded as "the value read at that path"; the renderer resolves `evidence` against the record
+ *  and marks the row UNSUPPORTED when the path is absent or holds a different value. */
+export interface ReleaseNoteClaim {
+  text: string;
+  evidence: string;
+  value?: string;
+}
+
+/** A release note (release-notes-v0): two registers of prose, the claims that back the headline, and
+ *  the surfaces a compiler could not read. The renderer turns this into markdown; it never presents a
+ *  claim the record does not support. */
+export interface ReleaseNote {
+  version: string;
+  headline: string;
+  plain_md: string;
+  formal_md: string;
+  claims: ReleaseNoteClaim[];
+  unreadable?: string[];
 }
 
 // ── the conventional-commit bump rule, byte-for-byte scripts/next_version.mjs ────────────────────────
@@ -269,13 +294,58 @@ function surfacesAtTag(root: string, tag: string): TagSurfaces {
   };
 }
 
+/** Assemble one record from an already-parsed surface bundle. `ref` is the git ref the date and the
+ *  commit range END are read from — a tag for a settled release, `HEAD` for the pending one — and
+ *  `rangeStart` is the predecessor the range and the surface diff run against (`null` for the earliest
+ *  release, which reports its whole surface as added). Pulling this out of the loop lets the pending
+ *  record be compiled through EXACTLY the same path as a tagged one, so the two can only differ in the
+ *  `pending` flag (I1). `laws.before` is filled by the caller's chaining pass. */
+function assembleRecord(
+  root: string,
+  meta: { version: string; tag: string; ref: string; rangeStart: string | null; pending: boolean },
+  after: TagSurfaces,
+  before: TagSurfaces | null,
+): ReleaseRecord {
+  // F1 — a surface whose FILE was present but yielded nothing readable is NAMED, so a bare `null` is
+  // never mistaken for "nothing changed"; an absent file is not named. mcp.ts backs two surface keys.
+  const surfaceUnread: string[] = [];
+  if (after.mcpPresent && after.mcp === null) surfaceUnread.push("mcp_tools", "mcp_tool_args");
+  if (after.cliPresent && after.cli === null) surfaceUnread.push("cli_flags");
+  if (after.envPresent && after.env === null) surfaceUnread.push("env_vars");
+  surfaceUnread.sort();
+
+  return {
+    version: meta.version,
+    tag: meta.tag,
+    date: gitCapture(root, ["log", "-1", "--format=%cI", meta.ref]).trim(),
+    commits: rangeCommits(root, meta.rangeStart, meta.ref),
+    bump: rangeBump(root, meta.rangeStart, meta.ref),
+    laws: { before: null, after: after.laws.laws, files: after.laws.files },
+    surface: {
+      mcp_tools: diffSurface(after.mcp ? after.mcp.tools : null, before?.mcp ? before.mcp.tools : null),
+      mcp_tool_args: diffSurface(after.mcp ? after.mcp.args : null, before?.mcp ? before.mcp.args : null),
+      cli_flags: diffSurface(after.cli, before?.cli ?? null),
+      env_vars: diffSurface(after.env, before?.env ?? null),
+      domain_types: diffSurface(after.domainTypes, before?.domainTypes ?? null),
+    },
+    surface_unread: surfaceUnread,
+    pending: meta.pending,
+  };
+}
+
 /**
  * Compile a ReleaseRecord per v* tag, oldest first, reading every field AT the tag. Throws — never
  * returns `[]` — when `tree_root` is not a git repository, or is one that holds no v* tag: an empty
  * list would read as "this project has no releases", a different and false claim from "there is no
  * repository to read" or "there are no tags yet".
+ *
+ * With `pending: { version }`, ONE further record is appended for the commits since the last tag,
+ * compiled through the same path as a tagged release (tag = `v<version>`, date/commits/laws/surface
+ * read from HEAD against the last tag) and marked `pending: true`. It is the record the tag WOULD
+ * carry once cut — the package can then ship the history it is itself part of. A pending version a tag
+ * already holds is refused by name, rather than emit two records for one version.
  */
-export function compileReleases(opts: { tree_root: string }): ReleaseRecord[] {
+export function compileReleases(opts: { tree_root: string; pending?: { version: string } }): ReleaseRecord[] {
   const root = opts.tree_root;
 
   // F2 — a tree_root that is not a git repository. Refuse by name rather than return [].
@@ -299,6 +369,15 @@ export function compileReleases(opts: { tree_root: string }): ReleaseRecord[] {
     );
   }
 
+  // F1 (history) — a pending version a tag already holds would be two records for one version. Refuse
+  // by name, before any compilation, naming both the version and the tag that already holds it.
+  const pendingTag = opts.pending ? `v${opts.pending.version}` : null;
+  if (opts.pending && pendingTag !== null && tags.includes(pendingTag)) {
+    throw new Error(
+      `compileReleases: pending version ${opts.pending.version} is already released as tag ${pendingTag} — refusing to emit a second record for one version`,
+    );
+  }
+
   const records: ReleaseRecord[] = [];
   let before: TagSurfaces | null = null;
   for (let i = 0; i < tags.length; i++) {
@@ -306,43 +385,118 @@ export function compileReleases(opts: { tree_root: string }): ReleaseRecord[] {
     const prevTag = i > 0 ? tags[i - 1]! : null;
 
     // Parse every surface at this tag ONCE; the previous iteration's bundle is this tag's "before",
-    // so no tag's content is fetched twice. Presence (was the file there?) is kept apart from
-    // readability (could it be parsed?) — the distinction F1's surface_unread turns on.
+    // so no tag's content is fetched twice. Presence and readability are kept apart inside assemble.
     const after = surfacesAtTag(root, tag);
-
-    // F1 — a surface whose FILE was present at the tag but yielded nothing readable is NAMED, so a
-    // bare `null` is never mistaken for "nothing changed". A surface whose file is absent is not
-    // named — absence is not the same as unread. mcp.ts backs two surface keys.
-    const surfaceUnread: string[] = [];
-    if (after.mcpPresent && after.mcp === null) surfaceUnread.push("mcp_tools", "mcp_tool_args");
-    if (after.cliPresent && after.cli === null) surfaceUnread.push("cli_flags");
-    if (after.envPresent && after.env === null) surfaceUnread.push("env_vars");
-    surfaceUnread.sort();
-
-    records.push({
-      version: tag.replace(/^v/, ""),
-      tag,
-      date: gitCapture(root, ["log", "-1", "--format=%cI", tag]).trim(),
-      commits: rangeCommits(root, prevTag, tag),
-      bump: rangeBump(root, prevTag, tag),
-      laws: { before: null, after: after.laws.laws, files: after.laws.files },
-      surface: {
-        mcp_tools: diffSurface(after.mcp ? after.mcp.tools : null, before?.mcp ? before.mcp.tools : null),
-        mcp_tool_args: diffSurface(after.mcp ? after.mcp.args : null, before?.mcp ? before.mcp.args : null),
-        cli_flags: diffSurface(after.cli, before?.cli ?? null),
-        env_vars: diffSurface(after.env, before?.env ?? null),
-        domain_types: diffSurface(after.domainTypes, before?.domainTypes ?? null),
-      },
-      surface_unread: surfaceUnread,
-    });
-
+    records.push(assembleRecord(root, { version: tag.replace(/^v/, ""), tag, ref: tag, rangeStart: prevTag, pending: false }, after, before));
     before = after;
   }
 
-  // laws.before chains from the predecessor's after; the earliest tag keeps null.
+  // The pending release: HEAD compiled as if it were the tag `v<version>`, diffed against the last
+  // tag (which `before` still holds), marked pending. Same path as a tagged record, so it equals the
+  // record that tag would carry save the flag.
+  if (opts.pending && pendingTag !== null) {
+    const lastTag = tags[tags.length - 1]!;
+    const headSurfaces = surfacesAtTag(root, "HEAD");
+    records.push(
+      assembleRecord(
+        root,
+        { version: opts.pending.version, tag: pendingTag, ref: "HEAD", rangeStart: lastTag, pending: true },
+        headSurfaces,
+        before,
+      ),
+    );
+  }
+
+  // laws.before chains from the predecessor's after; the earliest release keeps null.
   for (let i = 1; i < records.length; i++) {
     records[i]!.laws.before = records[i - 1]!.laws.after;
   }
 
   return records;
+}
+
+/** The whole release history as a stable JSON document, NEWEST first — the file the package ships so
+ *  the changelog UI reads a settled artifact rather than shelling out to git. Pretty-printed (2-space)
+ *  with a single trailing newline, byte-identical for the same inputs. Same options as
+ *  `compileReleases`, so a pending version leads the document. */
+export function releasesJson(options: { tree_root: string; pending?: { version: string } }): string {
+  const releases = compileReleases(options).reverse();
+  return JSON.stringify({ generated_from: "compileReleases", releases }, null, 2) + "\n";
+}
+
+/** Resolve a dotted/indexed evidence path (`laws.after`, `surface.cli_flags.added[0]`) against a
+ *  record. Returns whether the path resolved and the value it reached — the plain way: a segment is a
+ *  key, and any `[n]` on it is an array index applied in order. A key missing on an object, or an
+ *  index off the end of an array, does not resolve. */
+function resolveEvidencePath(record: ReleaseRecord, path: string): { resolved: boolean; value: unknown } {
+  let cur: unknown = record;
+  for (const segment of path.split(".")) {
+    const keyMatch = /^[^[\]]*/.exec(segment);
+    const key = keyMatch ? keyMatch[0] : "";
+    const steps: (string | number)[] = [];
+    if (key !== "") steps.push(key);
+    const idxRe = /\[(\d+)\]/g;
+    let idx: RegExpExecArray | null;
+    while ((idx = idxRe.exec(segment)) !== null) steps.push(Number(idx[1]));
+    for (const step of steps) {
+      if (cur === null || cur === undefined) return { resolved: false, value: undefined };
+      if (typeof step === "number") {
+        if (!Array.isArray(cur) || step >= cur.length) return { resolved: false, value: undefined };
+        cur = cur[step];
+      } else {
+        if (typeof cur !== "object" || cur === null || !(step in (cur as Record<string, unknown>))) {
+          return { resolved: false, value: undefined };
+        }
+        cur = (cur as Record<string, unknown>)[step];
+      }
+    }
+  }
+  return { resolved: true, value: cur };
+}
+
+/** The value at an evidence path, as the string a claim's `value` is compared against: a string is
+ *  itself, anything else is JSON-stringified so `150` reads as `"150"` and an array reads as its JSON. */
+function evidenceValueString(value: unknown): string {
+  return typeof value === "string" ? value : JSON.stringify(value);
+}
+
+/** Render one release note to markdown: the headline as a heading, then the plain register, then the
+ *  formal register, then an evidence section with one row per claim. Every field the note declares is
+ *  rendered; a surface named in `unreadable` is STATED as unreadable, never omitted. A claim whose
+ *  `evidence` path does not resolve in the record, or resolves to a different value than its `value`,
+ *  is marked UNSUPPORTED naming what the record actually holds — it is never dropped and never shown
+ *  as if evidenced. The rendering is derived from the NOTE: no evidence row appears that the note did
+ *  not claim (I2). */
+export function renderReleaseNote(note: ReleaseNote, record: ReleaseRecord): string {
+  const lines: string[] = [];
+  lines.push(`# ${note.headline}`, "");
+  lines.push(note.plain_md, "");
+  lines.push(note.formal_md, "");
+
+  lines.push("## Evidence", "");
+  for (const claim of note.claims) {
+    const { resolved, value } = resolveEvidencePath(record, claim.evidence);
+    const held = resolved ? evidenceValueString(value) : null;
+    const claimed = claim.value;
+    // Supported iff the path resolved AND (no value was claimed, or the claimed value matches what the
+    // record holds). Otherwise the row is marked UNSUPPORTED naming what the record actually holds.
+    const supported = resolved && (claimed === undefined || held === claimed);
+    if (supported) {
+      lines.push(`- ${claim.text} — \`${claim.evidence}\` → \`${held ?? ""}\``);
+    } else if (!resolved) {
+      lines.push(`- ${claim.text} — \`${claim.evidence}\` → UNSUPPORTED (the path does not resolve in the record)`);
+    } else {
+      lines.push(`- ${claim.text} — \`${claim.evidence}\` → UNSUPPORTED (the record holds \`${held}\`)`);
+    }
+  }
+
+  const unreadable = note.unreadable ?? [];
+  if (unreadable.length > 0) {
+    lines.push("", "## Unreadable surfaces", "");
+    for (const surface of unreadable) {
+      lines.push(`- \`${surface}\` could not be read at this release`);
+    }
+  }
+
+  return lines.join("\n") + "\n";
 }

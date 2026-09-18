@@ -285,7 +285,12 @@ export const CALIBRATION_TRAIL = {
 // because their name appears inside some string in src/. Re-baselining a sealed ratchet by
 // twenty-five belongs in its own change, with its own reading of what those fields are — not
 // folded into a change about tool descriptions. Measured, named, and left for a decision.
-export const PINNED_UNREAD_FIELDS = 218;
+// 218 → 224: the release trio's model-facing fields (release-note's headline/plain_md/formal_md/
+// claims/unreadable and release-note-verdict's registers) are read by the seats that write and judge
+// them and by the changelog that renders them — not yet by src/. The renderer that reads them into
+// markdown is the next slice, and it brings this back down; if it does not land, these fields are
+// unwired and the number is the evidence.
+export const PINNED_UNREAD_FIELDS = 224;
 
 /* ─────────────────────────────────────────────────────────────────────────────────────────────────
  * TWO CORPORA — engine (src/) vs contract (broad).

@@ -1,0 +1,59 @@
+{
+  "slug": "release-record",
+  "version": 1,
+  "extends": "Signal",
+  "domain": "release",
+  "status": "active",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "version": {
+        "type": "string",
+        "description": "the semver this release carries, without the v prefix"
+      },
+      "tag": {
+        "type": "string"
+      },
+      "date": {
+        "type": "string",
+        "description": "the tag's commit date, ISO"
+      },
+      "bump": {
+        "type": "string",
+        "description": "major | minor | patch, derived from the range's commit subjects"
+      },
+      "commits": {
+        "type": "array",
+        "description": "{sha, subject}, oldest first, for the range since the previous tag",
+        "items": {
+          "type": "object"
+        }
+      },
+      "laws": {
+        "type": "object",
+        "description": "{before, after, files} read from scripts/laws.sh at each end; null where a count could not be read"
+      },
+      "surface": {
+        "type": "object",
+        "description": "per surface (mcp_tools, mcp_tool_args, cli_flags, env_vars, domain_types) a sorted {added, removed}, or null when that surface could not be read at this tag"
+      },
+      "surface_unread": {
+        "type": "array",
+        "description": "the surfaces whose file was present but yielded nothing readable",
+        "items": {
+          "type": "string"
+        }
+      },
+      "source": {
+        "type": "string"
+      }
+    }
+  },
+  "required_fields": [
+    "version",
+    "tag",
+    "date",
+    "commits",
+    "surface"
+  ]
+}

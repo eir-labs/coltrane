@@ -289,8 +289,13 @@ describe("#227 — the genome's declared required fields are dropped, not absent
     // (contract-seat-primer-v1, contract-rolling-seat-primer-v1): agent, area, session, commit and the
     // blobs it read, forked warm by the next build. It declares its required fields (agent_slug, area,
     // session_id, commit, files), so it joins `checked` and does not appear in the `lossy` census.
+    // 70 → 73: the release trio — `release-record` (extends Signal; the record compileReleases
+    // compiles from git, which release-notes-v0 seats a writer on), `release-note` (extends Artifact;
+    // the plain and formal registers plus the evidence path behind every claim) and
+    // `release-note-verdict` (extends Verdict; which claims the record does not support). All three
+    // declare their required fields, so they join `checked` and none appears in the `lossy` census.
     expect(checked).toHaveLength(genome.domain_types.size);
-    expect(checked.length).toBe(70);
+    expect(checked.length).toBe(73);
   });
 });
 

@@ -61,7 +61,8 @@
       "types": "./dist/src/genome_schema.d.ts",
       "import": "./dist/src/genome_schema.js",
       "default": "./dist/src/genome_schema.js"
-    }
+    },
+    "./releases.json": "./releases.json"
   },
   "files": [
     "dist/src",
@@ -76,7 +77,8 @@
     "tours",
     "evals",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "releases.json"
   ],
   "publishConfig": {
     "access": "public"

@@ -16,3 +16,6 @@ tests/lint_guard/.scratch/
 
 .worktrees/
 .playwright-mcp/
+
+# written by scripts/emit_releases.mjs at publish time; never committed (it would go stale)
+/releases.json

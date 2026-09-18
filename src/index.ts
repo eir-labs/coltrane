@@ -58,3 +58,8 @@ export * from "./document_factory.js";
 // caller: "wire it or export it." Wiring is a separate act; reachability is not.
 export * from "./local_queue.js";
 export * from "./residency.js";
+
+// The release-record compiler — reads, at each v* tag, the surface an integrator sees (MCP tools, CLI
+// flags, worker env, domain-type versions, law counts) and reports what each release changed. A public
+// entrypoint, exported here so the public-entrypoint rule can name it.
+export * from "./releases.js";

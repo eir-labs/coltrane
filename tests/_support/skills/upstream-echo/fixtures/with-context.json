@@ -1,0 +1,11 @@
+{
+  "id": "with-context",
+  "description": "A fixture may declare `context`; the runner passes it as run()'s second argument. Two upstream entries arrive as two.",
+  "input": { "value": "b" },
+  "context": { "upstream": [ { "role": "judge-a", "domain_type": "Judgment", "data": { "value": "a" } }, { "role": "judge-b", "domain_type": "Judgment", "data": { "value": "b" } } ] },
+  "assertions": [
+    { "path": "upstream_count", "op": "equals", "value": 2 },
+    { "path": "upstream_roles", "op": "equals", "value": ["judge-a", "judge-b"] },
+    { "path": "upstream_values", "op": "equals", "value": ["a", "b"] }
+  ]
+}

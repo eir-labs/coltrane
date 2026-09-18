@@ -36,6 +36,10 @@ RUN npm ci --ignore-scripts
 
 COPY tsconfig.json ./
 COPY src ./src
+# `npm run build` ends by emitting releases.json (scripts/emit_releases.mjs), so the script has to
+# be in the image. Without a git repository here it writes the `unavailable` document, which is
+# the honest answer for an image that carries no history.
+COPY scripts ./scripts
 RUN npm run build
 
 # ── room ──────────────────────────────────────────────────────────────────────────────────────

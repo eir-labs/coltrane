@@ -1,0 +1,50 @@
+{
+  "slug": "release-note-verdict",
+  "version": 1,
+  "extends": "Verdict",
+  "domain": "release",
+  "status": "active",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "version": {
+        "type": "string"
+      },
+      "pass": {
+        "type": "boolean"
+      },
+      "unsupported_claims": {
+        "type": "array",
+        "description": "claims whose evidence path is absent from the record, or whose value disagrees with it — verbatim, with what the record actually says",
+        "items": {
+          "type": "object"
+        }
+      },
+      "missing_from_prose": {
+        "type": "array",
+        "description": "surface changes the record carries that neither register mentions",
+        "items": {
+          "type": "string"
+        }
+      },
+      "register_faults": {
+        "type": "array",
+        "description": "plain prose carrying internal vocabulary, or a formal register disagreeing with the record's own fields",
+        "items": {
+          "type": "string"
+        }
+      },
+      "checks": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        }
+      }
+    }
+  },
+  "required_fields": [
+    "version",
+    "pass",
+    "checks"
+  ]
+}

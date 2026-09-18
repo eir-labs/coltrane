@@ -1,0 +1,66 @@
+{
+  "slug": "release-note",
+  "version": 1,
+  "extends": "Artifact",
+  "domain": "release",
+  "status": "active",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "version": {
+        "type": "string"
+      },
+      "headline": {
+        "type": "string",
+        "description": "one line a reader can scan in a list, in plain language; names what changed, never 'various improvements'"
+      },
+      "plain_md": {
+        "type": "string",
+        "description": "the plain register: what this release means for someone using coltrane, in their words (a tool they call, a flag they pass, a variable they set). No internal vocabulary, no gig ids, no costs."
+      },
+      "formal_md": {
+        "type": "string",
+        "description": "the formal register: version, tag, date, bump, the commits by subject, the law counts at both ends, and each surface change as it stands in the record"
+      },
+      "claims": {
+        "type": "array",
+        "description": "every factual claim the prose makes, each paired with the field of the release-record that supports it. A claim with no evidence is what the verify seat refuses.",
+        "items": {
+          "type": "object",
+          "properties": {
+            "text": {
+              "type": "string",
+              "description": "the claim as the prose states it"
+            },
+            "evidence": {
+              "type": "string",
+              "description": "the record path that supports it, e.g. surface.cli_flags.added[0] or laws.after"
+            },
+            "value": {
+              "type": "string",
+              "description": "the value read at that path"
+            }
+          },
+          "required": [
+            "text",
+            "evidence"
+          ]
+        }
+      },
+      "unreadable": {
+        "type": "array",
+        "description": "the surfaces the record marks unread, named for the reader so a gap is stated rather than implied",
+        "items": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  "required_fields": [
+    "version",
+    "headline",
+    "plain_md",
+    "formal_md",
+    "claims"
+  ]
+}

@@ -285,7 +285,13 @@ export const CALIBRATION_TRAIL = {
 // because their name appears inside some string in src/. Re-baselining a sealed ratchet by
 // twenty-five belongs in its own change, with its own reading of what those fields are — not
 // folded into a change about tool descriptions. Measured, named, and left for a decision.
-export const PINNED_UNREAD_FIELDS = 218;
+// 218 → 224 → 221: the release trio's model-facing fields. `renderReleaseNote` (src/releases.ts) now
+// reads all five of release-note's — headline, plain_md, formal_md, claims and unreadable — which is
+// what the ratchet asked for and what took this back down. The three that remain are
+// release-note-verdict's: unsupported_claims, missing_from_prose and register_faults. They are read by
+// the operator deciding whether a note may publish, and nothing in src/ reads them; a verdict renderer
+// would take this to 218.
+export const PINNED_UNREAD_FIELDS = 221;
 
 /* ─────────────────────────────────────────────────────────────────────────────────────────────────
  * TWO CORPORA — engine (src/) vs contract (broad).

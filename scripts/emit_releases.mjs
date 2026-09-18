@@ -37,14 +37,27 @@ if (argv.includes("--pending") && (version === undefined || version.startsWith("
   process.exit(2);
 }
 
+// `--allow-unavailable` is for the BUILD path. Most CI jobs check out at depth 1 with no tags, so
+// compileReleases rightly refuses there — and the package advertises ./releases.json, so the file must
+// exist for that subpath to resolve. Under the flag a refusal writes a document that SAYS it could not
+// be compiled, carrying the reason: "could not read the history" stays distinguishable from "this
+// project has no releases", which is the same rule the surface readers follow. The publish path passes
+// no flag, so there a refusal is fatal and nothing ships with an empty history.
+const allowUnavailable = argv.includes("--allow-unavailable");
 let json;
 try {
   json = releasesJson({ tree_root: treeRoot, ...(version ? { pending: { version } } : {}) });
 } catch (e) {
-  // compileReleases refuses by name (a tree with no repository, no v* tag, or a pending version a tag
-  // already holds). Print that reason; a stack trace in a publish log says less.
-  console.error(`emit_releases: ${e instanceof Error ? e.message : String(e)}`);
-  process.exit(2);
+  const reason = e instanceof Error ? e.message : String(e);
+  if (!allowUnavailable) {
+    // compileReleases refuses by name (a tree with no repository, no v* tag, or a pending version a
+    // tag already holds). Print that reason; a stack trace in a publish log says less.
+    console.error(`emit_releases: ${reason}`);
+    process.exit(2);
+  }
+  writeFileSync(out, `${JSON.stringify({ generated_from: "compileReleases", releases: [], unavailable: reason }, null, 2)}\n`);
+  console.log(`emit_releases: history unavailable → ${out} (${reason})`);
+  process.exit(0);
 }
 writeFileSync(out, json);
 

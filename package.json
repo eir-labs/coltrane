@@ -84,7 +84,7 @@
     "access": "public"
   },
   "scripts": {
-    "build": "tsc && cp src/skill_runner.mjs dist/src/ && chmod +x dist/src/server_entry.js dist/src/server_relay.js dist/src/cli_entry.js",
+    "build": "tsc && cp src/skill_runner.mjs dist/src/ && chmod +x dist/src/server_entry.js dist/src/server_relay.js dist/src/cli_entry.js && node scripts/emit_releases.mjs --allow-unavailable",
     "dev": "tsc --watch",
     "prepare": "npm run build",
     "test": "bash scripts/laws.sh",

@@ -321,7 +321,11 @@ describe("release record — deterministic and stable under later tags (I1)", ()
     const runC = compileReleases({ tree_root: repo });
     expect(runC.length, "the third tag appears").toBe(3);
     expect(runC.slice(0, 2), "the first two records do not change when a later tag is added").toEqual(runA);
-  });
+    // This law compiles the same fixture THREE times and each compile spawns a git subprocess per
+    // surface per tag — around sixty in total. It was sitting at ~4.9s against vitest's 5s default,
+    // so it went red on noise rather than on the property it states. The timeout is the measurement
+    // window, not the assertion: nothing here is weakened by widening it.
+  }, 30_000);
 });
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────────

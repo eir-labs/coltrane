@@ -16,7 +16,7 @@
 //   node scripts/emit_releases.mjs                      # tagged releases only
 //   node scripts/emit_releases.mjs --pending 0.24.34    # plus the one about to ship
 //   node scripts/emit_releases.mjs --out some/path.json # default: ./releases.json
-import { writeFileSync } from "node:fs";
+import { writeFileSync, readFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { releasesJson } from "../dist/src/releases.js";
 
@@ -47,9 +47,32 @@ if (argv.includes("--pending") && (version === undefined || version.startsWith("
 // project has no releases", which is the same rule the surface readers follow. The publish path passes
 // no flag, so there a refusal is fatal and nothing ships with an empty history.
 const allowUnavailable = argv.includes("--allow-unavailable");
+
+// contract-release-compile-cache-v1 — the document we are about to overwrite is this run's cache. A
+// tag is immutable, so a record whose tag still resolves to the commit it names cannot have changed;
+// compileReleases re-checks that itself and recompiles anything that fails the check, so a stale,
+// hand-edited or truncated file can only ever cost time, never correctness. An unreadable file is
+// simply no cache: this is a speed-up, and it must never be the reason a release history fails to
+// emit. Measured before it existed: a full 80-tag compile was 3m52s, and vitest's globalSetup ran it
+// before EVERY test file.
+function readCache(path) {
+  if (!existsSync(path)) return undefined;
+  try {
+    const doc = JSON.parse(readFileSync(path, "utf8"));
+    return Array.isArray(doc?.releases) ? doc.releases : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 let json;
 try {
-  json = releasesJson({ tree_root: treeRoot, ...(version ? { pending: { version } } : {}) });
+  const cache = readCache(out);
+  json = releasesJson({
+    tree_root: treeRoot,
+    ...(version ? { pending: { version } } : {}),
+    ...(cache ? { cache } : {}),
+  });
 } catch (e) {
   const reason = e instanceof Error ? e.message : String(e);
   if (!allowUnavailable) {

@@ -47,6 +47,12 @@ export interface ReleaseRecord {
   version: string;
   /** The ref. */
   tag: string;
+  /** contract-release-compile-cache-v1 (O3) — the commit the tag resolved to when this record was
+   *  compiled. A tag is immutable, so this is what makes a previously-compiled record REUSABLE: the
+   *  compiler can confirm a cached record still describes its tag with one map lookup instead of the
+   *  ~75 git reads a recompile costs. It is also the record's own address, in the sense the rest of
+   *  the engine now uses the word — a release that names its commit can be checked offline. */
+  commit: string;
   /** The tag's commit date, ISO. */
   date: string;
   /** The range since the previous tag, oldest first; the earliest tag's range is every commit up to it. */
@@ -278,7 +284,7 @@ interface TagSurfaces {
 
 /** Read and parse every surface at `tag` with the minimum number of git reads — one `git show` per
  *  text surface, one `ls-tree` (+ a show per domain-type file) for domain_types, one for laws.sh. */
-function surfacesAtTag(root: string, tag: string): TagSurfaces {
+export function surfacesAtTag(root: string, tag: string): TagSurfaces {
   const mcpContent = showAtTag(root, tag, "src/mcp.ts");
   const cliContent = showAtTag(root, tag, "src/cli.ts");
   const envContent = showAtTag(root, tag, "src/worker_env.ts");
@@ -302,7 +308,7 @@ function surfacesAtTag(root: string, tag: string): TagSurfaces {
  *  `pending` flag (I1). `laws.before` is filled by the caller's chaining pass. */
 function assembleRecord(
   root: string,
-  meta: { version: string; tag: string; ref: string; rangeStart: string | null; pending: boolean },
+  meta: { version: string; tag: string; ref: string; commit: string; rangeStart: string | null; pending: boolean },
   after: TagSurfaces,
   before: TagSurfaces | null,
 ): ReleaseRecord {
@@ -317,6 +323,7 @@ function assembleRecord(
   return {
     version: meta.version,
     tag: meta.tag,
+    commit: meta.commit,
     date: gitCapture(root, ["log", "-1", "--format=%cI", meta.ref]).trim(),
     commits: rangeCommits(root, meta.rangeStart, meta.ref),
     bump: rangeBump(root, meta.rangeStart, meta.ref),
@@ -345,8 +352,22 @@ function assembleRecord(
  * carry once cut — the package can then ship the history it is itself part of. A pending version a tag
  * already holds is refused by name, rather than emit two records for one version.
  */
-export function compileReleases(opts: { tree_root: string; pending?: { version: string } }): ReleaseRecord[] {
+export function compileReleases(opts: {
+  tree_root: string;
+  pending?: { version: string };
+  /** contract-release-compile-cache-v1 — previously-compiled records. Each one whose `tag` still
+   *  resolves to the `commit` it names is REUSED VERBATIM; every other tag is compiled as before.
+   *  The repository, never the cache, decides which releases exist: an entry naming a tag the tree no
+   *  longer holds is dropped (F1), and a `pending` entry is always ignored because HEAD moves (O6).
+   *  Absent or empty means "nothing to reuse" and the compile is exactly what it always was (F2). */
+  cache?: readonly ReleaseRecord[];
+  /** Injected for tests. Production reads the surface with `surfacesAtTag`; the seam exists so a law
+   *  can OBSERVE that a fully-cached compile reads no surface at all (O5), which is the only way the
+   *  cost claim can go red when the wire is cut. */
+  deps?: { surfaces?: (root: string, tag: string) => TagSurfaces };
+}): ReleaseRecord[] {
   const root = opts.tree_root;
+  const readSurfaces = opts.deps?.surfaces ?? surfacesAtTag;
 
   // F2 — a tree_root that is not a git repository. Refuse by name rather than return [].
   try {
@@ -378,16 +399,54 @@ export function compileReleases(opts: { tree_root: string; pending?: { version: 
     );
   }
 
+  // contract-release-compile-cache-v1 (O5) — ONE git read resolves every tag, rather than one per
+  // tag. A lightweight tag's `objectname` IS its commit; an annotated tag's commit is the
+  // dereferenced `*objectname`, so prefer that when it is present.
+  const tagCommit = new Map<string, string>();
+  for (const line of gitCapture(root, [
+    "for-each-ref",
+    "--format=%(refname:short)\t%(objectname)\t%(*objectname)",
+    "refs/tags/v*",
+  ]).split("\n")) {
+    if (!line.trim()) continue;
+    const [name, obj, deref] = line.split("\t");
+    if (!name) continue;
+    tagCommit.set(name, (deref && deref.length > 0 ? deref : obj) ?? "");
+  }
+
+  // A cached record is usable only for a tag the tree still holds, at the commit the record names.
+  // `pending` entries never qualify: the record they describe is HEAD, which moves (O6).
+  const reusable = new Map<string, ReleaseRecord>();
+  for (const r of opts.cache ?? []) {
+    if (r.pending) continue;
+    const live = tagCommit.get(r.tag);
+    if (live !== undefined && live !== "" && r.commit === live) reusable.set(r.tag, r);
+  }
+
   const records: ReleaseRecord[] = [];
   let before: TagSurfaces | null = null;
   for (let i = 0; i < tags.length; i++) {
     const tag = tags[i]!;
     const prevTag = i > 0 ? tags[i - 1]! : null;
 
+    const cached = reusable.get(tag);
+    if (cached) {
+      // Reused verbatim, and NO surface is read for it. The next tag's `before` is therefore not in
+      // hand; it is read on demand below, once, only if a later tag actually needs compiling.
+      // Cloned one level deep because the chaining pass below writes `laws.before`; a reused record
+      // must not mutate the caller's cache array under it.
+      records.push({ ...cached, laws: { ...cached.laws } });
+      before = null;
+      continue;
+    }
+
     // Parse every surface at this tag ONCE; the previous iteration's bundle is this tag's "before",
     // so no tag's content is fetched twice. Presence and readability are kept apart inside assemble.
-    const after = surfacesAtTag(root, tag);
-    records.push(assembleRecord(root, { version: tag.replace(/^v/, ""), tag, ref: tag, rangeStart: prevTag, pending: false }, after, before));
+    // After a run of reused records `before` is null, so the predecessor's surface is read here —
+    // one read to re-enter the chain, not one per skipped tag.
+    if (before === null && prevTag !== null) before = readSurfaces(root, prevTag);
+    const after = readSurfaces(root, tag);
+    records.push(assembleRecord(root, { version: tag.replace(/^v/, ""), tag, ref: tag, commit: tagCommit.get(tag) ?? gitCapture(root, ["rev-parse", `${tag}^{commit}`]).trim(), rangeStart: prevTag, pending: false }, after, before));
     before = after;
   }
 
@@ -396,11 +455,14 @@ export function compileReleases(opts: { tree_root: string; pending?: { version: 
   // record that tag would carry save the flag.
   if (opts.pending && pendingTag !== null) {
     const lastTag = tags[tags.length - 1]!;
-    const headSurfaces = surfacesAtTag(root, "HEAD");
+    // The pending record diffs against the last tag. If that tag was reused, its surface was never
+    // read, so read it now — the pending diff is against the tree, never against the cache.
+    if (before === null) before = readSurfaces(root, lastTag);
+    const headSurfaces = readSurfaces(root, "HEAD");
     records.push(
       assembleRecord(
         root,
-        { version: opts.pending.version, tag: pendingTag, ref: "HEAD", rangeStart: lastTag, pending: true },
+        { version: opts.pending.version, tag: pendingTag, ref: "HEAD", commit: gitCapture(root, ["rev-parse", "HEAD^{commit}"]).trim(), rangeStart: lastTag, pending: true },
         headSurfaces,
         before,
       ),
@@ -419,7 +481,14 @@ export function compileReleases(opts: { tree_root: string; pending?: { version: 
  *  the changelog UI reads a settled artifact rather than shelling out to git. Pretty-printed (2-space)
  *  with a single trailing newline, byte-identical for the same inputs. Same options as
  *  `compileReleases`, so a pending version leads the document. */
-export function releasesJson(options: { tree_root: string; pending?: { version: string } }): string {
+export function releasesJson(options: {
+  tree_root: string;
+  pending?: { version: string };
+  /** contract-release-compile-cache-v1 — passed straight to `compileReleases`. The emitter hands it
+   *  the records from the document it is about to overwrite, which is what makes a rebuild
+   *  incremental instead of a full 80-tag recompile. */
+  cache?: readonly ReleaseRecord[];
+}): string {
   const releases = compileReleases(options).reverse();
   return JSON.stringify({ generated_from: "compileReleases", releases }, null, 2) + "\n";
 }

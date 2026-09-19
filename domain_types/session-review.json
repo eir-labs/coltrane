@@ -1,0 +1,86 @@
+{
+  "slug": "session-review",
+  "version": 1,
+  "extends": "Artifact",
+  "domain": "session-review",
+  "status": "active",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "title": {
+        "type": "string"
+      },
+      "span": {
+        "type": "string",
+        "description": "the session's start and end, from the census"
+      },
+      "what_happened": {
+        "type": "string",
+        "description": "the arc of the session in plain prose: what was asked, what was built, what was decided"
+      },
+      "what_it_cost": {
+        "type": "string",
+        "description": "the measured shape of the spend and the context, from the census and the ledger rows carried in"
+      },
+      "what_went_wrong": {
+        "type": "string",
+        "description": "defects, dead ends, wasted work and their causes — named, not softened"
+      },
+      "decisions": {
+        "type": "array",
+        "description": "the operator's decisions, each quoted from their own message in the census",
+        "items": {
+          "type": "object",
+          "properties": {
+            "decision": {
+              "type": "string"
+            },
+            "quote": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "decision",
+            "quote"
+          ]
+        }
+      },
+      "open": {
+        "type": "array",
+        "description": "what the session left open",
+        "items": {
+          "type": "string"
+        }
+      },
+      "claims": {
+        "type": "array",
+        "description": "every factual claim the prose makes, paired with the census path or ledger field that supports it",
+        "items": {
+          "type": "object",
+          "properties": {
+            "text": {
+              "type": "string"
+            },
+            "evidence": {
+              "type": "string"
+            },
+            "value": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "text",
+            "evidence"
+          ]
+        }
+      }
+    }
+  },
+  "required_fields": [
+    "title",
+    "what_happened",
+    "what_it_cost",
+    "what_went_wrong",
+    "claims"
+  ]
+}

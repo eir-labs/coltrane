@@ -1,0 +1,72 @@
+{
+  "slug": "session-census",
+  "version": 1,
+  "extends": "Signal",
+  "domain": "session-review",
+  "status": "active",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "transcript": {
+        "type": "string"
+      },
+      "bytes": {
+        "type": "number"
+      },
+      "records": {
+        "type": "number"
+      },
+      "span": {
+        "type": "object",
+        "description": "{first, last} timestamps of the transcript"
+      },
+      "turns": {
+        "type": "object",
+        "description": "assistant turns and the token classes they reported, plus the peak context"
+      },
+      "tools": {
+        "type": "array",
+        "description": "{name, calls}, most-called first",
+        "items": {
+          "type": "object"
+        }
+      },
+      "operator_messages": {
+        "type": "array",
+        "description": "the operator's own messages, identical ones collapsed to {text, count, first, last} — a repeated cron prompt is one decision said many times",
+        "items": {
+          "type": "object"
+        }
+      },
+      "interruptions": {
+        "type": "number"
+      },
+      "denials": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        }
+      },
+      "errors": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        }
+      },
+      "error": {
+        "type": "string",
+        "description": "set when the transcript could not be read; the census is then a refusal, not an empty count"
+      },
+      "source": {
+        "type": "string"
+      }
+    }
+  },
+  "required_fields": [
+    "transcript",
+    "records",
+    "turns",
+    "tools",
+    "operator_messages"
+  ]
+}

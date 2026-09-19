@@ -1,0 +1,26 @@
+{
+  "slug": "session-target",
+  "version": 1,
+  "extends": "Signal",
+  "domain": "session-review",
+  "status": "active",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "transcript": {
+        "type": "string",
+        "description": "absolute path to one Claude Code session transcript (.jsonl)"
+      },
+      "label": {
+        "type": "string",
+        "description": "what this session was, in the operator's words — carried, never inferred"
+      },
+      "source": {
+        "type": "string"
+      }
+    }
+  },
+  "required_fields": [
+    "transcript"
+  ]
+}

@@ -1483,6 +1483,23 @@ export function withoutBoxCredentials(env: NodeJS.ProcessEnv): Record<string, st
   return out;
 }
 
+/**
+ * contract-seat-ask-v1 — the hands-off interrogation seam a makeClaudeInvoker carries ALONGSIDE its
+ * AgentInvoker call signature. `askSeat` resumes a PAST seat's own session — the uuid
+ * sessionUuidFor(gig_id, role), the SAME derivation the amend loop uses — and returns its prose. It
+ * shares the invoker's `run` seam, spawn bounds and cage builder, but it is NOT the chair path: it
+ * resolves no grants, builds no identity/method/input prompt, and seals nothing. A resume whose
+ * session is gone yields `session_lost` — never a fresh --session-id seat, which would invent the
+ * reasoning this verb exists to prevent.
+ */
+export type SeatAskResult =
+  | { answer: string; session_id: string; resumed: true }
+  | { session_lost: true; session_id: string | undefined };
+export interface SeatAsker {
+  askSeat(input: { gig_id: string; role: string; question: string; max_turns?: number | undefined }): Promise<SeatAskResult>;
+}
+export type ClaudeInvoker = AgentInvoker & SeatAsker;
+
 export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker {
   const bin = opts.bin ?? "claude";
   // Injected run (tests) short-circuits the spawn: plain mode, returns the JSON blob directly.
@@ -1512,7 +1529,7 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
     const dt = opts.registry?.listTypes().find((t) => t.slug === slug);
     return dt ? dt.extends : "";
   };
-  return async (ctx) => {
+  const invoke: AgentInvoker = async (ctx) => {
     // #250 — a chair whose gig is already cancelled spends nothing: no prompt, no mcp-config,
     // no spawn. This is the cheapest point on the whole cancellation chain.
     if (ctx.signal?.aborted) {
@@ -2289,6 +2306,57 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
       try { unlinkSync(cfgPath); } catch { /* best-effort cleanup */ }
     }
   };
+  // contract-seat-ask-v1 — the hands-off ask, attached to the SAME closure so it reuses the injected
+  // `run` seam, spawn bounds and child-env floor. Distinct from the chair path above by construction:
+  // no grant resolution, no identity/method/input prompt (the QUESTION is the only thing sent), an
+  // empty allow list plus the host-builtin deny floor (so the asked seat cannot write, seal or act),
+  // and no output/ledger write of its own. A lost resume is REPORTED, never followed by a fresh seat.
+  const asker = invoke as unknown as ClaudeInvoker;
+  asker.askSeat = async ({ gig_id, role, question, max_turns }) => {
+    const session_id = sessionUuidFor(gig_id, role);
+    // No (gig_id, role) session to key on ⇒ nothing to resume: the same "no conversation" answer,
+    // and NO spawn — never a fresh seat that would invent the reasoning (F1).
+    if (session_id === undefined) return { session_lost: true, session_id };
+    const cfgPath = join(tmpdir(), `coltrane-mcp-${randomUUID()}.json`);
+    writeFileSync(cfgPath, JSON.stringify({ mcpServers: {} }));
+    // The cage: an EMPTY allow list (buildInvokerArgs emits no --allowedTools, MCP or builtin), every
+    // host builtin denied by construction (hostBuiltinDenials over the empty set), the turn cap
+    // defaulting to 2 and always present, and --resume naming the seat's own uuid — never --session-id
+    // (a resume CONTINUES; an open would FORK a fresh conversation and the attribution would be a lie).
+    const askArgs = buildInvokerArgs(question, cfgPath, {
+      allowed_tools: [],
+      disallowed_tools: hostBuiltinDenials([]),
+      max_tool_calls: max_turns ?? 2,
+      effort: "medium",
+      session_id,
+      resume: true,
+    });
+    const childEnv = withoutBoxCredentials(process.env);
+    try {
+      let stdout: string;
+      try {
+        stdout = customRun
+          ? await customRun(bin, askArgs, spawnBounds, childEnv)
+          : await spawnStreaming(
+              bin, [...askArgs, "--output-format", "stream-json", "--verbose"], spawnBounds,
+              undefined, undefined, abortGraceMs, promptViaStdin(question) ? question : undefined, childEnv,
+            );
+      } catch (e) {
+        // A lost resume can arrive as a non-zero exit carrying the CLI's notice in its stdout; caught
+        // here (as the amend path does) so it becomes the typed session_lost signal, never a throw.
+        if (e instanceof ChildExitError && resumeSessionLost(e.stdout)) return { session_lost: true, session_id };
+        throw e;
+      }
+      // The seat's conversation is gone → REPORT it (F1); the handler turns this into a typed refusal.
+      if (resumeSessionLost(stdout)) return { session_lost: true, session_id };
+      // The answer is the seat's prose, returned verbatim — never re-parsed as JSON. An empty answer
+      // is returned AS empty (F2), the emptiness being the seat's, not the engine's.
+      return { answer: finalText(stdout).text, session_id, resumed: true };
+    } finally {
+      try { unlinkSync(cfgPath); } catch { /* best-effort cleanup */ }
+    }
+  };
+  return asker;
 }
 
 // Spawn a child and stream its stdout line-by-line. Each complete line is parsed as a

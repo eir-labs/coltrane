@@ -1,0 +1,33 @@
+{
+  "id": "basic",
+  "description": "contract: the census counts what a gig DID \u2014 one amend round for the chair that sealed the same type twice, the failed verdict, the departure, and the spend \u2014 from records shipped with the skill.",
+  "input": {
+    "gig-target": {
+      "gig_id": "00000000-0000-4000-8000-00000000cens",
+      "outputs_dir": "skills/gig-census/fixtures/outputs",
+      "ledger_path": "skills/gig-census/fixtures/ledger.jsonl"
+    }
+  },
+  "assertions": [
+    {
+      "path": "gig_id",
+      "op": "equals",
+      "value": "00000000-0000-4000-8000-00000000cens"
+    },
+    {
+      "path": "chairs.0.amend_rounds",
+      "op": "equals",
+      "value": 1
+    },
+    {
+      "path": "failed_verdicts",
+      "op": "equals",
+      "value": 1
+    },
+    {
+      "path": "spend.completed",
+      "op": "equals",
+      "value": true
+    }
+  ]
+}

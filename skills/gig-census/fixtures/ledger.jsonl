@@ -1,0 +1,3 @@
+{"kind": "chair_spend", "gig_id": "00000000-0000-4000-8000-00000000cens", "role": "make"}
+{"kind": "chair_spend", "gig_id": "00000000-0000-4000-8000-00000000cens", "role": "check"}
+{"kind": "gig", "gig_id": "00000000-0000-4000-8000-00000000cens", "status": "complete"}

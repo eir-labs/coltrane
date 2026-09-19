@@ -1,0 +1,59 @@
+{
+  "slug": "session-analysis",
+  "version": 1,
+  "extends": "Interpretation",
+  "domain": "session-review",
+  "status": "active",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "where_the_cost_went": {
+        "type": "array",
+        "description": "each finding {finding, evidence, value} — which token class, which tool, which phase carried the bill",
+        "items": {
+          "type": "object"
+        }
+      },
+      "where_the_time_went": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        }
+      },
+      "rework": {
+        "type": "array",
+        "description": "work that had to be done twice, with the census evidence that shows it (errors, denials, repeated operator corrections)",
+        "items": {
+          "type": "object"
+        }
+      },
+      "said_vs_done": {
+        "type": "array",
+        "description": "where the operator's messages and the tool histogram disagree — what was asked for versus what the session spent itself on",
+        "items": {
+          "type": "object"
+        }
+      },
+      "turning_points": {
+        "type": "array",
+        "description": "the moments the session changed direction, each anchored to an operator message",
+        "items": {
+          "type": "object"
+        }
+      },
+      "caveats": {
+        "type": "array",
+        "description": "what the census cannot show, stated so the writer does not fill the gap",
+        "items": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  "required_fields": [
+    "where_the_cost_went",
+    "rework",
+    "turning_points",
+    "caveats"
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "id": "basic",
+  "description": "contract: the census counts a transcript held in the package itself — records, assistant turns, the tool histogram, and the operator's messages with repeats collapsed.",
+  "input": { "session-target": { "transcript": "skills/session-census/fixtures/sample.jsonl" } },
+  "assertions": [
+    { "path": "records", "op": "equals", "value": 6 },
+    { "path": "turns.assistant", "op": "equals", "value": 2 },
+    { "path": "operator_messages.0.count", "op": "equals", "value": 2 }
+  ]
+}

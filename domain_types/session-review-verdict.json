@@ -1,0 +1,48 @@
+{
+  "slug": "session-review-verdict",
+  "version": 1,
+  "extends": "Verdict",
+  "domain": "session-review",
+  "status": "active",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "pass": {
+        "type": "boolean"
+      },
+      "unsupported_claims": {
+        "type": "array",
+        "description": "claims whose evidence path is absent from the census, or whose value disagrees with it",
+        "items": {
+          "type": "object"
+        }
+      },
+      "misquoted_decisions": {
+        "type": "array",
+        "description": "decisions whose quote does not appear verbatim in the census's operator messages",
+        "items": {
+          "type": "object"
+        }
+      },
+      "omissions": {
+        "type": "array",
+        "description": "what the census carries that the review does not mention and should",
+        "items": {
+          "type": "string"
+        }
+      },
+      "checks": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        }
+      }
+    }
+  },
+  "required_fields": [
+    "pass",
+    "checks",
+    "unsupported_claims",
+    "misquoted_decisions"
+  ]
+}

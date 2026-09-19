@@ -1,0 +1,104 @@
+{
+  "slug": "session-review-v0",
+  "domain": "session-review",
+  "agent_slugs": [
+    "session-analyst",
+    "session-reviewer",
+    "session-review-verifier"
+  ],
+  "phases": [
+    {
+      "name": "census",
+      "chairs": [
+        {
+          "role": "census",
+          "skill_slug": "session-census",
+          "depends_on": [],
+          "input_contract": [
+            "session-target"
+          ],
+          "output_contract": [
+            "session-census"
+          ],
+          "required_skills": []
+        }
+      ]
+    },
+    {
+      "name": "analyse",
+      "chairs": [
+        {
+          "role": "analyse",
+          "agent_slug": "session-analyst",
+          "depends_on": [
+            "census"
+          ],
+          "input_contract": [
+            "session-census"
+          ],
+          "output_contract": [
+            "session-analysis"
+          ],
+          "required_skills": [],
+          "turn_reserve": 4
+        }
+      ]
+    },
+    {
+      "name": "review",
+      "chairs": [
+        {
+          "role": "write-review",
+          "agent_slug": "session-reviewer",
+          "depends_on": [
+            "census",
+            "analyse"
+          ],
+          "input_contract": [
+            "session-census",
+            "session-analysis"
+          ],
+          "output_contract": [
+            "session-review"
+          ],
+          "required_skills": [],
+          "turn_reserve": 4
+        }
+      ]
+    },
+    {
+      "name": "check",
+      "chairs": [
+        {
+          "role": "check-review",
+          "agent_slug": "session-review-verifier",
+          "depends_on": [
+            "census",
+            "write-review"
+          ],
+          "input_contract": [
+            "session-census",
+            "session-review"
+          ],
+          "output_contract": [
+            "session-review-verdict"
+          ],
+          "required_skills": [],
+          "turn_reserve": 4
+        }
+      ]
+    }
+  ],
+  "status": "draft",
+  "input_types": [
+    "session-target"
+  ],
+  "output_types": [
+    "session-census",
+    "session-analysis",
+    "session-review",
+    "session-review-verdict"
+  ],
+  "max_examine_rounds": 2,
+  "description": "A formal review of one working session, from a census counted by code rather than from anyone's memory. The input is a session-target: the path to a Claude Code transcript. The census chair is SKILL-BACKED (session-census, determinism 1.0, no model): it streams the .jsonl — 23MB and 13,000 records for the session this was built on — and emits counts, the tool histogram, the token classes and peak context, the operator's own messages with identical ones collapsed to a count, the interruptions, the denials and the errors. Nothing a model has to summarize, and nothing a model may contradict. An INTERPRET seat sits between the counts and the prose — composeStandard refuses a CREATE seat fed only by sensing, and it is right: the patterns (where the cost went, what was done twice, where what was ASKED FOR diverges from what the session SPENT ITSELF ON) are a separate judgement from the prose that reports them. The review seat then writes what the session was: the arc, the measured cost, what went wrong, the operator's decisions quoted from their own words, and every claim paired with the census path behind it. The verify seat resolves each path, checks each quote VERBATIM against the operator's messages, and names what the census carries that the review ignored; a failing verdict re-runs the writer with the verdict fed back. A review that flatters the work is a failed review, and a quote the operator never wrote is the failure the verify seat exists to catch."
+}

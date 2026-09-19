@@ -1,0 +1,20 @@
+{
+  "slug": "gig-census",
+  "version": 1,
+  "skill_type": "analysis",
+  "permission": { "tier": 1 },
+  "determinism_ratio": 1.0,
+  "input_type": "gig-target",
+  "output_type": "gig-census",
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "gig_id": { "type": "string" },
+      "chairs": { "type": "array" },
+      "verdicts": { "type": "array" },
+      "departures": { "type": "array" },
+      "spend": { "type": "object" }
+    },
+    "required": ["gig_id", "chairs", "spend"]
+  }
+}

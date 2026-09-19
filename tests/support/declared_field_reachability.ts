@@ -291,7 +291,11 @@ export const CALIBRATION_TRAIL = {
 // release-note-verdict's: unsupported_claims, missing_from_prose and register_faults. They are read by
 // the operator deciding whether a note may publish, and nothing in src/ reads them; a verdict renderer
 // would take this to 218.
-export const PINNED_UNREAD_FIELDS = 221;
+// 221 → 235: the session-review quintet's model-facing fields (the census's counts, the analysis's
+// findings, the review's registers, the verdict's three refusal lists). They are read by the seats that
+// write and judge them and by whoever files the review; src/ reads none of them, exactly as the release
+// trio's verdict fields do. A renderer for either would bring both numbers down together.
+export const PINNED_UNREAD_FIELDS = 235;
 
 /* ─────────────────────────────────────────────────────────────────────────────────────────────────
  * TWO CORPORA — engine (src/) vs contract (broad).
@@ -535,4 +539,6 @@ export const PINNED_UNREAD_ENGINE_FIELDS = 23;
  * 120 -> 119 on 2026-09-17, measured the same way: red-law-reviewer names inferred_not_run (a
  * change-verdict field it must fill with what it could not execute). No field became unread.
  */
-export const PINNED_UNREAD_CONTRACT_FIELDS = 119;
+// 119 → 121: two of the session-review quintet's fields land in the CONTRACT corpus rather than the
+// engine one, for the same reason — declared in the genome, read by seats, not by src/.
+export const PINNED_UNREAD_CONTRACT_FIELDS = 121;

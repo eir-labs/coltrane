@@ -45,7 +45,7 @@ import { standardSimulate } from "./simulate.js";
 import { runGig, BudgetExhausted, GigAborted, ResumeRefused, partialGigUsage, partialBudgetState, partitionGigInputKeys, unknownGigInputMessage, type AgentInvoker } from "./runtime.js";
 import { assembleRunDeps, resolveWorkingRepo } from "./run_deps.js";
 import { createCheckpointStore, createReuseStore, type CheckpointStore, type ReuseStore } from "./reuse.js";
-import { killLiveChairChildren } from "./claude_invoker.js";
+import { killLiveChairChildren, type SeatAsker } from "./claude_invoker.js";
 import { selectChairInvoker } from "./invoker_selection.js";
 import { dockerComposeRealizer, type VenueRealizer } from "./venue_realizer.js";
 import { institutionPlacementResolver } from "./placement_institutions.js";
@@ -497,6 +497,32 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
           required_fields: arr(args["required_fields"]),
         });
         return { ok: true, requires_approval: approval, data: res };
+      }
+      case "seat_ask": {
+        // contract-seat-ask-v1 — ask a PAST seat WHY, on the conversation it actually held. The
+        // handler seals NO output and writes NO ledger row (I2): it only resumes a session and
+        // returns its prose. The resume + cage live in the Claude invoker's hands-off ask path
+        // (deps.invoke.askSeat) so the spawn is built by the SAME buildInvokerArgs every seat uses.
+        const gig_id = typeof args["gig_id"] === "string" ? args["gig_id"] : "";
+        const role = typeof args["role"] === "string" ? args["role"] : "";
+        const question = typeof args["question"] === "string" ? args["question"] : "";
+        const max_turns = typeof args["max_turns"] === "number" ? (args["max_turns"] as number) : undefined;
+        const asker = deps.invoke as unknown as Partial<SeatAsker> | undefined;
+        if (!asker || typeof asker.askSeat !== "function") {
+          return { ok: false, requires_approval: approval, error: "seat_ask needs a Claude invoker with a resumable session path (deps.invoke); none is wired on this surface" };
+        }
+        const asked = await asker.askSeat({ gig_id, role, question, max_turns });
+        // F1 — no conversation to ask: a TYPED refusal naming the gig and role, and NO fresh seat was
+        // spawned (the invoker returned this before any --session-id open). Returned, never thrown.
+        if ("session_lost" in asked) {
+          return {
+            ok: false, requires_approval: approval, refusal: "no_conversation",
+            error: `no conversation to ask: gig "${gig_id}" role "${role}" has no resumable seat session — it never ran or its session is gone. Refusing rather than spawning a fresh seat that would invent the reasoning.`,
+          };
+        }
+        // O1/F2 — the seat's own reasoning, verbatim (empty stays empty), stamped with the session it
+        // came from and marked a resume, not a fresh open.
+        return { ok: true, requires_approval: approval, data: { answer: asked.answer, session_id: asked.session_id, resumed: asked.resumed } };
       }
       case "type_browse": {
         let types = deps.registry.listTypes();

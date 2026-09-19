@@ -294,8 +294,13 @@ describe("#227 — the genome's declared required fields are dropped, not absent
     // the plain and formal registers plus the evidence path behind every claim) and
     // `release-note-verdict` (extends Verdict; which claims the record does not support). All three
     // declare their required fields, so they join `checked` and none appears in the `lossy` census.
+    // 73 → 78: the session-review quintet — `session-target` (the transcript to review),
+    // `session-census` (what a transcript SAYS, counted by code), `session-analysis` (the INTERPRET
+    // step composeStandard requires between counting and writing), `session-review` (the prose with a
+    // claim-to-evidence pairing) and `session-review-verdict` (which claims the census does not hold,
+    // and which quotes the operator never wrote). All five declare their required fields.
     expect(checked).toHaveLength(genome.domain_types.size);
-    expect(checked.length).toBe(73);
+    expect(checked.length).toBe(78);
   });
 });
 

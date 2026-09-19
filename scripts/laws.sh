@@ -25,7 +25,7 @@ cd "$(dirname "$0")/.."
 
 # THE ROOT BAND — `npm test`, the one the verifier measured and the one carrying almost
 # every law in this repo.
-EXPECTED_LAWS="${EXPECTED_LAWS:-3941}"   # includes 22 todo; RED until built: 8 seat-ask
+EXPECTED_LAWS="${EXPECTED_LAWS:-3953}"   # includes 22 todo
 #   +1  mcp_tools_describe law 7 (#535) — a description that backticks an argument names one the
 #       verb's own input_schema declares. The prose sits beside a GENERATED schema: the schema moves
 #       with the handler, the description does not. Its first draft could not fail — it forgave any

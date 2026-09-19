@@ -181,6 +181,11 @@ const TOOL_DEFS: readonly Omit<MCPToolDef, "description">[] = [
   // enforcement belongs); hosted routes to deps.approveGig, non-hosted has no local run to
   // approve (a local run takes its verdicts through gig_dispatch's `approvals`).
   { slug: "gig_approve",                   category: "run", input_schema: obj({ gig_id: "string", role: "string", verdict: "object" }), output_schema: obj({ gig_id: "string", role: "string", status: "string", approved: "boolean" }) },
+  // contract-seat-ask-v1 — interrogate a PAST seat on the conversation it actually held. The verb
+  // resumes sessionUuidFor(gig_id, role) — the same session the amend loop resumes — and sends ONLY
+  // the question. The asked seat is given no tools and seals nothing, so a reconciler can hear a
+  // worker's reasoning without a fresh seat inventing it (the whole point of the asymmetry).
+  { slug: "seat_ask",                      category: "understand", input_schema: obj({ gig_id: "string", role: "string", question: "string", max_turns: "number" }), output_schema: obj({ answer: "string", session_id: "string", resumed: "boolean" }) },
   // venue_credential_mint — the verb that stands up a worker without a browser. `org_slug` scopes
   // the credential and `instance` binds it to one host; a key with an org and no instance is the
   // org's whole authority with nothing to bind it to. The answer carries the COMPLETE worker
@@ -367,6 +372,8 @@ export const TOOL_DESCRIPTIONS: Record<string, string> = {
     "Cancel a QUEUED gig before a worker claims it, so no worker ever runs it. Only a queued gig can be cancelled — a running one is stopped with gig_abort.",
   gig_approve:
     "Supply the verdict a parked human chair is waiting for, keyed by chair role. The verdict then seals through the same gate as every other output, recorded against who gave it.",
+  seat_ask:
+    "Ask a past seat WHY, on the very conversation it held. Resumes that chair's own session by gig and role and puts one question to it — no re-reading of identity, method or inputs, because the conversation already holds them. The asked seat is given no tools and seals nothing, so it can explain the record without touching it; when its conversation is gone the ask refuses rather than letting a fresh seat imagine the reasoning.",
   venue_credential_mint:
     "Mint a scoped credential for one venue instance — the room's own environment, never a standing key.",
   org_hire:

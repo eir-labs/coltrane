@@ -146,7 +146,12 @@ function parse(src: string): SExpr {
 // outside it is an unimplemented operator — an admissibility refusal statically, and UNDECIDED at
 // runtime. Some KNOWN operators (subseteq/forall/resolvable/…) still cannot be reduced from facts
 // alone, so they too return UNDECIDED at runtime — that is an honest non-decision, not an unknown.
-const KNOWN_OPERATORS: ReadonlySet<string> = new Set<string>([
+/** EXPORTED because a second reader exists: obligation-adjudicate reports which operator an
+ *  obligation asked for and this evaluator does not implement. That report is only honest if it
+ *  reads the same set the evaluator does — a copy would keep naming an operator as missing after
+ *  it was implemented, which is precisely backwards for a field whose job is "build this next".
+ *  One home, two readers. */
+export const KNOWN_OPERATORS: ReadonlySet<string> = new Set<string>([
   "=>",
   "and",
   "or",

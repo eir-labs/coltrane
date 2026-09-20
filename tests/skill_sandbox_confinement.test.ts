@@ -30,13 +30,13 @@ import { executeSkill, tierFlags } from "../src/skill_subprocess.js";
 let root: string;
 
 /** A skill whose code half is `body`, declared at `tier`. */
-function skill(body: string, tier = 0): string {
+function skill(body: string, tier = 0, network?: { allow: string[] }): string {
   const dir = join(root, `s${Math.random().toString(36).slice(2)}`);
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, "meta.json"), JSON.stringify({
     slug: "probe", version: 1, skill_type: "deterministic",
     input_type: "note", output_type: "note",
-    permission: { tier }, description: "probe", determinism_ratio: 1,
+    permission: network ? { tier, network } : { tier }, description: "probe", determinism_ratio: 1,
   }));
   writeFileSync(join(dir, "skill.mjs"), body);
   return dir;
@@ -148,15 +148,41 @@ describe("the tiers still grant what they say", () => {
   });
 });
 
-describe("what this sandbox does NOT claim", () => {
-  it("states the network gap honestly rather than asserting a guarantee", () => {
-    // Node's permission model has no network flag. Until skill execution moves to a runtime
-    // that has one, an outbound request from a skill is POSSIBLE, and the source must say so —
-    // a comment promising otherwise is the defect this release exists to remove.
-    const src = tierFlags(0).join(" ");
-    expect(src).not.toContain("--allow-net");
-    // The confinement above removes the credential from reach, which is what makes the
-    // remaining network capability survivable rather than critical.
+describe("the network is a declared capability", () => {
+  // The previous release stated a gap honestly: Node's permission model had no network flag, so a
+  // skill could reach out and the source said so rather than promising otherwise. Node 24 added
+  // --allow-net, and the gap closed — measured, not assumed: every URL in a landscape run came
+  // back ERR_ACCESS_DENIED until the flag was passed. So the grant that was already in the schema
+  // and read by nothing (SkillPermissionSchema.network) is now what decides.
+  it("passes no --allow-net when the skill declares no network grant", () => {
+    expect(tierFlags(0).join(" ")).not.toContain("--allow-net");
+    expect(tierFlags(2).join(" ")).not.toContain("--allow-net"); // not a tier — a declaration
+  });
+
+  it("passes --allow-net when the skill declares a grant", () => {
+    expect(tierFlags(0, undefined, { allow: ["example.com"] }).join(" ")).toContain("--allow-net");
+  });
+
+  it("lets a granted skill reach a host its allow list names, and refuses one it does not", async () => {
+    const body = `export default async function run(input) {
+      try { const r = await fetch(input.url); return { status: r.status }; }
+      catch (e) { return { error: String(e.message) }; }
+    }`;
+    const dir = skill(body, 0, { allow: ["example.com"] });
+    const allowed = executeSkill(dir, { url: "https://example.com/" }).output as { status?: number };
+    expect(allowed.status).toBe(200);
+    const refused = executeSkill(dir, { url: "https://www.w3.org/TR/prov-o/" }).output as { error?: string };
+    expect(String(refused.error)).toContain("network grant refuses");
+  });
+
+  it("denies fetch to a skill with no grant", () => {
+    const body = `export default async function run() {
+      try { const r = await fetch("https://example.com/"); return { status: r.status }; }
+      catch (e) { return { error: String(e.message) }; }
+    }`;
+    const out = executeSkill(skill(body, 0), {}).output as { status?: number; error?: string };
+    expect(out.status).toBeUndefined();
+    expect(String(out.error)).toMatch(/fetch failed|ERR_ACCESS_DENIED/);
   });
 });
 

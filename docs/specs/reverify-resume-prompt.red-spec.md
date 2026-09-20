@@ -1,101 +1,127 @@
-# contract-reverify-resume-prompt-v1 — a resumed re-verify carries only what is new
+# contract-reverify-carries-amendment-v1 — a resumed re-verify carries the amended inputs, not nothing
 
 RED spec. The laws are `tests/spec_reverify_resume_prompt.test.ts`; they FAIL today because the
 enforcement below does not exist yet. This document names, per obligation, the mechanism and the
-callsite the enforcement must land at, and the red law that will turn green when it does.
+callsite the enforcement must land at, and the red law that will turn green when it does. It AMENDS
+`contract-reverify-resume-prompt-v1` in place: that contract's O1 and I1 are SUPERSEDED (their trim was
+too aggressive), while its O2 (completions full prompt) and F1 (cold fallback) are KEPT green untouched
+and are renumbered I5 and F2 here.
 
 ## The defect
 
-Recorded by build gig 7332d166 (`4c1ed5e`). The examine⇄amend loop's re-verify RESUMES the verifier's
-round-one Claude session — `runtime.ts:2346` prepares it with `{ resume: true, keep_prompt: true }` — but
-is handed the FULL prompt. `keep_prompt` was introduced (contract-resumed-gig-session-v1) so the SAME
-`buildPrompt` could serve BOTH the resuming Claude door and the stateless chat-completions door, whose
-examine-loop law (`tests/spec_completions_seat_every_door.test.ts` LAW 6) routes each spawn by the seat
-identity IN its prompt. So `buildPrompt` keeps the full prompt whenever `resume_keep_prompt` is set
-(`src/claude_invoker.ts:163` — the trim branch is skipped). A resumed Claude conversation already holds
-the whole round-one prompt, so every re-verify re-sends it — the exact cold read the resume exists to
-avoid. Measured: the re-verify prompt is byte-for-byte the round-one prompt (I1 law: 6864 == 6864 chars).
+A resumed re-verify BLINDS a tool-less verify seat. `buildReverifyResumePrompt` (`src/claude_invoker.ts:356`)
+sends a resumed verify spawn only an amend statement — "re-derive your verdict from the CURRENT working
+tree — read the amended artifact as it now stands" — plus the output contract. That is right for
+`change-verifier`, which holds `Read` and git and whose evidence IS the tree. It is WRONG for a verify
+seat whose evidence arrives as sealed inputs and which grants no tool that can reach a tree: the amended
+records are never re-sent, so the seat re-judges round one. Measured live: `session-review-v0`'s
+round-two verdict cited round 1 three times and wrote "amendment unreadable" while its own `input_refs`
+named the amended record. `release-note-verifier` has the same shape. The amended records ARE available —
+`prepareChair` resolves inputs fresh for the re-verify (`src/runtime.ts:2472`) — they are simply dropped
+because the trim discarded the whole `buildPrompt` layer stack, inputs and all.
 
-## The contract (contract-reverify-resume-prompt-v1)
+## The contract (contract-reverify-carries-amendment-v1)
 
-A resumed conversation is sent only what is new; a stateless seat is sent everything. The Claude door
-(which resumes) trims the re-verify; the chat-completions door (which is stateless) keeps the full
-prompt. `src/completions_invoker.ts` is OUT of scope and must not change — the divergence has to be
-achieved on the Claude side.
+Source: `contract-reverify-carries-amendment-v1`, decided by the operator 2026-09-19.
 
-### O1 — the resumed Claude re-verify is short
+### O1 / O2 — carry every amended input, and nothing already covered
 
-**Mechanism.** The Claude invoker, when it is about to spawn a re-verify (`ctx.resume === true &&
-ctx.resume_keep_prompt === true` with a resolvable session), must build a SHORT prompt for the spawn
-rather than the full stack: a statement that the makers amended their work and the verdict must be
-re-derived from the current tree, plus the chair's output contract (its `verdict` output type / seal
-directive). It must re-send no `buildPrompt` layer (`# Disposition`, `# Identity`, `# Method`,
-`# Context`) and not the gig input — the resumed conversation already holds all of them.
+**Mechanism.** `buildReverifyResumePrompt` renders an AMENDED-RECORDS section carrying exactly those
+current chair inputs whose engine-stamped `content_sha` is ABSENT from the verify chair's own round-one
+sealed record's `input_shas`. An input whose `content_sha` IS in that set is NOT re-sent (the trim
+`contract-reverify-resume-prompt-v1` bought is kept). Each carried record renders as
+`- <domain_type> (from <agent_slug>): <JSON.stringify(data)>` (mirroring `buildPrompt`'s input block).
+When the amended set is empty, the section — its `# Amended records` header included — is omitted entirely.
 
-**Callsite.** `src/claude_invoker.ts:1489-1491`, where the invoker chooses `prompt` for the spawn.
-Today `resumingWithSession` is true and `prompt = buildPrompt(ctx, …)`, which returns the FULL prompt
-because `ctx.resume_keep_prompt` skips the trim at `src/claude_invoker.ts:163`. The trim for a re-verify
-must be applied HERE, on the Claude side only, so `fullPrompt` (the cold-fallback prompt, built with
-`resume: false`) stays full and `src/completions_invoker.ts:186` is untouched.
+**Callsite.** `buildReverifyResumePrompt` (`src/claude_invoker.ts:356`) and its call site
+(`src/claude_invoker.ts:1692-1693`). The function must receive the amended set (threaded through the
+ctx), render it, and compute nothing itself.
 
-**Law.** `O1 — the resumed re-verify re-sends no buildPrompt layer and no gig input, only the amend +
-re-derive statement and the output contract`.
+**Law.** `I1` (section absent when covered, present when amended) and `I2` (two-input: amended payload
+carried, covered payload dropped).
 
-### O2 — the stateless chat-completions re-verify keeps the full prompt
+### O3 — the RUNTIME resolves the amended set; the prompt renders it
 
-**Mechanism.** The chat-completions door holds no conversation, so its re-verify must still carry its
-whole context — the seat identity (the signal LAW 6 routes on) and the gig input. Because O1's trim is
-applied on the Claude side (not in shared `buildPrompt`), the completions door's `buildPrompt(ctx, …)`
-call keeps returning the full prompt, and the two doors DIVERGE: the completions re-verify stays full
-while the Claude re-verify shrinks.
+**Mechanism.** At chair prep for the re-verify round (`prepareChair`, `src/runtime.ts:2472`), the runtime
+reads the verify chair's own round-one sealed `OutputRecord` (its `input_shas`, engine-stamped at seal —
+`src/runtime.ts:2593`), compares each freshly-resolved input's `content_sha` against it, and threads the
+amended subset onto the invocation context (a new `AgentInvocationContext` field). The prompt builder
+renders what it is handed; NO model output is read to decide what changed. The round-one record is
+reachable at that point via `producedByRole.get(vch.role)` (the failing verdict, not yet overwritten).
 
-**Callsite.** `src/completions_invoker.ts:186` (the completions door's `buildPrompt` call) must remain a
-full-prompt call — this file is out of scope, so the enforcement is precisely that the O1 change does
-NOT reach it. The law observes this door through `makeCompletionsInvoker`'s injected `fetchFn` seam.
+**Callsite.** `src/runtime.ts:2472` (the re-verify `prepareChair`) and the new ctx field it threads.
 
-**Law.** `O2 — the completions re-verify carries the seat identity + gig input, and diverges from the
-trimmed Claude re-verify`. Its whole-context assertions guard LAW 6; its load-bearing assertion — the
-Claude re-verify is a small fraction of the completions re-verify — is red today because both doors send
-the full prompt (6864 vs 7265 chars, not the required < ¼).
+**Law.** `I1`/`I2`/`I3` are all driven through `runGig`'s real examine⇄amend loop, so cutting the
+runtime's threading makes every carrying law red — the wire-cut check.
 
-### I1 — the resumed re-verify is under a quarter of the round-one prompt
+### O4 — the working-tree instruction only to a seat that can reach the tree
 
-**Mechanism.** The direct size consequence of O1. `checkable`: the round-one verifier prompt is over
-4KB; the resumed re-verify is under a quarter of it.
+**Mechanism.** The "re-derive your verdict from the CURRENT working tree" instruction is emitted ONLY
+when the verify seat's effective tool set contains a tree-reading tool. A seat granted none is told
+instead that "the carried records are your evidence" and that it holds no tool reaching the tree.
 
-**Callsite.** Same as O1. Observed at the spawn boundary through the injected `run` seam.
+**Callsite.** `buildReverifyResumePrompt`, consulting `ctx.agent.allowed_tools` through the tree-reading
+accessor (O5).
 
-**Law.** `I1 — a resumed re-verify prompt is under a quarter of a round-one verifier prompt over 4KB`.
-Red today: 6864 not < 1716 (round one is re-sent verbatim).
+**Law.** `I4` — the same fixture built over two agents, one with `Read` granted and one with
+`allowed_tools: []`; the tree instruction is present in exactly one and the carried-evidence statement
+in the other.
 
-### F1 — a lost re-verify resume falls back cold, full, and never fails the chair
+### O5 — the tree-reading tool set lives in ONE named home
 
-**Mechanism.** A re-verify whose `--resume` finds no conversation has nothing to rely on, so the cold
-fallback must re-send the FULL prompt on a fresh `--session-id`, record `resume_fallback`, and never
-fail the chair. This is the generic resume fallback (`resumeColdFallback`, `src/claude_invoker.ts:1714`,
-reached from `:1792`), which re-sends `fullPrompt` — the full prompt built with `resume: false`. The
-fallback only becomes DISTINGUISHABLE from the normal re-verify once O1 trims the normal path; until
-then both are full, and the law's red anchor is that the resumed (non-fallback) re-verify is still full.
+**Mechanism.** The set of tools that can read the working tree lives in ONE named home in
+`src/tool_providers.ts`, reachable only through an accessor (e.g. `grantsTreeReader(allowed)`), so no
+call site re-inlines the oracle — the discipline `HOST_BUILTINS` already keeps (unexported set + accessor,
+`src/tool_providers.ts:32-98`).
 
-**Callsite.** `src/claude_invoker.ts:1791-1793` (resolve-lost) and `:1802-1804` (throw-lost) → `:1714`.
-`coldArgs`/`fullPrompt` (`:1625-1626`) must stay full for the re-verify path.
+**Callsite.** `src/tool_providers.ts` — the named set and its accessor.
 
-**Law.** `F1 — the lost re-verify re-runs COLD with the FULL prompt on a fresh session, records
-resume_fallback, and does not fail`. Its red anchor asserts the resumed re-verify (before the fallback)
-is trimmed (no `# Disposition`); its guards assert the cold fallback is full, the chair does not throw,
-and `chair_complete` records `resume_fallback`.
+**Law.** Exercised by `I4`: cutting the tree-reading predicate (so every seat looks tool-less, or every
+seat looks tool-holding) makes `I4` red.
+
+## Kept green (renumbered), and the failure modes
+
+### I5 — the stateless chat-completions door keeps the full prompt (was O2)
+
+Unchanged. The completions door holds no conversation, so its keep-prompt re-verify still carries the
+seat identity and every gig input via `buildPrompt`. `src/completions_invoker.ts` is OUT of scope and
+must not change. Law: `I5` (kept, green before and after).
+
+### F1 — no round-one record findable → carry ALL, loudly
+
+When no round-one sealed record is findable for the verify role (the verdict was never sealed, or the
+store holds none), the re-verify carries ALL current inputs and records that it did so for want of a
+prior round. An absent prior round must never read as "nothing changed" and silently carry nothing — the
+absence is loud, and it over-sends rather than under-sends. Enforced by the runtime's amended-set
+resolution (O3); in the natural examine⇄amend loop the round-one record always exists, so this failure
+mode is covered by the resolution's construction rather than a dedicated red law (recorded, not invented).
+
+### F2 — a lost --resume falls back cold (was F1)
+
+Unchanged: a re-verify whose `--resume` session is gone re-runs COLD with the FULL round-one prompt on a
+fresh `--session-id`, records `resume_fallback`, and never fails the chair. The amendment carrying must
+NOT fire on that path — the full prompt already holds every input. Law: `F2` (kept, red anchor: the
+resumed re-verify before the fallback is trimmed).
+
+### F3 — identity is the content_sha, never the record id
+
+An input record present in round one whose `content_sha` has CHANGED (re-sealed under the same record id)
+is treated as amended and carried. Identity for this comparison is the `content_sha`, never the record
+id — an amended record re-sealed under a familiar id must not be mistaken for one the seat has already
+seen. Covered by `I2`/`I3`: the maker re-seals its artifact under the same `make` record id with a
+changed `content_sha`, and the law asserts it IS carried.
+
+## Verification method
+
+Example-based / behavioral. I1–I5 and F2 are specific behaviors of a specific spawn (the examine loop's
+re-verify), not universal properties over an input space, so each is asserted by driving `runGig`'s REAL
+examine⇄amend loop with a verifier that fails once and reading the prompt the re-verify spawn actually
+receives — the Claude door through `makeClaudeInvoker`'s injected `run` seam, the chat-completions door
+(I5) through `makeCompletionsInvoker`'s injected `fetchFn` seam. No property-based engine is required;
+the callsite is deterministic given the fixed loop and the injected seams.
 
 ## Controls (must stay green)
 
 `tests/spec_completions_seat_every_door.test.ts` (LAW 6 — the completions examine loop routes by seat
 identity), `tests/spec_resumed_gig_continues_chair_session.test.ts`, `tests/spec_amend_resume_prompt.test.ts`,
-and `tests/spec_chair_session_continuity.test.ts`. Verified green alongside the red laws.
-
-## Verification method
-
-Example-based / behavioral. O1, O2, I1, F1 are specific behaviors of a specific spawn (the examine
-loop's re-verify), not universal properties over an input space, so each is asserted by driving
-`runGig`'s REAL examine⇄amend loop with a verifier that fails once and reading the prompt the re-verify
-spawn actually receives — the Claude door through `makeClaudeInvoker`'s injected `run` seam, the
-chat-completions door through `makeCompletionsInvoker`'s injected `fetchFn` seam. No property-based
-engine is required; the callsite is deterministic given the fixed loop and the injected seams.
+and `tests/spec_chair_session_continuity.test.ts`.

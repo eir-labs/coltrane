@@ -29,7 +29,8 @@
       "facts": {
         "payee": "org:eir-gk",
         "w8": "instrument-ref:w8ben-e-2026"
-      }
+      },
+      "supplied_by": "org:eir-gk"
     }
   },
   "assertions": [

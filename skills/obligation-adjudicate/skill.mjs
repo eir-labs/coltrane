@@ -16,17 +16,29 @@
 //   - a `proposed` bearing law is not adjudicated at all: nothing is in force until it is executed.
 //   - an obligor may not certify its own discharge, so this chair refuses to adjudicate a law whose
 //     fact snapshot was supplied by the debtor (`facts.supplied_by === law.debtor`).
-import { evaluate, KNOWN_OPERATORS } from "../../dist/src/institution_enforcement.js";
+import { evaluate, KNOWN_OPERATORS, REDUCIBLE_OPERATORS } from "../../dist/src/institution_enforcement.js";
 
-/** Operators a predicate names that the evaluator does not implement. Textual, deliberately: the
- *  point is to REPORT what an obligation asked for, not to decide it. */
-function missingOperators(predicate) {
+/** What a predicate asked for and did not get, split into the TWO different failures it can be —
+ *  because they are different work and must not land on one list (contract-operator-sets-v1):
+ *
+ *    unreducible — a real word in the language this evaluator cannot decide from facts (subseteq,
+ *                  forall, has, …). THIS is the "build this one next" list: an obligation asked,
+ *                  and implementing fact-reduction for it is what would let the obligation decide.
+ *    unknown     — not a word at all. A malformed law that admissibility should have refused;
+ *                  reporting a typo as work to do would send someone to implement a misspelling.
+ *
+ *  Both sets are imported, never copied: REDUCIBLE_OPERATORS is pinned to the evaluator's dispatch
+ *  in both directions, so this report cannot drift from what the evaluator actually does. Reading
+ *  the VOCABULARY set here was the defect — it made this silent for all seven known-but-undecidable
+ *  operators, which is backwards for a field whose job is to name the next thing to build.
+ *  Textual, deliberately: the point is to REPORT what an obligation asked for, not to decide it. */
+function operatorsWanted(predicate) {
   const heads = String(predicate ?? "").match(/\(\s*([^\s()]+)/g) ?? [];
-  const named = heads.map((h) => h.replace(/^\(\s*/, ""));
-  // The evaluator's own set, imported rather than copied: a copy would keep naming an operator as
-  // missing after it was implemented, which is backwards for a field whose whole job is "build this
-  // one next". One home, two readers.
-  return [...new Set(named.filter((op) => !KNOWN_OPERATORS.has(op)))];
+  const named = [...new Set(heads.map((h) => h.replace(/^\(\s*/, "")))];
+  return {
+    unreducible: named.filter((op) => KNOWN_OPERATORS.has(op) && !REDUCIBLE_OPERATORS.has(op)),
+    unknown: named.filter((op) => !KNOWN_OPERATORS.has(op)),
+  };
 }
 
 export default function run(input, context) {
@@ -62,14 +74,19 @@ export default function run(input, context) {
       continue;
     }
     const verdict = evaluate({ predicate: check.predicate, inputs: check.inputs ?? {} }, facts);
-    const missing = verdict === "UNDECIDED" ? missingOperators(check.predicate) : [];
+    const wanted = verdict === "UNDECIDED" ? operatorsWanted(check.predicate) : { unreducible: [], unknown: [] };
+    const missing = wanted.unreducible;
     results.push({
       obligation: slug,
       outcome: verdict,
       why: verdict === "DEAD_NAME" ? "a declared input the snapshot does not supply" :
-           verdict === "UNDECIDED" ? (missing.length ? `operators the evaluator does not implement: ${missing.join(", ")}` : "the predicate could not be reduced from these facts") :
+           verdict === "UNDECIDED" ?
+             (wanted.unknown.length ? `the predicate names words this language does not have: ${wanted.unknown.join(", ")} — a malformed law, not work to do`
+              : missing.length ? `operators this evaluator cannot reduce from facts: ${missing.join(", ")}`
+              : "the predicate could not be reduced from these facts") :
            "decided from the snapshot",
       needs_operators: missing,
+      unknown_operators: wanted.unknown,
     });
   }
 

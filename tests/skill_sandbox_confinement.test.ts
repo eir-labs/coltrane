@@ -200,15 +200,35 @@ describe("the network is a declared capability", () => {
     expect(String(out.seen?.[2])).toContain("max_requests=2");
   });
 
-  it("refuses a body larger than max_bytes", () => {
+  // The readers that leaked: text/arrayBuffer/json were wrapped and blob/bytes/body were not, so an
+  // honest skill reading a large response the ordinary way walked around the ceiling. One law per
+  // reader, because a law that only exercises text() passes while the bound leaks.
+  for (const reader of ["blob", "bytes", "arrayBuffer", "text"]) {
+    it(`refuses a body larger than max_bytes via ${reader}()`, () => {
+      const body = `export default async function run(input) {
+        const r = await fetch(input.url);
+        try { const v = await r.${reader}(); return { got: v?.size ?? v?.byteLength ?? v?.length ?? 0 }; }
+        catch (e) { return { error: String(e.message) }; }
+      }`;
+      const dir = skill(body, 0, { allow: ["example.com"], max_bytes: 10 });
+      const out = executeSkill(dir, { url: "https://example.com/" }).output as { error?: string; got?: number };
+      expect(out.got).toBeUndefined();
+      expect(String(out.error)).toContain("max_bytes=10");
+    });
+  }
+
+  it("counts res.body as the stream flows and refuses past max_bytes", () => {
     const body = `export default async function run(input) {
       const r = await fetch(input.url);
-      try { const t = await r.text(); return { chars: t.length }; }
-      catch (e) { return { error: String(e.message) }; }
+      try {
+        let n = 0;
+        for await (const chunk of r.body) n += chunk.byteLength;
+        return { got: n };
+      } catch (e) { return { error: String(e.message) }; }
     }`;
     const dir = skill(body, 0, { allow: ["example.com"], max_bytes: 10 });
-    const out = executeSkill(dir, { url: "https://example.com/" }).output as { error?: string; chars?: number };
-    expect(out.chars).toBeUndefined();
+    const out = executeSkill(dir, { url: "https://example.com/" }).output as { error?: string; got?: number };
+    expect(out.got).toBeUndefined();
     expect(String(out.error)).toContain("max_bytes=10");
   });
 

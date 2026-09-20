@@ -149,14 +149,35 @@ describe("skill network grant — backed by the runtime, or refused", () => {
     }
   });
 
-  it("refuses a grant this runtime cannot back, naming the skill and the field", () => {
+  it("drops an unbackable grant as a load_error and loads the rest of the genome", () => {
+    if (nodeMajor >= 24) return; // cannot be exercised here; the law above governs
+    // TOTAL, like loadInstitutions: "this ONE skill cannot run on this runtime" must not become
+    // "NOTHING loads on this runtime". Measured on CI (Node 22), where a single fetching skill made
+    // the whole genome unloadable and took four unrelated suites down with it.
+    const dir = makeGenomeDir();
+    try {
+      seedCoreTypes(dir);
+      writeSkillWithPermission(dir, "netty", { tier: 0, network: { allow: ["api.example.com"] } });
+      writeSkillWithPermission(dir, "innocent", { tier: 0 });
+      const g = loadGenome(dir);
+      expect(g.skills.has("innocent")).toBe(true);   // the rest of the genome loads
+      expect(g.skills.has("netty")).toBe(false);     // and the unbackable skill is NOT admitted
+      const err = g.load_errors.find((e) => e.slug === "netty");
+      expect(err?.error).toContain("permission.network");
+      expect(err?.error).toContain("not admitted");
+    } finally {
+      rmGenome(dir);
+    }
+  });
+
+  it("names the skill and the field in the load_error", () => {
     if (nodeMajor >= 24) return; // cannot be exercised here; the law above governs
     const dir = makeGenomeDir();
     try {
       seedCoreTypes(dir);
       writeSkillWithPermission(dir, "greedy-fetcher", { tier: 0, network: { allow: ["api.example.com"] } });
-      let message = "";
-      try { loadGenome(dir); } catch (e) { message = e instanceof Error ? e.message : String(e); }
+      const g = loadGenome(dir);
+      const message = g.load_errors.find((e) => e.slug === "greedy-fetcher")?.error ?? "";
       expect(message).toContain("greedy-fetcher");
       expect(message).toContain("permission.network");
     } finally {

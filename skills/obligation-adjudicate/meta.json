@@ -1,0 +1,12 @@
+{
+  "slug": "obligation-adjudicate",
+  "version": 1,
+  "skill_type": "verification",
+  "input_type": "bearing-law",
+  "output_type": "obligation-adjudication",
+  "determinism_ratio": 1.0,
+  "permission": {
+    "tier": 1
+  },
+  "description": "The first caller of evaluate(). Takes executed bearing laws and a fact snapshot, evaluates each law's check, and seals one verdict per obligation: PERMIT, DENY, UNDECIDED (with the operators the predicate asked for and the evaluator does not implement), DEAD_NAME (a declared input the snapshot does not supply), unadjudicable (no check), not-in-force (status proposed), or refused (the snapshot came from the debtor — an obligor does not certify its own discharge). It does not widen the operator set: the operators an obligation actually wanted are reported, so the next one implemented is chosen by a real obligation rather than a design guess. Tier 1 because it imports the engine's evaluator."
+}

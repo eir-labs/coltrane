@@ -1,0 +1,53 @@
+{
+  "slug": "landscape-relations",
+  "version": 1,
+  "extends": "Interpretation",
+  "domain": "landscape",
+  "status": "active",
+  "description": "Typed relations between verified items. claims = one sentence per relation; relations = the typed edges, each with evidence; frame = how relations were determined.",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "relations": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "from": {
+              "type": "string"
+            },
+            "to": {
+              "type": "string"
+            },
+            "rel": {
+              "type": "string",
+              "enum": [
+                "extends",
+                "implements",
+                "profiles",
+                "maps-to",
+                "overlaps",
+                "competes-with",
+                "depends-on",
+                "supersedes",
+                "references"
+              ]
+            },
+            "evidence": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "from",
+            "to",
+            "rel",
+            "evidence"
+          ]
+        }
+      }
+    }
+  },
+  "required_fields": [
+    "relations"
+  ]
+}

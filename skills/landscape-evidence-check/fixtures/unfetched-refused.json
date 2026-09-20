@@ -1,0 +1,42 @@
+{
+  "id": "unfetched-refused",
+  "description": "A quote whose page was not fetched is refused",
+  "input": {
+    "scans": [
+      {
+        "source": "web:landscape:x",
+        "data": {
+          "layer": "x",
+          "items": [
+            {
+              "handle": "y",
+              "name": "y",
+              "kind": "standard",
+              "layer": "x",
+              "url": "https://missing.org",
+              "what_it_models": "m",
+              "evidence": [
+                {
+                  "url": "https://missing.org",
+                  "quote": "anything",
+                  "retrieved_at": "2026-09-19"
+                }
+              ]
+            }
+          ],
+          "queries_run": [
+            "q"
+          ]
+        }
+      }
+    ],
+    "mock_pages": {}
+  },
+  "assertions": [
+    {
+      "path": "refused.0.handle",
+      "op": "equals",
+      "value": "y"
+    }
+  ]
+}

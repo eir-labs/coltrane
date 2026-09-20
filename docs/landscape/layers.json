@@ -1,0 +1,34 @@
+{
+ "provenance": [
+  "Identity, provenance and lineage: how documents, parties, laws and derived records are identified, versioned and traced to their origins.",
+  "W3C PROV-O, GLEIF LEI, European Legislation Identifier (ELI), URN:LEX, W3C Verifiable Credentials"
+ ],
+ "law-markup": [
+  "How primary law is published as structured, addressable data, including point-in-time versions.",
+  "Akoma Ntoso / OASIS LegalDocML, USLM (US Code XML), e-Gov 法令API / 法令XML (Japan), legislation.gov.uk CLML, Delaware Code online"
+ ],
+ "norms-rules": [
+  "How legal norms (who must / may / must not do what, under what conditions, or else what) are formally represented and evaluated.",
+  "Institutional Grammar 2.0 (ADICO), OASIS LegalRuleML, W3C ODRL, Catala, LKIF, Blawx / s(CASP), Symboleo"
+ ],
+ "contract-models": [
+  "Data models for contracts as structured objects: parties, clauses, parameters, obligations, events and lifecycle.",
+  "Accord Project (Concerto, TemplateMark, Cicero), ISDA Common Domain Model, EDM Council FIBO, Symboleo, OASIS eContracts"
+ ],
+ "standard-forms": [
+  "Market-standard agreements and form libraries for NDAs, services, IP licensing and assignment, startup financing and corporate governance, in the US and Japan.",
+  "Common Paper, Bonterms, oneNDA, Y Combinator SAFE, NVCA model documents, Cooley GO forms, JPO / METI model contracts (モデル契約書)"
+ ],
+ "clause-corpora": [
+  "Clause taxonomies and labelled contract datasets for learning clause families, parameters and variation.",
+  "CUAD, LEDGAR, MAUD, ContractNLI, ACORD, SEC EDGAR exhibits, SALI LMSS"
+ ],
+ "ip-licensing": [
+  "Formal models of intellectual-property rights, licences, grants, fields of use, territories and assignments.",
+  "W3C ODRL, SPDX, Creative Commons REL, WIPO ST standards, USPTO assignment data"
+ ],
+ "tooling": [
+  "Open-source packages and tools for drafting, assembling, comparing, rendering and executing legal documents and rules.",
+  "docassemble, Accord Project runtime, Catala compiler, OpenFisca, LexNLP, docx redline libraries, Pandoc"
+ ]
+}

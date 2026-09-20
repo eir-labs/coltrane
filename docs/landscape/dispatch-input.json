@@ -1,0 +1,136 @@
+{
+  "domain": "Drafting, reviewing, negotiating, executing and tracking legal instruments for a small two-entity technology group: a Japanese 合同会社 that owns the IP, and a Delaware C-corp that commercialises it under licence, with a possible Austrian research entity later.",
+  "purpose": "Map what already exists (standards, schemas, ontologies, data models, form libraries, labelled corpora, packages) so the eventual type model for this contract system is built on the world's existing work, with attribution and formal lineage, instead of invented.",
+  "budget": 40,
+  "needs": [
+    "Model instruments as clauses with layers of meaning beneath the text: sources, rules, facts, obligations; a PDF is only a projection.",
+    "Gather primary law (Japan, Delaware, US federal) and official templates as versioned, addressable sources, with attribution and lineage.",
+    "Represent obligations and rights borne by legal persons: who must / may / must not do what, when, and what follows on breach.",
+    "Represent signing authority: who may bind which entity, for what, up to how much.",
+    "Draft from a one-line request, from meeting notes, or from a precedent deal.",
+    "Review our own drafts and counterparties' paper against our positions; handle negotiation rounds and Word redlines.",
+    "IP assignment and exclusive licensing across territories (Japan vs rest of world), including purchase options and sublicensing.",
+    "Services agreements with cost-plus pricing, invoices, and transfer-pricing rationale.",
+    "Corporate governance instruments: board consents, member decisions, stockholder consents, certificates.",
+    "Startup financing instruments: SAFEs and founder stock documents.",
+    "Track obligations over time: due dates, events, amendments, and what a change of fact or law touches.",
+    "Answer portfolio questions for diligence and exits (every change-of-control clause, every IP assignment).",
+    "Bilingual English/Japanese instruments, with a language of record.",
+    "Treat clauses as propositions and instruments as proofs (Curry-Howard): we intend to model obligations, rights and conditions in a data layer with formal semantics, so evidence of contract calculi, type-theoretic and proof-carrying approaches matters as much as document schemas.",
+    "Compose and decompose obligations algebraically, so that a clause's meaning can be checked, combined and refined rather than only rendered."
+  ],
+  "proposed_layers": [
+    {
+      "id": "provenance",
+      "question": "Identity, provenance and lineage: how documents, parties, laws and derived records are identified, versioned and traced to their origins.",
+      "seed_candidates": [
+        "W3C PROV-O",
+        "GLEIF LEI",
+        "European Legislation Identifier (ELI)",
+        "URN:LEX",
+        "W3C Verifiable Credentials"
+      ]
+    },
+    {
+      "id": "law-markup",
+      "question": "How primary law is published as structured, addressable data, including point-in-time versions.",
+      "seed_candidates": [
+        "Akoma Ntoso / OASIS LegalDocML",
+        "USLM (US Code XML)",
+        "e-Gov 法令API / 法令XML (Japan)",
+        "legislation.gov.uk CLML",
+        "Delaware Code online"
+      ]
+    },
+    {
+      "id": "norms-rules",
+      "question": "How legal norms (who must / may / must not do what, under what conditions, or else what) are formally represented and evaluated. Include formal semantics and type-theoretic treatments: contract calculi, deontic and linear logics, and proof-carrying or machine-checked formalisations of law.",
+      "seed_candidates": [
+        "Institutional Grammar 2.0 (ADICO)",
+        "OASIS LegalRuleML",
+        "W3C ODRL",
+        "Catala",
+        "LKIF",
+        "Blawx / s(CASP)",
+        "Symboleo",
+        "Marlowe (financial contract DSL)",
+        "Stipula (legal contract calculus)",
+        "Symboleo (requirements-level contract specification)",
+        "Peyton Jones & Eber, Composing Contracts",
+        "ACTUS financial contract standard",
+        "linear logic / resource-aware treatments of obligation",
+        "proof assistants applied to law (Lean, Isabelle, Coq)",
+        "Catala formal semantics",
+        "defeasible deontic logic"
+      ]
+    },
+    {
+      "id": "contract-models",
+      "question": "Data models for contracts as structured objects: parties, clauses, parameters, obligations, events and lifecycle.",
+      "seed_candidates": [
+        "Accord Project (Concerto",
+        "TemplateMark",
+        "Cicero)",
+        "ISDA Common Domain Model",
+        "EDM Council FIBO",
+        "Symboleo",
+        "OASIS eContracts"
+      ]
+    },
+    {
+      "id": "standard-forms",
+      "question": "Market-standard agreements and form libraries for NDAs, services, IP licensing and assignment, startup financing and corporate governance, in the US and Japan.",
+      "seed_candidates": [
+        "Common Paper",
+        "Bonterms",
+        "oneNDA",
+        "Y Combinator SAFE",
+        "NVCA model documents",
+        "Cooley GO forms",
+        "JPO / METI model contracts (モデル契約書)"
+      ]
+    },
+    {
+      "id": "clause-corpora",
+      "question": "Clause taxonomies and labelled contract datasets for learning clause families, parameters and variation.",
+      "seed_candidates": [
+        "CUAD",
+        "LEDGAR",
+        "MAUD",
+        "ContractNLI",
+        "ACORD",
+        "SEC EDGAR exhibits",
+        "SALI LMSS"
+      ]
+    },
+    {
+      "id": "ip-licensing",
+      "question": "Formal models of intellectual-property rights, licences, grants, fields of use, territories and assignments.",
+      "seed_candidates": [
+        "W3C ODRL",
+        "SPDX",
+        "Creative Commons REL",
+        "WIPO ST standards",
+        "USPTO assignment data"
+      ]
+    },
+    {
+      "id": "tooling",
+      "question": "Open-source packages and tools for drafting, assembling, comparing, rendering and executing legal documents and rules.",
+      "seed_candidates": [
+        "docassemble",
+        "Accord Project runtime",
+        "Catala compiler",
+        "OpenFisca",
+        "LexNLP",
+        "docx redline libraries",
+        "Pandoc"
+      ]
+    }
+  ],
+  "exclusions": [
+    "Litigation and case-management systems",
+    "E-signature platforms (signing stays in Documenso)",
+    "Proprietary CLM products except where they publish an open schema"
+  ]
+}

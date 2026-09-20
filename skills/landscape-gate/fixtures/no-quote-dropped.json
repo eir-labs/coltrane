@@ -1,0 +1,32 @@
+{
+  "id": "no-quote-dropped",
+  "description": "A verified item with an empty quote is dropped",
+  "input": {
+    "map": {
+      "items": [
+        {
+          "handle": "x",
+          "evidence": [
+            {
+              "url": "https://a",
+              "quote": " "
+            }
+          ]
+        }
+      ]
+    },
+    "verification": {
+      "verified_handles": [
+        "x"
+      ]
+    },
+    "attack": {}
+  },
+  "assertions": [
+    {
+      "path": "gate.kept",
+      "op": "equals",
+      "value": 0
+    }
+  ]
+}

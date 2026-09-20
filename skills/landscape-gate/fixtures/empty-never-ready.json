@@ -1,0 +1,12 @@
+{
+  "id": "empty-never-ready",
+  "description": "An empty input is never READY",
+  "input": {},
+  "assertions": [
+    {
+      "path": "gate.status",
+      "op": "equals",
+      "value": "EMPTY"
+    }
+  ]
+}

@@ -1,0 +1,49 @@
+{
+  "id": "english-match",
+  "description": "An English quote present on the fetched page verifies",
+  "input": {
+    "scans": [
+      {
+        "source": "web:landscape:x",
+        "data": {
+          "layer": "x",
+          "items": [
+            {
+              "handle": "prov-o",
+              "name": "prov-o",
+              "kind": "standard",
+              "layer": "x",
+              "url": "https://w3.org/prov",
+              "what_it_models": "m",
+              "evidence": [
+                {
+                  "url": "https://w3.org/prov",
+                  "quote": "(PROV-O) provides a set of classes",
+                  "retrieved_at": "2026-09-19"
+                }
+              ]
+            }
+          ],
+          "queries_run": [
+            "q"
+          ]
+        }
+      }
+    ],
+    "mock_pages": {
+      "https://w3.org/prov": "<html><p>The PROV Ontology (PROV-O) provides a set of classes, properties</p></html>"
+    }
+  },
+  "assertions": [
+    {
+      "path": "verified_handles.0",
+      "op": "equals",
+      "value": "prov-o"
+    },
+    {
+      "path": "pass",
+      "op": "equals",
+      "value": true
+    }
+  ]
+}

@@ -1,0 +1,1353 @@
+{
+ "id": "landscape-verification",
+ "target_ref": "web:landscape:law-markup,web:landscape:tooling,web:landscape:standard-forms,web:landscape:provenance,web:landscape:clause-corpora,web:landscape:ip-licensing,web:landscape:contract-models,web:landscape:norms-rules",
+ "pass": false,
+ "checks": [
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "akoma-ntoso-legaldocml#evidence[0]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "akoma-ntoso-legaldocml#evidence[1]",
+   "result": "quote not found on fetched page"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "akoma-ntoso-legaldocml#evidence[2]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "uslm-us-legislative-markup#evidence[0]",
+   "result": "quote not found on fetched page"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "uslm-us-legislative-markup#evidence[1]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "e-gov-japan-law-xml#evidence[0]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "e-gov-japan-law-xml#evidence[1]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "clml-uk-legislation#evidence[0]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "clml-uk-legislation#evidence[1]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "formex-eu-publications#evidence[0]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "formex-eu-publications#evidence[1]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "docassemble#evidence[0]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "accord-project-cicero#evidence[0]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "catala#evidence[0]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "openfisca-core#evidence[0]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "lexnlp#evidence[0]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "lexnlp#evidence[1]",
+   "result": "quote not found on fetched page"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "python-redlines#evidence[0]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "docx-redline-pkg#evidence[0]",
+   "result": "quote not found on fetched page"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "docx-redline-pkg#evidence[1]",
+   "result": "quote not found on fetched page"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "pandoc#evidence[0]",
+   "result": "quote not found on fetched page"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "pandoc#evidence[1]",
+   "result": "quote not found on fetched page"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "docxtpl#evidence[0]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "weasyprint#evidence[0]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "common-paper#evidence[0]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "common-paper#evidence[1]",
+   "result": "quote not found on fetched page"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "bonterms#evidence[0]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "bonterms#evidence[1]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "onenda#evidence[0]",
+   "result": "quote not found on fetched page"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "yc-safe#evidence[0]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "nvca-model-docs#evidence[0]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "cooley-go#evidence[0]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "meti-jpo-model-contracts#evidence[0]",
+   "result": "quote not found on fetched page"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "series-seed#evidence[0]",
+   "result": "quote not found on fetched page"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "ipa-model-contracts-jp#evidence[0]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "prov-o#evidence[0]",
+   "result": "quote not found on fetched page"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "prov-o#evidence[1]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "prov-o#evidence[2]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "prov-o#evidence[3]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "gleif-lei#evidence[0]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "gleif-lei#evidence[1]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "gleif-lei#evidence[2]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "gleif-vlei#evidence[0]",
+   "result": "quote not found on fetched page"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "gleif-vlei#evidence[1]",
+   "result": "quote not found on fetched page"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "gleif-vlei#evidence[2]",
+   "result": "quote not found on fetched page"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "eli#evidence[0]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "eli#evidence[1]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "eli#evidence[2]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "urn-lex#evidence[0]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "urn-lex#evidence[1]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "urn-lex#evidence[2]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "w3c-vc-data-model#evidence[0]",
+   "result": "quote not found on fetched page"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "w3c-vc-data-model#evidence[1]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "w3c-did#evidence[0]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "w3c-did#evidence[1]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "w3c-did#evidence[2]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "doi-iso-26324#evidence[0]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "doi-iso-26324#evidence[1]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "dcmi-terms#evidence[0]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "dcmi-terms#evidence[1]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "cuad#evidence[0]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "cuad#evidence[1]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "ledgar#evidence[0]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "ledgar#evidence[1]",
+   "result": "quote not found on fetched page"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "maud#evidence[0]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "contract-nli#evidence[0]",
+   "result": "quote not found on fetched page"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "contract-nli#evidence[1]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "acord-atticus#evidence[0]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "acord-atticus#evidence[1]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "sali-lmss#evidence[0]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "sali-lmss#evidence[1]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "pile-of-law#evidence[0]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "material-contracts-corpus#evidence[0]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "lex-glue#evidence[0]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "multi-legal-pile#evidence[0]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "odrl-information-model#evidence[0]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "odrl-information-model#evidence[1]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "spdx-specification#evidence[0]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "spdx-specification#evidence[1]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "creative-commons-ccrel#evidence[0]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "creative-commons-ccrel#evidence[1]",
+   "result": "quote not found on fetched page"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "wipo-st96#evidence[0]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "wipo-st96#evidence[1]",
+   "result": "quote not found on fetched page"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "uspto-patent-assignment-dataset#evidence[0]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "uspto-patent-assignment-dataset#evidence[1]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "iptc-rightsml#evidence[0]",
+   "result": "quote not found on fetched page"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "lcc-rights-reference-model#evidence[0]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "ipronto#evidence[0]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "ipronto#evidence[1]",
+   "result": "quote not found on fetched page"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "mpeg-21-rel#evidence[0]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "dalicc#evidence[0]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "accord-project#evidence[0]",
+   "result": "quote not found on fetched page"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "accord-project#evidence[1]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "accord-project#evidence[2]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "accord-project#evidence[3]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "accord-project#evidence[4]",
+   "result": "quote not found on fetched page"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "isda-cdm#evidence[0]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "isda-cdm#evidence[1]",
+   "result": "quote not found on fetched page"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "isda-cdm#evidence[2]",
+   "result": "quote not found on fetched page"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "isda-cdm#evidence[3]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "isda-cdm#evidence[4]",
+   "result": "quote not found on fetched page"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "isda-cdm#evidence[5]",
+   "result": "quote not found on fetched page"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "edm-fibo#evidence[0]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "edm-fibo#evidence[1]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "edm-fibo#evidence[2]",
+   "result": "quote not found on fetched page"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "symboleo#evidence[0]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "symboleo#evidence[1]",
+   "result": "quote not found on fetched page"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "symboleo#evidence[2]",
+   "result": "quote not found on fetched page"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "oasis-econtracts#evidence[0]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "oasis-econtracts#evidence[1]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "oasis-econtracts#evidence[2]",
+   "result": "quote not found on fetched page"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "open-contracting-data-standard#evidence[0]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "open-contracting-data-standard#evidence[1]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "open-contracting-data-standard#evidence[2]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "institutional-grammar-2#evidence[0]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "institutional-grammar-2#evidence[1]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "oasis-legalruleml#evidence[0]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "oasis-legalruleml#evidence[1]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "w3c-odrl#evidence[0]",
+   "result": "quote not found on fetched page"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "w3c-odrl#evidence[1]",
+   "result": "quote not found on fetched page"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "catala#evidence[0]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "catala#evidence[1]",
+   "result": "quote not found on fetched page"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "catala#evidence[2]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "lkif-core#evidence[0]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "lkif-core#evidence[1]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "lkif-core#evidence[2]",
+   "result": "quote not found on fetched page"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "blawx#evidence[0]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "blawx#evidence[1]",
+   "result": "quote not found on fetched page"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "symboleo#evidence[0]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "symboleo#evidence[1]",
+   "result": "quote not found on fetched page"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "symboleo#evidence[2]",
+   "result": "quote not found on fetched page"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "marlowe#evidence[0]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "marlowe#evidence[1]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "stipula#evidence[0]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "stipula#evidence[1]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "composing-contracts-pj#evidence[0]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "composing-contracts-pj#evidence[1]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "actus#evidence[0]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "actus#evidence[1]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "actus#evidence[2]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "linear-logic-resource#evidence[0]",
+   "result": "quote not found on fetched page"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "linear-logic-resource#evidence[1]",
+   "result": "quote not found on fetched page"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "logikey#evidence[0]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "logikey#evidence[1]",
+   "result": "quote not found on fetched page"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "defeasible-deontic-logic#evidence[0]",
+   "result": "match"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "defeasible-deontic-logic#evidence[1]",
+   "result": "quote not found on fetched page"
+  },
+  {
+   "method": "fetch+exact-substring",
+   "target_ref": "defeasible-deontic-logic#evidence[2]",
+   "result": "quote not found on fetched page"
+  }
+ ],
+ "verified_handles": [
+  "akoma-ntoso-legaldocml",
+  "uslm-us-legislative-markup",
+  "e-gov-japan-law-xml",
+  "clml-uk-legislation",
+  "formex-eu-publications",
+  "docassemble",
+  "accord-project-cicero",
+  "catala",
+  "openfisca-core",
+  "lexnlp",
+  "python-redlines",
+  "docxtpl",
+  "weasyprint",
+  "common-paper",
+  "bonterms",
+  "yc-safe",
+  "nvca-model-docs",
+  "cooley-go",
+  "ipa-model-contracts-jp",
+  "prov-o",
+  "gleif-lei",
+  "eli",
+  "urn-lex",
+  "w3c-vc-data-model",
+  "w3c-did",
+  "doi-iso-26324",
+  "dcmi-terms",
+  "cuad",
+  "ledgar",
+  "maud",
+  "contract-nli",
+  "acord-atticus",
+  "sali-lmss",
+  "pile-of-law",
+  "material-contracts-corpus",
+  "lex-glue",
+  "multi-legal-pile",
+  "odrl-information-model",
+  "spdx-specification",
+  "creative-commons-ccrel",
+  "wipo-st96",
+  "uspto-patent-assignment-dataset",
+  "lcc-rights-reference-model",
+  "ipronto",
+  "mpeg-21-rel",
+  "dalicc",
+  "accord-project",
+  "isda-cdm",
+  "edm-fibo",
+  "symboleo",
+  "oasis-econtracts",
+  "open-contracting-data-standard",
+  "institutional-grammar-2",
+  "oasis-legalruleml",
+  "catala",
+  "lkif-core",
+  "blawx",
+  "symboleo",
+  "marlowe",
+  "stipula",
+  "composing-contracts-pj",
+  "actus",
+  "logikey",
+  "defeasible-deontic-logic"
+ ],
+ "refused": [
+  {
+   "handle": "docx-redline-pkg",
+   "reason": "https://pypi.org/project/docx-redline/: quote not found on fetched page; https://pypi.org/project/docx-redline/: quote not found on fetched page"
+  },
+  {
+   "handle": "pandoc",
+   "reason": "https://pandoc.org: quote not found on fetched page; https://pandoc.org: quote not found on fetched page"
+  },
+  {
+   "handle": "onenda",
+   "reason": "https://www.onenda.org/: quote not found on fetched page"
+  },
+  {
+   "handle": "meti-jpo-model-contracts",
+   "reason": "https://github.com/meti-oi-startups/METI-JPO-Model-Contract: quote not found on fetched page"
+  },
+  {
+   "handle": "series-seed",
+   "reason": "https://github.com/CooleyLLP/seriesseed/blob/master/README.md: quote not found on fetched page"
+  },
+  {
+   "handle": "gleif-vlei",
+   "reason": "https://www.gleif.org/en/organizational-identity/introducing-the-verifiable-lei-vlei: quote not found on fetched page; https://www.gleif.org/en/organizational-identity/introducing-the-verifiable-lei-vlei: quote not found on fetched page; https://www.gleif.org/en/organizational-identity/introducing-the-verifiable-lei-vlei: quote not found on fetched page"
+  },
+  {
+   "handle": "iptc-rightsml",
+   "reason": "https://iptc.org/std/RightsML/2.0/RightsML_2.0-specification.html: quote not found on fetched page"
+  },
+  {
+   "handle": "w3c-odrl",
+   "reason": "https://www.w3.org/TR/odrl-model/: quote not found on fetched page; https://www.w3.org/TR/odrl-model/: quote not found on fetched page"
+  },
+  {
+   "handle": "linear-logic-resource",
+   "reason": "https://plato.stanford.edu/entries/logic-linear/: quote not found on fetched page; https://ncatlab.org/nlab/show/linear+logic: quote not found on fetched page"
+  }
+ ],
+ "fetch_log": [
+  {
+   "url": "https://docs.oasis-open.org/legaldocml/akn-core/v1.0/akn-core-v1.0-part1-vocabulary.html",
+   "status": "200",
+   "chars": 807987
+  },
+  {
+   "url": "https://laws.e-gov.go.jp/docs/law-data-basic/8529371-law-api-v1/",
+   "status": "200",
+   "chars": 183265
+  },
+  {
+   "url": "https://pypi.org/project/docx-redline/",
+   "status": "200",
+   "chars": 214971
+  },
+  {
+   "url": "https://laws.e-gov.go.jp/docs/law-data-basic/419a603-xml-schema-for-japanese-law/",
+   "status": "200",
+   "chars": 406357
+  },
+  {
+   "url": "https://legislation.github.io/clml-schema/",
+   "status": "200",
+   "chars": 2234
+  },
+  {
+   "url": "https://www.oasis-open.org/2026/07/16/invitation-to-comment-on-akoma-ntoso-v2-0-part-2-akn-3-1-before-call-for-consent-as-oasis-standard/",
+   "status": "200",
+   "chars": 146674
+  },
+  {
+   "url": "https://github.com/CatalaLang/catala",
+   "status": "200",
+   "chars": 371902
+  },
+  {
+   "url": "https://commonpaper.com/standards/mutual-nda/",
+   "status": "200",
+   "chars": 118531
+  },
+  {
+   "url": "https://pandoc.org",
+   "status": "200",
+   "chars": 18540
+  },
+  {
+   "url": "https://weasyprint.org/",
+   "status": "200",
+   "chars": 18570
+  },
+  {
+   "url": "https://github.com/openfisca/openfisca-core",
+   "status": "200",
+   "chars": 356597
+  },
+  {
+   "url": "https://www.oasis-open.org/standard/akn-v1-0/",
+   "status": "200",
+   "chars": 139728
+  },
+  {
+   "url": "https://github.com/LexPredict/lexpredict-lexnlp",
+   "status": "200",
+   "chars": 319900
+  },
+  {
+   "url": "https://bonterms.com/forms/bonterms-cloud-terms-v1",
+   "status": "200",
+   "chars": 433600
+  },
+  {
+   "url": "https://bonterms.com/forms/professional-services-agreement-v1",
+   "status": "200",
+   "chars": 482653
+  },
+  {
+   "url": "https://github.com/jhpyle/docassemble",
+   "status": "200",
+   "chars": 285261
+  },
+  {
+   "url": "https://github.com/usgpo/uslm",
+   "status": "200",
+   "chars": 393795
+  },
+  {
+   "url": "https://docxtpl.readthedocs.io/",
+   "status": "200",
+   "chars": 70437
+  },
+  {
+   "url": "https://github.com/usgpo/uslm/blob/main/USLM-User-Guide.md",
+   "status": "200",
+   "chars": 918993
+  },
+  {
+   "url": "https://github.com/legislation/clml-schema",
+   "status": "200",
+   "chars": 292913
+  },
+  {
+   "url": "https://www.onenda.org/",
+   "status": "200",
+   "chars": 48122
+  },
+  {
+   "url": "https://www.w3.org/TR/prov-o/",
+   "status": "200",
+   "chars": 464167
+  },
+  {
+   "url": "https://www.ipa.go.jp/digital/model/model20201222.html",
+   "status": "200",
+   "chars": 95335
+  },
+  {
+   "url": "https://www.w3.org/TR/did-1.1/",
+   "status": "200",
+   "chars": 529426
+  },
+  {
+   "url": "https://www.w3.org/TR/vc-data-model-2.0/",
+   "status": "200",
+   "chars": 1021848
+  },
+  {
+   "url": "https://github.com/accordproject/cicero",
+   "status": "200",
+   "chars": 327320
+  },
+  {
+   "url": "https://github.com/CooleyLLP/seriesseed/blob/master/README.md",
+   "status": "200",
+   "chars": 291483
+  },
+  {
+   "url": "https://github.com/JSv4/Python-Redlines",
+   "status": "200",
+   "chars": 418017
+  },
+  {
+   "url": "https://github.com/meti-oi-startups/METI-JPO-Model-Contract",
+   "status": "200",
+   "chars": 309328
+  },
+  {
+   "url": "https://commonpaper.com/blog/the-anatomy-of-a-common-paper-standard/",
+   "status": "200",
+   "chars": 112180
+  },
+  {
+   "url": "https://arxiv.org/abs/2103.06268",
+   "status": "200",
+   "chars": 41745
+  },
+  {
+   "url": "https://www.doi.org/the-identifier/resources/factsheets/doi-system-and-the-handle-system",
+   "status": "200",
+   "chars": 21419
+  },
+  {
+   "url": "https://arxiv.org/abs/2301.00876",
+   "status": "200",
+   "chars": 41804
+  },
+  {
+   "url": "https://www.ycombinator.com/documents",
+   "status": "200",
+   "chars": 168072
+  },
+  {
+   "url": "https://arxiv.org/abs/2501.06582",
+   "status": "200",
+   "chars": 42191
+  },
+  {
+   "url": "https://arxiv.org/abs/2504.02864",
+   "status": "200",
+   "chars": 39724
+  },
+  {
+   "url": "https://op.europa.eu/en/web/eu-vocabularies/formex",
+   "status": "200",
+   "chars": 391430
+  },
+  {
+   "url": "https://arxiv.org/abs/2306.02069",
+   "status": "200",
+   "chars": 41740
+  },
+  {
+   "url": "https://www.dublincore.org/specifications/dublin-core/dcmi-terms/terms/provenance/",
+   "status": "200",
+   "chars": 74913
+  },
+  {
+   "url": "https://www.atticusprojectai.org/acord",
+   "status": "200",
+   "chars": 42366
+  },
+  {
+   "url": "https://www.atticusprojectai.org/cuad",
+   "status": "200",
+   "chars": 47824
+  },
+  {
+   "url": "https://www.w3.org/TR/odrl-model/",
+   "status": "200",
+   "chars": 181852
+  },
+  {
+   "url": "https://www.w3.org/TR/odrl-vocab/",
+   "status": "200",
+   "chars": 245206
+  },
+  {
+   "url": "https://www.w3.org/submissions/2008/SUBM-ccREL-20080501/",
+   "status": "200",
+   "chars": 106301
+  },
+  {
+   "url": "https://stanfordnlp.github.io/contract-nli/",
+   "status": "200",
+   "chars": 21709
+  },
+  {
+   "url": "https://www.cooleygo.com/documents/incorporation-package-delaware/",
+   "status": "200",
+   "chars": 96883
+  },
+  {
+   "url": "https://huggingface.co/datasets/pile-of-law/pile-of-law",
+   "status": "200",
+   "chars": 194885
+  },
+  {
+   "url": "https://sali.org/explore-the-standard/",
+   "status": "200",
+   "chars": 132786
+  },
+  {
+   "url": "https://creativecommons.org/ns",
+   "status": "200",
+   "chars": 14831
+  },
+  {
+   "url": "https://github.com/sali-legal/LMSS",
+   "status": "200",
+   "chars": 257992
+  },
+  {
+   "url": "https://op.europa.eu/en/web/eu-vocabularies/eli",
+   "status": "200",
+   "chars": 392677
+  },
+  {
+   "url": "https://aclanthology.org/2020.lrec-1.155/",
+   "status": "200",
+   "chars": 46050
+  },
+  {
+   "url": "https://spdx.dev/learn/handling-license-info/",
+   "status": "200",
+   "chars": 180412
+  },
+  {
+   "url": "https://aclanthology.org/2022.acl-long.297/",
+   "status": "200",
+   "chars": 44486
+  },
+  {
+   "url": "https://www.uspto.gov/ip-policy/economic-research/research-datasets/patent-assignment-dataset",
+   "status": "200",
+   "chars": 143459
+  },
+  {
+   "url": "https://accordproject.org/projects/cicero/",
+   "status": "200",
+   "chars": 83934
+  },
+  {
+   "url": "https://concerto.accordproject.org/docs/design/specification/model-classes/",
+   "status": "200",
+   "chars": 34722
+  },
+  {
+   "url": "https://iptc.org/std/RightsML/2.0/RightsML_2.0-specification.html",
+   "status": "200",
+   "chars": 182488
+  },
+  {
+   "url": "https://dalicc.github.io/",
+   "status": "200",
+   "chars": 18194
+  },
+  {
+   "url": "https://www.rfc-editor.org/rfc/rfc9676",
+   "status": "200",
+   "chars": 835620
+  },
+  {
+   "url": "https://www.niso.org/niso-io/2014/12/linked-content-coalition-framework-rights-management",
+   "status": "200",
+   "chars": 34468
+  },
+  {
+   "url": "https://docs.accordproject.org/docs/accordproject/",
+   "status": "200",
+   "chars": 32236
+  },
+  {
+   "url": "https://docs.oasis-open.org/legalxml-econtracts/CS01/legalxml-econtracts-specification-1.0.html",
+   "status": "200",
+   "chars": 535114
+  },
+  {
+   "url": "https://dmag.ac.upc.edu/ontologies/ipronto/",
+   "status": "200",
+   "chars": 10164
+  },
+  {
+   "url": "https://edmcouncil.org/frameworks/industry-models/fibo/",
+   "status": "200",
+   "chars": 115482
+  },
+  {
+   "url": "https://accordproject.org/projects/concerto/",
+   "status": "200",
+   "chars": 75986
+  },
+  {
+   "url": "https://arxiv.org/abs/2008.08937",
+   "status": "200",
+   "chars": 46559
+  },
+  {
+   "url": "https://docs.oasis-open.org/legalruleml/legalruleml-core-spec/v1.0/legalruleml-core-spec-v1.0.html",
+   "status": "200",
+   "chars": 774152
+  },
+  {
+   "url": "https://mpeg.chiariglione.org/standards/mpeg-21/rights-expression-language.html",
+   "status": "200",
+   "chars": 147803
+  },
+  {
+   "url": "https://arxiv.org/abs/2103.03198",
+   "status": "200",
+   "chars": 45200
+  },
+  {
+   "url": "https://www.oasis-open.org/standard/econtracts-v1-0/",
+   "status": "200",
+   "chars": 138750
+  },
+  {
+   "url": "https://github.com/Smart-Contract-Modelling-uOttawa/Symboleo-IDE",
+   "status": "200",
+   "chars": 317251
+  },
+  {
+   "url": "https://www.wipo.int/standards/en/st96/v7-0/annex-iii/index.html",
+   "status": "200",
+   "chars": 1141225
+  },
+  {
+   "url": "https://spec.edmcouncil.org/fibo/",
+   "status": "200",
+   "chars": 694131
+  },
+  {
+   "url": "https://akswnc7.informatik.uni-leipzig.de/dstreitmatter/archivo/spec.edmcouncil.org/fibo--ontology--FND--Agreements--Contracts/2021.04.16-105957/fibo--ontology--FND--Agreements--Contracts_type=generatedDocu.html",
+   "status": "200",
+   "chars": 84225
+  },
+  {
+   "url": "https://arxiv.org/html/2411.15898v1",
+   "status": "200",
+   "chars": 325482
+  },
+  {
+   "url": "https://arxiv.org/abs/2110.11069",
+   "status": "200",
+   "chars": 40786
+  },
+  {
+   "url": "https://cdm.finos.org/docs/legal-agreements/",
+   "status": "200",
+   "chars": 58629
+  },
+  {
+   "url": "https://www.oasis-open.org/standard/legalruleml-core-specification-version-1-0-oasis-standard/",
+   "status": "200",
+   "chars": 139607
+  },
+  {
+   "url": "https://www.actusfrf.org/about",
+   "status": "200",
+   "chars": 818675
+  },
+  {
+   "url": "https://www.actusfrf.org/methodology",
+   "status": "200",
+   "chars": 672745
+  },
+  {
+   "url": "https://en.wikipedia.org/wiki/Legal_Knowledge_Interchange_Format",
+   "status": "200",
+   "chars": 64911
+  },
+  {
+   "url": "https://arxiv.org/abs/1903.10187",
+   "status": "200",
+   "chars": 43412
+  },
+  {
+   "url": "https://github.com/Lexpedite/blawx",
+   "status": "200",
+   "chars": 299051
+  },
+  {
+   "url": "https://arxiv.org/abs/2506.08899",
+   "status": "200",
+   "chars": 41915
+  },
+  {
+   "url": "https://arxiv.org/html/2507.05519v8",
+   "status": "200",
+   "chars": 571228
+  },
+  {
+   "url": "https://github.com/RinkeHoekstra/lkif-core",
+   "status": "200",
+   "chars": 373257
+  },
+  {
+   "url": "https://cdm.finos.org/docs/event-model/",
+   "status": "200",
+   "chars": 139082
+  },
+  {
+   "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC7586073/",
+   "status": "200",
+   "chars": 21310
+  },
+  {
+   "url": "https://www.gleif.org/en/organizational-identity/introducing-the-verifiable-lei-vlei",
+   "status": "200",
+   "chars": 195315
+  },
+  {
+   "url": "https://github.com/marlowe-lang/marlowe-cardano",
+   "status": "200",
+   "chars": 410479
+  },
+  {
+   "url": "https://www.isda.org/isda-solutions-infohub/cdm/",
+   "status": "200",
+   "chars": 196698
+  },
+  {
+   "url": "https://www.gleif.org/en/organizational-identity/introducing-the-legal-entity-identifier-lei/iso-17442-the-lei-code-structure",
+   "status": "200",
+   "chars": 215040
+  },
+  {
+   "url": "https://plato.stanford.edu/entries/logic-linear/",
+   "status": "200",
+   "chars": 93998
+  },
+  {
+   "url": "https://cdm.finos.org/docs/product-model/",
+   "status": "200",
+   "chars": 150590
+  },
+  {
+   "url": "https://www.microsoft.com/en-us/research/publication/composing-contracts-an-adventure-in-financial-engineering/",
+   "status": "200",
+   "chars": 176725
+  },
+  {
+   "url": "https://nvca.org/press_releases/nvca-releases-2025-updates-to-model-legal-documents/",
+   "status": "200",
+   "chars": 160486
+  },
+  {
+   "url": "https://docs.cardano.org/developer-resources/smart-contracts/marlowe",
+   "status": "200",
+   "chars": 38279
+  },
+  {
+   "url": "https://ncatlab.org/nlab/show/linear+logic",
+   "status": "200",
+   "chars": 234212
+  },
+  {
+   "url": "https://standard.open-contracting.org/latest/en/primer/how/",
+   "status": "200",
+   "chars": 23725
+  },
+  {
+   "url": "https://standard.open-contracting.org/",
+   "status": "200",
+   "chars": 19858
+  }
+ ]
+}

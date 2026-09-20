@@ -1,0 +1,22 @@
+{
+  "slug": "landscape-evidence-check",
+  "version": 1,
+  "skill_type": "verification",
+  "input_type": "landscape-scan",
+  "output_type": "landscape-verification",
+  "determinism_ratio": 1.0,
+  "permission": {
+    "tier": 0,
+    "network": {
+      "allow": [
+        "*"
+      ],
+      "methods": [
+        "GET"
+      ],
+      "max_requests": 400
+    }
+  },
+  "timeout_ms": 110000,
+  "description": "Deterministic evidence check for a landscape: fetches every evidence URL in this run and accepts an item only if one of its quotes is an exact substring of the fetched text (tags stripped, entities decoded, whitespace collapsed on both sides; no lowercasing, no tokenising, no ASCII stripping — so Japanese sources verify exactly like English ones). Reads each scan individually from context.upstream. Deterministic core is verify(scans, pages); fixtures use mock_pages, so tests use no network. Runs inside the runtime's fixed 120s skill window: a 95s internal deadline, 10s per request, 16 concurrent; URLs not reached in time are recorded as not fetched, never silently passed. Declares a network grant (permission.network): without one the sandbox denies fetch outright. The allow list is '*' because a landscape scouts the open web and the URLs are not known before the run; the grant is still the thing that makes the capability visible, and max_requests bounds it."
+}

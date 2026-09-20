@@ -984,9 +984,11 @@ export async function runChart(
     // anything is refused by `runGig` exactly as it always was — a chart must not quietly turn a
     // false claim into a cold run.
     //
-    // `deps.budget` (append units) rides along unchanged and is therefore PER MOVEMENT: it is a rate
-    // limiter on one run's consumed context. The cross-movement bound is the chart's envelope, in
-    // real dollars, checked at the boundary above. Two different limits, kept apart deliberately.
+    // `deps.budget` rides along unchanged and is therefore PER MOVEMENT: it is one run's own dollar
+    // ceiling, enforced against that run's settled spend. The cross-movement bound is the chart's
+    // envelope, checked at the boundary above. Two different limits over the same denomination,
+    // kept apart deliberately — a per-run ceiling is not a total. (Both were dollars as of the
+    // budget-in-dollars change; this comment said "append units" long after that gate was removed.)
     const priorMovementCp = deps.checkpoints?.read(movementGig);
     const resumeMovement = deps.resume_from !== undefined && (degenerate || priorMovementCp !== undefined);
     const movementDeps: RunDeps = {

@@ -363,7 +363,7 @@ export const TOOL_DESCRIPTIONS: Record<string, string> = {
 
   // run — dispatch work and watch it
   gig_dispatch:
-    "Run a standard. Returns the gig id immediately. `depth` tightens turn caps for cheap iteration, `budget` sets a ceiling in append units (a rate limiter on context growth, not dollars), `reuse` serves a chair from a prior sealed output whose producer and inputs hash the same, and `resume_gig_id` continues a gig that stopped — refused, never silently run cold, if the genome, its producers, the payload, the model or a consumed type moved since. A gig reaching a chair a human holds PARKS rather than failing.",
+    "Run a standard. Returns the gig id immediately. `depth` tightens turn caps for cheap iteration, `budget` sets a per-gig ceiling in US dollars, enforced against settled model spend at batch boundaries — a gig that crosses it stops rather than reporting a number nobody can check, `reuse` serves a chair from a prior sealed output whose producer and inputs hash the same, and `resume_gig_id` continues a gig that stopped — refused, never silently run cold, if the genome, its producers, the payload, the model or a consumed type moved since. A gig reaching a chair a human holds PARKS rather than failing.",
   gig_monitor:
     "Where a gig is now: its phase, its chairs, and whether it is running, parked at a human chair, complete, aborted or failed.",
   gig_abort:

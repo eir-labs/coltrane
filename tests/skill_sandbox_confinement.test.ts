@@ -30,7 +30,7 @@ import { executeSkill, tierFlags } from "../src/skill_subprocess.js";
 let root: string;
 
 /** A skill whose code half is `body`, declared at `tier`. */
-function skill(body: string, tier = 0, network?: { allow: string[] }): string {
+function skill(body: string, tier = 0, network?: { allow: string[]; methods?: string[]; max_requests?: number; max_bytes?: number }): string {
   const dir = join(root, `s${Math.random().toString(36).slice(2)}`);
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, "meta.json"), JSON.stringify({
@@ -173,6 +173,43 @@ describe("the network is a declared capability", () => {
     expect(allowed.status).toBe(200);
     const refused = executeSkill(dir, { url: "https://www.w3.org/TR/prov-o/" }).output as { error?: string };
     expect(String(refused.error)).toContain("network grant refuses");
+  });
+
+  it("refuses a method the grant does not name", () => {
+    const body = `export default async function run(input) {
+      try { const r = await fetch(input.url, { method: "POST" }); return { status: r.status }; }
+      catch (e) { return { error: String(e.message) }; }
+    }`;
+    const dir = skill(body, 0, { allow: ["example.com"], methods: ["GET"] });
+    const out = executeSkill(dir, { url: "https://example.com/" }).output as { error?: string };
+    expect(String(out.error)).toContain("refuses method POST");
+  });
+
+  it("refuses past max_requests", () => {
+    const body = `export default async function run(input) {
+      const seen = [];
+      for (let i = 0; i < 3; i++) {
+        try { const r = await fetch(input.url); seen.push(String(r.status)); }
+        catch (e) { seen.push(String(e.message)); }
+      }
+      return { seen };
+    }`;
+    const dir = skill(body, 0, { allow: ["example.com"], max_requests: 2 });
+    const out = executeSkill(dir, { url: "https://example.com/" }).output as { seen?: string[] };
+    expect(out.seen?.[0]).toBe("200");
+    expect(String(out.seen?.[2])).toContain("max_requests=2");
+  });
+
+  it("refuses a body larger than max_bytes", () => {
+    const body = `export default async function run(input) {
+      const r = await fetch(input.url);
+      try { const t = await r.text(); return { chars: t.length }; }
+      catch (e) { return { error: String(e.message) }; }
+    }`;
+    const dir = skill(body, 0, { allow: ["example.com"], max_bytes: 10 });
+    const out = executeSkill(dir, { url: "https://example.com/" }).output as { error?: string; chars?: number };
+    expect(out.chars).toBeUndefined();
+    expect(String(out.error)).toContain("max_bytes=10");
   });
 
   it("denies fetch to a skill with no grant", () => {

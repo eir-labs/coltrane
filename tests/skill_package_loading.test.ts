@@ -106,17 +106,14 @@ describe("skill package loading + identity", () => {
   });
 });
 
-// RED-first laws — the network-grant false-assurance gate (docs/specs/skill-network-grant-refusal.md).
-// src/genome_schema.ts declares NetworkGrantSchema { allow, methods, max_requests, max_bytes } under
-// SkillPermissionSchema.network, but NOTHING outside genome_schema.ts reads permission.network,
-// max_requests, max_bytes or methods: a skill declaring an origin allowlist, a method restriction, and
-// rate/size caps is held to NONE of them (the runner even reaches the network freely — skill_runner.mjs:12).
-// The repo's convention for a grant the runtime cannot back is REFUSAL with a named error, not silence
-// (assertToolGrantsResolvable, src/tool_providers.ts:169). These laws demand the loader treat a declared
-// permission.network as a dead name and FAIL CLOSED at load — naming the skill and the field — exactly as
-// a dead tool grant is refused. They are RED until that gate lands in src/loader.ts (the loader stores the
-// SkillRecord today and throws nothing); the two baseline laws are GREEN controls proving the change does
-// not narrow a skill that declares no network permission.
+// The network-grant law, revised 2026-09-20 (docs/specs/skill-network-grant-refusal.md).
+// The original law refused ANY declared permission.network at load, because nothing read the grant
+// and Node's --permission model had no network flag: an origin allowlist, a method restriction and
+// rate/size caps were held to none of them, which is a false assurance. Node 24's --allow-net moved
+// the ground. skill_subprocess passes that flag ONLY for a declared grant (no grant → no flag → the
+// child's fetch is denied at the syscall), and skill_runner enforces allow[], methods[],
+// max_requests and max_bytes in-process. So the grant is backed, and the refusal narrows to the one
+// case that is still unenforceable: a runtime too old to have the flag.
 
 /** Write a skill package with an arbitrary `permission` sub-object (undefined ⇒ omit it entirely) —
  *  mirrors writeSkillPackage but does not force { tier: 0 }, so a permission.network can be declared. */
@@ -129,49 +126,39 @@ function writeSkillWithPermission(root: string, slug: string, permission: unknow
   writeFileSync(join(d, "fixtures", "f0.json"), JSON.stringify({ id: "basic", input: {}, assertions: [] }));
 }
 
-describe("skill network-grant refusal — fail closed on an unenforceable permission.network", () => {
-  it("RED: refuses at load a skill declaring a well-formed permission.network (fails closed, not a warning)", () => {
+describe("skill network grant — backed by the runtime, or refused", () => {
+  const nodeMajor = Number(process.versions.node.split(".")[0] ?? 0);
+
+  it("loads a well-formed permission.network on a runtime that can back it (Node 24+)", () => {
+    if (nodeMajor < 24) return; // the other law governs this runtime
     const dir = makeGenomeDir();
     try {
       seedCoreTypes(dir);
       writeSkillWithPermission(dir, "netty", {
         tier: 0,
-        network: { allow: ["https://api.example.com"], methods: ["GET"], max_requests: 100, max_bytes: 4096 },
+        network: { allow: ["api.example.com"], methods: ["GET"], max_requests: 100, max_bytes: 4096 },
       });
-      // Fail CLOSED: loadGenome must THROW, not return a genome that silently stored the skill.
-      expect(() => loadGenome(dir)).toThrow();
-      // And it must not have been quietly accepted — the throw is the whole contract.
-      let threw = false;
-      try { loadGenome(dir); } catch { threw = true; }
-      expect(threw).toBe(true);
+      const g = loadGenome(dir);
+      expect(g.skills.has("netty")).toBe(true);
+      // and the grant SURVIVES to the record the execution path reads — a stored grant nothing
+      // carries would be the old defect wearing a new face
+      expect(g.skills.get("netty")?.permission?.network?.allow).toEqual(["api.example.com"]);
+      expect(g.skills.get("netty")?.permission?.network?.max_requests).toBe(100);
     } finally {
       rmGenome(dir);
     }
   });
 
-  it("RED: the refusal names the skill slug and the field 'permission.network' (dead-name shape)", () => {
+  it("refuses a grant this runtime cannot back, naming the skill and the field", () => {
+    if (nodeMajor >= 24) return; // cannot be exercised here; the law above governs
     const dir = makeGenomeDir();
     try {
       seedCoreTypes(dir);
-      writeSkillWithPermission(dir, "greedy-fetcher", {
-        tier: 0,
-        network: { allow: ["https://api.example.com"], methods: ["GET"] },
-      });
+      writeSkillWithPermission(dir, "greedy-fetcher", { tier: 0, network: { allow: ["api.example.com"] } });
       let message = "";
       try { loadGenome(dir); } catch (e) { message = e instanceof Error ? e.message : String(e); }
       expect(message).toContain("greedy-fetcher");
       expect(message).toContain("permission.network");
-    } finally {
-      rmGenome(dir);
-    }
-  });
-
-  it("RED: any non-null network is refused — even an empty {} object (which parses to { allow: [] })", () => {
-    const dir = makeGenomeDir();
-    try {
-      seedCoreTypes(dir);
-      writeSkillWithPermission(dir, "empty-net", { tier: 0, network: {} });
-      expect(() => loadGenome(dir)).toThrow();
     } finally {
       rmGenome(dir);
     }

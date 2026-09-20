@@ -482,22 +482,21 @@ export function loadGenome(
         const why = metaCheck.error.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`).join("; ");
         throw new SkillLoadError(`skill ${pkg.meta.slug}: meta failed schema validation — ${why}`);
       }
-      // Fail closed: a declared permission.network is a DEAD NAME. NetworkGrantSchema parses
-      // { allow, methods, max_requests, max_bytes } and SkillSchema stores it, but NOTHING in the
-      // execution path reads it — Node's --permission model has no --allow-net (skill_subprocess.ts
-      // emits only tier flags) and skill_runner.mjs:12 says the child can still reach the network.
-      // A skill declaring an origin allowlist, a method restriction, or rate/size caps is held to
-      // NONE of them: a false assurance, worse than a missing feature. The repo's convention for a
-      // grant the runtime cannot back is refusal with a named error, not silence
-      // (assertToolGrantsResolvable, tool_providers.ts:169). So refuse it at load — before the
-      // SkillRecord is stored — naming the skill and the field, exactly as a dead tool grant is
-      // refused. (NetworkGrantSchema stays in genome_schema.ts; only LOADING a skill that declares
-      // it is refused.) A skill declaring no permission.network is untouched.
-      if (metaCheck.data.permission?.network !== undefined) {
+      // A declared permission.network USED to be a dead name: NetworkGrantSchema parsed it,
+      // SkillSchema stored it, and nothing in the execution path read it, so an origin allowlist
+      // or a rate cap was a false assurance and loading was refused outright. Node 24's
+      // --allow-net changed the ground: skill_subprocess passes the flag only for a declared
+      // grant (no grant, no flag, and the child's fetch is denied at the syscall), and
+      // skill_runner enforces the allow list in-process. So the grant is backed, and what is
+      // refused now is narrower and still fail-closed: a grant this RUNTIME cannot back, i.e.
+      // a Node too old to have the flag. On such a runtime --permission has no network gate at
+      // all, so the declaration would again promise what nothing enforces.
+      const nodeMajorHere = Number(process.versions.node.split(".")[0] ?? 0);
+      if (metaCheck.data.permission?.network !== undefined && nodeMajorHere < 24) {
         throw new SkillLoadError(
-          `skill "${pkg.meta.slug}" declares permission.network but the runtime cannot enforce it — ` +
-            `Node's --permission model has no network gate and no chokepoint reads the grant ` +
-            `(a network grant the runtime cannot back is a dead name; remove permission.network or run the skill under a runtime that enforces it)`,
+          `skill "${pkg.meta.slug}" declares permission.network but this runtime cannot back it — ` +
+            `Node ${process.versions.node} has no --allow-net (added in Node 24), so the grant would be a dead name ` +
+            `(upgrade the runtime or remove permission.network)`,
         );
       }
       if (skills.has(pkg.meta.slug)) {

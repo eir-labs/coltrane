@@ -1,6 +1,6 @@
 # Spec: refuse an unenforceable `permission.network` at load time
 
-**Status:** RED spec (laws written, enforcement not yet implemented)
+**Status:** SUPERSEDED 2026-09-20 — the premise changed. See "What changed" below.
 **Change request:** close the false-assurance gap where a skill declares a network
 permission that nothing reads, enforces, or refuses.
 **Decision:** REFUSE fail-closed at load time (miles-change-decision-c63b88b1).
@@ -82,3 +82,39 @@ declares no network permission.
 Revert the `src/loader.ts` gate and the five added laws in a single commit. Nothing
 downstream ever read `permission.network`, so restoring load-accepts-network is
 complete and side-effect-free; `NetworkGrantSchema` was never modified.
+
+
+---
+
+## What changed (2026-09-20)
+
+This spec's decision — refuse ANY declared `permission.network` at load — rested on a
+measured fact: no code path read the grant, and Node's `--permission` model had no
+network flag, so the runtime *could not* back it. Both halves of that have moved.
+
+**Node 24 added `--allow-net`.** Under `--permission` the network is now denied unless
+that flag is passed. Measured on this machine (Node 26.7.0): a tier-0 skill's `fetch`
+fails with `ERR_ACCESS_DENIED`, and every one of 101 URLs in a landscape discovery run
+came back `error: TypeError` until the flag was granted. `patent-fetch`'s "if the cage
+blocks the network" fallback had been describing this gate without knowing it existed.
+
+**The chokepoint now exists, and reads the grant:**
+
+- `src/skill_subprocess.ts` passes `--allow-net` **only** when `meta.permission.network`
+  is declared, and passes the grant to the child in the input envelope. No grant, no
+  flag, and the capability is denied at the syscall — the declaration is what decides.
+- `src/skill_runner.mjs` wraps `fetch` and enforces the rest of the grant, because
+  `--allow-net` is all-or-nothing: `allow[]` (host equality or subdomain; `*` for any),
+  `methods[]`, `max_requests`, and `max_bytes` (the body readers are wrapped, so an
+  oversized response throws rather than being returned).
+
+**So the law narrows rather than disappears.** What is refused at load is a grant *this
+runtime cannot back* — Node older than 24, where `--permission` has no network gate at
+all and the declaration would again promise what nothing enforces. The false-assurance
+principle is unchanged; the set of unenforceable cases shrank to one.
+
+**What is still not claimed.** The wrapper bounds the skill's own code. Once the
+capability is granted, code that deliberately reaches around it (`node:net`, a fresh
+undici agent) is not stopped by it, and `max_bytes` bounds what a body reader hands back
+rather than what crossed the wire. Granting network to a skill grants it the network;
+the allowlist keeps an honest skill honest and makes a dishonest one visible in review.

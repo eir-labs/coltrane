@@ -22,13 +22,23 @@ import { join, isAbsolute, resolve } from "node:path";
 
 const skillDir = argv[2];
 
-/** Enforce the grant's host allowlist in-process: --allow-net is all-or-nothing, so a skill that
- *  was granted the network can still only reach the hosts its grant names. A host is allowed when
- *  it equals an entry or is a subdomain of one; "*" allows any host. No grant → fetch is left as
- *  Node hands it over (already denied by the absent flag). */
+/** Enforce the grant IN-PROCESS. `--allow-net` is all-or-nothing, so everything the grant promises
+ *  beyond "may use the network" is enforced here, at the one chokepoint a skill's code goes through:
+ *    allow[]       — the host must equal an entry or be a subdomain of one ("*" allows any host)
+ *    methods[]     — the request method must be named (default GET when the caller sets none)
+ *    max_requests  — a ceiling on calls; the next one throws
+ *    max_bytes     — a ceiling on what a response BODY can hand back: the body readers are wrapped,
+ *                    so an oversized response throws instead of being returned. It bounds what the
+ *                    skill can read, not what crossed the wire.
+ *  This bounds the skill's own code. Once the capability is granted, code that deliberately reaches
+ *  around this wrapper (node:net, a fresh undici agent) is not stopped by it — the grant is a bound
+ *  on an honest skill and a visible declaration for review, not a proof. No grant → nothing wrapped,
+ *  and the absent --allow-net has already denied the capability at the syscall. */
 function applyNetworkGrant(grant) {
-  if (!grant || !Array.isArray(grant.allow)) return;
-  const allow = grant.allow.map((h) => String(h).trim().toLowerCase()).filter(Boolean);
+  if (!grant) return;
+  const allow = (Array.isArray(grant.allow) ? grant.allow : []).map((h) => String(h).trim().toLowerCase()).filter(Boolean);
+  const methods = Array.isArray(grant.methods) ? grant.methods.map((m) => String(m).toUpperCase()) : null;
+  const maxBytes = typeof grant.max_bytes === "number" ? grant.max_bytes : null;
   const permitted = (url) => {
     let host;
     try { host = new URL(String(url)).hostname.toLowerCase(); } catch { return false; }
@@ -38,13 +48,30 @@ function applyNetworkGrant(grant) {
   let used = 0;
   globalThis.fetch = async (input, init) => {
     const url = typeof input === "string" || input instanceof URL ? String(input) : input?.url;
-    if (!permitted(url)) {
-      throw new Error(`network grant refuses ${url} — allowed hosts: ${allow.join(", ")}`);
+    if (!permitted(url)) throw new Error(`network grant refuses ${url} — allowed hosts: ${allow.join(", ") || "(none)"}`);
+    const method = String(init?.method ?? input?.method ?? "GET").toUpperCase();
+    if (methods && !methods.includes(method)) {
+      throw new Error(`network grant refuses method ${method} — allowed: ${methods.join(", ")}`);
     }
     if (typeof grant.max_requests === "number" && ++used > grant.max_requests) {
       throw new Error(`network grant exhausted: max_requests=${grant.max_requests}`);
     }
-    return original(input, init);
+    const res = await original(input, init);
+    if (maxBytes === null) return res;
+    const guard = (value) => {
+      const size = typeof value === "string" ? Buffer.byteLength(value) : value?.byteLength ?? 0;
+      if (size > maxBytes) throw new Error(`network grant refuses a ${size}-byte body — max_bytes=${maxBytes}`);
+      return value;
+    };
+    return new Proxy(res, {
+      get(target, prop, recv) {
+        if (prop === "text") return async () => guard(await target.text());
+        if (prop === "arrayBuffer") return async () => guard(await target.arrayBuffer());
+        if (prop === "json") return async () => JSON.parse(guard(await target.text()));
+        const v = Reflect.get(target, prop, recv);
+        return typeof v === "function" ? v.bind(target) : v;
+      },
+    });
   };
 }
 

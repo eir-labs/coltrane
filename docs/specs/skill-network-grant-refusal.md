@@ -113,6 +113,14 @@ runtime cannot back* — Node older than 24, where `--permission` has no network
 all and the declaration would again promise what nothing enforces. The false-assurance
 principle is unchanged; the set of unenforceable cases shrank to one.
 
+**And the refusal is TOTAL, not fatal.** The unbackable skill drops out with a named
+`load_error` and the rest of the genome loads, exactly as `loadInstitutions` treats a
+malformed institution. The first version threw, and CI (Node 22) showed what that costs:
+one fetching skill made the whole genome unloadable and took four unrelated suites with
+it. "This one skill cannot run on this runtime" must not become "nothing loads on this
+runtime". Nothing can seat a skill that was never admitted, so a chair naming it fails
+closed at compose with a reason.
+
 **What is still not claimed.** The wrapper bounds the skill's own code. Once the
 capability is granted, code that deliberately reaches around it (`node:net`, a fresh
 undici agent) is not stopped by it, and `max_bytes` bounds what a body reader hands back

@@ -493,11 +493,22 @@ export function loadGenome(
       // all, so the declaration would again promise what nothing enforces.
       const nodeMajorHere = Number(process.versions.node.split(".")[0] ?? 0);
       if (metaCheck.data.permission?.network !== undefined && nodeMajorHere < 24) {
-        throw new SkillLoadError(
-          `skill "${pkg.meta.slug}" declares permission.network but this runtime cannot back it — ` +
+        // TOTAL, like loadInstitutions: the unbackable skill drops out with a named load_error and
+        // the rest of the genome loads. Throwing here turned "this ONE skill cannot run on this
+        // runtime" into "NOTHING loads on this runtime" — measured on CI (Node 22), where a single
+        // fetching skill made the whole genome unloadable and four unrelated suites failed with it.
+        // The false-assurance principle is untouched: the skill is not admitted, so nothing can seat
+        // it, and a chair that names it fails closed at compose with a reason.
+        load_errors.push({
+          kind: "skill",
+          path: pkgDir,
+          slug: pkg.meta.slug,
+          error:
+            `skill "${pkg.meta.slug}" declares permission.network but this runtime cannot back it — ` +
             `Node ${process.versions.node} has no --allow-net (added in Node 24), so the grant would be a dead name ` +
-            `(upgrade the runtime or remove permission.network)`,
-        );
+            `(upgrade the runtime or remove permission.network); the skill is not admitted`,
+        });
+        continue;
       }
       if (skills.has(pkg.meta.slug)) {
         load_errors.push({ kind: "skill", path: pkgDir, slug: pkg.meta.slug, error: `duplicate skill slug "${pkg.meta.slug}" (first seen in ${skill_paths.get(pkg.meta.slug)})` });

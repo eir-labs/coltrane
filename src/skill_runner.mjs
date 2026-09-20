@@ -27,9 +27,10 @@ const skillDir = argv[2];
  *    allow[]       — the host must equal an entry or be a subdomain of one ("*" allows any host)
  *    methods[]     — the request method must be named (default GET when the caller sets none)
  *    max_requests  — a ceiling on calls; the next one throws
- *    max_bytes     — a ceiling on what a response BODY can hand back: the body readers are wrapped,
- *                    so an oversized response throws instead of being returned. It bounds what the
- *                    skill can read, not what crossed the wire.
+ *    max_bytes     — a ceiling on what a response BODY can hand back: EVERY reader is wrapped
+ *                    (text, arrayBuffer, bytes, blob, json, clone) and `body` is counted as the
+ *                    stream flows, so an oversized response throws at the chunk that crosses the
+ *                    line. It bounds what the skill can read, not what crossed the wire.
  *  This bounds the skill's own code. Once the capability is granted, code that deliberately reaches
  *  around this wrapper (node:net, a fresh undici agent) is not stopped by it — the grant is a bound
  *  on an honest skill and a visible declaration for review, not a proof. No grant → nothing wrapped,
@@ -58,20 +59,48 @@ function applyNetworkGrant(grant) {
     }
     const res = await original(input, init);
     if (maxBytes === null) return res;
-    const guard = (value) => {
-      const size = typeof value === "string" ? Buffer.byteLength(value) : value?.byteLength ?? 0;
+    // EVERY reader, not the three obvious ones. `text`, `arrayBuffer` and `json` were wrapped and
+    // `blob`, `bytes` and `body` were not — and `res.body` is exactly the path an honest skill takes
+    // for a large response, which is the case max_bytes exists for. A ceiling three readers can walk
+    // around is not a ceiling.
+    const guard = (value, size) => {
       if (size > maxBytes) throw new Error(`network grant refuses a ${size}-byte body — max_bytes=${maxBytes}`);
       return value;
     };
-    return new Proxy(res, {
-      get(target, prop, recv) {
-        if (prop === "text") return async () => guard(await target.text());
-        if (prop === "arrayBuffer") return async () => guard(await target.arrayBuffer());
-        if (prop === "json") return async () => JSON.parse(guard(await target.text()));
-        const v = Reflect.get(target, prop, recv);
-        return typeof v === "function" ? v.bind(target) : v;
-      },
-    });
+    const sized = (v) => (typeof v === "string" ? Buffer.byteLength(v) : (v?.byteLength ?? v?.size ?? 0));
+    const wrap = (r) =>
+      new Proxy(r, {
+        get(target, prop, recv) {
+          if (prop === "text") return async () => { const v = await target.text(); return guard(v, sized(v)); };
+          if (prop === "arrayBuffer") return async () => { const v = await target.arrayBuffer(); return guard(v, sized(v)); };
+          if (prop === "bytes") return async () => { const v = await target.bytes(); return guard(v, sized(v)); };
+          if (prop === "blob") return async () => { const v = await target.blob(); return guard(v, sized(v)); };
+          if (prop === "json") return async () => { const v = await target.text(); return JSON.parse(guard(v, sized(v))); };
+          if (prop === "clone") return () => wrap(target.clone());
+          if (prop === "body") {
+            // The stream is counted as it flows: a skill reading chunk by chunk is bounded by the
+            // same number, and the error arrives at the chunk that crosses it rather than after.
+            const src = target.body;
+            if (!src) return src;
+            let seen = 0;
+            return src.pipeThrough(
+              new TransformStream({
+                transform(chunk, controller) {
+                  seen += chunk?.byteLength ?? chunk?.length ?? 0;
+                  if (seen > maxBytes) {
+                    controller.error(new Error(`network grant refuses a ${seen}-byte body — max_bytes=${maxBytes}`));
+                    return;
+                  }
+                  controller.enqueue(chunk);
+                },
+              }),
+            );
+          }
+          const v = Reflect.get(target, prop, recv);
+          return typeof v === "function" ? v.bind(target) : v;
+        },
+      });
+    return wrap(res);
   };
 }
 

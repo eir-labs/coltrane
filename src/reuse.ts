@@ -221,7 +221,7 @@ export function checkpointRoleKey(chart_slug: string, movement_id: string | unde
  *
  * `spent_usd` is REAL settled model spend summed across the movements that have completed — the
  * number a chart's `budget_envelope.total_usd` is denominated in. It is deliberately NOT the
- * per-run `BudgetState.spent`, which counts synthetic append units (see BudgetState.unit); the
+ * per-run `BudgetState.spent_usd`, which is one run's own settled spend against its own ceiling; the
  * whole per-run snapshot rides alongside under `budget_state` so nothing about money collapses to
  * a single scalar.
  */

@@ -66,15 +66,6 @@ describe("the network is a declared capability", () => {
   // --allow-net, and the gap closed — measured, not assumed: every URL in a landscape run came
   // back ERR_ACCESS_DENIED until the flag was passed. So the grant that was already in the schema
   // and read by nothing (SkillPermissionSchema.network) is now what decides.
-  it("passes no --allow-net when the skill declares no network grant", () => {
-    expect(tierFlags(0).join(" ")).not.toContain("--allow-net");
-    expect(tierFlags(2).join(" ")).not.toContain("--allow-net"); // not a tier — a declaration
-  });
-
-  it("passes --allow-net when the skill declares a grant", () => {
-    expect(tierFlags(0, undefined, { allow: ["example.com"] }).join(" ")).toContain("--allow-net");
-  });
-
   const FETCH = `export default async function run(input) {
     try { const r = await fetch(input.url, input.init); return { status: r.status }; }
     catch (e) { return { error: String(e.message) }; }

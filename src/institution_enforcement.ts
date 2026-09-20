@@ -146,11 +146,14 @@ function parse(src: string): SExpr {
 // outside it is an unimplemented operator — an admissibility refusal statically, and UNDECIDED at
 // runtime. Some KNOWN operators (subseteq/forall/resolvable/…) still cannot be reduced from facts
 // alone, so they too return UNDECIDED at runtime — that is an honest non-decision, not an unknown.
-/** EXPORTED because a second reader exists: obligation-adjudicate reports which operator an
- *  obligation asked for and this evaluator does not implement. That report is only honest if it
- *  reads the same set the evaluator does — a copy would keep naming an operator as missing after
- *  it was implemented, which is precisely backwards for a field whose job is "build this next".
- *  One home, two readers. */
+/** The VOCABULARY: every operator that is a real word in this predicate language, across both
+ *  shipped institutions. Its question is "is this a typo?", and `checkLaw` is its reader — a
+ *  misspelling must be refused at admissibility rather than discovered as an UNDECIDED at run.
+ *
+ *  It is NOT the set of operators this evaluator can reduce, and a reader asking that question
+ *  wants `REDUCIBLE_OPERATORS` below. Seven members here — subseteq, forall, resolvable, nonempty,
+ *  declared_before, has, backed_by_contract — are known-but-not-fact-decidable by design and
+ *  return UNDECIDED honestly. contract-operator-sets-v1 pins the difference. */
 export const KNOWN_OPERATORS: ReadonlySet<string> = new Set<string>([
   "=>",
   "and",
@@ -169,6 +172,34 @@ export const KNOWN_OPERATORS: ReadonlySet<string> = new Set<string>([
   "declared_before",
   "has",
   "backed_by_contract",
+]);
+
+/** The REDUCIBLE set: exactly what `asBool` and `asVerdict` dispatch. Its question is a different
+ *  one from the vocabulary's — "can this evaluator decide it from facts?" — and it is the set a
+ *  caller wants when it reports which operator an obligation asked for and did not get.
+ *
+ *  `obligation-adjudicate` is that caller. Reading the vocabulary set instead made it silent for
+ *  every known-but-undecidable operator, which is backwards for a field whose whole job is "build
+ *  this one next" (review of #547).
+ *
+ *  BOTH DIRECTIONS are pinned against the dispatch by `tests/spec_operator_sets_are_pinned.test.ts`:
+ *  every member here is `case`d in a reducer, and every `case` in a reducer is named here. So
+ *  whoever adds an operator does not have to remember this list — the law remembers for them. It is
+ *  also a subset of KNOWN_OPERATORS, because reducing a word the language does not admit would mean
+ *  admissibility refuses a predicate the runtime decides perfectly. */
+export const REDUCIBLE_OPERATORS: ReadonlySet<string> = new Set<string>([
+  // asBool
+  "and",
+  "or",
+  "not",
+  "=",
+  "is-agent",
+  "human-governor",
+  // asVerdict
+  "=>",
+  "require",
+  "allow",
+  "deny",
 ]);
 
 /** `allow` / `deny` are verdict ATOMS, not variables — excluded when collecting free variables. */

@@ -1,0 +1,47 @@
+{
+  "id": "dead-name-on-missing-fact",
+  "description": "A declared input the snapshot does not supply is DEAD_NAME, never a pass",
+  "input": {
+    "laws": [
+      {
+        "slug": "needs-fact",
+        "status": "executed",
+        "bearer": "org:eir-labs",
+        "law": {
+          "attributes": "Eir Labs Inc.",
+          "deontic": "obliged",
+          "aim": "pay the FY1 balance",
+          "conditions": "by 2027-03-31",
+          "or_else": "the GK may invoice interest",
+          "debtor": "org:eir-labs",
+          "creditor": "org:eir-gk",
+          "check": {
+            "predicate": "(= a b)",
+            "inputs": {
+              "a": "x",
+              "b": "y"
+            }
+          }
+        }
+      }
+    ],
+    "facts": {
+      "facts": {
+        "a": 1
+      },
+      "supplied_by": "org:eir-gk"
+    }
+  },
+  "assertions": [
+    {
+      "path": "results.0.outcome",
+      "op": "equals",
+      "value": "DEAD_NAME"
+    },
+    {
+      "path": "pass",
+      "op": "equals",
+      "value": false
+    }
+  ]
+}

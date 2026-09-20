@@ -1,0 +1,47 @@
+{
+  "id": "unattributed-snapshot-refused",
+  "description": "A snapshot naming no supplier is refused: absence declines rather than passes",
+  "input": {
+    "laws": [
+      {
+        "slug": "anon",
+        "status": "executed",
+        "bearer": "org:eir-labs",
+        "law": {
+          "attributes": "Eir Labs",
+          "deontic": "obliged",
+          "aim": "pay",
+          "conditions": "by then",
+          "or_else": "interest",
+          "debtor": "org:eir-labs",
+          "creditor": "org:eir-gk",
+          "check": {
+            "predicate": "(= a b)",
+            "inputs": {
+              "a": "x",
+              "b": "y"
+            }
+          }
+        }
+      }
+    ],
+    "facts": {
+      "facts": {
+        "a": 1,
+        "b": 1
+      }
+    }
+  },
+  "assertions": [
+    {
+      "path": "results.0.outcome",
+      "op": "equals",
+      "value": "refused"
+    },
+    {
+      "path": "pass",
+      "op": "equals",
+      "value": false
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "id": "empty-never-passes",
+  "description": "No obligations supplied is not a pass",
+  "input": {
+    "laws": [],
+    "facts": {}
+  },
+  "assertions": [
+    {
+      "path": "pass",
+      "op": "equals",
+      "value": false
+    }
+  ]
+}

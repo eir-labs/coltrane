@@ -1,0 +1,43 @@
+{
+  "id": "decides-what-it-can",
+  "description": "An obligation whose predicate uses only implemented operators is decided",
+  "input": {
+    "laws": [
+      {
+        "slug": "w8-on-file",
+        "status": "executed",
+        "bearer": "org:eir-labs",
+        "law": {
+          "attributes": "Eir Labs Inc.",
+          "deontic": "obliged",
+          "aim": "pay the FY1 balance",
+          "conditions": "by 2027-03-31",
+          "or_else": "the GK may invoice interest",
+          "debtor": "org:eir-labs",
+          "creditor": "org:eir-gk",
+          "check": {
+            "predicate": "(=> (has payee w8) (require (backed_by_form w8)))",
+            "inputs": {
+              "payee": "principal",
+              "w8": "instrument-ref"
+            }
+          }
+        }
+      }
+    ],
+    "facts": {
+      "facts": {
+        "payee": "org:eir-gk",
+        "w8": "instrument-ref:w8ben-e-2026"
+      },
+      "supplied_by": "org:eir-gk"
+    }
+  },
+  "assertions": [
+    {
+      "path": "checks.0.method",
+      "op": "equals",
+      "value": "evaluate(check, fact-snapshot)"
+    }
+  ]
+}

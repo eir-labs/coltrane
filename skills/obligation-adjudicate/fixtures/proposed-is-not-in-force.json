@@ -1,0 +1,40 @@
+{
+  "id": "proposed-is-not-in-force",
+  "description": "A proposed bearing law is not adjudicated at all",
+  "input": {
+    "laws": [
+      {
+        "slug": "not-yet",
+        "status": "proposed",
+        "bearer": "org:eir-labs",
+        "law": {
+          "attributes": "Eir Labs Inc.",
+          "deontic": "obliged",
+          "aim": "pay the FY1 balance",
+          "conditions": "by 2027-03-31",
+          "or_else": "the GK may invoice interest",
+          "debtor": "org:eir-labs",
+          "creditor": "org:eir-gk",
+          "check": {
+            "predicate": "(= a b)",
+            "inputs": {
+              "a": "x",
+              "b": "y"
+            }
+          }
+        }
+      }
+    ],
+    "facts": {
+      "facts": {},
+      "supplied_by": "org:eir-gk"
+    }
+  },
+  "assertions": [
+    {
+      "path": "results.0.outcome",
+      "op": "equals",
+      "value": "not-in-force"
+    }
+  ]
+}

@@ -1,0 +1,35 @@
+{
+  "id": "no-check-is-not-a-pass",
+  "description": "An obligation with no check is unadjudicable, not a pass",
+  "input": {
+    "laws": [
+      {
+        "slug": "prose-only",
+        "status": "executed",
+        "law": {
+          "attributes": "Eir Labs",
+          "deontic": "obliged",
+          "aim": "use commercially reasonable efforts",
+          "conditions": "at all times",
+          "or_else": "the record states none"
+        }
+      }
+    ],
+    "facts": {
+      "facts": {},
+      "supplied_by": "org:eir-gk"
+    }
+  },
+  "assertions": [
+    {
+      "path": "results.0.outcome",
+      "op": "equals",
+      "value": "unadjudicable"
+    },
+    {
+      "path": "pass",
+      "op": "equals",
+      "value": false
+    }
+  ]
+}

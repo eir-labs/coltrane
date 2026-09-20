@@ -4,6 +4,7 @@ import { join, extname, resolve, isAbsolute, dirname } from "node:path";
 import { createRequire } from "node:module";
 import { defineAgent, composeStandard, CompositionError, GenomeIncompleteError, type Agent, type AgentDef, type Standard, type PhaseDef } from "./composition.js";
 import { loadSkillPackage, SkillLoadError } from "./skills.js";
+import { NODE_WITH_ALLOW_NET } from "./skill_subprocess.js";
 import { SkillSchema, EvalSchema, DomainTypeSchema, VenueSchema, ChartSchema, BearingLawSchema, venueDefect, type SkillOutput, type EvalOutput, type DomainTypeOutput, type ChartInput, type VenueInput, type BearingLawOutput } from "./genome_schema.js";
 import { composeChart, chartEntrySeedTypes, type Chart, type Venue } from "./chart.js";
 import type { Primitive } from "./core_types.js";
@@ -482,23 +483,33 @@ export function loadGenome(
         const why = metaCheck.error.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`).join("; ");
         throw new SkillLoadError(`skill ${pkg.meta.slug}: meta failed schema validation — ${why}`);
       }
-      // Fail closed: a declared permission.network is a DEAD NAME. NetworkGrantSchema parses
-      // { allow, methods, max_requests, max_bytes } and SkillSchema stores it, but NOTHING in the
-      // execution path reads it — Node's --permission model has no --allow-net (skill_subprocess.ts
-      // emits only tier flags) and skill_runner.mjs:12 says the child can still reach the network.
-      // A skill declaring an origin allowlist, a method restriction, or rate/size caps is held to
-      // NONE of them: a false assurance, worse than a missing feature. The repo's convention for a
-      // grant the runtime cannot back is refusal with a named error, not silence
-      // (assertToolGrantsResolvable, tool_providers.ts:169). So refuse it at load — before the
-      // SkillRecord is stored — naming the skill and the field, exactly as a dead tool grant is
-      // refused. (NetworkGrantSchema stays in genome_schema.ts; only LOADING a skill that declares
-      // it is refused.) A skill declaring no permission.network is untouched.
-      if (metaCheck.data.permission?.network !== undefined) {
-        throw new SkillLoadError(
-          `skill "${pkg.meta.slug}" declares permission.network but the runtime cannot enforce it — ` +
-            `Node's --permission model has no network gate and no chokepoint reads the grant ` +
-            `(a network grant the runtime cannot back is a dead name; remove permission.network or run the skill under a runtime that enforces it)`,
-        );
+      // A declared permission.network USED to be a dead name: NetworkGrantSchema parsed it,
+      // SkillSchema stored it, and nothing in the execution path read it, so an origin allowlist
+      // or a rate cap was a false assurance and loading was refused outright. Node 24's
+      // --allow-net changed the ground: skill_subprocess passes the flag only for a declared
+      // grant (no grant, no flag, and the child's fetch is denied at the syscall), and
+      // skill_runner enforces the allow list in-process. So the grant is backed, and what is
+      // refused now is narrower and still fail-closed: a grant this RUNTIME cannot back, i.e.
+      // a Node too old to have the flag. On such a runtime --permission has no network gate at
+      // all, so the declaration would again promise what nothing enforces.
+      const nodeMajorHere = Number(process.versions.node.split(".")[0] ?? 0);  // NODE_WITH_ALLOW_NET in skill_subprocess
+      if (metaCheck.data.permission?.network !== undefined && nodeMajorHere < NODE_WITH_ALLOW_NET) {
+        // TOTAL, like loadInstitutions: the unbackable skill drops out with a named load_error and
+        // the rest of the genome loads. Throwing here turned "this ONE skill cannot run on this
+        // runtime" into "NOTHING loads on this runtime" — measured on CI (Node 22), where a single
+        // fetching skill made the whole genome unloadable and four unrelated suites failed with it.
+        // The false-assurance principle is untouched: the skill is not admitted, so nothing can seat
+        // it, and a chair that names it fails closed at compose with a reason.
+        load_errors.push({
+          kind: "skill",
+          path: pkgDir,
+          slug: pkg.meta.slug,
+          error:
+            `skill "${pkg.meta.slug}" declares permission.network but this runtime cannot back it — ` +
+            `Node ${process.versions.node} has no --allow-net (added in Node 24), so the grant would be a dead name ` +
+            `(upgrade the runtime or remove permission.network); the skill is not admitted`,
+        });
+        continue;
       }
       if (skills.has(pkg.meta.slug)) {
         load_errors.push({ kind: "skill", path: pkgDir, slug: pkg.meta.slug, error: `duplicate skill slug "${pkg.meta.slug}" (first seen in ${skill_paths.get(pkg.meta.slug)})` });

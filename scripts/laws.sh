@@ -25,7 +25,11 @@ cd "$(dirname "$0")/.."
 
 # THE ROOT BAND — `npm test`, the one the verifier measured and the one carrying almost
 # every law in this repo.
-EXPECTED_LAWS="${EXPECTED_LAWS:-3965}"   # includes 22 todo
+# 3965 → 3966: one stale law went (it asserted Node's permission model has no network gate, which
+# stopped being true at Node 24), and two pure flag-string laws replaced it in this band. The nine
+# laws that need a real request moved to tests/security — a band may reach out, the root suite may
+# not — so they are counted there, by file, not here.
+EXPECTED_LAWS="${EXPECTED_LAWS:-3966}"   # includes 22 todo
 #   +1  mcp_tools_describe law 7 (#535) — a description that backticks an argument names one the
 #       verb's own input_schema declares. The prose sits beside a GENERATED schema: the schema moves
 #       with the handler, the description does not. Its first draft could not fail — it forgave any
@@ -40,7 +44,7 @@ EXPECTED_FILES="${EXPECTED_FILES:-413}"
 # for leaving them unpinned while claiming the laws are counted.
 EXPECTED_FAILURE_MODES_FILES="${EXPECTED_FAILURE_MODES_FILES:-5}"
 EXPECTED_HONEST_BROKER_FILES="${EXPECTED_HONEST_BROKER_FILES:-2}"
-EXPECTED_SECURITY_FILES="${EXPECTED_SECURITY_FILES:-1}"
+EXPECTED_SECURITY_FILES="${EXPECTED_SECURITY_FILES:-2}"   # + skill_network_grant.spec.ts: proving a network gate needs a real request, which the root suite forbids
 
 # THE FILES DELEGATED AWAY FROM THE ROOT BAND, by name.
 #

@@ -4,6 +4,7 @@ import { join, extname, resolve, isAbsolute, dirname } from "node:path";
 import { createRequire } from "node:module";
 import { defineAgent, composeStandard, CompositionError, GenomeIncompleteError, type Agent, type AgentDef, type Standard, type PhaseDef } from "./composition.js";
 import { loadSkillPackage, SkillLoadError } from "./skills.js";
+import { NODE_WITH_ALLOW_NET } from "./skill_subprocess.js";
 import { SkillSchema, EvalSchema, DomainTypeSchema, VenueSchema, ChartSchema, BearingLawSchema, venueDefect, type SkillOutput, type EvalOutput, type DomainTypeOutput, type ChartInput, type VenueInput, type BearingLawOutput } from "./genome_schema.js";
 import { composeChart, chartEntrySeedTypes, type Chart, type Venue } from "./chart.js";
 import type { Primitive } from "./core_types.js";
@@ -491,8 +492,8 @@ export function loadGenome(
       // refused now is narrower and still fail-closed: a grant this RUNTIME cannot back, i.e.
       // a Node too old to have the flag. On such a runtime --permission has no network gate at
       // all, so the declaration would again promise what nothing enforces.
-      const nodeMajorHere = Number(process.versions.node.split(".")[0] ?? 0);
-      if (metaCheck.data.permission?.network !== undefined && nodeMajorHere < 24) {
+      const nodeMajorHere = Number(process.versions.node.split(".")[0] ?? 0);  // NODE_WITH_ALLOW_NET in skill_subprocess
+      if (metaCheck.data.permission?.network !== undefined && nodeMajorHere < NODE_WITH_ALLOW_NET) {
         // TOTAL, like loadInstitutions: the unbackable skill drops out with a named load_error and
         // the rest of the genome loads. Throwing here turned "this ONE skill cannot run on this
         // runtime" into "NOTHING loads on this runtime" — measured on CI (Node 22), where a single

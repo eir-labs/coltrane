@@ -107,6 +107,12 @@ function nodeMajor(): number {
  */
 export const MIN_NODE_FOR_SANDBOX = 22;
 
+/** `--allow-net` arrived in Node 24. Below it there is no network gate at all: `--permission` has
+ *  no network flag, so a skill reaches out whatever its grant says. The loader refuses to admit a
+ *  network-granted skill on such a runtime for that reason; tierFlags refuses to PASS the flag for
+ *  the same one. */
+export const NODE_WITH_ALLOW_NET = 24;
+
 function assertSandboxCapableRuntime(): void {
   const major = nodeMajor();
   if (major < MIN_NODE_FOR_SANDBOX) {
@@ -145,7 +151,16 @@ export function tierFlags(tier: number, skillDir?: string, network?: { allow: st
   else flags.push(...own.map((p2) => `--allow-fs-read=${p2}`));
   if (tier >= 2) flags.push("--allow-child-process");
   // The network is a declared capability, not a tier. No grant → no flag → Node denies it.
-  if (network) flags.push("--allow-net");
+  //
+  // Guarded on the runtime because an unrecognised flag does not degrade — it kills the child
+  // before it starts, so a granted skill on Node 22 came back with no output at all rather than
+  // with a refusal. The loader already declines to ADMIT such a skill, which protects the genome
+  // path; this protects every other caller of executeSkill, including the laws that construct a
+  // skill directly to test the mechanism rather than the admission. On a runtime without the flag
+  // this changes nothing that can be changed: there is no network permission to grant, the skill
+  // reaches out regardless, and the in-process half of the grant (host allowlist, methods, request
+  // and byte ceilings, the stream counter) still runs — which is the half worth testing there.
+  if (network && nodeMajor() >= NODE_WITH_ALLOW_NET) flags.push("--allow-net");
   return flags;
 }
 

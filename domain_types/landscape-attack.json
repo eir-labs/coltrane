@@ -1,0 +1,58 @@
+{
+  "slug": "landscape-attack",
+  "version": 1,
+  "extends": "Judgment",
+  "domain": "landscape",
+  "status": "active",
+  "description": "Adversarial pass over the landscape. criteria = the attack classes run; verdicts = counts per class; findings = each problem found, with evidence.",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "findings": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "target": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "missing-item",
+                "wrong-layer",
+                "overclaim",
+                "bad-relation",
+                "uncovered-question",
+                "stale"
+              ]
+            },
+            "claim": {
+              "type": "string"
+            },
+            "evidence": {
+              "type": "string"
+            },
+            "severity": {
+              "type": "string",
+              "enum": [
+                "blocker",
+                "high",
+                "medium",
+                "note"
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "claim",
+            "severity"
+          ]
+        }
+      }
+    }
+  },
+  "required_fields": [
+    "findings"
+  ]
+}

@@ -1,0 +1,51 @@
+{
+  "id": "relations-pruned",
+  "description": "A relation touching a dropped item is removed",
+  "input": {
+    "map": {
+      "items": [
+        {
+          "handle": "a",
+          "evidence": [
+            {
+              "url": "https://w3.org/prov",
+              "quote": "A verbatim sentence.",
+              "retrieved_at": "2026-09-19"
+            }
+          ]
+        },
+        {
+          "handle": "b",
+          "evidence": [
+            {
+              "url": "https://w3.org/prov",
+              "quote": "A verbatim sentence.",
+              "retrieved_at": "2026-09-19"
+            }
+          ]
+        }
+      ],
+      "relations": [
+        {
+          "from": "a",
+          "to": "b",
+          "rel": "extends",
+          "evidence": "e"
+        }
+      ]
+    },
+    "verification": {
+      "verified_handles": [
+        "a"
+      ]
+    },
+    "attack": {}
+  },
+  "assertions": [
+    {
+      "path": "relations.length",
+      "op": "equals",
+      "value": 0
+    }
+  ]
+}

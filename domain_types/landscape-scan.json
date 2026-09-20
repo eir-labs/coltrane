@@ -1,0 +1,171 @@
+{
+  "slug": "landscape-scan",
+  "version": 1,
+  "extends": "Signal",
+  "domain": "landscape",
+  "status": "active",
+  "description": "One layer's scouting result. source = 'web:landscape:<layer>'. data = {layer, items[], queries_run[], not_found[], caveats[]}; every item carries a fetched URL and a verbatim quote. completeness = 0..1 self-assessed coverage of the layer; acquisition_cost = estimated dollars spent.",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "data": {
+        "type": "object",
+        "properties": {
+          "layer": {
+            "type": "string"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "handle": {
+                  "type": "string",
+                  "description": "kebab-case id, unique across the whole landscape"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "standard",
+                    "schema",
+                    "ontology",
+                    "vocabulary",
+                    "data-model",
+                    "dataset",
+                    "form-library",
+                    "package",
+                    "specification",
+                    "identifier-scheme",
+                    "other"
+                  ]
+                },
+                "layer": {
+                  "type": "string"
+                },
+                "url": {
+                  "type": "string"
+                },
+                "governing_body": {
+                  "type": "string"
+                },
+                "licence": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "active",
+                    "maintained",
+                    "dormant",
+                    "superseded",
+                    "draft",
+                    "unknown"
+                  ]
+                },
+                "latest_version": {
+                  "type": "string"
+                },
+                "latest_release_date": {
+                  "type": "string"
+                },
+                "jurisdictions": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "what_it_models": {
+                  "type": "string"
+                },
+                "core_concepts": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "The item's own named classes, types or fields, verbatim."
+                },
+                "evidence": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "url": {
+                        "type": "string"
+                      },
+                      "quote": {
+                        "type": "string",
+                        "description": "Copied VERBATIM from the fetched page (HTML page preferred over PDF). Never paraphrased, never translated."
+                      },
+                      "retrieved_at": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "url",
+                      "quote"
+                    ]
+                  },
+                  "minItems": 1
+                }
+              },
+              "required": [
+                "handle",
+                "name",
+                "kind",
+                "layer",
+                "url",
+                "what_it_models",
+                "evidence"
+              ]
+            }
+          },
+          "queries_run": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1
+          },
+          "not_found": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "reason"
+              ]
+            }
+          },
+          "caveats": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "layer",
+          "items",
+          "queries_run"
+        ]
+      },
+      "layer": {
+        "type": "string"
+      }
+    }
+  },
+  "required_fields": [
+    "layer"
+  ]
+}

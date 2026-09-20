@@ -1,0 +1,44 @@
+{
+  "id": "case-not-folded",
+  "description": "A quote differing only in case is refused",
+  "input": {
+    "scans": [
+      {
+        "source": "web:landscape:x",
+        "data": {
+          "layer": "x",
+          "items": [
+            {
+              "handle": "c",
+              "name": "c",
+              "kind": "standard",
+              "layer": "x",
+              "url": "https://c.org",
+              "what_it_models": "m",
+              "evidence": [
+                {
+                  "url": "https://c.org",
+                  "quote": "prov-o provides",
+                  "retrieved_at": "2026-09-19"
+                }
+              ]
+            }
+          ],
+          "queries_run": [
+            "q"
+          ]
+        }
+      }
+    ],
+    "mock_pages": {
+      "https://c.org": "PROV-O provides"
+    }
+  },
+  "assertions": [
+    {
+      "path": "refused.0.handle",
+      "op": "equals",
+      "value": "c"
+    }
+  ]
+}

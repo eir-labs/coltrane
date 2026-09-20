@@ -1,0 +1,57 @@
+{
+  "slug": "landscape-fit",
+  "version": 1,
+  "extends": "Judgment",
+  "domain": "landscape",
+  "status": "active",
+  "description": "Each verified item judged against the needs and competency questions. criteria = the needs and competency questions; verdicts = per-layer summary; fits = per-item decision; uncovered_questions = questions nothing serves.",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "fits": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "type": "string"
+            },
+            "decision": {
+              "type": "string",
+              "enum": [
+                "adopt",
+                "borrow",
+                "reference",
+                "ignore"
+              ]
+            },
+            "serves": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "rationale": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "handle",
+            "decision",
+            "rationale"
+          ]
+        }
+      },
+      "uncovered_questions": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  "required_fields": [
+    "fits",
+    "uncovered_questions"
+  ]
+}

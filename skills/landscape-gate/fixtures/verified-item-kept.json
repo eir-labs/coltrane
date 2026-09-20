@@ -1,0 +1,41 @@
+{
+  "id": "verified-item-kept",
+  "description": "A verified, evidenced item survives; READY",
+  "input": {
+    "map": {
+      "items": [
+        {
+          "handle": "prov-o",
+          "evidence": [
+            {
+              "url": "https://w3.org/prov",
+              "quote": "A verbatim sentence.",
+              "retrieved_at": "2026-09-19"
+            }
+          ]
+        }
+      ],
+      "uncovered_questions": []
+    },
+    "verification": {
+      "verified_handles": [
+        "prov-o"
+      ]
+    },
+    "attack": {
+      "findings": []
+    }
+  },
+  "assertions": [
+    {
+      "path": "gate.status",
+      "op": "equals",
+      "value": "READY"
+    },
+    {
+      "path": "gate.kept",
+      "op": "equals",
+      "value": 1
+    }
+  ]
+}

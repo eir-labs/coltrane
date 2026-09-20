@@ -27,7 +27,10 @@ export interface SkillMeta {
   input_type?: string;
   output_type?: string;
   determinism_ratio?: number;
-  permission?: { tier?: number };
+  /** tier gates the filesystem/spawn cage; `network` is a DECLARED capability (NetworkGrantSchema
+   *  in genome_schema.ts) — its presence is what passes --allow-net, and its `allow` list is
+   *  enforced inside the child by skill_runner.mjs. */
+  permission?: { tier?: number; network?: { allow: string[]; methods?: string[]; max_requests?: number; max_bytes?: number } };
   /** Per-skill execution ceiling. Caps the caller-supplied timeout (whichever is smaller). */
   timeout_ms?: number;
 }
@@ -64,13 +67,26 @@ export interface ExecuteResult {
  * import it. `tests/skill_sandbox_confinement.test.ts` probes the capability rather than the
  * flag string, because asserting on flags is how the previous claim survived being false.
  *
- * WHAT THIS DOES NOT DO: Node's permission model has no network gate. There is no flag here
- * that stops `fetch`, and there was never one — the old guarantee was unimplementable in this
- * runtime, not merely misconfigured. A pre-open-source ancestor of this engine ran skills under
- * Deno (`--allow-read=<dir>` plus a net allowlist), which is the runtime with the primitive
- * this wants. Until that returns, an outbound request from a skill is possible and is stated
- * rather than denied. What has changed is that the credential is no longer in reach: the child
- * gets an explicit minimal environment (see `skillEnv`), so there is nothing worth exfiltrating.
+ * THE NETWORK. The previous comment here said Node's permission model has no network gate and
+ * that an outbound request from a skill was possible and stated rather than denied. That stopped
+ * being true: under `--permission` the network is now DENIED unless `--allow-net` is passed, so a
+ * skill's `fetch` fails with ERR_ACCESS_DENIED before it reaches a host. Measured, not assumed —
+ * every URL in a landscape run came back `error: TypeError` until the flag was passed.
+ *
+ * So the grant that was already in the schema and read by nothing — `SkillPermissionSchema.network`
+ * (NetworkGrantSchema: allow[], methods?, max_requests?, max_bytes?) — is now what decides: no
+ * grant, no flag, no network. It is a DECLARED capability rather than a tier, because a tier-0
+ * fetcher (`patent-fetch`) needs it while a tier-2 skill that only runs tests must not get it for
+ * free. `patent-fetch`'s "if the cage blocks the network" fallback was describing this gate
+ * without knowing it existed.
+ *
+ * WHAT THIS DOES NOT DO: `--allow-net` is all-or-nothing — Node has no per-host form. The grant's
+ * `allow` list is therefore enforced INSIDE the child by `skill_runner.mjs`, which wraps `fetch`
+ * and refuses a host the grant does not name. That bounds the skill's own code; it is not a proof
+ * against code that deliberately reaches around it (`node:net` is reachable once the capability is
+ * granted). Granting network to a skill grants it the network; the allowlist keeps an honest skill
+ * honest and makes a dishonest one visible in review. The credential remains out of reach either
+ * way: the child gets an explicit minimal environment (see `skillEnv`).
  */
 /** Node major running this process. */
 function nodeMajor(): number {
@@ -91,6 +107,12 @@ function nodeMajor(): number {
  */
 export const MIN_NODE_FOR_SANDBOX = 22;
 
+/** `--allow-net` arrived in Node 24. Below it there is no network gate at all: `--permission` has
+ *  no network flag, so a skill reaches out whatever its grant says. The loader refuses to admit a
+ *  network-granted skill on such a runtime for that reason; tierFlags refuses to PASS the flag for
+ *  the same one. */
+export const NODE_WITH_ALLOW_NET = 24;
+
 function assertSandboxCapableRuntime(): void {
   const major = nodeMajor();
   if (major < MIN_NODE_FOR_SANDBOX) {
@@ -102,7 +124,7 @@ function assertSandboxCapableRuntime(): void {
   }
 }
 
-export function tierFlags(tier: number, skillDir?: string): string[] {
+export function tierFlags(tier: number, skillDir?: string, network?: { allow: string[] }): string[] {
   // `RUNNER` lives in this package's dist/; the child must be able to read it to start, and to
   // read the skill it imports. Nothing else.
   // One flag PER PATH: Node no longer accepts a comma-separated list here, and silently
@@ -128,6 +150,17 @@ export function tierFlags(tier: number, skillDir?: string): string[] {
   if (tier >= 1) flags.push("--allow-fs-read=*", "--allow-fs-write=*");
   else flags.push(...own.map((p2) => `--allow-fs-read=${p2}`));
   if (tier >= 2) flags.push("--allow-child-process");
+  // The network is a declared capability, not a tier. No grant → no flag → Node denies it.
+  //
+  // Guarded on the runtime because an unrecognised flag does not degrade — it kills the child
+  // before it starts, so a granted skill on Node 22 came back with no output at all rather than
+  // with a refusal. The loader already declines to ADMIT such a skill, which protects the genome
+  // path; this protects every other caller of executeSkill, including the laws that construct a
+  // skill directly to test the mechanism rather than the admission. On a runtime without the flag
+  // this changes nothing that can be changed: there is no network permission to grant, the skill
+  // reaches out regardless, and the in-process half of the grant (host allowlist, methods, request
+  // and byte ceilings, the stream counter) still runs — which is the half worth testing there.
+  if (network && nodeMajor() >= NODE_WITH_ALLOW_NET) flags.push("--allow-net");
   return flags;
 }
 
@@ -186,8 +219,14 @@ export function executeSkill(skillDir: string, input: unknown, timeoutMs = 120_0
   const started = Date.now();
   assertSandboxCapableRuntime();
   const dir = realDir(skillDir);
-  const res = spawnSync("node", [...tierFlags(tier, dir), runnerPath(), dir], {
-    input: JSON.stringify(context === undefined ? input : { __coltrane_skill_envelope: 1, input, context }),
+  const res = spawnSync("node", [...tierFlags(tier, dir, meta.permission?.network), runnerPath(), dir], {
+    // The envelope carries the network grant so the child can enforce its host allowlist; --allow-net
+    // is all-or-nothing, and a tier-0 child cannot re-read its own meta.json to learn the list.
+    input: JSON.stringify(
+      context === undefined && !meta.permission?.network
+        ? input
+        : { __coltrane_skill_envelope: 1, input, context, network_grant: meta.permission?.network },
+    ),
     encoding: "utf-8",
     maxBuffer: 64 * 1024 * 1024,
     timeout,
@@ -252,7 +291,7 @@ export async function executeSkillAsync(
     // (the runtime forwards RunDeps.tree_root), spawn the child there so the skill's code half runs
     // in the gig's tree, not the long-lived engine process's own directory. Absent a cwd the spawn
     // is unchanged: the child inherits the parent's working directory, exactly as before (I2).
-    const child = spawn("node", [...tierFlags(tier, dir), runnerPath(), dir], {
+    const child = spawn("node", [...tierFlags(tier, dir, meta.permission?.network), runnerPath(), dir], {
       stdio: ["pipe", "pipe", "pipe"], env: skillEnv(),
       ...(opts.cwd !== undefined ? { cwd: opts.cwd } : {}),
     });
@@ -328,7 +367,13 @@ export async function executeSkillAsync(
     });
     // With a context the input travels in an envelope the runner unwraps into run(input, context);
     // without one the bare input goes over the wire exactly as before (fixtures, legacy callers).
-    child.stdin.end(JSON.stringify(opts.context === undefined ? input : { __coltrane_skill_envelope: 1, input, context: opts.context }));
+    child.stdin.end(
+      JSON.stringify(
+        opts.context === undefined && !meta.permission?.network
+          ? input
+          : { __coltrane_skill_envelope: 1, input, context: opts.context, network_grant: meta.permission?.network },
+      ),
+    );
   });
 }
 

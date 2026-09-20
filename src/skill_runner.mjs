@@ -9,15 +9,100 @@
 // directory and the skill's own package, writes and child_process are tier-gated — so a
 // tier-0 skill can read its own code and inputs but cannot read elsewhere, write, or spawn.
 //
-// It CAN still reach the network: Node's permission model has no network gate, and this
-// comment previously claimed otherwise. The credential is out of reach instead — the child
-// is given an explicit minimal environment rather than the parent's, so there is nothing
-// worth exfiltrating. A real network gate needs a runtime that has one.
+// The network is now gated by Node itself: without --allow-net (passed only when the skill's
+// meta declares permission.network) a fetch fails with ERR_ACCESS_DENIED. --allow-net is
+// all-or-nothing, so the grant's `allow` list is enforced HERE: fetch is wrapped and a host the
+// grant does not name is refused before the request is made. That bounds this skill's own code,
+// not code that deliberately reaches around it — once the capability is granted, node:net is
+// reachable. The credential is out of reach either way: the child gets an explicit minimal
+// environment rather than the parent's.
 import { argv, stdin, stdout, exit } from "node:process";
 import { pathToFileURL } from "node:url";
 import { join, isAbsolute, resolve } from "node:path";
 
 const skillDir = argv[2];
+
+/** Enforce the grant IN-PROCESS. `--allow-net` is all-or-nothing, so everything the grant promises
+ *  beyond "may use the network" is enforced here, at the one chokepoint a skill's code goes through:
+ *    allow[]       — the host must equal an entry or be a subdomain of one ("*" allows any host)
+ *    methods[]     — the request method must be named (default GET when the caller sets none)
+ *    max_requests  — a ceiling on calls; the next one throws
+ *    max_bytes     — a ceiling on what a response BODY can hand back: EVERY reader is wrapped
+ *                    (text, arrayBuffer, bytes, blob, json, clone) and `body` is counted as the
+ *                    stream flows, so an oversized response throws at the chunk that crosses the
+ *                    line. It bounds what the skill can read, not what crossed the wire.
+ *  This bounds the skill's own code. Once the capability is granted, code that deliberately reaches
+ *  around this wrapper (node:net, a fresh undici agent) is not stopped by it — the grant is a bound
+ *  on an honest skill and a visible declaration for review, not a proof. No grant → nothing wrapped,
+ *  and the absent --allow-net has already denied the capability at the syscall. */
+function applyNetworkGrant(grant) {
+  if (!grant) return;
+  const allow = (Array.isArray(grant.allow) ? grant.allow : []).map((h) => String(h).trim().toLowerCase()).filter(Boolean);
+  const methods = Array.isArray(grant.methods) ? grant.methods.map((m) => String(m).toUpperCase()) : null;
+  const maxBytes = typeof grant.max_bytes === "number" ? grant.max_bytes : null;
+  const permitted = (url) => {
+    let host;
+    try { host = new URL(String(url)).hostname.toLowerCase(); } catch { return false; }
+    return allow.some((a) => a === "*" || host === a || host.endsWith(`.${a}`));
+  };
+  const original = globalThis.fetch;
+  let used = 0;
+  globalThis.fetch = async (input, init) => {
+    const url = typeof input === "string" || input instanceof URL ? String(input) : input?.url;
+    if (!permitted(url)) throw new Error(`network grant refuses ${url} — allowed hosts: ${allow.join(", ") || "(none)"}`);
+    const method = String(init?.method ?? input?.method ?? "GET").toUpperCase();
+    if (methods && !methods.includes(method)) {
+      throw new Error(`network grant refuses method ${method} — allowed: ${methods.join(", ")}`);
+    }
+    if (typeof grant.max_requests === "number" && ++used > grant.max_requests) {
+      throw new Error(`network grant exhausted: max_requests=${grant.max_requests}`);
+    }
+    const res = await original(input, init);
+    if (maxBytes === null) return res;
+    // EVERY reader, not the three obvious ones. `text`, `arrayBuffer` and `json` were wrapped and
+    // `blob`, `bytes` and `body` were not — and `res.body` is exactly the path an honest skill takes
+    // for a large response, which is the case max_bytes exists for. A ceiling three readers can walk
+    // around is not a ceiling.
+    const guard = (value, size) => {
+      if (size > maxBytes) throw new Error(`network grant refuses a ${size}-byte body — max_bytes=${maxBytes}`);
+      return value;
+    };
+    const sized = (v) => (typeof v === "string" ? Buffer.byteLength(v) : (v?.byteLength ?? v?.size ?? 0));
+    const wrap = (r) =>
+      new Proxy(r, {
+        get(target, prop, recv) {
+          if (prop === "text") return async () => { const v = await target.text(); return guard(v, sized(v)); };
+          if (prop === "arrayBuffer") return async () => { const v = await target.arrayBuffer(); return guard(v, sized(v)); };
+          if (prop === "bytes") return async () => { const v = await target.bytes(); return guard(v, sized(v)); };
+          if (prop === "blob") return async () => { const v = await target.blob(); return guard(v, sized(v)); };
+          if (prop === "json") return async () => { const v = await target.text(); return JSON.parse(guard(v, sized(v))); };
+          if (prop === "clone") return () => wrap(target.clone());
+          if (prop === "body") {
+            // The stream is counted as it flows: a skill reading chunk by chunk is bounded by the
+            // same number, and the error arrives at the chunk that crosses it rather than after.
+            const src = target.body;
+            if (!src) return src;
+            let seen = 0;
+            return src.pipeThrough(
+              new TransformStream({
+                transform(chunk, controller) {
+                  seen += chunk?.byteLength ?? chunk?.length ?? 0;
+                  if (seen > maxBytes) {
+                    controller.error(new Error(`network grant refuses a ${seen}-byte body — max_bytes=${maxBytes}`));
+                    return;
+                  }
+                  controller.enqueue(chunk);
+                },
+              }),
+            );
+          }
+          const v = Reflect.get(target, prop, recv);
+          return typeof v === "function" ? v.bind(target) : v;
+        },
+      });
+    return wrap(res);
+  };
+}
 
 async function main() {
   let raw = "";
@@ -30,6 +115,10 @@ async function main() {
   const isEnvelope = payload && typeof payload === "object" && payload.__coltrane_skill_envelope === 1;
   const input = isEnvelope ? payload.input : payload;
   const context = isEnvelope ? payload.context : undefined;
+
+  // The allowlist travels with the input envelope (the parent reads meta; the child must not
+  // re-read the package from disk under a tier-0 read scope).
+  applyNetworkGrant(isEnvelope ? payload.network_grant : undefined);
 
   const dir = isAbsolute(skillDir) ? skillDir : resolve(skillDir);
   const mod = await import(pathToFileURL(join(dir, "skill.mjs")).href);

@@ -30,13 +30,13 @@ import { executeSkill, tierFlags } from "../src/skill_subprocess.js";
 let root: string;
 
 /** A skill whose code half is `body`, declared at `tier`. */
-function skill(body: string, tier = 0): string {
+function skill(body: string, tier = 0, network?: { allow: string[]; methods?: string[]; max_requests?: number; max_bytes?: number }): string {
   const dir = join(root, `s${Math.random().toString(36).slice(2)}`);
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, "meta.json"), JSON.stringify({
     slug: "probe", version: 1, skill_type: "deterministic",
     input_type: "note", output_type: "note",
-    permission: { tier }, description: "probe", determinism_ratio: 1,
+    permission: network ? { tier, network } : { tier }, description: "probe", determinism_ratio: 1,
   }));
   writeFileSync(join(dir, "skill.mjs"), body);
   return dir;
@@ -148,15 +148,27 @@ describe("the tiers still grant what they say", () => {
   });
 });
 
-describe("what this sandbox does NOT claim", () => {
-  it("states the network gap honestly rather than asserting a guarantee", () => {
-    // Node's permission model has no network flag. Until skill execution moves to a runtime
-    // that has one, an outbound request from a skill is POSSIBLE, and the source must say so —
-    // a comment promising otherwise is the defect this release exists to remove.
-    const src = tierFlags(0).join(" ");
-    expect(src).not.toContain("--allow-net");
-    // The confinement above removes the credential from reach, which is what makes the
-    // remaining network capability survivable rather than critical.
+function nodeMajor(): number {
+  return Number(process.versions.node.split(".")[0] ?? 0);
+}
+
+describe("the network grant decides the flag", () => {
+  // These two touch no network and belong in the unit band: they read the flag string tierFlags
+  // builds, nothing more. The laws that need a real request — host allowlist, methods, the request
+  // and byte ceilings, the stream counter, and the ungranted denial — live in tests/security, where
+  // a band may reach out; the root suite may not (suite_reaches_no_remote).
+  it("passes no --allow-net when the skill declares no network grant", () => {
+    expect(tierFlags(0).join(" ")).not.toContain("--allow-net");
+    expect(tierFlags(2).join(" ")).not.toContain("--allow-net"); // not a tier — a declaration
+  });
+
+  it("passes --allow-net when the skill declares a grant — and only where the flag exists", () => {
+    // Asserted BOTH ways so the law is falsifiable on either runtime. Below Node 24 the flag does
+    // not exist and passing it kills the child before it starts, so its ABSENCE is the correct
+    // behaviour there and this law says so rather than going quiet.
+    const flags = tierFlags(0, undefined, { allow: ["example.com"] }).join(" ");
+    if (nodeMajor() >= 24) expect(flags).toContain("--allow-net");
+    else expect(flags).not.toContain("--allow-net");
   });
 });
 

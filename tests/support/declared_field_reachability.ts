@@ -500,7 +500,11 @@ export const TWO_CORPORA_CALIBRATION_TRAIL = {
 // consumer is Nomos's seal and a future bearing-law browse surface, neither built yet. `bearer`,
 // `provenance`, `source` etc. from the same schema matched existing src readers, so only these two
 // surface. When a bearing-law consumer lands, this should SHRINK back.
-export const PINNED_UNREAD_ENGINE_FIELDS = 23;
+// 23 → 20 (2026-09-20): allow, methods and max_requests/max_bytes acquired readers when the skill
+// network grant stopped being a dead name — skill_subprocess passes the flag on the grant's presence
+// and skill_runner enforces the list, the method, the request ceiling and the byte ceiling. The
+// ratchet moving down is the point: three fields that were declared and unread are now enforced.
+export const PINNED_UNREAD_ENGINE_FIELDS = 20;
 
 /** CONTRACT ratchet FLOOR (hand-verified 2026-08-21). 127 = the count of domain_types/*.json +
  *  core_types/*.json schema.properties keys (>= 5 chars, deduped) with no `\bname\b` reader anywhere in the

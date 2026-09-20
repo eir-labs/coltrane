@@ -16,16 +16,17 @@
 //   - a `proposed` bearing law is not adjudicated at all: nothing is in force until it is executed.
 //   - an obligor may not certify its own discharge, so this chair refuses to adjudicate a law whose
 //     fact snapshot was supplied by the debtor (`facts.supplied_by === law.debtor`).
-import { evaluate } from "../../dist/src/institution_enforcement.js";
-
-const KNOWN = ["and", "or", "not", "=", "is-agent", "human-governor", "=>", "require", "allow", "deny"];
+import { evaluate, KNOWN_OPERATORS } from "../../dist/src/institution_enforcement.js";
 
 /** Operators a predicate names that the evaluator does not implement. Textual, deliberately: the
  *  point is to REPORT what an obligation asked for, not to decide it. */
 function missingOperators(predicate) {
   const heads = String(predicate ?? "").match(/\(\s*([^\s()]+)/g) ?? [];
   const named = heads.map((h) => h.replace(/^\(\s*/, ""));
-  return [...new Set(named.filter((op) => !KNOWN.includes(op)))];
+  // The evaluator's own set, imported rather than copied: a copy would keep naming an operator as
+  // missing after it was implemented, which is backwards for a field whose whole job is "build this
+  // one next". One home, two readers.
+  return [...new Set(named.filter((op) => !KNOWN_OPERATORS.has(op)))];
 }
 
 export default function run(input, context) {
@@ -49,7 +50,14 @@ export default function run(input, context) {
       results.push({ obligation: slug, outcome: "unadjudicable", why: "the law carries no check — a clause the machine cannot decide is a person's" });
       continue;
     }
-    if (snapshot.supplied_by && debtor && snapshot.supplied_by === debtor) {
+    // An obligor does not certify its own discharge — and an UNATTRIBUTED snapshot cannot be shown
+    // not to come from the debtor, so absence declines rather than passes. A settlement resting on
+    // facts nobody stands behind is the case this rule exists for.
+    if (!snapshot.supplied_by) {
+      results.push({ obligation: slug, outcome: "refused", why: "the fact snapshot names no supplier; an unattributed snapshot cannot be shown not to come from the debtor" });
+      continue;
+    }
+    if (debtor && snapshot.supplied_by === debtor) {
       results.push({ obligation: slug, outcome: "refused", why: `the fact snapshot was supplied by the debtor (${debtor}); an obligor does not certify its own discharge` });
       continue;
     }

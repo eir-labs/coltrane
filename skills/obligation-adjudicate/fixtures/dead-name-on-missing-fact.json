@@ -28,7 +28,8 @@
     "facts": {
       "facts": {
         "a": 1
-      }
+      },
+      "supplied_by": "org:eir-gk"
     }
   },
   "assertions": [

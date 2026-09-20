@@ -16,7 +16,8 @@
       }
     ],
     "facts": {
-      "facts": {}
+      "facts": {},
+      "supplied_by": "org:eir-gk"
     }
   },
   "assertions": [

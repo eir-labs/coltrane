@@ -29,7 +29,8 @@
       "facts": {
         "paid_minor": 0,
         "due_minor": 6151477
-      }
+      },
+      "supplied_by": "org:eir-gk"
     }
   },
   "assertions": [

@@ -115,6 +115,45 @@ describe("the network is a declared capability", () => {
     }
   });
 
+  // THE FALLTHROUGH PATH. Every law above this point reads the Response through a reader the
+  // wrapper handles explicitly (text/blob/bytes/arrayBuffer) or through a grant with NO max_bytes —
+  // and `applyNetworkGrant` returns the RAW response when no byte ceiling is declared
+  // (`if (maxBytes === null) return res`). So the Proxy's own fallthrough — every native getter:
+  // ok, status, headers, url, redirected — was exercised by nothing, and shipped broken.
+  //
+  // `Reflect.get(target, prop, recv)` passes the PROXY as the receiver. A native Response getter
+  // reads a private field, and reading #state with the proxy as `this` throws
+  // "Cannot read private member #state from an object whose class did not declare it".
+  //
+  // How it presented in the wild is why this law is worth more than the five reader laws: a skill's
+  // own `if (res.ok)` threw, its own catch recorded a per-locator failure, and it returned
+  // `fetched: 0` SUCCESSFULLY. The chain saw a well-formed source set containing nothing, and the
+  // defect read as "the statute did not resolve" rather than "the runtime broke the response".
+  // Every layer behaved correctly and the answer was still wrong.
+  it("a granted skill with a byte ceiling reads native Response getters — the Proxy fallthrough", async () => {
+    const srv = await localServer();
+    try {
+      const body = `export default async function run(input) {
+        const r = await fetch(input.url);
+        try { return { status: r.status, ok: r.ok, redirected: r.redirected }; }
+        catch (e) { return { error: String(e.message) }; }
+      }`;
+      // max_bytes is what puts the Proxy in the path at all; without it the raw Response is
+      // returned and this law would pass while the fallthrough stayed broken.
+      const out = (await executeSkillAsync(skill(body, 0, { allow: [srv.host], max_bytes: 4096 }), { url: srv.url }, 30000, {}))
+        .output as { status?: number; ok?: boolean; redirected?: boolean; error?: string };
+      expect(
+        out.error,
+        "a native getter threw through the grant's Proxy — the receiver handed to Reflect.get must be the TARGET, not the proxy, or every private-field getter on Response dies under a byte ceiling",
+      ).toBeUndefined();
+      expect(out.status, "status is the number the server sent").toBe(200);
+      expect(out.ok, "ok is a boolean, not a throw").toBe(true);
+      expect(out.redirected, "redirected reads too").toBe(false);
+    } finally {
+      srv.close();
+    }
+  });
+
   // One law per reader: a law that only exercises text() passes while the bound leaks through
   // blob() or body, which is exactly how three of six readers went unwrapped.
   for (const reader of ["blob", "bytes", "arrayBuffer", "text"]) {

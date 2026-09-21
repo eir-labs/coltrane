@@ -96,7 +96,12 @@ function applyNetworkGrant(grant) {
               }),
             );
           }
-          const v = Reflect.get(target, prop, recv);
+          // THE RECEIVER IS THE TARGET, NOT THE PROXY. A native Response getter (ok, status,
+          // headers, url, redirected) reads a private field, and `#state` read with the proxy as
+          // `this` throws "Cannot read private member #state from an object whose class did not
+          // declare it". Passing `recv` here broke every native getter under a byte ceiling — and
+          // only under one, since a grant with no max_bytes returns the raw response above.
+          const v = Reflect.get(target, prop, target);
           return typeof v === "function" ? v.bind(target) : v;
         },
       });

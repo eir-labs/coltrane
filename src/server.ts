@@ -52,7 +52,7 @@ import { institutionPlacementResolver } from "./placement_institutions.js";
 import type { PlacementResolver } from "./placement.js";
 import { isDepth, DEPTHS, type Depth } from "./pricing.js";
 import type { ToolProvider } from "./tool_providers.js";
-import { ENGINE_MCP_SERVER, isHostBuiltin, toolBaseName } from "./tool_providers.js";
+import { ENGINE_MCP_SERVER, isHostBuiltin, toolBaseName, mcpServerOf, toolSlugOf } from "./tool_providers.js";
 import type { ToolHook, ToolCallContext, PreOutcome } from "./hooks.js";
 import {
   gigScopeRefusal,
@@ -434,6 +434,48 @@ function metaToRow(meta: OutputMeta): Record<string, unknown> {
  * Pure tool dispatcher. Routes a tool call to its implementation. No transport,
  * no I/O beyond the injected deps — fully unit-testable.
  */
+/**
+ * THE IN-PROCESS HANDS for a completions seat (src/completions_invoker.ts `McpToolSource`).
+ *
+ * On a host running coltrane in-process the bridge is NOT an MCP client: `dispatchTool` already IS the
+ * tool surface, and the MCP server is a wrapper over it. So `call` goes straight to `dispatchTool` —
+ * unknown slugs refused by name, approval gating on every result, the same governed path every other
+ * door takes.
+ *
+ * The write boundary is PINNED to validate here, in code, never read from the environment: a seat's
+ * `output_write` adjudicates against the full seal predicate and persists nothing, and the runtime
+ * seals what passed exactly once. A source built over seal-mode deps would seal twice (or, over a
+ * store that refuses, not at all) and nothing would say so.
+ *
+ * `only` narrows the verbs this source serves. The drain uses it: its local output store is empty by
+ * construction, so serving `output_query` there would answer every seat "nothing sealed" — a
+ * plausible, wrong answer. A verb outside `only` is not LISTED, so a chair granted it is refused
+ * before any model call rather than handed a hollow tool.
+ */
+export function makeEngineToolSource(
+  getDeps: () => ServerDeps,
+  opts: { only?: readonly string[] } = {},
+): { list: () => Promise<{ name: string; description?: string; inputSchema: Record<string, unknown> }[]>; call: (name: string, args: Record<string, unknown>) => Promise<unknown> } {
+  const served = (slug: string): boolean => opts.only === undefined || opts.only.includes(slug);
+  return {
+    list: async () =>
+      MCP_TOOLS.filter((t) => served(t.slug)).map((t) => ({
+        name: `mcp__${ENGINE_MCP_SERVER}__${t.slug}`,
+        description: t.description,
+        inputSchema: t.input_schema as Record<string, unknown>,
+      })),
+    call: async (name, args) => {
+      const server = mcpServerOf(name);
+      if (server !== null && server !== ENGINE_MCP_SERVER) {
+        return { ok: false, error: `"${name}" is not an engine tool — this source serves only "${ENGINE_MCP_SERVER}"` };
+      }
+      const slug = toolSlugOf(name);
+      if (!served(slug)) return { ok: false, error: `"${slug}" is not served to this seat` };
+      return dispatchTool(slug, args, { ...getDeps(), output_write_mode: "validate" });
+    },
+  };
+}
+
 export async function dispatchTool(slug: string, args: Record<string, unknown>, deps: ServerDeps): Promise<ToolResult> {
   if (!KNOWN_SLUGS.has(slug)) {
     return { ok: false, error: `unknown tool "${slug}"` };
@@ -4148,7 +4190,12 @@ export function bootstrapServerDeps(genomeRoot?: string): ServerDeps {
   // sealed output — whether this process ran the gig or a separate CLI process did — lands in
   // one content-addressed store MCP retrieval reads. COLTRANE_MIRROR_DIR overrides (tests).
   const output_mirror = createOutputMirror(defaultMirrorDir(root));
-  return {
+  // The completions seat's hands are THIS deps object — the tool source reads it lazily, at call
+  // time, so it is the same store, registry and ledger every other verb on this door sees.
+  // eslint-disable-next-line prefer-const
+  let self: ServerDeps;
+  const engineTools = makeEngineToolSource(() => self);
+  self = {
     registry,
     toolProviders,
     mcpServerConfigs, // the SAME object handed to the invoker — the preflight guard resolves against it
@@ -4219,6 +4266,7 @@ export function bootstrapServerDeps(genomeRoot?: string): ServerDeps {
     // failing startup if it is malformed — the propagation this bootstrap owes.
     invoke: selectChairInvoker(process.env, {
       registry,
+      tools: engineTools,
       claude: {
         registry,
         model: process.env["COLTRANE_MODEL"],
@@ -4258,6 +4306,7 @@ export function bootstrapServerDeps(genomeRoot?: string): ServerDeps {
     checkpoints: createCheckpointStore(defaultOutputsPersistDir()),
     reuse: createReuseStore(defaultOutputsPersistDir()),
   };
+  return self;
 }
 
 /** The slice of `process` the shutdown path uses. Injected in tests — signal handling is

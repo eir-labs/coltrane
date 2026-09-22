@@ -40,6 +40,7 @@ import {
   type OutputWriteSeal,
 } from "./claude_invoker.js";
 import { CORE_TYPES } from "./core_types.js";
+import { canonJson } from "./canonical_form.js";
 import type { TranscriptStore } from "./transcript_store.js";
 // The provider-neutral loop and the chat-completions wire it runs on. The invoker no longer carries
 // a loop of its own: it hands `runTurn` a port and a tool source and reads back typed stops. The
@@ -427,8 +428,15 @@ export function makeCompletionsInvoker(opts: CompletionsInvokerOptions): AgentIn
     // is kept even if the turn then hit a typed stop — the boundary already adjudicated it good.
     if (sealViaWrite) {
       const blob: Record<string, unknown[]> = {};
+      // One payload accepted twice (a seat that emits two identical output_write calls in one round —
+      // eir-drafting gig 3a37d808, facts-5) is ONE record, not two with the same content_sha. Distinct
+      // payloads of one type are still kept, each its own record.
+      const kept = new Set<string>();
       for (const w of writes) {
         if (!w.ok) continue;
+        const key = `${w.domain_type}\u0000${canonJson(w.data)}`;
+        if (kept.has(key)) continue;
+        kept.add(key);
         const list = (blob[w.domain_type] ??= []);
         if (list.length >= MAX_SEALED_RECORDS_PER_TYPE) {
           throw new Error(

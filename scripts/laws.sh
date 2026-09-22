@@ -29,7 +29,12 @@ cd "$(dirname "$0")/.."
 # stopped being true at Node 24), and two pure flag-string laws replaced it in this band. The nine
 # laws that need a real request moved to tests/security — a band may reach out, the root suite may
 # not — so they are counted there, by file, not here.
-EXPECTED_LAWS="${EXPECTED_LAWS:-4051}"   # includes 22 todo
+EXPECTED_LAWS="${EXPECTED_LAWS:-4055}"   # includes 22 todo
+#   +4  bus_verbs (new file) — bus_post / bus_read / bus_owed on the MCP surface, so a Claude Code chair
+#       is a member of the same bus `coltrane chat` uses (wiki spec.coltrane-bus). A bus name cannot
+#       reach outside the bus directory; the speaker must be named. 7 wires cut, all red. Two existing
+#       laws caught the first draft: a description backticking another verb's argument (#535), and one
+#       shared handler reading every verb's arguments (#234).
 #   +1  completions_seal K11 — an identical accepted write seals once (eir-drafting 3a37d808 facts-5 sealed one payload twice, same content_sha, 5 ms apart); distinct payloads still seal separately.
 #   +14 bus (5), bus_chair (5), bus_terminal (4) — wiki spec.coltrane-bus steps 1-3: an append-only
 #       JSONL bus with per-member cursors (a tag owes a reply, untagged is passive signal), a resident
@@ -71,7 +76,7 @@ EXPECTED_LAWS="${EXPECTED_LAWS:-4051}"   # includes 22 todo
 #       with the handler, the description does not. Its first draft could not fail — it forgave any
 #       token no tool anywhere declared, which is exactly what a renamed argument leaves behind.
 #       Sabotage said so (`current` -> `slug_current` stayed green); the exemption is gone.
-EXPECTED_FILES="${EXPECTED_FILES:-423}"   # + tests/sealed_inputs.test.ts, tests/fan_out.test.ts, tests/completions_seal.test.ts, tests/tier_ladder.test.ts, tests/amend_ladder.test.ts, tests/completions_reasoning_effort.test.ts, tests/bus.test.ts, tests/bus_chair.test.ts, tests/bus_terminal.test.ts
+EXPECTED_FILES="${EXPECTED_FILES:-424}"   # + tests/sealed_inputs.test.ts, tests/fan_out.test.ts, tests/completions_seal.test.ts, tests/tier_ladder.test.ts, tests/amend_ladder.test.ts, tests/completions_reasoning_effort.test.ts, tests/bus.test.ts, tests/bus_chair.test.ts, tests/bus_terminal.test.ts, tests/bus_verbs.test.ts
 
 # THE OTHER BANDS. `vitest run` is ROOT-CONFIG ONLY — this repo's own workflow comments
 # record that four configs went unexecuted once for exactly that reason. So pinning only the

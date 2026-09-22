@@ -235,6 +235,22 @@ describe("a completions seat seals through output_write", () => {
     expect(sealedNotes(deps, gigOf(res)).map((n) => n.data["claim"])[0]).toBe("sealed before the cap");
   });
 
+  it("K11 — an identical write accepted twice seals ONCE; different writes of one type still seal separately", async () => {
+    // eir-drafting gig 3a37d808, facts-5: two records, same content_sha, 5 ms apart — one payload
+    // accepted twice (two identical output_write calls in one round), sealed as two records.
+    const same = { claim: "the one fact set", source: "s" };
+    const m = model((_b, n) =>
+      n === 0 ? { calls: [write(same), write(same)] }
+        : n === 1 ? { calls: [write({ claim: "a second, different record", source: "s" })] }
+          : { text: "done" });
+    vi.stubGlobal("fetch", m.fn);
+    env();
+    const deps = bootstrapServerDeps(root);
+    const res = await dispatch(deps, "plain-std");
+    expect(res.ok, res.error ?? "").toBe(true);
+    expect(sealedNotes(deps, gigOf(res)).map((n) => n.data["claim"]).sort()).toEqual(["a second, different record", "the one fact set"]);
+  });
+
   it("K8 — the deployment's output ceiling reaches the request", async () => {
     const m = model((_b, n) => (n === 0 ? { calls: [write({ claim: "c", source: "s" })] } : { text: "done" }));
     vi.stubGlobal("fetch", m.fn);

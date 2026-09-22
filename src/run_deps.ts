@@ -1,3 +1,4 @@
+import { amendLadderFromEnv } from "./invoker_selection.js";
 /**
  * The enforcement half of `RunDeps`, assembled once so the two call sites cannot drift.
  *
@@ -192,5 +193,8 @@ export function assembleRunDeps(args: AssembleRunDepsArgs): RunDeps {
     // threaded only when present, so a research gig that names no tree stays byte-identical and a
     // laws/changes seal with no tree_root refuses `tree_root_unknown` rather than reading process.cwd().
     ...(args.tree_root ? { tree_root: args.tree_root } : {}),
+    // THE AMEND LADDER, from the deployment's environment — here, in the one assembler, so the dispatch
+    // door and the drain cannot disagree about it. Absent → no key → the loop is what it was.
+    ...(() => { const l = amendLadderFromEnv(process.env); return l ? { tier_ladder: l } : {}; })(),
   };
 }

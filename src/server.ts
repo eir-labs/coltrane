@@ -476,6 +476,19 @@ export function makeEngineToolSource(
   };
 }
 
+/** The named bus and the member speaking, from a bus verb's `bus` and `as` — or why not. */
+async function openNamedBus(busArg: unknown, asArg: unknown, slug: string): Promise<{ bus: import("./bus.js").Bus; as: string } | { error: string }> {
+  const as = typeof asArg === "string" ? asArg.trim() : "";
+  if (!as) return { error: `${slug} needs \`as\`: the member speaking or reading` };
+  const { openBus } = await import("./bus.js");
+  const { busPath } = await import("./bus_terminal.js");
+  try {
+    return { bus: openBus(busPath(String(busArg ?? ""))), as };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
 export async function dispatchTool(slug: string, args: Record<string, unknown>, deps: ServerDeps): Promise<ToolResult> {
   if (!KNOWN_SLUGS.has(slug)) {
     return { ok: false, error: `unknown tool "${slug}"` };
@@ -539,6 +552,29 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
           required_fields: arr(args["required_fields"]),
         });
         return { ok: true, requires_approval: approval, data: res };
+      }
+      // wiki spec.coltrane-bus — the bus on the MCP surface, so an MCP client (a Claude Code chair) is a
+      // member of the same bus `coltrane chat` uses, under the same rules. One case per verb, so each
+      // reads exactly the arguments it advertises (#234).
+      case "bus_post": {
+        const b = await openNamedBus(args["bus"], args["as"], slug);
+        if ("error" in b) return { ok: false, requires_approval: approval, error: b.error };
+        const text = typeof args["text"] === "string" ? args["text"] : "";
+        if (!text.trim()) return { ok: false, requires_approval: approval, error: "bus_post needs `text`" };
+        const reply_to = typeof args["reply_to"] === "string" && args["reply_to"] ? args["reply_to"] : undefined;
+        return { ok: true, requires_approval: approval, data: b.bus.post({ author: b.as, text, reply_to }) };
+      }
+      case "bus_read": {
+        const b = await openNamedBus(args["bus"], args["as"], slug);
+        if ("error" in b) return { ok: false, requires_approval: approval, error: b.error };
+        const lines = b.bus.unread(b.as);
+        if (args["peek"] !== true) b.bus.advance(b.as, lines.length);
+        return { ok: true, requires_approval: approval, data: { lines } };
+      }
+      case "bus_owed": {
+        const b = await openNamedBus(args["bus"], args["as"], slug);
+        if ("error" in b) return { ok: false, requires_approval: approval, error: b.error };
+        return { ok: true, requires_approval: approval, data: { lines: b.bus.owed(b.as) } };
       }
       case "seat_ask": {
         // contract-seat-ask-v1 — ask a PAST seat WHY, on the conversation it actually held. The

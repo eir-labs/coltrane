@@ -454,7 +454,7 @@ function metaToRow(meta: OutputMeta): Record<string, unknown> {
  */
 export function makeEngineToolSource(
   getDeps: () => ServerDeps,
-  opts: { only?: readonly string[] } = {},
+  opts: { only?: readonly string[]; seal?: boolean } = {},
 ): { list: () => Promise<{ name: string; description?: string; inputSchema: Record<string, unknown> }[]>; call: (name: string, args: Record<string, unknown>) => Promise<unknown> } {
   const served = (slug: string): boolean => opts.only === undefined || opts.only.includes(slug);
   return {
@@ -471,7 +471,9 @@ export function makeEngineToolSource(
       }
       const slug = toolSlugOf(name);
       if (!served(slug)) return { ok: false, error: `"${slug}" is not served to this seat` };
-      return dispatchTool(slug, args, { ...getDeps(), output_write_mode: "validate" });
+      // A gig seat's source VALIDATES (the runtime is its one sealer). A sealing source — a bus chair's,
+      // whose commitments have no runtime behind them — persists what the boundary accepts.
+      return dispatchTool(slug, args, opts.seal ? { ...getDeps(), output_write_mode: "seal" } : { ...getDeps(), output_write_mode: "validate" });
     },
   };
 }

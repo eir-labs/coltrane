@@ -108,7 +108,8 @@ export async function runChatTerminal(argv: readonly string[]): Promise<number> 
   const bus = openBus(busPath(busName));
   const me = flag("as") ?? process.env["USER"] ?? "human";
   const port = makeChatCompletionsPort({ baseUrl: url, apiKey: process.env["COLTRANE_COMPLETIONS_KEY"] ?? "", fetchFn: longWaitFetch });
-  const chat = startChat({ bus, me, chair, port, tools: makeEngineToolSource(() => deps), out: say });
+  const tools = busCommitSource(makeEngineToolSource(() => deps, { seal: true }), { bus: busName, chair: slug });
+  const chat = startChat({ bus, me, chair, port, tools, out: say });
 
   say(`bus "${busName}" — you are ${me}, the chair is @${slug} (${model}). Tag @${slug} to ask it; Ctrl-D to leave.`);
   const timer = setInterval(() => { void chat.poll(); }, 1500);
@@ -154,5 +155,23 @@ export function resolveBusChair(
   return {
     error: `more than one conductor is seated (${seated.map((s) => `${s.agent} in ${s.institution}`).join(", ")}); ` +
       `name the one you mean: coltrane chat --chair <agent>.`,
+  };
+}
+
+/**
+ * A bus chair's hands, with its commitments stamped: every `output_write` it makes is sealed under gig
+ * `bus:<name>`, as the chair, in phase `bus` — whatever the model put in those fields, so a chair can
+ * neither misfile a commitment nor sign another agent's name. Every other tool passes through untouched.
+ */
+export function busCommitSource<T extends { list: () => Promise<unknown>; call: (n: string, a: Record<string, unknown>) => Promise<unknown> }>(
+  inner: T,
+  where: { bus: string; chair: string },
+): T {
+  return {
+    ...inner,
+    call: (name: string, args: Record<string, unknown>) =>
+      name === "output_write" || name.endsWith("__output_write")
+        ? inner.call(name, { ...args, gig_id: `bus:${where.bus}`, agent_slug: where.chair, phase: "bus" })
+        : inner.call(name, args),
   };
 }

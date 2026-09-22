@@ -24,6 +24,7 @@ import type { ModelPrice, PriceTable } from "./turn_loop.js";
 import { makeClaudeInvoker, type ClaudeInvokerOptions } from "./claude_invoker.js";
 import { makeCompletionsInvoker, type McpToolSource } from "./completions_invoker.js";
 import { makeFileTranscriptStore } from "./transcript_store.js";
+import { longWaitFetch } from "./long_wait_fetch.js";
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -156,7 +157,9 @@ export function selectChairInvoker(env: EnvLike, opts: SelectChairInvokerOptions
       // A price table is loaded and validated ONLY when configured. Absent = spend is reported
       // unpriced (never $0); malformed = loadPriceTable throws and the process refuses to start.
       ...(pricesFile ? { prices: loadPriceTable(pricesFile) } : {}),
-      ...(opts.fetchFn ? { fetchFn: opts.fetchFn } : {}),
+      // NOT the global fetch: its built-in 300s wait for response headers killed every seat that
+      // reasoned past five minutes (gig 6acd89e2). The chair's own timeout must be the one that rules.
+      fetchFn: completionsFetchFor(opts.fetchFn),
       ...(timeoutRaw ? { timeoutMs: Number(timeoutRaw) } : {}),
       ...(maxTokensRaw ? { maxTokens: Number(maxTokensRaw) } : {}),
       ...(opts.tools ? { tools: opts.tools, sealVia: "output_write" as const } : {}),
@@ -242,4 +245,19 @@ export function amendLadderFromEnv(env: EnvLike): string[] | undefined {
     economy: env["COLTRANE_TIER_ECONOMY"], standard: env["COLTRANE_TIER_STANDARD"], premium: env["COLTRANE_TIER_PREMIUM"],
   };
   return rungs.filter((t) => !!mapped[t]);
+}
+
+/** The runtime's own fetch, captured at load: the one with the built-in 300s header limit. */
+const RUNTIME_FETCH: typeof fetch | undefined = globalThis.fetch;
+
+/**
+ * The transport the completions port calls through. In order: an injected one; else a fetch the HOST
+ * installed in place of the runtime's (a proxy agent, a test double), which is respected rather than
+ * overridden; else, on an unmodified runtime, the long-wait transport, because the runtime's fetch
+ * gives up on headers at 300s and a reasoning seat can think longer than that.
+ */
+export function completionsFetchFor(injected: typeof fetch | undefined): typeof fetch {
+  if (injected) return injected;
+  if (globalThis.fetch !== RUNTIME_FETCH) return globalThis.fetch;
+  return longWaitFetch;
 }

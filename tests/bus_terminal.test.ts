@@ -47,3 +47,35 @@ describe("the terminal", () => {
     expect(entryArgv(["dispatch", "x"], true)).toEqual(["dispatch", "x"]);
   });
 });
+
+// Bare `coltrane` talks to the repo's CONDUCTOR: the chair with role "conductor" in the repo's
+// institution that has an agent seated. An explicit --chair wins; two conductors, or none seated,
+// refuse and say how to fix it — the engine never guesses which chair you meant.
+import { resolveBusChair } from "../src/bus_terminal.js";
+
+const inst = (slug: string, chairs: Array<{ id: string; role: string }>, seats: Array<{ chair_id: string; agent_slug?: string }>) =>
+  [slug, { slug, document: { chairs, assignments: seats } }] as const;
+
+describe("which chair a bare `coltrane` talks to", () => {
+  it("R1 — the institution's seated conductor", () => {
+    const m = new Map([inst("coltrane", [{ id: "c.cond", role: "conductor" }, { id: "c.author", role: "change-author" }], [{ chair_id: "c.cond", agent_slug: "eir" }, { chair_id: "c.author", agent_slug: "blakey" }])]);
+    expect(resolveBusChair(m as never, undefined)).toEqual({ slug: "eir" });
+  });
+  it("R2 — an explicit chair wins", () => {
+    const m = new Map([inst("coltrane", [{ id: "c.cond", role: "conductor" }], [{ chair_id: "c.cond", agent_slug: "eir" }])]);
+    expect(resolveBusChair(m as never, "blakey")).toEqual({ slug: "blakey" });
+  });
+  it("R3 — no seated conductor refuses, saying how to seat one", () => {
+    const empty = new Map([inst("coltrane", [{ id: "c.cond", role: "conductor" }], [{ chair_id: "c.cond" }])]);
+    const r = resolveBusChair(empty as never, undefined);
+    expect("error" in r && r.error).toMatch(/conductor[\s\S]*--chair/);
+  });
+  it("R4 — two seated conductors refuse, naming both", () => {
+    const two = new Map([
+      inst("a", [{ id: "a.c", role: "conductor" }], [{ chair_id: "a.c", agent_slug: "eir" }]),
+      inst("b", [{ id: "b.c", role: "conductor" }], [{ chair_id: "b.c", agent_slug: "miles" }]),
+    ]);
+    const r = resolveBusChair(two as never, undefined);
+    expect("error" in r && r.error).toMatch(/eir[\s\S]*miles/);
+  });
+});

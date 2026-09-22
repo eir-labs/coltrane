@@ -29,7 +29,8 @@ cd "$(dirname "$0")/.."
 # stopped being true at Node 24), and two pure flag-string laws replaced it in this band. The nine
 # laws that need a real request moved to tests/security — a band may reach out, the root suite may
 # not — so they are counted there, by file, not here.
-EXPECTED_LAWS="${EXPECTED_LAWS:-4055}"   # includes 22 todo
+EXPECTED_LAWS="${EXPECTED_LAWS:-4059}"   # includes 22 todo
+#   +4  bus_terminal R1-R4 — bare `coltrane` resolves the repo's CONDUCTOR (the one seated chair with role "conductor" in the genome's institutions); --chair wins; none or two refuse, saying how to fix it. 4 wires cut, all red.
 #   +4  bus_verbs (new file) — bus_post / bus_read / bus_owed on the MCP surface, so a Claude Code chair
 #       is a member of the same bus `coltrane chat` uses (wiki spec.coltrane-bus). A bus name cannot
 #       reach outside the bus directory; the speaker must be named. 7 wires cut, all red. Two existing

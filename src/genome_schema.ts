@@ -252,6 +252,22 @@ export const ChairSchema = z.object({
   // runs COLD (no fork) rather than warm-starting a primer too large to be worth forking. OPTIONAL, so
   // an absent ceiling forks the primer whatever its size (the standing behaviour).
   fork_from: z.object({ primer: z.string(), max_context_tokens: z.number().optional() }).optional(),
+  /** FAN-OUT — one chair template, seated once per item of an input set, each instance seeing only
+   *  its item (and, per `join`, only the items of other sets that match it). The instance count comes
+   *  from the sealed data, never from the model; the split is the engine's, and each instance's seal
+   *  names the exact slice it read. `over.type` and every `join[].type` must be in `input_contract`.
+   *  `match` names a field of the OVER item; `on` a field of the JOIN item; either may hold a scalar
+   *  or an array, and an item joins when the two share a value. Strict: a misspelled key is a load
+   *  error, not a fan-out that silently degrades to one chair. */
+  fan_out: z
+    .object({
+      over: z.object({ type: z.string(), path: z.string(), key: z.string() }).strict(),
+      join: z
+        .array(z.object({ type: z.string(), path: z.string(), on: z.string(), match: z.string() }).strict())
+        .optional(),
+    })
+    .strict()
+    .optional(),
 });
 export const PhaseSchema = z.object({ name: z.string(), chairs: z.array(ChairSchema) });
 /** Lifecycle status, shared by domain types and standards (#203). */

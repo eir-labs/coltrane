@@ -132,6 +132,31 @@ export interface OutputRecord {
    * Absent when the record consumed nothing from another gig. Not folded into `content_sha`.
    */
   input_resolutions?: readonly InputResolution[] | undefined;
+  /**
+   * FAN-OUT — set when this record was sealed by one INSTANCE of a fanned-out chair. Names the
+   * template role, the key and value that picked this instance, and, for every input the engine
+   * narrowed, the sha of the exact slice the chair was handed and the whole record it was cut from.
+   * `input_refs`/`input_shas` still name the whole records; this says which part of them was read.
+   * Engine-stamped; no door forwards a caller's value. Not folded into `content_sha`.
+   */
+  shard?: ShardStamp | undefined;
+}
+
+/** See OutputRecord.shard. */
+export interface ShardStamp {
+  /** The template chair's role; the instance's role is `<of>#<value>`. */
+  of: string;
+  key: string;
+  value: string;
+  slices: ReadonlyArray<{
+    type: string;
+    /** The sealed record the slice was cut from, or "gig_input" when the set arrived in the payload. */
+    source: string;
+    content_sha?: string | undefined;
+    path: string;
+    count: number;
+    slice_sha: string;
+  }>;
 }
 
 /** One engine-resolved cross-gig input. See OutputRecord.input_resolutions. */
@@ -177,6 +202,8 @@ export interface OutputWrite {
   reused_from?: { output_id: string; gig_id: string; cache_key: string } | undefined;
   /** See OutputRecord.input_resolutions. Supplied by the RUNTIME only; no MCP door forwards it. */
   input_resolutions?: readonly InputResolution[] | undefined;
+  /** See OutputRecord.shard. Supplied by the RUNTIME only; no MCP door forwards it. */
+  shard?: ShardStamp | undefined;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
@@ -847,6 +874,7 @@ export function createOutputStore(registry: Registry, options?: OutputStoreOptio
         skill_provenance: o.skill_provenance,
         reused_from: o.reused_from,
         ...(o.input_resolutions && o.input_resolutions.length > 0 ? { input_resolutions: o.input_resolutions } : {}),
+        ...(o.shard ? { shard: o.shard } : {}),
       };
       outputs.set(rec.id, rec);
       if (outputsDir) {

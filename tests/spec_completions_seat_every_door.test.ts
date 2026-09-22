@@ -39,18 +39,44 @@ function writeJson(dir: string, name: string, body: unknown): void {
   writeFileSync(join(dir, name), JSON.stringify(body, null, 2));
 }
 
-interface Sent { url: string; auth: string; body: { model: string; messages: { content: string }[] } }
+interface Sent {
+  url: string; auth: string;
+  body: { model: string; messages: { role?: string; content: string }[]; tools?: { function: { name: string } }[] };
+}
 
-/** A chat-completions transport. `answer` sees the parsed request and returns the reply body. */
+/**
+ * A chat-completions transport. `answer` sees the parsed request and returns the reply body.
+ *
+ * AMENDED 2026-09-22 (tests/completions_seal.test.ts): a completions seat now SEALS through
+ * `output_write`, never its final text. So the answer these laws script — a JSON object in the message
+ * — is delivered as what a real model does on this port: an `output_write` call carrying that object
+ * as its data. The seat then closes its turn after the tool result; that CLOSE round is answered here
+ * with zero usage and recorded in `closes`, so `sent` still means "the requests that sealed" and every
+ * law's arithmetic (request counts, tier routing, settled cost) is unchanged in meaning.
+ */
 function transport(answer: (body: Sent["body"], n: number) => unknown) {
   const sent: Sent[] = [];
+  const closes: Sent[] = [];
+  let lastModel = "";
   const fn = vi.fn(async (url: unknown, init?: { body?: unknown; headers?: Record<string, string> }) => {
     const body = JSON.parse(String(init?.body)) as Sent["body"];
-    sent.push({ url: String(url), auth: String(init?.headers?.["authorization"] ?? ""), body });
-    const reply = answer(body, sent.length - 1);
-    return { ok: true, status: 200, json: async () => reply, text: async () => JSON.stringify(reply) };
+    const entry = { url: String(url), auth: String(init?.headers?.["authorization"] ?? ""), body };
+    const respond = (r: unknown) => ({ ok: true, status: 200, json: async () => r, text: async () => JSON.stringify(r) });
+    if (body.messages.at(-1)?.role === "tool") {
+      closes.push(entry);
+      return respond({ choices: [{ message: { role: "assistant", content: "sealed" }, finish_reason: "stop" }], model: lastModel, usage: { prompt_tokens: 0, completion_tokens: 0 } });
+    }
+    sent.push(entry);
+    let r = answer(body, sent.length - 1) as { choices: { message: { content: string } }[]; model: string };
+    lastModel = r.model;
+    const writeTool = body.tools?.map((t) => t.function.name).find((n) => n.endsWith("output_write"));
+    if (writeTool) {
+      const data = JSON.parse(r.choices[0]!.message.content) as unknown;
+      r = { ...r, choices: [{ message: { role: "assistant", content: null, tool_calls: [{ id: `w${sent.length}`, type: "function", function: { name: writeTool, arguments: JSON.stringify({ data }) } }] }, finish_reason: "tool_calls" }] } as never;
+    }
+    return respond(r);
   });
-  return { fn, sent };
+  return { fn, sent, closes };
 }
 
 const reply = (obj: unknown, model: string, usage: Record<string, unknown>) => ({
@@ -118,7 +144,7 @@ describe("a completions seat at every door", () => {
   });
 
   it("LAW 1 — `gig_dispatch` runs a chair through the completions port when the deployment configures one", async () => {
-    const { fn, sent } = transport(() => reply({ claim: "c", source: "s" }, "served-flash", { prompt_tokens: 10, completion_tokens: 5 }));
+    const { fn, sent, closes } = transport(() => reply({ claim: "c", source: "s" }, "served-flash", { prompt_tokens: 10, completion_tokens: 5 }));
     vi.stubGlobal("fetch", fn);
     env({ COLTRANE_COMPLETIONS_URL: URL_BASE, COLTRANE_COMPLETIONS_KEY: "k-test", COLTRANE_TIER_STANDARD: "model-std" });
     const deps = bootstrapServerDeps(root);
@@ -129,6 +155,7 @@ describe("a completions seat at every door", () => {
     expect(sent[0]!.url).toBe(`${URL_BASE}/chat/completions`);
     expect(sent[0]!.auth).toBe("Bearer k-test");
     expect(sent[0]!.body.model).toBe("model-std");
+    expect(closes.length, "the seat seals by output_write, then closes its turn — one close round").toBe(1);
   });
 
   it("LAW 2 (control) — with no completions URL, the door keeps the Claude invoker and calls no endpoint", async () => {

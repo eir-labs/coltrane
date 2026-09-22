@@ -50,8 +50,13 @@ const researcher: Agent = {
 /** The same chair, reaching for a host builtin. */
 const shellUser: Agent = { ...researcher, slug: "shell-user", allowed_tools: ["Bash", "mcp__coltrane__output_query"] };
 
+// AMENDED 2026-09-22 (tests/completions_seal.test.ts K7): a granted tool the source does not LIST is now
+// refused before any model call, where it used to be silently not offered. `researcher` grants
+// output_write, so the source these laws hand it must list output_write — the laws' own subjects are
+// unchanged; the fixture no longer relies on a grant quietly vanishing.
 const TOOLS: McpToolDef[] = [
   { name: "mcp__coltrane__output_query", description: "read sealed outputs", inputSchema: { type: "object", properties: { gig_id: { type: "string" } }, required: ["gig_id"] } },
+  { name: "mcp__coltrane__output_write", description: "seal an output", inputSchema: { type: "object", properties: { data: { type: "object" } } } },
 ];
 
 function ctxFor(agent: Agent): AgentInvocationContext {
@@ -274,7 +279,8 @@ describe("LAW 12 — an encoded tool name is LEGAL, not merely lossless", () => 
     const huge: McpToolDef = { name: longName, inputSchema: { type: "object", properties: {} } };
     const wire = C.encodeToolName(longName);
     const { fn } = fakeCompletions([callsTool(wire, {}), saysJson({ claim: "c", source: "s" })]);
-    const { source, called } = recordingTools([huge], { [longName]: { ok: true } });
+    // AMENDED 2026-09-22: the source lists every tool the chair is granted (see TOOLS above).
+    const { source, called } = recordingTools([huge, ...TOOLS], { [longName]: { ok: true } });
 
     // AMENDED 2026-09-16: the chair is GRANTED the long-named tool. This law predates grant filtering
     // and called an ungranted tool; once grants bound the chair, the only way to keep it green without

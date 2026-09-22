@@ -29,7 +29,13 @@ cd "$(dirname "$0")/.."
 # stopped being true at Node 24), and two pure flag-string laws replaced it in this band. The nine
 # laws that need a real request moved to tests/security — a band may reach out, the root suite may
 # not — so they are counted there, by file, not here.
-EXPECTED_LAWS="${EXPECTED_LAWS:-4000}"   # includes 22 todo
+EXPECTED_LAWS="${EXPECTED_LAWS:-4011}"   # includes 22 todo
+#   +11 completions_seal (new file) — a completions seat seals through output_write, in-band, over an
+#       in-process engine source pinned to validate. Cutting that pin reds K1 with "expected 2 to be 1":
+#       the double seal. The handoff's bridge, dispatchTool(toolBaseName(name)), would have refused
+#       every namespaced call as unknown (toolBaseName strips a scope suffix, not the server prefix);
+#       the laws caught it and toolSlugOf now does that job. One cut stayed green on first write (the
+#       repair turn dropped from the per-model spend) and K3 now pins the attribution too.
 #   +14 fan_out (new file) — a chair seated once per item of a sealed set, each instance handed only
 #       its slice (and only the join items that match it), each seal naming the slice's sha. 21 wires
 #       cut; six first cuts broke the build and the runner said so instead of reporting green.
@@ -43,7 +49,7 @@ EXPECTED_LAWS="${EXPECTED_LAWS:-4000}"   # includes 22 todo
 #       with the handler, the description does not. Its first draft could not fail — it forgave any
 #       token no tool anywhere declared, which is exactly what a renamed argument leaves behind.
 #       Sabotage said so (`current` -> `slug_current` stayed green); the exemption is gone.
-EXPECTED_FILES="${EXPECTED_FILES:-416}"   # + tests/sealed_inputs.test.ts, tests/fan_out.test.ts
+EXPECTED_FILES="${EXPECTED_FILES:-417}"   # + tests/sealed_inputs.test.ts, tests/fan_out.test.ts, tests/completions_seal.test.ts
 
 # THE OTHER BANDS. `vitest run` is ROOT-CONFIG ONLY — this repo's own workflow comments
 # record that four configs went unexecuted once for exactly that reason. So pinning only the

@@ -84,11 +84,14 @@ export async function runChatTerminal(argv: readonly string[]): Promise<number> 
   const { mcpServerOf, toolBaseName, ENGINE_MCP_SERVER } = await import("./tool_providers.js");
 
   const say = (s: string): void => { process.stdout.write(`${s}\n`); };
-  const slug = flag("chair") ?? process.env["COLTRANE_CHAIR"];
+  const root = process.env["COLTRANE_GENOME"] ?? process.cwd();
+  const { loadInstitutions } = await import("./institution_loader.js");
+  const resolved = resolveBusChair(loadInstitutions(root).institutions as never, flag("chair") ?? process.env["COLTRANE_CHAIR"]);
+  if ("error" in resolved) { say(resolved.error); return 2; }
+  const slug = resolved.slug;
   const url = process.env["COLTRANE_COMPLETIONS_URL"];
-  if (!slug) { say("coltrane chat needs a chair: --chair <agent slug> or COLTRANE_CHAIR."); return 2; }
   if (!url) { say("coltrane chat needs a model: set COLTRANE_COMPLETIONS_URL (and _KEY, COLTRANE_TIER_*)."); return 2; }
-  const deps = bootstrapServerDeps(process.env["COLTRANE_GENOME"] ?? process.cwd());
+  const deps = bootstrapServerDeps(root);
   const agent = deps.agents?.get(slug);
   if (!agent) { say(`no agent "${slug}" in this genome.`); return 2; }
   const tier = String(agent.model_tier ?? "standard").toUpperCase();
@@ -118,4 +121,38 @@ export async function runChatTerminal(argv: readonly string[]): Promise<number> 
   }
   clearInterval(timer);
   return 0;
+}
+
+/**
+ * Which chair bare `coltrane` talks to: an explicit `--chair` / COLTRANE_CHAIR; else the ONE chair with
+ * role "conductor" in the genome's institutions that has an agent seated. None seated, or more than
+ * one, refuses and says how to fix it — the engine never guesses which chair you meant.
+ */
+export function resolveBusChair(
+  institutions: ReadonlyMap<string, { slug: string; document: { chairs?: ReadonlyArray<{ id: string; role: string }>; assignments?: ReadonlyArray<{ chair_id: string; agent_slug?: string | undefined }> } }>,
+  explicit: string | undefined,
+): { slug: string } | { error: string } {
+  if (explicit) return { slug: explicit };
+  const seated: Array<{ institution: string; agent: string }> = [];
+  for (const inst of institutions.values()) {
+    for (const chair of inst.document.chairs ?? []) {
+      if (chair.role !== "conductor") continue;
+      for (const a of inst.document.assignments ?? []) {
+        if (a.chair_id === chair.id && a.agent_slug) seated.push({ institution: inst.slug, agent: a.agent_slug });
+      }
+    }
+  }
+  if (seated.length === 1) return { slug: seated[0]!.agent };
+  if (seated.length === 0) {
+    return {
+      error:
+        `no conductor is seated in this genome's institutions. Add a chair with role "conductor" to ` +
+        `institutions/<name>.json and seat an agent in it (define the agent with agent_define), or name ` +
+        `the chair for this session: coltrane chat --chair <agent>.`,
+    };
+  }
+  return {
+    error: `more than one conductor is seated (${seated.map((s) => `${s.agent} in ${s.institution}`).join(", ")}); ` +
+      `name the one you mean: coltrane chat --chair <agent>.`,
+  };
 }

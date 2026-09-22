@@ -29,7 +29,8 @@ cd "$(dirname "$0")/.."
 # stopped being true at Node 24), and two pure flag-string laws replaced it in this band. The nine
 # laws that need a real request moved to tests/security — a band may reach out, the root suite may
 # not — so they are counted there, by file, not here.
-EXPECTED_LAWS="${EXPECTED_LAWS:-4050}"   # includes 22 todo
+EXPECTED_LAWS="${EXPECTED_LAWS:-4051}"   # includes 22 todo
+#   +1  completions_seal K11 — an identical accepted write seals once (eir-drafting 3a37d808 facts-5 sealed one payload twice, same content_sha, 5 ms apart); distinct payloads still seal separately.
 #   +14 bus (5), bus_chair (5), bus_terminal (4) — wiki spec.coltrane-bus steps 1-3: an append-only
 #       JSONL bus with per-member cursors (a tag owes a reply, untagged is passive signal), a resident
 #       chair that answers only what it owes, and bare `coltrane` in a terminal opening a chat with it.

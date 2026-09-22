@@ -29,7 +29,11 @@ cd "$(dirname "$0")/.."
 # stopped being true at Node 24), and two pure flag-string laws replaced it in this band. The nine
 # laws that need a real request moved to tests/security — a band may reach out, the root suite may
 # not — so they are counted there, by file, not here.
-EXPECTED_LAWS="${EXPECTED_LAWS:-4025}"   # includes 22 todo
+EXPECTED_LAWS="${EXPECTED_LAWS:-4034}"   # includes 22 todo
+#   +9  amend_ladder (new file) — a failed re-verify read against the verdict before it: different
+#       findings seat the maker one rung up (cold), the same findings stop the loop (amend_stalled).
+#       A first draft designed for "unreadable findings"; the core Verdict makes that case impossible,
+#       its law could not fail, and it went. 11 wires cut, all red.
 #   +4  spec_reverify_resume_prompt (existing file, rewritten by contract-reverify-carries-amendment-v1,
 #       drafted red on work/release-compile-cache 59704e5 and built here) + F1 drafted with the build. A
 #       resumed re-verify carries the inputs its round-one verdict never saw (by content_sha: comparing by
@@ -57,7 +61,7 @@ EXPECTED_LAWS="${EXPECTED_LAWS:-4025}"   # includes 22 todo
 #       with the handler, the description does not. Its first draft could not fail — it forgave any
 #       token no tool anywhere declared, which is exactly what a renamed argument leaves behind.
 #       Sabotage said so (`current` -> `slug_current` stayed green); the exemption is gone.
-EXPECTED_FILES="${EXPECTED_FILES:-418}"   # + tests/sealed_inputs.test.ts, tests/fan_out.test.ts, tests/completions_seal.test.ts, tests/tier_ladder.test.ts
+EXPECTED_FILES="${EXPECTED_FILES:-419}"   # + tests/sealed_inputs.test.ts, tests/fan_out.test.ts, tests/completions_seal.test.ts, tests/tier_ladder.test.ts, tests/amend_ladder.test.ts
 
 # THE OTHER BANDS. `vitest run` is ROOT-CONFIG ONLY — this repo's own workflow comments
 # record that four configs went unexecuted once for exactly that reason. So pinning only the

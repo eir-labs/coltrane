@@ -29,18 +29,18 @@ cd "$(dirname "$0")/.."
 # stopped being true at Node 24), and two pure flag-string laws replaced it in this band. The nine
 # laws that need a real request moved to tests/security — a band may reach out, the root suite may
 # not — so they are counted there, by file, not here.
-EXPECTED_LAWS="${EXPECTED_LAWS:-3980}"   # includes 22 todo
-#   +7  a_red_law_names_its_plant — red-spec v5: every coverage_map entry names what the law DRIVES
-#       and the PLANT (the production edit that must turn it red). Each of its seven laws was planted
-#       against before sealing: the v4 type turned all six type laws red; `plant` dropped from
-#       required, the kind enum dropped, the structural allOf deleted and the drafter's PLANT sentence
-#       deleted each turned only its own law red.
+EXPECTED_LAWS="${EXPECTED_LAWS:-3986}"   # includes 22 todo
+#   +13 sealed_inputs (new file) — spec.coltrane-sealed-inputs: a dispatch names sealed outputs
+#       ($output / $query) and runGig resolves, re-hashes, type-checks and delivers them, stamping an
+#       engine-only resolution that trace() may cross. Sabotage ran over 18 wires; four stayed green on
+#       first write (markers left in gig_input, the door's type check — L2 passed on a LATER chair's
+#       refusal — an undeclared key silently dropped, a mixed array) and each got a law that reds.
 #   +1  mcp_tools_describe law 7 (#535) — a description that backticks an argument names one the
 #       verb's own input_schema declares. The prose sits beside a GENERATED schema: the schema moves
 #       with the handler, the description does not. Its first draft could not fail — it forgave any
 #       token no tool anywhere declared, which is exactly what a renamed argument leaves behind.
 #       Sabotage said so (`current` -> `slug_current` stayed green); the exemption is gone.
-EXPECTED_FILES="${EXPECTED_FILES:-415}"
+EXPECTED_FILES="${EXPECTED_FILES:-415}"   # + tests/sealed_inputs.test.ts
 
 # THE OTHER BANDS. `vitest run` is ROOT-CONFIG ONLY — this repo's own workflow comments
 # record that four configs went unexecuted once for exactly that reason. So pinning only the

@@ -197,6 +197,11 @@ function mapStop(finish: string | undefined): ModelReply["stop"] {
  * the reply into a neutral `ModelReply`; a non-2xx response THROWS with its status, so the loop can
  * type it as `transport_failed` rather than the port swallowing it into a shrug.
  */
+/** The engine's effort levels (EffortSchema) → the provider's `reasoning.effort` scale. */
+function wireEffort(effort: string): "low" | "medium" | "high" {
+  return effort === "low" ? "low" : effort === "medium" ? "medium" : "high";
+}
+
 export function makeChatCompletionsPort(opts: ChatCompletionsPortOptions): ModelPort {
   const doFetch = opts.fetchFn ?? fetch;
   // Strip trailing '/' in LINEAR time (CodeQL js/polynomial-redos, PR #534). The old `/\/+$/` regex
@@ -243,6 +248,10 @@ export function makeChatCompletionsPort(opts: ChatCompletionsPortOptions): Model
       messages: req.messages.map(toWireMessage),
       ...(req.tools.length > 0 ? { tools: req.tools.map(toFunctionDef) } : {}),
       ...(req.max_tokens !== undefined ? { max_tokens: req.max_tokens } : {}),
+      // The seat's reasoning effort, on the wire's low/medium/high scale. A reasoning model spends its
+      // reasoning INSIDE max_tokens (measured 22 Sep): without a bound it can spend all of it and return
+      // null content. Levels above `high` saturate there, never an unknown value.
+      ...(req.effort !== undefined ? { reasoning: { effort: wireEffort(req.effort) } } : {}),
     };
 
     const res = await doFetch(url, {

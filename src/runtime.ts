@@ -208,6 +208,13 @@ export interface AgentInvocationContext {
   // conversation to carry that identity — trimming it would leave the seat unidentifiable. Absent on a
   // maker amend, whose trimmed continuation is correct because the failing verdict is its one new input.
   resume_keep_prompt?: boolean | undefined;
+  /**
+   * contract-reverify-carries-amendment-v1 (O3) — on a RE-VERIFY: the inputs this seat has not seen
+   * (see `amendedSince`). A resumed door renders them, because its resumed conversation holds only
+   * round one's. Absent on every other invocation. `carried_all` says the whole input set was sent
+   * for want of a round-one record (F1).
+   */
+  amended_inputs?: { records: readonly OutputRecord[]; carried_all: boolean } | undefined;
   // contract-seat-primer-v1 (O1/I2) — set on a PRIME chair. The invoker parses the seat's forwarded
   // `Read` events from the run's stdout and emits them (a `seat_reads` stream event) so the runtime
   // can seal the seat-primer record from exactly the files this seat read. Absent = a non-prime chair.
@@ -1262,6 +1269,24 @@ const CORE_TYPE_SET: ReadonlySet<string> = new Set(CORE_TYPES);
 /** EXPORTED because the chart layer asks the same question at the movement boundary — which of a
  *  source movement's sealed records does an edge of type T carry — and two layers answering "does
  *  this record satisfy this declared type" differently is the #263 defect wearing a new hat. */
+/**
+ * contract-reverify-carries-amendment-v1 — which of a re-verify's CURRENT inputs the seat has not seen.
+ *
+ * Identity is the content_sha, never the record id (F3): a maker that re-seals under a familiar id is
+ * still carried. Engine-stamped only — the seat's own round-one record's `input_shas`, compared with the
+ * inputs' `content_sha` — so no model output decides what changed. With NO round-one record (the verdict
+ * never sealed, or the store holds none) every input is carried and `carried_all` says so (F1): an
+ * absent prior round must never read as "nothing changed" and carry nothing.
+ */
+export function amendedSince(
+  current: readonly OutputRecord[],
+  roundOne: readonly OutputRecord[] | undefined,
+): { records: OutputRecord[]; carried_all: boolean } {
+  if (!roundOne || roundOne.length === 0) return { records: [...current], carried_all: true };
+  const seen = new Set(roundOne.flatMap((r) => r.input_shas));
+  return { records: current.filter((i) => !seen.has(i.content_sha)), carried_all: false };
+}
+
 export function outputSatisfiesType(output: OutputRecord, declared: string): boolean {
   if (output.domain_type === declared) return true;
   if (CORE_TYPE_SET.has(declared) && output.core_type === declared) return true;
@@ -2573,6 +2598,10 @@ export async function runGig(
           // carry the verify seat's identity — the trimmed continuation would strip it. buildInvokerArgs
           // still emits `--resume` (it keys on `resume`, not the prompt), so O1's arg law holds.
           const vprep = prepareChair(vch, phase.name, [], { resume: true, keep_prompt: true, round: round + 1 });
+          // contract-reverify-carries-amendment-v1 (O3) — what the verify seat has not seen: its current
+          // inputs, less those its round-one verdict was sealed over. The verdict being re-judged is still
+          // in producedByRole here (it is replaced only after the re-verify seals).
+          vprep.amended_inputs = amendedSince(vprep.inputs, producedByRole.get(vch.role));
           const vrecs = await invokeAndWriteChair(vprep);
           dropFromProduced(producedByRole.get(vch.role) ?? []);
           producedByRole.set(vch.role, vrecs);
@@ -2628,6 +2657,8 @@ export async function runGig(
     /** contract-resumed-gig-session-v1 (O1) — a re-VERIFY re-invocation: resumes the session (like
      *  `resume`) but the invoker keeps the FULL prompt, not the maker's trimmed amend continuation. */
     resume_keep_prompt?: boolean;
+    /** contract-reverify-carries-amendment-v1 — set on a re-verify prep; see ctx.amended_inputs. */
+    amended_inputs?: { records: readonly OutputRecord[]; carried_all: boolean };
     /** FAN-OUT — set on an instance of a fanned-out chair: the payload it sees (its slice in place of
      *  the whole set) and the stamp its seal carries. Absent on every other chair. */
     gig_input?: Record<string, unknown>;
@@ -3423,6 +3454,7 @@ export async function runGig(
           // contract-resumed-gig-session-v1 (O1) — a re-verify resumes its session but keeps the full
           // prompt; thread it so buildPrompt skips the maker's trimmed continuation for this seat.
           ...(p.resume_keep_prompt ? { resume_keep_prompt: true } : {}),
+          ...(p.amended_inputs ? { amended_inputs: p.amended_inputs } : {}),
           // contract-seat-primer-v1 (O1/I2) — a PRIME chair: the invoker parses its Read events and
           // emits them so the runtime seals the seat-primer from exactly what this seat read.
           ...(chair.prime ? { prime: chair.prime } : {}),

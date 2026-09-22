@@ -29,7 +29,11 @@ cd "$(dirname "$0")/.."
 # stopped being true at Node 24), and two pure flag-string laws replaced it in this band. The nine
 # laws that need a real request moved to tests/security — a band may reach out, the root suite may
 # not — so they are counted there, by file, not here.
-EXPECTED_LAWS="${EXPECTED_LAWS:-4021}"   # includes 22 todo
+EXPECTED_LAWS="${EXPECTED_LAWS:-4025}"   # includes 22 todo
+#   +4  spec_reverify_resume_prompt (existing file, rewritten by contract-reverify-carries-amendment-v1,
+#       drafted red on work/release-compile-cache 59704e5 and built here) + F1 drafted with the build. A
+#       resumed re-verify carries the inputs its round-one verdict never saw (by content_sha: comparing by
+#       id reds I1), and the working-tree instruction reaches only a seat that can read the tree.
 #   +10 tier_ladder (new file) — COLTRANE_TIER_LADDER: a completions chair that cannot seal is seated
 #       cold one rung up; only seal failures climb; every rung settles; the record names the model AND
 #       tier that sealed (a failed cheap rung out-produced the sealer in the fixture, so the whole-chair

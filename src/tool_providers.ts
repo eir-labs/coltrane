@@ -51,6 +51,18 @@ const HOST_BUILTINS: ReadonlySet<string> = new Set([
   // by what it can load, not by whether it can run.
 ]);
 
+// The tools that can READ THE WORKING TREE. A verify seat holding one of these can re-derive its verdict
+// from the tree as it now stands; a seat holding none can only rule on the records it is handed.
+// Unexported, like HOST_BUILTINS: callers ask `grantsTreeReader`, never re-inline the set
+// (contract-reverify-carries-amendment-v1 O5). Scoped grants count by their base name — a seat granted
+// `Bash(git diff:*)` can read the tree.
+const TREE_READERS: ReadonlySet<string> = new Set(["Read", "Grep", "Glob", "LS", "Bash", "LSP"]);
+
+/** Does this grant set hold a tool that can read the working tree? */
+export function grantsTreeReader(allowed: readonly string[] | undefined): boolean {
+  return (allowed ?? []).some((g) => TREE_READERS.has(toolBaseName(g)));
+}
+
 /** The engine's own MCP server slug — the key the repo's .mcp.json ships it under, and the prefix
  *  its tools are advertised behind (mcp__coltrane__<tool>). In-house engine tools are bridged through
  *  this server, so an in-house grant resolves to it (#204). */

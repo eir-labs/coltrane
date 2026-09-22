@@ -247,6 +247,10 @@ export type GigProgressEvent =
   | { type: "phase_start"; phase: string; roles: string[] }
   /** A fan-out chair's join left items no instance received. Reported, never silently dropped. */
   | { type: "fan_out_unmatched"; phase: string; role: string; set_type: string; path: string; on: string; values: unknown[] }
+  /** The amend ladder seated a maker one rung up: its last re-verify failed on different findings. */
+  | { type: "amend_escalated"; phase: string; role: string; round: number; from_tier: string; to_tier: string }
+  /** The amend ladder stopped the loop: the re-verify failed on the same findings as the verdict before. */
+  | { type: "amend_stalled"; phase: string; role: string; round: number; repeated: Array<{ method: string; target_ref: string }> }
   | { type: "chair_start"; phase: string; role: string; producer: string }
   | {
       type: "chair_complete"; phase: string; role: string; producer: string;
@@ -377,6 +381,13 @@ export type ChairSelector = (
 ) => readonly Chair[] | Promise<readonly Chair[]>;
 
 export interface RunDeps {
+  /**
+   * THE AMEND LADDER — COLTRANE_TIER_LADDER's rungs (cheapest first, already narrowed to rungs this
+   * deployment can seat). When set, the examine⇄amend loop reads each failed re-verify against the one
+   * before it: different findings seat the maker one rung up; the same findings stop the loop
+   * (`amend_stalled`). Absent → the loop is exactly what it was. See tests/amend_ladder.test.ts.
+   */
+  tier_ladder?: readonly string[] | undefined;
   outputs: OutputStore;
   ledger: Ledger;
   invoke: AgentInvoker;
@@ -2545,6 +2556,16 @@ export async function runGig(
           (m) => !makerSet.some((other) => other.role !== m.role && transitiveDepsOf(other.role).has(m.role)),
         );
 
+        // THE AMEND LADDER (deps.tier_ladder). Findings are the failing verdict's checks as
+        // (method, target_ref) pairs; each failed re-verify is read against the verdict before it.
+        const findingsOf = (v: OutputRecord): Array<{ method: string; target_ref: string }> =>
+          ((v.data as { checks?: unknown }).checks as Array<Record<string, unknown>> | undefined ?? [])
+            .map((c) => ({ method: String(c["method"] ?? ""), target_ref: String(c["target_ref"] ?? "") }));
+        const findingsKey = (v: OutputRecord): string =>
+          findingsOf(v).map((f) => JSON.stringify([f.method, f.target_ref])).sort().join("\n");
+        const ladder = deps.tier_ladder;
+        const makerTier = new Map<string, string>(); // maker role → the rung it is seated on now
+
         for (let round = 1; round <= examineRounds && verdict; round++) {
           checkpoint();
           emit({ type: "phase_start", phase: `${phase.name}:amend#${round}`, roles: [...makers.map((m) => m.role), vch.role] });
@@ -2558,7 +2579,8 @@ export async function runGig(
             if (insts) {
               for (const inst of insts) {
                 const prior = producedByRole.get(inst.chair.role) ?? [];
-                const iprep = prepareChair(inst.chair, phaseNameOf(mk.role), [...prior, feedback], { resume: true, round: round + 1, instance: inst });
+                const t = makerTier.get(mk.role);
+                const iprep = prepareChair(inst.chair, phaseNameOf(mk.role), [...prior, feedback], { resume: t === undefined, round: round + 1, instance: inst, ...(t ? { tier: t } : {}) });
                 const irecs = await invokeAndWriteChair(iprep);
                 dropFromProduced(prior);
                 producedByRole.set(inst.chair.role, irecs);
@@ -2581,7 +2603,10 @@ export async function runGig(
             // O1 — the initial invocation is round 1 (the default), so the amend loop's iteration
             // `round` (1-based) stamps round `round + 1`: each re-run of a seat gets a distinct,
             // monotonic round and no two chair_spend rows for one role collide.
-            const prep = prepareChair(mk, phaseNameOf(mk.role), [...priorWork, feedback], { resume: true, round: round + 1 });
+            const mt = makerTier.get(mk.role);
+            // A maker seated on a NEW rung is a different player: it starts cold (no resume of the
+            // cheaper model's conversation), carrying its prior work and the verdict as inputs.
+            const prep = prepareChair(mk, phaseNameOf(mk.role), [...priorWork, feedback], { resume: mt === undefined, round: round + 1, ...(mt ? { tier: mt } : {}) });
             const recs = await invokeAndWriteChair(prep);
             dropFromProduced(producedByRole.get(mk.role) ?? []);
             producedByRole.set(mk.role, recs);
@@ -2609,7 +2634,25 @@ export async function runGig(
           noteCheckpointRole(vch.role, phase.name, vrecs);
           if (budget && hasCeiling) budget.spent_usd = usage.total_cost_usd;
           saveCheckpoint();
+          const previous = feedback;
           verdict = failingVerdict(vch.role); // undefined once it passes → loop ends
+          if (verdict && ladder && ladder.length > 0) {
+            if (findingsKey(verdict) === findingsKey(previous)) {
+              // The objection did not move. Stop: a better model meeting it again buys nothing.
+              emit({ type: "amend_stalled", phase: phase.name, role: vch.role, round, repeated: findingsOf(verdict) });
+              break;
+            }
+            // New findings, still failing: seat each maker one rung up (from its current rung), if
+            // there is one. At the top it stays where it is.
+            for (const mk of makers) {
+              const from = makerTier.get(mk.role) ?? standard.agents.find((a) => a.slug === mk.agent_slug)?.model_tier ?? "";
+              const at = ladder.indexOf(from);
+              const to = at >= 0 ? ladder[at + 1] : undefined;
+              if (to === undefined) continue;
+              makerTier.set(mk.role, to);
+              emit({ type: "amend_escalated", phase: phaseNameOf(mk.role), role: mk.role, round, from_tier: from, to_tier: to });
+            }
+          }
         }
       }
     }
@@ -2831,7 +2874,7 @@ export async function runGig(
     }
   }
 
-  function prepareChair(chair: Chair, phaseName: string, extraInputs: readonly OutputRecord[] = [], opts: { resume?: boolean; keep_prompt?: boolean; round?: number; instance?: FanOutInstance } = {}): PreparedChair {
+  function prepareChair(chair: Chair, phaseName: string, extraInputs: readonly OutputRecord[] = [], opts: { resume?: boolean; keep_prompt?: boolean; round?: number; instance?: FanOutInstance; tier?: string } = {}): PreparedChair {
     // FAN-OUT — an instance receives the narrowed VIEW of each record the split cut, in the record's
     // place (same id and content_sha: provenance names the whole record), and its payload slice.
     const narrow = (inputs: OutputRecord[]): void => {
@@ -2902,8 +2945,10 @@ export async function runGig(
       };
     }
 
-    const agent = standard.agents.find((a) => a.slug === chair.agent_slug);
-    if (!agent) throw new RuntimeError(`phase "${phaseName}" chair "${chair.role}" references unknown agent "${chair.agent_slug}"`);
+    const seated = standard.agents.find((a) => a.slug === chair.agent_slug);
+    if (!seated) throw new RuntimeError(`phase "${phaseName}" chair "${chair.role}" references unknown agent "${chair.agent_slug}"`);
+    // THE AMEND LADDER — a maker the ladder moved up is the same agent seated on a higher tier.
+    const agent: Agent = opts.tier !== undefined ? { ...seated, model_tier: opts.tier as Agent["model_tier"] } : seated;
     const primitive = agent.primitives[0];
     if (!primitive) throw new RuntimeError(`agent "${agent.slug}" declares no primitive`);
     const domain_type = agent.output_types[0];

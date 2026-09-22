@@ -226,3 +226,20 @@ export function withTierLadder(
     }
   };
 }
+
+/**
+ * The amend ladder a run gets from this deployment: COLTRANE_TIER_LADDER's rungs, narrowed on the
+ * completions port to rungs a model is mapped for (an unmapped rung would be climbed into and refused
+ * `unresolved_tier`). Absent variable → undefined → no ladder. Read by the ONE RunDeps assembler, so
+ * every door gets the same ladder.
+ */
+export function amendLadderFromEnv(env: EnvLike): string[] | undefined {
+  const raw = env["COLTRANE_TIER_LADDER"];
+  if (!raw) return undefined;
+  const rungs = parseTierLadder(raw);
+  if (!env["COLTRANE_COMPLETIONS_URL"]) return rungs;
+  const mapped: Record<string, string | undefined> = {
+    economy: env["COLTRANE_TIER_ECONOMY"], standard: env["COLTRANE_TIER_STANDARD"], premium: env["COLTRANE_TIER_PREMIUM"],
+  };
+  return rungs.filter((t) => !!mapped[t]);
+}

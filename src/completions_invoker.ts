@@ -28,7 +28,7 @@
 import type { AgentInvocationContext, AgentInvoker } from "./runtime.js";
 import type { Registry } from "./registry.js";
 import type { ModelTier } from "./pricing.js";
-import { ENGINE_MCP_SERVER, isHostBuiltin, mcpServerOf, toolBaseName } from "./tool_providers.js";
+import { ENGINE_MCP_SERVER, isHostBuiltin, mcpServerOf, toolBaseName, toolSlugOf } from "./tool_providers.js";
 import { venueEffectiveTools } from "./chart.js";
 import {
   buildPrompt,
@@ -36,14 +36,17 @@ import {
   extractOptionsForChair,
   promptSchemaFor,
   sessionUuidFor,
+  MAX_SEALED_RECORDS_PER_TYPE,
+  type OutputWriteSeal,
 } from "./claude_invoker.js";
+import { CORE_TYPES } from "./core_types.js";
 import type { TranscriptStore } from "./transcript_store.js";
 // The provider-neutral loop and the chat-completions wire it runs on. The invoker no longer carries
 // a loop of its own: it hands `runTurn` a port and a tool source and reads back typed stops. The
 // tool-name encoding lives in the port now (the one place that speaks the wire) and is re-exported
 // here UNCHANGED so the existing completions-invoker laws keep their import path (Laws 4 & 12 import
 // encodeToolName/fromFunctionName/toFunctionDef from this module).
-import { runTurn, type PriceTable, type ToolSource, type TurnMessage } from "./turn_loop.js";
+import { runTurn, type PriceTable, type ToolSource, type TurnMessage, type TurnResult } from "./turn_loop.js";
 import {
   encodeToolName,
   fromFunctionName,
@@ -97,6 +100,14 @@ export interface CompletionsInvokerOptions {
    *  conversation…" note over a request that holds none. Absent = no transcript is saved or resumed
    *  (the stateless door as it was): a maker amend then falls back to the full cold prompt. */
   transcripts?: TranscriptStore | undefined;
+  /**
+   * How the seat SEALS. `"output_write"`: in-band, by an `output_write` call the tool source adjudicates
+   * against the full contract (validate mode — the runtime is the one sealer), corrected by the seat
+   * within its own run; the seat's final text is never sealed. A seat that ends without ever calling it
+   * gets ONE repair turn, then is refused `no_seal`. Requires `tools`. Absent: the legacy text seal —
+   * the final answer is parsed as JSON, once, with no correction.
+   */
+  sealVia?: "output_write" | undefined;
 }
 
 export type CompletionsRefusal =
@@ -117,7 +128,10 @@ export type CompletionsRefusal =
   // contract-tool-wire-name-collision-v1 (O2) — the offered set held two tools that encode to one wire
   // name. Surfaced as a typed refusal naming the colliding tools, never an insertion-order winner, and
   // caught before any model call.
-  | "tool_name_collision";
+  | "tool_name_collision"
+  // The output_write seal path: the seat ended — after its one repair turn, when it never knocked —
+  // with no write accepted by the boundary. Its text is not sealed in the write's place.
+  | "no_seal";
 
 export const COMPLETIONS_REFUSALS: readonly CompletionsRefusal[] = [
   "host_tool_denied",
@@ -129,7 +143,17 @@ export const COMPLETIONS_REFUSALS: readonly CompletionsRefusal[] = [
   "aborted",
   "context_limit",
   "tool_name_collision",
+  "no_seal",
 ];
+
+/** The engine's own seal verb, as the tool source lists it. */
+const OUTPUT_WRITE_TOOL = `mcp__${ENGINE_MCP_SERVER}__output_write`;
+/** The repair turn's round cap: enough to make the call it should have made, not to redo the work. */
+const SEAL_REPAIR_ROUNDS = 3;
+const isObj = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+/** One grant pattern matched against one listed name — the turn loop's own rule (exact, or `*` prefix). */
+const patternCovers = (pattern: string, name: string): boolean =>
+  pattern.endsWith("*") ? name.startsWith(pattern.slice(0, -1)) : name === pattern;
 
 const refuse = (refusal: CompletionsRefusal, message: string): Record<string, unknown> => ({
   ok: false,
@@ -182,6 +206,15 @@ export function makeCompletionsInvoker(opts: CompletionsInvokerOptions): AgentIn
       );
     }
 
+    const sealViaWrite = opts.sealVia === "output_write";
+    if (sealViaWrite && !opts.tools) {
+      return refuse(
+        "no_tool_source",
+        `agent "${ctx.agent.slug}" seals through output_write, but no tool source is wired to serve it — ` +
+          `a seat that cannot reach the write boundary cannot seal.`,
+      );
+    }
+
     // (3) The tier must resolve to a concrete model. Guessing one spends real money against a
     // model nobody chose.
     const tier = ctx.agent.model_tier as ModelTier | undefined;
@@ -208,7 +241,59 @@ export function makeCompletionsInvoker(opts: CompletionsInvokerOptions): AgentIn
     // `listed ∩ allow`, re-sent byte-identical every round, and refuses any call outside it before it
     // reaches source.
     const chairGrants = ctx.venue ? venueEffectiveTools(ctx.agent, ctx.venue) : grants;
-    const allow = chairGrants.map(mapGrant);
+    const allow = [...new Set([...chairGrants.map(mapGrant), ...(sealViaWrite ? [OUTPUT_WRITE_TOOL] : [])])];
+
+    // A grant the source does not LIST would be silently not offered — the seat would run without a
+    // hand it was promised. Refuse before any model call, naming what is missing.
+    if (opts.tools && allow.length > 0) {
+      const listed = (await opts.tools.list()).map((t) => t.name);
+      const unprovided = allow.filter((p) => !listed.some((n) => patternCovers(p, n)));
+      if (unprovided.length > 0) {
+        return refuse(
+          "no_tool_source",
+          `agent "${ctx.agent.slug}" is granted [${unprovided.join(", ")}], which the wired tool source ` +
+            `does not provide — refusing rather than running the chair without a hand it was promised.`,
+        );
+      }
+    }
+
+    // THE WRITE BOUNDARY, per invocation. Every output_write the seat makes is pinned to THIS chair —
+    // its gig, its agent, its phase, and one of the types it seals (a single-output chair may omit the
+    // type) — and recorded with the boundary's verdict. What passed is the seal; nothing else is.
+    const sealTypes = ctx.output_types?.length ? ctx.output_types : ctx.agent.output_types;
+    const coreOf = (t: string): string =>
+      (CORE_TYPES as readonly string[]).includes(t) ? t : (opts.registry?.listTypes().find((d) => d.slug === t)?.extends ?? "");
+    const writes: Array<{ domain_type: string; data: unknown; ok: boolean; error?: string }> = [];
+    const source: ToolSource | undefined = !opts.tools
+      ? undefined
+      : !sealViaWrite
+        ? (opts.tools as ToolSource)
+        : {
+            list: (opts.tools as ToolSource).list,
+            call: async (name, args) => {
+              if (toolSlugOf(name) !== "output_write") return opts.tools!.call(name, args);
+              const asked = typeof args["domain_type"] === "string" ? (args["domain_type"] as string) : "";
+              const dt = asked !== "" ? asked : sealTypes.length === 1 ? sealTypes[0]! : "";
+              if (!sealTypes.includes(dt)) {
+                const error = `this chair seals only [${sealTypes.join(", ")}] — "${dt}" is not one of them. Call output_write with one of those domain_types.`;
+                writes.push({ domain_type: dt, data: args["data"], ok: false, error });
+                return { ok: false, error };
+              }
+              const r = await opts.tools!.call(name, {
+                ...args, domain_type: dt, core_type: coreOf(dt),
+                gig_id: ctx.gig_id ?? "", agent_slug: ctx.agent.slug, phase: ctx.phase,
+              });
+              const ok = isObj(r) && r["ok"] === true;
+              writes.push({ domain_type: dt, data: args["data"], ok, ...(!ok && isObj(r) ? { error: String(r["error"] ?? "") } : {}) });
+              return r;
+            },
+          };
+    const seal: OutputWriteSeal | undefined = sealViaWrite
+      ? {
+          via: "output_write", gig_id: ctx.gig_id ?? "", agent_slug: ctx.agent.slug, phase: ctx.phase,
+          core_by_type: Object.fromEntries(sealTypes.map((t) => [t, coreOf(t)])),
+        }
+      : undefined;
 
     // THE ROUND CAP. Chair budget, then the agent's own cap, then the invoker default, then the
     // engine default — the turn-budget contract's order. `ctx.turn_budget === 0` is a deliberate hard
@@ -230,14 +315,14 @@ export function makeCompletionsInvoker(opts: CompletionsInvokerOptions): AgentIn
       // O2 / I1 — re-send the saved transcript UNCHANGED as the prefix (a provider prefix cache can
       // serve it), then EXACTLY ONE new user message: the trimmed amend prompt buildPrompt returns on a
       // resume (its one new thing is the failing verdict). Append-only over the prior round.
-      seed = [...loaded, { role: "user", content: buildPrompt(ctx, single, many) }];
+      seed = [...loaded, { role: "user", content: buildPrompt(ctx, single, many, seal) }];
     } else if (isMakerAmend) {
       // F1 — a maker amend with no saved transcript (no store wired, or nothing under this id) has no
       // conversation to resume. Seed the FULL cold prompt (buildPrompt with resume OFF: identity,
       // method, gig input) — NEVER the resume-only prompt that claims a conversation the seat does not
       // hold — and emit the SAME `resume_fallback` event the Claude invoker does, which the runtime
       // folds into chair_complete.resume_fallback. The chair does not fail for this.
-      seed = [{ role: "user", content: buildPrompt({ ...ctx, resume: false }, single, many) }];
+      seed = [{ role: "user", content: buildPrompt({ ...ctx, resume: false }, single, many, seal) }];
       ctx.onEvent?.({
         type: "resume_fallback",
         raw: {
@@ -250,12 +335,12 @@ export function makeCompletionsInvoker(opts: CompletionsInvokerOptions): AgentIn
         },
       });
     } else {
-      seed = [{ role: "user", content: buildPrompt(ctx, single, many) }];
+      seed = [{ role: "user", content: buildPrompt(ctx, single, many, seal) }];
     }
-    const result = await runTurn(seed, {
+    const turnOpts = {
       port,
       model,
-      ...(opts.tools ? { tools: opts.tools as ToolSource } : {}),
+      ...(source ? { tools: source } : {}),
       allow,
       max_rounds: maxRounds,
       timeout_ms: timeoutMs,
@@ -272,7 +357,30 @@ export function makeCompletionsInvoker(opts: CompletionsInvokerOptions): AgentIn
       ...(ctx.signal ? { signal: ctx.signal } : {}),
       ...(opts.prices ? { prices: opts.prices } : {}),
       ...(opts.maxTokens !== undefined ? { max_tokens: opts.maxTokens } : {}),
-    });
+    };
+    const turns: TurnResult[] = [await runTurn(seed, turnOpts)];
+
+    // THE CHANNEL REPAIR — once. A seat that finished its turn without ever calling output_write
+    // answered on the wrong channel; its work is still in the transcript, so one short continuation
+    // is enough to make the call. Not for a seat that knocked and was refused (it already had its
+    // correction in-band, and re-prompting it is the loop the governor rejected), and not for a typed
+    // stop (a seat out of rounds gets no more rounds here).
+    if (sealViaWrite && writes.length === 0 && turns[0]!.stop === "done") {
+      const calls = sealTypes
+        .map((t) => `  output_write({ "domain_type": "${t}", "data": <your result> })`)
+        .join("\n");
+      ctx.onEvent?.({
+        type: "seal_boundary_repair",
+        raw: { agent: ctx.agent.slug, unsealed: [...sealTypes], note: "the seat finished without calling output_write; continued ONCE to seal" },
+      });
+      const correction =
+        `STOP — your turn finished but sealed NOTHING. Not one output_write call was made for ` +
+        `[${sealTypes.join(", ")}]. Text is not sealed; it will be discarded.\n\n` +
+        `Do NOT redo the work. Seal it now by calling output_write — the only channel that seals:\n${calls}\n\n` +
+        `This is the LAST attempt.`;
+      turns.push(await runTurn([...turns[0]!.messages, { role: "user", content: correction }], { ...turnOpts, max_rounds: SEAL_REPAIR_ROUNDS }));
+    }
+    const result = turns[turns.length - 1]!;
 
     // O1 — save the seat's transcript under its (gig_id, role) session id AFTER the turn, whatever the
     // stop, so a later maker amend resumes the conversation it actually had. runTurn.messages is the
@@ -285,11 +393,15 @@ export function makeCompletionsInvoker(opts: CompletionsInvokerOptions): AgentIn
     // emitted ONLY when every round was priced; a round the transport left unpriced or unreported is
     // never folded in as $0 (#235). The per-model breakdown is keyed by the model the transport
     // NAMED as serving the round, never the configured tier.
-    const totalInput =
-      result.totals.input_tokens + result.totals.cache_read_tokens + result.totals.cache_write_tokens;
-    const totalOutput = result.totals.output_tokens;
+    // Every turn this invocation ran — the repair turn's rounds were spent too, and a round spent and
+    // not settled is the defect #235 names.
+    const allRounds = turns.flatMap((t) => t.rounds);
+    const sum = (k: "input_tokens" | "cache_read_tokens" | "cache_write_tokens" | "output_tokens" | "cost_usd"): number =>
+      turns.reduce((n, t) => n + t.totals[k], 0);
+    const totalInput = sum("input_tokens") + sum("cache_read_tokens") + sum("cache_write_tokens");
+    const totalOutput = sum("output_tokens");
     const byModel: Record<string, { inputTokens: number; outputTokens: number; costUSD: number }> = {};
-    for (const r of result.rounds) {
+    for (const r of allRounds) {
       if (r.model === undefined || r.usage === undefined) continue;
       const slot = (byModel[r.model] ??= { inputTokens: 0, outputTokens: 0, costUSD: 0 });
       slot.inputTokens +=
@@ -298,16 +410,35 @@ export function makeCompletionsInvoker(opts: CompletionsInvokerOptions): AgentIn
       slot.costUSD += r.cost_usd ?? 0;
     }
     const everyRoundPriced =
-      result.rounds.length > 0 && result.rounds.every((r) => r.cost_usd !== undefined);
+      allRounds.length > 0 && allRounds.every((r) => r.cost_usd !== undefined);
     if (totalInput > 0 || totalOutput > 0) {
       ctx.onEvent?.({
         type: "result",
         raw: {
           usage: { input_tokens: totalInput, output_tokens: totalOutput },
-          ...(everyRoundPriced ? { total_cost_usd: result.totals.cost_usd } : {}),
+          ...(everyRoundPriced ? { total_cost_usd: sum("cost_usd") } : {}),
           ...(Object.keys(byModel).length > 0 ? { modelUsage: byModel } : {}),
         },
       });
+    }
+
+    // THE SEAL, on the output_write path: every write the boundary ACCEPTED, as a list per type (a
+    // chair may seal many records of one type; the runtime seals one record per element). What passed
+    // is kept even if the turn then hit a typed stop — the boundary already adjudicated it good.
+    if (sealViaWrite) {
+      const blob: Record<string, unknown[]> = {};
+      for (const w of writes) {
+        if (!w.ok) continue;
+        const list = (blob[w.domain_type] ??= []);
+        if (list.length >= MAX_SEALED_RECORDS_PER_TYPE) {
+          throw new Error(
+            `chair sealed more than MAX_SEALED_RECORDS_PER_TYPE (${MAX_SEALED_RECORDS_PER_TYPE}) records of type ` +
+              `"${w.domain_type}" — refusing the surplus loudly rather than dropping it.`,
+          );
+        }
+        list.push(w.data);
+      }
+      if (Object.keys(blob).length > 0) return blob;
     }
 
     // A typed stop is a NAMED refusal, never a throw and never a parse of empty content. The runtime
@@ -357,6 +488,17 @@ export function makeCompletionsInvoker(opts: CompletionsInvokerOptions): AgentIn
       );
     }
 
+    if (sealViaWrite) {
+      const last = [...writes].reverse().find((w) => !w.ok);
+      return refuse(
+        "no_seal",
+        `chair "${ctx.agent.slug}" sealed nothing: ` +
+          (writes.length === 0
+            ? `it never called output_write, including after its one repair turn. Its text was not sealed.`
+            : `none of its ${writes.length} output_write call(s) passed the boundary` +
+              (last?.error ? ` — the last was refused: ${last.error}` : ".")),
+      );
+    }
     return extractJson(result.text, extractOptionsForChair(types, single));
   };
 }

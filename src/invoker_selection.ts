@@ -22,7 +22,7 @@ import type { AgentInvoker } from "./runtime.js";
 import type { Registry } from "./registry.js";
 import type { ModelPrice, PriceTable } from "./turn_loop.js";
 import { makeClaudeInvoker, type ClaudeInvokerOptions } from "./claude_invoker.js";
-import { makeCompletionsInvoker } from "./completions_invoker.js";
+import { makeCompletionsInvoker, type McpToolSource } from "./completions_invoker.js";
 import { makeFileTranscriptStore } from "./transcript_store.js";
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -98,6 +98,14 @@ export interface SelectChairInvokerOptions {
   claude: ClaudeInvokerOptions;
   /** Injectable transport for the completions port (tests). Absent = the global fetch. */
   fetchFn?: typeof fetch | undefined;
+  /**
+   * The completions seat's hands — each door's in-process engine source (server.ts
+   * `makeEngineToolSource`, validate-pinned). When supplied, the seat SEALS through `output_write`
+   * (corrected in-band) and reaches any engine tool it is granted; when absent, a seat with a grant
+   * is refused `no_tool_source` and a grant-less seat falls back to the text seal. Unused on the
+   * host-tool path, which bridges the engine server into the spawn instead.
+   */
+  tools?: McpToolSource | undefined;
 }
 
 /**
@@ -123,6 +131,10 @@ export function selectChairInvoker(env: EnvLike, opts: SelectChairInvokerOptions
     if (prem) tierMap["premium"] = prem;
     const pricesFile = env["COLTRANE_PRICES_FILE"];
     const timeoutRaw = env["COLTRANE_CHAIR_TIMEOUT_MS"];
+    // The per-request output ceiling. A long structured answer (a clause with every obligation in
+    // five slots) truncates at a provider default the deployment never chose; the port reports a
+    // `length` stop, which the loop surfaces rather than parsing a half-answer.
+    const maxTokensRaw = env["COLTRANE_COMPLETIONS_MAX_TOKENS"];
     // contract-completions-seat-transcript-v1 (O3) — a completions seat resumes across the door only if
     // its conversation is kept somewhere. Wire the engine's file-backed store: COLTRANE_TRANSCRIPTS_DIR
     // when set, else <COLTRANE_OUTPUTS_DIR or $HOME/.eir/coltrane_outputs>/transcripts — reading only
@@ -142,6 +154,8 @@ export function selectChairInvoker(env: EnvLike, opts: SelectChairInvokerOptions
       ...(pricesFile ? { prices: loadPriceTable(pricesFile) } : {}),
       ...(opts.fetchFn ? { fetchFn: opts.fetchFn } : {}),
       ...(timeoutRaw ? { timeoutMs: Number(timeoutRaw) } : {}),
+      ...(maxTokensRaw ? { maxTokens: Number(maxTokensRaw) } : {}),
+      ...(opts.tools ? { tools: opts.tools, sealVia: "output_write" as const } : {}),
     });
   }
   return makeClaudeInvoker(opts.claude);

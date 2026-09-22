@@ -120,6 +120,16 @@ export function mcpServerOf(grant: string): string | null {
   return m ? m[1]! : null;
 }
 
+/** The tool's own slug under its server: `mcp__coltrane__output_write` → `output_write`; a bare slug is
+ *  returned as-is. NOT `toolBaseName`, which strips only a scope suffix (`Bash(git add:*)` → `Bash`)
+ *  and leaves the server prefix on — so dispatching `toolBaseName(namespaced)` names a verb no
+ *  surface has, and every namespaced call is refused as unknown. */
+export function toolSlugOf(name: string): string {
+  const base = toolBaseName(name);
+  const server = mcpServerOf(base);
+  return server === null ? base : base.slice(`mcp__${server}__`.length);
+}
+
 /** Resolve an agent's allowed_tools to providers. In order: a host-builtin passes (no server); an
  *  explicit registry entry wins; an `mcp__<server>__*` grant resolves by convention to that server's
  *  config from `mcpServerConfigs` (deployment-registered; coltrane ships its own); everything else —

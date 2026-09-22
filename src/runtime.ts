@@ -37,7 +37,8 @@ import { producersSha,
   type CheckpointStore, type CheckpointRole, type GigCheckpoint,
   type ReuseStore, type ReuseEntry, type ReuseOutput, type RunIdentity, type PriorBudgetState,
 } from "./reuse.js";
-import type { OutputStore, OutputRecord } from "./outputs.js";
+import type { OutputStore, OutputRecord, InputResolution } from "./outputs.js";
+import { resolveSealedInputs } from "./sealed_inputs.js";
 import { checkGigConformance, type GigConformanceResult } from "./gig_conformance.js";
 import { drainGigHeader } from "./output_mirror.js";
 import { LEDGER_SCHEMA_VERSION, type Ledger, type GigUsage } from "./ledger.js";
@@ -1404,7 +1405,10 @@ export async function runGig(
   // canonicalized on a run that never needs it — which is every run that uses none of the
   // three. Memoized, so it is computed at most once.
   let gigInputShaCache: string | undefined;
-  const gigInputSha = (): string => (gigInputShaCache ??= sha256Hex(canonJson(gigInput)));
+  // The payload AS DISPATCHED — sealed-input markers included — so the gig's input identity names
+  // the records it asked for even after resolution strips the markers out of `gigInput` below.
+  const dispatchedInput = gigInput;
+  const gigInputSha = (): string => (gigInputShaCache ??= sha256Hex(canonJson(dispatchedInput)));
 
   // #195 — settled model spend, accumulated from each agent invocation's `result` event (the
   // stream-json result carries usage + total_cost_usd + a per-model breakdown). These were
@@ -1545,6 +1549,29 @@ export async function runGig(
   // hard stop, so no model tokens are spent on bad input.
   const standardInputs = new Set<string>(standard.input_types ?? []);
 
+  // spec.coltrane-sealed-inputs — resolve every `$output` / `$query` marker in the payload BEFORE any
+  // chair runs: looked up in the store, re-hashed, type-checked, or the dispatch is refused. The
+  // markers leave `gigInput`; the records are delivered as inputs to every chair whose contract names
+  // the type, and what those chairs seal carries the engine's resolution (see `resolutionsOf`).
+  const sealedInputs = resolveSealedInputs(gigInput, {
+    outputs: deps.outputs,
+    declared: standardInputs,
+    satisfies: outputSatisfiesType,
+  });
+  gigInput = sealedInputs.gigInput;
+  const resolutionById = new Map<string, InputResolution>();
+  for (const recs of sealedInputs.byType.values()) for (const r of recs) resolutionById.set(r.record.id, r.resolution);
+  /** Offer a chair the dispatch-named records its contract declares, as records — so what it seals
+   *  carries their content_shas and their resolutions. */
+  const pullResolved = (inputs: OutputRecord[], wanted: readonly string[]): void => {
+    for (const t of wanted) {
+      for (const r of sealedInputs.byType.get(t) ?? []) if (!inputs.includes(r.record)) inputs.push(r.record);
+    }
+  };
+  /** The engine's resolutions for the dispatch-named records among a chair's inputs. */
+  const resolutionsOf = (inputs: readonly OutputRecord[]): InputResolution[] =>
+    inputs.flatMap((i) => { const r = resolutionById.get(i.id); return r ? [r] : []; });
+
   // Sealed records an earlier MOVEMENT handed to this one over a chart edge (RunDeps.seed_outputs).
   // They are inputs, not products: available to entry chairs, never folded into `produced`.
   const seedRecords: readonly OutputRecord[] = deps.seed_outputs ?? [];
@@ -1631,6 +1658,7 @@ export async function runGig(
         for (const need of ch.input_contract) {
           if (!standardInputs.has(need)) continue;      // not a gig input — upstream's job
           if (gigInput[need] !== undefined) continue;   // supplied
+          if (sealedInputs.byType.has(need)) continue;  // supplied as sealed records
           if (reachable.some((t) => mightSatisfy(t, need))) continue; // an upstream can cover it
           // A chart edge satisfies a declared gig input with a SEALED RECORD rather than a payload
           // key. Without this the pre-flight would refuse a correctly-arranged movement at t=0.
@@ -2710,6 +2738,7 @@ export async function runGig(
         inputs.push(...recs);
       }
       pullSeeds(chair, inputs, chair.input_contract);
+      pullResolved(inputs, chair.input_contract);
       // Amend carriage: extra inputs (the maker's own prior work + the failing verdict) join the
       // frontier so they enter the reuse key — see the EXAMINE⇄AMEND block. Empty otherwise.
       for (const ex of extraInputs) if (!inputs.includes(ex)) inputs.push(ex);
@@ -2805,6 +2834,9 @@ export async function runGig(
       // upstream record — by type, as records, so provenance survives the movement boundary.
       pullSeeds(chair, inputs, [...chair.input_contract, ...agent.input_types]);
     }
+    // Dispatch-named sealed records reach EVERY chair whose contract declares their type — a gig
+    // input is available to any chair (#156), whether or not it names upstream roles.
+    pullResolved(inputs, chair.input_contract.length > 0 ? chair.input_contract : agent.input_types);
 
     // Amend carriage (O1/I3): the maker's own round-just-judged artifact and the failing verdict are
     // threaded in as extra inputs so they enter `inputs` BEFORE lookupReuse — the amend key then
@@ -3113,6 +3145,7 @@ export async function runGig(
           data: o.data,
           input_refs: inputs.map((i) => i.id),
           input_shas: inputs.map((i) => i.content_sha),
+          input_resolutions: resolutionsOf(inputs),
           ...(o.skill_provenance ? { skill_provenance: o.skill_provenance } : {}),
           reused_from: { output_id: o.source_output_id, gig_id: hit.source_gig_id, cache_key: hit.cache_key },
         });
@@ -3733,6 +3766,7 @@ export async function runGig(
         data: slice,
         input_refs: inputs.map((i) => i.id),
         input_shas: inputs.map((i) => i.content_sha), // #196 — real predecessor hashes, engine-stamped
+        input_resolutions: resolutionsOf(inputs),        // spec.coltrane-sealed-inputs — the cross-gig edge
         // WHICH model produced this, resolved through the invoker's own function so the stamp
         // and the spawn cannot disagree. Absent for a skill-backed chair — no model ran, and
         // absent must mean unknown rather than "the default".

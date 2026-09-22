@@ -1437,8 +1437,9 @@ export async function runGig(
     /** F3 — whether THIS chair reported a settled `total_cost_usd` at least once. Distinct from
      *  `attributed`: a chair can report usage tokens (attributed) yet no cost (unverifiable). */
     reportedCost: () => boolean;
-    /** What the transport SAID about this one chair — measured, never inferred. */
-    reported: () => { model?: string; cost_usd?: number; tokens_used?: number };
+    /** What the transport SAID about this one chair — measured, never inferred. `tier` is set only
+     *  when the chair CLIMBED the tier ladder: the tier it sealed at, not the one its agent declares. */
+    reported: () => { model?: string; cost_usd?: number; tokens_used?: number; tier?: string };
     /** contract-spend-survives-v1 (O1) — this chair's OWN settled usage, as a GigUsage, for the
      *  durable chair_spend row. Undefined when the chair reported no usage payload (captured:false),
      *  so an unattributed chair carries no cost field rather than a $0 one (#235). */
@@ -1454,6 +1455,11 @@ export async function runGig(
     // accumulated across this chair's `result` events; `workingModel` picks the one that did the
     // work (the argmax) at report time rather than trusting the CLI's first key.
     const chairOutputByModel = new Map<string, number>();
+    // THE TIER LADDER. After a climb, the model that SEALED is the one that worked on the LAST rung —
+    // a failed cheap rung can out-produce the one that sealed, so the argmax over the whole chair
+    // would name the loser. Output since the last climb is kept apart; the spend stays whole.
+    let sealedTier: string | undefined;
+    let outputSinceClimb: Map<string, number> | undefined;
     let chairCost = 0;
     let chairTokens = 0;
     let chairSaw = false;
@@ -1463,14 +1469,23 @@ export async function runGig(
       usage: () => (chairSaw ? chairOwnUsage : undefined),
       reported: () => {
         if (!chairSaw) return {};
-        const model = workingModel(chairOutputByModel);
+        const model = workingModel(outputSinceClimb ?? chairOutputByModel);
         return {
           ...(model !== undefined ? { model } : {}),
           cost_usd: chairCost,
           tokens_used: chairTokens,
+          ...(sealedTier !== undefined ? { tier: sealedTier } : {}),
         };
       },
       fold(ev: AgentStreamEvent): void {
+        if (ev.type === "tier_escalated") {
+          const to = (ev.raw as Record<string, unknown> | undefined)?.["to_tier"];
+          if (typeof to === "string") {
+            sealedTier = to;
+            outputSinceClimb = new Map();
+          }
+          return;
+        }
         if (ev.type !== "result") return;
         const raw = ev.raw as Record<string, unknown> | undefined;
         if (!raw) return;
@@ -1523,6 +1538,7 @@ export async function runGig(
             // model that did none of the work. Accumulate per-model output; the gig-level `by_model`
             // total above is untouched.
             chairOutputByModel.set(model, (chairOutputByModel.get(model) ?? 0) + outTok);
+            outputSinceClimb?.set(model, (outputSinceClimb.get(model) ?? 0) + outTok);
           }
         } else {
           // The scalars moved but `by_model` did not — the breakdown cannot sum to the total.
@@ -3140,7 +3156,7 @@ export async function runGig(
   async function executeChair(p: PreparedChair): Promise<OutputRecord[]> {
     // What the transport SAID about this chair, hoisted out of the invocation block so the seal
     // can prefer a measurement over the tier table's guess. Empty for a skill-backed chair.
-    let chairReport: { model?: string; cost_usd?: number; tokens_used?: number } = {};
+    let chairReport: { model?: string; cost_usd?: number; tokens_used?: number; tier?: string } = {};
     const { chair, phaseName, inputs, skills, output_specs, producer_slug, domain } = p;
     // contract-seat-time-monotonic-v1 (O1) — the chair's timings (first_write_ms, duration_ms below)
     // are monotonic differences (performance.now), never Date.now: a wall-clock jump mid-chair is
@@ -3856,7 +3872,7 @@ export async function runGig(
           ? {
               model: chairReport.model ?? resolveModel(p.agent.model_tier, deps.model_version),
               ...(chairReport.model !== undefined ? { model_reported: true } : {}),
-              ...(p.agent.model_tier ? { model_tier: p.agent.model_tier } : {}),
+              ...((chairReport.tier ?? p.agent.model_tier) ? { model_tier: chairReport.tier ?? p.agent.model_tier } : {}),
               // Per-chair spend, declared in the record's own schema since it was written and
               // populated by nothing. The gig total cannot separate two chairs on two tiers,
               // which is the only question per-chair routing asks. Attributed ONCE per invocation

@@ -143,7 +143,11 @@ export function selectChairInvoker(env: EnvLike, opts: SelectChairInvokerOptions
     const transcriptsDir =
       env["COLTRANE_TRANSCRIPTS_DIR"] ??
       join(env["COLTRANE_OUTPUTS_DIR"] ?? join(env["HOME"] ?? env["USERPROFILE"] ?? homedir(), ".eir/coltrane_outputs"), "transcripts");
-    return makeCompletionsInvoker({
+    // THE TIER LADDER — opt-in, deployment-declared, validated HERE so a misspelled rung refuses at
+    // startup instead of silently never climbing.
+    const ladderRaw = env["COLTRANE_TIER_LADDER"];
+    const ladder = ladderRaw ? parseTierLadder(ladderRaw) : undefined;
+    const completions = makeCompletionsInvoker({
       baseUrl: completionsUrl,
       apiKey: env["COLTRANE_COMPLETIONS_KEY"] ?? "",
       ...(opts.registry ? { registry: opts.registry } : {}),
@@ -157,6 +161,68 @@ export function selectChairInvoker(env: EnvLike, opts: SelectChairInvokerOptions
       ...(maxTokensRaw ? { maxTokens: Number(maxTokensRaw) } : {}),
       ...(opts.tools ? { tools: opts.tools, sealVia: "output_write" as const } : {}),
     });
+    return ladder ? withTierLadder(completions, ladder, tierMap) : completions;
   }
   return makeClaudeInvoker(opts.claude);
+}
+
+const LADDER_TIERS = ["economy", "standard", "premium"] as const;
+type LadderTier = (typeof LADDER_TIERS)[number];
+
+/** `COLTRANE_TIER_LADDER` → the rungs, in order. A name that is not a tier refuses — naming it. */
+export function parseTierLadder(raw: string): LadderTier[] {
+  const rungs = raw.split(",").map((t) => t.trim()).filter((t) => t !== "");
+  const bad = rungs.filter((t) => !(LADDER_TIERS as readonly string[]).includes(t));
+  if (bad.length > 0 || rungs.length === 0) {
+    throw new Error(
+      `COLTRANE_TIER_LADDER="${raw}" names ${bad.length > 0 ? `[${bad.join(", ")}], which ${bad.length === 1 ? "is not a tier" : "are not tiers"}` : "no tiers"} — ` +
+        `rungs are ${LADDER_TIERS.join(" | ")}, comma-separated, cheapest first.`,
+    );
+  }
+  return rungs as LadderTier[];
+}
+
+/** The refusals that say the PLAYER could not seal — the only ones a better player can fix. A
+ *  transport failure is the wire's; a better player would meet the same wire. */
+const CLIMBS_ON: ReadonlySet<string> = new Set(["no_seal", "round_limit", "context_limit"]);
+
+/**
+ * Seat the chair again, one rung up, when it could not seal on its own. Not a re-prompt of the same
+ * seat (the governor rejected that): a different model, seated COLD — a fresh prompt, no transcript,
+ * because the next player holds none of the last one's conversation.
+ *
+ * Every attempt runs through the same invoker, so each settles its own `result` event and the runtime
+ * sums them — a failed rung's spend is not lost. The climb is emitted as `tier_escalated`, which the
+ * runtime reads to stamp the tier (and model) that actually SEALED the record.
+ */
+export function withTierLadder(
+  inner: AgentInvoker,
+  ladder: readonly LadderTier[],
+  tierMap: Readonly<Record<string, string>>,
+): AgentInvoker {
+  return async (ctx) => {
+    const tried: string[] = [];
+    let cur = ctx;
+    for (;;) {
+      const res = await inner(cur);
+      const refusal = res["ok"] === false && typeof res["refusal"] === "string" ? (res["refusal"] as string) : undefined;
+      if (refusal === undefined || !CLIMBS_ON.has(refusal)) return res;
+      const tier = String(cur.agent.model_tier ?? "");
+      tried.push(`${tier}: ${refusal}`);
+      const at = ladder.indexOf(tier as LadderTier);
+      const next = at >= 0 ? ladder[at + 1] : undefined;
+      const message = String(res["message"] ?? "");
+      if (next === undefined) {
+        return { ...res, message: `${message} — tier ladder [${ladder.join(" → ")}] exhausted: ${tried.join("; ")}` };
+      }
+      if (!tierMap[next]) {
+        return { ...res, message: `${message} — the ladder's next rung "${next}" has no model mapped; not climbing (tried ${tried.join("; ")})` };
+      }
+      ctx.onEvent?.({
+        type: "tier_escalated",
+        raw: { agent: ctx.agent.slug, from_tier: tier, to_tier: next, reason: refusal, message },
+      });
+      cur = { ...cur, agent: { ...cur.agent, model_tier: next }, resume: false, resume_keep_prompt: false };
+    }
+  };
 }

@@ -12,7 +12,8 @@ import type { Registry } from "./registry.js";
 import type { Depth, ModelTier } from "./pricing.js";
 import type { Effort } from "./genome_schema.js";
 import type { CodeToolAccess } from "./composition.js";
-import { resolveAgentGrants, hostBuiltinDenials, toolBaseName, ENGINE_MCP_SERVER, type ToolProviderRegistry } from "./tool_providers.js";
+import { resolveAgentGrants, hostBuiltinDenials, toolBaseName, grantsTreeReader, ENGINE_MCP_SERVER, type ToolProviderRegistry } from "./tool_providers.js";
+import type { OutputRecord } from "./outputs.js";
 import { venueEffectiveTools } from "./chart.js";
 import { CORE_TYPES } from "./core_types.js";
 
@@ -358,6 +359,10 @@ function buildReverifyResumePrompt(
   outputSchema: Record<string, unknown> | undefined,
   outputSchemas: Record<string, Record<string, unknown> | undefined> | undefined,
   seal: OutputWriteSeal | undefined,
+  // contract-reverify-carries-amendment-v1 — what to carry (resolved by the RUNTIME; rendered, never
+  // computed, here) and whether this seat can reach the tree at all (O4).
+  amended: { records: readonly OutputRecord[]; carried_all: boolean } | undefined,
+  readsTree: boolean,
 ): string {
   const types = sealTypes.length ? sealTypes : ["output"];
   const contract = seal
@@ -376,12 +381,26 @@ function buildReverifyResumePrompt(
           .join("\n")
     : `Re-seal your output — ${types.map((t) => `"${t}"`).join(", ")} — exactly as you did in round one: ` +
         `respond with ONLY the single JSON object (the output's data), no prose, no code fence.`;
+  const records = amended?.records ?? [];
+  const evidence = readsTree
+    ? `re-derive your verdict from the CURRENT working tree — read the amended artifact as it now stands, ` +
+      `do not rely on what you saw in round one — and rule again.`
+    : `the carried records are your evidence: you hold no tool that reaches a working tree, so rule on ` +
+      `the amended records below as they now stand, not on what you saw in round one.`;
   return [
     `# Re-verify (amend round)`,
     `The makers AMENDED their work in response to your failing verdict. You are RESUMING the conversation ` +
       `that already holds your disposition, identity, method, tools and the gig input, so this prompt ` +
-      `carries only what is new: re-derive your verdict from the CURRENT working tree — read the amended ` +
-      `artifact as it now stands, do not rely on what you saw in round one — and rule again.`,
+      `carries only what is new: ${evidence}`,
+    ...(records.length > 0
+      ? [
+          `# Amended records\n` +
+            (amended?.carried_all
+              ? `No round-one record of what you saw was found, so EVERY current input is carried below.\n`
+              : `The inputs that changed since your round-one verdict:\n`) +
+            records.map((o) => `- ${o.domain_type} (from ${o.agent_slug}): ${JSON.stringify(o.data)}`).join("\n"),
+        ]
+      : []),
     `# Output contract\n${contract}`,
   ].join("\n\n");
 }
@@ -1690,7 +1709,7 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
     const reverifyResume = resumingWithSession && ctx.resume_keep_prompt === true;
     const fullPrompt = buildPrompt(resumingWithSession ? { ...ctx, resume: false } : ctx, schema, outputSchemas, seal);
     const prompt = reverifyResume
-      ? buildReverifyResumePrompt(sealTypes, schema, outputSchemas, seal)
+      ? buildReverifyResumePrompt(sealTypes, schema, outputSchemas, seal, ctx.amended_inputs, grantsTreeReader(ctx.agent.allowed_tools))
       : resumingWithSession
         ? buildPrompt(ctx, schema, outputSchemas, seal)
         : fullPrompt;

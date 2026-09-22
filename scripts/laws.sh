@@ -29,7 +29,11 @@ cd "$(dirname "$0")/.."
 # stopped being true at Node 24), and two pure flag-string laws replaced it in this band. The nine
 # laws that need a real request moved to tests/security — a band may reach out, the root suite may
 # not — so they are counted there, by file, not here.
-EXPECTED_LAWS="${EXPECTED_LAWS:-4034}"   # includes 22 todo
+EXPECTED_LAWS="${EXPECTED_LAWS:-4036}"   # includes 22 todo
+#   +2  completions_reasoning_effort (new file) — a seat's resolved effort reaches the wire as
+#       reasoning.effort (levels above high saturate). The long-wait transport's 5 laws live in the
+#       security band (tests/security/completions_long_wait.spec.ts): they open a real loopback
+#       socket, which the root suite forbids.
 #   +9  amend_ladder (new file) — a failed re-verify read against the verdict before it: different
 #       findings seat the maker one rung up (cold), the same findings stop the loop (amend_stalled).
 #       A first draft designed for "unreadable findings"; the core Verdict makes that case impossible,
@@ -61,7 +65,7 @@ EXPECTED_LAWS="${EXPECTED_LAWS:-4034}"   # includes 22 todo
 #       with the handler, the description does not. Its first draft could not fail — it forgave any
 #       token no tool anywhere declared, which is exactly what a renamed argument leaves behind.
 #       Sabotage said so (`current` -> `slug_current` stayed green); the exemption is gone.
-EXPECTED_FILES="${EXPECTED_FILES:-419}"   # + tests/sealed_inputs.test.ts, tests/fan_out.test.ts, tests/completions_seal.test.ts, tests/tier_ladder.test.ts, tests/amend_ladder.test.ts
+EXPECTED_FILES="${EXPECTED_FILES:-420}"   # + tests/sealed_inputs.test.ts, tests/fan_out.test.ts, tests/completions_seal.test.ts, tests/tier_ladder.test.ts, tests/amend_ladder.test.ts, tests/completions_reasoning_effort.test.ts
 
 # THE OTHER BANDS. `vitest run` is ROOT-CONFIG ONLY — this repo's own workflow comments
 # record that four configs went unexecuted once for exactly that reason. So pinning only the
@@ -70,7 +74,7 @@ EXPECTED_FILES="${EXPECTED_FILES:-419}"   # + tests/sealed_inputs.test.ts, tests
 # for leaving them unpinned while claiming the laws are counted.
 EXPECTED_FAILURE_MODES_FILES="${EXPECTED_FAILURE_MODES_FILES:-5}"
 EXPECTED_HONEST_BROKER_FILES="${EXPECTED_HONEST_BROKER_FILES:-2}"
-EXPECTED_SECURITY_FILES="${EXPECTED_SECURITY_FILES:-2}"   # + skill_network_grant.spec.ts: proving a network gate needs a real request, which the root suite forbids
+EXPECTED_SECURITY_FILES="${EXPECTED_SECURITY_FILES:-3}"   # + completions_long_wait.spec.ts: the 300s header limit needs a real socket to disprove   # + skill_network_grant.spec.ts: proving a network gate needs a real request, which the root suite forbids
 
 # THE FILES DELEGATED AWAY FROM THE ROOT BAND, by name.
 #

@@ -7,6 +7,21 @@
 import type { Bus } from "./bus.js";
 import { chairPass, type BusChair } from "./bus_chair.js";
 import type { ModelPort, ToolSource } from "./turn_loop.js";
+import { homedir } from "node:os";
+import { join } from "node:path";
+
+/**
+ * Where a named bus lives: `<COLTRANE_BUS_DIR or ~/.eir/bus>/<name>.jsonl`. A name is a plain name —
+ * letters, digits, `.`, `_`, `-`, not starting with a dot — so it can never reach outside the bus
+ * directory. Anything else throws, naming the rule.
+ */
+export function busPath(name: string): string {
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(name)) {
+    throw new Error(`bus name ${JSON.stringify(name)} is not a plain name (letters, digits, . _ -, not starting with a dot)`);
+  }
+  const dir = process.env["COLTRANE_BUS_DIR"] ?? join(homedir(), ".eir", "bus");
+  return join(dir, `${name}.jsonl`);
+}
 
 /** Bare `coltrane` in an interactive terminal is `coltrane chat`; to a script or a pipe it stays bare,
  *  so the usage-and-exit-2 contract CI relies on is untouched. */
@@ -60,8 +75,7 @@ export function startChat(a: {
  */
 export async function runChatTerminal(argv: readonly string[]): Promise<number> {
   const flag = (k: string): string | undefined => { const i = argv.indexOf(`--${k}`); return i >= 0 ? argv[i + 1] : undefined; };
-  const { homedir } = await import("node:os");
-  const { join, basename } = await import("node:path");
+  const { basename } = await import("node:path");
   const readline = await import("node:readline");
   const { openBus } = await import("./bus.js");
   const { bootstrapServerDeps, makeEngineToolSource } = await import("./server.js");
@@ -88,7 +102,7 @@ export async function runChatTerminal(argv: readonly string[]): Promise<number> 
     allowed_tools: (agent.allowed_tools ?? []).map((g) => (mcpServerOf(g) ? g : `mcp__${ENGINE_MCP_SERVER}__${toolBaseName(g)}`)),
   };
   const busName = flag("bus") ?? basename(process.cwd());
-  const bus = openBus(join(homedir(), ".eir", "bus", `${busName}.jsonl`));
+  const bus = openBus(busPath(busName));
   const me = flag("as") ?? process.env["USER"] ?? "human";
   const port = makeChatCompletionsPort({ baseUrl: url, apiKey: process.env["COLTRANE_COMPLETIONS_KEY"] ?? "", fetchFn: longWaitFetch });
   const chat = startChat({ bus, me, chair, port, tools: makeEngineToolSource(() => deps), out: say });

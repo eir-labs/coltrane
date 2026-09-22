@@ -6,7 +6,7 @@
 // terminal polls. The human's own lines are never echoed back.
 import type { Bus } from "./bus.js";
 import { chairPass, type BusChair } from "./bus_chair.js";
-import type { ModelPort, ToolSource } from "./turn_loop.js";
+import type { ModelPort, ToolSource, ToolDef } from "./turn_loop.js";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -108,7 +108,13 @@ export async function runChatTerminal(argv: readonly string[]): Promise<number> 
   const bus = openBus(busPath(busName));
   const me = flag("as") ?? process.env["USER"] ?? "human";
   const port = makeChatCompletionsPort({ baseUrl: url, apiKey: process.env["COLTRANE_COMPLETIONS_KEY"] ?? "", fetchFn: longWaitFetch });
-  const tools = busCommitSource(makeEngineToolSource(() => deps, { seal: true }), { bus: busName, chair: slug });
+  // The chair's hands: the engine surface (commitments sealed and stamped) and the code tools, confined
+  // to this repo. Its grants decide which of them it is actually offered.
+  const { codeTools } = await import("./code_tools.js");
+  const tools = unionSources([
+    busCommitSource(makeEngineToolSource(() => deps, { seal: true }), { bus: busName, chair: slug }),
+    codeTools({ root }),
+  ]);
   const chat = startChat({ bus, me, chair, port, tools, out: say });
 
   say(`bus "${busName}" — you are ${me}, the chair is @${slug} (${model}). Tag @${slug} to ask it; Ctrl-D to leave.`);
@@ -173,5 +179,24 @@ export function busCommitSource<T extends { list: () => Promise<unknown>; call: 
       name === "output_write" || name.endsWith("__output_write")
         ? inner.call(name, { ...args, gig_id: `bus:${where.bus}`, agent_slug: where.chair, phase: "bus" })
         : inner.call(name, args),
+  };
+}
+
+/** Several tool sources as one: every tool each lists, and each call routed to the source that listed
+ *  that name. A name no source lists is refused, never guessed at. */
+export function unionSources(sources: ReadonlyArray<{ list: () => Promise<ReadonlyArray<{ name: string; description?: string | undefined; inputSchema: Record<string, unknown> }>>; call: (n: string, a: Record<string, unknown>) => Promise<unknown> }>) {
+  const owner = async (name: string) => {
+    for (const s of sources) if ((await s.list()).some((d) => d.name === name)) return s;
+    return undefined;
+  };
+  return {
+    list: async (): Promise<ToolDef[]> =>
+      (await Promise.all(sources.map((s) => s.list()))).flat().map((d) => ({
+        name: d.name, inputSchema: d.inputSchema, ...(d.description !== undefined ? { description: d.description } : {}),
+      })),
+    call: async (name: string, args: Record<string, unknown>) => {
+      const s = await owner(name);
+      return s ? s.call(name, args) : { ok: false, error: `no tool named "${name}" is offered to this chair` };
+    },
   };
 }

@@ -29,7 +29,10 @@ cd "$(dirname "$0")/.."
 # stopped being true at Node 24), and two pure flag-string laws replaced it in this band. The nine
 # laws that need a real request moved to tests/security — a band may reach out, the root suite may
 # not — so they are counted there, by file, not here.
-EXPECTED_LAWS="${EXPECTED_LAWS:-3986}"   # includes 22 todo
+EXPECTED_LAWS="${EXPECTED_LAWS:-4000}"   # includes 22 todo
+#   +14 fan_out (new file) — a chair seated once per item of a sealed set, each instance handed only
+#       its slice (and only the join items that match it), each seal naming the slice's sha. 21 wires
+#       cut; six first cuts broke the build and the runner said so instead of reporting green.
 #   +13 sealed_inputs (new file) — spec.coltrane-sealed-inputs: a dispatch names sealed outputs
 #       ($output / $query) and runGig resolves, re-hashes, type-checks and delivers them, stamping an
 #       engine-only resolution that trace() may cross. Sabotage ran over 18 wires; four stayed green on
@@ -40,7 +43,7 @@ EXPECTED_LAWS="${EXPECTED_LAWS:-3986}"   # includes 22 todo
 #       with the handler, the description does not. Its first draft could not fail — it forgave any
 #       token no tool anywhere declared, which is exactly what a renamed argument leaves behind.
 #       Sabotage said so (`current` -> `slug_current` stayed green); the exemption is gone.
-EXPECTED_FILES="${EXPECTED_FILES:-415}"   # + tests/sealed_inputs.test.ts
+EXPECTED_FILES="${EXPECTED_FILES:-416}"   # + tests/sealed_inputs.test.ts, tests/fan_out.test.ts
 
 # THE OTHER BANDS. `vitest run` is ROOT-CONFIG ONLY — this repo's own workflow comments
 # record that four configs went unexecuted once for exactly that reason. So pinning only the

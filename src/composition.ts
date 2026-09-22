@@ -94,6 +94,14 @@ export interface Chair {
    *  contract-rolling-seat-primer-v1 (O4) — `max_context_tokens` is a context ceiling: a primer whose
    *  recorded `context_tokens` exceeds it is REPLACED (cold run), never forked. Absent → fork any size. */
   fork_from?: { primer: string; max_context_tokens?: number };
+  /** FAN-OUT — seat this chair once per item of `over` (mirrors `ChairSchema.fan_out`). */
+  fan_out?: FanOut;
+}
+
+/** See `ChairSchema.fan_out`. */
+export interface FanOut {
+  over: { type: string; path: string; key: string };
+  join?: Array<{ type: string; path: string; on: string; match: string }>;
 }
 
 export interface PhaseDef {
@@ -320,6 +328,22 @@ export function composeStandard(def: {
             `area (a build primes an area and forks the prior primer OF THAT area). Make prime.area and ` +
             `fork_from.primer the same slug, or drop one.`,
         );
+      }
+      // FAN-OUT — a chair can only split a set it takes in. A type outside input_contract never reaches
+      // the chair, so the split would find nothing and every run would refuse; say so at authoring.
+      if (ch.fan_out) {
+        for (const t of [ch.fan_out.over.type, ...(ch.fan_out.join ?? []).map((j) => j.type)]) {
+          if (!(ch.input_contract ?? []).includes(t)) {
+            throw new CompositionError(
+              `standard ${def.slug}: chair "${ch.role}" fan_out splits "${t}", which is not in its input_contract ` +
+                `[${(ch.input_contract ?? []).join(", ")}] — a chair can only split a set it takes in. Add "${t}" ` +
+                `to the chair's input_contract, or split a type it declares.`,
+            );
+          }
+        }
+        if (ch.human) {
+          throw new CompositionError(`standard ${def.slug}: chair "${ch.role}" is a human seat and declares fan_out — an office is held once, not per item`);
+        }
       }
       if (ch.fork_from && !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(ch.fork_from.primer)) {
         throw new CompositionError(

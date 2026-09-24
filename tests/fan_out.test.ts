@@ -13,6 +13,7 @@ import {
   createRegistry, createOutputStore, MemoryLedger, composeStandard, runGig, sha256Hex, canonJson,
   type AgentInvoker, type DomainType, type PhaseDef, type Standard, type OutputRecord, type Chair,
 } from "../src/index.js";
+import { ChairSchema } from "../src/genome_schema.js";
 import { testAgent } from "./_support/agents.js";
 import { coreInvariantFields } from "./_support/specs.js";
 import { createMemoryReuseStore } from "../src/reuse.js";
@@ -21,7 +22,7 @@ const TYPES: DomainType[] = [
   // AMENDED 2026-09-24: `families` is declared WITHOUT a type. The dispatch door now validates a
   // payload against its declared type (tests/gig_input_validated), so a typed `families` would make the
   // door refuse F4's "not an array" payload first, and this file's subject is FAN-OUT's own refusal.
-  { slug: "fanx-charter", extends: "Plan", domain: "demo", schema: { properties: { families: {} } }, required_fields: [] },
+  { slug: "fanx-charter", extends: "Plan", domain: "demo", schema: { properties: { families: {}, charter: {}, data: {}, steps: {} } }, required_fields: [] },
   { slug: "fanx-ruleset", extends: "Interpretation", domain: "demo", schema: { properties: { rules: { type: "array" } } }, required_fields: [] },
   { slug: "fanx-clause", extends: "Artifact", domain: "demo", schema: { properties: { family: { type: "string" } } }, required_fields: ["family"] },
   { slug: "fanx-check", extends: "Verdict", domain: "demo", schema: {}, required_fields: [] },
@@ -316,5 +317,122 @@ describe("F8 — fan-out across several records of the over type", () => {
     const b = band();
     await expect(runGig(acrossStd({ over: { type: "fanx-charter", path: "families", key: "family" } }), { "fanx-charter": [{ $output: a.id }, { $output: b2.id }] }, { ...w, invoke: b.invoke } as never))
       .rejects.toThrow(/2 sources/);
+  });
+});
+
+// ── F9 — CARRY: what a seat is allowed to see ───────────────────────────────────────────────────
+//
+// `fan_out` narrows the path it SPLITS and leaves every other field of the record whole, and the
+// invoker renders whole `data` into the prompt. Measured by eir-drafting on the run that failed:
+// 86 seats, each handed 490,779 characters to read its own item, with `data.expanded` — 63
+// provisions no seat can use — accounting for 306,011 of it. On their current, healthy merge it is
+// still 29,828 of 51,659 (58%) that the seat cannot use.
+//
+// No chair can fix this. The sealed record SHOULD hold `expanded`: naming what this run fetched and
+// where its text lives is the record's job, and the trace depends on it. A chair-level fix buys the
+// seat's view by sealing a poorer record. So the narrowing belongs to the SPLIT:
+//
+//   fan_out: { over: {…}, carry: ["data.sources", "data.failures"] }
+//
+// KEEP, not drop, and dotted at the same granularity as `over.path` — eir-drafting's record needs to
+// shed `charter` at the top AND `data.expanded` one level down, which a top-level allowlist cannot
+// express. Keep because enriching the sealed record is the common act (that record gained four
+// fields in seven days, every one of them for the trace, none for a seat) and enriching a prompt
+// should be the deliberate one. It also makes the standard STATE what a seat may read, which in a
+// legal drafting chain is worth having at the standard level rather than inside a skill.
+//
+// The SEALED RECORD IS UNTOUCHED. `carry` narrows the VIEW an instance receives; the store still
+// holds every field, provenance still names the whole record, and the ShardStamp's slice_sha is
+// computed over what the seat actually receives — so "what did this seat hold" stays a chain fact.
+describe("F9 — a split may narrow what its seats SEE, without narrowing what was sealed", () => {
+  const RICH = {
+    families: FAMILIES,
+    // Two things to shed, at two different depths — the shape that makes dotted paths necessary.
+    charter: { demand: "D".repeat(500) },
+    data: { sources: { keep: "K".repeat(100) }, expanded: "E".repeat(9000) },
+  };
+  const carryStd = (carry?: string[]) =>
+    composeStandard({
+      slug: "fan-carry", domain: "demo", input_types: ["fanx-charter"],
+      agents: [testAgent({ slug: "composer", primitives: ["CREATE"], input_types: ["fanx-charter"], output_types: ["fanx-clause"], domain: "demo" })],
+      phases: [{ name: "compose", chairs: [{
+        role: "compose", agent_slug: "composer", depends_on: [], input_contract: ["fanx-charter"],
+        output_contract: ["fanx-clause"], required_skills: [],
+        fan_out: { over: { type: "fanx-charter", path: "families", key: "family", ...(carry ? { carry } : {}) } },
+      } as Chair] }] as PhaseDef[],
+    });
+  const handed = (b: ReturnType<typeof band>, role: string) =>
+    composerCalls(b.seen).find((c) => c.role === role)!.gig_input["fanx-charter"] as Record<string, unknown>;
+
+  it("F9a — a seat sees the paths named and the split path, and nothing else", async () => {
+    const w = world();
+    const b = band();
+    const r = await runGig(carryStd(["data.sources"]), { "fanx-charter": RICH }, { ...w, invoke: b.invoke } as never);
+    expect(r.status).toBe("complete");
+    const view = handed(b, "compose#grant");
+    expect(Object.keys(view).sort(), "charter is gone; data survives only as far as it was named").toEqual(["data", "families"]);
+    expect(Object.keys(view["data"] as Record<string, unknown>)).toEqual(["sources"]);
+    expect(view["families"], "the split path is carried whether or not it is named").toEqual([FAMILIES[0]]);
+  });
+
+  it("F9b — without carry the view is exactly what it was: every field rides whole", async () => {
+    const w = world();
+    const b = band();
+    await runGig(carryStd(), { "fanx-charter": RICH }, { ...w, invoke: b.invoke } as never);
+    const view = handed(b, "compose#grant");
+    expect(Object.keys(view).sort()).toEqual(["charter", "data", "families"]);
+    expect((view["data"] as Record<string, unknown>)["expanded"]).toBeDefined();
+  });
+
+  it("F9c — a carry path that matches NOTHING is refused, naming it", async () => {
+    const w = world();
+    const b = band();
+    // Under keep, a field renamed in the skill that builds the record turns into a seat that quietly
+    // STARVES: it still gets a record, still gets its item, and answers anyway without the thing it
+    // was going to read. A plausible answer is worse than an error, so this fails closed.
+    await expect(runGig(carryStd(["data.sources", "data.nowhere"]), { "fanx-charter": RICH }, { ...w, invoke: b.invoke } as never))
+      .rejects.toThrow(/carry path "data\.nowhere" matches nothing/);
+    expect(composerCalls(b.seen).length, "no seat runs on a diet the engine cannot serve").toBe(0);
+  });
+
+  it("F9d — the ShardStamp names what the seat RECEIVED, not what it would have without carry", async () => {
+    const w = world();
+    const b = band();
+    const withCarry = await runGig(carryStd(["data.sources"]), { "fanx-charter": RICH }, { ...w, invoke: b.invoke } as never);
+    const w2 = world();
+    const b2 = band();
+    const without = await runGig(carryStd(), { "fanx-charter": RICH }, { ...w2, invoke: b2.invoke } as never);
+    const shaOf = (res: Awaited<ReturnType<typeof runGig>>) =>
+      res.outputs.find((o) => o.from_role === "compose#grant")!.shard!.slices.find((s) => s.type === "fanx-charter")!.slice_sha;
+    expect(shaOf(withCarry), "a slice_sha over bytes the seat never saw would be a claim, not a record").not.toBe(shaOf(without));
+  });
+
+  it("F9f — the field survives the SCHEMA: a chair authored on disk keeps its carry list", () => {
+    // `fan_out` is strict, so a field the schema does not name does not silently vanish — it REFUSES
+    // the whole chair at load. Either way a standard authored in a file could not express a diet,
+    // and no law above touches the schema: every one builds its Chair in TypeScript.
+    const parsed = ChairSchema.parse({
+      role: "compose", agent_slug: "composer", output_contract: ["fanx-clause"],
+      fan_out: { over: { type: "fanx-charter", path: "data.sources", key: "slug", carry: ["data.sources", "data.failures"] } },
+    });
+    expect(parsed.fan_out!.over.carry).toEqual(["data.sources", "data.failures"]);
+    // omitted means the view is what it always was — every field rides whole
+    expect(ChairSchema.parse({ role: "r", output_contract: ["fanx-clause"], fan_out: { over: { type: "t", path: "p", key: "k" } } }).fan_out!.over.carry).toBeUndefined();
+  });
+
+  it("F9e — what was SEALED is untouched: carry narrows the view, never the record", async () => {
+    const w = world();
+    const b = band();
+    const rec = w.outputs.write({
+      core_type: "Plan", domain_type: "fanx-charter", domain: "demo", gig_id: "g-prior",
+      agent_slug: "author", primitive: "PLAN", data: { ...RICH, steps: ["s"] },
+    });
+    await runGig(carryStd(["data.sources"]), { "fanx-charter": { $output: rec.id } }, { ...w, invoke: b.invoke } as never);
+    const stored = w.outputs.get(rec.id)!;
+    expect(Object.keys(stored.data).sort(), "the store still holds every field").toEqual(["charter", "data", "families", "steps"]);
+    expect(stored.content_sha, "and it still hashes to what was sealed").toBe(rec.content_sha);
+    const seatView = composerCalls(b.seen).find((c) => c.role === "compose#moral")!.inputs.find((i) => i.domain_type === "fanx-charter")!;
+    expect(Object.keys(seatView.data).sort(), "the seat's VIEW is narrow").toEqual(["data", "families"]);
+    expect(seatView.id, "and it still stands in the record's place — provenance names the whole record").toBe(rec.id);
   });
 });

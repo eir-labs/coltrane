@@ -1,7 +1,7 @@
 // RED — Stage A of the cheap band: an OpenAI-compatible invoker whose HANDS ARE MCP.
 //
-// WHY THIS EXISTS. src/bifrost_invoker.ts is already a complete second AgentInvoker, and it is
-// useless for research/synthesis because of one self-declared limit (bifrost_invoker.ts:5):
+// WHY THIS EXISTS. An earlier vendor-named invoker (src/bifrost_invoker.ts, deleted 2026-09-23) was a
+// complete second AgentInvoker, and it was useless for research/synthesis because of one self-declared limit:
 // "v0 is deliberately text-in/JSON-out — no tools, no MCP; a chair that needs tools keeps the
 // Claude invoker." A research chair must retrieve, vet, seal and write — every one a governed
 // verb over MCP. A toolless cheap invoker cannot do the work at all.

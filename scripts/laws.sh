@@ -29,7 +29,12 @@ cd "$(dirname "$0")/.."
 # stopped being true at Node 24), and two pure flag-string laws replaced it in this band. The nine
 # laws that need a real request moved to tests/security — a band may reach out, the root suite may
 # not — so they are counted there, by file, not here.
-EXPECTED_LAWS="${EXPECTED_LAWS:-4078}"   # includes 21 todo
+EXPECTED_LAWS="${EXPECTED_LAWS:-4081}"
+# +3 fan_out F8 (fan_out.test.ts) — `over.across_sources`: one seat per item across EVERY record of
+# the set, each handed only its own record and stamped with it; a key repeated across rounds still
+# refused; the default two-source refusal unchanged. Six cuts, all red: the stamp naming the first
+# source, an empty drop set, the runtime ignoring drop, the opt-in forced on, the duplicate check
+# dropped, items taken from the first source only.   # includes 21 todo
 #   +6  claude_seat_reads (new file) — law 9 on the door the drafting genome runs on: a Claude seat's
 #       tools are a CHILD's, so its reads live only in the stream. captureSeatReads reads the sealed
 #       records its tool RESULTS carried and emits the same `seat_read` the completions door does, so

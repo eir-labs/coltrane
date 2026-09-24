@@ -267,12 +267,6 @@ describe("#221 policy 5 — every call site gets the same behaviour AND the same
     ).toEqual({ title: "real", severity: "high" });
   });
 
-  it.todo(
-    "bifrost_invoker.ts:116 has the same gap — it resolves the output schema at :64 and " +
-      "then calls extractJson(text) with no opts. Not asserted here because it needs a " +
-      "url/deviceToken/fetchFn harness; covered by tests/bifrost_invoker.test.ts's fixtures " +
-      "once the opts parameter exists.",
-  );
 });
 
 describe("#221 extractJson — typed error with a bounded excerpt", () => {

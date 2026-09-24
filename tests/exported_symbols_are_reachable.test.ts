@@ -7,8 +7,11 @@
  *  standards setting it. Each was green, and each did nothing.
  *
  *  A sweep on 2026-08-20 found 60 exported symbols that are exercised by tests, exported from no
- *  public entrypoint, and called nowhere in src/ — including `makeBifrostInvoker`, the second
- *  AgentInvoker implementation that is the whole point of the model-agnostic seam.
+ *  public entrypoint, and called nowhere in src/. The sweep's own example then was `makeBifrostInvoker`,
+ *  a second AgentInvoker named for one vendor's transport; the completions port superseded it (one
+ *  general OpenAI-compatible connector, any endpoint) and it was deleted on 2026-09-23. NOTE it was
+ *  never IN this count — it was exported from index.ts, and this predicate counts only symbols exported
+ *  from no public entrypoint — so deleting it left the pin where it was.
  *
  *  WHY THIS IS A RATCHET AND NOT A ZERO. Demanding zero today would fail on 59 pre-existing cases and
  *  make the suite red for reasons unrelated to whatever change is being reviewed — which teaches

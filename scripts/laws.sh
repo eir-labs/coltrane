@@ -29,7 +29,13 @@ cd "$(dirname "$0")/.."
 # stopped being true at Node 24), and two pure flag-string laws replaced it in this band. The nine
 # laws that need a real request moved to tests/security — a band may reach out, the root suite may
 # not — so they are counted there, by file, not here.
-EXPECTED_LAWS="${EXPECTED_LAWS:-4068}"   # includes 22 todo
+EXPECTED_LAWS="${EXPECTED_LAWS:-4060}"   # includes 21 todo
+#   -8  bifrost_invoker deleted (7 laws + 1 todo): a second AgentInvoker named for ONE vendor's
+#       transport (/v1/generate, text-only, no tools), exported from index.ts and called nowhere in
+#       src/. The completions port replaced it with one general OpenAI-compatible connector whose
+#       endpoint is an env var, and spec_turn_loop LAW 18 already forbids the loop and the port to name
+#       a vendor. Deleting it did NOT move the orphan pin: it was exported from index.ts, so it was
+#       never in that count.
 #   +6  code_tools (new file) — the engine's own code hands for a chair on any model: read / search /
 #       patch-exactly-once / run one law file, confined to the repo (realpath, so .., absolute and
 #       symlinks cannot escape), never touching secrets or .git. Plus the union that gives a chat chair
@@ -85,7 +91,7 @@ EXPECTED_LAWS="${EXPECTED_LAWS:-4068}"   # includes 22 todo
 #       with the handler, the description does not. Its first draft could not fail — it forgave any
 #       token no tool anywhere declared, which is exactly what a renamed argument leaves behind.
 #       Sabotage said so (`current` -> `slug_current` stayed green); the exemption is gone.
-EXPECTED_FILES="${EXPECTED_FILES:-426}"   # + tests/sealed_inputs.test.ts, tests/fan_out.test.ts, tests/completions_seal.test.ts, tests/tier_ladder.test.ts, tests/amend_ladder.test.ts, tests/completions_reasoning_effort.test.ts, tests/bus.test.ts, tests/bus_chair.test.ts, tests/bus_terminal.test.ts, tests/bus_verbs.test.ts, tests/bus_commit.test.ts, tests/code_tools.test.ts
+EXPECTED_FILES="${EXPECTED_FILES:-425}"   # + tests/sealed_inputs.test.ts, tests/fan_out.test.ts, tests/completions_seal.test.ts, tests/tier_ladder.test.ts, tests/amend_ladder.test.ts, tests/completions_reasoning_effort.test.ts, tests/bus.test.ts, tests/bus_chair.test.ts, tests/bus_terminal.test.ts, tests/bus_verbs.test.ts, tests/bus_commit.test.ts, tests/code_tools.test.ts
 
 # THE OTHER BANDS. `vitest run` is ROOT-CONFIG ONLY — this repo's own workflow comments
 # record that four configs went unexecuted once for exactly that reason. So pinning only the

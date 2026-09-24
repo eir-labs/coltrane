@@ -29,7 +29,17 @@ cd "$(dirname "$0")/.."
 # stopped being true at Node 24), and two pure flag-string laws replaced it in this band. The nine
 # laws that need a real request moved to tests/security — a band may reach out, the root suite may
 # not — so they are counted there, by file, not here.
-EXPECTED_LAWS="${EXPECTED_LAWS:-4081}"
+EXPECTED_LAWS="${EXPECTED_LAWS:-4092}"
+#  +11 optional_declared_input (new file) — `chair.optional_inputs`, the twin of optional_outputs: a
+#      declared input whose ABSENCE is not a refusal, so a chair can read the previous round's
+#      findings and still run the first round. Waived in four demands (compose's pipeline check, the
+#      t=0 pre-flight, and prepareChair's two branches — agent AND skill) plus chart rule R7, which
+#      would otherwise call the slot dead one layer up and leave the waiver unreachable. Deny-by-
+#      default, subset of input_contract, refused at compose if it names a type the chair does not
+#      declare; optional never means ignored — a present optional input is routed as before; and one
+#      chair's waiver never excuses another chair's demand for the same type. Twelve cuts: nine red
+#      at once, three stayed green — the skill branch and the schema field had no law until O10/O11
+#      were written, and the normaliser's `?? []` line could not fail at all, so it was deleted.
 # +3 fan_out F8 (fan_out.test.ts) — `over.across_sources`: one seat per item across EVERY record of
 # the set, each handed only its own record and stamped with it; a key repeated across rounds still
 # refused; the default two-source refusal unchanged. Six cuts, all red: the stamp naming the first
@@ -112,7 +122,7 @@ EXPECTED_LAWS="${EXPECTED_LAWS:-4081}"
 #       with the handler, the description does not. Its first draft could not fail — it forgave any
 #       token no tool anywhere declared, which is exactly what a renamed argument leaves behind.
 #       Sabotage said so (`current` -> `slug_current` stayed green); the exemption is gone.
-EXPECTED_FILES="${EXPECTED_FILES:-428}"   # + tests/sealed_inputs.test.ts, tests/fan_out.test.ts, tests/completions_seal.test.ts, tests/tier_ladder.test.ts, tests/amend_ladder.test.ts, tests/completions_reasoning_effort.test.ts, tests/bus.test.ts, tests/bus_chair.test.ts, tests/bus_terminal.test.ts, tests/bus_verbs.test.ts, tests/bus_commit.test.ts, tests/code_tools.test.ts, tests/gig_input_validated.test.ts, tests/seat_reads_recorded.test.ts, tests/claude_seat_reads.test.ts
+EXPECTED_FILES="${EXPECTED_FILES:-429}"   # + tests/sealed_inputs.test.ts, tests/fan_out.test.ts, tests/completions_seal.test.ts, tests/tier_ladder.test.ts, tests/amend_ladder.test.ts, tests/completions_reasoning_effort.test.ts, tests/bus.test.ts, tests/bus_chair.test.ts, tests/bus_terminal.test.ts, tests/bus_verbs.test.ts, tests/bus_commit.test.ts, tests/code_tools.test.ts, tests/gig_input_validated.test.ts, tests/seat_reads_recorded.test.ts, tests/claude_seat_reads.test.ts, tests/optional_declared_input.test.ts
 
 # THE OTHER BANDS. `vitest run` is ROOT-CONFIG ONLY — this repo's own workflow comments
 # record that four configs went unexecuted once for exactly that reason. So pinning only the

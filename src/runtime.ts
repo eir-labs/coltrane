@@ -1729,7 +1729,9 @@ export async function runGig(
           ch.depends_on.length > 0
             ? ch.depends_on.flatMap((d) => sealedByRole.get(d) ?? [])
             : producedByEarlierPhases;
+        const optionalHere = new Set<string>(ch.optional_inputs ?? []);
         for (const need of ch.input_contract) {
+          if (optionalHere.has(need)) continue;         // declared optional — absence is not a defect
           if (!standardInputs.has(need)) continue;      // not a gig input — upstream's job
           if (gigInput[need] !== undefined) continue;   // supplied
           if (sealedInputs.byType.has(need)) continue;  // supplied as sealed records
@@ -2933,9 +2935,11 @@ export async function runGig(
       // frontier so they enter the reuse key — see the EXAMINE⇄AMEND block. Empty otherwise.
       for (const ex of extraInputs) if (!inputs.includes(ex)) inputs.push(ex);
       if (chair.input_contract.length > 0) {
+        const optionalHere = new Set<string>(chair.optional_inputs ?? []);
         for (const need of chair.input_contract) {
           // #156: a type satisfied by an upstream record OR by the gig payload (entry-chair seed).
           const fromGig = standardInputs.has(need) && gigInput[need] !== undefined;
+          if (optionalHere.has(need)) continue;  // declared optional — may be absent, still routed
           if (!fromGig && !inputs.some((o) => outputSatisfiesType(o, need))) {
             const provided = inputs.map((o) => o.domain_type).join(",");
             // #244 — this disjunction knows WHICH branch failed; don't discard that.
@@ -3043,9 +3047,11 @@ export async function runGig(
     // (docs/genome-extension.md): a core-type requirement is met by any domain
     // subtype extending it; a domain-type requirement stays exact. Empty skips.
     if (chair.input_contract.length > 0) {
+      const optionalHere = new Set<string>(chair.optional_inputs ?? []);
       for (const need of chair.input_contract) {
         // #156: satisfied by an upstream record OR the gig payload (entry-chair typed seed).
         const fromGig = standardInputs.has(need) && gigInput[need] !== undefined;
+        if (optionalHere.has(need)) continue;  // declared optional — may be absent, still routed
         if (!fromGig && !inputs.some((o) => outputSatisfiesType(o, need))) {
           const provided = inputs.map((o) => o.domain_type).join(",");
           // #244 — when `need` is a DECLARED gig input, the cause is a missing key in the

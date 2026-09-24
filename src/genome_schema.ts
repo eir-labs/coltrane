@@ -212,6 +212,11 @@ export const ChairSchema = z.object({
   // #243 — which promised outputs may legitimately be absent. Deny-by-default: omitted
   // means every promised type is required. Subset of output_contract, checked at compose.
   optional_outputs: z.array(z.string()).default([]),
+  // Which DECLARED inputs may legitimately be absent — the twin of optional_outputs. Deny-by-default:
+  // omitted means every declared type is demanded, at compose, at the door and at the seat. A type
+  // named here is still declared, so when it IS present it is routed exactly as before: optional
+  // means "may be absent", never "ignored". Subset of input_contract, checked at compose.
+  optional_inputs: z.array(z.string()).default([]),
   /** The FLOOR. A skill named here must be held by whoever is seated — bound by slug or carried on
    *  the record — or the seating is refused at compose and the chair fails closed at run. */
   required_skills: z.array(z.string()).default([]),

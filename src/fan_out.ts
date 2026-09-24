@@ -66,6 +66,29 @@ function pathSet(data: Record<string, unknown>, path: string, value: unknown): R
   return out;
 }
 
+/**
+ * KEEP only these dotted paths (plus the split path, always). `carry` narrows the VIEW a seat
+ * receives — never the sealed record, which keeps every field so the trace can still name what the
+ * run held. A path matching nothing REFUSES: under a keep-list, a field renamed in the skill that
+ * builds the record turns into a seat that quietly STARVES — it still gets a record, still gets its
+ * item, and answers anyway without the thing it was going to read. A plausible answer is worse than
+ * an error, so this fails closed, the same way a typo'd optional_inputs does.
+ */
+function carried(role: string, data: Record<string, unknown>, keep: readonly string[]): Record<string, unknown> {
+  let out: Record<string, unknown> = {};
+  for (const path of keep) {
+    const v = pathGet(data, path);
+    if (v === undefined) {
+      throw new FanOutRefused(
+        `fan-out of chair "${role}": carry path "${path}" matches nothing in the record — ` +
+          `a seat cannot be served a field that is not there. Fix the path, or drop it from carry.`,
+      );
+    }
+    out = pathSet(out, path, v);
+  }
+  return out;
+}
+
 const asValues = (v: unknown): unknown[] => (Array.isArray(v) ? v : v === undefined ? [] : [v]);
 const shares = (a: unknown[], b: unknown[]): boolean => a.some((x) => b.some((y) => canonJson(x) === canonJson(y)));
 
@@ -161,8 +184,11 @@ export function expandFanOut(
   });
 
   const unmatchedIdx = joins.map((j) => new Set(j.items.map((_, i) => i)));
-  const slice = (type: string, src: Source, path: string, narrowed: unknown[]) => {
-    const data = pathSet(src.data, path, narrowed);
+  const slice = (type: string, src: Source, path: string, narrowed: unknown[], keep?: readonly string[]) => {
+    const whole = pathSet(src.data, path, narrowed);
+    // The split path is carried whether or not it is named: a fan-out that handed out everything
+    // EXCEPT the item it split on would seat a chair with nothing to do.
+    const data = keep ? carried(role, whole, [path, ...keep.filter((k) => k !== path)]) : whole;
     return {
       data,
       entry: {
@@ -187,7 +213,7 @@ export function expandFanOut(
     };
 
     const from = itemsWithSource[idx]!.source;
-    const o = slice(fan.over.type, from, fan.over.path, [item]);
+    const o = slice(fan.over.type, from, fan.over.path, [item], fan.over.carry);
     place(fan.over.type, from, o.data);
     slices.push(o.entry);
 

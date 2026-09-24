@@ -29,7 +29,19 @@ cd "$(dirname "$0")/.."
 # stopped being true at Node 24), and two pure flag-string laws replaced it in this band. The nine
 # laws that need a real request moved to tests/security — a band may reach out, the root suite may
 # not — so they are counted there, by file, not here.
-EXPECTED_LAWS="${EXPECTED_LAWS:-4105}"
+EXPECTED_LAWS="${EXPECTED_LAWS:-4112}"
+#   +7 fan_out F9 (6) + simulate_names_seats S14 (1) — `over.carry`: a KEEP-list of dotted paths
+#      narrowing the VIEW a seat receives, never the sealed record. Justified by measurement, not
+#      argument: eir-drafting's failing run handed 86 seats 490,779 characters each with 306,011 of
+#      it `data.expanded`, and their current healthy merge still spends 58% of every seat on what it
+#      cannot use. No chair can fix it — the record SHOULD hold `expanded` for the trace, so a
+#      chair-level fix buys the seat's view by sealing a poorer record. Dotted because their two fat
+#      fields sit at different depths (`charter` at the top, `data.expanded` one down) and a
+#      top-level allowlist cannot reach the number that justified the feature. KEEP because
+#      enriching the record is the common act and enriching a prompt should be the deliberate one.
+#      A carry path matching nothing REFUSES: under a keep-list a renamed field turns into a seat
+#      that quietly STARVES and answers anyway. Seven cuts, all red — the last only after F9f, since
+#      every other law built its chair in TypeScript and none went through the schema.
 #   +2 simulate_names_seats S12/S13 — `largest_field` follows the biggest field DOWN while it is an
 #      object. Found on the feature's first real use: a skill seals `{data: {…}}`, so the biggest
 #      top-level field of every source-set record is `data` — a true answer that is the same answer

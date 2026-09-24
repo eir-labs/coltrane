@@ -29,7 +29,14 @@ cd "$(dirname "$0")/.."
 # stopped being true at Node 24), and two pure flag-string laws replaced it in this band. The nine
 # laws that need a real request moved to tests/security — a band may reach out, the root suite may
 # not — so they are counted there, by file, not here.
-EXPECTED_LAWS="${EXPECTED_LAWS:-4103}"
+EXPECTED_LAWS="${EXPECTED_LAWS:-4105}"
+#   +2 simulate_names_seats S12/S13 — `largest_field` follows the biggest field DOWN while it is an
+#      object. Found on the feature's first real use: a skill seals `{data: {…}}`, so the biggest
+#      top-level field of every source-set record is `data` — a true answer that is the same answer
+#      whatever is wrong. `data.expanded (20,007)` is the answer; `data (41,297)` is a tautology.
+#      Stops at an array (an index is not a field a caller can carry or drop) and at depth 3. Four
+#      cuts, all red — the last only after its law could tell the named field's bytes from its
+#      parent's, which it could not when the wrapper and its child were the same size.
 #  +11 simulate_names_seats (new file) — the pre-dispatch gate now says WHO PLAYS. A chair with
 #      `fan_out` is a TEMPLATE; simulate received each phase as a chair COUNT, so a run that will
 #      seat 22 players looked like one that seats 1 AND WAS PRICED AS ONE — a "validate before you

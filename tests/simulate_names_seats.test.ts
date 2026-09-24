@@ -204,6 +204,62 @@ describe("S — standard_simulate says which chairs are seats", () => {
     expect(moral.input_bytes).toBeLessThan(1_000);
   });
 
+  it("S12 — largest_field DESCENDS: a skill output's nested `data` is a tautology, not an answer", async () => {
+    // Measured by eir-drafting on the first real use of the seat plan. A skill seals `{data: {...}}`,
+    // so the biggest TOP-LEVEL field of every source-set record in their chain is `data` — a true
+    // answer that is the same answer whatever is wrong, which is no answer. The defect lives one
+    // level down: `data.expanded` is 20,007 of a 51,659-byte seat, and `data.sources` (the
+    // provision the seat exists to read) is 20,120.
+    const registry = createRegistry();
+    for (const t of TYPES) registry.registerType(t);
+    const outputs = createOutputStore(registry);
+    const std = composeStandard({
+      slug: "sim-nested", domain: "demo", input_types: ["sim-charter"],
+      agents: [testAgent({ slug: "composer", primitives: ["CREATE"], input_types: ["sim-charter"], output_types: ["sim-clause"], domain: "demo" })],
+      phases: [{ name: "compose", chairs: [{
+        role: "compose", agent_slug: "composer", depends_on: [], input_contract: ["sim-charter"],
+        output_contract: ["sim-clause"], required_skills: [], fan_out: FAN,
+      } as Chair] }] as PhaseDef[],
+    });
+    const deps: ServerDeps = { registry, outputs, ledger: new MemoryLedger(), standards: new Map([[std.slug, std]]) };
+    const r = await dispatchTool("standard_simulate", {
+      standard_slug: "sim-nested", depth: "standard",
+      // Two big children on purpose: the wrapper is ~70k, its largest child 40k. A path that named
+      // the child while reporting the PARENT's bytes would read as a 70,000-byte `expanded`, and a
+      // caller would go carve up the wrong field.
+      mock_input: { "sim-charter": { families: FAMILIES, nested: { expanded: "E".repeat(40_000), other: "O".repeat(30_000) } } },
+    }, deps);
+    const seat = planOf(r).phases[0]!.chairs[0]!.seats!.find((x) => x.role === "compose#mention")!;
+    const lf = seat.inputs.find((i) => i.type === "sim-charter")!.largest_field!;
+    expect(lf.path, "naming the wrapper is the same answer whatever is wrong").toBe("nested.expanded");
+    expect(lf.bytes).toBeGreaterThan(40_000 - 100);
+    expect(lf.bytes, "the bytes must be the NAMED field's, not its parent's").toBeLessThan(45_000);
+  });
+
+  it("S13 — the descent stops at an ARRAY, and at a leaf: a path is a field, not an index", async () => {
+    const registry = createRegistry();
+    for (const t of TYPES) registry.registerType(t);
+    const outputs = createOutputStore(registry);
+    const std = composeStandard({
+      slug: "sim-arr", domain: "demo", input_types: ["sim-charter"],
+      agents: [testAgent({ slug: "composer", primitives: ["CREATE"], input_types: ["sim-charter"], output_types: ["sim-clause"], domain: "demo" })],
+      phases: [{ name: "compose", chairs: [{
+        role: "compose", agent_slug: "composer", depends_on: [], input_contract: ["sim-charter"],
+        output_contract: ["sim-clause"], required_skills: [], fan_out: FAN,
+      } as Chair] }] as PhaseDef[],
+    });
+    const deps: ServerDeps = { registry, outputs, ledger: new MemoryLedger(), standards: new Map([[std.slug, std]]) };
+    const r = await dispatchTool("standard_simulate", {
+      standard_slug: "sim-arr", depth: "standard",
+      // The fat thing is an ARRAY of objects. "expanded.0" would be an index, not a field, and a
+      // caller cannot act on it — the array itself is the thing to carry or drop.
+      mock_input: { "sim-charter": { families: FAMILIES, expanded: Array.from({ length: 40 }, () => ({ text: "T".repeat(1000) })) } },
+    }, deps);
+    const lf = planOf(r).phases[0]!.chairs[0]!.seats![0]!.inputs.find((i) => i.type === "sim-charter")!.largest_field!;
+    expect(lf.path).toBe("expanded");
+    expect(lf.bytes).toBeGreaterThan(40_000);
+  });
+
   it("S8 — with no payload to split, the chair is named as a template and says why it has no plan", async () => {
     const { deps } = bench(FAN);
     const r = await dispatchTool("standard_simulate", { standard_slug: "sim-fan", mock_input: {}, depth: "standard" }, deps);

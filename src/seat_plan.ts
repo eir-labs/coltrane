@@ -62,15 +62,31 @@ export interface SeatPlan {
 
 const bytesOf = (v: unknown): number => canonJson(v).length;
 
-/** The biggest top-level field of a record's data — the fat sibling, when there is one. */
-function largestField(data: unknown): { path: string; bytes: number } | undefined {
+/** The deepest OBJECT depth a path is followed to. A field is actionable; a path of six is noise. */
+const MAX_FIELD_DEPTH = 3;
+
+/**
+ * The biggest field of a record's data, followed DOWN while it is still a plain object.
+ *
+ * Naming the top level alone is a tautology for a whole class of record: a skill seals `{data: {…}}`,
+ * so the biggest top-level field of every such record is `data`, whatever is actually wrong with it.
+ * (Measured by eir-drafting: `largest_field: data (41,297)` on a 51,659-byte seat, where the answer
+ * they needed was `data.expanded (20,007)` — 63 provisions the seat cannot use.)
+ *
+ * The descent stops at an ARRAY on purpose. `expanded.0` is an index, not a field: a caller cannot
+ * carry or drop it, and the array itself is the thing they would act on.
+ */
+function largestField(data: unknown, depth = MAX_FIELD_DEPTH): { path: string; bytes: number } | undefined {
   if (typeof data !== "object" || data === null || Array.isArray(data)) return undefined;
   let best: { path: string; bytes: number } | undefined;
+  let bestValue: unknown;
   for (const [k, v] of Object.entries(data as Record<string, unknown>)) {
     const b = bytesOf(v);
-    if (!best || b > best.bytes) best = { path: k, bytes: b };
+    if (!best || b > best.bytes) { best = { path: k, bytes: b }; bestValue = v; }
   }
-  return best;
+  if (!best || depth <= 1) return best;
+  const deeper = largestField(bestValue, depth - 1);
+  return deeper ? { path: `${best.path}.${deeper.path}`, bytes: deeper.bytes } : best;
 }
 
 function seatOf(role: string, records: readonly OutputRecord[], payload: Record<string, unknown>): PlannedSeat {

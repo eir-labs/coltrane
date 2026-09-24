@@ -2902,6 +2902,10 @@ export async function runGig(
     // place (same id and content_sha: provenance names the whole record), and its payload slice.
     const narrow = (inputs: OutputRecord[]): void => {
       if (!opts.instance) return;
+      // A dropped record belongs to another seat's round: hand it to no one, or the seat reads the
+      // whole set it was split out of and the split bought nothing.
+      const drop = opts.instance.drop;
+      for (let k = inputs.length - 1; k >= 0; k--) if (drop.has(inputs[k]!.id)) inputs.splice(k, 1);
       for (let k = 0; k < inputs.length; k++) inputs[k] = opts.instance.records.get(inputs[k]!.id) ?? inputs[k]!;
     };
     const instanceView = opts.instance

@@ -28,6 +28,12 @@ export interface FanOutInstance {
   records: ReadonlyMap<string, OutputRecord>;
   /** Payload type → the narrowed value, for sets that arrived in the gig payload. */
   gig_input: Readonly<Record<string, unknown>>;
+  /**
+   * Record ids this instance must NOT receive: with `across_sources`, the OTHER records of the over
+   * type — the rounds this seat's item did not come from. Without it this is empty, and a narrowed
+   * view stands in each record's place.
+   */
+  drop: ReadonlySet<string>;
   stamp: ShardStamp;
 }
 
@@ -66,6 +72,20 @@ const shares = (a: unknown[], b: unknown[]): boolean => a.some((x) => b.some((y)
 type Source =
   | { kind: "record"; record: OutputRecord; data: Record<string, unknown> }
   | { kind: "payload"; data: Record<string, unknown> };
+
+/** Every record of `type` among the chair's inputs, in input order — for `across_sources`. */
+function sourcesFor(
+  role: string,
+  type: string,
+  records: readonly OutputRecord[],
+  satisfies: (rec: OutputRecord, type: string) => boolean,
+): Source[] {
+  const recs = records.filter((r) => satisfies(r, type));
+  if (recs.length === 0) {
+    throw new FanOutRefused(`fan-out of chair "${role}": no input of type "${type}" reached it — nothing to split`);
+  }
+  return recs.map((r) => ({ kind: "record" as const, record: r, data: r.data }));
+}
 
 function sourceFor(
   role: string,
@@ -109,8 +129,17 @@ export function expandFanOut(
   if (!fan) throw new FanOutRefused(`chair "${chair.role}" declares no fan_out`);
   const role = chair.role;
 
-  const over = sourceFor(role, fan.over.type, records, gigInput, satisfies);
-  const items = arrayAt(role, fan.over.type, over, fan.over.path);
+  // ACROSS SOURCES (opt-in): items come from EVERY record of the over type, each remembering the record
+  // it came from, so an instance is handed ONE record — its own — and its stamp names that record. The
+  // single-source refusal stays the default: choosing silently among several sets is the defect it was
+  // written against; saying "take them all" is a different, declared intention.
+  const overSources: Source[] = fan.over.across_sources
+    ? sourcesFor(role, fan.over.type, records, satisfies)
+    : [sourceFor(role, fan.over.type, records, gigInput, satisfies)];
+  const itemsWithSource: Array<{ item: unknown; source: Source }> = overSources.flatMap((src) =>
+    arrayAt(role, fan.over.type, src, fan.over.path).map((item) => ({ item, source: src })),
+  );
+  const items = itemsWithSource.map((x) => x.item);
   if (items.length === 0) {
     throw new FanOutRefused(`fan-out of chair "${role}": "${fan.over.type}" at "${fan.over.path}" has no items — a chair seated zero times is not a run`);
   }
@@ -157,8 +186,9 @@ export function expandFanOut(
       else payload[type] = data;
     };
 
-    const o = slice(fan.over.type, over, fan.over.path, [item]);
-    place(fan.over.type, over, o.data);
+    const from = itemsWithSource[idx]!.source;
+    const o = slice(fan.over.type, from, fan.over.path, [item]);
+    place(fan.over.type, from, o.data);
     slices.push(o.entry);
 
     joins.forEach((j, ji) => {
@@ -177,9 +207,13 @@ export function expandFanOut(
 
     const { fan_out: _template, ...rest } = chair;
     void _template;
+    const drop = new Set(
+      overSources.flatMap((s) => (s.kind === "record" && s !== from ? [s.record.id] : [])),
+    );
     return {
       chair: { ...rest, role: `${role}#${value}` },
       records: recs,
+      drop,
       gig_input: payload,
       stamp: { of: role, key: fan.over.key, value, slices },
     };

@@ -1767,6 +1767,29 @@ export async function runGig(
     // door (src/server.ts) also calls, so the two doors cannot drift into two vocabularies. The
     // behaviour here is unchanged: a near miss throws the same RuntimeError, the extras emit the same
     // event. `isPresent` is `gigInput[d] !== undefined`, exactly the collision predicate as before.
+    // THE PAYLOAD IS CHECKED AGAINST THE TYPES IT CLAIMS TO BE (eir-drafting, 24 Sep). Outputs are
+    // validated at the seal boundary and sealed inputs at the door; a hand-typed payload was only
+    // HASHED, so a charter carrying four fields its type forbids ran for months and surfaced only when
+    // something happened to SEAL one. Validated here with the SAME compiled schema the seal enforces
+    // (registry.validate — which skips a type the registry does not hold and a bare core type), before
+    // any chair runs, and refused naming the type and the path.
+    for (const declared of standardInputs) {
+      const value = gigInput[declared];
+      // Only an OBJECT payload under a type the registry HOLDS is checked. A type the registry does not
+      // hold has no schema to check against (refusing there would fail every genome whose declared input
+      // type is unregistered, which is a compose-time question, not this door's). A non-object value is
+      // not a record of any type; the chair's input_contract still governs whether it may run at all.
+      if (value === undefined || typeof value !== "object" || value === null || Array.isArray(value)) continue;
+      if (deps.outputs.coreTypeOf(declared) === null) continue;
+      const verdict = deps.outputs.validateShape(declared, value as Record<string, unknown>);
+      if (!verdict.valid) {
+        throw new RuntimeError(
+          `gig input "${declared}" does not satisfy its type: ${verdict.errors.join("; ")}. ` +
+            `The dispatch payload is checked against the same schema the seal enforces, so a typo fails here ` +
+            `rather than at a chair that seals one eight phases later.`,
+        );
+      }
+    }
     const part = partitionGigInputKeys([...Object.keys(gigInput)], [...standardInputs], (d) => gigInput[d] !== undefined);
     if (part.nearMiss !== undefined) {
       throw new RuntimeError(unknownGigInputMessage(part.nearMiss.key, part.nearMiss.declaredKey, standard.slug));

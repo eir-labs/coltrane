@@ -904,6 +904,47 @@ export function captureSeatDenials(stdout: string): SeatDenial[] {
   return out;
 }
 
+/**
+ * THE SEALED RECORDS THIS SEAT'S TOOLS RETURNED (spec.coltrane-sealed-inputs law 9, Claude door).
+ *
+ * A completions seat's tools are in-process, so its invoker sees every result. A Claude seat calls its
+ * MCP server as a CHILD, so its reads live only in the stream — the same place `captureOutputWrites`
+ * reads its seals from. Every {id, content_sha} pair a tool RESULT carried is a record it was handed.
+ * The seat's own `output_write` results are excluded: a chair naming its own seal as something it read
+ * would be false provenance. Reported, never trusted — the runtime re-hashes each ref before stamping.
+ */
+export function captureSeatReads(stdout: string): Array<{ id: string; content_sha: string }> {
+  const ownWrites = new Set<string>();
+  const refs: Array<{ id: string; content_sha: string }> = [];
+  const harvest = (value: unknown, depth = 0): void => {
+    if (depth > 8 || value === null || typeof value !== "object") return;
+    if (Array.isArray(value)) { for (const v of value) harvest(v, depth + 1); return; }
+    const o = value as Record<string, unknown>;
+    if (typeof o["id"] === "string" && typeof o["content_sha"] === "string" && !refs.some((r) => r.id === o["id"])) {
+      refs.push({ id: o["id"] as string, content_sha: o["content_sha"] as string });
+    }
+    for (const v of Object.values(o)) harvest(v, depth + 1);
+  };
+  for (const raw of stdout.split("\n")) {
+    const l = raw.trim();
+    if (!l) continue;
+    let e: Record<string, unknown>;
+    try { e = JSON.parse(l) as Record<string, unknown>; } catch { continue; } // a torn line is not fatal
+    const msg = e["message"];
+    if (!msg || typeof msg !== "object") continue;
+    for (const b of ((msg as { content?: Array<Record<string, unknown>> }).content ?? [])) {
+      const kind = String(b["type"] ?? "");
+      if (kind === "tool_use" && isOutputWriteToolName(String(b["name"] ?? ""))) ownWrites.add(String(b["id"] ?? ""));
+      if (kind !== "tool_result" || ownWrites.has(String(b["tool_use_id"] ?? ""))) continue;
+      const content = b["content"];
+      if (typeof content === "string") {
+        try { harvest(JSON.parse(content)); } catch { /* not JSON: nothing a record could be read from */ }
+      } else harvest(content);
+    }
+  }
+  return refs;
+}
+
 export function captureOutputWrites(
   stdout: string,
   sealTypes: readonly string[],
@@ -2059,6 +2100,12 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
       // Every stream whose writes count toward the seal. Diverges from `stdout` only when a reserve
       // was granted, which is the one case where a chair's output spans more than one invocation.
       let sealStdout = stdout;
+
+      // WHAT THE SEAT READ (spec.coltrane-sealed-inputs law 9), reported as the same `seat_read` event
+      // the completions door emits — so the runtime's ONE verification path (re-hash, dedup, stamp)
+      // serves both doors. Here, where every seal path sees the stream: a text-seal chair reads too.
+      const seatReads = captureSeatReads(stdout);
+      if (seatReads.length > 0) ctx.onEvent?.({ type: "seat_read", raw: { refs: seatReads } } as AgentStreamEvent);
 
       if (budgetStopped && reserveTurns > 0 && seal !== undefined) {
         const sealedSoFar = captureOutputWrites(stdout, sealTypes);

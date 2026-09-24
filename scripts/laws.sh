@@ -29,7 +29,12 @@ cd "$(dirname "$0")/.."
 # stopped being true at Node 24), and two pure flag-string laws replaced it in this band. The nine
 # laws that need a real request moved to tests/security — a band may reach out, the root suite may
 # not — so they are counted there, by file, not here.
-EXPECTED_LAWS="${EXPECTED_LAWS:-4072}"   # includes 21 todo
+EXPECTED_LAWS="${EXPECTED_LAWS:-4078}"   # includes 21 todo
+#   +6  claude_seat_reads (new file) — law 9 on the door the drafting genome runs on: a Claude seat's
+#       tools are a CHILD's, so its reads live only in the stream. captureSeatReads reads the sealed
+#       records its tool RESULTS carried and emits the same `seat_read` the completions door does, so
+#       the runtime's one verification path serves both. Asking is not reading (only a result counts),
+#       and the seat's own output_write result is not a read. 6 wires cut, all red.
 #   +6  seat_reads_recorded (new file) — spec.coltrane-sealed-inputs law 9, un-deferred: a sealed record
 #       a seat PULLS through its tools is named in what it seals, re-hashed first (the door's check) and
 #       stamped with a `read` resolution so trace crosses the gig. Two cuts stayed green until their laws
@@ -102,7 +107,7 @@ EXPECTED_LAWS="${EXPECTED_LAWS:-4072}"   # includes 21 todo
 #       with the handler, the description does not. Its first draft could not fail — it forgave any
 #       token no tool anywhere declared, which is exactly what a renamed argument leaves behind.
 #       Sabotage said so (`current` -> `slug_current` stayed green); the exemption is gone.
-EXPECTED_FILES="${EXPECTED_FILES:-427}"   # + tests/sealed_inputs.test.ts, tests/fan_out.test.ts, tests/completions_seal.test.ts, tests/tier_ladder.test.ts, tests/amend_ladder.test.ts, tests/completions_reasoning_effort.test.ts, tests/bus.test.ts, tests/bus_chair.test.ts, tests/bus_terminal.test.ts, tests/bus_verbs.test.ts, tests/bus_commit.test.ts, tests/code_tools.test.ts, tests/gig_input_validated.test.ts, tests/seat_reads_recorded.test.ts
+EXPECTED_FILES="${EXPECTED_FILES:-428}"   # + tests/sealed_inputs.test.ts, tests/fan_out.test.ts, tests/completions_seal.test.ts, tests/tier_ladder.test.ts, tests/amend_ladder.test.ts, tests/completions_reasoning_effort.test.ts, tests/bus.test.ts, tests/bus_chair.test.ts, tests/bus_terminal.test.ts, tests/bus_verbs.test.ts, tests/bus_commit.test.ts, tests/code_tools.test.ts, tests/gig_input_validated.test.ts, tests/seat_reads_recorded.test.ts, tests/claude_seat_reads.test.ts
 
 # THE OTHER BANDS. `vitest run` is ROOT-CONFIG ONLY — this repo's own workflow comments
 # record that four configs went unexecuted once for exactly that reason. So pinning only the

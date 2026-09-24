@@ -3253,6 +3253,9 @@ export async function runGig(
   }
 
   async function executeChair(p: PreparedChair): Promise<OutputRecord[]> {
+    // WHAT THIS SEAT READ through its tools, as the invoker reported it. Reported, never trusted: each
+    // ref is re-hashed against the store before it is stamped (spec.coltrane-sealed-inputs law 9).
+    const readRefs: Array<{ id: string; content_sha: string }> = [];
     // What the transport SAID about this chair, hoisted out of the invocation block so the seal
     // can prefer a measurement over the tier table's guess. Empty for a skill-backed chair.
     let chairReport: { model?: string; cost_usd?: number; tokens_used?: number; tier?: string } = {};
@@ -3545,6 +3548,14 @@ export async function runGig(
           ...(gigSubstrate?.seat ? { seatExec: gigSubstrate.seat } : {}),
           onEvent: (ev) => {
             sink.fold(ev);
+            if (ev.type === "seat_read") {
+              const raw = ev.raw as { refs?: Array<{ id?: unknown; content_sha?: unknown }> } | undefined;
+              for (const r of raw?.refs ?? []) {
+                if (typeof r?.id === "string" && typeof r.content_sha === "string" && !readRefs.some((x) => x.id === r.id)) {
+                  readRefs.push({ id: r.id, content_sha: r.content_sha });
+                }
+              }
+            }
             emit({ type: "agent_event", phase: phaseName, role: chair.role, event: ev });
             // contract-amend-resume-prompt-v1 (F1) — the invoker's cold-fallback signal. Captured here
             // (the one seam every chair event flows through) so chair_complete can record it.
@@ -3929,6 +3940,22 @@ export async function runGig(
       }
     }
 
+    // WHAT THE SEAT READ, VERIFIED. A record the seat pulled through a tool is named in what it seals —
+    // but only after the engine re-hashes it against the store, the same check the dispatch door makes
+    // (spec.coltrane-sealed-inputs law 9). A ref the store does not hold, or whose bytes no longer hash
+    // to its content_sha, is NOT stamped: a read the engine cannot stand behind must not read as one.
+    // Deduped against what was pushed, so a record both fed and re-read is named once.
+    const verifiedReads = readRefs.filter((r: { id: string; content_sha: string }) => {
+      if (inputs.some((i) => i.id === r.id)) return false;
+      const rec = deps.outputs.get(r.id);
+      if (!rec || rec.content_sha !== r.content_sha) return false;
+      const now = outputContentHash({
+        core_type: rec.core_type, domain_type: rec.domain_type, domain_type_version: rec.domain_type_version,
+        domain: rec.domain, primitive: rec.primitive, phase: rec.phase, agent_slug: rec.agent_slug, data: rec.data,
+      });
+      return now === rec.content_sha;
+    });
+
     // Only now does anything become durable.
     const written: OutputRecord[] = [];
     for (const { spec, slice } of resolved) {
@@ -3955,9 +3982,17 @@ export async function runGig(
         phase: phaseName,
         primitive: spec.primitive,
         data: slice,
-        input_refs: inputs.map((i) => i.id),
-        input_shas: inputs.map((i) => i.content_sha), // #196 — real predecessor hashes, engine-stamped
-        input_resolutions: resolutionsOf(inputs),        // spec.coltrane-sealed-inputs — the cross-gig edge
+        input_refs: [...inputs.map((i) => i.id), ...verifiedReads.map((r: { id: string }) => r.id)],
+        input_shas: [...inputs.map((i) => i.content_sha), ...verifiedReads.map((r: { content_sha: string }) => r.content_sha)],
+        // spec.coltrane-sealed-inputs — the cross-gig edge, for what was fed AND for what the seat read:
+        // a provision pulled from another gig is only walkable because the ENGINE verified and stamped it.
+        input_resolutions: [
+          ...resolutionsOf(inputs),
+          ...verifiedReads.map((r: { id: string; content_sha: string }) => ({
+            output_id: r.id, content_sha: r.content_sha,
+            from_gig: deps.outputs.get(r.id)?.gig_id ?? "", resolved_at: new Date().toISOString(), resolved_by: "read" as const,
+          })),
+        ],
         ...(p.shard ? { shard: p.shard } : {}),          // fan-out — which slice this instance read
         // WHICH model produced this, resolved through the invoker's own function so the stamp
         // and the spawn cannot disagree. Absent for a skill-backed chair — no model ran, and

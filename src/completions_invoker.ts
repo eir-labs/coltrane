@@ -152,6 +152,21 @@ const OUTPUT_WRITE_TOOL = `mcp__${ENGINE_MCP_SERVER}__output_write`;
 /** The repair turn's round cap: enough to make the call it should have made, not to redo the work. */
 const SEAL_REPAIR_ROUNDS = 3;
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+/** Every {id, content_sha} pair anywhere in a tool result: the sealed records the call returned. */
+function sealedRefsIn(value: unknown, out: Array<{ id: string; content_sha: string }> = [], depth = 0): Array<{ id: string; content_sha: string }> {
+  if (depth > 6 || value === null || typeof value !== "object") return out;
+  if (Array.isArray(value)) {
+    for (const v of value) sealedRefsIn(v, out, depth + 1);
+    return out;
+  }
+  const o = value as Record<string, unknown>;
+  if (typeof o["id"] === "string" && typeof o["content_sha"] === "string" && !out.some((r) => r.id === o["id"])) {
+    out.push({ id: o["id"] as string, content_sha: o["content_sha"] as string });
+  }
+  for (const v of Object.values(o)) sealedRefsIn(v, out, depth + 1);
+  return out;
+}
+
 /** One grant pattern matched against one listed name — the turn loop's own rule (exact, or `*` prefix). */
 const patternCovers = (pattern: string, name: string): boolean =>
   pattern.endsWith("*") ? name.startsWith(pattern.slice(0, -1)) : name === pattern;
@@ -272,7 +287,15 @@ export function makeCompletionsInvoker(opts: CompletionsInvokerOptions): AgentIn
         : {
             list: (opts.tools as ToolSource).list,
             call: async (name, args) => {
-              if (toolSlugOf(name) !== "output_write") return opts.tools!.call(name, args);
+              if (toolSlugOf(name) !== "output_write") {
+                const result = await opts.tools!.call(name, args);
+                // WHAT THE SEAT READ. Any sealed record that came back through a tool is reported, so
+                // the runtime can name it in what this chair seals (spec.coltrane-sealed-inputs law 9).
+                // Reported, never trusted: the runtime re-hashes each one before stamping it.
+                const refs = sealedRefsIn(result);
+                if (refs.length > 0) ctx.onEvent?.({ type: "seat_read", raw: { tool: toolSlugOf(name), refs } });
+                return result;
+              }
               const asked = typeof args["domain_type"] === "string" ? (args["domain_type"] as string) : "";
               const dt = asked !== "" ? asked : sealTypes.length === 1 ? sealTypes[0]! : "";
               if (!sealTypes.includes(dt)) {

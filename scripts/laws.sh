@@ -29,7 +29,13 @@ cd "$(dirname "$0")/.."
 # stopped being true at Node 24), and two pure flag-string laws replaced it in this band. The nine
 # laws that need a real request moved to tests/security — a band may reach out, the root suite may
 # not — so they are counted there, by file, not here.
-EXPECTED_LAWS="${EXPECTED_LAWS:-4060}"   # includes 21 todo
+EXPECTED_LAWS="${EXPECTED_LAWS:-4066}"   # includes 21 todo
+#   +6  gig_input_validated (new file) — a dispatch payload is checked against the types it claims to
+#       be, at the door, with the same compiled schema the seal enforces (eir-drafting's repro: a
+#       charter carried 4 forbidden fields and omitted 2 required ones for months; only a seal caught
+#       it). Not the seal's core floor — a payload is not an output. Unknown types and non-object
+#       values are skipped, both pinned. 6 wires cut, all red; two existing laws had to be amended
+#       because the door now refuses earlier than they expected.
 #   -8  bifrost_invoker deleted (7 laws + 1 todo): a second AgentInvoker named for ONE vendor's
 #       transport (/v1/generate, text-only, no tools), exported from index.ts and called nowhere in
 #       src/. The completions port replaced it with one general OpenAI-compatible connector whose
@@ -91,7 +97,7 @@ EXPECTED_LAWS="${EXPECTED_LAWS:-4060}"   # includes 21 todo
 #       with the handler, the description does not. Its first draft could not fail — it forgave any
 #       token no tool anywhere declared, which is exactly what a renamed argument leaves behind.
 #       Sabotage said so (`current` -> `slug_current` stayed green); the exemption is gone.
-EXPECTED_FILES="${EXPECTED_FILES:-425}"   # + tests/sealed_inputs.test.ts, tests/fan_out.test.ts, tests/completions_seal.test.ts, tests/tier_ladder.test.ts, tests/amend_ladder.test.ts, tests/completions_reasoning_effort.test.ts, tests/bus.test.ts, tests/bus_chair.test.ts, tests/bus_terminal.test.ts, tests/bus_verbs.test.ts, tests/bus_commit.test.ts, tests/code_tools.test.ts
+EXPECTED_FILES="${EXPECTED_FILES:-426}"   # + tests/sealed_inputs.test.ts, tests/fan_out.test.ts, tests/completions_seal.test.ts, tests/tier_ladder.test.ts, tests/amend_ladder.test.ts, tests/completions_reasoning_effort.test.ts, tests/bus.test.ts, tests/bus_chair.test.ts, tests/bus_terminal.test.ts, tests/bus_verbs.test.ts, tests/bus_commit.test.ts, tests/code_tools.test.ts, tests/gig_input_validated.test.ts
 
 # THE OTHER BANDS. `vitest run` is ROOT-CONFIG ONLY — this repo's own workflow comments
 # record that four configs went unexecuted once for exactly that reason. So pinning only the

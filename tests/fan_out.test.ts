@@ -18,7 +18,10 @@ import { coreInvariantFields } from "./_support/specs.js";
 import { createMemoryReuseStore } from "../src/reuse.js";
 
 const TYPES: DomainType[] = [
-  { slug: "fanx-charter", extends: "Plan", domain: "demo", schema: { properties: { families: { type: "array" } } }, required_fields: [] },
+  // AMENDED 2026-09-24: `families` is declared WITHOUT a type. The dispatch door now validates a
+  // payload against its declared type (tests/gig_input_validated), so a typed `families` would make the
+  // door refuse F4's "not an array" payload first, and this file's subject is FAN-OUT's own refusal.
+  { slug: "fanx-charter", extends: "Plan", domain: "demo", schema: { properties: { families: {} } }, required_fields: [] },
   { slug: "fanx-ruleset", extends: "Interpretation", domain: "demo", schema: { properties: { rules: { type: "array" } } }, required_fields: [] },
   { slug: "fanx-clause", extends: "Artifact", domain: "demo", schema: { properties: { family: { type: "string" } } }, required_fields: ["family"] },
   { slug: "fanx-check", extends: "Verdict", domain: "demo", schema: {}, required_fields: [] },

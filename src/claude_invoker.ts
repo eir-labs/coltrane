@@ -415,7 +415,7 @@ function buildReverifyResumePrompt(
 // `output_trace` reported an intact chain over garbage.
 //
 // This is now ONE implementation shared by all four production call sites (:319, :325,
-// bifrost_invoker.ts, document_factory.ts) — see #226; the judge's half-fixed duplicate is
+// document_factory.ts) — see #226; the judge's half-fixed duplicate is
 // gone.
 
 /** Bound on the raw-output excerpt a parse failure carries, so no blob lands in a log line. */
@@ -651,7 +651,7 @@ function schemaPropertyNames(schema: Record<string, unknown> | undefined): strin
 
 /**
  * Build the extractor's options for a chair from what the invoker already resolved.
- * Shared by the Claude and Bifrost invokers so the key signal reaches every call site —
+ * Shared by the Claude and completions invokers so the key signal reaches every call site —
  * behaviour propagates through the shared import, but `expectKeys` does not unless each
  * site passes it (#221 policy 5).
  *

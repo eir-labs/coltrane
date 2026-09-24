@@ -28,7 +28,6 @@ export * from "./runtime.js";
 export * from "./gig_conformance.js";
 export * from "./chart.js";
 export * from "./claude_invoker.js";
-export * from "./bifrost_invoker.js";
 export * from "./turn_loop.js";
 export * from "./chat_completions_port.js";
 export * from "./completions_invoker.js";

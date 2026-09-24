@@ -100,7 +100,7 @@ export interface Chair {
 
 /** See `ChairSchema.fan_out`. */
 export interface FanOut {
-  over: { type: string; path: string; key: string };
+  over: { type: string; path: string; key: string; across_sources?: boolean };
   join?: Array<{ type: string; path: string; on: string; match: string }>;
 }
 

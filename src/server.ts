@@ -42,7 +42,9 @@ import {
 } from "./ledger.js";
 import { sealDrill } from "./seal_drill.js";
 import { standardSimulate } from "./simulate.js";
-import { runGig, BudgetExhausted, GigAborted, ResumeRefused, partialGigUsage, partialBudgetState, partitionGigInputKeys, unknownGigInputMessage, type AgentInvoker } from "./runtime.js";
+import { planSeats } from "./seat_plan.js";
+import { resolveSealedInputs } from "./sealed_inputs.js";
+import { runGig, outputSatisfiesType, BudgetExhausted, GigAborted, ResumeRefused, partialGigUsage, partialBudgetState, partitionGigInputKeys, unknownGigInputMessage, type AgentInvoker } from "./runtime.js";
 import { assembleRunDeps, resolveWorkingRepo } from "./run_deps.js";
 import { createCheckpointStore, createReuseStore, type CheckpointStore, type ReuseStore } from "./reuse.js";
 import { killLiveChairChildren, type SeatAsker } from "./claude_invoker.js";
@@ -700,11 +702,49 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
           .filter(isGig)
           .map((e) => e.usage?.total_cost_usd)
           .filter((n): n is number => typeof n === "number" && n > 0);
+        // WHO PLAYS, before anything is spent. A chair with `fan_out` is a TEMPLATE: it becomes N
+        // seats at run time, and a gate that priced it as one chair quoted a fraction of the run it
+        // exists to validate. Computed with the engine's own split (see src/seat_plan.ts), against
+        // the sealed records the payload names, so plan and run cannot drift.
+        const simInput = (args["mock_input"] as Record<string, unknown>) ?? {};
+        let simRecords: readonly OutputRecord[] = [];
+        // The payload the CHAIRS will see, not the one the caller typed: a resolved marker leaves
+        // `gigInput` and arrives as a record, so planning against the raw payload would count the
+        // marker object as payload the seat reads — and, worse, report it as a source.
+        let simPayload = simInput;
+        try {
+          const resolved = resolveSealedInputs(simInput, {
+            outputs: deps.outputs,
+            declared: new Set<string>(std.input_types ?? []),
+            satisfies: outputSatisfiesType,
+          });
+          simRecords = [...resolved.byType.values()].flatMap((rs) => rs.map((r) => r.record));
+          simPayload = resolved.gigInput;
+        } catch {
+          // A payload whose markers do not resolve is dispatch's refusal to make, not the
+          // pre-flight's: plan what CAN be planned and let the chairs report what cannot.
+        }
+        const plan = planSeats({ standard: std, gig_input: simPayload, records: simRecords, satisfies: outputSatisfiesType });
         const res = standardSimulate({
           standard_slug: simSlug,
           mock_input: (args["mock_input"] as Record<string, unknown>) ?? {},
           depth: simDepth.depth ?? "standard",
-          ...(std ? { standard: { slug: std.slug, phases: std.phases.map((p) => ({ name: p.name, chairs: p.chairs.length })) } } : {}),
+          ...(std
+            ? {
+                standard: {
+                  slug: std.slug,
+                  // SEATS, not chair records: a fan-out chair that will seat 22 players is 22
+                  // dispatches and 22 prompts. Where the plan could not be computed (no payload to
+                  // split), the chair's own count stands in — honestly low, and `seat_plan` says so.
+                  phases: std.phases.map((p, i) => ({
+                    name: p.name,
+                    chairs: plan.phases[i]
+                      ? p.chairs.reduce((n, ch, j) => n + Math.max(plan.phases[i]!.chairs[j]?.seat_count ?? 1, ch.fan_out ? 0 : 1), 0)
+                      : p.chairs.length,
+                  })),
+                },
+              }
+            : {}),
           ...(observed.length > 0 ? { observed_costs_usd: observed } : {}),
         });
         // WU-0008 — the seal drill: before quoting a price, prove every chair contract
@@ -715,7 +755,7 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
           { phases: std.phases.map((p) => ({ name: p.name, chairs: p.chairs.map((c) => ({ role: c.role, output_contract: c.output_contract })) })) },
           deps.registry,
         );
-        return { ok: true, requires_approval: approval, data: { ...res, seal_drill: drill } };
+        return { ok: true, requires_approval: approval, data: { ...res, seal_drill: drill, seat_plan: plan } };
       }
       case "output_query": {
         const mirror = deps.output_mirror;

@@ -260,6 +260,20 @@ describe("S — standard_simulate says which chairs are seats", () => {
     expect(lf.bytes).toBeGreaterThan(40_000);
   });
 
+  it("S14 — a declared `carry` shows up in the PLAN: the diet is visible before anything is spent", async () => {
+    // The two features are one workflow: simulate names the fat field, you declare a carry list,
+    // simulate says what it bought. If the plan did not reflect carry, an operator would declare a
+    // diet and have no way to check it short of dispatching.
+    const withCarry = bench({ over: { type: "sim-charter", path: "families", key: "family", carry: ["families"] } } as Chair["fan_out"]);
+    const without = bench(FAN);
+    const input = { "sim-charter": { families: FAMILIES, expanded: "E".repeat(30_000) } };
+    const a = await dispatchTool("standard_simulate", { standard_slug: "sim-fan", mock_input: input, depth: "standard" }, withCarry.deps);
+    const b = await dispatchTool("standard_simulate", { standard_slug: "sim-fan", mock_input: input, depth: "standard" }, without.deps);
+    const seatBytes = (r: { data?: unknown }) => planOf(r).phases[0]!.chairs[0]!.seats!.find((x) => x.role === "compose#mention")!.input_bytes;
+    expect(seatBytes(b), "control: the fat sibling rides whole").toBeGreaterThan(30_000);
+    expect(seatBytes(a), "and a declared diet is what the seat is planned to hold").toBeLessThan(1_000);
+  });
+
   it("S8 — with no payload to split, the chair is named as a template and says why it has no plan", async () => {
     const { deps } = bench(FAN);
     const r = await dispatchTool("standard_simulate", { standard_slug: "sim-fan", mock_input: {}, depth: "standard" }, deps);

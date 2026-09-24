@@ -47,6 +47,16 @@ export interface Chair {
    * Must be a subset of output_contract; enforced at compose time.
    */
   optional_outputs?: readonly string[];
+  /**
+   * Which DECLARED inputs may legitimately be absent. The twin of `optional_outputs`, for the same
+   * reason: a chair that reads the previous round's findings — and runs on the first round, when
+   * nothing has ever sealed one — has no way to say so today, so its author must either drop the
+   * type from the contract (and then it is never routed even when it exists) or seal an empty
+   * record to satisfy a demand nobody meant to make.
+   *
+   * Must be a subset of input_contract; enforced at compose time.
+   */
+  optional_inputs?: readonly string[];
   /** The FLOOR — a skill the seated agent must hold, by slug binding OR carried on its record.
    *  Checked at compose (does the incumbent declare it) and at run (does it resolve). */
   required_skills: readonly string[];
@@ -477,6 +487,17 @@ export function composeStandard(def: {
           );
         }
       }
+      // The same defect one field over: an optional_inputs entry naming nothing the chair declares
+      // silently keeps the type the author meant to relax REQUIRED, while they believe otherwise.
+      // Absent must mean DECLINE, so the typo is refused where the genome is authored.
+      for (const opt of ch.optional_inputs ?? []) {
+        if (!ch.input_contract.includes(opt)) {
+          throw new CompositionError(
+            `standard ${def.slug}: chair "${ch.role}" marks "${opt}" optional but does not declare it — ` +
+              `optional_inputs must be a subset of input_contract [${ch.input_contract.join(", ")}]`,
+          );
+        }
+      }
       // #243 — a skill-backed chair seals exactly ONE output: its deterministic code half
       // returns a single blob, and `prepareChair` takes `output_contract[0]` and discards the
       // rest. So a multi-entry contract on a skill chair is a promise the runtime structurally
@@ -583,8 +604,9 @@ export function composeStandard(def: {
         if (!upstream) continue; // already reported above
         for (const t of upstream.output_contract) produced.add(t);
       }
+      const optional = new Set<string>(ch.optional_inputs ?? []);
       for (const need of ch.input_contract) {
-        if (!produced.has(need)) {
+        if (!produced.has(need) && !optional.has(need)) {
           throw new CompositionError(
             `standard ${def.slug}: chair "${ch.role}" input_contract requires "${need}" not produced by any upstream chair (depends_on=[${ch.depends_on.join(",")}])`,
           );

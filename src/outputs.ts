@@ -436,6 +436,13 @@ export interface OutputStore {
    * cannot offer that guarantee mid-loop, so the check has to be separable from the effect.
    * One implementation backs both, so the two answers cannot drift.
    */
+  /**
+   * Does this data satisfy the DOMAIN SCHEMA of `domain_type` — the same compiled schema the seal
+   * enforces — without the core substance floor? For a DISPATCH PAYLOAD, which is not a sealed output:
+   * it claims to be a charter, so it must be shaped like one, but it owes none of the seal's floor.
+   * A type the registry does not hold, and a bare core type, are not checked (registry.validate's rule).
+   */
+  validateShape(domain_type: string, data: Record<string, unknown>): { valid: boolean; errors: string[] };
   validateWrite(o: { core_type: string; domain_type: string; data: Record<string, unknown> }): {
     valid: boolean;
     reason?: string;
@@ -1116,6 +1123,9 @@ export function createOutputStore(registry: Registry, options?: OutputStoreOptio
       return resolveTypeVersion(typeSlug);
     },
 
+    validateShape(domain_type, data) {
+      return registry.validate({ domain_type, data } as never);
+    },
     validateWrite(o) {
       return checkWritable(o);
     },

@@ -104,7 +104,7 @@ const TOOL_DEFS: readonly Omit<MCPToolDef, "description">[] = [
   // #239 — `basis`/`sample_size` say WHERE the estimate came from (a measured mean of real runs,
   // the standard's real structure, or a per-slug guess). estimated_duration_ms is the key the
   // handler actually returns; the old `estimated_duration` was never present on a response.
-  { slug: "standard_simulate",             category: "build", input_schema: obj({ standard_slug: "string", mock_input: "object", depth: "string" }), output_schema: obj({ phases: "array", estimated_cost: "number", estimated_duration_ms: "number", basis: "string", sample_size: "number" }) },
+  { slug: "standard_simulate",             category: "build", input_schema: obj({ standard_slug: "string", mock_input: "object", depth: "string" }), output_schema: obj({ phases: "array", estimated_cost: "number", estimated_duration_ms: "number", basis: "string", sample_size: "number", seat_plan: "object", seal_drill: "object" }) },
   // #237 — `depth` is read now (and rejected when unrecognized); the response echoes the depth
   // the run actually took, so "I ran a cheap iteration" is verifiable rather than assumed.
   // #234 — every argument this tool reads is advertised, and every argument advertised is read.
@@ -352,7 +352,7 @@ export const TOOL_DESCRIPTIONS: Record<string, string> = {
   venue_define:
     "Define a venue: the deny-by-default tool CEILING, ingress and egress origins, digest-pinned installs, credential surface and lifecycle. A venue can only ever narrow a seated agent, never widen one.",
   standard_simulate:
-    "Walk a standard's graph without running it: its phases, estimated cost and duration, and the BASIS that estimate came from — a measured mean of real runs, the standard's real structure, or a per-slug guess. Cheap to run before a dispatch is not.",
+    "Walk a standard's graph without running it: its phases, estimated cost and duration, and the BASIS that estimate came from — a measured mean of real runs, the standard's real structure, or a per-slug guess. With a `mock_input`, the answer also names WHO PLAYS: every chair by role, the seats a fan-out chair expands into (`role#key`, computed by the engine's own split), the BYTES each seat would be handed after narrowing, and the largest field inside each one — so a prompt too long to run is a number you read here, not a failure eight phases in. Cheap to run before a dispatch is not.",
   agent_promote:
     "Move an agent definition one step along its lifecycle: name the target `status` and the `current` one you believe it holds. The chain is draft, review, approved, active, retired — promotion is not a jump to active.",
   standard_promote:

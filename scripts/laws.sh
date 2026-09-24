@@ -29,7 +29,21 @@ cd "$(dirname "$0")/.."
 # stopped being true at Node 24), and two pure flag-string laws replaced it in this band. The nine
 # laws that need a real request moved to tests/security — a band may reach out, the root suite may
 # not — so they are counted there, by file, not here.
-EXPECTED_LAWS="${EXPECTED_LAWS:-4092}"
+EXPECTED_LAWS="${EXPECTED_LAWS:-4103}"
+#  +11 simulate_names_seats (new file) — the pre-dispatch gate now says WHO PLAYS. A chair with
+#      `fan_out` is a TEMPLATE; simulate received each phase as a chair COUNT, so a run that will
+#      seat 22 players looked like one that seats 1 AND WAS PRICED AS ONE — a "validate before you
+#      spend" gate quoting 1/22 of the spend. `seat_plan` names every chair by role, expands a
+#      fan-out with the ENGINE's own split (never a re-implementation), and reports the BYTES each
+#      seat would be handed after narrowing plus the largest field in each input. Measured by
+#      eir-drafting on a failing run: a seat handed 490,779 characters to read its own 48,849,
+#      434,225 of it two sibling arrays that fan_out leaves whole. That is now a number read before
+#      dispatch. Fourteen cuts: nine red at once; four stayed green because every law simulated from
+#      a RAW payload and never from sealed records — the path a real dispatch takes — until S10/S11
+#      were written, which also found the planner measuring the caller's markers instead of the
+#      resolved payload. A fifteenth finding has no law and needed none: naming a field `template`
+#      made the reachability sweep count `project-charter.template` as read by a file unrelated to
+#      it, so the field is `is_template` and that pin stays honest at 235.
 #  +11 optional_declared_input (new file) — `chair.optional_inputs`, the twin of optional_outputs: a
 #      declared input whose ABSENCE is not a refusal, so a chair can read the previous round's
 #      findings and still run the first round. Waived in four demands (compose's pipeline check, the
@@ -122,7 +136,7 @@ EXPECTED_LAWS="${EXPECTED_LAWS:-4092}"
 #       with the handler, the description does not. Its first draft could not fail — it forgave any
 #       token no tool anywhere declared, which is exactly what a renamed argument leaves behind.
 #       Sabotage said so (`current` -> `slug_current` stayed green); the exemption is gone.
-EXPECTED_FILES="${EXPECTED_FILES:-429}"   # + tests/sealed_inputs.test.ts, tests/fan_out.test.ts, tests/completions_seal.test.ts, tests/tier_ladder.test.ts, tests/amend_ladder.test.ts, tests/completions_reasoning_effort.test.ts, tests/bus.test.ts, tests/bus_chair.test.ts, tests/bus_terminal.test.ts, tests/bus_verbs.test.ts, tests/bus_commit.test.ts, tests/code_tools.test.ts, tests/gig_input_validated.test.ts, tests/seat_reads_recorded.test.ts, tests/claude_seat_reads.test.ts, tests/optional_declared_input.test.ts
+EXPECTED_FILES="${EXPECTED_FILES:-430}"   # + tests/sealed_inputs.test.ts, tests/fan_out.test.ts, tests/completions_seal.test.ts, tests/tier_ladder.test.ts, tests/amend_ladder.test.ts, tests/completions_reasoning_effort.test.ts, tests/bus.test.ts, tests/bus_chair.test.ts, tests/bus_terminal.test.ts, tests/bus_verbs.test.ts, tests/bus_commit.test.ts, tests/code_tools.test.ts, tests/gig_input_validated.test.ts, tests/seat_reads_recorded.test.ts, tests/claude_seat_reads.test.ts, tests/optional_declared_input.test.ts, tests/simulate_names_seats.test.ts
 
 # THE OTHER BANDS. `vitest run` is ROOT-CONFIG ONLY — this repo's own workflow comments
 # record that four configs went unexecuted once for exactly that reason. So pinning only the

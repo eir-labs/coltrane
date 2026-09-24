@@ -253,8 +253,13 @@ function outsideNeeds(standard: Standard): string[] {
   for (const ch of chairsOf(standard)) for (const t of ch.output_contract) producedInside.add(t);
   const needs = new Set<string>();
   for (const ch of chairsOf(standard)) {
+    const optional = new Set<string>(ch.optional_inputs ?? []);
     for (const t of ch.input_contract) {
       if (!declared.has(t) || producedInside.has(t)) continue;
+      // A type this chair declares OPTIONAL is not a need of this chair. It may still be a need of
+      // another chair in the same standard that demands it — the loop keeps going, so one chair's
+      // waiver never excuses another chair's demand.
+      if (optional.has(t)) continue;
       needs.add(t);
     }
   }

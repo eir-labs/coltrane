@@ -165,7 +165,9 @@ export interface InputResolution {
   content_sha: string;
   from_gig: string;
   resolved_at: string;
-  resolved_by: "dispatch" | "query";
+  /** How the engine came to hold this record: named in the dispatch, matched by a dispatch query, or
+   *  READ by the seat through a tool and re-hashed here before it was stamped. */
+  resolved_by: "dispatch" | "query" | "read";
   /** The query text, when the record was resolved by `$query`. */
   query?: Record<string, unknown> | undefined;
 }

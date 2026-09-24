@@ -261,7 +261,7 @@ export const ChairSchema = z.object({
    *  error, not a fan-out that silently degrades to one chair. */
   fan_out: z
     .object({
-      over: z.object({ type: z.string(), path: z.string(), key: z.string() }).strict(),
+      over: z.object({ type: z.string(), path: z.string(), key: z.string(), across_sources: z.boolean().optional() }).strict(),
       join: z
         .array(z.object({ type: z.string(), path: z.string(), on: z.string(), match: z.string() }).strict())
         .optional(),

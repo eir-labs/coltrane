@@ -261,3 +261,60 @@ describe("F7 — reuse", () => {
     expect(grant.shard?.slices.map((x) => x.type).sort()).toEqual(["fanx-charter", "fanx-ruleset"]);
   });
 });
+
+// ACROSS SOURCES — one seat per item across EVERY record of the over type (eir-drafting, 24 Sep: the
+// library fetches in three rounds with three fetchers, so nine source sets arrive and the seat wanted
+// one per provision, not per set). Opt-in: the refusal stays the default, because choosing silently
+// among several sets is the defect it was written against. Each instance still receives ONE record —
+// the one its own item came from — so a rule seals against its own source, not a merged blob.
+describe("F8 — fan-out across several records of the over type", () => {
+  const ACROSS = { over: { type: "fanx-charter", path: "families", key: "family", across_sources: true } };
+  const chairFan = (fan: Chair["fan_out"]): Chair => ({
+    role: "compose", agent_slug: "composer", depends_on: [], input_contract: ["fanx-charter"],
+    output_contract: ["fanx-clause"], required_skills: [], fan_out: fan,
+  } as Chair);
+  const acrossStd = (fan: Chair["fan_out"]) => composeStandard({
+    slug: "fan-across", domain: "demo", input_types: ["fanx-charter"],
+    agents: [testAgent({ slug: "composer", primitives: ["CREATE"], input_types: ["fanx-charter"], output_types: ["fanx-clause"], domain: "demo" })],
+    phases: [{ name: "compose", chairs: [chairFan(fan)] }] as PhaseDef[],
+  });
+  const seal = (w: ReturnType<typeof world>, families: Array<{ family: string }>, gig: string) =>
+    w.outputs.write({ core_type: "Plan", domain_type: "fanx-charter", domain: "demo", gig_id: gig, agent_slug: "author", primitive: "PLAN", data: { families, steps: ["s"] } });
+
+  it("one seat per item across every record, each handed only its own item and its own record", async () => {
+    const w = world();
+    const first = seal(w, [{ family: "grant" }, { family: "mention" }], "gig-round-1");
+    const second = seal(w, [{ family: "moral" }], "gig-round-2");
+    const b = band();
+    const res = await runGig(acrossStd(ACROSS), { "fanx-charter": [{ $output: first.id }, { $output: second.id }] }, { ...w, invoke: b.invoke } as never);
+    expect(res.status).toBe("complete");
+    expect(composerCalls(b.seen).map((c) => c.role).sort()).toEqual(["compose#grant", "compose#mention", "compose#moral"]);
+    for (const c of composerCalls(b.seen)) {
+      const handed = c.inputs.filter((i) => i.domain_type === "fanx-charter");
+      expect(handed.length, `${c.role} must be handed ONE record, the one its item came from`).toBe(1);
+      expect((handed[0]!.data["families"] as unknown[]).length).toBe(1);
+    }
+    const moral = res.outputs.find((o) => o.from_role === "compose#moral")!;
+    expect(moral.shard!.slices.find((s) => s.type === "fanx-charter")!.source, "the stamp names the record this item came from").toBe(second.id);
+    expect(res.outputs.find((o) => o.from_role === "compose#grant")!.shard!.slices[0]!.source).toBe(first.id);
+  });
+
+  it("a key repeated across records is still refused — two seats cannot share a role", async () => {
+    const w = world();
+    const a = seal(w, [{ family: "grant" }], "gig-round-1");
+    const b2 = seal(w, [{ family: "grant" }], "gig-round-2");
+    const b = band();
+    await expect(runGig(acrossStd(ACROSS), { "fanx-charter": [{ $output: a.id }, { $output: b2.id }] }, { ...w, invoke: b.invoke } as never))
+      .rejects.toThrow(/duplicate key "grant"/);
+    expect(composerCalls(b.seen).length).toBe(0);
+  });
+
+  it("without the opt-in, several records are still refused (the default is unchanged)", async () => {
+    const w = world();
+    const a = seal(w, [{ family: "grant" }], "gig-round-1");
+    const b2 = seal(w, [{ family: "moral" }], "gig-round-2");
+    const b = band();
+    await expect(runGig(acrossStd({ over: { type: "fanx-charter", path: "families", key: "family" } }), { "fanx-charter": [{ $output: a.id }, { $output: b2.id }] }, { ...w, invoke: b.invoke } as never))
+      .rejects.toThrow(/2 sources/);
+  });
+});

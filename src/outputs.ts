@@ -206,6 +206,9 @@ export interface OutputWrite {
   input_resolutions?: readonly InputResolution[] | undefined;
   /** See OutputRecord.shard. Supplied by the RUNTIME only; no MCP door forwards it. */
   shard?: ShardStamp | undefined;
+  /** This write is a LOCAL COPY of a row the remote sink already holds (resume state rebuilt from
+   *  the drain). Recorded locally and in the mirror, never drained back. Not part of the record. */
+  already_in_sink?: boolean | undefined;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
@@ -897,7 +900,7 @@ export function createOutputStore(registry: Registry, options?: OutputStoreOptio
       // finished seal, so it is best-effort.
       if (mirror) {
         try {
-          mirror.persist(rec);
+          mirror.persist(rec, o.already_in_sink === true ? { drain: false } : undefined);
         } catch (e) {
           if (process.env["COLTRANE_DRAIN_DEBUG"]) {
             console.warn(`[outputs] mirror.persist failed: ${e instanceof Error ? e.message : String(e)}`);

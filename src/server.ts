@@ -22,7 +22,7 @@ import {
 } from "./mcp.js";
 import { createRegistry, loadRegistry, domainTypeDefect, type Registry, type DomainType } from "./registry.js";
 import { loadGenome, resolveGenome, type SkillRecord, type EvalRecord, type LoadError } from "./loader.js";
-import { SkillSchema, AgentObjectSchema, StandardSchema, DomainTypeSchema, ChartSchema, VenueSchema, VenueObjectSchema, venueDefect, EffortSchema, type Effort } from "./genome_schema.js";
+import { SkillSchema, AgentObjectSchema, StandardSchema, DomainTypeSchema, ChartSchema, VenueSchema, VenueObjectSchema, venueDefect, EffortSchema, type Effort, type Layout } from "./genome_schema.js";
 import {
   composeChart, runChart, chartHash, chartEntrySeedTypes, dispatchTarget,
   type Chart, type Venue, type ChartPlan, type ChartResult, type ResolvedMovement,
@@ -134,6 +134,11 @@ export interface ServerDeps {
   /** The loaded ROOMS. Consulted wherever a chart names a venue: composeChart's ceiling rule needs
    *  the room to resolve, and an unresolvable ceiling fails closed. */
   venues?: Map<string, Venue> | undefined;
+  /** THIS TREE'S LAYOUT (coltrane.layout.json at genome_dir) — what a seat's role tokens mean in the
+   *  repository this server dispatches against. Threaded to every run through assembleRunDeps (and
+   *  to every chart movement). Absent → role tokens fail closed at dispatch, naming the role.
+   *  Refreshed by genome_reload. */
+  layout?: Layout | undefined;
   /** The SUBSTRATE realizer a venue-with-mcp_servers gig is stood up on. Bootstrap constructs the
    *  containerized realizer (`dockerComposeRealizer()`, real docker by default) and threads it into
    *  the chart-path runGig deps beside `venue`, so a chart whose room declares servers gets a real
@@ -1253,6 +1258,9 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
             // runChart forwards it to every movement via `...deps`. Threaded only when present, never
             // process.cwd().
             ...(deps.genome_dir ? { tree_root: deps.genome_dir } : {}),
+            // THE REPOSITORY'S LAYOUT — every movement inherits it through runChart's `...deps`, so a
+            // chart's seats resolve their role tokens against the same tree a standard's would.
+            ...(deps.layout !== undefined ? { layout: deps.layout } : {}),
             ...(depth ? { depth } : {}), ...(effort ? { effort } : {}), ...(max_context_tokens !== undefined ? { max_context_tokens } : {}), ...reuseWiring, ...humanWiring,
           };
           /** The ARRANGEMENT's manifest. A chart has no single genome_hash or run_fingerprint — it
@@ -1454,6 +1462,9 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
           // resolve against the bootstrapped root too. Never process.cwd(): absent genome_dir → no
           // tree_root, and a laws/changes seal then refuses `tree_root_unknown`.
           tree_root: deps.genome_dir,
+          // THE REPOSITORY'S LAYOUT — the genome tree this server was bootstrapped from is the tree the
+          // gig runs against, so its own coltrane.layout.json answers the seats' role tokens.
+          layout: deps.layout,
         });
 
         // The gig id this run seals under — minted ONCE for both doors so the single-flight lock
@@ -2277,6 +2288,9 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
 
         // Refresh surfaced load_errors so the next system_health call sees them.
         deps.load_errors = [...fresh.load_errors];
+        // The layout — re-read with the rest of the tree, so an edited coltrane.layout.json reaches
+        // the next dispatch (and a removed or malformed one stops granting).
+        deps.layout = fresh.layout;
 
         // agents — diff against deps.agents (the prior-load snapshot) then
         // mutate deps.agents in place so the next reload sees the new baseline.
@@ -4318,6 +4332,8 @@ export function bootstrapServerDeps(genomeRoot?: string): ServerDeps {
     standards: genome.standards, // ← gig_dispatch can now resolve file-defined standards
     charts: genome.charts,   // ← gig_dispatch resolves a chart_slug; chart_browse lists them
     venues: genome.venues,   // ← the ceiling a chart's venue imposes has to resolve to something
+    // THE TREE'S LAYOUT — coltrane.layout.json at this root; what the seats' role tokens mean here.
+    ...(genome.layout !== undefined ? { layout: genome.layout } : {}),
     // The production construction of a realizer — the wire from dispatch to the container substrate.
     // A venue-with-mcp_servers gig is stood up on this (real docker by default; the seam's `run` is
     // the daemon-free test substitute). Before this, dockerComposeRealizer was defined and reachable

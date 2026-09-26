@@ -1175,6 +1175,11 @@ export async function workOnce(ctx: WorkerContext, deps: WorkOnceDeps): Promise<
         // venue-populated room, or a claim naming no repository) there is no tree here, so tree_root is
         // undefined and a laws/changes seal refuses `tree_root_unknown` rather than stamping the wrong tree.
         tree_root: workspace?.dir,
+        // THE GRANT BOUNDARY IS THE ORG STORE'S ROW for the repository this gig works in — never the
+        // clone's own coltrane.layout.json. The clone is the repository being edited: a layout read
+        // from it would let anyone who can push to that repository widen every seat that drains it.
+        // No row for this repository → no layout, and every role token fails closed naming its role.
+        layout: workingRepo ? genome.layouts?.get(workingRepo) : undefined,
       }),
       gig_id: claim.gig_id, // ← the run IS the queue row; the drained header completes it
       signal: aborter.signal,

@@ -31,104 +31,114 @@
     "ROUND 4 RULING (b), NAMED NON-GOAL: the diff gate does not see gitignored paths (git status does not list them). This is a documented limit and is NOT enforced by this change. Enforced instead: the engine never seals a gitignored path (stampChangeAddresses refuses it) and has no publish step (no git add/commit/push in src/ — publishing is a seat's sandboxed Bash).",
     "ROUND 4 NOTE: D4-REAL cannot observe the relative-path trap (srt resolves relative paths; the CLI ignores them). That plant is covered by D2-ABSOLUTE, where it was observed red.",
     "ROUND 5: grantCovers agrees with the Claude CLI 2.1.283's Write/Edit matcher — the bundled `ignore` 7.0.5 behind the CLI's dct/tn/Gn rule preprocessing, verified from the binary by the drafter — on a fixed table and a generated corpus; every protected path is denied to a Write/Edit grant iff the CLI could reach it; the spawn carries the .git and .claude denials. `ignore@7.0.5` is an exact devDependency used only as the oracle.",
-    "ROUND 5 FINDINGS (red at 5776395): Write(./**) — `**` to the CLI — gets NO protected-path denial (fail-open); `./x`, `a//b` and `**/**` are not preprocessed as the CLI does; `x/**` does not cover `x` (fail-closed at the gate); `[!…]` is negated by the engine but literal in ignore 7.0.5. Note the implementer compared against ignore 5.3.2; the CLI bundles 7.0.5."
+    "ROUND 5 FINDINGS (red at 5776395): Write(./**) — `**` to the CLI — gets NO protected-path denial (fail-open); `./x`, `a//b` and `**/**` are not preprocessed as the CLI does; `x/**` does not cover `x` (fail-closed at the gate); `[!…]` is negated by the engine but literal in ignore 7.0.5. Note the implementer compared against ignore 5.3.2; the CLI bundles 7.0.5.",
+    "ROUND 6: a literal Write/Edit spelled `./` or `//` refuses the chair (naming it) and is never spawned; a layout glob so spelled is a load_error; scope matching is case-insensitive like the CLI's; upper-cased protected paths are never granted, are denied to reaching grants, and are never excused by the diff gate; the room images carry every runtime dependency of the engine (room band; skipped as UNVERIFIED without Docker or the image).",
+    "ROUND 6 NOTE: the CI `room` job builds only coltrane/room:ephemeral, so the floor-image law skips (UNVERIFIED) in CI; building Dockerfile.floor there too would verify it."
   ],
   "laws": [
     {
       "path": "tests/a_grant_never_crosses_repositories.test.ts",
-      "commit": "8a9827e56654c35a8f86ecc0fb325cbbd495764b"
+      "commit": "72bd6561314b21b3614f62a01b3369f2958a2e61"
     },
     {
       "path": "tests/a_missing_role_or_layout_grants_nothing.test.ts",
-      "commit": "8a9827e56654c35a8f86ecc0fb325cbbd495764b"
+      "commit": "72bd6561314b21b3614f62a01b3369f2958a2e61"
     },
     {
       "path": "tests/a_new_repository_shape_needs_no_agent_amendment.test.ts",
-      "commit": "8a9827e56654c35a8f86ecc0fb325cbbd495764b"
+      "commit": "72bd6561314b21b3614f62a01b3369f2958a2e61"
     },
     {
       "path": "tests/a_seat_cannot_rewrite_its_own_layout.test.ts",
-      "commit": "8a9827e56654c35a8f86ecc0fb325cbbd495764b"
+      "commit": "72bd6561314b21b3614f62a01b3369f2958a2e61"
     },
     {
       "path": "tests/a_seat_cannot_write_outside_its_target_paths.test.ts",
-      "commit": "8a9827e56654c35a8f86ecc0fb325cbbd495764b"
+      "commit": "72bd6561314b21b3614f62a01b3369f2958a2e61"
     },
     {
       "path": "tests/a_seat_cannot_write_the_engines_state.test.ts",
-      "commit": "8a9827e56654c35a8f86ecc0fb325cbbd495764b"
+      "commit": "72bd6561314b21b3614f62a01b3369f2958a2e61"
     },
     {
       "path": "tests/a_seat_that_writes_outside_its_grant_is_refused.test.ts",
-      "commit": "8a9827e56654c35a8f86ecc0fb325cbbd495764b"
+      "commit": "72bd6561314b21b3614f62a01b3369f2958a2e61"
     },
     {
       "path": "tests/a_seats_bash_runs_in_a_sandbox.test.ts",
-      "commit": "8a9827e56654c35a8f86ecc0fb325cbbd495764b"
+      "commit": "72bd6561314b21b3614f62a01b3369f2958a2e61"
+    },
+    {
+      "path": "tests/a_spelling_or_case_never_widens_a_grant.test.ts",
+      "commit": "72bd6561314b21b3614f62a01b3369f2958a2e61"
     },
     {
       "path": "tests/a_target_path_never_escapes_the_tree.test.ts",
-      "commit": "8a9827e56654c35a8f86ecc0fb325cbbd495764b"
+      "commit": "72bd6561314b21b3614f62a01b3369f2958a2e61"
     },
     {
       "path": "tests/an_empty_or_globbed_scope_fails_closed.test.ts",
-      "commit": "8a9827e56654c35a8f86ecc0fb325cbbd495764b"
+      "commit": "72bd6561314b21b3614f62a01b3369f2958a2e61"
     },
     {
       "path": "tests/both_invokers_grant_through_the_layout.test.ts",
-      "commit": "8a9827e56654c35a8f86ecc0fb325cbbd495764b"
+      "commit": "72bd6561314b21b3614f62a01b3369f2958a2e61"
     },
     {
       "path": "tests/every_door_carries_the_current_layout.test.ts",
-      "commit": "8a9827e56654c35a8f86ecc0fb325cbbd495764b"
+      "commit": "72bd6561314b21b3614f62a01b3369f2958a2e61"
     },
     {
       "path": "tests/every_protected_path_is_denied_where_the_cli_could_reach_it.test.ts",
-      "commit": "8a9827e56654c35a8f86ecc0fb325cbbd495764b"
+      "commit": "72bd6561314b21b3614f62a01b3369f2958a2e61"
     },
     {
       "path": "tests/literal_grants_resolve_unchanged.test.ts",
-      "commit": "8a9827e56654c35a8f86ecc0fb325cbbd495764b"
+      "commit": "72bd6561314b21b3614f62a01b3369f2958a2e61"
     },
     {
       "path": "tests/seat_grant_resolution_only_narrows.test.ts",
-      "commit": "8a9827e56654c35a8f86ecc0fb325cbbd495764b"
+      "commit": "72bd6561314b21b3614f62a01b3369f2958a2e61"
+    },
+    {
+      "path": "tests/spec_room_image_carries_runtime_deps.test.ts",
+      "commit": "72bd6561314b21b3614f62a01b3369f2958a2e61"
     },
     {
       "path": "tests/the_chair_records_its_resolved_grants.test.ts",
-      "commit": "8a9827e56654c35a8f86ecc0fb325cbbd495764b"
+      "commit": "72bd6561314b21b3614f62a01b3369f2958a2e61"
     },
     {
       "path": "tests/the_diff_gate_never_fails_open.test.ts",
-      "commit": "8a9827e56654c35a8f86ecc0fb325cbbd495764b"
+      "commit": "72bd6561314b21b3614f62a01b3369f2958a2e61"
     },
     {
       "path": "tests/the_drain_takes_its_layout_from_the_store.test.ts",
-      "commit": "8a9827e56654c35a8f86ecc0fb325cbbd495764b"
+      "commit": "72bd6561314b21b3614f62a01b3369f2958a2e61"
     },
     {
       "path": "tests/the_engine_matches_scopes_as_the_cli_does.test.ts",
-      "commit": "8a9827e56654c35a8f86ecc0fb325cbbd495764b"
+      "commit": "72bd6561314b21b3614f62a01b3369f2958a2e61"
     },
     {
       "path": "tests/the_engine_never_publishes_an_ignored_path.test.ts",
-      "commit": "8a9827e56654c35a8f86ecc0fb325cbbd495764b"
+      "commit": "72bd6561314b21b3614f62a01b3369f2958a2e61"
     },
     {
       "path": "tests/the_layout_is_read_from_the_genome_tree.test.ts",
-      "commit": "8a9827e56654c35a8f86ecc0fb325cbbd495764b"
+      "commit": "72bd6561314b21b3614f62a01b3369f2958a2e61"
     },
     {
       "path": "tests/the_room_can_start_the_sandbox_and_nothing_more.test.ts",
-      "commit": "8a9827e56654c35a8f86ecc0fb325cbbd495764b"
+      "commit": "72bd6561314b21b3614f62a01b3369f2958a2e61"
     },
     {
       "path": "tests/the_sandbox_refuses_a_real_write.test.ts",
-      "commit": "8a9827e56654c35a8f86ecc0fb325cbbd495764b"
+      "commit": "72bd6561314b21b3614f62a01b3369f2958a2e61"
     },
     {
       "path": "tests/the_sandbox_tree_is_always_absolute.test.ts",
-      "commit": "8a9827e56654c35a8f86ecc0fb325cbbd495764b"
+      "commit": "72bd6561314b21b3614f62a01b3369f2958a2e61"
     }
   ],
   "coverage_map": [
@@ -1778,8 +1788,239 @@
       "kind": "behavioural",
       "drives": "grantCovers — src/grant_scope.ts (vs the CLI oracle, tests/support/cli_scope_oracle.ts)",
       "plant": "(RED at 5776395) grantCovers reads `[!…]` as a negated class; the CLI's ignore 7.0.5 reads a literal `!`"
+    },
+    {
+      "invariant_id": "SPELLING-CASE",
+      "test_name": "1 — a literal Write/Edit spelled `./` or `//` is refused, never seated > Write(./**): refused at dispatch, naming the grant — the seat is never invoked",
+      "test_file": "tests/a_spelling_or_case_never_widens_a_grant.test.ts",
+      "kind": "behavioural",
+      "drives": "runGig preflight → resolveSeatGrants — src/runtime.ts, src/layout_grants.ts",
+      "plant": "drop the literal-scope refusal (isAmbiguousSpelling) in resolveSeatGrants — src/layout_grants.ts",
+      "plant_observed": "P1-literal-refusal-removed applied at 0a8d1be → AssertionError: a seat holding Write(./**) — which the CLI reads wider than it is written — was invoked: expected 1 to be +0 // Object.is equality"
+    },
+    {
+      "invariant_id": "SPELLING-CASE",
+      "test_name": "1 — a literal Write/Edit spelled `./` or `//` is refused, never seated > Write(src//a): refused at dispatch, naming the grant — the seat is never invoked",
+      "test_file": "tests/a_spelling_or_case_never_widens_a_grant.test.ts",
+      "kind": "behavioural",
+      "drives": "runGig preflight → resolveSeatGrants — src/runtime.ts, src/layout_grants.ts",
+      "plant": "drop the literal-scope refusal (isAmbiguousSpelling) in resolveSeatGrants — src/layout_grants.ts",
+      "plant_observed": "P1-literal-refusal-removed applied at 0a8d1be → AssertionError: a seat holding Write(src//a) — which the CLI reads wider than it is written — was invoked: expected 1 to be +0 // Object.is equality"
+    },
+    {
+      "invariant_id": "SPELLING-CASE",
+      "test_name": "1 — a literal Write/Edit spelled `./` or `//` is refused, never seated > Edit(./src/**): refused at dispatch, naming the grant — the seat is never invoked",
+      "test_file": "tests/a_spelling_or_case_never_widens_a_grant.test.ts",
+      "kind": "behavioural",
+      "drives": "runGig preflight → resolveSeatGrants — src/runtime.ts, src/layout_grants.ts",
+      "plant": "drop the literal-scope refusal (isAmbiguousSpelling) in resolveSeatGrants — src/layout_grants.ts",
+      "plant_observed": "P1-literal-refusal-removed applied at 0a8d1be → AssertionError: a seat holding Edit(./src/**) — which the CLI reads wider than it is written — was invoked: expected 1 to be +0 // Object.is equality"
+    },
+    {
+      "invariant_id": "SPELLING-CASE",
+      "test_name": "1 — a literal Write/Edit spelled `./` or `//` is refused, never seated > the Claude invoker refuses Write(./**) before the spawn",
+      "test_file": "tests/a_spelling_or_case_never_widens_a_grant.test.ts",
+      "kind": "behavioural",
+      "drives": "makeClaudeInvoker(...) — src/claude_invoker.ts (resolveSeatGrants refusals)",
+      "plant": "drop the literal-scope refusal (isAmbiguousSpelling) in resolveSeatGrants — src/layout_grants.ts",
+      "plant_observed": "P1-literal-refusal-removed applied at 0a8d1be → AssertionError: a seat holding Write(./**) — `**` to the CLI — was spawned: expected true to be false // Object.is equality"
+    },
+    {
+      "invariant_id": "SPELLING-CASE",
+      "test_name": "1 — a literal Write/Edit spelled `./` or `//` is refused, never seated > control — the same scopes spelled plainly are seated",
+      "test_file": "tests/a_spelling_or_case_never_widens_a_grant.test.ts",
+      "kind": "behavioural",
+      "drives": "runGig preflight → resolveSeatGrants — src/runtime.ts, src/layout_grants.ts",
+      "plant": "refuse every literal Write/Edit (or every layout glob) — a control, green at 0a8d1be"
+    },
+    {
+      "invariant_id": "SPELLING-CASE",
+      "test_name": "2 — a layout glob spelled `./` or `//` is a load_error naming it > source: [\"./src/**\"] → load_error naming \"./src/**\", and no layout",
+      "test_file": "tests/a_spelling_or_case_never_widens_a_grant.test.ts",
+      "kind": "behavioural",
+      "drives": "loadGenome → LayoutSchema — src/loader.ts, src/genome_schema.ts",
+      "plant": "admit `./` and `//` in LayoutGlobsSchema's refine — src/genome_schema.ts",
+      "plant_observed": "P2-schema-admits applied at 0a8d1be → FAIL (vitest): source: [\"./src/**\"] → load_error naming \"./src/**\", and no layout"
+    },
+    {
+      "invariant_id": "SPELLING-CASE",
+      "test_name": "2 — a layout glob spelled `./` or `//` is a load_error naming it > source: [\"src//**\"] → load_error naming \"src//**\", and no layout",
+      "test_file": "tests/a_spelling_or_case_never_widens_a_grant.test.ts",
+      "kind": "behavioural",
+      "drives": "loadGenome → LayoutSchema — src/loader.ts, src/genome_schema.ts",
+      "plant": "admit `./` and `//` in LayoutGlobsSchema's refine — src/genome_schema.ts",
+      "plant_observed": "P2-schema-admits applied at 0a8d1be → FAIL (vitest): source: [\"src//**\"] → load_error naming \"src//**\", and no layout"
+    },
+    {
+      "invariant_id": "SPELLING-CASE",
+      "test_name": "2 — a layout glob spelled `./` or `//` is a load_error naming it > source: [\"./**\"] → load_error naming \"./**\", and no layout",
+      "test_file": "tests/a_spelling_or_case_never_widens_a_grant.test.ts",
+      "kind": "behavioural",
+      "drives": "loadGenome → LayoutSchema — src/loader.ts, src/genome_schema.ts",
+      "plant": "admit `./` and `//` in LayoutGlobsSchema's refine — src/genome_schema.ts",
+      "plant_observed": "P2-schema-admits applied at 0a8d1be → FAIL (vitest): source: [\"./**\"] → load_error naming \"./**\", and no layout"
+    },
+    {
+      "invariant_id": "SPELLING-CASE",
+      "test_name": "2 — a layout glob spelled `./` or `//` is a load_error naming it > control — `src/**` loads",
+      "test_file": "tests/a_spelling_or_case_never_widens_a_grant.test.ts",
+      "kind": "behavioural",
+      "drives": "loadGenome → LayoutSchema — src/loader.ts, src/genome_schema.ts",
+      "plant": "refuse every literal Write/Edit (or every layout glob) — a control, green at 0a8d1be"
+    },
+    {
+      "invariant_id": "SPELLING-CASE",
+      "test_name": "4 — case never hides a protected path > upper-cased protected targets are never granted — not even to a bare Write",
+      "test_file": "tests/a_spelling_or_case_never_widens_a_grant.test.ts",
+      "kind": "behavioural",
+      "drives": "resolveSeatGrants — src/layout_grants.ts (isProtectedPath / grantMayReach, src/grant_scope.ts)",
+      "plant": "isProtectedPath compares case-sensitively (drop toLowerCase) — src/grant_scope.ts",
+      "plant_observed": "P4-case-sensitive-protected applied at 0a8d1be → AssertionError: an upper-cased spelling of a protected path became a grant: expected [ 'Write(.GIT/config)', …(3) ] to deeply equal []"
+    },
+    {
+      "invariant_id": "SPELLING-CASE",
+      "test_name": "4 — case never hides a protected path > an upper-cased grant reaching a protected path is denied it (Write(.GIT/**), Write(.Claude/*), Write(COLTRANE.LAYOUT.JSON))",
+      "test_file": "tests/a_spelling_or_case_never_widens_a_grant.test.ts",
+      "kind": "behavioural",
+      "drives": "resolveSeatGrants — src/layout_grants.ts (isProtectedPath / grantMayReach, src/grant_scope.ts)",
+      "plant": "ignore({ ignorecase: false }) in grant_scope's matcherFor — src/grant_scope.ts",
+      "plant_observed": "P3-case-sensitive-matcher applied at 0a8d1be → FAIL (vitest): an upper-cased grant reaching a protected path is denied it (Write(.GIT/**), Write(.Claude/*), Write(COLTRANE.LAYOUT.JSON))"
+    },
+    {
+      "invariant_id": "SPELLING-CASE",
+      "test_name": "4 — case never hides a protected path > the diff gate never excuses an upper-cased protected path > a Write(**) seat that writes .GIT/config is refused, and nothing it made is sealed",
+      "test_file": "tests/a_spelling_or_case_never_widens_a_grant.test.ts",
+      "kind": "behavioural",
+      "drives": "runGig — src/runtime.ts (diff gate → inWriteScope → isProtectedPath, src/grant_scope.ts)",
+      "plant": "isProtectedPath compares case-sensitively (drop toLowerCase) — src/grant_scope.ts",
+      "plant_observed": "P4-case-sensitive-protected applied at 0a8d1be → AssertionError: .GIT/config was excused by the gate — a case spelling hid a protected path: expected [ { …(23) } ] to have a length of +0 but got 1"
+    },
+    {
+      "invariant_id": "SPELLING-CASE",
+      "test_name": "4 — case never hides a protected path > the diff gate never excuses an upper-cased protected path > a Write(**) seat that writes .Claude/settings.json is refused, and nothing it made is sealed",
+      "test_file": "tests/a_spelling_or_case_never_widens_a_grant.test.ts",
+      "kind": "behavioural",
+      "drives": "runGig — src/runtime.ts (diff gate → inWriteScope → isProtectedPath, src/grant_scope.ts)",
+      "plant": "isProtectedPath compares case-sensitively (drop toLowerCase) — src/grant_scope.ts",
+      "plant_observed": "P4-case-sensitive-protected applied at 0a8d1be → AssertionError: .Claude/settings.json was excused by the gate — a case spelling hid a protected path: expected [ { …(23) } ] to have a length of +0 but got 1"
+    },
+    {
+      "invariant_id": "SPELLING-CASE",
+      "test_name": "4 — case never hides a protected path > the diff gate never excuses an upper-cased protected path > a Write(**) seat that writes .COLTRANE/x is refused, and nothing it made is sealed",
+      "test_file": "tests/a_spelling_or_case_never_widens_a_grant.test.ts",
+      "kind": "behavioural",
+      "drives": "runGig — src/runtime.ts (diff gate → inWriteScope → isProtectedPath, src/grant_scope.ts)",
+      "plant": "isProtectedPath compares case-sensitively (drop toLowerCase) — src/grant_scope.ts",
+      "plant_observed": "P4-case-sensitive-protected applied at 0a8d1be → AssertionError: .COLTRANE/x was excused by the gate — a case spelling hid a protected path: expected [ { …(23) } ] to have a length of +0 but got 1"
+    },
+    {
+      "invariant_id": "SPELLING-CASE",
+      "test_name": "4 — case never hides a protected path > the diff gate never excuses an upper-cased protected path > a Write(**) seat that writes COLTRANE.LAYOUT.JSON is refused, and nothing it made is sealed",
+      "test_file": "tests/a_spelling_or_case_never_widens_a_grant.test.ts",
+      "kind": "behavioural",
+      "drives": "runGig — src/runtime.ts (diff gate → inWriteScope → isProtectedPath, src/grant_scope.ts)",
+      "plant": "isProtectedPath compares case-sensitively (drop toLowerCase) — src/grant_scope.ts",
+      "plant_observed": "P4-case-sensitive-protected applied at 0a8d1be → AssertionError: COLTRANE.LAYOUT.JSON was excused by the gate — a case spelling hid a protected path: expected [ { …(23) } ] to have a length of +0 but got 1"
+    },
+    {
+      "invariant_id": "SPELLING-CASE",
+      "test_name": "the engine's scope matcher agrees with the CLI's (ignore 7.0.5 + the CLI's Gn preprocessing) > Write(SRC/**) on \"src/a\": engine and CLI agree",
+      "test_file": "tests/the_engine_matches_scopes_as_the_cli_does.test.ts",
+      "kind": "behavioural",
+      "drives": "grantCovers — src/grant_scope.ts (vs the CLI oracle, tests/support/cli_scope_oracle.ts)",
+      "plant": "ignore({ ignorecase: false }) in grant_scope's matcherFor — src/grant_scope.ts",
+      "plant_observed": "P3-case-sensitive-matcher applied at 0a8d1be → FAIL (vitest): Write(SRC/**) on \"src/a\": engine and CLI agree"
+    },
+    {
+      "invariant_id": "SPELLING-CASE",
+      "test_name": "the engine's scope matcher agrees with the CLI's (ignore 7.0.5 + the CLI's Gn preprocessing) > Write(src/**) on \"SRC/A.ts\": engine and CLI agree",
+      "test_file": "tests/the_engine_matches_scopes_as_the_cli_does.test.ts",
+      "kind": "behavioural",
+      "drives": "grantCovers — src/grant_scope.ts (vs the CLI oracle, tests/support/cli_scope_oracle.ts)",
+      "plant": "ignore({ ignorecase: false }) in grant_scope's matcherFor — src/grant_scope.ts",
+      "plant_observed": "P3-case-sensitive-matcher applied at 0a8d1be → FAIL (vitest): Write(src/**) on \"SRC/A.ts\": engine and CLI agree"
+    },
+    {
+      "invariant_id": "SPELLING-CASE",
+      "test_name": "the engine's scope matcher agrees with the CLI's (ignore 7.0.5 + the CLI's Gn preprocessing) > Write(**) on \".GIT/config\": engine and CLI agree",
+      "test_file": "tests/the_engine_matches_scopes_as_the_cli_does.test.ts",
+      "kind": "behavioural",
+      "drives": "grantCovers — src/grant_scope.ts (vs the CLI oracle, tests/support/cli_scope_oracle.ts)",
+      "plant": "(no round-6 plant touches it) a case-sensitive or rewrite-free change to grant_scope that disagrees with the CLI on this pair"
+    },
+    {
+      "invariant_id": "SPELLING-CASE",
+      "test_name": "the engine's scope matcher agrees with the CLI's (ignore 7.0.5 + the CLI's Gn preprocessing) > Write(*.JSON) on \"a.json\": engine and CLI agree",
+      "test_file": "tests/the_engine_matches_scopes_as_the_cli_does.test.ts",
+      "kind": "behavioural",
+      "drives": "grantCovers — src/grant_scope.ts (vs the CLI oracle, tests/support/cli_scope_oracle.ts)",
+      "plant": "ignore({ ignorecase: false }) in grant_scope's matcherFor — src/grant_scope.ts",
+      "plant_observed": "P3-case-sensitive-matcher applied at 0a8d1be → AssertionError: grantCovers(\"*.JSON\", \"a.json\") disagrees with the CLI (true): expected false to be true // Object.is equality"
+    },
+    {
+      "invariant_id": "SPELLING-CASE",
+      "test_name": "the engine's scope matcher agrees with the CLI's (ignore 7.0.5 + the CLI's Gn preprocessing) > Write(*.json) on \"A.JSON\": engine and CLI agree",
+      "test_file": "tests/the_engine_matches_scopes_as_the_cli_does.test.ts",
+      "kind": "behavioural",
+      "drives": "grantCovers — src/grant_scope.ts (vs the CLI oracle, tests/support/cli_scope_oracle.ts)",
+      "plant": "ignore({ ignorecase: false }) in grant_scope's matcherFor — src/grant_scope.ts",
+      "plant_observed": "P3-case-sensitive-matcher applied at 0a8d1be → AssertionError: grantCovers(\"*.json\", \"A.JSON\") disagrees with the CLI (true): expected false to be true // Object.is equality"
+    },
+    {
+      "invariant_id": "SPELLING-CASE",
+      "test_name": "the engine's scope matcher agrees with the CLI's (ignore 7.0.5 + the CLI's Gn preprocessing) > Write(.Claude/) on \".claude/settings.json\": engine and CLI agree",
+      "test_file": "tests/the_engine_matches_scopes_as_the_cli_does.test.ts",
+      "kind": "behavioural",
+      "drives": "grantCovers — src/grant_scope.ts (vs the CLI oracle, tests/support/cli_scope_oracle.ts)",
+      "plant": "ignore({ ignorecase: false }) in grant_scope's matcherFor — src/grant_scope.ts",
+      "plant_observed": "P3-case-sensitive-matcher applied at 0a8d1be → AssertionError: grantCovers(\".Claude/\", \".claude/settings.json\") disagrees with the CLI (true): expected false to be true // Object.is equality"
+    },
+    {
+      "invariant_id": "SPELLING-CASE",
+      "test_name": "the engine's scope matcher agrees with the CLI's (ignore 7.0.5 + the CLI's Gn preprocessing) > Write(Config) on \".git/config\": engine and CLI agree",
+      "test_file": "tests/the_engine_matches_scopes_as_the_cli_does.test.ts",
+      "kind": "behavioural",
+      "drives": "grantCovers — src/grant_scope.ts (vs the CLI oracle, tests/support/cli_scope_oracle.ts)",
+      "plant": "ignore({ ignorecase: false }) in grant_scope's matcherFor — src/grant_scope.ts",
+      "plant_observed": "P3-case-sensitive-matcher applied at 0a8d1be → FAIL (vitest): Write(Config) on \".git/config\": engine and CLI agree"
+    },
+    {
+      "invariant_id": "SPELLING-CASE",
+      "test_name": "the engine's scope matcher agrees with the CLI's (ignore 7.0.5 + the CLI's Gn preprocessing) > Write(src/*) on \"SRC/A/B\": engine and CLI agree",
+      "test_file": "tests/the_engine_matches_scopes_as_the_cli_does.test.ts",
+      "kind": "behavioural",
+      "drives": "grantCovers — src/grant_scope.ts (vs the CLI oracle, tests/support/cli_scope_oracle.ts)",
+      "plant": "ignore({ ignorecase: false }) in grant_scope's matcherFor — src/grant_scope.ts",
+      "plant_observed": "P3-case-sensitive-matcher applied at 0a8d1be → FAIL (vitest): Write(src/*) on \"SRC/A/B\": engine and CLI agree"
+    },
+    {
+      "invariant_id": "SPELLING-CASE",
+      "test_name": "the engine's scope matcher agrees with the CLI's (ignore 7.0.5 + the CLI's Gn preprocessing) > Write(COLTRANE.LAYOUT.JSON) on \"coltrane.layout.json\": engine and CLI agree",
+      "test_file": "tests/the_engine_matches_scopes_as_the_cli_does.test.ts",
+      "kind": "behavioural",
+      "drives": "grantCovers — src/grant_scope.ts (vs the CLI oracle, tests/support/cli_scope_oracle.ts)",
+      "plant": "ignore({ ignorecase: false }) in grant_scope's matcherFor — src/grant_scope.ts",
+      "plant_observed": "P3-case-sensitive-matcher applied at 0a8d1be → FAIL (vitest): Write(COLTRANE.LAYOUT.JSON) on \"coltrane.layout.json\": engine and CLI agree"
+    },
+    {
+      "invariant_id": "ROOM-IMAGE-DEPS",
+      "test_name": "the room images carry every runtime dependency of the engine (skipped as UNVERIFIED without Docker or the image) > coltrane/room:ephemeral: declares this tree's runtime dependencies, installs each (exact pins exact), and the grant matcher loads",
+      "test_file": "tests/spec_room_image_carries_runtime_deps.test.ts",
+      "kind": "behavioural",
+      "drives": "the built image coltrane/room:ephemeral (Dockerfile.room / Dockerfile.floor), run with its own node",
+      "plant": "build the image from a manifest that predates a runtime dependency (or with `ignore` in devDependencies under npm ci --omit=dev)",
+      "plant_observed": "observed 27 Sep on the drafter's host with the images built before round 5 (coltrane/room:ephemeral): AssertionError: coltrane/room:ephemeral was built from a manifest whose runtime dependencies differ from this tree's — rebuild it: expected { …(6) } to deeply equal { …(7) }. Green after rebuilding both images at 0a8d1be."
+    },
+    {
+      "invariant_id": "ROOM-IMAGE-DEPS",
+      "test_name": "the room images carry every runtime dependency of the engine (skipped as UNVERIFIED without Docker or the image) > coltrane/floor:seat: declares this tree's runtime dependencies, installs each (exact pins exact), and the grant matcher loads",
+      "test_file": "tests/spec_room_image_carries_runtime_deps.test.ts",
+      "kind": "behavioural",
+      "drives": "the built image coltrane/floor:seat (Dockerfile.room / Dockerfile.floor), run with its own node",
+      "plant": "build the image from a manifest that predates a runtime dependency (or with `ignore` in devDependencies under npm ci --omit=dev)",
+      "plant_observed": "observed 27 Sep on the drafter's host with the images built before round 5 (coltrane/floor:seat): AssertionError: coltrane/floor:seat was built from a manifest whose runtime dependencies differ from this tree's — rebuild it: expected { …(6) } to deeply equal { …(7) }. Green after rebuilding both images at 0a8d1be."
     }
   ],
-  "testing_method": "vitest, example-based laws plus fast-check properties (RED-DEF-15: expansion draws only on declared tokens + the layout; the target and venue steps never add). Every law drives the production symbol named in `drives`; symbols that do not exist yet are reached through a runtime import (tests/layout_grants_fixtures.ts) so the shared tsc gate stays green and each law fails where it asserts. The invokers are observed through the seams the suite already uses: the Claude invoker's injected `run` (the exact argv), and the completions invoker's model request body and typed refusals. The chair record is observed on chair_complete through RunDeps.onProgress; the dispatch door by bootstrapServerDeps over a genome tree on disk with the invoke seam replaced. The resolver-level plants were rehearsed by the drafter against a throwaway reference resolver, deleted before commit; each turned its law red. plant_observed is omitted (the v5 type refuses null) and is filled by the grader once production exists. Round 3: the laws for the implementer's surviving plants (NO-SELF-WIDENING-2 isolation, DOOR-CHART, DOOR-RELOAD, TARGET-ESCAPE, LAYERED, RECORD-VENUE, PREFLIGHT-EXPANDED) are green against the implementation at cef6f97, and each plant was applied, observed red and reverted by the drafter. The target-escape laws for README/backslash/drive-letter entries and the dispatch refusals are red, because the ruling (refuse, never normalise) is new. The completions any-scope laws for Read/Bash, and every D1/D2/D3/D5 law, are red (the behaviour is new). D4 runs a REAL sandboxed process through @anthropic-ai/sandbox-runtime (srt), because `claude -p` cannot run a Bash command without a model; it is SKIPPED and printed as UNVERIFIED when srt or an OS sandbox is absent, and was observed red (no sandbox config on the argv) with srt present on macOS. The drafter's manual srt probe confirmed the target config shape (absolute allowWrite tree + absolute denyWrite) is enforced: inside src/ written, outside refused, the layout file refused. plant_observed is omitted; the grader fills it. Round 4: every law for the implementer's surviving plants (items 2–10) is green against 9ff943c, and each plant was applied to that production code, observed red, and reverted; plant_observed records the failing assertion. The laws for the conductor's two new rulings (.coltrane denial; ignored path never sealed) are red today because the behaviour does not exist yet; their plant_observed is left for the grader. Round 5: each of the implementer's six dot-path plants (OWN-A…F) was applied to src/grant_scope.ts at 5776395 and the new laws observed red (OWN-A 22 laws beyond the 4 findings, OWN-C 2, OWN-E 9, OWN-F 12, OWN-B 6, OWN-D 5); plant_observed records one failing assertion per law. Controls and laws no plant touched carry no plant_observed.",
+  "testing_method": "vitest, example-based laws plus fast-check properties (RED-DEF-15: expansion draws only on declared tokens + the layout; the target and venue steps never add). Every law drives the production symbol named in `drives`; symbols that do not exist yet are reached through a runtime import (tests/layout_grants_fixtures.ts) so the shared tsc gate stays green and each law fails where it asserts. The invokers are observed through the seams the suite already uses: the Claude invoker's injected `run` (the exact argv), and the completions invoker's model request body and typed refusals. The chair record is observed on chair_complete through RunDeps.onProgress; the dispatch door by bootstrapServerDeps over a genome tree on disk with the invoke seam replaced. The resolver-level plants were rehearsed by the drafter against a throwaway reference resolver, deleted before commit; each turned its law red. plant_observed is omitted (the v5 type refuses null) and is filled by the grader once production exists. Round 3: the laws for the implementer's surviving plants (NO-SELF-WIDENING-2 isolation, DOOR-CHART, DOOR-RELOAD, TARGET-ESCAPE, LAYERED, RECORD-VENUE, PREFLIGHT-EXPANDED) are green against the implementation at cef6f97, and each plant was applied, observed red and reverted by the drafter. The target-escape laws for README/backslash/drive-letter entries and the dispatch refusals are red, because the ruling (refuse, never normalise) is new. The completions any-scope laws for Read/Bash, and every D1/D2/D3/D5 law, are red (the behaviour is new). D4 runs a REAL sandboxed process through @anthropic-ai/sandbox-runtime (srt), because `claude -p` cannot run a Bash command without a model; it is SKIPPED and printed as UNVERIFIED when srt or an OS sandbox is absent, and was observed red (no sandbox config on the argv) with srt present on macOS. The drafter's manual srt probe confirmed the target config shape (absolute allowWrite tree + absolute denyWrite) is enforced: inside src/ written, outside refused, the layout file refused. plant_observed is omitted; the grader fills it. Round 4: every law for the implementer's surviving plants (items 2–10) is green against 9ff943c, and each plant was applied to that production code, observed red, and reverted; plant_observed records the failing assertion. The laws for the conductor's two new rulings (.coltrane denial; ignored path never sealed) are red today because the behaviour does not exist yet; their plant_observed is left for the grader. Round 5: each of the implementer's six dot-path plants (OWN-A…F) was applied to src/grant_scope.ts at 5776395 and the new laws observed red (OWN-A 22 laws beyond the 4 findings, OWN-C 2, OWN-E 9, OWN-F 12, OWN-B 6, OWN-D 5); plant_observed records one failing assertion per law. Controls and laws no plant touched carry no plant_observed. Round 6: the four surviving plants (literal-spelling refusal removed, schema admitting ./ and //, case-sensitive matcher, case-sensitive isProtectedPath) were each applied at 0a8d1be and observed red (4 / 3 / 10 / 5 laws). The room-image law was observed red against the stale pre-round-5 images on the drafter's host, then green after rebuilding both images.",
   "uncovered": []
 }

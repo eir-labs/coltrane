@@ -151,6 +151,7 @@ export function resolveSeatGrants(args: ResolveSeatGrantsArgs): SeatGrants {
   // ── 1 · expand role tokens through THIS repository's layout ──────────────────────────────────
   const expanded: string[] = [];
   const refusals: RoleRefusal[] = [];
+  const refusedLiterals = new Set<string>();
   const pushGenerated = (g: string) => {
     if (!expanded.includes(g)) expanded.push(g);
   };
@@ -158,6 +159,18 @@ export function resolveSeatGrants(args: ResolveSeatGrantsArgs): SeatGrants {
     const token = parseRoleToken(g);
     if (!token) {
       expanded.push(g);
+      // A path-scoped Write/Edit LITERAL spelled `./x` or `a//b` is REFUSED, not rewritten: the CLI
+      // silently preprocesses those spellings (src/grant_scope.ts cliAllowPattern — `./**` IS `**` to
+      // it), so a grant that reads narrow and acts wide is not seated. It stays in the expansion so the
+      // protected-path denials below are still computed over what it would have reached.
+      const sc = scopeOf(g);
+      if (WRITE_TOOLS.has(toolBaseName(g)) && sc !== undefined && isAmbiguousSpelling(sc)) {
+        refusedLiterals.add(g);
+        refusals.push({
+          token: g, role: "(literal scope)",
+          reason: `the scope "${sc}" is spelled with a leading "./" or an inner "//", which the CLI silently rewrites (./** is ** to it) — write it plainly`,
+        });
+      }
       continue;
     }
     const { tool, role } = token;
@@ -214,13 +227,13 @@ export function resolveSeatGrants(args: ResolveSeatGrantsArgs): SeatGrants {
   const target_paths_applied = target_paths !== undefined;
   let narrowed: string[];
   if (!target_paths_applied) {
-    narrowed = expanded.filter((g) => !isProtectedGrant(g));
+    narrowed = expanded.filter((g) => !isProtectedGrant(g) && !refusedLiterals.has(g));
   } else {
     const targets = target_paths
       .map(normaliseTarget)
       .filter((t): t is string => t !== undefined && !isProtectedPath(t));
     narrowed = [];
-    for (const g of expanded.filter((x) => !isProtectedGrant(x))) {
+    for (const g of expanded.filter((x) => !isProtectedGrant(x) && !refusedLiterals.has(x))) {
       const tool = toolBaseName(g);
       if (!WRITE_TOOLS.has(tool)) {
         narrowed.push(g);
@@ -240,12 +253,18 @@ export function resolveSeatGrants(args: ResolveSeatGrantsArgs): SeatGrants {
   return { grants, refusals, target_paths_applied, denials };
 }
 
+/** A path scope spelled in a form the CLI silently rewrites: a leading `./`, or `//` anywhere after the
+ *  first character (a leading `//` is an ABSOLUTE rule, judged as rooted outside the tree). */
+function isAmbiguousSpelling(scope: string): boolean {
+  return scope.startsWith("./") || scope.slice(1).includes("//");
+}
+
 /** One line naming every refused role token — the message a refused chair carries. */
 export function describeRoleRefusals(agentSlug: string, refusals: readonly RoleRefusal[]): string {
   return (
-    `agent "${agentSlug}" holds role token(s) its repository's layout does not answer — ` +
+    `agent "${agentSlug}" holds grant(s) that cannot be seated — ` +
     refusals.map((r) => `${r.token} (role "${r.role}": ${r.reason})`).join("; ") +
-    `. A role token with no answer grants nothing and the chair is refused rather than widened.`
+    `. Such a grant grants nothing and the chair is refused rather than widened.`
   );
 }
 

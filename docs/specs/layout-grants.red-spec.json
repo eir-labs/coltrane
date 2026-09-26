@@ -36,136 +36,141 @@
     "ROUND 6 NOTE: the CI `room` job builds only coltrane/room:ephemeral, so the floor-image law skips (UNVERIFIED) in CI; building Dockerfile.floor there too would verify it.",
     "ROUND 7 (the non-author grade, issuecomment-5847662352): (1) no layout entry carries (, ), or , or edge whitespace — the CLI 2.1.283 --allowedTools splitter (Hp, vendored and tied to the binary) must read every emitted grant as exactly itself; (2) protection never compares literal names: casefold + NFKC + confusable folding (NFD, drop Mn) for the matcher and the diff gate, and realpath/inode where the file exists; (3) the sandbox opens .git (never hooks or config) and the network only through layout-declared git/egress roles the seat holds as tokens; (4) a root drain never makes a root room and /proc/sys stays unwritable; (5) the engine's ignore is fingerprinted against the installed CLI binary; (6) the sandbox denies <tree>/.coltrane.",
     "ROLLOUT OBLIGATION (outside this repo): the sandbox settings keys (sandbox.enabled, failIfUnavailable, allowUnsandboxedCommands, filesystem.*, network.allowedDomains/strictAllowlist) EXIST in Claude Code 2.1.247 and 2.1.278 — the drains' versions — but are NOT runtime-verified there. The drain rollout must verify them live on each drain's CLI (a sandboxed write outside the tree, to the layout file and to .git/hooks refused; an undeclared host refused) before relying on them, and the drain hosts need bwrap and socat.",
-    "ROUND 7 FINDING: deploy-agent holds only WebFetch(https://api.vercel.com/*) with code_tool_access \"none\" — no Bash, so no sandbox; its fetch is an in-process CLI tool which the CLI 2.1.283 schema says the sandbox network setting does not gate. The grade's `fly` is not in its grants."
+    "ROUND 7 FINDING: deploy-agent holds only WebFetch(https://api.vercel.com/*) with code_tool_access \"none\" — no Bash, so no sandbox; its fetch is an in-process CLI tool which the CLI 2.1.283 schema says the sandbox network setting does not gate. The grade's `fly` is not in its grants.",
+    "ROUND 8 (chancery #112 blocker): a role set to null in paths, commands, git.* or egress is a DECLARED ABSENCE — its token grants nothing, does not refuse the chair, and is recorded as absent_by_declaration (resolver result and chair_complete); a missing key still fails closed; [] stays refused. The four real draft layouts validate with their declared absences (chancery: migrations, ship_dry; lighthouse-classic: migrations; coltrane-ui: ship_dry; cognition: build, migrations, scripts, ship_dry) and seat chancery #112's agents."
   ],
   "laws": [
     {
       "path": "tests/a_grant_never_crosses_repositories.test.ts",
-      "commit": "eaa7454022224dbc6f51e6abf5bec4625ea3a84e"
+      "commit": "7223ab8080c5a51f185e857de5d04b7407606c2f"
     },
     {
       "path": "tests/a_grant_never_smuggles_another_grant.test.ts",
-      "commit": "eaa7454022224dbc6f51e6abf5bec4625ea3a84e"
+      "commit": "7223ab8080c5a51f185e857de5d04b7407606c2f"
     },
     {
       "path": "tests/a_missing_role_or_layout_grants_nothing.test.ts",
-      "commit": "eaa7454022224dbc6f51e6abf5bec4625ea3a84e"
+      "commit": "7223ab8080c5a51f185e857de5d04b7407606c2f"
     },
     {
       "path": "tests/a_new_repository_shape_needs_no_agent_amendment.test.ts",
-      "commit": "eaa7454022224dbc6f51e6abf5bec4625ea3a84e"
+      "commit": "7223ab8080c5a51f185e857de5d04b7407606c2f"
     },
     {
       "path": "tests/a_protected_path_has_no_other_spelling.test.ts",
-      "commit": "eaa7454022224dbc6f51e6abf5bec4625ea3a84e"
+      "commit": "7223ab8080c5a51f185e857de5d04b7407606c2f"
+    },
+    {
+      "path": "tests/a_repository_can_declare_a_role_absent.test.ts",
+      "commit": "7223ab8080c5a51f185e857de5d04b7407606c2f"
     },
     {
       "path": "tests/a_room_never_runs_as_root.test.ts",
-      "commit": "eaa7454022224dbc6f51e6abf5bec4625ea3a84e"
+      "commit": "7223ab8080c5a51f185e857de5d04b7407606c2f"
     },
     {
       "path": "tests/a_seat_cannot_rewrite_its_own_layout.test.ts",
-      "commit": "eaa7454022224dbc6f51e6abf5bec4625ea3a84e"
+      "commit": "7223ab8080c5a51f185e857de5d04b7407606c2f"
     },
     {
       "path": "tests/a_seat_cannot_write_outside_its_target_paths.test.ts",
-      "commit": "eaa7454022224dbc6f51e6abf5bec4625ea3a84e"
+      "commit": "7223ab8080c5a51f185e857de5d04b7407606c2f"
     },
     {
       "path": "tests/a_seat_cannot_write_the_engines_state.test.ts",
-      "commit": "eaa7454022224dbc6f51e6abf5bec4625ea3a84e"
+      "commit": "7223ab8080c5a51f185e857de5d04b7407606c2f"
     },
     {
       "path": "tests/a_seat_reaches_git_and_the_network_only_as_declared.test.ts",
-      "commit": "eaa7454022224dbc6f51e6abf5bec4625ea3a84e"
+      "commit": "7223ab8080c5a51f185e857de5d04b7407606c2f"
     },
     {
       "path": "tests/a_seat_that_writes_outside_its_grant_is_refused.test.ts",
-      "commit": "eaa7454022224dbc6f51e6abf5bec4625ea3a84e"
+      "commit": "7223ab8080c5a51f185e857de5d04b7407606c2f"
     },
     {
       "path": "tests/a_seats_bash_runs_in_a_sandbox.test.ts",
-      "commit": "eaa7454022224dbc6f51e6abf5bec4625ea3a84e"
+      "commit": "7223ab8080c5a51f185e857de5d04b7407606c2f"
     },
     {
       "path": "tests/a_spelling_or_case_never_widens_a_grant.test.ts",
-      "commit": "eaa7454022224dbc6f51e6abf5bec4625ea3a84e"
+      "commit": "7223ab8080c5a51f185e857de5d04b7407606c2f"
     },
     {
       "path": "tests/a_target_path_never_escapes_the_tree.test.ts",
-      "commit": "eaa7454022224dbc6f51e6abf5bec4625ea3a84e"
+      "commit": "7223ab8080c5a51f185e857de5d04b7407606c2f"
     },
     {
       "path": "tests/an_empty_or_globbed_scope_fails_closed.test.ts",
-      "commit": "eaa7454022224dbc6f51e6abf5bec4625ea3a84e"
+      "commit": "7223ab8080c5a51f185e857de5d04b7407606c2f"
     },
     {
       "path": "tests/both_invokers_grant_through_the_layout.test.ts",
-      "commit": "eaa7454022224dbc6f51e6abf5bec4625ea3a84e"
+      "commit": "7223ab8080c5a51f185e857de5d04b7407606c2f"
     },
     {
       "path": "tests/every_door_carries_the_current_layout.test.ts",
-      "commit": "eaa7454022224dbc6f51e6abf5bec4625ea3a84e"
+      "commit": "7223ab8080c5a51f185e857de5d04b7407606c2f"
     },
     {
       "path": "tests/every_protected_path_is_denied_where_the_cli_could_reach_it.test.ts",
-      "commit": "eaa7454022224dbc6f51e6abf5bec4625ea3a84e"
+      "commit": "7223ab8080c5a51f185e857de5d04b7407606c2f"
     },
     {
       "path": "tests/literal_grants_resolve_unchanged.test.ts",
-      "commit": "eaa7454022224dbc6f51e6abf5bec4625ea3a84e"
+      "commit": "7223ab8080c5a51f185e857de5d04b7407606c2f"
     },
     {
       "path": "tests/seat_grant_resolution_only_narrows.test.ts",
-      "commit": "eaa7454022224dbc6f51e6abf5bec4625ea3a84e"
+      "commit": "7223ab8080c5a51f185e857de5d04b7407606c2f"
     },
     {
       "path": "tests/spec_room_image_carries_runtime_deps.test.ts",
-      "commit": "eaa7454022224dbc6f51e6abf5bec4625ea3a84e"
+      "commit": "7223ab8080c5a51f185e857de5d04b7407606c2f"
     },
     {
       "path": "tests/spec_room_runs_non_root_live.test.ts",
-      "commit": "eaa7454022224dbc6f51e6abf5bec4625ea3a84e"
+      "commit": "7223ab8080c5a51f185e857de5d04b7407606c2f"
     },
     {
       "path": "tests/the_chair_records_its_resolved_grants.test.ts",
-      "commit": "eaa7454022224dbc6f51e6abf5bec4625ea3a84e"
+      "commit": "7223ab8080c5a51f185e857de5d04b7407606c2f"
     },
     {
       "path": "tests/the_diff_gate_never_fails_open.test.ts",
-      "commit": "eaa7454022224dbc6f51e6abf5bec4625ea3a84e"
+      "commit": "7223ab8080c5a51f185e857de5d04b7407606c2f"
     },
     {
       "path": "tests/the_drain_takes_its_layout_from_the_store.test.ts",
-      "commit": "eaa7454022224dbc6f51e6abf5bec4625ea3a84e"
+      "commit": "7223ab8080c5a51f185e857de5d04b7407606c2f"
     },
     {
       "path": "tests/the_engine_matches_scopes_as_the_cli_does.test.ts",
-      "commit": "eaa7454022224dbc6f51e6abf5bec4625ea3a84e"
+      "commit": "7223ab8080c5a51f185e857de5d04b7407606c2f"
     },
     {
       "path": "tests/the_engine_never_publishes_an_ignored_path.test.ts",
-      "commit": "eaa7454022224dbc6f51e6abf5bec4625ea3a84e"
+      "commit": "7223ab8080c5a51f185e857de5d04b7407606c2f"
     },
     {
       "path": "tests/the_layout_is_read_from_the_genome_tree.test.ts",
-      "commit": "eaa7454022224dbc6f51e6abf5bec4625ea3a84e"
+      "commit": "7223ab8080c5a51f185e857de5d04b7407606c2f"
     },
     {
       "path": "tests/the_room_can_start_the_sandbox_and_nothing_more.test.ts",
-      "commit": "eaa7454022224dbc6f51e6abf5bec4625ea3a84e"
+      "commit": "7223ab8080c5a51f185e857de5d04b7407606c2f"
     },
     {
       "path": "tests/the_sandbox_refuses_a_real_write.test.ts",
-      "commit": "eaa7454022224dbc6f51e6abf5bec4625ea3a84e"
+      "commit": "7223ab8080c5a51f185e857de5d04b7407606c2f"
     },
     {
       "path": "tests/the_sandbox_tree_is_always_absolute.test.ts",
-      "commit": "eaa7454022224dbc6f51e6abf5bec4625ea3a84e"
+      "commit": "7223ab8080c5a51f185e857de5d04b7407606c2f"
     },
     {
       "path": "tests/the_scope_oracle_is_the_installed_clis.test.ts",
-      "commit": "eaa7454022224dbc6f51e6abf5bec4625ea3a84e"
+      "commit": "7223ab8080c5a51f185e857de5d04b7407606c2f"
     }
   ],
   "coverage_map": [
@@ -2692,8 +2697,333 @@
       "drives": "docker run with the RENDERED room options / docker image inspect",
       "plant": "render `user: 0:0` in the room (src/venue_realizer.ts)",
       "plant_observed": "render user 0:0 applied at 24a26de → AssertionError: a room process runs as uid 0: expected +0 not to be +0 (the no-op sysrq write was then permitted)"
+    },
+    {
+      "invariant_id": "DECLARED-ABSENCE",
+      "test_name": "LayoutSchema: null is a declared absence; [] is still refused > paths.migrations: null is admitted",
+      "test_file": "tests/a_repository_can_declare_a_role_absent.test.ts",
+      "kind": "behavioural",
+      "drives": "LayoutSchema — src/genome_schema.ts",
+      "plant": "(RED at 2b59552) null is not a declared absence: the schema refuses it and the resolver refuses the chair — the plant 'null refuses the chair' is today's behaviour"
+    },
+    {
+      "invariant_id": "DECLARED-ABSENCE",
+      "test_name": "LayoutSchema: null is a declared absence; [] is still refused > commands.ship_dry: null is admitted",
+      "test_file": "tests/a_repository_can_declare_a_role_absent.test.ts",
+      "kind": "behavioural",
+      "drives": "LayoutSchema — src/genome_schema.ts",
+      "plant": "(RED at 2b59552) null is not a declared absence: the schema refuses it and the resolver refuses the chair — the plant 'null refuses the chair' is today's behaviour"
+    },
+    {
+      "invariant_id": "DECLARED-ABSENCE",
+      "test_name": "LayoutSchema: null is a declared absence; [] is still refused > git.push: null is admitted",
+      "test_file": "tests/a_repository_can_declare_a_role_absent.test.ts",
+      "kind": "behavioural",
+      "drives": "LayoutSchema — src/genome_schema.ts",
+      "plant": "(RED at 2b59552) null is not a declared absence: the schema refuses it and the resolver refuses the chair — the plant 'null refuses the chair' is today's behaviour"
+    },
+    {
+      "invariant_id": "DECLARED-ABSENCE",
+      "test_name": "LayoutSchema: null is a declared absence; [] is still refused > egress.publish: null is admitted",
+      "test_file": "tests/a_repository_can_declare_a_role_absent.test.ts",
+      "kind": "behavioural",
+      "drives": "LayoutSchema — src/genome_schema.ts",
+      "plant": "(RED at 2b59552) null is not a declared absence: the schema refuses it and the resolver refuses the chair — the plant 'null refuses the chair' is today's behaviour"
+    },
+    {
+      "invariant_id": "DECLARED-ABSENCE",
+      "test_name": "LayoutSchema: null is a declared absence; [] is still refused > an empty list is still refused — absence is only ever the explicit null",
+      "test_file": "tests/a_repository_can_declare_a_role_absent.test.ts",
+      "kind": "behavioural",
+      "drives": "LayoutSchema — src/genome_schema.ts",
+      "plant": "admit [] as an absence (drop min(1))"
+    },
+    {
+      "invariant_id": "DECLARED-ABSENCE",
+      "test_name": "the resolver: a declared absence grants nothing and refuses nothing; an undeclared role still refuses > Write(@migrations) and Bash(@ship_dry) under declared absences: no grant, no refusal, both recorded",
+      "test_file": "tests/a_repository_can_declare_a_role_absent.test.ts",
+      "kind": "behavioural",
+      "drives": "resolveSeatGrants — src/layout_grants.ts",
+      "plant": "(RED at 2b59552) null is not a declared absence: the schema refuses it and the resolver refuses the chair — the plant 'null refuses the chair' is today's behaviour"
+    },
+    {
+      "invariant_id": "DECLARED-ABSENCE",
+      "test_name": "the resolver: a declared absence grants nothing and refuses nothing; an undeclared role still refuses > the same tokens under a layout that simply LACKS the keys: refused, naming the roles — missing is not null",
+      "test_file": "tests/a_repository_can_declare_a_role_absent.test.ts",
+      "kind": "behavioural",
+      "drives": "resolveSeatGrants — src/layout_grants.ts",
+      "plant": "missing == null: drop the undeclared-role refusal in resolveSeatGrants (src/layout_grants.ts)",
+      "plant_observed": "missing==null applied at 2b59552 → AssertionError: an undeclared role was treated as declared absent: expected [] to deeply equal [ 'migrations', 'ship_dry' ]"
+    },
+    {
+      "invariant_id": "DECLARED-ABSENCE",
+      "test_name": "the resolver: a declared absence grants nothing and refuses nothing; an undeclared role still refuses > git.push: null — Bash(@git_push) grants nothing and does not refuse; git.stage still expands",
+      "test_file": "tests/a_repository_can_declare_a_role_absent.test.ts",
+      "kind": "behavioural",
+      "drives": "resolveSeatGrants — src/layout_grants.ts",
+      "plant": "(RED at 2b59552) null is not a declared absence: the schema refuses it and the resolver refuses the chair — the plant 'null refuses the chair' is today's behaviour"
+    },
+    {
+      "invariant_id": "DECLARED-ABSENCE",
+      "test_name": "the resolver: a declared absence grants nothing and refuses nothing; an undeclared role still refuses > property: no grant ever results from a null role, and a null role never refuses",
+      "test_file": "tests/a_repository_can_declare_a_role_absent.test.ts",
+      "kind": "behavioural",
+      "drives": "resolveSeatGrants — src/layout_grants.ts",
+      "plant": "(RED at 2b59552) null is not a declared absence: the schema refuses it and the resolver refuses the chair — the plant 'null refuses the chair' is today's behaviour"
+    },
+    {
+      "invariant_id": "DECLARED-ABSENCE",
+      "test_name": "the spawn and the dispatch > egress.publish: null — a seat holding Bash(@publish) spawns with no network host, and is not refused",
+      "test_file": "tests/a_repository_can_declare_a_role_absent.test.ts",
+      "kind": "behavioural",
+      "drives": "makeClaudeInvoker(...) argv — src/claude_invoker.ts (sandbox.network)",
+      "plant": "null refuses the chair / a grant results from null (red today for the laws above; this one is green because the agent holds no absent role here)"
+    },
+    {
+      "invariant_id": "DECLARED-ABSENCE",
+      "test_name": "the spawn and the dispatch > runGig seats the chair under declared absences, and chair_complete records them",
+      "test_file": "tests/a_repository_can_declare_a_role_absent.test.ts",
+      "kind": "behavioural",
+      "drives": "runGig — src/runtime.ts (preflight + chair_complete record)",
+      "plant": "(RED at 2b59552) null is not a declared absence: the schema refuses it and the resolver refuses the chair — the plant 'null refuses the chair' is today's behaviour"
+    },
+    {
+      "invariant_id": "DECLARED-ABSENCE",
+      "test_name": "the spawn and the dispatch > runGig refuses the chair when the roles are merely missing — naming them",
+      "test_file": "tests/a_repository_can_declare_a_role_absent.test.ts",
+      "kind": "behavioural",
+      "drives": "runGig — src/runtime.ts (preflight + chair_complete record)",
+      "plant": "missing == null: drop the undeclared-role refusal in resolveSeatGrants (src/layout_grants.ts)",
+      "plant_observed": "missing==null applied at 2b59552 → AssertionError: a chair holding undeclared roles was seated: expected 1 to be +0"
+    },
+    {
+      "invariant_id": "DECLARED-ABSENCE",
+      "test_name": "each real repository's layout, with its declared absences, validates and seats chancery's agents > chancery (eir-labs/chancery#112): the absences it must declare are exactly the ones the conductor named",
+      "test_file": "tests/a_repository_can_declare_a_role_absent.test.ts",
+      "kind": "behavioural",
+      "drives": "LayoutSchema + resolveSeatGrants over the vendored draft layouts (tests/support/real_layouts.json) and chancery #112's agents",
+      "plant": "— a fixture check: the vendored drafts lack exactly the roles the conductor named"
+    },
+    {
+      "invariant_id": "DECLARED-ABSENCE",
+      "test_name": "each real repository's layout, with its declared absences, validates and seats chancery's agents > chancery: validates with its declared absences",
+      "test_file": "tests/a_repository_can_declare_a_role_absent.test.ts",
+      "kind": "behavioural",
+      "drives": "LayoutSchema + resolveSeatGrants over the vendored draft layouts (tests/support/real_layouts.json) and chancery #112's agents",
+      "plant": "(RED at 2b59552) null is not a declared absence: the schema refuses it and the resolver refuses the chair — the plant 'null refuses the chair' is today's behaviour"
+    },
+    {
+      "invariant_id": "DECLARED-ABSENCE",
+      "test_name": "each real repository's layout, with its declared absences, validates and seats chancery's agents > chancery: code-implementer is seated — no refusal, and every absent role it holds is recorded",
+      "test_file": "tests/a_repository_can_declare_a_role_absent.test.ts",
+      "kind": "behavioural",
+      "drives": "LayoutSchema + resolveSeatGrants over the vendored draft layouts (tests/support/real_layouts.json) and chancery #112's agents",
+      "plant": "(RED at 2b59552) null is not a declared absence: the schema refuses it and the resolver refuses the chair — the plant 'null refuses the chair' is today's behaviour"
+    },
+    {
+      "invariant_id": "DECLARED-ABSENCE",
+      "test_name": "each real repository's layout, with its declared absences, validates and seats chancery's agents > chancery: pr-publisher is seated — no refusal, and every absent role it holds is recorded",
+      "test_file": "tests/a_repository_can_declare_a_role_absent.test.ts",
+      "kind": "behavioural",
+      "drives": "LayoutSchema + resolveSeatGrants over the vendored draft layouts (tests/support/real_layouts.json) and chancery #112's agents",
+      "plant": "null refuses the chair / a grant results from null (red today for the laws above; this one is green because the agent holds no absent role here)"
+    },
+    {
+      "invariant_id": "DECLARED-ABSENCE",
+      "test_name": "each real repository's layout, with its declared absences, validates and seats chancery's agents > chancery: red-spec-drafter is seated — no refusal, and every absent role it holds is recorded",
+      "test_file": "tests/a_repository_can_declare_a_role_absent.test.ts",
+      "kind": "behavioural",
+      "drives": "LayoutSchema + resolveSeatGrants over the vendored draft layouts (tests/support/real_layouts.json) and chancery #112's agents",
+      "plant": "null refuses the chair / a grant results from null (red today for the laws above; this one is green because the agent holds no absent role here)"
+    },
+    {
+      "invariant_id": "DECLARED-ABSENCE",
+      "test_name": "each real repository's layout, with its declared absences, validates and seats chancery's agents > chancery: change-verifier is seated — no refusal, and every absent role it holds is recorded",
+      "test_file": "tests/a_repository_can_declare_a_role_absent.test.ts",
+      "kind": "behavioural",
+      "drives": "LayoutSchema + resolveSeatGrants over the vendored draft layouts (tests/support/real_layouts.json) and chancery #112's agents",
+      "plant": "(RED at 2b59552) null is not a declared absence: the schema refuses it and the resolver refuses the chair — the plant 'null refuses the chair' is today's behaviour"
+    },
+    {
+      "invariant_id": "DECLARED-ABSENCE",
+      "test_name": "each real repository's layout, with its declared absences, validates and seats chancery's agents > chancery AS PUBLISHED (no null): code-implementer still fails closed on the roles the draft lacks",
+      "test_file": "tests/a_repository_can_declare_a_role_absent.test.ts",
+      "kind": "behavioural",
+      "drives": "LayoutSchema + resolveSeatGrants over the vendored draft layouts (tests/support/real_layouts.json) and chancery #112's agents",
+      "plant": "missing == null: drop the undeclared-role refusal in resolveSeatGrants (src/layout_grants.ts)",
+      "plant_observed": "missing==null applied at 2b59552 → AssertionError: a missing role was excused without a declaration: expected [] to deeply equal ArrayContaining{…}"
+    },
+    {
+      "invariant_id": "DECLARED-ABSENCE",
+      "test_name": "each real repository's layout, with its declared absences, validates and seats chancery's agents > lighthouse-classic (eir-labs/lighthouse-classic#17): the absences it must declare are exactly the ones the conductor named",
+      "test_file": "tests/a_repository_can_declare_a_role_absent.test.ts",
+      "kind": "behavioural",
+      "drives": "LayoutSchema + resolveSeatGrants over the vendored draft layouts (tests/support/real_layouts.json) and chancery #112's agents",
+      "plant": "— a fixture check: the vendored drafts lack exactly the roles the conductor named"
+    },
+    {
+      "invariant_id": "DECLARED-ABSENCE",
+      "test_name": "each real repository's layout, with its declared absences, validates and seats chancery's agents > lighthouse-classic: validates with its declared absences",
+      "test_file": "tests/a_repository_can_declare_a_role_absent.test.ts",
+      "kind": "behavioural",
+      "drives": "LayoutSchema + resolveSeatGrants over the vendored draft layouts (tests/support/real_layouts.json) and chancery #112's agents",
+      "plant": "(RED at 2b59552) null is not a declared absence: the schema refuses it and the resolver refuses the chair — the plant 'null refuses the chair' is today's behaviour"
+    },
+    {
+      "invariant_id": "DECLARED-ABSENCE",
+      "test_name": "each real repository's layout, with its declared absences, validates and seats chancery's agents > lighthouse-classic: code-implementer is seated — no refusal, and every absent role it holds is recorded",
+      "test_file": "tests/a_repository_can_declare_a_role_absent.test.ts",
+      "kind": "behavioural",
+      "drives": "LayoutSchema + resolveSeatGrants over the vendored draft layouts (tests/support/real_layouts.json) and chancery #112's agents",
+      "plant": "(RED at 2b59552) null is not a declared absence: the schema refuses it and the resolver refuses the chair — the plant 'null refuses the chair' is today's behaviour"
+    },
+    {
+      "invariant_id": "DECLARED-ABSENCE",
+      "test_name": "each real repository's layout, with its declared absences, validates and seats chancery's agents > lighthouse-classic: pr-publisher is seated — no refusal, and every absent role it holds is recorded",
+      "test_file": "tests/a_repository_can_declare_a_role_absent.test.ts",
+      "kind": "behavioural",
+      "drives": "LayoutSchema + resolveSeatGrants over the vendored draft layouts (tests/support/real_layouts.json) and chancery #112's agents",
+      "plant": "null refuses the chair / a grant results from null (red today for the laws above; this one is green because the agent holds no absent role here)"
+    },
+    {
+      "invariant_id": "DECLARED-ABSENCE",
+      "test_name": "each real repository's layout, with its declared absences, validates and seats chancery's agents > lighthouse-classic: red-spec-drafter is seated — no refusal, and every absent role it holds is recorded",
+      "test_file": "tests/a_repository_can_declare_a_role_absent.test.ts",
+      "kind": "behavioural",
+      "drives": "LayoutSchema + resolveSeatGrants over the vendored draft layouts (tests/support/real_layouts.json) and chancery #112's agents",
+      "plant": "null refuses the chair / a grant results from null (red today for the laws above; this one is green because the agent holds no absent role here)"
+    },
+    {
+      "invariant_id": "DECLARED-ABSENCE",
+      "test_name": "each real repository's layout, with its declared absences, validates and seats chancery's agents > lighthouse-classic: change-verifier is seated — no refusal, and every absent role it holds is recorded",
+      "test_file": "tests/a_repository_can_declare_a_role_absent.test.ts",
+      "kind": "behavioural",
+      "drives": "LayoutSchema + resolveSeatGrants over the vendored draft layouts (tests/support/real_layouts.json) and chancery #112's agents",
+      "plant": "null refuses the chair / a grant results from null (red today for the laws above; this one is green because the agent holds no absent role here)"
+    },
+    {
+      "invariant_id": "DECLARED-ABSENCE",
+      "test_name": "each real repository's layout, with its declared absences, validates and seats chancery's agents > lighthouse-classic AS PUBLISHED (no null): code-implementer still fails closed on the roles the draft lacks",
+      "test_file": "tests/a_repository_can_declare_a_role_absent.test.ts",
+      "kind": "behavioural",
+      "drives": "LayoutSchema + resolveSeatGrants over the vendored draft layouts (tests/support/real_layouts.json) and chancery #112's agents",
+      "plant": "missing == null: drop the undeclared-role refusal in resolveSeatGrants (src/layout_grants.ts)",
+      "plant_observed": "missing==null applied at 2b59552 → AssertionError: a missing role was excused without a declaration: expected [] to deeply equal ArrayContaining{…}"
+    },
+    {
+      "invariant_id": "DECLARED-ABSENCE",
+      "test_name": "each real repository's layout, with its declared absences, validates and seats chancery's agents > coltrane-ui (eir-labs/coltrane-ui#256): the absences it must declare are exactly the ones the conductor named",
+      "test_file": "tests/a_repository_can_declare_a_role_absent.test.ts",
+      "kind": "behavioural",
+      "drives": "LayoutSchema + resolveSeatGrants over the vendored draft layouts (tests/support/real_layouts.json) and chancery #112's agents",
+      "plant": "— a fixture check: the vendored drafts lack exactly the roles the conductor named"
+    },
+    {
+      "invariant_id": "DECLARED-ABSENCE",
+      "test_name": "each real repository's layout, with its declared absences, validates and seats chancery's agents > coltrane-ui: validates with its declared absences",
+      "test_file": "tests/a_repository_can_declare_a_role_absent.test.ts",
+      "kind": "behavioural",
+      "drives": "LayoutSchema + resolveSeatGrants over the vendored draft layouts (tests/support/real_layouts.json) and chancery #112's agents",
+      "plant": "(RED at 2b59552) null is not a declared absence: the schema refuses it and the resolver refuses the chair — the plant 'null refuses the chair' is today's behaviour"
+    },
+    {
+      "invariant_id": "DECLARED-ABSENCE",
+      "test_name": "each real repository's layout, with its declared absences, validates and seats chancery's agents > coltrane-ui: code-implementer is seated — no refusal, and every absent role it holds is recorded",
+      "test_file": "tests/a_repository_can_declare_a_role_absent.test.ts",
+      "kind": "behavioural",
+      "drives": "LayoutSchema + resolveSeatGrants over the vendored draft layouts (tests/support/real_layouts.json) and chancery #112's agents",
+      "plant": "null refuses the chair / a grant results from null (red today for the laws above; this one is green because the agent holds no absent role here)"
+    },
+    {
+      "invariant_id": "DECLARED-ABSENCE",
+      "test_name": "each real repository's layout, with its declared absences, validates and seats chancery's agents > coltrane-ui: pr-publisher is seated — no refusal, and every absent role it holds is recorded",
+      "test_file": "tests/a_repository_can_declare_a_role_absent.test.ts",
+      "kind": "behavioural",
+      "drives": "LayoutSchema + resolveSeatGrants over the vendored draft layouts (tests/support/real_layouts.json) and chancery #112's agents",
+      "plant": "null refuses the chair / a grant results from null (red today for the laws above; this one is green because the agent holds no absent role here)"
+    },
+    {
+      "invariant_id": "DECLARED-ABSENCE",
+      "test_name": "each real repository's layout, with its declared absences, validates and seats chancery's agents > coltrane-ui: red-spec-drafter is seated — no refusal, and every absent role it holds is recorded",
+      "test_file": "tests/a_repository_can_declare_a_role_absent.test.ts",
+      "kind": "behavioural",
+      "drives": "LayoutSchema + resolveSeatGrants over the vendored draft layouts (tests/support/real_layouts.json) and chancery #112's agents",
+      "plant": "null refuses the chair / a grant results from null (red today for the laws above; this one is green because the agent holds no absent role here)"
+    },
+    {
+      "invariant_id": "DECLARED-ABSENCE",
+      "test_name": "each real repository's layout, with its declared absences, validates and seats chancery's agents > coltrane-ui: change-verifier is seated — no refusal, and every absent role it holds is recorded",
+      "test_file": "tests/a_repository_can_declare_a_role_absent.test.ts",
+      "kind": "behavioural",
+      "drives": "LayoutSchema + resolveSeatGrants over the vendored draft layouts (tests/support/real_layouts.json) and chancery #112's agents",
+      "plant": "(RED at 2b59552) null is not a declared absence: the schema refuses it and the resolver refuses the chair — the plant 'null refuses the chair' is today's behaviour"
+    },
+    {
+      "invariant_id": "DECLARED-ABSENCE",
+      "test_name": "each real repository's layout, with its declared absences, validates and seats chancery's agents > coltrane-ui AS PUBLISHED (no null): code-implementer still fails closed on the roles the draft lacks",
+      "test_file": "tests/a_repository_can_declare_a_role_absent.test.ts",
+      "kind": "behavioural",
+      "drives": "LayoutSchema + resolveSeatGrants over the vendored draft layouts (tests/support/real_layouts.json) and chancery #112's agents",
+      "plant": "missing == null: drop the undeclared-role refusal in resolveSeatGrants (src/layout_grants.ts) — NOTE: vacuous for coltrane-ui (code-implementer holds no role that draft lacks), so this entry cannot go red"
+    },
+    {
+      "invariant_id": "DECLARED-ABSENCE",
+      "test_name": "each real repository's layout, with its declared absences, validates and seats chancery's agents > cognition (eir-dev/cognition#18): the absences it must declare are exactly the ones the conductor named",
+      "test_file": "tests/a_repository_can_declare_a_role_absent.test.ts",
+      "kind": "behavioural",
+      "drives": "LayoutSchema + resolveSeatGrants over the vendored draft layouts (tests/support/real_layouts.json) and chancery #112's agents",
+      "plant": "— a fixture check: the vendored drafts lack exactly the roles the conductor named"
+    },
+    {
+      "invariant_id": "DECLARED-ABSENCE",
+      "test_name": "each real repository's layout, with its declared absences, validates and seats chancery's agents > cognition: validates with its declared absences",
+      "test_file": "tests/a_repository_can_declare_a_role_absent.test.ts",
+      "kind": "behavioural",
+      "drives": "LayoutSchema + resolveSeatGrants over the vendored draft layouts (tests/support/real_layouts.json) and chancery #112's agents",
+      "plant": "(RED at 2b59552) null is not a declared absence: the schema refuses it and the resolver refuses the chair — the plant 'null refuses the chair' is today's behaviour"
+    },
+    {
+      "invariant_id": "DECLARED-ABSENCE",
+      "test_name": "each real repository's layout, with its declared absences, validates and seats chancery's agents > cognition: code-implementer is seated — no refusal, and every absent role it holds is recorded",
+      "test_file": "tests/a_repository_can_declare_a_role_absent.test.ts",
+      "kind": "behavioural",
+      "drives": "LayoutSchema + resolveSeatGrants over the vendored draft layouts (tests/support/real_layouts.json) and chancery #112's agents",
+      "plant": "(RED at 2b59552) null is not a declared absence: the schema refuses it and the resolver refuses the chair — the plant 'null refuses the chair' is today's behaviour"
+    },
+    {
+      "invariant_id": "DECLARED-ABSENCE",
+      "test_name": "each real repository's layout, with its declared absences, validates and seats chancery's agents > cognition: pr-publisher is seated — no refusal, and every absent role it holds is recorded",
+      "test_file": "tests/a_repository_can_declare_a_role_absent.test.ts",
+      "kind": "behavioural",
+      "drives": "LayoutSchema + resolveSeatGrants over the vendored draft layouts (tests/support/real_layouts.json) and chancery #112's agents",
+      "plant": "null refuses the chair / a grant results from null (red today for the laws above; this one is green because the agent holds no absent role here)"
+    },
+    {
+      "invariant_id": "DECLARED-ABSENCE",
+      "test_name": "each real repository's layout, with its declared absences, validates and seats chancery's agents > cognition: red-spec-drafter is seated — no refusal, and every absent role it holds is recorded",
+      "test_file": "tests/a_repository_can_declare_a_role_absent.test.ts",
+      "kind": "behavioural",
+      "drives": "LayoutSchema + resolveSeatGrants over the vendored draft layouts (tests/support/real_layouts.json) and chancery #112's agents",
+      "plant": "null refuses the chair / a grant results from null (red today for the laws above; this one is green because the agent holds no absent role here)"
+    },
+    {
+      "invariant_id": "DECLARED-ABSENCE",
+      "test_name": "each real repository's layout, with its declared absences, validates and seats chancery's agents > cognition: change-verifier is seated — no refusal, and every absent role it holds is recorded",
+      "test_file": "tests/a_repository_can_declare_a_role_absent.test.ts",
+      "kind": "behavioural",
+      "drives": "LayoutSchema + resolveSeatGrants over the vendored draft layouts (tests/support/real_layouts.json) and chancery #112's agents",
+      "plant": "(RED at 2b59552) null is not a declared absence: the schema refuses it and the resolver refuses the chair — the plant 'null refuses the chair' is today's behaviour"
+    },
+    {
+      "invariant_id": "DECLARED-ABSENCE",
+      "test_name": "each real repository's layout, with its declared absences, validates and seats chancery's agents > cognition AS PUBLISHED (no null): code-implementer still fails closed on the roles the draft lacks",
+      "test_file": "tests/a_repository_can_declare_a_role_absent.test.ts",
+      "kind": "behavioural",
+      "drives": "LayoutSchema + resolveSeatGrants over the vendored draft layouts (tests/support/real_layouts.json) and chancery #112's agents",
+      "plant": "missing == null: drop the undeclared-role refusal in resolveSeatGrants (src/layout_grants.ts)",
+      "plant_observed": "missing==null applied at 2b59552 → AssertionError: a missing role was excused without a declaration: expected [] to deeply equal ArrayContaining{…}"
     }
   ],
-  "testing_method": "vitest, example-based laws plus fast-check properties (RED-DEF-15: expansion draws only on declared tokens + the layout; the target and venue steps never add). Every law drives the production symbol named in `drives`; symbols that do not exist yet are reached through a runtime import (tests/layout_grants_fixtures.ts) so the shared tsc gate stays green and each law fails where it asserts. The invokers are observed through the seams the suite already uses: the Claude invoker's injected `run` (the exact argv), and the completions invoker's model request body and typed refusals. The chair record is observed on chair_complete through RunDeps.onProgress; the dispatch door by bootstrapServerDeps over a genome tree on disk with the invoke seam replaced. The resolver-level plants were rehearsed by the drafter against a throwaway reference resolver, deleted before commit; each turned its law red. plant_observed is omitted (the v5 type refuses null) and is filled by the grader once production exists. Round 3: the laws for the implementer's surviving plants (NO-SELF-WIDENING-2 isolation, DOOR-CHART, DOOR-RELOAD, TARGET-ESCAPE, LAYERED, RECORD-VENUE, PREFLIGHT-EXPANDED) are green against the implementation at cef6f97, and each plant was applied, observed red and reverted by the drafter. The target-escape laws for README/backslash/drive-letter entries and the dispatch refusals are red, because the ruling (refuse, never normalise) is new. The completions any-scope laws for Read/Bash, and every D1/D2/D3/D5 law, are red (the behaviour is new). D4 runs a REAL sandboxed process through @anthropic-ai/sandbox-runtime (srt), because `claude -p` cannot run a Bash command without a model; it is SKIPPED and printed as UNVERIFIED when srt or an OS sandbox is absent, and was observed red (no sandbox config on the argv) with srt present on macOS. The drafter's manual srt probe confirmed the target config shape (absolute allowWrite tree + absolute denyWrite) is enforced: inside src/ written, outside refused, the layout file refused. plant_observed is omitted; the grader fills it. Round 4: every law for the implementer's surviving plants (items 2–10) is green against 9ff943c, and each plant was applied to that production code, observed red, and reverted; plant_observed records the failing assertion. The laws for the conductor's two new rulings (.coltrane denial; ignored path never sealed) are red today because the behaviour does not exist yet; their plant_observed is left for the grader. Round 5: each of the implementer's six dot-path plants (OWN-A…F) was applied to src/grant_scope.ts at 5776395 and the new laws observed red (OWN-A 22 laws beyond the 4 findings, OWN-C 2, OWN-E 9, OWN-F 12, OWN-B 6, OWN-D 5); plant_observed records one failing assertion per law. Controls and laws no plant touched carry no plant_observed. Round 6: the four surviving plants (literal-spelling refusal removed, schema admitting ./ and //, case-sensitive matcher, case-sensitive isProtectedPath) were each applied at 0a8d1be and observed red (4 / 3 / 10 / 5 laws). The room-image law was observed red against the stale pre-round-5 images on the drafter's host, then green after rebuilding both images. Round 7: laws for the six blockers are red at 24a26de where the behaviour does not exist (smuggling, Unicode spellings, git/egress, the root drain); the laws for surviving or tie-in plants were shown red by applying the plant at 24a26de (.coltrane deny dropped; the room rendered as root, live; the ignore dependency bumped to 7.0.7; CLAUDE_BIN pointed at a fixture binary bundling ignore 7.0.6 and lacking the splitter). The real-process git/network laws were run with srt 0.0.77 on macOS; they SKIP as UNVERIFIED without it.",
+  "testing_method": "vitest, example-based laws plus fast-check properties (RED-DEF-15: expansion draws only on declared tokens + the layout; the target and venue steps never add). Every law drives the production symbol named in `drives`; symbols that do not exist yet are reached through a runtime import (tests/layout_grants_fixtures.ts) so the shared tsc gate stays green and each law fails where it asserts. The invokers are observed through the seams the suite already uses: the Claude invoker's injected `run` (the exact argv), and the completions invoker's model request body and typed refusals. The chair record is observed on chair_complete through RunDeps.onProgress; the dispatch door by bootstrapServerDeps over a genome tree on disk with the invoke seam replaced. The resolver-level plants were rehearsed by the drafter against a throwaway reference resolver, deleted before commit; each turned its law red. plant_observed is omitted (the v5 type refuses null) and is filled by the grader once production exists. Round 3: the laws for the implementer's surviving plants (NO-SELF-WIDENING-2 isolation, DOOR-CHART, DOOR-RELOAD, TARGET-ESCAPE, LAYERED, RECORD-VENUE, PREFLIGHT-EXPANDED) are green against the implementation at cef6f97, and each plant was applied, observed red and reverted by the drafter. The target-escape laws for README/backslash/drive-letter entries and the dispatch refusals are red, because the ruling (refuse, never normalise) is new. The completions any-scope laws for Read/Bash, and every D1/D2/D3/D5 law, are red (the behaviour is new). D4 runs a REAL sandboxed process through @anthropic-ai/sandbox-runtime (srt), because `claude -p` cannot run a Bash command without a model; it is SKIPPED and printed as UNVERIFIED when srt or an OS sandbox is absent, and was observed red (no sandbox config on the argv) with srt present on macOS. The drafter's manual srt probe confirmed the target config shape (absolute allowWrite tree + absolute denyWrite) is enforced: inside src/ written, outside refused, the layout file refused. plant_observed is omitted; the grader fills it. Round 4: every law for the implementer's surviving plants (items 2–10) is green against 9ff943c, and each plant was applied to that production code, observed red, and reverted; plant_observed records the failing assertion. The laws for the conductor's two new rulings (.coltrane denial; ignored path never sealed) are red today because the behaviour does not exist yet; their plant_observed is left for the grader. Round 5: each of the implementer's six dot-path plants (OWN-A…F) was applied to src/grant_scope.ts at 5776395 and the new laws observed red (OWN-A 22 laws beyond the 4 findings, OWN-C 2, OWN-E 9, OWN-F 12, OWN-B 6, OWN-D 5); plant_observed records one failing assertion per law. Controls and laws no plant touched carry no plant_observed. Round 6: the four surviving plants (literal-spelling refusal removed, schema admitting ./ and //, case-sensitive matcher, case-sensitive isProtectedPath) were each applied at 0a8d1be and observed red (4 / 3 / 10 / 5 laws). The room-image law was observed red against the stale pre-round-5 images on the drafter's host, then green after rebuilding both images. Round 7: laws for the six blockers are red at 24a26de where the behaviour does not exist (smuggling, Unicode spellings, git/egress, the root drain); the laws for surviving or tie-in plants were shown red by applying the plant at 24a26de (.coltrane deny dropped; the room rendered as root, live; the ignore dependency bumped to 7.0.7; CLAUDE_BIN pointed at a fixture binary bundling ignore 7.0.6 and lacking the splitter). The real-process git/network laws were run with srt 0.0.77 on macOS; they SKIP as UNVERIFIED without it. Round 8: 18 laws red at 2b59552 (the null contract does not exist — 'null refuses the chair' is today's behaviour); the plant missing==null (the undeclared-role refusal dropped) was applied at 2b59552 and turned the missing-role laws red. The vendored drafts are verbatim from the PR heads (recorded in tests/support/real_layouts.json).",
   "uncovered": []
 }

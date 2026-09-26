@@ -17,6 +17,7 @@ import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { VenueSchema, DEVICE_CLASSES, type VenueOutput } from "./genome_schema.js";
+import { roomSeatSeccompProfile } from "./room_seat_seccomp.js";
 import { sha256Hex, canonStructuralJson } from "./canonical_form.js";
 import { prepareWorkspace, type PreparedWorkspace } from "./workspace.js";
 
@@ -321,6 +322,11 @@ function assertValueRenderable(
   }
 }
 
+/** Where a seat-bearing room's seccomp profile is written — derived from the realization directory. */
+export function roomSeccompPath(realizationDir: string): string {
+  return `${realizationDir}/seat-seccomp.json`;
+}
+
 /** Renders the runtime configuration from a PARSED venue. Never from raw input: re-parsing through
  *  `VenueSchema` (which is `.strict()`) is the enforcement point, so an unparsed object carrying an
  *  extra key is refused at the door rather than trusted to have been parsed by every future caller. */
@@ -458,6 +464,16 @@ export function renderComposeConfig(
   const uid = process.getuid?.();
   const gid = process.getgid?.();
   if (uid !== undefined && gid !== undefined) room["user"] = `${uid}:${gid}`;
+
+  // ── A SEAT-BEARING ROOM CAN START THE SEAT'S BASH SANDBOX. ─────────────────────────────────────
+  // A room whose venue selects a `floor` runs the seat inside it, and every seat holding Bash spawns
+  // under the CLI's sandbox with failIfUnavailable — bubblewrap, which needs an unprivileged user
+  // namespace and mounts inside it. Docker's default seccomp profile denies those, so the room runs
+  // under Docker's default profile PLUS the six bubblewrap calls (src/room_seat_seccomp.ts, written
+  // beside this document by the realizer), with /proc unmasked so bubblewrap can mount a fresh one.
+  // Never privileged and no capability added; a production-only room (no floor) runs no seat and
+  // keeps Docker's defaults untouched.
+  if (v.floor) room["security_opt"] = [`seccomp=${roomSeccompPath(realizationDir)}`, "systempaths=unconfined"];
 
   // Devices: map EXACTLY the declared class's nodes and the owning group, and widen nothing — no
   // privileged mode, no capabilities, no wildcard device rule. Only when a host maps the class.
@@ -998,6 +1014,11 @@ export function dockerComposeRealizer(opts?: { run?: ComposeRunner; prepareWorks
       // JSON is YAML, so the rendered document is written verbatim — the thing the laws inspect is
       // byte-for-byte the thing compose runs. No second serialization to drift from the first.
       writeFileSync(composePath, JSON.stringify(doc, null, 2));
+      // The seat-bearing room's seccomp profile, at the path the document names (renderComposeConfig).
+      const roomService = (doc["services"] as Record<string, Record<string, unknown>> | undefined)?.["room"];
+      if (Array.isArray(roomService?.["security_opt"])) {
+        writeFileSync(roomSeccompPath(realizationDir), JSON.stringify(roomSeatSeccompProfile()));
+      }
 
       const roomContainer = roomContainerName(realizationDir);
       try {

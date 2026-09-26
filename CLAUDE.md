@@ -340,6 +340,36 @@ to exactly those origins (`--allowed-origins`, server-enforced; isolated + headl
 `browser_grant`, no browser — the grant is unresolvable and the chair fails closed. Author
 capability deliberately: the grant string IS the policy, and the cage is the blast-radius bound.
 
+### Role tokens: the repository's layout decides what a path grant reaches
+
+An agent may grant a **role token** instead of a path: `Write(@source)`, `Edit(@tests)`,
+`Bash(@laws)`. The repository answers what the role means, in `coltrane.layout.json` at the root
+of the genome tree the gig runs against (`paths`: `source`/`tests`/`migrations`/`scripts`/`docs`,
+each a list of globs; `commands`: `build`/`test`/`laws`/`ship_dry`, each a list of command
+prefixes). Its shape is `LayoutSchema` in `src/genome_schema.ts`; a malformed file is a load
+error and is treated as absent. The drain never reads its clone's file: it takes the org store's
+layout row for the gig's repository (`resolveWorkingRepo(claim)`). A new repository shape is a
+layout file, never an agent amendment.
+
+`resolveSeatGrants` (`src/layout_grants.ts`) is the one resolution both invokers and `runGig` use,
+in this order: (1) expand role tokens through the layout (path role → `<Tool>(<glob>)` per glob,
+command role → `Bash(<prefix>:*)`), literals untouched; (2) narrow Write/Edit to the change's
+`target_paths` (absent → no narrowing, recorded `target_paths_applied: false`; `[]` → no writes);
+(3) narrow by the venue's equipment. Only step 1 may produce a string the agent did not write;
+every later step only removes or narrows. `chair_complete` records `resolved_grants` and
+`target_paths_applied`.
+
+**Fail closed.** A role the layout does not declare, or any role token with no layout, grants
+nothing and the chair is refused at dispatch naming the role — never a `**` default. A
+`target_paths` entry with glob metacharacters refuses the chair, naming the entry. The completions
+invoker refuses any path-scoped Write/Edit, because it cannot carry the scope to the model.
+
+**No self-widening, and its known limit.** Whenever a seat's Write/Edit covers
+`coltrane.layout.json`, the spawn is denied `Write(coltrane.layout.json)`/`Edit(coltrane.layout.json)`.
+**Bash grants are not path-scoped**: a seat holding a Bash prefix that writes files (`sed -i`, `cp`,
+`tee`) can still write any path, the layout file included. That is a known limit, not an enforced
+boundary.
+
 ---
 
 ## Tool routing — the most common gotcha

@@ -186,6 +186,10 @@ async function underSandbox(sb: Sandbox | undefined, tree: string, cmd: string):
 }
 
 describe("REAL: each agent's own git and network work, inside the sandbox (skipped as UNVERIFIED without srt + an OS sandbox)", () => {
+  it("required: when COLTRANE_REQUIRE_REAL=1 (the CI sandbox job), srt and an OS sandbox are present", () => {
+    if (process.env["COLTRANE_REQUIRE_REAL"] === "1") expect(UNAVAILABLE, "this job requires the real-process laws to RUN, and they would skip").toBe("");
+  });
+
   for (const [slug, file] of [["code-implementer", "src/a.ts"], ["red-spec-drafter", "tests/x.test.ts"]] as const) {
     it.skipIf(Boolean(UNAVAILABLE))(`${slug} (declared): \`git add ${file}\` succeeds and the file is staged`, async () => {
       const t = gitTree();

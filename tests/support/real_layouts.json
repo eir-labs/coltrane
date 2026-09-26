@@ -1,5 +1,5 @@
 {
-  "_provenance": "Vendored by the red-battery drafter on 27 Sep 2026 via `gh api repos/<repo>/contents/coltrane.layout.json?ref=<head>`, verbatim, from the four draft PRs; agents' allowed_tools verbatim from eir-labs/chancery#112 agents/*.json at its head.",
+  "_provenance": "Vendored by the red-battery drafter on 27 Sep 2026 via `gh api repos/<repo>/contents/coltrane.layout.json?ref=<head>`, verbatim, from the four draft PRs; agents' allowed_tools verbatim from eir-labs/chancery#112 agents/*.json at its head. wiki (eir-labs/wiki#33) added 27 Sep 2026 at its head 06c0af2 — it already DECLARES its absences (migrations, ship_dry: null).",
   "layouts": {
     "chancery": {
       "repo": "eir-labs/chancery",
@@ -219,6 +219,70 @@
           "laws": [
             "python3 -m pytest tests/"
           ],
+          "publish": [
+            "gh pr create"
+          ]
+        },
+        "git": {
+          "stage": [
+            "git add",
+            "git mv",
+            "git rm"
+          ],
+          "commit": [
+            "git commit"
+          ],
+          "push": [
+            "git push"
+          ]
+        },
+        "egress": {
+          "git_push": [
+            "github.com"
+          ],
+          "publish": [
+            "api.github.com"
+          ]
+        }
+      }
+    },
+    "wiki": {
+      "repo": "eir-labs/wiki",
+      "pr": 33,
+      "head": "06c0af275ff3a20bb307032fd0834f752d5b2d73",
+      "layout": {
+        "paths": {
+          "source": [
+            "src/**",
+            "supabase/functions/**"
+          ],
+          "tests": [
+            "tests/**",
+            "contracts/seams/**"
+          ],
+          "migrations": null,
+          "scripts": [
+            "scripts/**",
+            "tools/**",
+            ".github/workflows/**"
+          ],
+          "docs": [
+            "docs/**",
+            "*.md"
+          ]
+        },
+        "commands": {
+          "build": [
+            "npm run build"
+          ],
+          "test": [
+            "npm test",
+            "npx vitest run"
+          ],
+          "laws": [
+            "npx vitest run tests/unit"
+          ],
+          "ship_dry": null,
           "publish": [
             "gh pr create"
           ]

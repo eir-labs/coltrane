@@ -45,6 +45,27 @@ describe("E7 — the local queue refuses a completion from a worker that does no
     expect(q.list().find((v) => v.gig_id === gig_id)!.state).toBe("complete");
   });
 
+  it("E7 a stale holder cannot complete a row that was REQUEUED (lease lapsed and reaped, not yet re-claimed)", async () => {
+    // A row back in queued/ still carries its stale lease record, so a holder-name check alone
+    // admits its old holder. Only the state-directory half of the check (the row must be in claimed/
+    // or done/) refuses it. Without that half, the old holder's output becomes the gig's while the
+    // row sits in the queue for the next worker to run again.
+    const { openLocalQueue } = await loadLocalQueue();
+    const clock = makeClock();
+    const q = openLocalQueue(freshRoot(), { leaseMs: LEASE_MS, clock: clock.now });
+    const { gig_id } = await q.enqueue({ standard_slug: "s", input: {}, acting_for: "a" });
+    expect(await q.claim("w1")).not.toBeNull();
+    clock.advance(LEASE_MS + 1);
+    expect(q.reap().requeued, "precondition: the lapsed claim went back to the queue").toContain(gig_id);
+    expect(q.list().find((v) => v.gig_id === gig_id)!.state).toBe("queued");
+
+    const stale = await q.complete("w1", gig_id, { verdict: "from the lapsed holder" }).then(() => "accepted", () => "refused");
+    expect(stale, "complete() accepted a seal from the lapsed holder of a REQUEUED row").toBe("refused");
+    const view = q.list().find((v) => v.gig_id === gig_id)!;
+    expect(view.state, "the stale completion moved a queued row out of the queue").toBe("queued");
+    expect(view.content_sha, "the stale holder's output was recorded as the gig's").toBeUndefined();
+  });
+
   it("E7 a worker that never held the gig cannot complete it", async () => {
     const { openLocalQueue } = await loadLocalQueue();
     const q = openLocalQueue(freshRoot(), { leaseMs: LEASE_MS });

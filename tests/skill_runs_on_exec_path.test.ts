@@ -28,8 +28,8 @@
 //   P3b  behavioural  dist/src/server_entry.js relay → runRelay/spawnChild — src/server_relay.ts
 //                                                                            spawn("node", [entryPath]) in spawnChild (holds at ad9d5ec)
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { spawnSync } from "node:child_process";
-import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -132,13 +132,39 @@ describe("P3 — the sweep: every engine child the engine launches names its Nod
     expect(cfg!.command, "the engine MCP server is launched as a bare `node` from PATH").toBe(process.execPath);
   });
 
-  it("P3b — the MCP relay spawns its server child on process.execPath", () => {
+  it("P3b — the MCP relay spawns its server child on process.execPath", async () => {
     // `coltrane-server` (relay mode) re-launches server_entry as its child on start and on
     // server_restart. The child is engine code serving skill_execute.
-    const r = spawnSync(process.execPath, [join(ROOT, "dist", "src", "server_entry.js")], {
-      cwd: ROOT, encoding: "utf8", input: "", timeout: 5_000, env: { ...process.env },
+    //
+    // DETERMINISTIC by construction. The first version fed the relay `input: ""`: stdin closed, the
+    // relay exited and killed its child, and the PATH shim was often not yet reached, so the plant
+    // went red 1 run in 4. Now stdin stays OPEN until the child is PROVEN started, and the proof does
+    // not depend on which binary ran it: a NODE_OPTIONS preload, inherited by the child through the
+    // relay's `{...process.env}`, records the execPath of every Node that starts with
+    // COLTRANE_SERVER_DIRECT=1 (the relay's child, and only it). Under the plant the shim logs BEFORE
+    // it execs the real binary, so by the time the child is recorded, the shim log exists.
+    const started = join(root, "child-started.log");
+    const preload = "data:text/javascript," + encodeURIComponent(
+      `import { appendFileSync } from "node:fs";` +
+      `if (process.env.COLTRANE_SERVER_DIRECT === "1") appendFileSync(${JSON.stringify(started)}, process.execPath + "\\n");`,
+    );
+    const relay = spawn(process.execPath, [join(ROOT, "dist", "src", "server_entry.js")], {
+      cwd: ROOT, stdio: ["pipe", "ignore", "ignore"],
+      env: { ...process.env, COLTRANE_SERVER_DIRECT: "", NODE_OPTIONS: `--import=${preload}` },
     });
-    expect(r.error?.message ?? "", "the relay could not be started").not.toMatch(/ENOENT/);
-    expect(existsSync(shimLog), "the relay launched its server child through `node` on PATH").toBe(false);
+    try {
+      const deadline = Date.now() + 15_000;
+      while (!existsSync(started) && relay.exitCode === null && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      // Non-vacuity: the relay must have started a server child at all, or "the shim was never
+      // invoked" says nothing.
+      expect(existsSync(started), `the relay never started its server child (relay exit ${relay.exitCode})`).toBe(true);
+      expect(existsSync(shimLog), "the relay launched its server child through `node` on PATH").toBe(false);
+      expect(readFileSync(started, "utf8").trim().split("\n"), "the server child ran on a Node other than the relay's").toEqual([process.execPath]);
+    } finally {
+      relay.stdin?.end();
+      relay.kill("SIGKILL");
+    }
   });
 });

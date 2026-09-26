@@ -29,7 +29,9 @@ cd "$(dirname "$0")/.."
 # stopped being true at Node 24), and two pure flag-string laws replaced it in this band. The nine
 # laws that need a real request moved to tests/security — a band may reach out, the root suite may
 # not — so they are counted there, by file, not here.
-EXPECTED_LAWS="${EXPECTED_LAWS:-4334}"
+EXPECTED_LAWS="${EXPECTED_LAWS:-4412}"
+#  merge of main (#559 genome-writes-stay-in-root, with #556/#558: 4310 in 440) into #554 (gig-runs-once: 4334 in 460),
+#  4334 + 78 (main moved 4232 → 4310 since the last merge) = 4412 laws, 462 files, read from the run (bash scripts/laws.sh).
 #  merge of main (#557 + #556: 4232) into #554 (gig-runs-once: 4295), both from 4193: 4193 + 102 + 39 = 4334, read from the run.
 #   +2 gig-runs-once round 6f, on 7b554e6: drain_budget B1c (the ceiling gates each chair INSIDE a phase, not just
 #      the phase start) and B1f (integer micro-dollars: 0.3+0.3+0.3 USD reaches a 900000 ceiling; a float compare
@@ -84,6 +86,25 @@ EXPECTED_LAWS="${EXPECTED_LAWS:-4334}"
 #      heartbeat + lost lease (3), E5 release never hold (3), E6 re-claim finishes without re-running (2),
 #      E7 local complete() holder check (2), E8 one lease constant (2). All 18 fail until the engine half
 #      lands; this script refuses a red suite, so it goes green with the implementation, not before.
+#  merge of main (#556 + #558: 4249 in 439) into #559 (containment: 4269 in 438), both from 4208 in 437:
+#  4249 + 61 = 4310 laws, 439 + 1 = 440 files, read from the run.
+#  +21 genome_writes_stay_in_root, the two survivors of #559's first grade: 12 laws give every site a value that
+#      lands beside its OWN directory (../agents-evil/x — a helper without the trailing separator admits it),
+#      and 9 give every suffix-less site a value that IS its directory (".", "a/..", "./", "").
+#  +3 genome_writes_stay_in_root, charter_read (conductor's decision on #559): a charter is read only from
+#      inside the genome root — a control, the hostile paths refused by name with nothing returned, and no
+#      genome root means refused.
+#  +37 genome_writes_stay_in_root (new file, RED at e6c89ff): no path the engine derives leaves its root —
+#      founder ruling "SLUGS ARE NOT IDENTIFIERS". 12 controls (a normal slug still writes inside the root) and
+#      25 red laws: six local genome-writing doors, agent_evolve's traversal read, the history snapshot, the
+#      three blessed writers on their own (4), the hosted store upsert per door (7) and the port for every class,
+#      persistLineageAdoption, the skill chain append and read, output_write's gig id, gig_logs' gig id.
+#  merge of main (#556, one_output_gate: 4232) into #558 (openrouter_reference: 4225): 4208 + 24 + 17 = 4249, read from the run.
+#   +6 openrouter_reference round 2 (on 02c591f): L2g a reported 0 is a known price, L2h a negative cost is never a
+#      credit, L2i a zero-token class needs no rate, L2j chair_spend carries the unpriced count, L2k the negative-input
+#      guard refuses, L2l the CLI says unpriced. L2b amended in place (discriminating fixture), not counted.
+#  +11 openrouter_reference (new file, #558): the one-line flip (L1a-d), OpenRouter/DeepSeek usage and cost (L2a-f),
+#      the provider doc names every variable the door reads (L3). Merged over #557: 4208 + 11 = 4219, read from the run.
 #   +5 one_output_gate round 3 — G7 the reload proof compares CONTENT; G8 a declared .mcp.json env cannot move
 #      the COLTRANE_GENOME pin; G9 SLUGS ARE NOT IDENTIFIERS (founder ruling): a slug never reaches the
 #      filesystem; G10 a 75-type org-shaped registry seats cleanly; G11 the refusal names the type(s) and why,
@@ -242,7 +263,7 @@ EXPECTED_LAWS="${EXPECTED_LAWS:-4334}"
 #       with the handler, the description does not. Its first draft could not fail — it forgave any
 #       token no tool anywhere declared, which is exactly what a renamed argument leaves behind.
 #       Sabotage said so (`current` -> `slug_current` stayed green); the exemption is gone.
-EXPECTED_FILES="${EXPECTED_FILES:-460}"   # + main: one_output_gate, skill_runs_on_exec_path, node_floor_where_skills_run, bus_not_hosted   # + gig_runs_once_drain_budget (round 6e)   # + gig_runs_once_queue_clients (round 6c)   # + gig_runs_once_real_store (round 6b)   # + gig_runs_once_hosted_dispatch (round 6)   # + gig_runs_once_resumed_reclaim, gig_runs_once_store_decides (round 5)   # + the fifteen tests/gig_runs_once_*.test.ts (RED battery), + tests/every_skill_runs_its_fixtures.test.ts, + tests/node_floor_refuses.test.ts, + tests/spec_reside_drive.test.ts (#537), + tests/a_red_law_names_its_plant.test.ts (#551), + tests/sealed_inputs.test.ts, tests/fan_out.test.ts, tests/completions_seal.test.ts, tests/tier_ladder.test.ts, tests/amend_ladder.test.ts, tests/completions_reasoning_effort.test.ts, tests/bus.test.ts, tests/bus_chair.test.ts, tests/bus_terminal.test.ts, tests/bus_verbs.test.ts, tests/bus_commit.test.ts, tests/code_tools.test.ts, tests/gig_input_validated.test.ts, tests/seat_reads_recorded.test.ts, tests/claude_seat_reads.test.ts, tests/optional_declared_input.test.ts, tests/simulate_names_seats.test.ts
+EXPECTED_FILES="${EXPECTED_FILES:-462}"   # merge: + main: one_output_gate, skill_runs_on_exec_path, node_floor_where_skills_run, bus_not_hosted   # + gig_runs_once_drain_budget (round 6e)   # + gig_runs_once_queue_clients (round 6c)   # + gig_runs_once_real_store (round 6b)   # + gig_runs_once_hosted_dispatch (round 6)   # + gig_runs_once_resumed_reclaim, gig_runs_once_store_decides (round 5)   # + the fifteen tests/gig_runs_once_*.test.ts (RED battery), + tests/every_skill_runs_its_fixtures.test.ts, + tests/node_floor_refuses.test.ts, + tests/spec_reside_drive.test.ts (#537), + tests/a_red_law_names_its_plant.test.ts (#551), + tests/sealed_inputs.test.ts, tests/fan_out.test.ts, tests/completions_seal.test.ts, tests/tier_ladder.test.ts, tests/amend_ladder.test.ts, tests/completions_reasoning_effort.test.ts, tests/bus.test.ts, tests/bus_chair.test.ts, tests/bus_terminal.test.ts, tests/bus_verbs.test.ts, tests/bus_commit.test.ts, tests/code_tools.test.ts, tests/gig_input_validated.test.ts, tests/seat_reads_recorded.test.ts, tests/claude_seat_reads.test.ts, tests/optional_declared_input.test.ts, tests/simulate_names_seats.test.ts   # and from main: + tests/genome_writes_stay_in_root.test.ts, + tests/skill_runs_on_exec_path.test.ts, + tests/node_floor_where_skills_run.test.ts, + tests/bus_not_hosted.test.ts, + tests/every_skill_runs_its_fixtures.test.ts, + tests/node_floor_refuses.test.ts, + tests/spec_reside_drive.test.ts (#537), + tests/a_red_law_names_its_plant.test.ts (#551), + tests/sealed_inputs.test.ts, tests/fan_out.test.ts, tests/completions_seal.test.ts, tests/tier_ladder.test.ts, tests/amend_ladder.test.ts, tests/completions_reasoning_effort.test.ts, tests/bus.test.ts, tests/bus_chair.test.ts, tests/bus_terminal.test.ts, tests/bus_verbs.test.ts, tests/bus_commit.test.ts, tests/code_tools.test.ts, tests/gig_input_validated.test.ts, tests/seat_reads_recorded.test.ts, tests/claude_seat_reads.test.ts, tests/optional_declared_input.test.ts, tests/simulate_names_seats.test.ts
 
 # THE OTHER BANDS. `vitest run` is ROOT-CONFIG ONLY — this repo's own workflow comments
 # record that four configs went unexecuted once for exactly that reason. So pinning only the
@@ -251,7 +272,7 @@ EXPECTED_FILES="${EXPECTED_FILES:-460}"   # + main: one_output_gate, skill_runs_
 # for leaving them unpinned while claiming the laws are counted.
 EXPECTED_FAILURE_MODES_FILES="${EXPECTED_FAILURE_MODES_FILES:-5}"
 EXPECTED_HONEST_BROKER_FILES="${EXPECTED_HONEST_BROKER_FILES:-2}"
-EXPECTED_SECURITY_FILES="${EXPECTED_SECURITY_FILES:-4}"   # + skill_runs_on_exec_path.spec.ts: an old PATH node must not open the network to an ungranted skill (a real request)   # + completions_long_wait.spec.ts: the 300s header limit needs a real socket to disprove   # + skill_network_grant.spec.ts: proving a network gate needs a real request, which the root suite forbids
+EXPECTED_SECURITY_FILES="${EXPECTED_SECURITY_FILES:-5}"   # + openrouter_live_smoke.spec.ts: spends on a real key, skipped (UNVERIFIED) unless COLTRANE_COMPLETIONS_URL is openrouter.ai and a key is set   # + skill_runs_on_exec_path.spec.ts: an old PATH node must not open the network to an ungranted skill (a real request)   # + completions_long_wait.spec.ts: the 300s header limit needs a real socket to disprove   # + skill_network_grant.spec.ts: proving a network gate needs a real request, which the root suite forbids
 
 # THE FILES DELEGATED AWAY FROM THE ROOT BAND, by name.
 #

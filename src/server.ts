@@ -31,6 +31,7 @@ import type { GenomeStore, GenomeClass } from "./genome_store.js";
 import { runSkillFixtures, executeSkill, loadFixtures } from "./skill_subprocess.js";
 import { evolveSkill } from "./skills.js";
 import { sealAgentDefinition, sealDefinition, sealSkillPackage, recordIdentity } from "./genome_writer.js";
+import { containedPath, containedCallerPath } from "./contained_path.js";
 import {
   createOutputStore, defaultOutputsPersistDir, performanceRoot,
   type OutputStore, type OutputRecord, type TraceDirection, type TraceMissingNode, type TraceRecordNode,
@@ -1912,7 +1913,9 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         const roleFilter = args["role"] ? String(args["role"]) : undefined;
         const typeFilter = args["type"] ? String(args["type"]) : undefined;
         const tail = typeof args["tail"] === "number" ? (args["tail"] as number) : undefined;
-        const dir = deps.gig_log_base ? join(deps.gig_log_base, "gigs", gid) : undefined;
+        // #559 — the gig id is caller data, and this handler readdir()s and returns every .jsonl under
+        // the directory it names: that directory must be inside gigs/, or nothing is read.
+        const dir = deps.gig_log_base ? containedPath("gig_logs", join(deps.gig_log_base, "gigs"), gid) : undefined;
         if (!dir || !existsSync(dir)) {
           return { ok: true, requires_approval: approval, data: { gig_id: gid, roles: [], count: 0, events: [] } };
         }
@@ -2280,8 +2283,15 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         return { ok: true, requires_approval: proposal.approval_required, data: { new_version: proposal.next_version, changelog_entry: `${proposal.change_class}: +${newFields} field(s)`, change_class: proposal.change_class, effective_hash: tx?.effective_hash, content_hash: tx?.content_hash } };
       }
       case "charter_read": {
-        const path = args["path"] ? String(args["path"]) : "";
-        if (!path) return { ok: false, requires_approval: approval, error: "charter_read: path required (no default charter location)" };
+        const asked = args["path"] ? String(args["path"]) : "";
+        if (!asked) return { ok: false, requires_approval: approval, error: "charter_read: path required (no default charter location)" };
+        // #559 — a charter is read only from INSIDE the genome root, by the same whole-segment check
+        // as every derived path. With no genome root there is no inside, so the read is refused
+        // (absent means decline, never "any path the caller names").
+        if (!deps.genome_dir) {
+          return { ok: false, requires_approval: approval, error: `charter_read: this server has no genome root, so there is no inside to read a charter from; refused ${JSON.stringify(asked)}` };
+        }
+        const path = containedCallerPath("charter_read", deps.genome_dir, asked);
         if (!existsSync(path)) return { ok: false, requires_approval: approval, error: `charter_read: file not found at ${path}` };
         try {
           const raw = JSON.parse(readFileSync(path, "utf-8"));
@@ -2939,8 +2949,11 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
           // agents map (a hosted surface has no filesystem — the STORE genome is the base,
           // and the seam above persists the merged definition back through the store).
           let currentDef: AgentDef;
-          if (deps.genome_dir && existsSync(join(deps.genome_dir, "agents", `${evolveSlug}.json`))) {
-            currentDef = JSON.parse(readFileSync(join(deps.genome_dir, "agents", `${evolveSlug}.json`), "utf-8")) as AgentDef;
+          // #559 — the base file must be inside agents/: a slug whose path lands elsewhere is refused
+          // before it is read, so bytes from outside the root are never merged and echoed back.
+          const agentFile = deps.genome_dir ? containedPath("agent_evolve read", join(deps.genome_dir, "agents"), evolveSlug, ".json") : undefined;
+          if (agentFile && existsSync(agentFile)) {
+            currentDef = JSON.parse(readFileSync(agentFile, "utf-8")) as AgentDef;
           } else if (deps.agents?.has(evolveSlug)) {
             currentDef = deps.agents.get(evolveSlug) as unknown as AgentDef;
           } else {

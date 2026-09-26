@@ -113,7 +113,7 @@ export interface SelectChairInvokerOptions {
  * Choose the chair invoker for this door from the deployment environment.
  *
  * `COLTRANE_COMPLETIONS_URL` present → the completions port, wired from the deployment's variables:
- * bearer key, the tier→model map, the per-chair timeout, and the validated price table when
+ * bearer key, the tier→model map (COLTRANE_TIER_<X>, else the one-line COLTRANE_MODEL), the per-chair timeout, and the validated price table when
  * `COLTRANE_PRICES_FILE` is set. Absent → the caller's host-tool invoker, byte-for-byte its own
  * options. A malformed price table throws HERE, so a caller that constructs deps at startup fails at
  * startup with the file named.
@@ -123,13 +123,7 @@ export function selectChairInvoker(env: EnvLike, opts: SelectChairInvokerOptions
   if (completionsUrl) {
     // The tier→model map is deployment-defined; the engine names no model. An unmapped tier is a
     // typed refusal at the chair (the completions invoker's `unresolved_tier`), not a silent default.
-    const tierMap: Record<string, string> = {};
-    const eco = env["COLTRANE_TIER_ECONOMY"];
-    const std = env["COLTRANE_TIER_STANDARD"];
-    const prem = env["COLTRANE_TIER_PREMIUM"];
-    if (eco) tierMap["economy"] = eco;
-    if (std) tierMap["standard"] = std;
-    if (prem) tierMap["premium"] = prem;
+    const tierMap = completionsTierMap(env);
     const pricesFile = env["COLTRANE_PRICES_FILE"];
     const timeoutRaw = env["COLTRANE_CHAIR_TIMEOUT_MS"];
     // The per-request output ceiling. A long structured answer (a clause with every obligation in
@@ -171,6 +165,24 @@ export function selectChairInvoker(env: EnvLike, opts: SelectChairInvokerOptions
 
 const LADDER_TIERS = ["economy", "standard", "premium"] as const;
 type LadderTier = (typeof LADDER_TIERS)[number];
+
+/**
+ * The completions seat's tier → model map, from the deployment's variables. THE ONE-LINE MODE:
+ * `COLTRANE_TIER_<X>` wins for its own tier; `COLTRANE_MODEL` seats every tier left unmapped — the
+ * same precedence the Claude seat gives it (resolveModel: the tier's entry, then the fallback). With
+ * neither, the tier stays unmapped and the chair is refused `unresolved_tier`: the engine supplies no
+ * default model. Shared by the selector and the amend ladder, so the two cannot disagree on which
+ * tiers are seated.
+ */
+function completionsTierMap(env: EnvLike): Record<string, string> {
+  const one = env["COLTRANE_MODEL"];
+  const tierMap: Record<string, string> = {};
+  for (const tier of LADDER_TIERS) {
+    const model = env[`COLTRANE_TIER_${tier.toUpperCase()}`] || one;
+    if (model) tierMap[tier] = model;
+  }
+  return tierMap;
+}
 
 /** `COLTRANE_TIER_LADDER` → the rungs, in order. A name that is not a tier refuses — naming it. */
 export function parseTierLadder(raw: string): LadderTier[] {
@@ -232,7 +244,7 @@ export function withTierLadder(
 
 /**
  * The amend ladder a run gets from this deployment: COLTRANE_TIER_LADDER's rungs, narrowed on the
- * completions port to rungs a model is mapped for (an unmapped rung would be climbed into and refused
+ * completions port to rungs a model is mapped for (by its COLTRANE_TIER_<X> or by COLTRANE_MODEL) (an unmapped rung would be climbed into and refused
  * `unresolved_tier`). Absent variable → undefined → no ladder. Read by the ONE RunDeps assembler, so
  * every door gets the same ladder.
  */
@@ -241,9 +253,7 @@ export function amendLadderFromEnv(env: EnvLike): string[] | undefined {
   if (!raw) return undefined;
   const rungs = parseTierLadder(raw);
   if (!env["COLTRANE_COMPLETIONS_URL"]) return rungs;
-  const mapped: Record<string, string | undefined> = {
-    economy: env["COLTRANE_TIER_ECONOMY"], standard: env["COLTRANE_TIER_STANDARD"], premium: env["COLTRANE_TIER_PREMIUM"],
-  };
+  const mapped = completionsTierMap(env);
   return rungs.filter((t) => !!mapped[t]);
 }
 

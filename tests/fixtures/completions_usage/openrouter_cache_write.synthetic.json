@@ -1,0 +1,79 @@
+{
+  "_provenance": {
+    "kind": "synthetic",
+    "label": "synthetic: built to OpenRouter's documented type; NOT a recording",
+    "built": "2026-09-27",
+    "why": "The recorded live response (openrouter_chat_completion.json, 2026-09-26) reports cache_write_tokens: 0, so it cannot show that cache writes are priced at their own rate. This fixture keeps that mapping covered without editing the recording.",
+    "sources": [
+      {
+        "url": "https://openrouter.ai/docs/use-cases/usage-accounting",
+        "fetched": "2026-09-27",
+        "what": "documented_usage_example below, copied verbatim (also preserved in the recorded fixture's documented_usage_example): prompt_tokens 194 with cache_write_tokens 100, i.e. cache writes reported as a part of prompt_tokens. 'cache_write_tokens is the number of tokens that were written to the cache (only returned for models with explicit caching and cache write pricing)'"
+      },
+      {
+        "url": "https://openrouter.ai/docs/api/reference/overview",
+        "fetched": "2026-09-27",
+        "what": "the non-streaming Response / ResponseUsage type the response below is built to"
+      },
+      {
+        "url": "https://openrouter.ai/api/v1/models?supported_parameters=tools",
+        "fetched": "2026-09-27",
+        "what": "qwen/qwen3.8-flash prices: prompt 0.15, completion 0.47, input_cache_read 0.016, input_cache_write 0.2 (USD per million tokens)"
+      }
+    ],
+    "how_response_was_built": "The counts were chosen by the drafter so that cached_tokens and cache_write_tokens are both non-zero, and both are treated as parts of prompt_tokens (the documented example's reading; the recorded response has 1408 cached out of 1920 prompt). cost is these counts at the listed qwen/qwen3.8-flash rates: 2000 uncached x 0.15 + 9000 read x 0.016 + 1000 written x 0.2 + 800 output x 0.47, per million = 0.00102."
+  },
+  "documented_usage_example": {
+    "object": "chat.completion.chunk",
+    "usage": {
+      "completion_tokens": 2,
+      "completion_tokens_details": {
+        "reasoning_tokens": 0
+      },
+      "cost": 0.95,
+      "cost_details": {
+        "upstream_inference_cost": 19
+      },
+      "prompt_tokens": 194,
+      "prompt_tokens_details": {
+        "cached_tokens": 0,
+        "cache_write_tokens": 100,
+        "audio_tokens": 0
+      },
+      "total_tokens": 196
+    }
+  },
+  "response": {
+    "id": "gen-synthetic-cache-write",
+    "object": "chat.completion",
+    "created": 1790467200,
+    "model": "qwen/qwen3.8-flash",
+    "choices": [
+      {
+        "finish_reason": "stop",
+        "native_finish_reason": "stop",
+        "message": {
+          "role": "assistant",
+          "content": "{\"claim\":\"c\"}"
+        }
+      }
+    ],
+    "usage": {
+      "prompt_tokens": 12000,
+      "completion_tokens": 800,
+      "total_tokens": 12800,
+      "prompt_tokens_details": {
+        "cached_tokens": 9000,
+        "cache_write_tokens": 1000
+      },
+      "completion_tokens_details": {
+        "reasoning_tokens": 0
+      },
+      "cost": 0.00102,
+      "is_byok": false,
+      "cost_details": {
+        "upstream_inference_cost": null
+      }
+    }
+  }
+}

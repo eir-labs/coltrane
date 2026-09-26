@@ -433,6 +433,12 @@ roles it holds>, strictAllowlist: true}`, so it reaches no host by default. A li
 `Bash(git add:*)` opens nothing, so the shipped git agents fail closed until they are migrated to role
 tokens (a separate genome change).
 
+**A repository can declare a role absent.** A role set to `null` in a layout (under `paths`,
+`commands`, `git.*` or `egress`) means "this repository has none". A token for that role grants
+nothing and does not refuse the chair. It is recorded as `absent_by_declaration`, both in the
+resolver's result and on `chair_complete`. A role key that is simply missing still refuses the
+chair, and an empty list is still refused: absence is only ever the explicit `null`.
+
 **Grant grammar.** The CLI splits `--allowedTools` on `,` and on spaces outside parentheses, and the
 first `)` closes a grant (`Hp` in 2.1.283). So:
 - no layout entry may carry `(`, `)`, `,` or edge whitespace (`LayoutSchema`, and the resolver for an

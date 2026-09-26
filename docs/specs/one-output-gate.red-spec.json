@@ -7,7 +7,12 @@
     "G4: both seal briefs tell the chair to omit an optional field it has no value for and never send null",
     "R: the live cde960ea payload shape (change-verdict, decision_ref:null) seals through runGig without the key",
     "G5 (O5): the drain refuses a Claude chair, naming the type, before spawning anything, when a run-registry type does not reload through the loader unchanged",
-    "G6: on the server door, the seat's engine child judges by the genome the door was bootstrapped with, from any cwd (including one with its own genome, and one with no build)"
+    "G6: on the server door, the seat's engine child judges by the genome the door was bootstrapped with, from any cwd (including one with its own genome, and one with no build)",
+    "G7: the drain's reload proof compares each type's CONTENT (its effective schema), and a type that changes on reload refuses the chair, naming it",
+    "G8: whatever a deployment's .mcp.json declares in the engine entry's env, the child's COLTRANE_GENOME is the door's root",
+    "G9 (founder ruling, verbatim: \"SLUGS ARE NOT IDENTIFIERS\"): a slug never reaches the filesystem. Every file and directory in the drain's run genome is named by the engine (a content hash or another engine-derived id), no file lands outside the run genome, and the child still resolves every type by slug. It does that through what it reads inside the genome, never through a path join",
+    "G10: a registry shaped like production's 75-type org seats a Claude chair on the drain with a working gate",
+    "G11: a refusal names every offending type slug and its reason, both in the chair's error and in the gig's terminal record"
   ],
   "input_refs": [
     "live: gig cde960ea, 26 Sep 2026, drain @eir-labs/coltrane@0.24.20 — chair review-change cannot seal change-verdict: type at /decision_ref: must be string"
@@ -15,7 +20,7 @@
   "laws": [
     {
       "path": "tests/one_output_gate.test.ts",
-      "commit": "156b5ec42dbb711d637727cbaba4fe20dacb7e1b"
+      "commit": "da210a65ba7c734f07bfd817d14b64b22ea67f79"
     }
   ],
   "coverage_map": [
@@ -173,8 +178,52 @@
       "kind": "behavioural",
       "drives": "bootstrapServerDeps(runRoot).invoke — src/server.ts (selectChairInvoker → makeClaudeInvoker, sealVia output_write, mcpServerConfigs from readMcpServerConfigs) → real spawn from a cwd whose own genome differs → the engine server entry's output_write",
       "plant": "the engine child's entry resolved against the cwd (the relative `dist/src/server_entry.js` of readMcpServerConfigs' fallback / .mcp.json) — origin state at 769d6de"
+    },
+    {
+      "invariant_id": "G7",
+      "test_name": "G1 · one gate: on the drain, what the in-turn output_write accepts the seal accepts, and what the seal rejects the chair is told in-turn > G7 · a run-registry type whose CONTENT changes on reload refuses the chair, naming it — nothing is spawned",
+      "test_file": "tests/one_output_gate.test.ts",
+      "kind": "behavioural",
+      "drives": "drainChairInvoker(env, runRegistry) — src/cli.ts → engineServerForRegistry / materializeRunGenome — src/run_genome_engine.ts → the real claude spawn and engine server entry; the type carries a schema value JSON cannot hold (a Date default), so it reloads under the same slug with a different schema",
+      "plant": "make sealView in src/run_genome_engine.ts compare slugs only: .map((t) => ({ slug: t.slug }))",
+      "plant_observed": "'a chair was seated over a root whose \"org-dated-note\" reloads with a different schema: expected { offered: true, …(5) } to be undefined' (red at 5da1fab as well: the refusal said '(same slugs, different schemas)' and named no type)"
+    },
+    {
+      "invariant_id": "G8",
+      "test_name": "G1 · one gate: on the drain, what the in-turn output_write accepts the seal accepts, and what the seal rejects the chair is told in-turn > G8 · a declared engine env cannot override the genome pin > the child judges by the door's root, not the COLTRANE_GENOME the .mcp.json declares — both directions",
+      "test_file": "tests/one_output_gate.test.ts",
+      "kind": "behavioural",
+      "drives": "bootstrapServerDeps(runRoot).invoke — src/server.ts → withEngineServerAt / engineServerAt — src/run_genome_engine.ts; runRoot/.mcp.json declares env COLTRANE_GENOME = a decoy genome (file v1)",
+      "plant": "in engineServerAt spread the declared env AFTER the pins: env: { COLTRANE_GENOME: …, COLTRANE_SERVER_DIRECT: '1', ...extraEnv }",
+      "plant_observed": "'the in-turn gate ACCEPTED what the door's seal rejects — the declared env's COLTRANE_GENOME (…coltrane-g8-decoy-…) won over the pin: expected true to be false'"
+    },
+    {
+      "invariant_id": "G9",
+      "test_name": "G1 · one gate: on the drain, what the in-turn output_write accepts the seal accepts, and what the seal rejects the chair is told in-turn > G9 · hostile slugs never reach the filesystem: no path under the run genome or its parent carries slug text, nothing lands outside the root, and the child resolves every type",
+      "test_file": "tests/one_output_gate.test.ts",
+      "kind": "behavioural",
+      "drives": "drainChairInvoker(env, runRegistry) — src/cli.ts → engineServerForRegistry / materializeRunGenome — src/run_genome_engine.ts → the real claude spawn and engine server entry, with TMPDIR pointed at a fresh directory; the stand-in claude sends output_write for every hostile slug to the real child",
+      "plant": "name the run genome's type file from the slug: join(typesDir, `${t.slug}.json`) in materializeRunGenome (the state at 5da1fab)",
+      "plant_observed": "'a path under …/coltrane-g9-parent-… carries slug text — a slug reached the filesystem: tmp/coltrane-run-genome-staging-…/domain_types/abs-escaped-by-slug.json, tmp/escaped-by-slug.json'"
+    },
+    {
+      "invariant_id": "G10",
+      "test_name": "G1 · one gate: on the drain, what the in-turn output_write accepts the seal accepts, and what the seal rejects the chair is told in-turn > G10 · a 75-type org-shaped registry, reconstructed from store rows, seats a chair whose gate works",
+      "test_file": "tests/one_output_gate.test.ts",
+      "kind": "behavioural",
+      "drives": "reconstructGenome (src/genome_store.ts) over 75 production-shaped rows → loadRegistry → drainChairInvoker(env, runRegistry) — src/cli.ts → engineServerForRegistry / materializeRunGenome — src/run_genome_engine.ts → the real claude spawn and engine server entry",
+      "plant": "refuse the whole registry when any type's file cannot be named from its slug, or re-add a slug grammar that rejects a production-shaped slug; either strands every Claude gig of the org"
+    },
+    {
+      "invariant_id": "G11",
+      "test_name": "G11 · the refusal names the offending type(s) and the reason, in the chair's error and the gig's terminal record > workOnce fails the gig with an error naming BOTH types and each one's reason, and writes that error to the gig's terminal record",
+      "test_file": "tests/one_output_gate.test.ts",
+      "kind": "behavioural",
+      "drives": "workOnce (src/worker.ts) with a stubbed store → makeInvoke → drainChairInvoker → materializeRunGenome's refusal → failGig's p_error (coltrane_mcp_gig_fail)",
+      "plant": "refuse with a generic message: drop the per-type slug list and the loader's load_error reason from the materializeRunGenome refusal (the state at 5da1fab lacks the loader's reason)",
+      "plant_observed": "red at 5da1fab: 'the chair's error does not say why it is dropped (the loader's own reason): cannot seat a Claude chair on the drain: … (org-refusal-report) …'"
     }
   ],
-  "testing_method": "vitest, example-based. G1 drives the real drainChairInvoker and the real claude invoker spawn. A stand-in claude on PATH (tests/_support/gate_fake_claude.mjs) reads the per-gig --mcp-config, starts the engine server it names over stdio (or http) with the MCP SDK client, and calls output_write, so the in-turn gate the law sees is the real server. The run's genome comes from reconstructGenome over a store row whose change-verdict is v2 and requires org_ticket, which the file genome's closed v1 forbids, so a gate built from the wrong genome shows up in either direction. G2 drives captureOutputWrites over CLI-shaped stream-json. G3 and R drive the output store and runGig on the repo genome. Plants were applied to a scratch copy of src, observed red, and reverted: the file-genome engine child (G1a/G1b), a validation-only strip (G3b, R), stripping required nulls (G3c), a recursive strip (G3d). A sketched fix (materialising the run registry's types as the child's COLTRANE_GENOME) turned G1 green, so the fixture can pass. SUSPECTS. (iii) path skips validate mode: CONFIRMED from source and reproduced (G1a red at origin/main: the mcp-config names servers [] and no engine server). drainChairInvoker (src/cli.ts) builds makeClaudeInvoker({registry, model, timeout_ms}) with no sealVia and no mcpServerConfigs, so a drained Claude seat seals from text. No in-turn gate exists; the seal is the only judgment. The drain's completions seats do use a validate-pinned source over the store registry, so their gates agree. (i) child holds another genome: LATENT. The fix for (iii) would walk into it. The engine child is bootstrapServerDeps(COLTRANE_GENOME ?? cwd), which is the file genome, while the drain seals against the org store's types. Observed with the plant: the file child accepted a payload the store seal refuses (missing org_ticket) and refused one it accepts (additionalProperties org_ticket). (ii) rejection without is_error: Not the live cause. createColtraneServer sets isError: !result.ok. But captureOutputWrites trusts only the CLI's is_error and never reads the ok:false body, so G2 hardens it. ROUND 2 (after the implementer's 769d6de): the shared fixtures are deep-frozen and every law is handed its own structuredClone, so G3e can fail in a full-file run. G2e shows the is_error flag refusing on its own. G5 feeds drainChairInvoker a run registry holding a type the loader drops on reload. G6 bootstraps the server door on a run root holding the org's change-verdict v2, then chdirs into a directory with its own genome (file v1, dist symlinked so the relative entry resolves) and into a bare directory. A scratch fix turned G6 green and was reverted: an absolute entry plus COLTRANE_GENOME set to the bootstrap root in the engine config.",
+  "testing_method": "vitest, example-based. G1 drives the real drainChairInvoker and the real claude invoker spawn. A stand-in claude on PATH (tests/_support/gate_fake_claude.mjs) reads the per-gig --mcp-config, starts the engine server it names over stdio (or http) with the MCP SDK client, and calls output_write, so the in-turn gate the law sees is the real server. The run's genome comes from reconstructGenome over a store row whose change-verdict is v2 and requires org_ticket, which the file genome's closed v1 forbids, so a gate built from the wrong genome shows up in either direction. G2 drives captureOutputWrites over CLI-shaped stream-json. G3 and R drive the output store and runGig on the repo genome. Plants were applied to a scratch copy of src, observed red, and reverted: the file-genome engine child (G1a/G1b), a validation-only strip (G3b, R), stripping required nulls (G3c), a recursive strip (G3d). A sketched fix (materialising the run registry's types as the child's COLTRANE_GENOME) turned G1 green, so the fixture can pass. SUSPECTS. (iii) path skips validate mode: CONFIRMED from source and reproduced (G1a red at origin/main: the mcp-config names servers [] and no engine server). drainChairInvoker (src/cli.ts) builds makeClaudeInvoker({registry, model, timeout_ms}) with no sealVia and no mcpServerConfigs, so a drained Claude seat seals from text. No in-turn gate exists; the seal is the only judgment. The drain's completions seats do use a validate-pinned source over the store registry, so their gates agree. (i) child holds another genome: LATENT. The fix for (iii) would walk into it. The engine child is bootstrapServerDeps(COLTRANE_GENOME ?? cwd), which is the file genome, while the drain seals against the org store's types. Observed with the plant: the file child accepted a payload the store seal refuses (missing org_ticket) and refused one it accepts (additionalProperties org_ticket). (ii) rejection without is_error: Not the live cause. createColtraneServer sets isError: !result.ok. But captureOutputWrites trusts only the CLI's is_error and never reads the ok:false body, so G2 hardens it. ROUND 2 (after the implementer's 769d6de): the shared fixtures are deep-frozen and every law is handed its own structuredClone, so G3e can fail in a full-file run. G2e shows the is_error flag refusing on its own. G5 feeds drainChairInvoker a run registry holding a type the loader drops on reload. G6 bootstraps the server door on a run root holding the org's change-verdict v2, then chdirs into a directory with its own genome (file v1, dist symlinked so the relative entry resolves) and into a bare directory. A scratch fix turned G6 green and was reverted: an absolute entry plus COLTRANE_GENOME set to the bootstrap root in the engine config. ROUND 3 (on 5da1fab merged with main at 8a743b5). FOUNDER RULING, verbatim: \"SLUGS ARE NOT IDENTIFIERS\". Per the ruling there is no slug-grammar law, neither at the path builder nor in the schema. G9 drives the drain door with slugs ../../x, /abs, NUL, a/b, a\\b, ., .. and one kebab slug, with TMPDIR pointed at a fresh directory. It asserts that no path under that directory or its parent carries slug text, that nothing is created outside the run genome, and that the real child answers output_write ok for every slug. A scratch writer that names files by the sha256 of the slug turned G9, G10 and G5 green and was reverted. The ruling's (1b), an engine-built index rather than a path join, is covered by the same law's resolution half: every hostile slug resolves in the child although no file bears it. G10 is a READ-ONLY shape check. The test never queries production; it builds 75 kebab slugs of at most 22 characters across all six cores. COST (measured by the grader, issuecomment-5847851004): one engine child per chair, about 200 ms (185-211 ms) from spawn to MCP connect and about 99 MB RSS; materializeRunGenome takes about 19 ms and is content-addressed, so it is reused across claims. A box's concurrency ceiling falls by about 100 MB per concurrent chair.",
   "uncovered": []
 }

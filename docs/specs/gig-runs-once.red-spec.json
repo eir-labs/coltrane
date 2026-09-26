@@ -1,5 +1,5 @@
 {
-  "spec_doc": "docs/specs/gig-runs-once.red-spec.json \u2014 engine half of the two-repo fix; the store half (coltrane_drain_renew / coltrane_drain_release, attempts/max_attempts, terminal-status guard on the header upsert, lease clearing on terminal writes, manifest merge) lands in eir-labs/coltrane-ui branch work/gig-runs-once and deploys first. CONTRACT SURFACE the laws pin \u2014 src/lease.ts: export const HOSTED_LEASE_MS = 60 * 60 * 1000; export const DRAIN_LEASE_ROUTES = { renew: '/rest/v1/rpc/coltrane_drain_renew', release: '/rest/v1/rpc/coltrane_drain_release' }; renew: POST ${COLTRANE_DRAIN_URL}${DRAIN_LEASE_ROUTES.renew} body {p_gig_id} ONLY, Bearer drain key (the route fills p_token), X-Coltrane-Instance (the route fills p_instance); 200 -> new lease_until; 403 / 42501 -> lease lost; release: POST ${COLTRANE_DRAIN_URL}${DRAIN_LEASE_ROUTES.release} body {p_gig_id, p_reason, p_terminal} ONLY, instance in X-Coltrane-Instance -> boolean; WorkOnceDeps.scheduleHeartbeat: (intervalMs: number, beat: () => Promise<unknown>) => () => void; default arms an unref'd setInterval; interval = HOSTED_LEASE_MS / 3; WorkOnceResult.acknowledged: boolean on a claimed result: true iff the store acknowledged the terminal header; terminal header attempts: 3; header status: 'running' is a new GigHeaderRecord status, sent awaited before the first chair with the run's genome_hash; manifest.cold_run_reason: string on a header written by a run that went cold because a resume was refused. ROUND 2: output drains are acknowledged (3 attempts) before the completed header; a 'running' header refused with 23514 or 403/42501 aborts the run with no terminal write.",
+  "spec_doc": "docs/specs/gig-runs-once.red-spec.json \u2014 engine half of the two-repo fix; the store half (coltrane_drain_renew / coltrane_drain_release, attempts/max_attempts, terminal-status guard on the header upsert, lease clearing on terminal writes, manifest merge) lands in eir-labs/coltrane-ui branch work/gig-runs-once and deploys first. CONTRACT SURFACE the laws pin \u2014 src/lease.ts: export const HOSTED_LEASE_MS = 60 * 60 * 1000; export const DRAIN_LEASE_ROUTES = { renew: '/rest/v1/rpc/coltrane_drain_renew', release: '/rest/v1/rpc/coltrane_drain_release' }; renew: POST ${COLTRANE_DRAIN_URL}${DRAIN_LEASE_ROUTES.renew} body {p_gig_id} ONLY, Bearer drain key (the route fills p_token), X-Coltrane-Instance (the route fills p_instance); 200 -> new lease_until; 403 / 42501 -> lease lost; release: POST ${COLTRANE_DRAIN_URL}${DRAIN_LEASE_ROUTES.release} body {p_gig_id, p_reason, p_terminal} ONLY, instance in X-Coltrane-Instance -> boolean; WorkOnceDeps.scheduleHeartbeat: (intervalMs: number, beat: () => Promise<unknown>) => () => void; default arms an unref'd setInterval; interval = HOSTED_LEASE_MS / 3; WorkOnceResult.acknowledged: boolean on a claimed result: true iff the store acknowledged the terminal header; terminal header attempts: 3; header status: 'running' is a new GigHeaderRecord status, sent awaited before the first chair with the run's genome_hash; manifest.cold_run_reason: string on a header written by a run that went cold because a resume was refused. ROUND 2: output drains are acknowledged (3 attempts) before the completed header; a 'running' header refused with 23514 or 403/42501 aborts the run with no terminal write. ROUND 3 (branch work/gig-runs-once-r3): G1 the heartbeat stays armed until the terminal header is acknowledged or exhausted; G2 no release after the outcome is decided when the terminal header is unacknowledged; REFUND a non-terminal release only before the first chair invocation; Q6 the drain deadline ends a gig aborted/timeout (WorkOnceResult status 'aborted', aborted:{reason:'timeout'}, header status 'aborted', no gig_fail); G4 (terminal rows only; founder ruling, Eugene: \"what's closed is closed. can refer to the sealed outputs on input if needed but reopening doesn't smell right.\"): the successful resume path at gig_dispatch(resume_gig_id) / `coltrane dispatch --resume` runs today under the OLD id (gigId = resumeArg ?? randomUUID()), which the store's terminal guard answers with 23514; a resume of a failed/aborted gig must dispatch a NEW gig carrying resumes:<old id>, take the old seals as inputs by reference (content_sha in input_shas, never re-sealed), and write nothing under the old id. The refused-resume case is covered by tests/resume_reuse_dispatch.test.ts:164. A parked \u2192 approved \u2192 re-claimed gig is not terminal and keeps its id (E6b records a cold run there).",
   "validation_criteria": [
     "every contract invariant E1-E8 has a red law that drives production code and names its plant",
     "the drain-service lease RPC routes live in ONE constant (DRAIN_LEASE_ROUTES, src/lease.ts)",
@@ -204,6 +204,62 @@
       "kind": "behavioural",
       "drives": "workOnce(ctx, deps) \u2014 src/worker.ts \u2014 same",
       "plant": "log and ignore a refused 'running' header (continue into the first chair)"
+    },
+    {
+      "invariant_id": "G1a",
+      "test_name": "G1 \u2014 the heartbeat stays armed through sealing, output acks and the terminal header > G1a the heartbeat's stop is called only AFTER the terminal header was acknowledged",
+      "test_file": "tests/gig_runs_once_heartbeat_window.test.ts",
+      "kind": "behavioural",
+      "drives": "workOnce(ctx, deps) \u2014 src/worker.ts \u2014 the scheduleHeartbeat stop relative to the acknowledged terminal header",
+      "plant": "call the heartbeat's stop when runGig returns (outcome decided), before the terminal header is awaited"
+    },
+    {
+      "invariant_id": "G1b",
+      "test_name": "G1 \u2014 the heartbeat stays armed through sealing, output acks and the terminal header > G1b a renew refused AFTER the last chair but before the completion is acknowledged suppresses the terminal write",
+      "test_file": "tests/gig_runs_once_heartbeat_window.test.ts",
+      "kind": "behavioural",
+      "drives": "workOnce(ctx, deps) \u2014 src/worker.ts \u2014 a lease loss during the output-ack / terminal-header window gating the terminal write",
+      "plant": "disarm the heartbeat when the outcome is decided, or write the completed header regardless of a lease lost after the last chair"
+    },
+    {
+      "invariant_id": "G2a",
+      "test_name": "G2 \u2014 once the outcome is decided, an unacknowledged terminal header sends no release > G2a completed but never acknowledged: acknowledged:false and NO release of any kind",
+      "test_file": "tests/gig_runs_once_release_after_outcome.test.ts",
+      "kind": "behavioural",
+      "drives": "workOnce(ctx, deps) \u2014 src/worker.ts \u2014 the unacknowledged-completion path",
+      "plant": "send release(p_terminal=false) when the completed header exhausts its retries"
+    },
+    {
+      "invariant_id": "G2b",
+      "test_name": "G2 \u2014 once the outcome is decided, an unacknowledged terminal header sends no release > G2b failed but the failed header never acknowledged (gig_fail recorded): acknowledged:false and NO release of any kind",
+      "test_file": "tests/gig_runs_once_release_after_outcome.test.ts",
+      "kind": "behavioural",
+      "drives": "workOnce(ctx, deps) \u2014 src/worker.ts \u2014 the unacknowledged-failure path",
+      "plant": "send a (non-terminal or terminal) release when the failed header exhausts its retries although gig_fail recorded the failure"
+    },
+    {
+      "invariant_id": "REFUND",
+      "test_name": "ATTEMPT REFUND \u2014 after the first chair is invoked, every release is terminal > REFUND a chair ran, the run failed, and failGig threw: the release this worker sends is TERMINAL, never a refund",
+      "test_file": "tests/gig_runs_once_release_after_outcome.test.ts",
+      "kind": "behavioural",
+      "drives": "workOnce(ctx, deps) \u2014 src/worker.ts \u2014 the failGig-throws release fallback after a chair was invoked",
+      "plant": "send release(p_terminal=false) from workOnce's catch after the first chair invocation"
+    },
+    {
+      "invariant_id": "Q6",
+      "test_name": "Q6 \u2014 the drain deadline ends a gig as aborted/timeout, acknowledged > Q6 the run timeout fires: WorkOnceResult is aborted/timeout, the terminal header says `aborted` (retried to acknowledgement), and nothing reports it failed",
+      "test_file": "tests/gig_runs_once_timeout_aborted.test.ts",
+      "kind": "behavioural",
+      "drives": "workOnce(ctx, deps) \u2014 src/worker.ts \u2014 the drainTimeoutMs() deadline (src/run_deps.ts) through runGig's abort, WorkOnceResult.aborted, the aborted header",
+      "plant": "let the deadline's abort fall into workOnce's generic catch (status failed, failGig, failed header)"
+    },
+    {
+      "invariant_id": "G4",
+      "test_name": "G4 \u2014 a resume of a TERMINAL gig is a new gig linked to the old one > G4 gig_dispatch({resume_gig_id}) of a FAILED gig runs under a NEW id carrying `resumes: <old id>`, takes the old seals as inputs by reference, and writes nothing under the old id",
+      "test_file": "tests/gig_runs_once_terminal_resume.test.ts",
+      "kind": "behavioural",
+      "drives": "dispatchTool(\"gig_dispatch\", { resume_gig_id }, deps) \u2014 src/server.ts (`const gigId = resumeArg ?? randomUUID()`, the successful resume path) over runGig resume \u2014 src/runtime.ts and drainGigHeader \u2014 src/output_mirror.ts. FOUNDER RULING (Eugene), verbatim: \"what's closed is closed. can refer to the sealed outputs on input if needed but reopening doesn't smell right.\" The refused-resume case is covered by tests/resume_reuse_dispatch.test.ts:164 (a refused resume is a refusal, never a cold run).",
+      "plant": "keep `const gigId = resumeArg ?? randomUUID()` for a failed/aborted gig (resuming under the old id) \u2014 or re-seal the old gig's sealed note under the new id as the new gig's own work (a new seal / the new gate's input_shas not naming the old content_sha)"
     }
   ],
   "testing_method": "vitest, example-based and behavioural: every engine law drives workOnce (or runCli / openLocalQueue) through a stubbed global fetch that plays both hosts \u2014 the org store (ctx.baseUrl RPCs) and the drain service (COLTRANE_DRAIN_URL: header, outputs, storage, renew, release) \u2014 statefully, so a re-claim reads what the first worker's acknowledged writes left behind. The heartbeat's clock is injected (WorkOnceDeps.scheduleHeartbeat) and fired from inside the chair invocation; acknowledgement is observed by holding the store's answer back (a delayed Response) and asserting what had resolved when workOnce returned. E8 moves the lease constant with vi.doMock over src/lease.ts and asserts both derived numbers follow. New symbols are reached by variable specifiers and casts so tsc over tests/ stays clean.",
@@ -211,39 +267,55 @@
   "laws": [
     {
       "path": "tests/gig_runs_once_heartbeat.test.ts",
-      "commit": "a5c2e92f19e9ce04533b2efa602c89b3e08ca1e4"
+      "commit": "52cc81a1ef6cf11dd4aa2f53baa7083730cd3ac1"
+    },
+    {
+      "path": "tests/gig_runs_once_heartbeat_window.test.ts",
+      "commit": "52cc81a1ef6cf11dd4aa2f53baa7083730cd3ac1"
     },
     {
       "path": "tests/gig_runs_once_lease_constant.test.ts",
-      "commit": "a5c2e92f19e9ce04533b2efa602c89b3e08ca1e4"
+      "commit": "52cc81a1ef6cf11dd4aa2f53baa7083730cd3ac1"
     },
     {
       "path": "tests/gig_runs_once_local_complete.test.ts",
-      "commit": "a5c2e92f19e9ce04533b2efa602c89b3e08ca1e4"
+      "commit": "52cc81a1ef6cf11dd4aa2f53baa7083730cd3ac1"
     },
     {
       "path": "tests/gig_runs_once_outputs_first.test.ts",
-      "commit": "a5c2e92f19e9ce04533b2efa602c89b3e08ca1e4"
+      "commit": "52cc81a1ef6cf11dd4aa2f53baa7083730cd3ac1"
     },
     {
       "path": "tests/gig_runs_once_reclaim.test.ts",
-      "commit": "a5c2e92f19e9ce04533b2efa602c89b3e08ca1e4"
+      "commit": "52cc81a1ef6cf11dd4aa2f53baa7083730cd3ac1"
     },
     {
       "path": "tests/gig_runs_once_refused_header.test.ts",
-      "commit": "a5c2e92f19e9ce04533b2efa602c89b3e08ca1e4"
+      "commit": "52cc81a1ef6cf11dd4aa2f53baa7083730cd3ac1"
     },
     {
       "path": "tests/gig_runs_once_release.test.ts",
-      "commit": "a5c2e92f19e9ce04533b2efa602c89b3e08ca1e4"
+      "commit": "52cc81a1ef6cf11dd4aa2f53baa7083730cd3ac1"
+    },
+    {
+      "path": "tests/gig_runs_once_release_after_outcome.test.ts",
+      "commit": "52cc81a1ef6cf11dd4aa2f53baa7083730cd3ac1"
     },
     {
       "path": "tests/gig_runs_once_start_header.test.ts",
-      "commit": "a5c2e92f19e9ce04533b2efa602c89b3e08ca1e4"
+      "commit": "52cc81a1ef6cf11dd4aa2f53baa7083730cd3ac1"
     },
     {
       "path": "tests/gig_runs_once_terminal_ack.test.ts",
-      "commit": "a5c2e92f19e9ce04533b2efa602c89b3e08ca1e4"
+      "commit": "52cc81a1ef6cf11dd4aa2f53baa7083730cd3ac1"
+    },
+    {
+      "path": "tests/gig_runs_once_terminal_resume.test.ts",
+      "commit": "52cc81a1ef6cf11dd4aa2f53baa7083730cd3ac1"
+    },
+    {
+      "path": "tests/gig_runs_once_timeout_aborted.test.ts",
+      "commit": "52cc81a1ef6cf11dd4aa2f53baa7083730cd3ac1"
     }
   ]
 }

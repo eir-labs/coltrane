@@ -295,7 +295,13 @@ export const CALIBRATION_TRAIL = {
 // findings, the review's registers, the verdict's three refusal lists). They are read by the seats that
 // write and judge them and by whoever files the review; src/ reads none of them, exactly as the release
 // trio's verdict fields do. A renderer for either would bring both numbers down together.
-export const PINNED_UNREAD_FIELDS = 235;
+// 235 → 242 (2026-09-21): the landscape domain types landed (domain-landscape-discovery-v0). Their
+// payload fields ARE read — by the standard's skills (landscape-evidence-check reads items/evidence/
+// quote/url, landscape-gate reads verified_handles/findings/severity, landscape-cartograph reads the
+// rest) — but skills/ is in neither corpus, here or in the sealed cross-check that re-derives it. So
+// they surface as unread. A skill is a reader; widening both corpora together would shrink this
+// number rather than grow it, and is worth doing on its own rather than inside a domain PR.
+export const PINNED_UNREAD_FIELDS = 242;
 
 /* ─────────────────────────────────────────────────────────────────────────────────────────────────
  * TWO CORPORA — engine (src/) vs contract (broad).
@@ -545,4 +551,6 @@ export const PINNED_UNREAD_ENGINE_FIELDS = 20;
  */
 // 119 → 121: two of the session-review quintet's fields land in the CONTRACT corpus rather than the
 // engine one, for the same reason — declared in the genome, read by seats, not by src/.
-export const PINNED_UNREAD_CONTRACT_FIELDS = 121;
+// 121 → 123 (2026-09-21): the landscape charter's competency_questions and layers, read by the
+// framer's own prose and by the skills, for the same corpus reason as the engine pin above.
+export const PINNED_UNREAD_CONTRACT_FIELDS = 123;

@@ -1,0 +1,41 @@
+{
+  "id": "blocker-blocks",
+  "description": "An unresolved blocker marks the map BLOCKED",
+  "input": {
+    "map": {
+      "items": [
+        {
+          "handle": "a",
+          "evidence": [
+            {
+              "url": "https://w3.org/prov",
+              "quote": "A verbatim sentence.",
+              "retrieved_at": "2026-09-19"
+            }
+          ]
+        }
+      ]
+    },
+    "verification": {
+      "verified_handles": [
+        "a"
+      ]
+    },
+    "attack": {
+      "findings": [
+        {
+          "kind": "missing-item",
+          "claim": "Akoma Ntoso missing",
+          "severity": "blocker"
+        }
+      ]
+    }
+  },
+  "assertions": [
+    {
+      "path": "gate.status",
+      "op": "equals",
+      "value": "BLOCKED"
+    }
+  ]
+}

@@ -299,8 +299,15 @@ describe("#227 — the genome's declared required fields are dropped, not absent
     // step composeStandard requires between counting and writing), `session-review` (the prose with a
     // claim-to-evidence pairing) and `session-review-verdict` (which claims the census does not hold,
     // and which quotes the operator never wrote). All five declare their required fields.
+    // 78 → 85: the landscape septet (domain-landscape-discovery-v0) — `landscape-charter` (the
+    // competency questions and the layers to scout), `landscape-scan` (one layer's candidates, each
+    // with the page it was fetched from), `landscape-verification` (the deterministic evidence
+    // check's verdict), `landscape-relations` (typed edges with their evidence), `landscape-fit`
+    // (adopt / borrow / reference / ignore against the needs), `landscape-attack` (what the map
+    // missed or overclaimed) and `landscape-map` (the assembled projection). All seven declare their
+    // required fields, so they join `checked` and none appears in the `lossy` census.
     expect(checked).toHaveLength(genome.domain_types.size);
-    expect(checked.length).toBe(78);
+    expect(checked.length).toBe(85);
   });
 });
 

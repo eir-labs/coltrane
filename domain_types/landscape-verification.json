@@ -1,0 +1,58 @@
+{
+  "slug": "landscape-verification",
+  "version": 1,
+  "extends": "Verdict",
+  "domain": "landscape",
+  "status": "active",
+  "description": "Deterministic evidence check: every evidence URL fetched in this run and every quote matched as an exact substring of the fetched text. An item survives if at least one of its evidence entries resolves.",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "verified_handles": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "refused": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "type": "string"
+            },
+            "reason": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "handle",
+            "reason"
+          ]
+        }
+      },
+      "fetch_log": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "url": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string"
+            },
+            "chars": {
+              "type": "number"
+            }
+          }
+        }
+      }
+    }
+  },
+  "required_fields": [
+    "verified_handles",
+    "refused"
+  ]
+}

@@ -1,0 +1,378 @@
+{
+  "slug": "domain-landscape-discovery-v0",
+  "domain": "landscape",
+  "status": "draft",
+  "description": "Step zero of modelling a domain's type space: before formalising types, map what already exists in the world — standards, schemas, ontologies, data models, form libraries, labelled corpora and packages — by layer, with relations, maturity, licence and governance, each item proven by a page fetched in this run and a verbatim quote. frame (competency questions from the business's needs) → scout (one seat per layer, concurrent, web-grounded; the layer is supplied per chair) → evidence (a deterministic skill chair: fetch + exact-substring match, no model, encoding-agnostic) → relate → fit (adopt / borrow / reference / ignore against the needs) → attack (missing items, overclaims, false coverage) → map (deterministic assembly) → gate (a deterministic skill chair: no unverified item can be sealed; blockers mark the map BLOCKED; empty is never READY). Domain-agnostic: the domain, needs and layers arrive as the dispatch input and the chairs' supplies. Discovery only — proposing types from the map is a separate standard that consumes landscape-map and emits draft-domain-type.",
+  "agent_slugs": [
+    "landscape-framer",
+    "landscape-scout",
+    "landscape-relator",
+    "landscape-fitter",
+    "landscape-attacker"
+  ],
+  "input_types": [],
+  "output_types": [
+    "landscape-map"
+  ],
+  "phases": [
+    {
+      "name": "frame",
+      "intent": "Turn the domain and the business's needs into a charter: competency questions the eventual types must answer, and the layers to scout.",
+      "chairs": [
+        {
+          "role": "frame",
+          "agent_slug": "landscape-framer",
+          "depends_on": [],
+          "input_contract": [],
+          "output_contract": [
+            "landscape-charter"
+          ],
+          "required_skills": []
+        }
+      ]
+    },
+    {
+      "name": "scout",
+      "intent": "Diverge, one seat per layer, concurrently. Find what already exists from primary sources; every item carries a fetched URL and a verbatim quote; record what was searched and what could not be confirmed.",
+      "chairs": [
+        {
+          "role": "scout-provenance",
+          "agent_slug": "landscape-scout",
+          "depends_on": [
+            "frame"
+          ],
+          "input_contract": [
+            "landscape-charter"
+          ],
+          "output_contract": [
+            "landscape-scan"
+          ],
+          "required_skills": [],
+          "supplies": {
+            "layer": "provenance",
+            "layer_question": "Identity, provenance and lineage: how documents, parties, laws and derived records are identified, versioned and traced to their origins.",
+            "seed_candidates": "W3C PROV-O, GLEIF LEI, European Legislation Identifier (ELI), URN:LEX, W3C Verifiable Credentials"
+          }
+        },
+        {
+          "role": "scout-law-markup",
+          "agent_slug": "landscape-scout",
+          "depends_on": [
+            "frame"
+          ],
+          "input_contract": [
+            "landscape-charter"
+          ],
+          "output_contract": [
+            "landscape-scan"
+          ],
+          "required_skills": [],
+          "supplies": {
+            "layer": "law-markup",
+            "layer_question": "How primary law is published as structured, addressable data, including point-in-time versions.",
+            "seed_candidates": "Akoma Ntoso / OASIS LegalDocML, USLM (US Code XML), e-Gov 法令API / 法令XML (Japan), legislation.gov.uk CLML, Delaware Code online"
+          }
+        },
+        {
+          "role": "scout-norms-rules",
+          "agent_slug": "landscape-scout",
+          "depends_on": [
+            "frame"
+          ],
+          "input_contract": [
+            "landscape-charter"
+          ],
+          "output_contract": [
+            "landscape-scan"
+          ],
+          "required_skills": [],
+          "supplies": {
+            "layer": "norms-rules",
+            "layer_question": "How legal norms (who must / may / must not do what, under what conditions, or else what) are formally represented and evaluated.",
+            "seed_candidates": "Institutional Grammar 2.0 (ADICO), OASIS LegalRuleML, W3C ODRL, Catala, LKIF, Blawx / s(CASP), Symboleo"
+          }
+        },
+        {
+          "role": "scout-contract-models",
+          "agent_slug": "landscape-scout",
+          "depends_on": [
+            "frame"
+          ],
+          "input_contract": [
+            "landscape-charter"
+          ],
+          "output_contract": [
+            "landscape-scan"
+          ],
+          "required_skills": [],
+          "supplies": {
+            "layer": "contract-models",
+            "layer_question": "Data models for contracts as structured objects: parties, clauses, parameters, obligations, events and lifecycle.",
+            "seed_candidates": "Accord Project (Concerto, TemplateMark, Cicero), ISDA Common Domain Model, EDM Council FIBO, Symboleo, OASIS eContracts"
+          }
+        },
+        {
+          "role": "scout-standard-forms",
+          "agent_slug": "landscape-scout",
+          "depends_on": [
+            "frame"
+          ],
+          "input_contract": [
+            "landscape-charter"
+          ],
+          "output_contract": [
+            "landscape-scan"
+          ],
+          "required_skills": [],
+          "supplies": {
+            "layer": "standard-forms",
+            "layer_question": "Market-standard agreements and form libraries for NDAs, services, IP licensing and assignment, startup financing and corporate governance, in the US and Japan.",
+            "seed_candidates": "Common Paper, Bonterms, oneNDA, Y Combinator SAFE, NVCA model documents, Cooley GO forms, JPO / METI model contracts (モデル契約書)"
+          }
+        },
+        {
+          "role": "scout-clause-corpora",
+          "agent_slug": "landscape-scout",
+          "depends_on": [
+            "frame"
+          ],
+          "input_contract": [
+            "landscape-charter"
+          ],
+          "output_contract": [
+            "landscape-scan"
+          ],
+          "required_skills": [],
+          "supplies": {
+            "layer": "clause-corpora",
+            "layer_question": "Clause taxonomies and labelled contract datasets for learning clause families, parameters and variation.",
+            "seed_candidates": "CUAD, LEDGAR, MAUD, ContractNLI, ACORD, SEC EDGAR exhibits, SALI LMSS"
+          }
+        },
+        {
+          "role": "scout-ip-licensing",
+          "agent_slug": "landscape-scout",
+          "depends_on": [
+            "frame"
+          ],
+          "input_contract": [
+            "landscape-charter"
+          ],
+          "output_contract": [
+            "landscape-scan"
+          ],
+          "required_skills": [],
+          "supplies": {
+            "layer": "ip-licensing",
+            "layer_question": "Formal models of intellectual-property rights, licences, grants, fields of use, territories and assignments.",
+            "seed_candidates": "W3C ODRL, SPDX, Creative Commons REL, WIPO ST standards, USPTO assignment data"
+          }
+        },
+        {
+          "role": "scout-tooling",
+          "agent_slug": "landscape-scout",
+          "depends_on": [
+            "frame"
+          ],
+          "input_contract": [
+            "landscape-charter"
+          ],
+          "output_contract": [
+            "landscape-scan"
+          ],
+          "required_skills": [],
+          "supplies": {
+            "layer": "tooling",
+            "layer_question": "Open-source packages and tools for drafting, assembling, comparing, rendering and executing legal documents and rules.",
+            "seed_candidates": "docassemble, Accord Project runtime, Catala compiler, OpenFisca, LexNLP, docx redline libraries, Pandoc"
+          }
+        }
+      ]
+    },
+    {
+      "name": "evidence",
+      "intent": "Deterministic: fetch every evidence URL in this run and match every quote as an exact substring of the fetched text. No model. An item survives only if one of its quotes resolves.",
+      "chairs": [
+        {
+          "role": "evidence",
+          "skill_slug": "landscape-evidence-check",
+          "depends_on": [
+            "scout-provenance",
+            "scout-law-markup",
+            "scout-norms-rules",
+            "scout-contract-models",
+            "scout-standard-forms",
+            "scout-clause-corpora",
+            "scout-ip-licensing",
+            "scout-tooling"
+          ],
+          "input_contract": [
+            "landscape-scan"
+          ],
+          "output_contract": [
+            "landscape-verification"
+          ],
+          "required_skills": []
+        }
+      ]
+    },
+    {
+      "name": "relate",
+      "intent": "Connect the verified items into a typed relation graph, each relation with evidence.",
+      "chairs": [
+        {
+          "role": "relate",
+          "agent_slug": "landscape-relator",
+          "depends_on": [
+            "scout-provenance",
+            "scout-law-markup",
+            "scout-norms-rules",
+            "scout-contract-models",
+            "scout-standard-forms",
+            "scout-clause-corpora",
+            "scout-ip-licensing",
+            "scout-tooling",
+            "evidence"
+          ],
+          "input_contract": [
+            "landscape-scan",
+            "landscape-verification"
+          ],
+          "output_contract": [
+            "landscape-relations"
+          ],
+          "required_skills": []
+        }
+      ]
+    },
+    {
+      "name": "fit",
+      "intent": "Judge each verified item against the needs and competency questions; name the questions nothing covers.",
+      "chairs": [
+        {
+          "role": "fit",
+          "agent_slug": "landscape-fitter",
+          "depends_on": [
+            "frame",
+            "evidence",
+            "relate",
+            "scout-provenance",
+            "scout-law-markup",
+            "scout-norms-rules",
+            "scout-contract-models",
+            "scout-standard-forms",
+            "scout-clause-corpora",
+            "scout-ip-licensing",
+            "scout-tooling"
+          ],
+          "input_contract": [
+            "landscape-charter",
+            "landscape-scan",
+            "landscape-verification",
+            "landscape-relations"
+          ],
+          "output_contract": [
+            "landscape-fit"
+          ],
+          "required_skills": []
+        }
+      ]
+    },
+    {
+      "name": "attack",
+      "intent": "Break the landscape: missing items, wrong layers, overclaims, relations that do not hold, questions falsely covered.",
+      "chairs": [
+        {
+          "role": "attack",
+          "agent_slug": "landscape-attacker",
+          "depends_on": [
+            "frame",
+            "evidence",
+            "relate",
+            "fit",
+            "scout-provenance",
+            "scout-law-markup",
+            "scout-norms-rules",
+            "scout-contract-models",
+            "scout-standard-forms",
+            "scout-clause-corpora",
+            "scout-ip-licensing",
+            "scout-tooling"
+          ],
+          "input_contract": [
+            "landscape-charter",
+            "landscape-scan",
+            "landscape-verification",
+            "landscape-relations",
+            "landscape-fit"
+          ],
+          "output_contract": [
+            "landscape-attack"
+          ],
+          "required_skills": []
+        }
+      ]
+    },
+    {
+      "name": "map",
+      "intent": "Assemble the layered map from sealed results only. Deterministic: a map is a projection, so assembly is layout rather than judgement — and a model seat here hit the 32k output ceiling trying to emit 64 items in one response.",
+      "chairs": [
+        {
+          "role": "map",
+          "depends_on": [
+            "frame",
+            "evidence",
+            "relate",
+            "fit",
+            "attack",
+            "scout-provenance",
+            "scout-law-markup",
+            "scout-norms-rules",
+            "scout-contract-models",
+            "scout-standard-forms",
+            "scout-clause-corpora",
+            "scout-ip-licensing",
+            "scout-tooling"
+          ],
+          "input_contract": [
+            "landscape-charter",
+            "landscape-scan",
+            "landscape-verification",
+            "landscape-relations",
+            "landscape-fit",
+            "landscape-attack"
+          ],
+          "output_contract": [
+            "landscape-map"
+          ],
+          "required_skills": [],
+          "skill_slug": "landscape-cartograph"
+        }
+      ]
+    },
+    {
+      "name": "gate",
+      "intent": "Deterministic guard: only verified, evidenced items survive; relations and fits touching a dropped item are removed; an unresolved blocker marks the map BLOCKED; an empty map is never READY.",
+      "chairs": [
+        {
+          "role": "gate",
+          "skill_slug": "landscape-gate",
+          "depends_on": [
+            "map",
+            "evidence",
+            "attack"
+          ],
+          "input_contract": [
+            "landscape-map",
+            "landscape-verification",
+            "landscape-attack"
+          ],
+          "output_contract": [
+            "landscape-map"
+          ],
+          "required_skills": []
+        }
+      ]
+    }
+  ]
+}

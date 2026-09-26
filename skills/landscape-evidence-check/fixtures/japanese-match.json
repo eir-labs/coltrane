@@ -1,0 +1,44 @@
+{
+  "id": "japanese-match",
+  "description": "A Japanese quote verifies exactly (the citation-verify ASCII defect cannot recur)",
+  "input": {
+    "scans": [
+      {
+        "source": "web:landscape:x",
+        "data": {
+          "layer": "x",
+          "items": [
+            {
+              "handle": "egov",
+              "name": "egov",
+              "kind": "standard",
+              "layer": "x",
+              "url": "https://laws.e-gov.go.jp/law/405AC0000000086",
+              "what_it_models": "m",
+              "evidence": [
+                {
+                  "url": "https://laws.e-gov.go.jp/law/405AC0000000086",
+                  "quote": "業務を執行する社員は",
+                  "retrieved_at": "2026-09-19"
+                }
+              ]
+            }
+          ],
+          "queries_run": [
+            "q"
+          ]
+        }
+      }
+    ],
+    "mock_pages": {
+      "https://laws.e-gov.go.jp/law/405AC0000000086": "<div>第五百九十五条　業務を執行する社員は、次に掲げる場合には</div>"
+    }
+  },
+  "assertions": [
+    {
+      "path": "verified_handles.0",
+      "op": "equals",
+      "value": "egov"
+    }
+  ]
+}

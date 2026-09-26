@@ -1039,6 +1039,18 @@ class DrainDeadline extends Error {
   }
 }
 
+/** Throw, naming the variable, when a drain key is set but the drain service's URL is not. */
+export function refuseBlindDrain(env: NodeJS.ProcessEnv = process.env): void {
+  const key = env["COLTRANE_DRAIN_KEY"];
+  const url = env["COLTRANE_DRAIN_URL"];
+  if (key && key.trim() !== "" && (!url || url.trim() === "")) {
+    throw new Error(
+      "COLTRANE_DRAIN_KEY is set but COLTRANE_DRAIN_URL is not: this drain cannot reach the service its " +
+        "outputs, headers and lease go through, so it claims nothing. Set COLTRANE_DRAIN_URL to the Coltrane service origin.",
+    );
+  }
+}
+
 /** 23514: the row is terminal (the store's terminal guard). 403 / 42501: the lease is not ours. */
 function isNotOursRefusal(e: DrainWriteError): boolean {
   return e.code === "23514" || e.code === "42501" || e.status === 403 || e.status === 409;
@@ -1063,6 +1075,11 @@ export async function workOnce(ctx: WorkerContext, deps: WorkOnceDeps): Promise<
   } catch (e) {
     log(`worker-state reap skipped: ${e instanceof Error ? e.message : String(e)}`);
   }
+  // NO BLIND DRAIN, and no blind CLAIM. A drain key with no COLTRANE_DRAIN_URL can reach none of the
+  // doors a run writes through (outputs, headers, renew, release). Refused HERE, before the store is
+  // asked for work: a claim would lease the row and spend one of its attempts, and this worker could
+  // not even release it — the release goes through the service it cannot reach.
+  refuseBlindDrain();
   const claim = await claimNextGig(ctx);
   if (!claim) return { claimed: false };
   log(`claimed ${claim.gig_id} (${claim.standard_slug}, ${claim.mode}) as ${claim.acting_for}`);

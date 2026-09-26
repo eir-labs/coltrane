@@ -1188,6 +1188,20 @@ export function stampLawAddresses(
  * REFUSALS: no `tree_root` → `tree_root_unknown`; a seat-supplied `blob_sha`/`patch_sha256`/`bytes`
  * that disagrees with git → `law_bytes_mismatch` naming the path and field.
  */
+/** The given tree-relative paths that git IGNORES in `tree_root` (untracked and matched by an ignore
+ *  rule). `git check-ignore` exits 1 when none is ignored — that is an answer, not a failure; any
+ *  other failure propagates, so an unreadable tree refuses the stamp rather than passing it. */
+function ignoredPaths(tree_root: string, paths: readonly string[]): string[] {
+  if (paths.length === 0) return [];
+  try {
+    return execFileSync("git", ["-C", tree_root, "check-ignore", "-z", "--stdin"], { input: paths.join("\0") + "\0", stdio: ["pipe", "pipe", "pipe"] })
+      .toString("utf8").split("\0").filter((p) => p.length > 0);
+  } catch (e) {
+    if ((e as { status?: number }).status === 1) return [];
+    throw e;
+  }
+}
+
 export function stampChangeAddresses(
   changes: readonly ChangeAddress[],
   tree_root: string | undefined,
@@ -1195,6 +1209,17 @@ export function stampChangeAddresses(
   if (tree_root === undefined) {
     throw new RuntimeError(
       "tree_root_unknown: a change-set carrying `changes` cannot be stamped without a RunDeps.tree_root — the seal reads git objects from a named tree and never falls back to process.cwd().",
+    );
+  }
+  // A GITIGNORED PATH NEVER LEAVES THE TREE THROUGH THE ENGINE. The post-seat diff gate reads `git
+  // status`, which does not list ignored paths — so a seat's write there is one no gate judged. The only
+  // way the engine carries a tree file into a sealed record is this stamp, so a change-set naming an
+  // ignored path is REFUSED here, naming it, and nothing is sealed. (Tracked files are never "ignored"
+  // to `git check-ignore`, so a tracked file under an ignore rule still stamps.)
+  const ignored = ignoredPaths(tree_root, changes.map((c) => c.path));
+  if (ignored.length > 0) {
+    throw new RuntimeError(
+      `ignored_path: the change-set names gitignored path(s) [${ignored.join(", ")}] — a path git ignores is one the diff gate never saw, so its bytes are never sealed. Nothing is sealed.`,
     );
   }
   return changes.map((change) => {

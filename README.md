@@ -19,7 +19,10 @@
 
 ## Run it
 
+**Node 26 or newer is required.** A skill's network grant is enforced by `--allow-net`, which arrived in Node 25 (already end-of-life); on Node 24 and older a skill can reach the network with no gate at all. So coltrane refuses to install or run on anything older than 26 — no degraded mode.
+
 ```bash
+nvm install 26          # or any Node 26+
 npm install -g @eir-labs/coltrane
 ```
 

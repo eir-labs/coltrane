@@ -485,7 +485,7 @@ export function loadGenome(
       }
       // A declared permission.network USED to be a dead name: NetworkGrantSchema parsed it,
       // SkillSchema stored it, and nothing in the execution path read it, so an origin allowlist
-      // or a rate cap was a false assurance and loading was refused outright. Node 24's
+      // or a rate cap was a false assurance and loading was refused outright. Node 25's
       // --allow-net changed the ground: skill_subprocess passes the flag only for a declared
       // grant (no grant, no flag, and the child's fetch is denied at the syscall), and
       // skill_runner enforces the allow list in-process. So the grant is backed, and what is
@@ -506,7 +506,7 @@ export function loadGenome(
           slug: pkg.meta.slug,
           error:
             `skill "${pkg.meta.slug}" declares permission.network but this runtime cannot back it — ` +
-            `Node ${process.versions.node} has no --allow-net (added in Node 24), so the grant would be a dead name ` +
+            `Node ${process.versions.node} has no --allow-net (added in Node 25), so the grant would be a dead name ` +
             `(upgrade the runtime or remove permission.network); the skill is not admitted`,
         });
         continue;

@@ -28,7 +28,7 @@ gate developers ran, and neither number matched the "481 tests" `ci.yml` claimed
 
 ### `ci.yml` — single-environment verify
 
-The canonical gate. Runs `npm run verify` on `ubuntu-latest` + node 22 only — that is every
+The canonical gate. Runs `npm run verify` on `ubuntu-latest` + node 26 only — that is every
 deterministic band, not just the unit suite. Stays the pass/fail signal on every PR + push.
 
 ### `test.yml` — cross-environment matrix
@@ -51,7 +51,7 @@ full failure surface, not just the first to fail.
 
 **Concurrency:** new pushes to the same ref cancel in-progress runs.
 
-**e2e-offline job:** single cell (ubuntu, node 22), on every PR and push. Builds, then runs
+**e2e-offline job:** single cell (ubuntu, node 26), on every PR and push. Builds, then runs
 `tests/e2e/vitest.offline.config.ts` — the e2e band minus the specs that spawn the real CLI.
 It replaces the old `e2e-smoke` stub, which echoed a warning, exited 0, and only ran on
 push-to-main, leaving all 36 e2e files executing nowhere.

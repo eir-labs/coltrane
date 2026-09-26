@@ -4,6 +4,7 @@
  * the stdio-server branch) out of `cli.ts`, which stays a pure function over an IO record
  * so the whole command surface is testable without spawning anything.
  */
+import "./runtime_floor.js"; // FIRST: refuse Node < 26 before anything else loads
 import { runCli } from "./cli.js";
 
 import { entryArgv } from "./bus_terminal.js";

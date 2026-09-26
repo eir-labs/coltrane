@@ -37,140 +37,150 @@
     "ROUND 7 (the non-author grade, issuecomment-5847662352): (1) no layout entry carries (, ), or , or edge whitespace — the CLI 2.1.283 --allowedTools splitter (Hp, vendored and tied to the binary) must read every emitted grant as exactly itself; (2) protection never compares literal names: casefold + NFKC + confusable folding (NFD, drop Mn) for the matcher and the diff gate, and realpath/inode where the file exists; (3) the sandbox opens .git (never hooks or config) and the network only through layout-declared git/egress roles the seat holds as tokens; (4) a root drain never makes a root room and /proc/sys stays unwritable; (5) the engine's ignore is fingerprinted against the installed CLI binary; (6) the sandbox denies <tree>/.coltrane.",
     "ROLLOUT OBLIGATION (outside this repo): the sandbox settings keys (sandbox.enabled, failIfUnavailable, allowUnsandboxedCommands, filesystem.*, network.allowedDomains/strictAllowlist) EXIST in Claude Code 2.1.247 and 2.1.278 — the drains' versions — but are NOT runtime-verified there. The drain rollout must verify them live on each drain's CLI (a sandboxed write outside the tree, to the layout file and to .git/hooks refused; an undeclared host refused) before relying on them, and the drain hosts need bwrap and socat.",
     "ROUND 7 FINDING: deploy-agent holds only WebFetch(https://api.vercel.com/*) with code_tool_access \"none\" — no Bash, so no sandbox; its fetch is an in-process CLI tool which the CLI 2.1.283 schema says the sandbox network setting does not gate. The grade's `fly` is not in its grants.",
-    "ROUND 8 (chancery #112 blocker): a role set to null in paths, commands, git.* or egress is a DECLARED ABSENCE — its token grants nothing, does not refuse the chair, and is recorded as absent_by_declaration (resolver result and chair_complete); a missing key still fails closed; [] stays refused. The four real draft layouts validate with their declared absences (chancery: migrations, ship_dry; lighthouse-classic: migrations; coltrane-ui: ship_dry; cognition: build, migrations, scripts, ship_dry) and seat chancery #112's agents."
+    "ROUND 8 (chancery #112 blocker): a role set to null in paths, commands, git.* or egress is a DECLARED ABSENCE — its token grants nothing, does not refuse the chair, and is recorded as absent_by_declaration (resolver result and chair_complete); a missing key still fails closed; [] stays refused. The four real draft layouts validate with their declared absences (chancery: migrations, ship_dry; lighthouse-classic: migrations; coltrane-ui: ship_dry; cognition: build, migrations, scripts, ship_dry) and seat chancery #112's agents.",
+    "ROUND 9, N1 (the r7+r8 grade): an open .git never blinds the diff gate. DESIGN PINNED: the SNAPSHOT — the gate judges against a baseline taken before the seat that the seat cannot write (every file's content, HEAD's tree from an object-store copy plus a full worktree walk), and reads the after-state by walking the worktree, ignoring the room's index flags (skip-worktree, assume-unchanged), .git/info/exclude / core.excludesFile, and whatever HEAD the seat leaves. Git roles legitimately write the index, so denying index-altering commands was not chosen.",
+    "ROUND 9 (a): the real-process and binary-bound laws run in CI — the `sandbox` job installs bubblewrap, socat, @anthropic-ai/sandbox-runtime@0.0.77 and @anthropic-ai/claude-code-linux-x64@2.1.283, sets COLTRANE_SRT / CLAUDE_BIN and COLTRANE_REQUIRE_REAL=1 (a skip is red there). It is new and its first run is the evidence that the Linux binary and bwrap behave as the macOS measurements did."
   ],
   "laws": [
     {
       "path": "tests/a_grant_never_crosses_repositories.test.ts",
-      "commit": "7223ab8080c5a51f185e857de5d04b7407606c2f"
+      "commit": "807e4a01165bd5d035b7372fd34a7dcdd535fe05"
     },
     {
       "path": "tests/a_grant_never_smuggles_another_grant.test.ts",
-      "commit": "7223ab8080c5a51f185e857de5d04b7407606c2f"
+      "commit": "807e4a01165bd5d035b7372fd34a7dcdd535fe05"
     },
     {
       "path": "tests/a_missing_role_or_layout_grants_nothing.test.ts",
-      "commit": "7223ab8080c5a51f185e857de5d04b7407606c2f"
+      "commit": "807e4a01165bd5d035b7372fd34a7dcdd535fe05"
     },
     {
       "path": "tests/a_new_repository_shape_needs_no_agent_amendment.test.ts",
-      "commit": "7223ab8080c5a51f185e857de5d04b7407606c2f"
+      "commit": "807e4a01165bd5d035b7372fd34a7dcdd535fe05"
     },
     {
       "path": "tests/a_protected_path_has_no_other_spelling.test.ts",
-      "commit": "7223ab8080c5a51f185e857de5d04b7407606c2f"
+      "commit": "807e4a01165bd5d035b7372fd34a7dcdd535fe05"
     },
     {
       "path": "tests/a_repository_can_declare_a_role_absent.test.ts",
-      "commit": "7223ab8080c5a51f185e857de5d04b7407606c2f"
+      "commit": "807e4a01165bd5d035b7372fd34a7dcdd535fe05"
     },
     {
       "path": "tests/a_room_never_runs_as_root.test.ts",
-      "commit": "7223ab8080c5a51f185e857de5d04b7407606c2f"
+      "commit": "807e4a01165bd5d035b7372fd34a7dcdd535fe05"
     },
     {
       "path": "tests/a_seat_cannot_rewrite_its_own_layout.test.ts",
-      "commit": "7223ab8080c5a51f185e857de5d04b7407606c2f"
+      "commit": "807e4a01165bd5d035b7372fd34a7dcdd535fe05"
     },
     {
       "path": "tests/a_seat_cannot_write_outside_its_target_paths.test.ts",
-      "commit": "7223ab8080c5a51f185e857de5d04b7407606c2f"
+      "commit": "807e4a01165bd5d035b7372fd34a7dcdd535fe05"
     },
     {
       "path": "tests/a_seat_cannot_write_the_engines_state.test.ts",
-      "commit": "7223ab8080c5a51f185e857de5d04b7407606c2f"
+      "commit": "807e4a01165bd5d035b7372fd34a7dcdd535fe05"
     },
     {
       "path": "tests/a_seat_reaches_git_and_the_network_only_as_declared.test.ts",
-      "commit": "7223ab8080c5a51f185e857de5d04b7407606c2f"
+      "commit": "807e4a01165bd5d035b7372fd34a7dcdd535fe05"
     },
     {
       "path": "tests/a_seat_that_writes_outside_its_grant_is_refused.test.ts",
-      "commit": "7223ab8080c5a51f185e857de5d04b7407606c2f"
+      "commit": "807e4a01165bd5d035b7372fd34a7dcdd535fe05"
     },
     {
       "path": "tests/a_seats_bash_runs_in_a_sandbox.test.ts",
-      "commit": "7223ab8080c5a51f185e857de5d04b7407606c2f"
+      "commit": "807e4a01165bd5d035b7372fd34a7dcdd535fe05"
     },
     {
       "path": "tests/a_spelling_or_case_never_widens_a_grant.test.ts",
-      "commit": "7223ab8080c5a51f185e857de5d04b7407606c2f"
+      "commit": "807e4a01165bd5d035b7372fd34a7dcdd535fe05"
     },
     {
       "path": "tests/a_target_path_never_escapes_the_tree.test.ts",
-      "commit": "7223ab8080c5a51f185e857de5d04b7407606c2f"
+      "commit": "807e4a01165bd5d035b7372fd34a7dcdd535fe05"
     },
     {
       "path": "tests/an_empty_or_globbed_scope_fails_closed.test.ts",
-      "commit": "7223ab8080c5a51f185e857de5d04b7407606c2f"
+      "commit": "807e4a01165bd5d035b7372fd34a7dcdd535fe05"
+    },
+    {
+      "path": "tests/an_open_git_never_blinds_the_diff_gate.test.ts",
+      "commit": "807e4a01165bd5d035b7372fd34a7dcdd535fe05"
     },
     {
       "path": "tests/both_invokers_grant_through_the_layout.test.ts",
-      "commit": "7223ab8080c5a51f185e857de5d04b7407606c2f"
+      "commit": "807e4a01165bd5d035b7372fd34a7dcdd535fe05"
     },
     {
       "path": "tests/every_door_carries_the_current_layout.test.ts",
-      "commit": "7223ab8080c5a51f185e857de5d04b7407606c2f"
+      "commit": "807e4a01165bd5d035b7372fd34a7dcdd535fe05"
     },
     {
       "path": "tests/every_protected_path_is_denied_where_the_cli_could_reach_it.test.ts",
-      "commit": "7223ab8080c5a51f185e857de5d04b7407606c2f"
+      "commit": "807e4a01165bd5d035b7372fd34a7dcdd535fe05"
     },
     {
       "path": "tests/literal_grants_resolve_unchanged.test.ts",
-      "commit": "7223ab8080c5a51f185e857de5d04b7407606c2f"
+      "commit": "807e4a01165bd5d035b7372fd34a7dcdd535fe05"
     },
     {
       "path": "tests/seat_grant_resolution_only_narrows.test.ts",
-      "commit": "7223ab8080c5a51f185e857de5d04b7407606c2f"
+      "commit": "807e4a01165bd5d035b7372fd34a7dcdd535fe05"
     },
     {
       "path": "tests/spec_room_image_carries_runtime_deps.test.ts",
-      "commit": "7223ab8080c5a51f185e857de5d04b7407606c2f"
+      "commit": "807e4a01165bd5d035b7372fd34a7dcdd535fe05"
     },
     {
       "path": "tests/spec_room_runs_non_root_live.test.ts",
-      "commit": "7223ab8080c5a51f185e857de5d04b7407606c2f"
+      "commit": "807e4a01165bd5d035b7372fd34a7dcdd535fe05"
     },
     {
       "path": "tests/the_chair_records_its_resolved_grants.test.ts",
-      "commit": "7223ab8080c5a51f185e857de5d04b7407606c2f"
+      "commit": "807e4a01165bd5d035b7372fd34a7dcdd535fe05"
     },
     {
       "path": "tests/the_diff_gate_never_fails_open.test.ts",
-      "commit": "7223ab8080c5a51f185e857de5d04b7407606c2f"
+      "commit": "807e4a01165bd5d035b7372fd34a7dcdd535fe05"
     },
     {
       "path": "tests/the_drain_takes_its_layout_from_the_store.test.ts",
-      "commit": "7223ab8080c5a51f185e857de5d04b7407606c2f"
+      "commit": "807e4a01165bd5d035b7372fd34a7dcdd535fe05"
     },
     {
       "path": "tests/the_engine_matches_scopes_as_the_cli_does.test.ts",
-      "commit": "7223ab8080c5a51f185e857de5d04b7407606c2f"
+      "commit": "807e4a01165bd5d035b7372fd34a7dcdd535fe05"
     },
     {
       "path": "tests/the_engine_never_publishes_an_ignored_path.test.ts",
-      "commit": "7223ab8080c5a51f185e857de5d04b7407606c2f"
+      "commit": "807e4a01165bd5d035b7372fd34a7dcdd535fe05"
     },
     {
       "path": "tests/the_layout_is_read_from_the_genome_tree.test.ts",
-      "commit": "7223ab8080c5a51f185e857de5d04b7407606c2f"
+      "commit": "807e4a01165bd5d035b7372fd34a7dcdd535fe05"
+    },
+    {
+      "path": "tests/the_real_process_laws_run_in_ci.test.ts",
+      "commit": "807e4a01165bd5d035b7372fd34a7dcdd535fe05"
     },
     {
       "path": "tests/the_room_can_start_the_sandbox_and_nothing_more.test.ts",
-      "commit": "7223ab8080c5a51f185e857de5d04b7407606c2f"
+      "commit": "807e4a01165bd5d035b7372fd34a7dcdd535fe05"
     },
     {
       "path": "tests/the_sandbox_refuses_a_real_write.test.ts",
-      "commit": "7223ab8080c5a51f185e857de5d04b7407606c2f"
+      "commit": "807e4a01165bd5d035b7372fd34a7dcdd535fe05"
     },
     {
       "path": "tests/the_sandbox_tree_is_always_absolute.test.ts",
-      "commit": "7223ab8080c5a51f185e857de5d04b7407606c2f"
+      "commit": "807e4a01165bd5d035b7372fd34a7dcdd535fe05"
     },
     {
       "path": "tests/the_scope_oracle_is_the_installed_clis.test.ts",
-      "commit": "7223ab8080c5a51f185e857de5d04b7407606c2f"
+      "commit": "807e4a01165bd5d035b7372fd34a7dcdd535fe05"
     }
   ],
   "coverage_map": [
@@ -3022,8 +3032,196 @@
       "drives": "LayoutSchema + resolveSeatGrants over the vendored draft layouts (tests/support/real_layouts.json) and chancery #112's agents",
       "plant": "missing == null: drop the undeclared-role refusal in resolveSeatGrants (src/layout_grants.ts)",
       "plant_observed": "missing==null applied at 2b59552 → AssertionError: a missing role was excused without a declaration: expected [] to deeply equal ArrayContaining{…}"
+    },
+    {
+      "test_name": "each real repository's layout, with its declared absences, validates and seats chancery's agents > wiki (eir-labs/wiki#33): the absences it must declare are exactly the ones the conductor named",
+      "test_file": "tests/a_repository_can_declare_a_role_absent.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "WIKI-33",
+      "drives": "LayoutSchema + resolveSeatGrants over wiki #33's layout (tests/support/real_layouts.json)",
+      "plant": "null refuses the chair (treat a declared absence as undeclared)"
+    },
+    {
+      "test_name": "each real repository's layout, with its declared absences, validates and seats chancery's agents > wiki: validates with its declared absences",
+      "test_file": "tests/a_repository_can_declare_a_role_absent.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "WIKI-33",
+      "drives": "LayoutSchema + resolveSeatGrants over wiki #33's layout (tests/support/real_layouts.json)",
+      "plant": "null refuses the chair (treat a declared absence as undeclared)"
+    },
+    {
+      "test_name": "each real repository's layout, with its declared absences, validates and seats chancery's agents > wiki: code-implementer is seated — no refusal, and every absent role it holds is recorded",
+      "test_file": "tests/a_repository_can_declare_a_role_absent.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "WIKI-33",
+      "drives": "LayoutSchema + resolveSeatGrants over wiki #33's layout (tests/support/real_layouts.json)",
+      "plant": "null refuses the chair (treat a declared absence as undeclared)",
+      "plant_observed": "null-refuses applied at 3dccce8 → FAIL: wiki: code-implementer is seated — no refusal, and every absent role it holds is recorded"
+    },
+    {
+      "test_name": "each real repository's layout, with its declared absences, validates and seats chancery's agents > wiki: pr-publisher is seated — no refusal, and every absent role it holds is recorded",
+      "test_file": "tests/a_repository_can_declare_a_role_absent.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "WIKI-33",
+      "drives": "LayoutSchema + resolveSeatGrants over wiki #33's layout (tests/support/real_layouts.json)",
+      "plant": "null refuses the chair (treat a declared absence as undeclared)"
+    },
+    {
+      "test_name": "each real repository's layout, with its declared absences, validates and seats chancery's agents > wiki: red-spec-drafter is seated — no refusal, and every absent role it holds is recorded",
+      "test_file": "tests/a_repository_can_declare_a_role_absent.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "WIKI-33",
+      "drives": "LayoutSchema + resolveSeatGrants over wiki #33's layout (tests/support/real_layouts.json)",
+      "plant": "null refuses the chair (treat a declared absence as undeclared)"
+    },
+    {
+      "test_name": "each real repository's layout, with its declared absences, validates and seats chancery's agents > wiki: change-verifier is seated — no refusal, and every absent role it holds is recorded",
+      "test_file": "tests/a_repository_can_declare_a_role_absent.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "WIKI-33",
+      "drives": "LayoutSchema + resolveSeatGrants over wiki #33's layout (tests/support/real_layouts.json)",
+      "plant": "null refuses the chair (treat a declared absence as undeclared)",
+      "plant_observed": "null-refuses applied at 3dccce8 → FAIL: wiki: change-verifier is seated — no refusal, and every absent role it holds is recorded"
+    },
+    {
+      "test_name": "each real repository's layout, with its declared absences, validates and seats chancery's agents > wiki AS PUBLISHED — it declares its own absences — validates and seats every agent, with no null synthesized",
+      "test_file": "tests/a_repository_can_declare_a_role_absent.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "WIKI-33",
+      "drives": "LayoutSchema + resolveSeatGrants over wiki #33's layout (tests/support/real_layouts.json)",
+      "plant": "null refuses the chair (treat a declared absence as undeclared)",
+      "plant_observed": "null-refuses applied at 3dccce8 → FAIL: wiki AS PUBLISHED — it declares its own absences — validates and seats every agent, with no null synthesized"
+    },
+    {
+      "test_name": "each real repository's layout, with its declared absences, validates and seats chancery's agents > wiki AS PUBLISHED (no null): code-implementer still fails closed on the roles the draft lacks",
+      "test_file": "tests/a_repository_can_declare_a_role_absent.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "WIKI-33",
+      "drives": "LayoutSchema + resolveSeatGrants over wiki #33's layout (tests/support/real_layouts.json)",
+      "plant": "null refuses the chair (treat a declared absence as undeclared)",
+      "plant_observed": "null-refuses applied at 3dccce8 → FAIL: wiki AS PUBLISHED (no null): code-implementer still fails closed on the roles the draft lacks"
+    },
+    {
+      "test_name": "REAL: each agent's own git and network work, inside the sandbox (skipped as UNVERIFIED without srt + an OS sandbox) > required: when COLTRANE_REQUIRE_REAL=1 (the CI sandbox job), srt and an OS sandbox are present",
+      "test_file": "tests/a_seat_reaches_git_and_the_network_only_as_declared.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "REAL-LAWS-REQUIRED",
+      "drives": "tests/a_seat_reaches_git_and_the_network_only_as_declared.test.ts under COLTRANE_REQUIRE_REAL=1",
+      "plant": "run the CI sandbox job without srt / the claude binary",
+      "plant_observed": "COLTRANE_REQUIRE_REAL=1 without srt and CLAUDE_BIN=/nonexistent → AssertionError: this job requires the … law(s) to RUN, and they would skip"
+    },
+    {
+      "test_name": "the diff gate judges against a baseline the seat cannot write (the snapshot design) > skip-worktree on a tracked file, then an out-of-scope edit: the chair is refused, naming scripts/deploy.sh",
+      "test_file": "tests/an_open_git_never_blinds_the_diff_gate.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "N1-GATE-NOT-BLINDED",
+      "drives": "runGig — src/runtime.ts (diff gate, src/diff_gate.ts)",
+      "plant": "(RED at 3dccce8) the gate trusts git status — the room's index flags, its excludes, and the post-seat HEAD"
+    },
+    {
+      "test_name": "the diff gate judges against a baseline the seat cannot write (the snapshot design) > assume-unchanged on a tracked file, then an out-of-scope edit: the chair is refused, naming scripts/deploy.sh",
+      "test_file": "tests/an_open_git_never_blinds_the_diff_gate.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "N1-GATE-NOT-BLINDED",
+      "drives": "runGig — src/runtime.ts (diff gate, src/diff_gate.ts)",
+      "plant": "(RED at 3dccce8) the gate trusts git status — the room's index flags, its excludes, and the post-seat HEAD"
+    },
+    {
+      "test_name": "the diff gate judges against a baseline the seat cannot write (the snapshot design) > .git/info/exclude, then a planted out-of-scope file: the chair is refused, naming scripts/planted.sh",
+      "test_file": "tests/an_open_git_never_blinds_the_diff_gate.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "N1-GATE-NOT-BLINDED",
+      "drives": "runGig — src/runtime.ts (diff gate, src/diff_gate.ts)",
+      "plant": "(RED at 3dccce8) the gate trusts git status — the room's index flags, its excludes, and the post-seat HEAD"
+    },
+    {
+      "test_name": "the diff gate judges against a baseline the seat cannot write (the snapshot design) > an out-of-scope change COMMITTED (HEAD moved; the status is clean against the new HEAD): the chair is refused, naming scripts/deploy.sh",
+      "test_file": "tests/an_open_git_never_blinds_the_diff_gate.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "N1-GATE-NOT-BLINDED",
+      "drives": "runGig — src/runtime.ts (diff gate, src/diff_gate.ts)",
+      "plant": "(RED at 3dccce8) the gate trusts git status — the room's index flags, its excludes, and the post-seat HEAD"
+    },
+    {
+      "test_name": "the diff gate judges against a baseline the seat cannot write (the snapshot design) > control — an in-scope edit, staged with the seat's own git role, seals",
+      "test_file": "tests/an_open_git_never_blinds_the_diff_gate.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "N1-GATE-NOT-BLINDED",
+      "drives": "runGig — src/runtime.ts (diff gate, src/diff_gate.ts)",
+      "plant": "refuse every seat that touched the index"
+    },
+    {
+      "test_name": "REAL: the attacks, run under srt with the git seat's own sandbox (skipped as UNVERIFIED without srt + an OS sandbox) > required: when COLTRANE_REQUIRE_REAL=1 (the CI sandbox job), srt and an OS sandbox are present",
+      "test_file": "tests/an_open_git_never_blinds_the_diff_gate.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "N1-GATE-NOT-BLINDED",
+      "drives": "runGig — src/runtime.ts (diff gate, src/diff_gate.ts) + the invoker's sandbox under srt",
+      "plant": "run the job without srt / an OS sandbox",
+      "plant_observed": "COLTRANE_REQUIRE_REAL=1 without srt → AssertionError: this job requires the real-process laws to RUN, and they would skip"
+    },
+    {
+      "test_name": "REAL: the attacks, run under srt with the git seat's own sandbox (skipped as UNVERIFIED without srt + an OS sandbox) > skip-worktree + edit: the sandbox PERMITS it (so only the gate can stop it), and the gate refuses the chair naming scripts/deploy.sh",
+      "test_file": "tests/an_open_git_never_blinds_the_diff_gate.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "N1-GATE-NOT-BLINDED",
+      "drives": "runGig — src/runtime.ts (diff gate, src/diff_gate.ts) + the invoker's sandbox under srt",
+      "plant": "(RED at 3dccce8) the gate trusts git status — the room's index flags, its excludes, and the post-seat HEAD"
+    },
+    {
+      "test_name": "REAL: the attacks, run under srt with the git seat's own sandbox (skipped as UNVERIFIED without srt + an OS sandbox) > info/exclude + plant: the sandbox PERMITS it (so only the gate can stop it), and the gate refuses the chair naming scripts/planted.sh",
+      "test_file": "tests/an_open_git_never_blinds_the_diff_gate.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "N1-GATE-NOT-BLINDED",
+      "drives": "runGig — src/runtime.ts (diff gate, src/diff_gate.ts) + the invoker's sandbox under srt",
+      "plant": "(RED at 3dccce8) the gate trusts git status — the room's index flags, its excludes, and the post-seat HEAD"
+    },
+    {
+      "test_name": "the real-process and binary-bound laws run in CI (structural — the obligation IS the workflow text) > a `sandbox` job installs bubblewrap, socat, @anthropic-ai/sandbox-runtime, and the CLI at the oracle's version",
+      "test_file": "tests/the_real_process_laws_run_in_ci.test.ts",
+      "kind": "structural",
+      "invariant_id": "REAL-LAWS-RUN-IN-CI",
+      "drives": ".github/workflows/ci.yml (the `sandbox` job) + tests/*.test.ts",
+      "structural_reason": "The obligation is the CI workflow's text: whether a job installs srt and the CLI and runs the required-real files. Nothing in the engine executes it; the workflow file is the artefact.",
+      "plant": "drop a required-real file from the sandbox job's list (or its env / installs)"
+    },
+    {
+      "test_name": "the real-process and binary-bound laws run in CI (structural — the obligation IS the workflow text) > it sets COLTRANE_REQUIRE_REAL=1 and exports COLTRANE_SRT and CLAUDE_BIN",
+      "test_file": "tests/the_real_process_laws_run_in_ci.test.ts",
+      "kind": "structural",
+      "invariant_id": "REAL-LAWS-RUN-IN-CI",
+      "drives": ".github/workflows/ci.yml (the `sandbox` job) + tests/*.test.ts",
+      "structural_reason": "The obligation is the CI workflow's text: whether a job installs srt and the CLI and runs the required-real files. Nothing in the engine executes it; the workflow file is the artefact.",
+      "plant": "drop a required-real file from the sandbox job's list (or its env / installs)"
+    },
+    {
+      "test_name": "the real-process and binary-bound laws run in CI (structural — the obligation IS the workflow text) > it runs exactly every test file that carries a required-real law",
+      "test_file": "tests/the_real_process_laws_run_in_ci.test.ts",
+      "kind": "structural",
+      "invariant_id": "REAL-LAWS-RUN-IN-CI",
+      "drives": ".github/workflows/ci.yml (the `sandbox` job) + tests/*.test.ts",
+      "structural_reason": "The obligation is the CI workflow's text: whether a job installs srt and the CLI and runs the required-real files. Nothing in the engine executes it; the workflow file is the artefact.",
+      "plant": "drop a required-real file from the sandbox job's list (or its env / installs)",
+      "plant_observed": "tests/an_open_git_never_blinds_the_diff_gate.test.ts removed from the job → FAIL: it runs exactly every test file that carries a required-real law"
+    },
+    {
+      "test_name": "D4 — the sandbox the invoker builds refuses a real write (skipped as UNVERIFIED without srt + an OS sandbox) > required: when COLTRANE_REQUIRE_REAL=1 (the CI sandbox job), srt and an OS sandbox are present",
+      "test_file": "tests/the_sandbox_refuses_a_real_write.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "REAL-LAWS-REQUIRED",
+      "drives": "tests/the_sandbox_refuses_a_real_write.test.ts under COLTRANE_REQUIRE_REAL=1",
+      "plant": "run the CI sandbox job without srt / the claude binary",
+      "plant_observed": "COLTRANE_REQUIRE_REAL=1 without srt and CLAUDE_BIN=/nonexistent → AssertionError: this job requires the … law(s) to RUN, and they would skip"
+    },
+    {
+      "test_name": "the engine's `ignore` is exactly the one the installed CLI bundles > required: when COLTRANE_REQUIRE_REAL=1 (the CI sandbox job), a claude binary is present to compare with",
+      "test_file": "tests/the_scope_oracle_is_the_installed_clis.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "REAL-LAWS-REQUIRED",
+      "drives": "tests/the_scope_oracle_is_the_installed_clis.test.ts under COLTRANE_REQUIRE_REAL=1",
+      "plant": "run the CI sandbox job without srt / the claude binary",
+      "plant_observed": "COLTRANE_REQUIRE_REAL=1 without srt and CLAUDE_BIN=/nonexistent → AssertionError: this job requires the … law(s) to RUN, and they would skip"
     }
   ],
-  "testing_method": "vitest, example-based laws plus fast-check properties (RED-DEF-15: expansion draws only on declared tokens + the layout; the target and venue steps never add). Every law drives the production symbol named in `drives`; symbols that do not exist yet are reached through a runtime import (tests/layout_grants_fixtures.ts) so the shared tsc gate stays green and each law fails where it asserts. The invokers are observed through the seams the suite already uses: the Claude invoker's injected `run` (the exact argv), and the completions invoker's model request body and typed refusals. The chair record is observed on chair_complete through RunDeps.onProgress; the dispatch door by bootstrapServerDeps over a genome tree on disk with the invoke seam replaced. The resolver-level plants were rehearsed by the drafter against a throwaway reference resolver, deleted before commit; each turned its law red. plant_observed is omitted (the v5 type refuses null) and is filled by the grader once production exists. Round 3: the laws for the implementer's surviving plants (NO-SELF-WIDENING-2 isolation, DOOR-CHART, DOOR-RELOAD, TARGET-ESCAPE, LAYERED, RECORD-VENUE, PREFLIGHT-EXPANDED) are green against the implementation at cef6f97, and each plant was applied, observed red and reverted by the drafter. The target-escape laws for README/backslash/drive-letter entries and the dispatch refusals are red, because the ruling (refuse, never normalise) is new. The completions any-scope laws for Read/Bash, and every D1/D2/D3/D5 law, are red (the behaviour is new). D4 runs a REAL sandboxed process through @anthropic-ai/sandbox-runtime (srt), because `claude -p` cannot run a Bash command without a model; it is SKIPPED and printed as UNVERIFIED when srt or an OS sandbox is absent, and was observed red (no sandbox config on the argv) with srt present on macOS. The drafter's manual srt probe confirmed the target config shape (absolute allowWrite tree + absolute denyWrite) is enforced: inside src/ written, outside refused, the layout file refused. plant_observed is omitted; the grader fills it. Round 4: every law for the implementer's surviving plants (items 2–10) is green against 9ff943c, and each plant was applied to that production code, observed red, and reverted; plant_observed records the failing assertion. The laws for the conductor's two new rulings (.coltrane denial; ignored path never sealed) are red today because the behaviour does not exist yet; their plant_observed is left for the grader. Round 5: each of the implementer's six dot-path plants (OWN-A…F) was applied to src/grant_scope.ts at 5776395 and the new laws observed red (OWN-A 22 laws beyond the 4 findings, OWN-C 2, OWN-E 9, OWN-F 12, OWN-B 6, OWN-D 5); plant_observed records one failing assertion per law. Controls and laws no plant touched carry no plant_observed. Round 6: the four surviving plants (literal-spelling refusal removed, schema admitting ./ and //, case-sensitive matcher, case-sensitive isProtectedPath) were each applied at 0a8d1be and observed red (4 / 3 / 10 / 5 laws). The room-image law was observed red against the stale pre-round-5 images on the drafter's host, then green after rebuilding both images. Round 7: laws for the six blockers are red at 24a26de where the behaviour does not exist (smuggling, Unicode spellings, git/egress, the root drain); the laws for surviving or tie-in plants were shown red by applying the plant at 24a26de (.coltrane deny dropped; the room rendered as root, live; the ignore dependency bumped to 7.0.7; CLAUDE_BIN pointed at a fixture binary bundling ignore 7.0.6 and lacking the splitter). The real-process git/network laws were run with srt 0.0.77 on macOS; they SKIP as UNVERIFIED without it. Round 8: 18 laws red at 2b59552 (the null contract does not exist — 'null refuses the chair' is today's behaviour); the plant missing==null (the undeclared-role refusal dropped) was applied at 2b59552 and turned the missing-role laws red. The vendored drafts are verbatim from the PR heads (recorded in tests/support/real_layouts.json).",
+  "testing_method": "vitest, example-based laws plus fast-check properties (RED-DEF-15: expansion draws only on declared tokens + the layout; the target and venue steps never add). Every law drives the production symbol named in `drives`; symbols that do not exist yet are reached through a runtime import (tests/layout_grants_fixtures.ts) so the shared tsc gate stays green and each law fails where it asserts. The invokers are observed through the seams the suite already uses: the Claude invoker's injected `run` (the exact argv), and the completions invoker's model request body and typed refusals. The chair record is observed on chair_complete through RunDeps.onProgress; the dispatch door by bootstrapServerDeps over a genome tree on disk with the invoke seam replaced. The resolver-level plants were rehearsed by the drafter against a throwaway reference resolver, deleted before commit; each turned its law red. plant_observed is omitted (the v5 type refuses null) and is filled by the grader once production exists. Round 3: the laws for the implementer's surviving plants (NO-SELF-WIDENING-2 isolation, DOOR-CHART, DOOR-RELOAD, TARGET-ESCAPE, LAYERED, RECORD-VENUE, PREFLIGHT-EXPANDED) are green against the implementation at cef6f97, and each plant was applied, observed red and reverted by the drafter. The target-escape laws for README/backslash/drive-letter entries and the dispatch refusals are red, because the ruling (refuse, never normalise) is new. The completions any-scope laws for Read/Bash, and every D1/D2/D3/D5 law, are red (the behaviour is new). D4 runs a REAL sandboxed process through @anthropic-ai/sandbox-runtime (srt), because `claude -p` cannot run a Bash command without a model; it is SKIPPED and printed as UNVERIFIED when srt or an OS sandbox is absent, and was observed red (no sandbox config on the argv) with srt present on macOS. The drafter's manual srt probe confirmed the target config shape (absolute allowWrite tree + absolute denyWrite) is enforced: inside src/ written, outside refused, the layout file refused. plant_observed is omitted; the grader fills it. Round 4: every law for the implementer's surviving plants (items 2–10) is green against 9ff943c, and each plant was applied to that production code, observed red, and reverted; plant_observed records the failing assertion. The laws for the conductor's two new rulings (.coltrane denial; ignored path never sealed) are red today because the behaviour does not exist yet; their plant_observed is left for the grader. Round 5: each of the implementer's six dot-path plants (OWN-A…F) was applied to src/grant_scope.ts at 5776395 and the new laws observed red (OWN-A 22 laws beyond the 4 findings, OWN-C 2, OWN-E 9, OWN-F 12, OWN-B 6, OWN-D 5); plant_observed records one failing assertion per law. Controls and laws no plant touched carry no plant_observed. Round 6: the four surviving plants (literal-spelling refusal removed, schema admitting ./ and //, case-sensitive matcher, case-sensitive isProtectedPath) were each applied at 0a8d1be and observed red (4 / 3 / 10 / 5 laws). The room-image law was observed red against the stale pre-round-5 images on the drafter's host, then green after rebuilding both images. Round 7: laws for the six blockers are red at 24a26de where the behaviour does not exist (smuggling, Unicode spellings, git/egress, the root drain); the laws for surviving or tie-in plants were shown red by applying the plant at 24a26de (.coltrane deny dropped; the room rendered as root, live; the ignore dependency bumped to 7.0.7; CLAUDE_BIN pointed at a fixture binary bundling ignore 7.0.6 and lacking the splitter). The real-process git/network laws were run with srt 0.0.77 on macOS; they SKIP as UNVERIFIED without it. Round 8: 18 laws red at 2b59552 (the null contract does not exist — 'null refuses the chair' is today's behaviour); the plant missing==null (the undeclared-role refusal dropped) was applied at 2b59552 and turned the missing-role laws red. The vendored drafts are verbatim from the PR heads (recorded in tests/support/real_layouts.json). Round 9: the N1 laws are red at 3dccce8 (the gate trusts git status); the srt variants first show the sandbox PERMITS each attack. Plants applied at 3dccce8: null refuses the chair (wiki laws red), a required-real file dropped from the CI job (structural law red), COLTRANE_REQUIRE_REAL=1 without srt/claude (the required laws red).",
   "uncovered": []
 }

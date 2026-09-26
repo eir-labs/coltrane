@@ -1533,14 +1533,16 @@ export type TourOutput = z.output<typeof TourSchema>;
 // role declared as an EMPTY list is refused (min 1) — an answer of "nothing" must be an absence the
 // resolver refuses by name, never a declared role that passes review and grants nothing.
 const LayoutEntriesSchema = z.array(z.string().min(1)).min(1);
-// A PATH role's globs are tree-relative. The CLI reads `Write(//x)` as an absolute path and `Write(~/x)`
-// as the home directory, and a `..` segment or a backslash names a path by a spelling the engine's
-// matcher (src/grant_scope.ts) does not judge — so a layout cannot hand a seat a grant outside its tree.
+// A PATH role's globs are tree-relative and plainly spelled. The CLI reads `Write(//x)` as an absolute
+// path and `Write(~/x)` as the home directory; it silently rewrites a leading `./` and an inner `//`
+// (`./**` is `**` to it); a `..` segment or a backslash names a path by a spelling nothing judges. Each
+// is REFUSED here, as the resolver refuses the same spellings in a literal grant (layout_grants.ts
+// isAmbiguousSpelling) — one rule, refuse, in both places.
 const LayoutGlobsSchema = z
   .array(
     z.string().min(1).refine(
-      (g) => !g.startsWith("//") && !g.startsWith("~") && !g.includes("\\") && !g.split("/").includes(".."),
-      { message: "a layout path glob must be tree-relative: no leading // or ~, no .. segment, no backslash" },
+      (g) => !g.startsWith("~") && !g.includes("//") && !g.startsWith("./") && !g.includes("\\") && !g.split("/").includes(".."),
+      { message: "a layout path glob must be tree-relative and plainly spelled: no leading ~ or ./, no //, no .. segment, no backslash" },
     ),
   )
   .min(1);

@@ -47,7 +47,7 @@ import { PlacementRefused, type PlacementResolver } from "./placement.js";
 import type { Depth } from "./pricing.js";
 import type { Effort, Layout } from "./genome_schema.js";
 import { snapshotTree, snapshotDirectory, changedPaths, outOfScope, DiffGateWindows, type TreeGit, type TreeState, type GateWindow } from "./diff_gate.js";
-import { resolveSeatGrants, targetPathsOf, globbedTargetPaths, escapingTargetPaths, describeRoleRefusals, writeScopeOf, seatCanWrite } from "./layout_grants.js";
+import { resolveSeatGrants, targetPathsOf, globbedTargetPaths, escapingTargetPaths, linkedTargetRefusal, describeRoleRefusals, writeScopeOf, seatCanWrite } from "./layout_grants.js";
 import type { SkillRecord, EvalRecord } from "./loader.js";
 import { COLTRANE_VERSION } from "./version.js";
 
@@ -1969,6 +1969,13 @@ export async function runGig(
     const gigTargets = targetPathsOf(gigInput);
     const globbedTargets = globbedTargetPaths(gigTargets);
     const escapingTargets = escapingTargetPaths(gigTargets);
+    // A target that reaches a file through a symlink or a hardlink is refused by name: a protected
+    // path is judged by the FILE (the tree the seats run in — the room's workspace, else tree_root).
+    const linkTree = gigSubstrate?.seat?.workspace ?? deps.tree_root;
+    const linkedTargets = linkTree === undefined ? [] : (gigTargets ?? [])
+      .filter((t) => !escapingTargets.includes(t) && !globbedTargets.includes(t))
+      .map((t) => linkedTargetRefusal(linkTree, t.replace(/^\.\//, "")))
+      .filter((r): r is string => r !== undefined);
     for (const ph of standard.phases) {
       for (const ch of ph.chairs) {
         // A skill-backed chair (skill_slug set, no agent_slug) seats no agent → its dead reference is
@@ -2016,6 +2023,9 @@ export async function runGig(
             kind: "target-path", phase: ph.name, chair: ch.role, agent: ag.slug,
             detail: `target_paths entry "${entry}" carries glob metacharacters (* ? [ {) — target_paths are paths, and a glob would become a grant pattern`,
           });
+        }
+        for (const detail of linkedTargets) {
+          offenders.push({ kind: "target-path", phase: ph.name, chair: ch.role, agent: ag.slug, detail });
         }
         for (const entry of escapingTargets) {
           offenders.push({

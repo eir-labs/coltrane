@@ -569,3 +569,228 @@ describe("charter_read (server.ts:2123) reads a charter only from inside the gen
     expect(JSON.stringify(r), "charter_read with no genome root returned the file's contents").not.toContain(SENTINEL);
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+// 9. The SITE directory's own prefix, and the site directory ITSELF. Two survivors of the first
+//    battery: every hostile value above lands either far outside the root or beside the GENOME root
+//    (`g-sibling`), so a helper that compared against `<siteDir>` with NO trailing separator stayed
+//    green — nothing ever landed in `agents-evil/` beside `agents/`. And a helper that ADMITTED the
+//    site directory itself stayed green — nothing ever resolved to exactly `skills/` or
+//    `genome/history/agents/`. These laws give each site a value of each kind.
+//
+//    Site-itself applies where the derived path carries NO engine suffix: a skill package
+//    (skills/<slug>), a history dir (genome/history/<class>/<slug>, which every genome file write
+//    derives too), a gig's log dir (gigs/<gig_id>). Where the engine appends `.json`/`.jsonl`, `.`
+//    derives `<site>/..json` — a file INSIDE the site, not the site — so no law demands its refusal:
+//    that would be a slug grammar, which the ruling rules out.
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+const prefixSiblings = (site: string): Array<[string, string]> => [
+  [`../${site}-evil/x`, `lands in ${site}-evil/, beside ${site}/, whose NAME shares the site directory's prefix`],
+  [`../../genome/history/${site}-evil/x`, `climbs out toward a history directory named like ${site}-evil`],
+];
+const SITE_ITSELF: Array<[string, string]> = [
+  [".", "resolves to the site directory itself"],
+  ["a/..", "descends and climbs back to the site directory itself"],
+  ["./", "the site directory with a trailing slash"],
+  ["", "the empty string: the site directory itself"],
+];
+/** The empty string may be refused by an earlier, unrelated check ("requires a non-empty slug"),
+ *  which is a refusal — but every other value must be refused NAMING the root. */
+const refusedFor = (r: { ok: boolean; error?: string | undefined }, value: string, what: string): void => {
+  if (value === "") expect.soft(r.ok, `${what} was ACCEPTED: ${JSON.stringify(r).slice(0, 300)}`).toBe(false);
+  else expectRefusedByName(r, what);
+};
+const thrownFor = (thrown: unknown, value: string, what: string): void => {
+  expect.soft(thrown, `${what} was ACCEPTED`).toBeInstanceOf(Error);
+  if (value !== "") expect.soft(String((thrown as Error | undefined)?.message), `${what} was refused without naming the boundary`).toMatch(/root/i);
+};
+const DOOR_SITE: Record<string, string> = {
+  type_register: "domain_types", standard_compose: "standards", chart_define: "charts",
+  venue_define: "venues", agent_define: "agents", skill_define: "skills",
+};
+
+describe("a value whose path shares the SITE directory's prefix is refused at every site", () => {
+  for (const door of DOORS) {
+    it(`${door.tool}: ../${DOOR_SITE[door.tool]}-evil/x is refused by name, lands nowhere, seals nothing`, async () => {
+      const a = arena();
+      for (const [slug, why] of prefixSiblings(DOOR_SITE[door.tool]!)) {
+        const s = surface({ genome_dir: a.root });
+        const before = snapshot(a.base);
+        const r = await s.call(door.tool, door.args(slug));
+        expectRefusedByName(r, `${door.tool} with slug ${JSON.stringify(slug)} (${why})`);
+        expect.soft(snapshot(a.base), `${door.tool} with slug ${JSON.stringify(slug)} changed the filesystem`).toEqual(before);
+        expect.soft(s.ledger.query().length, `${door.tool} with slug ${JSON.stringify(slug)} sealed an identity`).toBe(0);
+      }
+    });
+  }
+
+  it("agent_evolve: an agent file planted in agents-evil/ is neither read nor rewritten", async () => {
+    const a = arena();
+    mkdirSync(join(a.root, "agents-evil"), { recursive: true });
+    writeFileSync(join(a.root, "agents-evil", "x.json"), JSON.stringify({ ...TEST_BEHAVIOR, slug: "../agents-evil/x", identity: SENTINEL, primitives: ["SENSE"], input_types: [], output_types: ["raw-note"], domain: "demo" }) + "\n");
+    for (const [slug, why] of prefixSiblings("agents")) {
+      const s = surface({ genome_dir: a.root });
+      const before = snapshot(a.base);
+      const r = await s.call("agent_evolve", { slug, changes: { method: "evolved beside agents/" } });
+      expectRefusedByName(r, `agent_evolve with slug ${JSON.stringify(slug)} (${why})`);
+      expect.soft(JSON.stringify(r), `agent_evolve with slug ${JSON.stringify(slug)} returned bytes from beside agents/`).not.toContain(SENTINEL);
+      expect.soft(snapshot(a.base), `agent_evolve with slug ${JSON.stringify(slug)} changed the filesystem`).toEqual(before);
+    }
+  });
+
+  it("the store port: fileGenomeStore(root).upsert refuses ../<class dir>-evil/x for every class", async () => {
+    const dirs: Record<GenomeClass, string> = { agent: "agents", standard: "standards", skill: "skills", domain_type: "domain_types", chart: "charts", venue: "venues", institution: "institutions" };
+    const a = arena();
+    const store = fileGenomeStore(a.root);
+    for (const [cls, dir] of Object.entries(dirs) as Array<[GenomeClass, string]>) {
+      for (const [slug, why] of prefixSiblings(dir)) {
+        const before = snapshot(a.base);
+        let thrown: unknown;
+        try { await store.upsert(cls, { slug, code: "export default () => ({})", md: "# m", fixtures: [{ id: "f", input: {} }] }); } catch (e) { thrown = e; }
+        thrownFor(thrown, slug, `fileGenomeStore.upsert(${cls}) with slug ${JSON.stringify(slug)} (${why})`);
+        expect.soft(snapshot(a.base), `fileGenomeStore.upsert(${cls}) with slug ${JSON.stringify(slug)} changed the filesystem`).toEqual(before);
+      }
+    }
+  });
+
+  it("the blessed writers and the history snapshot refuse ../<site>-evil/x before sealing", () => {
+    const a = arena();
+    const cases: Array<[string, string, (slug: string, ledger: MemoryLedger) => unknown]> = [
+      ["sealDefinition", "domain_types", (slug, l) => sealDefinition("type_register", slug, { slug, v: 1 }, l, a.root, "domain_types")],
+      ["sealAgentDefinition", "agents", (slug, l) => sealAgentDefinition({ ...TEST_BEHAVIOR, slug, primitives: ["SENSE"], input_types: [], output_types: ["raw-note"], domain: "demo" }, l, a.root)],
+      ["sealSkillPackage", "skills", (slug, l) => sealSkillPackage({ slug, code: "export default () => ({})", fixtures: [{ id: "f", input: {} }] }, l, a.root)],
+      ["writeGenomeFileVersioned", "agents", (slug) => writeGenomeFileVersioned(a.root, "agents", slug, "{\"v\":1}\n")],
+    ];
+    for (const [name, site, write] of cases) {
+      for (const [slug, why] of prefixSiblings(site)) {
+        const ledger = new MemoryLedger();
+        const before = snapshot(a.base);
+        let thrown: unknown;
+        try { write(slug, ledger); } catch (e) { thrown = e; }
+        thrownFor(thrown, slug, `${name} with slug ${JSON.stringify(slug)} (${why})`);
+        expect.soft(snapshot(a.base), `${name} with slug ${JSON.stringify(slug)} changed the filesystem`).toEqual(before);
+        expect.soft(ledger.query().length, `${name} sealed an identity for slug ${JSON.stringify(slug)}`).toBe(0);
+      }
+    }
+  });
+
+  it("persistLineageAdoption refuses ../institutions-evil/x, and never rewrites the document planted there", () => {
+    const a = arena();
+    mkdirSync(join(a.root, "institutions-evil"), { recursive: true });
+    writeFileSync(join(a.root, "institutions-evil", "x.json"), JSON.stringify({ institution: { slug: "x", note: SENTINEL, lineage: [] } }) + "\n");
+    const ref = { record_ref: "sha-a", approved_by: "eugene", sealed_at: "2026-09-27T00:00:00.000Z" } as LineageRecordRefOutput;
+    for (const [slug, why] of prefixSiblings("institutions")) {
+      const before = snapshot(a.base);
+      let result: unknown; let thrown: unknown;
+      try { result = persistLineageAdoption(a.root, slug, ref); } catch (e) { thrown = e; }
+      const said = thrown instanceof Error ? thrown.message : JSON.stringify(result);
+      expect.soft(thrown instanceof Error || (result as { written?: boolean } | undefined)?.written === false, `persistLineageAdoption accepted ${JSON.stringify(slug)} (${why}): ${said}`).toBe(true);
+      expect.soft(said, `persistLineageAdoption refused ${JSON.stringify(slug)} without naming the boundary`).toMatch(/root/i);
+      expect.soft(snapshot(a.base), `persistLineageAdoption with ${JSON.stringify(slug)} changed the filesystem`).toEqual(before);
+    }
+  });
+
+  it("the skill chain refuses ../chain-evil/x on append and on read, and returns nothing planted there", async () => {
+    const a = arena();
+    const chainDir = join(a.root, "chain");
+    mkdirSync(join(a.root, "chain-evil"), { recursive: true });
+    writeFileSync(join(a.root, "chain-evil", "x.jsonl"), JSON.stringify({ slug: SENTINEL, version: 1, code_hash: "", tier: 0, duration_ms: 0, permission_violations: [], field_origins: { a: "code" } }) + "\n");
+    for (const [slug, why] of prefixSiblings("chain")) {
+      const dir = mkdtempSync(join(a.root, "skills", "pkg-"));
+      writeFileSync(join(dir, "meta.json"), JSON.stringify({ slug, version: 1, permission: { tier: 0 } }) + "\n");
+      writeFileSync(join(dir, "skill.md"), "# reasoning only\n");
+      const before = snapshot(a.base);
+      let thrown: unknown;
+      try { await resolveSkill(dir, {}, () => ({}), { chainDir }); } catch (e) { thrown = e; }
+      thrownFor(thrown, slug, `resolveSkill (chain append) with slug ${JSON.stringify(slug)} (${why})`);
+      expect.soft(snapshot(a.base), `resolveSkill with slug ${JSON.stringify(slug)} changed the filesystem`).toEqual(before);
+      let read: unknown; let readThrown: unknown;
+      try { read = skillChainEvents(slug, undefined, { chainDir }); } catch (e) { readThrown = e; }
+      thrownFor(readThrown, slug, `skillChainEvents with slug ${JSON.stringify(slug)} (${why}) returned ${JSON.stringify(read)?.slice(0, 120)}`);
+    }
+  });
+
+  it("output_write refuses a gig id landing in outputs-evil/, and gig_logs one reading gigs-evil/", async () => {
+    const a = arena();
+    mkdirSync(join(a.root, "gigs-evil", "x"), { recursive: true });
+    writeFileSync(join(a.root, "gigs-evil", "x", "leak.jsonl"), JSON.stringify({ type: "text", text: SENTINEL }) + "\n");
+    for (const [gid, why] of prefixSiblings("outputs")) {
+      const registry = createRegistry();
+      const s = surface({ registry, outputs: createOutputStore(registry, { persistDir: a.root }) });
+      const before = snapshot(a.base);
+      const r = await s.call("output_write", { core_type: "Signal", domain_type: "", domain: "demo", gig_id: gid, agent_slug: "parser", data: { t: "x", source: "fixture://demo/note" } });
+      expectRefusedByName(r, `output_write with gig_id ${JSON.stringify(gid)} (${why})`);
+      expect.soft(snapshot(a.base), `output_write with gig_id ${JSON.stringify(gid)} changed the filesystem`).toEqual(before);
+    }
+    for (const [gid, why] of prefixSiblings("gigs")) {
+      const r = await surface({ gig_log_base: a.root }).call("gig_logs", { gig_id: gid });
+      expect.soft(JSON.stringify(r), `gig_logs with gig_id ${JSON.stringify(gid)} returned a log from beside gigs/`).not.toContain(SENTINEL);
+      expectRefusedByName(r, `gig_logs with gig_id ${JSON.stringify(gid)} (${why})`);
+    }
+  });
+});
+
+describe("a value whose path IS the site directory is refused — nothing is written as or over it", () => {
+  for (const door of DOORS) {
+    it(`${door.tool}: ".", "a/..", "./" and "" are refused; the site directory and its history are untouched`, async () => {
+      const a = arena();
+      for (const [slug, why] of SITE_ITSELF) {
+        const s = surface({ genome_dir: a.root });
+        const before = snapshot(a.base);
+        const r = await s.call(door.tool, door.args(slug));
+        refusedFor(r, slug, `${door.tool} with slug ${JSON.stringify(slug)} (${why})`);
+        expect.soft(snapshot(a.base), `${door.tool} with slug ${JSON.stringify(slug)} wrote as or over a site directory`).toEqual(before);
+        expect.soft(s.ledger.query().length, `${door.tool} with slug ${JSON.stringify(slug)} sealed an identity`).toBe(0);
+      }
+    });
+  }
+
+  it("the store port refuses the site directory itself for every class (skills/ itself, genome/history/<class>/ itself)", async () => {
+    const classes: GenomeClass[] = ["agent", "standard", "skill", "domain_type", "chart", "venue", "institution"];
+    const a = arena();
+    const store = fileGenomeStore(a.root);
+    for (const cls of classes) {
+      for (const [slug, why] of SITE_ITSELF) {
+        const before = snapshot(a.base);
+        let thrown: unknown;
+        try { await store.upsert(cls, { slug, code: "export default () => ({})", md: "# m", fixtures: [{ id: "f", input: {} }] }); } catch (e) { thrown = e; }
+        thrownFor(thrown, slug, `fileGenomeStore.upsert(${cls}) with slug ${JSON.stringify(slug)} (${why})`);
+        expect.soft(snapshot(a.base), `fileGenomeStore.upsert(${cls}) with slug ${JSON.stringify(slug)} wrote as or over a site directory`).toEqual(before);
+      }
+    }
+  });
+
+  it("the blessed writers and the history snapshot refuse the site directory itself, before sealing", () => {
+    const a = arena();
+    // A prior version, so writeGenomeFileVersioned DOES derive a history dir for the value.
+    writeFileSync(join(a.root, "agents", "..json"), "{\"prior\":1}\n");
+    writeFileSync(join(a.root, "agents", ".json"), "{\"prior\":1}\n");
+    const cases: Array<[string, (slug: string, ledger: MemoryLedger) => unknown]> = [
+      ["sealDefinition", (slug, l) => sealDefinition("type_register", slug, { slug, v: 1 }, l, a.root, "domain_types")],
+      ["sealAgentDefinition", (slug, l) => sealAgentDefinition({ ...TEST_BEHAVIOR, slug, primitives: ["SENSE"], input_types: [], output_types: ["raw-note"], domain: "demo" }, l, a.root)],
+      ["sealSkillPackage", (slug, l) => sealSkillPackage({ slug, code: "export default () => ({})", fixtures: [{ id: "f", input: {} }] }, l, a.root)],
+      ["writeGenomeFileVersioned", (slug) => writeGenomeFileVersioned(a.root, "agents", slug, "{\"v\":2}\n")],
+    ];
+    for (const [name, write] of cases) {
+      for (const [slug, why] of SITE_ITSELF) {
+        const ledger = new MemoryLedger();
+        const before = snapshot(a.base);
+        let thrown: unknown;
+        try { write(slug, ledger); } catch (e) { thrown = e; }
+        thrownFor(thrown, slug, `${name} with slug ${JSON.stringify(slug)} (${why})`);
+        expect.soft(snapshot(a.base), `${name} with slug ${JSON.stringify(slug)} wrote as or over a site directory`).toEqual(before);
+        expect.soft(ledger.query().length, `${name} sealed an identity for slug ${JSON.stringify(slug)}`).toBe(0);
+      }
+    }
+  });
+
+  it("gig_logs refuses a gig id naming gigs/ itself, and returns none of the logs of the gigs inside it", async () => {
+    const a = arena();
+    writeFileSync(join(a.root, "gigs", "leak.jsonl"), JSON.stringify({ type: "text", text: SENTINEL }) + "\n");
+    for (const [gid, why] of SITE_ITSELF) {
+      const r = await surface({ gig_log_base: a.root }).call("gig_logs", { gig_id: gid });
+      expect.soft(JSON.stringify(r), `gig_logs with gig_id ${JSON.stringify(gid)} served gigs/ itself`).not.toContain(SENTINEL);
+      refusedFor(r, gid, `gig_logs with gig_id ${JSON.stringify(gid)} (${why})`);
+    }
+  });
+});

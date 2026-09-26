@@ -48,6 +48,11 @@ jobs:
       - run: npm ci
       - name: build the room image
         run: docker build -f Dockerfile.room -t coltrane/room:ephemeral .
+      # The SEAT-BEARING floor image, built beside the room image for the same reason: it is published
+      # nowhere, and the laws that need it (the floor-room laws in spec_venue_room_live, and the floor
+      # half of spec_room_image_carries_runtime_deps) SKIP without it — a law that can never fail in CI.
+      - name: build the floor image
+        run: docker build -f Dockerfile.floor -t coltrane/floor:seat .
       - name: the emitted transport reaches a standing room
         run: npm run test:room
       - name: nothing survives the run

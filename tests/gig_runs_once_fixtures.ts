@@ -81,6 +81,17 @@ export const GENOME_ROWS = {
       ],
       output_types: ["Signal"],
     },
+    // three model chairs in sequence: a closed gig seals the first, its resumer the second, and the
+    // resumer's re-claim must pay only for the third
+    {
+      slug: "three-chair-v0", domain: "demo", status: "active",
+      phases: [
+        { name: "scan", chairs: [chair("scan", [], [])] },
+        { name: "rescan", chairs: [chair("rescan", ["scan"], ["Signal"])] },
+        { name: "final", chairs: [chair("final", ["rescan"], ["Signal"])] },
+      ],
+      output_types: ["Signal"],
+    },
     // a human chair only — completes with ZERO model invocations when the claim carries its approval,
     // which is what lets the CLI law run `coltrane work` end to end with the real chair invoker
     {

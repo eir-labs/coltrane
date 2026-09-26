@@ -33,8 +33,8 @@ EXPECTED_LAWS="${EXPECTED_LAWS:-4267}"
 #   +8 gig-runs-once round 6b, from review 5326196799 at 2d4e7ab: real_store (new file) — D1 a resuming gig never
 #      re-pays for the closed gig's seals under the REAL scope rules; D2 player mode stops under its 30-minute lease;
 #      D3 (x3) any refusal of the start header, in the drain service's real shape (400 {error}, no code), stops the
-#      run; S2-S4 the review's surviving plants. The fixture now enforces the store's gig-token scope, which turns
-#      G4h and R5.1 red at head, as the review found them live.
+#      run; S2-S4 the review's surviving plants. The fixture enforces the store's gig-token scope as the coltrane-ui
+#      follow-up defines it (status + outputs readable for exactly the resumed gig; writes own-gig only).
 #  +21 gig-runs-once round 6, RED at 2d4e7ab: hosted_dispatch (new file) — the HOSTED gig_dispatch branch
 #      (createToolSurface, deps.queueGig): H1 a closed gig's resume queues resumes:<old id>, never resume_gig_id
 #      (x4); H2 an open gig's resume is refused (x3); H3 a store that throws / never answers / is not wired

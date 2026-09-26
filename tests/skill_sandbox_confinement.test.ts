@@ -198,7 +198,47 @@ describe("the sandbox states the runtime it needs", () => {
   it("refuses on an older runtime instead of running skills unsandboxed", () => {
     // The failure mode being prevented is not the error message. It is the alternative: a
     // runtime with no permission model executing skill code with none, silently.
-    expect(MIN_NODE_FOR_SANDBOX).toBe(22);
+    expect(MIN_NODE_FOR_SANDBOX).toBe(24);
     expect(Number(process.versions.node.split(".")[0])).toBeGreaterThanOrEqual(MIN_NODE_FOR_SANDBOX);
+  });
+});
+
+// THE FLOOR BACKS EVERY GRANT, AND EVERYTHING WE RUN MEETS THE FLOOR (26 Sep 2026).
+// The floor was 22 because Node 20 lacked --permission — a reactive minimum, never a chosen
+// target. Network grants need --allow-net, which is 24+ (NODE_WITH_ALLOW_NET), so on 22 the
+// hosted floor/room images could not run a fetching skill (#545's landscape-evidence-check) at
+// all. The sovereign ruled the floor up to 24 (current LTS). These two laws keep the declared
+// floor, the CI runtimes and the container images from drifting apart again.
+import { NODE_WITH_ALLOW_NET } from "../src/skill_subprocess.js";
+import { readdirSync as readDirPins } from "node:fs";
+
+describe("the declared Node floor backs every grant, and every runtime we pin meets it", () => {
+  const engines = (JSON.parse(readPkg(new URL("../package.json", import.meta.url), "utf-8")) as
+    { engines?: { node?: string } }).engines?.node ?? "";
+  const floor = Number((engines.match(/\d+/) ?? ["0"])[0]);
+
+  it("engines.node is at least the runtime that can back a network grant", () => {
+    expect(floor, `engines says ${engines}; a network grant needs Node ${NODE_WITH_ALLOW_NET}+`)
+      .toBeGreaterThanOrEqual(NODE_WITH_ALLOW_NET);
+  });
+
+  it("every CI workflow and container image pins a Node at or above the floor", () => {
+    const root = new URL("..", import.meta.url);
+    const pins: Array<[string, number]> = [];
+    const wf = new URL(".github/workflows/", root);
+    for (const f of readDirPins(wf)) {
+      if (!/\.ya?ml$/.test(f)) continue;
+      const text = readPkg(new URL(f, wf), "utf-8");
+      for (const m of text.matchAll(/node-version:\s*"?(\d+)/g)) pins.push([f, Number(m[1])]);
+      for (const m of text.matchAll(/node:\s*\[([^\]]*)\]/g))
+        for (const v of (m[1] ?? "").matchAll(/(\d+)/g)) pins.push([`${f} matrix`, Number(v[1])]);
+    }
+    for (const f of ["Dockerfile.floor", "Dockerfile.room"]) {
+      const text = readPkg(new URL(f, root), "utf-8");
+      for (const m of text.matchAll(/FROM\s+node:(\d+)/g)) pins.push([f, Number(m[1])]);
+    }
+    expect(pins.length, "found no Node pins — the walk is broken, not the fleet green").toBeGreaterThan(0);
+    const below = pins.filter(([, v]) => v < floor);
+    expect(below, `runtimes below the declared floor ${floor}`).toEqual([]);
   });
 });

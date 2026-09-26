@@ -1309,6 +1309,13 @@ export interface ClaudeInvokerOptions {
    *    behaviour, so a bare/test invoker is unaffected.
    */
   sealVia?: "text" | "output_write" | undefined;
+  /**
+   * The engine MCP server the in-band seal bridges into the spawn, stated on its own — for a door that
+   * wires no grant resolution (the drain: `mcpServerConfigs` would switch resolution on) but must still
+   * give its chair the write boundary. It must judge by the genome the RUN seals against, or the two
+   * gates disagree (src/run_genome_engine.ts). Wins over `mcpServerConfigs[coltrane]` for the seal.
+   */
+  engineServer?: Record<string, unknown> | undefined;
 }
 
 // The blast-radius cage, PURE. Given the agent's tool grant + a per-gig mcp-config path,
@@ -1712,7 +1719,7 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
     // output_write grant so the child can reach it. Gated on the engine server config being wired
     // (bootstrapServerDeps always supplies it); a bare/test invoker without it captures from the
     // injected stream instead of a real spawn, so it needs no grant.
-    const engineServerCfg = (opts.mcpServerConfigs ?? {})[ENGINE_MCP_SERVER];
+    const engineServerCfg = opts.engineServer ?? (opts.mcpServerConfigs ?? {})[ENGINE_MCP_SERVER];
     // ABSENT MUST MEAN DECLINE — and this is the one place the rule was never applied.
     //
     // On the seal path the prompt INSTRUCTS the chair to call output_write. If the engine server

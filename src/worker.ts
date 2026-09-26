@@ -126,6 +126,13 @@ export interface ClaimedGig {
    * approval seals under the approving principal's name rather than the worker's.
    */
   approvals?: Record<string, { verdict: Record<string, unknown>; approved_by?: string }> | null;
+  /**
+   * The CLOSED gig this one resumes (eir-labs/coltrane-ui #250). What's closed is closed: this gig
+   * runs under its OWN id, and the closed gig's sealed outputs enter it as inputs BY REFERENCE —
+   * restored as they are, never re-sealed, and nothing is written under the closed gig's id.
+   * Null/absent on an ordinary claim.
+   */
+  resumes?: string | null;
 }
 
 /**
@@ -922,6 +929,8 @@ export function resumeStateFromDrain(args: {
         data: p.row.data,
         input_refs: remapped ?? [],
         input_shas: inputShas,
+        // A local copy of a sink row: never drained back (a duplicate, or a write under a closed gig).
+        already_in_sink: true,
       });
     } catch (e) {
       // Unreachable: `validateWrite` above is the same gate `write` runs, from one implementation.
@@ -958,12 +967,14 @@ async function rebuildFromDrain(
   claim: ClaimedGig,
   standard: Standard,
   outputs: OutputStore,
+  /** The gig whose seals to rebuild from: the claim's own, or the closed gig it `resumes`. */
+  source: string = claim.gig_id,
 ): Promise<DrainResumeState | { ok: false; reason: string; nothing: true }> {
-  const drained = await fetchDrainedOutputs(ctx, claim.gig_id);
+  const drained = await fetchDrainedOutputs(ctx, source);
   if (drained.error !== undefined) return { ok: false, reason: `the sink's outputs could not be read — ${drained.error}` };
   if (drained.rows.length === 0) return { ok: false, reason: "the sink holds no sealed outputs for this gig", nothing: true };
 
-  const header = await fetchDrainedGenomeHash(ctx, claim.gig_id);
+  const header = await fetchDrainedGenomeHash(ctx, source);
   const current = genomeHash(standard);
   if (header.genome_hash === undefined) {
     // A miss is free; a wrong hit is not. An identity that cannot be checked resolves to doing
@@ -980,7 +991,7 @@ async function rebuildFromDrain(
     };
   }
   return resumeStateFromDrain({
-    gig_id: claim.gig_id,
+    gig_id: source,
     standard,
     identity: coldRunIdentity(standard, claim.input),
     rows: drained.rows,
@@ -1172,16 +1183,32 @@ export async function workOnce(ctx: WorkerContext, deps: WorkOnceDeps): Promise<
     // Set only when a resume was POSSIBLE and refused — the second payment worth explaining. A gig
     // whose sink holds nothing is on its first run, and that is not a cold run to account for.
     let coldRunReason: string | undefined;
-    try {
-      checkpoint = checkpoints.read(claim.gig_id);
-    } catch (e) {
-      // A damaged checkpoint is not a reason to fail a runnable row — it is a reason to pay for
-      // a cold run, and to say so.
-      log(`checkpoint for ${claim.gig_id} unreadable, running cold: ${e instanceof Error ? e.message : String(e)}`);
+    // A claim that RESUMES A CLOSED GIG (claim.resumes) runs under its own id and resumes from the
+    // closed gig's seals as inputs by reference (RunDeps.resume_as_new_gig). Its own checkpoint, if
+    // this box holds one, still comes first: that is this gig being re-claimed, not resumed.
+    const resumes = typeof claim.resumes === "string" && claim.resumes !== "" && claim.resumes !== claim.gig_id
+      ? claim.resumes
+      : undefined;
+    let resumeFrom = claim.gig_id;
+    const readLocal = (id: string): GigCheckpoint | undefined => {
+      try {
+        return checkpoints.read(id);
+      } catch (e) {
+        // A damaged checkpoint is not a reason to fail a runnable row — it is a reason to pay for
+        // a cold run, and to say so.
+        log(`checkpoint for ${id} unreadable, running cold: ${e instanceof Error ? e.message : String(e)}`);
+        return undefined;
+      }
+    };
+    checkpoint = readLocal(claim.gig_id);
+    if (!checkpoint && resumes !== undefined) {
+      checkpoint = readLocal(resumes);
+      if (checkpoint) resumeFrom = resumes;
     }
     if (!checkpoint) {
-      const rebuilt = await rebuildFromDrain(ctx, claim, standard, outputs);
+      const rebuilt = await rebuildFromDrain(ctx, claim, standard, outputs, resumes ?? claim.gig_id);
       if (rebuilt.ok) {
+        resumeFrom = rebuilt.checkpoint.gig_id;
         // Written to the LOCAL store because that is where the runtime's resume gate reads a
         // checkpoint from. The reconstruction seeds that gate; the gate remains the authority —
         // it re-resolves every output id, re-checks every content_sha and type fingerprint, and
@@ -1268,6 +1295,7 @@ export async function workOnce(ctx: WorkerContext, deps: WorkOnceDeps): Promise<
           status: "running",
           genome_hash: genomeHash(standard),
           started_at: new Date().toISOString(),
+          ...(resumes !== undefined ? { resumes } : {}),
           ...(coldRunReason !== undefined ? { cold_run_reason: coldRunReason } : {}),
         });
       } catch (e) {
@@ -1320,7 +1348,7 @@ export async function workOnce(ctx: WorkerContext, deps: WorkOnceDeps): Promise<
       gig_id: claim.gig_id, // ← the run IS the queue row; the drained header completes it
       signal: aborter.signal,
       checkpoints,
-      ...(resume ? { resume_from: claim.gig_id } : {}),
+      ...(resume ? { resume_from: resumeFrom, ...(resumeFrom !== claim.gig_id ? { resume_as_new_gig: true } : {}) } : {}),
       ...(cold_run_reason !== undefined ? { cold_run_reason } : {}),
       onTerminalHeader: (o) => { terminal = o; },
       ...human,

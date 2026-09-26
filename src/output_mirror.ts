@@ -53,7 +53,7 @@ export interface OutputMirror {
   /** The mirror's on-disk root (e.g. `<genomeRoot>/.coltrane`). */
   readonly root: string;
   /** Persist a sealed output: Tier-1 meta row + Tier-2 artifact locally, and drain to remote when configured. */
-  persist(rec: OutputRecord): void;
+  persist(rec: OutputRecord, opts?: { drain?: boolean }): void;
   /** Tier-1 traversal — a FRESH disk read (no in-process staleness), optionally scoped to one gig. */
   queryMeta(filter?: { gig_id?: string | undefined }): OutputMeta[];
   /** Tier-2 second pass — the full payload for a single output, by id or content_sha. */
@@ -166,7 +166,7 @@ export function createOutputMirror(mirrorRoot: string): OutputMirror {
   return {
     root: mirrorRoot,
 
-    persist(rec) {
+    persist(rec, opts) {
       const ref = storageRef(rec.content_sha);
       // TIER 2 first, so the Tier-1 row never points at an artifact that is not there yet.
       writeArtifact(rec);
@@ -180,7 +180,11 @@ export function createOutputMirror(mirrorRoot: string): OutputMirror {
       // (src/runtime.ts). An untracked drain let the store hold a row that said 'completed' over a
       // sink missing the outputs it completed WITH — and the terminal guard then makes sure nothing
       // ever re-runs it. A failure is ALWAYS warned, whatever COLTRANE_DRAIN_DEBUG says.
-      if (remoteConfigured()) trackOutputDrain(rec.gig_id, rec.id, drainRemote(rec));
+      //
+      // `drain: false` is a LOCAL COPY of a row the sink already holds (a resume rebuilt from the
+      // drain): sending it back would write a second row — and, for a closed gig resumed into a new
+      // one, a write under the closed gig's id.
+      if (remoteConfigured() && opts?.drain !== false) trackOutputDrain(rec.gig_id, rec.id, drainRemote(rec));
     },
 
     queryMeta(filter) {

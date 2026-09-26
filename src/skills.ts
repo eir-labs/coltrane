@@ -7,8 +7,9 @@
 // stubs so the RED contract suite typechecks and fails honestly on assertions (not on
 // missing imports). Each stub throws NotImplemented; the build fills them in green.
 import { readFileSync, existsSync, mkdtempSync, mkdirSync, copyFileSync, readdirSync, rmSync, appendFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
+import { containedPath } from "./contained_path.js";
 import { createHash } from "node:crypto";
 import {
   type SkillMeta,
@@ -135,6 +136,9 @@ export async function resolveSkill(
     console.warn("[skills] resolveSkill running without chainDir — no SkillChainEvent recorded; determinism_ratio will not accumulate.");
   }
   const pkg = loadSkillPackage(dir);
+  // #559 — a resolution whose chain event could not be recorded inside the chain directory is
+  // refused BEFORE the code runs or the model is asked, not after the work is spent.
+  const chainFile = opts?.chainDir ? containedPath("skill chain append", opts.chainDir, pkg.meta.slug, ".jsonl") : undefined;
   // schema fields bound what code/model may resolve. No schema → the code's own keys are
   // the shape (nothing is "unresolved"), so the model is never asked.
   const props = pkg.meta.output_schema?.properties as Record<string, unknown> | undefined;
@@ -178,8 +182,8 @@ export async function resolveSkill(
   for (const k of Object.keys(resolved)) field_origins[k] = "code";
   for (const k of Object.keys(modelFields)) field_origins[k] = "model";
 
-  if (opts?.chainDir) {
-    appendSkillChainEvent(opts.chainDir, {
+  if (chainFile) {
+    appendSkillChainEvent(chainFile, {
       slug: pkg.meta.slug,
       version: pkg.meta.version,
       code_hash: pkg.codeHash ?? "",
@@ -194,9 +198,10 @@ export async function resolveSkill(
   return { output, resolved, residual, field_origins, ...(degraded ? { degraded } : {}) };
 }
 
-function appendSkillChainEvent(chainDir: string, ev: SkillChainEvent): void {
-  mkdirSync(chainDir, { recursive: true });
-  appendFileSync(join(chainDir, `${ev.slug}.jsonl`), JSON.stringify(ev) + "\n");
+/** `file` is the contained path resolveSkill derived (and checked) before any work ran (#559). */
+function appendSkillChainEvent(file: string, ev: SkillChainEvent): void {
+  mkdirSync(dirname(file), { recursive: true });
+  appendFileSync(file, JSON.stringify(ev) + "\n");
 }
 
 // ── Resolution telemetry — the recorded field-origin log determinism reads from ──
@@ -222,7 +227,7 @@ export interface SkillChainEvent {
 export function skillChainEvents(slug: string, version?: number, opts?: SkillChainOpts): SkillChainEvent[] {
   const dir = opts?.chainDir;
   if (!dir) return []; // ambient store (from sealed records) is a Phase-3 open question
-  const path = join(dir, `${slug}.jsonl`);
+  const path = containedPath("skill chain read", dir, slug, ".jsonl"); // #559
   if (!existsSync(path)) return [];
   const events = readFileSync(path, "utf-8")
     .split("\n")

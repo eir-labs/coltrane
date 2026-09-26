@@ -322,6 +322,9 @@ function assertValueRenderable(
   }
 }
 
+/** The non-root uid:gid a room runs as when the drain itself is root — the images' `USER node`. */
+const ROOM_FALLBACK_USER = "1000:1000";
+
 /** Where a seat-bearing room's seccomp profile is written — derived from the realization directory. */
 export function roomSeccompPath(realizationDir: string): string {
   return `${realizationDir}/seat-seccomp.json`;
@@ -463,7 +466,12 @@ export function renderComposeConfig(
   // and the image's own `USER node` stands, which is the prior behaviour.
   const uid = process.getuid?.();
   const gid = process.getgid?.();
-  if (uid !== undefined && gid !== undefined) room["user"] = `${uid}:${gid}`;
+  // A ROOT DRAIN NEVER MAKES A ROOT ROOM. A seat-bearing room runs with /proc unmasked
+  // (systempaths=unconfined, for bubblewrap), and uid 0 there can write the host kernel's /proc/sys —
+  // measured by the non-author grade. So a root drain's room runs as the images' own non-root user
+  // (ROOM_FALLBACK_USER, `node` in node:26-alpine) and the realizer, which as root CAN, hands the
+  // workspace to that uid (see dockerComposeRealizer). Every other drain keeps direction (a): its own uid.
+  if (uid !== undefined && gid !== undefined) room["user"] = uid === 0 ? ROOM_FALLBACK_USER : `${uid}:${gid}`;
 
   // ── A SEAT-BEARING ROOM CAN START THE SEAT'S BASH SANDBOX. ─────────────────────────────────────
   // A room whose venue selects a `floor` runs the seat inside it, and every seat holding Bash spawns
@@ -990,6 +998,12 @@ export function dockerComposeRealizer(opts?: { run?: ComposeRunner; prepareWorks
           });
         } else {
           mkdirSync(join(realizationDir, "workspace"), { recursive: true });
+        }
+        // A ROOT drain's room runs as ROOM_FALLBACK_USER (renderComposeConfig), which must own its own
+        // workspace to write it. Root can chown, so it hands the tree over — the one case where the
+        // host changing ownership is both possible and required.
+        if (process.getuid?.() === 0) {
+          execFileSync("chown", ["-R", ROOM_FALLBACK_USER, join(realizationDir, "workspace")], { stdio: "pipe" });
         }
       } catch (e) {
         // A population failure names its SOURCE (prepareWorkspace/cloneInto say which repo failed) and

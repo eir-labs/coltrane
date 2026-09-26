@@ -4242,7 +4242,9 @@ function readMcpServerConfigs(root: string): Record<string, unknown> {
       if (parsed.mcpServers && typeof parsed.mcpServers === "object") return parsed.mcpServers;
     } catch { /* fall through to the default */ }
   }
-  return { [ENGINE_MCP_SERVER]: { command: "node", args: ["dist/src/server_entry.js"] } };
+  // process.execPath, not `node` on PATH: the engine server a seat reaches runs skills, so it runs on
+  // the runtime that passed the floor, not whichever node a spawn's PATH finds first.
+  return { [ENGINE_MCP_SERVER]: { command: process.execPath, args: ["dist/src/server_entry.js"] } };
 }
 
 export function bootstrapServerDeps(genomeRoot?: string): ServerDeps {

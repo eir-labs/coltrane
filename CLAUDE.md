@@ -374,16 +374,31 @@ Write/Edit *could* reach one of them under the CLI's own matching, the spawn is 
 each with its Edit twin. A bare Write or `code_tool_access` write/full counts. No target path, and no
 exact grant, ever names a protected path.
 
-**Scope matching follows the CLI, not node.** The installed CLI (2.1.283) matches a Write/Edit rule
-with the `ignore` package, i.e. gitignore semantics. This was read from its bundle
-(`matchingRuleForInput`). Three consequences:
-- `**` reaches dot-directories (node's `matchesGlob` says it does not);
-- a pattern with no slash matches at any depth;
-- a matched directory covers its contents.
+**Scope matching IS the CLI's matcher.** The installed CLI (2.1.283) matches a Write/Edit allow
+rule in two steps, both read from its bundle:
+1. It preprocesses the rule:
+   - a leading `./` is dropped;
+   - `//` collapses to `/`;
+   - `x/**` becomes `/x`, and `a/b/**` becomes `a/b`.
+2. It tests the result with the bundled `ignore` package, **7.0.5 exactly**. That means gitignore
+   semantics:
+   - `**` reaches dot-directories;
+   - a pattern with no slash matches at any depth;
+   - a matched directory covers its contents;
+   - matching is case-insensitive;
+   - `[!a]` is a literal `!` class, not a negation.
 
-The engine uses one matcher that reimplements those rules (`src/grant_scope.ts`, checked against
-`ignore` 5.3.2). The resolver, the denials and the diff gate all use it. Where the CLI's answer
+`src/grant_scope.ts` uses the same `ignore@7.0.5`, pinned exactly as a production dependency. It
+applies the same preprocessing in one place (`cliAllowPattern`) before both `grantCovers` and
+`grantMayReach`. The resolver, the denials and the diff gate all use it.
+`tests/support/cli_scope_oracle.ts` checks it against the CLI's matcher. Where the CLI's answer
 cannot be computed (a rule rooted at `//` or `~`), the matcher denies.
+
+**Spellings the CLI rewrites are refused, not normalised.** A path glob with a leading `./` or any
+`//` is refused wherever it appears, because the CLI silently rewrites it and `./**` is `**` to it:
+- in a layout (`LayoutSchema`), at load;
+- in a literal Write/Edit grant, where the chair is refused naming the grant. Its protected-path
+  denials are still computed.
 
 **Bash is path-scoped by two mechanisms.**
 - **Outside the tree and the protected files: the sandbox.** Every seat that can run Bash (granted,

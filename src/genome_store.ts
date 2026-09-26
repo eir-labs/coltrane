@@ -27,7 +27,7 @@ import {
 import { writeGenomeFileVersioned } from "./genome_writer.js";
 import { defineAgent, composeStandard, type Agent, type Standard, type PhaseDef } from "./composition.js";
 import { composeChart, chartEntrySeedTypes, type Chart, type Venue } from "./chart.js";
-import { DomainTypeSchema, SkillSchema, ChartSchema, VenueSchema, venueDefect } from "./genome_schema.js";
+import { DomainTypeSchema, SkillSchema, ChartSchema, VenueSchema, LayoutSchema, venueDefect, type Layout } from "./genome_schema.js";
 import { domainTypeDefect } from "./registry.js";
 import { CANONICAL_CORE_TYPES } from "./canonical_core_types.js";
 
@@ -226,6 +226,13 @@ export interface GenomeRows {
    *  the same gates the loader runs (ChartSchema+composeChart / VenueSchema+venueDefect). */
   charts?: Row[];
   venues?: Row[];
+  /**
+   * The org's repository layouts: `{repository, definition}` rows, the definition being the
+   * `coltrane.layout.json` shape, validated by LayoutSchema. Keyed by the repository string exactly
+   * as resolveWorkingRepo returns it for a claim (src/run_deps.ts). The drain seats a gig's chairs
+   * under the row for ITS repository and never under its clone's own file.
+   */
+  layouts?: Array<{ repository: string; definition: unknown }>;
 }
 
 /** Reconstruct the loader's in-memory genome shape from store rows — ONE reconstruction,
@@ -589,7 +596,37 @@ export function reconstructGenome(rows: GenomeRows, pin?: GenomeLoadPin): Loaded
     }
   }
 
-  return { core_types, domain_types, agents, standards, draft_standards, skills, evals, charts, venues, load_errors };
+  // Layouts — one per repository, each validated by the ONE schema. A row LayoutSchema refuses (or a
+  // repository named twice) is a load_error and is ABSENT from the map, so that repository's role
+  // tokens fail closed rather than resolving against a half-read or arbitrarily-chosen answer.
+  const layouts = new Map<string, Layout>();
+  const layoutRepos = new Map<string, number>();
+  for (const r of rows.layouts ?? []) {
+    const repo = typeof r?.repository === "string" ? r.repository : "";
+    layoutRepos.set(repo, (layoutRepos.get(repo) ?? 0) + 1);
+  }
+  for (const r of rows.layouts ?? []) {
+    const repo = typeof r?.repository === "string" ? r.repository : "";
+    const path = `postgrest:coltrane_repository_layouts/${repo || "?"}`;
+    if (repo.trim() === "") {
+      load_errors.push({ kind: "layout", path, slug: null, error: "layout row names no repository" });
+      continue;
+    }
+    if ((layoutRepos.get(repo) ?? 0) > 1) {
+      if (!load_errors.some((e) => e.kind === "layout" && e.path === path)) {
+        load_errors.push({ kind: "layout", path, slug: repo, error: `ambiguous layout: ${layoutRepos.get(repo)} rows claim repository "${repo}" — the engine will not pick one by row order` });
+      }
+      continue;
+    }
+    const check = LayoutSchema.safeParse(r.definition);
+    if (!check.success) {
+      load_errors.push({ kind: "layout", path, slug: repo, error: `layout for "${repo}" failed schema validation — ${zodWhy(check.error.issues)}` });
+      continue;
+    }
+    layouts.set(repo, check.data);
+  }
+
+  return { core_types, domain_types, agents, standards, draft_standards, skills, evals, charts, venues, layouts, load_errors };
 }
 
 /** Hosted backing: load the genome from the store's five tables and reconstruct the SAME
@@ -686,6 +723,9 @@ export function rpcGenomeStore(
         skills: rows.skills ?? [],
         charts: rows.charts ?? [],
         venues: rows.venues ?? [],
+        // The org's repository layouts — the drain's grant boundary. A store that does not yet
+        // return them yields none, and role tokens fail closed.
+        layouts: rows.layouts ?? [],
       }, { acting_org_id: ctx.acting_org_id ?? answeredOrg });
     },
     async upsert(): Promise<void> {

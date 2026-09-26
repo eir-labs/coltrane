@@ -1522,3 +1522,41 @@ export type DrawOutput = z.output<typeof DrawSchema>;
 export type ResourceOutput = z.output<typeof ResourceSchema>;
 export type BookingOutput = z.output<typeof BookingSchema>;
 export type TourOutput = z.output<typeof TourSchema>;
+
+// ── Layout — what a repository calls its source, its tests, its laws command ────────────────────
+//
+// `coltrane.layout.json` at the root of the genome tree a gig runs against. An agent grants a ROLE
+// TOKEN (`Write(@source)`, `Edit(@tests)`, `Bash(@laws)`) and the repository's layout answers what
+// that role means HERE — so a new repository shape is a layout file, never an agent amendment
+// (src/layout_grants.ts resolves the tokens). The role names are a closed set and every object is
+// strict: a misspelt role (`sources`) would otherwise load clean and silently answer nothing. A
+// role declared as an EMPTY list is refused (min 1) — an answer of "nothing" must be an absence the
+// resolver refuses by name, never a declared role that passes review and grants nothing.
+const LayoutEntriesSchema = z.array(z.string().min(1)).min(1);
+
+export const LayoutSchema = z
+  .object({
+    /** Path roles: each a list of globs, expanded to one `<Tool>(<glob>)` grant per glob. */
+    paths: z
+      .object({
+        source: LayoutEntriesSchema.optional(),
+        tests: LayoutEntriesSchema.optional(),
+        migrations: LayoutEntriesSchema.optional(),
+        scripts: LayoutEntriesSchema.optional(),
+        docs: LayoutEntriesSchema.optional(),
+      })
+      .strict()
+      .optional(),
+    /** Command roles: each a list of exact command prefixes, expanded to `Bash(<prefix>:*)`. */
+    commands: z
+      .object({
+        build: LayoutEntriesSchema.optional(),
+        test: LayoutEntriesSchema.optional(),
+        laws: LayoutEntriesSchema.optional(),
+        ship_dry: LayoutEntriesSchema.optional(),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
+export type Layout = z.output<typeof LayoutSchema>;

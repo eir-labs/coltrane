@@ -19,7 +19,12 @@
 //   src/loader.ts          loadGenome(root).layout — parsed <root>/coltrane.layout.json; absent file →
 //                            undefined; malformed → a load_errors entry naming the file, and undefined.
 //   src/layout_grants.ts   export function resolveSeatGrants({ agent, layout, target_paths, venue })
-//                            → { grants, refusals: {token, role, reason}[], target_paths_applied }.
+//                            → { grants, refusals: {token, role, reason}[], target_paths_applied, denials }.
+//                            target_paths: [] grants no Write/Edit (applied: true). The layout file is
+//                            never writable: denials carry Write/Edit(coltrane.layout.json).
+//   src/genome_store.ts    GenomeRows.layouts: {repository, definition}[] → LoadedGenome.layouts
+//                            (repository → Layout), validated by LayoutSchema; the drain's run takes
+//                            genome.layouts.get(<the gig's working repository>) — NEVER the clone's file.
 //   src/runtime.ts         RunDeps.layout → the chair's ctx.layout; chair_complete records
 //                            resolved_grants + target_paths_applied; a role refusal refuses the chair.
 //   src/run_deps.ts        assembleRunDeps threads `layout`.
@@ -47,6 +52,13 @@ export interface SeatGrants {
   grants: string[];
   refusals: RoleRefusal[];
   target_paths_applied: boolean;
+  /** NO SELF-WIDENING (round 2). The deny entries the spawn must carry so no grant can write the
+   *  layout file: `Write(coltrane.layout.json)` / `Edit(coltrane.layout.json)` whenever a Write/Edit
+   *  grant the seat holds covers it. A glob like `**` cannot be expressed minus one file in the CLI's
+   *  permission syntax, so the form is a DENY beside the grant (a scoped deny beats an allow, and the
+   *  NO OVER-DENIAL filter in src/claude_invoker.ts keeps a scoped deny unless an EXACT grant of the
+   *  same string exists — so the exact grant is also never returned). */
+  denials: string[];
 }
 
 export interface ResolveSeatGrantsArgs {
@@ -90,6 +102,9 @@ export function layoutSchema(): { safeParse(v: unknown): { success: boolean } } 
   }
   return s as { safeParse(v: unknown): { success: boolean } };
 }
+
+/** The layout file's name at the root of the tree a gig runs against. */
+export const LAYOUT_FILE = "coltrane.layout.json";
 
 /** A layout for a TypeScript repository shaped like this one. */
 export const TS_LAYOUT: Layout = {

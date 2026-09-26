@@ -172,17 +172,15 @@ export function createOutputMirror(mirrorRoot: string): OutputMirror {
       writeArtifact(rec);
       // TIER 1 — the always-on compact row.
       appendJsonl(metaFile(rec.gig_id), metaOf(rec, ref));
-      // REMOTE, credential-gated. Fire-and-forget: a finished gig is not failed because a
-      // remote append could not be reached. OSS with no credential never enters this path.
-      if (remoteConfigured()) {
-        // ALWAYS warned, not gated behind COLTRANE_DRAIN_DEBUG. A remote append that fails is not
-        // a cosmetic loss: the gig header never completes, its lease expires, and the store hands
-        // the same work to the next drain — which runs it and pays for it again. Silence here buys
-        // a tidy log and costs an unbounded loop, which is the wrong trade in every direction.
-        void drainRemote(rec).catch((e) => {
-          console.warn(`[output_mirror] remote drain FAILED — this gig will be re-run: ${e instanceof Error ? e.message : String(e)}`);
-        });
-      }
+      // REMOTE, credential-gated. OSS with no credential never enters this path.
+      //
+      // TRACKED, not fire-and-forget. `persist` stays synchronous (the seal boundary calls it inline),
+      // but the drain it starts is registered against the gig, and the gig's 'completed' header is
+      // written only once `awaitOutputDrains(gig_id)` says every one of them was acknowledged
+      // (src/runtime.ts). An untracked drain let the store hold a row that said 'completed' over a
+      // sink missing the outputs it completed WITH — and the terminal guard then makes sure nothing
+      // ever re-runs it. A failure is ALWAYS warned, whatever COLTRANE_DRAIN_DEBUG says.
+      if (remoteConfigured()) trackOutputDrain(rec.gig_id, rec.id, drainRemote(rec));
     },
 
     queryMeta(filter) {
@@ -239,8 +237,94 @@ export function createOutputMirror(mirrorRoot: string): OutputMirror {
 // COLTRANE_DRAIN_URL is the Coltrane SERVICE ORIGIN — deployment-supplied, no host baked in here,
 // and NOT the database. See `serviceOrigin` for why that distinction is the whole design.
 // COLTRANE_DRAIN_BUCKET names the Storage bucket (default "coltrane-artifacts").
-function remoteConfigured(): boolean {
+export function remoteConfigured(): boolean {
   return Boolean(process.env["COLTRANE_DRAIN_KEY"] || process.env["COLTRANE_DRAIN_PG"]);
+}
+
+// ── ACKNOWLEDGEMENT — every write the store owes a gig is retried, then answered for ─────────────
+//
+// A drain write either lands or is REPORTED. Three attempts, with backoff, for a transient answer
+// (a transport failure, 408, 429, 5xx); a refusal (any other 4xx — the store saying no, not "not
+// now") is not retried, because asking again gets the same no and burns the lease window doing it.
+
+/** How many times one drain write is tried before the worker gives up on it and says so. */
+export const DRAIN_WRITE_ATTEMPTS = 3;
+/** Backoff before the 2nd and 3rd attempts. Short: the lease is the budget these come out of. */
+const DRAIN_BACKOFF_MS = [250, 750] as const;
+
+/** A drain-service write the store did not acknowledge. `refused` = the store said no (not "later"). */
+export class DrainWriteError extends Error {
+  constructor(
+    message: string,
+    readonly status: number | undefined,
+    readonly code: string | undefined,
+    readonly refused: boolean,
+  ) {
+    super(message);
+    this.name = "DrainWriteError";
+  }
+}
+
+async function errorFromResponse(what: string, res: Response): Promise<DrainWriteError> {
+  const text = (await res.text().catch(() => "")).slice(0, 300);
+  let code: string | undefined;
+  try {
+    const parsed = JSON.parse(text) as { code?: unknown };
+    if (typeof parsed.code === "string") code = parsed.code;
+  } catch { /* not JSON */ }
+  const transient = res.status === 408 || res.status === 429 || res.status >= 500;
+  return new DrainWriteError(`${what} ${res.status}: ${text}`, res.status, code, !transient);
+}
+
+/** Try `attempt` up to DRAIN_WRITE_ATTEMPTS times; a refusal ends the loop at once. */
+export async function withDrainRetry<T>(attempt: () => Promise<T>): Promise<T> {
+  let last: unknown;
+  for (let n = 1; n <= DRAIN_WRITE_ATTEMPTS; n++) {
+    try {
+      return await attempt();
+    } catch (e) {
+      last = e;
+      if (e instanceof DrainWriteError && e.refused) throw e;
+      if (n < DRAIN_WRITE_ATTEMPTS) {
+        await new Promise((r) => setTimeout(r, DRAIN_BACKOFF_MS[n - 1] ?? DRAIN_BACKOFF_MS[DRAIN_BACKOFF_MS.length - 1]));
+      }
+    }
+  }
+  throw last;
+}
+
+interface GigDrains {
+  inflight: Set<Promise<void>>;
+  failures: string[];
+}
+const outputDrains = new Map<string, GigDrains>();
+
+function trackOutputDrain(gig_id: string, output_id: string, p: Promise<void>): void {
+  const g = outputDrains.get(gig_id) ?? { inflight: new Set<Promise<void>>(), failures: [] };
+  outputDrains.set(gig_id, g);
+  const tracked: Promise<void> = p.then(
+    () => { g.inflight.delete(tracked); },
+    (e: unknown) => {
+      g.inflight.delete(tracked);
+      const why = e instanceof Error ? e.message : String(e);
+      g.failures.push(`output ${output_id}: ${why}`);
+      console.warn(`[output_mirror] output ${output_id} of gig ${gig_id} was never acknowledged by the drain service — it did not land: ${why}`);
+    },
+  );
+  g.inflight.add(tracked);
+}
+
+/**
+ * Wait for EVERY output drain this process started for `gig_id` — including ones started while
+ * waiting — and report whether all of them were acknowledged. Consumes the gig's record, so a later
+ * call reports only what happened after this one.
+ */
+export async function awaitOutputDrains(gig_id: string): Promise<{ acknowledged: boolean; failures: string[] }> {
+  const g = outputDrains.get(gig_id);
+  if (!g) return { acknowledged: true, failures: [] };
+  while (g.inflight.size > 0) await Promise.all([...g.inflight]);
+  outputDrains.delete(gig_id);
+  return { acknowledged: g.failures.length === 0, failures: [...g.failures] };
 }
 
 function drainBody(rec: OutputRecord): Record<string, unknown> {
@@ -354,8 +438,7 @@ function serviceOrigin(): string {
  * Absent when COLTRANE_INSTANCE is unset — a local `coltrane work` run holds no lease and is not
  * pretending to.
  */
-async function drainPost(path: string, key: string, body: unknown): Promise<Response> {
-  const instance = process.env["COLTRANE_INSTANCE"];
+async function drainPost(path: string, key: string, body: unknown, instance = process.env["COLTRANE_INSTANCE"]): Promise<Response> {
   return fetch(`${serviceOrigin()}${path}`, {
     method: "POST",
     headers: {
@@ -367,28 +450,45 @@ async function drainPost(path: string, key: string, body: unknown): Promise<Resp
   });
 }
 
+/**
+ * One acknowledged POST to the drain service: retried on a transient answer, thrown as a
+ * DrainWriteError otherwise. The instance defaults to COLTRANE_INSTANCE, as every drain write's does.
+ */
+export async function drainServicePost(path: string, key: string, body: unknown, instance?: string): Promise<Response> {
+  serviceOrigin(); // a misconfigured origin is a refusal, not a transient: it throws before any retry
+  return withDrainRetry(async () => {
+    const res = await drainPost(path, key, body, instance ?? process.env["COLTRANE_INSTANCE"]);
+    if (!res.ok) throw await errorFromResponse(path, res);
+    return res;
+  });
+}
+
 async function drainViaPostgrest(rec: OutputRecord, key: string): Promise<void> {
   // ONE ACTION, TWO HALVES OF THE STORE. Persisting an output means a row and an artifact, because
   // our data storage has two halves — rows for metadata, Storage for bytes. That decomposition
   // belongs to the store, and a caller that can half-succeed at it is a caller holding the store's
   // internals. Until the service exposes it as a single call, the row goes first so a failure can
   // never be mistaken for a success.
-  const rowRes = await drainPost("/rest/v1/coltrane_outputs", key, [drainBody(rec)]);
-  if (!rowRes.ok) {
-    throw new Error(`coltrane_outputs ${rowRes.status}: ${(await rowRes.text()).slice(0, 200)}`);
-  }
+  //
+  // Each half is retried on its own, so a transient artifact failure does not re-send a row that
+  // already landed.
+  serviceOrigin(); // configuration, not transport: thrown once, never retried
+  await withDrainRetry(async () => {
+    const rowRes = await drainPost("/rest/v1/coltrane_outputs", key, [drainBody(rec)]);
+    if (!rowRes.ok) throw await errorFromResponse("coltrane_outputs", rowRes);
+  });
   const bucket = process.env["COLTRANE_DRAIN_BUCKET"] ?? "coltrane-artifacts";
   const objectPath = `${rec.gig_id}/${rec.content_sha}.json`;
-  const artRes = await drainPost(`/storage/v1/object/${bucket}/${objectPath}`, key, {
-    content_sha: rec.content_sha,
-    id: rec.id,
-    data: rec.data,
+  await withDrainRetry(async () => {
+    const artRes = await drainPost(`/storage/v1/object/${bucket}/${objectPath}`, key, {
+      content_sha: rec.content_sha,
+      id: rec.id,
+      data: rec.data,
+    });
+    // Content-addressed: the same sha names the same bytes, so an object already present IS the
+    // outcome we wanted. 409 is success.
+    if (!artRes.ok && artRes.status !== 409) throw await errorFromResponse("artifact", artRes);
   });
-  // Content-addressed: the same sha names the same bytes, so an object already present IS the
-  // outcome we wanted. 409 is success.
-  if (!artRes.ok && artRes.status !== 409) {
-    throw new Error(`artifact ${artRes.status}: ${(await artRes.text()).slice(0, 200)}`);
-  }
 }
 
 async function drainViaPg(rec: OutputRecord, conn: string): Promise<void> {
@@ -438,14 +538,21 @@ interface PgClient {
 // stubs for every real run — sealed outputs hanging off a header that said nothing true
 // about the run. On a terminal state the runtime hands this seam the run's own record and
 // the stub is replaced (merge semantics) with the real standard, status, spend, timestamps,
-// and reproducibility keys. Fire-and-forget like the output drain: a sink outage degrades
-// the mirror, never the run.
+// and reproducibility keys.
+//
+// AWAITED AND RETRIED, never fire-and-forget. The 'completed' header is the only way completion
+// reaches the store; written `void` into a process that exits, it was lost with the process, the
+// lease lapsed, and the finished gig ran again on the next box. Every header now goes through
+// drainServicePost's bounded retry, and its caller learns whether it was acknowledged.
+//
+// 'running' is the START header: written, awaited, before the first chair, carrying the run's
+// genome_hash — so a re-claim of a gig whose completion was lost has an identity to resume against.
 
 /** The slice of the run's terminal state the sink's gig row wants. */
 export interface GigHeaderRecord {
   gig_id: string;
   standard_slug: string;
-  status: "complete" | "failed" | "aborted" | "awaiting_approval";
+  status: "running" | "complete" | "failed" | "aborted" | "awaiting_approval";
   genome_hash?: string;
   run_fingerprint?: string;
   started_at?: string;
@@ -453,6 +560,9 @@ export interface GigHeaderRecord {
   outputs_count?: number;
   usage?: { total_cost_usd?: number; input_tokens?: number; output_tokens?: number } | undefined;
   error?: string;
+  /** Why this run went COLD when it could have resumed — recorded where the operator paying for it
+   *  can see it (the header manifest), not only in a log line. */
+  cold_run_reason?: string;
 }
 
 /** The sink row, derived entirely from the run's own record (engine "complete" → sink "completed"). */
@@ -467,6 +577,7 @@ export function gigHeaderBody(rec: GigHeaderRecord): Record<string, unknown> {
   const manifest: Record<string, unknown> = {};
   if (rec.outputs_count !== undefined) manifest["output_count"] = rec.outputs_count;
   if (rec.error !== undefined) manifest["error"] = rec.error;
+  if (rec.cold_run_reason !== undefined) manifest["cold_run_reason"] = rec.cold_run_reason;
   return {
     id: rec.gig_id,
     standard_slug: rec.standard_slug,
@@ -487,10 +598,7 @@ export async function drainGigHeader(rec: GigHeaderRecord): Promise<void> {
   if (!remoteConfigured()) return;
   const key = process.env["COLTRANE_DRAIN_KEY"];
   if (key) {
-    const res = await drainPost("/rest/v1/coltrane_gigs", key, gigHeaderBody(rec));
-    if (!res.ok) {
-      throw new Error(`coltrane_gigs ${res.status}: ${(await res.text()).slice(0, 200)}`);
-    }
+    await drainServicePost("/rest/v1/coltrane_gigs", key, gigHeaderBody(rec));
     return;
   }
   const pgConn = process.env["COLTRANE_DRAIN_PG"];

@@ -364,7 +364,13 @@ export async function runCli(argv: readonly string[], io: CliIO): Promise<number
     }
     // A claim that PARKED at a human chair exits 0: the row was run correctly and now waits on
     // a person. Exiting 1 would make every supervisor restart a worker that did its job.
-    const code = res.status === "failed" ? 1 : 0;
+    //
+    // UNACKNOWLEDGED IS NOT DONE. A run whose terminal state the store never recorded (an output that
+    // never landed, a completed header that was never acknowledged, a gig abandoned to its lease)
+    // exits non-zero, so a supervisor sees a worker that did not finish its job instead of a clean 0
+    // over a row that still reads `running`.
+    const code = res.status === "failed" || !res.acknowledged ? 1 : 0;
+    if (!res.acknowledged) line(io, `the store did NOT acknowledge this gig's ${res.status} state`);
     if (emitJson(io, json, res)) return code;
     io.out(res.gig_id + "\n");
     line(io, `${res.status}` +

@@ -29,6 +29,7 @@ import { amendLadderFromEnv } from "./invoker_selection.js";
 import { MCP_TOOLS } from "./mcp.js";
 import { ENGINE_MCP_SERVER, type ToolProvider, type ToolProviderRegistry } from "./tool_providers.js";
 import type { BudgetInput, RunDeps } from "./runtime.js";
+import { HOSTED_LEASE_MS } from "./lease.js";
 
 /**
  * Every engine tool as an in-house provider, tagged with the engine's own MCP server.
@@ -73,15 +74,15 @@ export function drainBudget(input: Record<string, unknown> | undefined): BudgetI
 /**
  * How long a single drained gig may run before it is aborted.
  *
- * The store's lease is thirty minutes; a run that outlives it is working on a gig another drain may
- * already have reclaimed. Defaulting under the lease keeps one gig to one worker without needing
- * the two clocks to agree exactly.
+ * DERIVED from the one lease constant (HOSTED_LEASE_MS, src/lease.ts), never restated: five sixths of
+ * a lease. The heartbeat keeps the lease while the gig runs, so this is the backstop for the case
+ * where no renewal lands at all — the run still stops before its first lease could lapse and hand the
+ * gig to another drain, and the last sixth is room for the terminal writes (outputs, then the header,
+ * each retried). Computed at call time from the imported binding, so moving the constant moves this.
  */
-const DEFAULT_DRAIN_TIMEOUT_MS = 25 * 60 * 1000;
-
 export function drainTimeoutMs(): number {
   const env = Number(process.env["COLTRANE_GIG_TIMEOUT_MS"]);
-  return Number.isFinite(env) && env > 0 ? env : DEFAULT_DRAIN_TIMEOUT_MS;
+  return Number.isFinite(env) && env > 0 ? env : Math.floor((HOSTED_LEASE_MS * 5) / 6);
 }
 
 /**

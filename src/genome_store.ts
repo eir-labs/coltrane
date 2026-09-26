@@ -759,6 +759,27 @@ export function rpcQueueGig(
   };
 }
 
+/** The store's answer to "what status is this gig in?" — the ServerDeps.gigStatus seam
+ *  (src/server.ts), through coltrane_mcp_gig_status as the agent token. Null when the store holds no
+ *  such gig. The RPC may answer with the row or a single-row array; both are the same fact. */
+export function rpcGigStatus(
+  ctx: { baseUrl: string; anonKey: string; agentToken: string },
+): (gig_id: string) => Promise<string | null> {
+  return async (gig_id) => {
+    const res = await fetch(`${ctx.baseUrl}/rest/v1/rpc/coltrane_mcp_gig_status`, {
+      method: "POST",
+      headers: { apikey: ctx.anonKey, Authorization: `Bearer ${ctx.anonKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ p_bearer: ctx.agentToken, p_gig: gig_id }),
+    });
+    const text = await res.text();
+    if (!res.ok) throw new Error(`coltrane_mcp_gig_status ${res.status}: ${text.slice(0, 200)}`);
+    const out = text ? (JSON.parse(text) as unknown) : null;
+    const row = Array.isArray(out) ? out[0] : out;
+    const status = row && typeof row === "object" ? (row as Record<string, unknown>)["status"] : undefined;
+    return typeof status === "string" ? status : null;
+  };
+}
+
 /** The hosted gig-queue seam for createToolSurface: queue one run through the governor-gated
  *  dispatch RPC AS THE CALLER (member JWT — RLS + the governor gate decide). Queuing only;
  *  a drain worker claims and runs it. Shape mirrors hosted_tools' member dispatch path. */

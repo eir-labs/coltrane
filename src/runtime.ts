@@ -1071,6 +1071,16 @@ export class GigAborted extends Error {
 }
 
 /** The human-readable cause behind an AbortSignal, whatever shape the aborter used. */
+/**
+ * WHY a run was stopped, as a TOKEN for the header manifest. An abort reason that names itself
+ * (`{ code: "timeout" }`, e.g. the drain's deadline) is used as given; otherwise the free-text reason.
+ */
+export function abortReasonCode(signal: AbortSignal): string {
+  const r = signal.reason as unknown;
+  if (r && typeof r === "object" && typeof (r as { code?: unknown }).code === "string") return (r as { code: string }).code;
+  return abortReasonText(signal);
+}
+
 export function abortReasonText(signal: AbortSignal): string {
   const r = signal.reason as unknown;
   if (typeof r === "string" && r.trim().length > 0) return r;
@@ -4490,6 +4500,7 @@ export async function runGig(
       error: endedAs === "aborted" && deps.signal?.aborted === true
         ? `aborted: ${abortReasonText(deps.signal)}`
         : e instanceof Error ? e.message : String(e),
+      ...(endedAs === "aborted" && deps.signal?.aborted === true ? { abort_reason: abortReasonCode(deps.signal) } : {}),
       ...(partial ? { usage: { total_cost_usd: partial.total_cost_usd, input_tokens: partial.input_tokens, output_tokens: partial.output_tokens } } : {}),
     });
     throw e;

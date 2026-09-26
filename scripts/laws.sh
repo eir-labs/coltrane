@@ -29,7 +29,12 @@ cd "$(dirname "$0")/.."
 # stopped being true at Node 24), and two pure flag-string laws replaced it in this band. The nine
 # laws that need a real request moved to tests/security — a band may reach out, the root suite may
 # not — so they are counted there, by file, not here.
-EXPECTED_LAWS="${EXPECTED_LAWS:-4248}"
+EXPECTED_LAWS="${EXPECTED_LAWS:-4289}"
+#  +41 layout grants, round 3: a_target_path_never_escapes_the_tree (13, new), every_door_carries_the_current_layout
+#      (6, new), a_seats_bash_runs_in_a_sandbox (6, new), a_seat_that_writes_outside_its_grant_is_refused (9, new),
+#      the_sandbox_refuses_a_real_write (1, new; SKIPPED as unverified without srt + an OS sandbox — counted, never a
+#      pass), a_seat_cannot_rewrite_its_own_layout +1, a_missing_role_or_layout_grants_nothing +1,
+#      the_chair_records_its_resolved_grants +1, both_invokers_grant_through_the_layout +3. Read from the run.
 #  +20 layout grants, round 2 (the conductor's and founder's rulings): a_seat_cannot_rewrite_its_own_layout (5,
 #      new), an_empty_or_globbed_scope_fails_closed (8, new), the_drain_takes_its_layout_from_the_store (5, new),
 #      both_invokers_grant_through_the_layout 7 -> 9 (completions fails closed on a scoped write). Read from the run.
@@ -175,7 +180,7 @@ EXPECTED_LAWS="${EXPECTED_LAWS:-4248}"
 #       with the handler, the description does not. Its first draft could not fail — it forgave any
 #       token no tool anywhere declared, which is exactly what a renamed argument leaves behind.
 #       Sabotage said so (`current` -> `slug_current` stayed green); the exemption is gone.
-EXPECTED_FILES="${EXPECTED_FILES:-446}"   # + the twelve layout-grants law files (docs/specs/layout-grants.red-spec.json), + tests/every_skill_runs_its_fixtures.test.ts, + tests/node_floor_refuses.test.ts, + tests/spec_reside_drive.test.ts (#537), + tests/a_red_law_names_its_plant.test.ts (#551), + tests/sealed_inputs.test.ts, tests/fan_out.test.ts, tests/completions_seal.test.ts, tests/tier_ladder.test.ts, tests/amend_ladder.test.ts, tests/completions_reasoning_effort.test.ts, tests/bus.test.ts, tests/bus_chair.test.ts, tests/bus_terminal.test.ts, tests/bus_verbs.test.ts, tests/bus_commit.test.ts, tests/code_tools.test.ts, tests/gig_input_validated.test.ts, tests/seat_reads_recorded.test.ts, tests/claude_seat_reads.test.ts, tests/optional_declared_input.test.ts, tests/simulate_names_seats.test.ts
+EXPECTED_FILES="${EXPECTED_FILES:-451}"   # + the seventeen layout-grants law files (docs/specs/layout-grants.red-spec.json), + tests/every_skill_runs_its_fixtures.test.ts, + tests/node_floor_refuses.test.ts, + tests/spec_reside_drive.test.ts (#537), + tests/a_red_law_names_its_plant.test.ts (#551), + tests/sealed_inputs.test.ts, tests/fan_out.test.ts, tests/completions_seal.test.ts, tests/tier_ladder.test.ts, tests/amend_ladder.test.ts, tests/completions_reasoning_effort.test.ts, tests/bus.test.ts, tests/bus_chair.test.ts, tests/bus_terminal.test.ts, tests/bus_verbs.test.ts, tests/bus_commit.test.ts, tests/code_tools.test.ts, tests/gig_input_validated.test.ts, tests/seat_reads_recorded.test.ts, tests/claude_seat_reads.test.ts, tests/optional_declared_input.test.ts, tests/simulate_names_seats.test.ts
 
 # THE OTHER BANDS. `vitest run` is ROOT-CONFIG ONLY — this repo's own workflow comments
 # record that four configs went unexecuted once for exactly that reason. So pinning only the

@@ -15,6 +15,7 @@
 //   chair_complete carries resolved_grants        behavioural  runGig — src/runtime.ts                    drop resolved_grants from the chair_complete emit
 //   …and target_paths_applied, both ways          behavioural  same                                       record target_paths_applied: true unconditionally
 //   the layout reaches the chair's invocation     behavioural  runGig — src/runtime.ts                    omit `layout` from the deps.invoke ctx
+//   the record reflects the ROOM's narrowing      behavioural  runGig — src/runtime.ts (the chair record)    drop `venue` from the record's resolveSeatGrants call
 //   the dispatch door carries the tree's layout   behavioural  bootstrapServerDeps + dispatchTool          omit `layout` from the assembleRunDeps call in
 //                                                              ("gig_dispatch") — src/server.ts           server.ts's dispatch door
 import { describe, it, expect } from "vitest";
@@ -24,7 +25,7 @@ import { testAgent } from "./_support/agents.js";
 import { coreInvariantFields } from "./_support/specs.js";
 import { createRegistry, createOutputStore, MemoryLedger, runGig, type Standard, type AgentInvoker, type GigProgressEvent } from "../src/index.js";
 import type { AgentInvocationContext } from "../src/runtime.js";
-import { genomeTree, IMPLEMENTER_FILE, type Layout } from "./layout_grants_fixtures.js";
+import { genomeTree, IMPLEMENTER_FILE, room, type Layout } from "./layout_grants_fixtures.js";
 
 const LAYOUT: Layout = { paths: { source: ["src/**", "lib/**"] }, commands: { laws: ["npx vitest run"] } };
 
@@ -76,6 +77,26 @@ describe("the chair records its resolved grants", () => {
     expect(seen.length, "the chair was never invoked").toBe(1);
     expect((seen[0] as unknown as { layout?: unknown }).layout, "runGig did not hand the chair the run's layout").toEqual(LAYOUT);
     expect(seen[0]!.gig_input["target_paths"], "the change-request's target_paths did not reach the chair").toEqual(["src/a.ts"]);
+  });
+});
+
+describe("the chair record reflects the room the chair sat in", () => {
+  it("a room that equips no Bash: chair_complete.resolved_grants holds no Bash — the record is what the seat could do IN THE ROOM", async () => {
+    const registry = createRegistry();
+    registry.registerType({ slug: "note", extends: "Signal", domain: "demo", schema: { properties: { value: { type: "string" } } }, required_fields: [] } as never);
+    const events: GigProgressEvent[] = [];
+    const invoke: AgentInvoker = () => ({ ...coreInvariantFields("Signal"), value: "done" });
+    const venue = room(["Read", "Write"]);
+    await runGig(standard, { request_text: "fix a", target_paths: ["src/a.ts"] }, {
+      outputs: createOutputStore(registry), ledger: new MemoryLedger(), invoke, layout: LAYOUT,
+      venue: venue.slug, venues: new Map([[venue.slug, venue]]),
+      onProgress: (e: GigProgressEvent) => events.push(e),
+    } as never);
+    const done = events.find((e) => e.type === "chair_complete") as (GigProgressEvent & Record<string, unknown>) | undefined;
+    expect(done, `no chair_complete — the room refused the gig? ${JSON.stringify(events.map((e) => e.type))}`).toBeDefined();
+    const grants = done!["resolved_grants"] as string[];
+    expect(grants, "non-vacuity: the room's Write survived").toContain("Write(src/a.ts)");
+    expect(grants.some((g) => g.startsWith("Bash")), "the record claims a Bash grant the room never equipped").toBe(false);
   });
 });
 

@@ -301,7 +301,10 @@ export const CALIBRATION_TRAIL = {
 // rest) — but skills/ is in neither corpus, here or in the sealed cross-check that re-derives it. So
 // they surface as unread. A skill is a reader; widening both corpora together would shrink this
 // number rather than grow it, and is worth doing on its own rather than inside a domain PR.
-export const PINNED_UNREAD_FIELDS = 242;
+// 242 → 241 (2026-09-26): change-request.target_paths became READ — layout grants narrow a seat's Write/Edit to it
+// (targetPathsOf, src/layout_grants.ts; the runGig target preflight). Verified: renaming every `target_paths`
+// word in src/ (this engine is word-based, so one read removed alone leaves the others) reads 242, red.
+export const PINNED_UNREAD_FIELDS = 241;
 
 /* ─────────────────────────────────────────────────────────────────────────────────────────────────
  * TWO CORPORA — engine (src/) vs contract (broad).

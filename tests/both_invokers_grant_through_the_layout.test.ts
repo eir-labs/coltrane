@@ -21,9 +21,8 @@
 //   Claude: a missing role refuses before the spawn       behavioural  same                                             ignore resolveSeatGrants().refusals in the invoker
 //   Completions: a Write narrowed away is not offered     behavioural  makeCompletionsInvoker(...) — src/completions_  compute chairGrants from ctx.agent.allowed_tools
 //                                                                      invoker.ts                                       instead of resolveSeatGrants(...).grants
-//   Completions: a scoped Write/Edit refuses (expanded)   behavioural  same                                             drop the scoped-write refusal (let mapGrant strip
-//                                                                                                                     the scope and offer bare Write)
-//   Completions: a scoped Write/Edit refuses (literal)    behavioural  same                                             same
+//   Completions: ANY scoped grant refuses (5 shapes)      behavioural  same                                             refuse only scoped Write/Edit (let mapGrant strip
+//                                                                                                                     the scope from Read/Bash and offer them bare)
 //   Completions: a missing role refuses, no model call    behavioural  same                                             ignore resolveSeatGrants().refusals in the invoker
 import { describe, it, expect } from "vitest";
 import { makeClaudeInvoker, createRegistry, type Agent } from "../src/index.js";
@@ -108,7 +107,7 @@ describe("the Claude invoker grants through resolveSeatGrants", () => {
   });
 });
 
-describe("the completions invoker grants through resolveSeatGrants — and fails closed on a scoped write", () => {
+describe("the completions invoker grants through resolveSeatGrants — and fails closed on ANY scoped grant", () => {
   // The completions invoker offers the model `listed ∩ allow`, where allow is its chair grants mapped to
   // tool names — and mapGrant keeps only a grant's BASE: `Write(src/a.ts)` would be offered as `Write`,
   // the whole tree. The scope cannot survive this invoker, so (the founder's ruling) a chair whose
@@ -120,6 +119,8 @@ describe("the completions invoker grants through resolveSeatGrants — and fails
     { name: "mcp__s__read", inputSchema: { type: "object" } },
     { name: "mcp__coltrane__Write", inputSchema: { type: "object" } },
     { name: "mcp__coltrane__Edit", inputSchema: { type: "object" } },
+    { name: "mcp__coltrane__Read", inputSchema: { type: "object" } },
+    { name: "mcp__coltrane__Bash", inputSchema: { type: "object" } },
   ];
   const registry = createRegistry();
   registry.registerType({ slug: "built-thing", extends: "Artifact", domain: "demo", schema: { properties: {} }, required_fields: [] } as never);
@@ -132,7 +133,7 @@ describe("the completions invoker grants through resolveSeatGrants — and fails
     testAgent({ slug: "reader", primitives: ["CREATE"], input_types: [], output_types: ["built-thing"], domain: "demo", model_tier: "economy", allowed_tools } as never);
   const offered = (calls: { body: Record<string, unknown> }[]): string => JSON.stringify(calls[0]?.body["tools"] ?? []);
 
-  it("control — a chair holding no scoped write still runs under a layout and target_paths, offered its MCP tools", async () => {
+  it("control — a chair holding only UNSCOPED grants still runs under a layout and target_paths, offered its MCP tools", async () => {
     const C = await loadCompletions();
     const { fn, calls } = fakeCompletions([saysJson({})]);
     const res = (await C.makeCompletionsInvoker(opts(fn))(ctx(reader(["mcp__s__read"])))) as Record<string, unknown>;
@@ -149,23 +150,28 @@ describe("the completions invoker grants through resolveSeatGrants — and fails
     expect(offered(calls), "non-vacuity: the MCP read tool is still offered").toMatch(/read/);
   });
 
-  it("an EXPANDED scoped write (Write(@source) → Write(src/a.ts)) refuses the chair naming the grant, before any model call", async () => {
-    const C = await loadCompletions();
-    const { fn, calls } = fakeCompletions([saysJson({})]);
-    const res = (await C.makeCompletionsInvoker(opts(fn))(ctx(reader(["mcp__s__read", "Write(@source)"]), { gig_input: { target_paths: ["src/a.ts"] } }))) as Record<string, unknown>;
-    expect(calls, "a scoped write reached the model as a bare, tree-wide Write").toHaveLength(0);
-    expect(res["ok"]).toBe(false);
-    expect(String(res["message"]), "the refusal does not name the effective scoped grant").toContain("Write(src/a.ts)");
-  });
-
-  it("a LITERAL scoped write (Edit(src/**)) refuses the chair naming the grant, before any model call", async () => {
-    const C = await loadCompletions();
-    const { fn, calls } = fakeCompletions([saysJson({})]);
-    const res = (await C.makeCompletionsInvoker(opts(fn))(ctx(reader(["mcp__s__read", "Edit(src/**)"]), { layout: undefined, gig_input: { request_text: "x" } }))) as Record<string, unknown>;
-    expect(calls, "a literal scoped Edit reached the model as a bare, tree-wide Edit").toHaveLength(0);
-    expect(res["ok"]).toBe(false);
-    expect(String(res["message"]), "the refusal does not name the scoped grant").toContain("Edit(src/**)");
-  });
+  // ROUND 3 (the founder's fail-closed ruling, generalised by the conductor): mapGrant strips the scope
+  // from EVERY grant — `Bash(npm test:*)` would be offered as the whole of Bash, `Read(src/**)` as the
+  // whole of Read. So a chair whose effective grants hold ANY scoped grant is refused, naming it, before
+  // any model call. The source lists a Write, Edit, Read and Bash tool, so nothing below is refused for
+  // being unprovided: only the scope refusal can stop the call.
+  const SCOPED: Array<[string, string[], Record<string, unknown>, string]> = [
+    ["an EXPANDED scoped Write (Write(@source) → Write(src/a.ts))", ["mcp__s__read", "Write(@source)"], { gig_input: { target_paths: ["src/a.ts"] } }, "Write(src/a.ts)"],
+    ["a LITERAL scoped Edit (Edit(src/**))", ["mcp__s__read", "Edit(src/**)"], { layout: undefined, gig_input: { request_text: "x" } }, "Edit(src/**)"],
+    ["a LITERAL scoped Read (Read(src/**))", ["mcp__s__read", "Read(src/**)"], { layout: undefined, gig_input: { request_text: "x" } }, "Read(src/**)"],
+    ["a LITERAL scoped Bash (Bash(npm test:*))", ["mcp__s__read", "Bash(npm test:*)"], { layout: undefined, gig_input: { request_text: "x" } }, "Bash(npm test:*)"],
+    ["an EXPANDED scoped Bash (Bash(@laws) → Bash(npx vitest run:*))", ["mcp__s__read", "Bash(@laws)"], {}, "Bash(npx vitest run:*)"],
+  ];
+  for (const [what, grants, over, named] of SCOPED) {
+    it(`${what} refuses the chair naming the grant, before any model call`, async () => {
+      const C = await loadCompletions();
+      const { fn, calls } = fakeCompletions([saysJson({})]);
+      const res = (await C.makeCompletionsInvoker(opts(fn))(ctx(reader(grants), over))) as Record<string, unknown>;
+      expect(calls, `${named} reached the model as an unscoped tool`).toHaveLength(0);
+      expect(res["ok"]).toBe(false);
+      expect(String(res["message"]), "the refusal does not name the scoped grant").toContain(named);
+    });
+  }
 
   it("a role the layout does not declare is refused naming it, before any model call", async () => {
     const C = await loadCompletions();

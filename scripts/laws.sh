@@ -29,7 +29,10 @@ cd "$(dirname "$0")/.."
 # stopped being true at Node 24), and two pure flag-string laws replaced it in this band. The nine
 # laws that need a real request moved to tests/security — a band may reach out, the root suite may
 # not — so they are counted there, by file, not here.
-EXPECTED_LAWS="${EXPECTED_LAWS:-4219}"
+EXPECTED_LAWS="${EXPECTED_LAWS:-4225}"
+#   +6 openrouter_reference round 2 (on 02c591f): L2g a reported 0 is a known price, L2h a negative cost is never a
+#      credit, L2i a zero-token class needs no rate, L2j chair_spend carries the unpriced count, L2k the negative-input
+#      guard refuses, L2l the CLI says unpriced. L2b amended in place (discriminating fixture), not counted.
 #  +11 openrouter_reference (new file, #558): the one-line flip (L1a-d), OpenRouter/DeepSeek usage and cost (L2a-f),
 #      the provider doc names every variable the door reads (L3). Merged over #557: 4208 + 11 = 4219, read from the run.
 #   +5 skill_runs_on_exec_path (new file, #557 round 2): a skill runs on process.execPath, never `node` from

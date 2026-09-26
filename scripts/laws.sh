@@ -29,7 +29,8 @@ cd "$(dirname "$0")/.."
 # stopped being true at Node 24), and two pure flag-string laws replaced it in this band. The nine
 # laws that need a real request moved to tests/security — a band may reach out, the root suite may
 # not — so they are counted there, by file, not here.
-EXPECTED_LAWS="${EXPECTED_LAWS:-4295}"
+EXPECTED_LAWS="${EXPECTED_LAWS:-4334}"
+#  merge of main (#557 + #556: 4232) into #554 (gig-runs-once: 4295), both from 4193: 4193 + 102 + 39 = 4334, read from the run.
 #   +2 gig-runs-once round 6f, on 7b554e6: drain_budget B1c (the ceiling gates each chair INSIDE a phase, not just
 #      the phase start) and B1f (integer micro-dollars: 0.3+0.3+0.3 USD reaches a 900000 ceiling; a float compare
 #      lets a fourth chair run). Both green at head, red under their plants.
@@ -83,6 +84,28 @@ EXPECTED_LAWS="${EXPECTED_LAWS:-4295}"
 #      heartbeat + lost lease (3), E5 release never hold (3), E6 re-claim finishes without re-running (2),
 #      E7 local complete() holder check (2), E8 one lease constant (2). All 18 fail until the engine half
 #      lands; this script refuses a red suite, so it goes green with the implementation, not before.
+#   +5 one_output_gate round 3 — G7 the reload proof compares CONTENT; G8 a declared .mcp.json env cannot move
+#      the COLTRANE_GENOME pin; G9 SLUGS ARE NOT IDENTIFIERS (founder ruling): a slug never reaches the
+#      filesystem; G10 a 75-type org-shaped registry seats cleanly; G11 the refusal names the type(s) and why,
+#      in the chair's error and the gig's terminal record.
+#  merge of origin/main (#557) into #556: main's 4208 + this branch's 19 one_output_gate laws = 4227, as the
+#      merged suite collects (read from the run, not added up).
+#   +5 skill_runs_on_exec_path (new file, #557 round 2): a skill runs on process.execPath, never `node` from
+#      PATH. The floor checked the parent's Node while the skill ran on PATH's (grade issuecomment-5847532054:
+#      an ungranted skill on PATH node 24 fetched a listener and got 200). P1a-c executeSkill /
+#      executeSkillAsync / skill_execute; P3a bootstrap's fallback engine MCP server; P3b the relay's child.
+#  +10 Node 26 is enforced where skills run, not at install; the bus is not a hosted tool (founder ruling,
+#      26 Sep 2026; coltrane-ui #252's grade). +11 node_floor_where_skills_run (new file: F1 library import
+#      below 26, F2 install not refused, F3 skill execution refuses by name, F4 `coltrane work` refuses),
+#      +4 bus_not_hosted (new file: B1-B3 hosted bus_* refused with no write, B4 local control); -3
+#      node_floor_refuses' install laws and -2 skill_sandbox_confinement's engines laws, retired with the
+#      install floor they pinned.
+#   +5 one_output_gate round 2 — G2 an is_error result whose body is non-JSON or ok:true is refused by the
+#      flag alone (1); G5 the drain refuses a run-registry type the loader drops on reload, before any
+#      spawn (1); G6 the server door's engine child judges by the run's genome whatever the cwd (3).
+#  +14 one_output_gate (new file, RED) — a chair's write is judged once: G1 the drain's Claude seat gets an
+#      in-turn gate built from the RUN's genome (2), G2 a {ok:false} write is never captured (4), G3 null on
+#      an optional field is absence in checkWritable (5), G4 the brief says so (2), R the live replay (1).
 #  +51 #545 rebuilt on main after #552 (the Node 26 floor made its Node 22 special-casing moot): +30 the
 #      landscape genome, +21 every_skill_runs_its_fixtures (discovered skills, three booked). Read from the run.
 #   +1 node_floor_refuses: THIS runtime accepts --allow-net, probed (the constant said 24; it is 25). Floor → 26.
@@ -219,7 +242,7 @@ EXPECTED_LAWS="${EXPECTED_LAWS:-4295}"
 #       with the handler, the description does not. Its first draft could not fail — it forgave any
 #       token no tool anywhere declared, which is exactly what a renamed argument leaves behind.
 #       Sabotage said so (`current` -> `slug_current` stayed green); the exemption is gone.
-EXPECTED_FILES="${EXPECTED_FILES:-456}"   # + gig_runs_once_drain_budget (round 6e)   # + gig_runs_once_queue_clients (round 6c)   # + gig_runs_once_real_store (round 6b)   # + gig_runs_once_hosted_dispatch (round 6)   # + gig_runs_once_resumed_reclaim, gig_runs_once_store_decides (round 5)   # + the fifteen tests/gig_runs_once_*.test.ts (RED battery), + tests/every_skill_runs_its_fixtures.test.ts, + tests/node_floor_refuses.test.ts, + tests/spec_reside_drive.test.ts (#537), + tests/a_red_law_names_its_plant.test.ts (#551), + tests/sealed_inputs.test.ts, tests/fan_out.test.ts, tests/completions_seal.test.ts, tests/tier_ladder.test.ts, tests/amend_ladder.test.ts, tests/completions_reasoning_effort.test.ts, tests/bus.test.ts, tests/bus_chair.test.ts, tests/bus_terminal.test.ts, tests/bus_verbs.test.ts, tests/bus_commit.test.ts, tests/code_tools.test.ts, tests/gig_input_validated.test.ts, tests/seat_reads_recorded.test.ts, tests/claude_seat_reads.test.ts, tests/optional_declared_input.test.ts, tests/simulate_names_seats.test.ts
+EXPECTED_FILES="${EXPECTED_FILES:-460}"   # + main: one_output_gate, skill_runs_on_exec_path, node_floor_where_skills_run, bus_not_hosted   # + gig_runs_once_drain_budget (round 6e)   # + gig_runs_once_queue_clients (round 6c)   # + gig_runs_once_real_store (round 6b)   # + gig_runs_once_hosted_dispatch (round 6)   # + gig_runs_once_resumed_reclaim, gig_runs_once_store_decides (round 5)   # + the fifteen tests/gig_runs_once_*.test.ts (RED battery), + tests/every_skill_runs_its_fixtures.test.ts, + tests/node_floor_refuses.test.ts, + tests/spec_reside_drive.test.ts (#537), + tests/a_red_law_names_its_plant.test.ts (#551), + tests/sealed_inputs.test.ts, tests/fan_out.test.ts, tests/completions_seal.test.ts, tests/tier_ladder.test.ts, tests/amend_ladder.test.ts, tests/completions_reasoning_effort.test.ts, tests/bus.test.ts, tests/bus_chair.test.ts, tests/bus_terminal.test.ts, tests/bus_verbs.test.ts, tests/bus_commit.test.ts, tests/code_tools.test.ts, tests/gig_input_validated.test.ts, tests/seat_reads_recorded.test.ts, tests/claude_seat_reads.test.ts, tests/optional_declared_input.test.ts, tests/simulate_names_seats.test.ts
 
 # THE OTHER BANDS. `vitest run` is ROOT-CONFIG ONLY — this repo's own workflow comments
 # record that four configs went unexecuted once for exactly that reason. So pinning only the
@@ -228,7 +251,7 @@ EXPECTED_FILES="${EXPECTED_FILES:-456}"   # + gig_runs_once_drain_budget (round 
 # for leaving them unpinned while claiming the laws are counted.
 EXPECTED_FAILURE_MODES_FILES="${EXPECTED_FAILURE_MODES_FILES:-5}"
 EXPECTED_HONEST_BROKER_FILES="${EXPECTED_HONEST_BROKER_FILES:-2}"
-EXPECTED_SECURITY_FILES="${EXPECTED_SECURITY_FILES:-3}"   # + completions_long_wait.spec.ts: the 300s header limit needs a real socket to disprove   # + skill_network_grant.spec.ts: proving a network gate needs a real request, which the root suite forbids
+EXPECTED_SECURITY_FILES="${EXPECTED_SECURITY_FILES:-4}"   # + skill_runs_on_exec_path.spec.ts: an old PATH node must not open the network to an ungranted skill (a real request)   # + completions_long_wait.spec.ts: the 300s header limit needs a real socket to disprove   # + skill_network_grant.spec.ts: proving a network gate needs a real request, which the root suite forbids
 
 # THE FILES DELEGATED AWAY FROM THE ROOT BAND, by name.
 #

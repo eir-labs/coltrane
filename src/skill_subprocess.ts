@@ -98,8 +98,9 @@ function nodeMajor(): number {
  *
  * The sandbox spawns with `--permission`, which is Node 22+. On Node 20 the child dies with
  * `node: bad option: --permission` — a message that names the flag rather than the reason, and
- * appears once per skill rather than once per process. `engines` in package.json says `>=26`,
- * but npm treats that as advisory, so a consumer on 20 reaches here anyway.
+ * appears once per skill rather than once per process. The package installs and imports as a library
+ * on Node 24 (founder ruling, 26 Sep 2026: the floor lives where skills run, not at install), so a
+ * library consumer below the floor reaches here — and this is where it is refused.
  *
  * Refusing loudly is the only honest option. There is no degraded mode: running a skill on a
  * runtime with no permission model means running it UNSANDBOXED, and silently doing that would
@@ -117,9 +118,10 @@ function assertSandboxCapableRuntime(): void {
   const major = nodeMajor();
   if (major < MIN_NODE_FOR_SANDBOX) {
     throw new Error(
-      `coltrane needs Node ${MIN_NODE_FOR_SANDBOX}+ to execute skills; this is Node ${process.versions.node}. ` +
-        `Skill execution is sandboxed with --permission, which does not exist before Node ${MIN_NODE_FOR_SANDBOX}. ` +
-        `Running without it would execute skill code unsandboxed, so it is refused rather than degraded.`,
+      `coltrane needs Node ${MIN_NODE_FOR_SANDBOX} or newer to execute skills; this is Node ${process.versions.node}. ` +
+        `A skill runs under the Node permission model, and its network controls (--allow-net, the only gate on a ` +
+        `skill's network grant) do not exist before Node ${NODE_WITH_ALLOW_NET}, which is end-of-life. ` +
+        `Running here would leave skill code without network controls, so it is refused rather than degraded.`,
     );
   }
 }
@@ -219,7 +221,10 @@ export function executeSkill(skillDir: string, input: unknown, timeoutMs = 120_0
   const started = Date.now();
   assertSandboxCapableRuntime();
   const dir = realDir(skillDir);
-  const res = spawnSync("node", [...tierFlags(tier, dir, meta.permission?.network), runnerPath(), dir], {
+  // process.execPath, never `node` on PATH: the floor above checked THIS runtime's version, and
+  // tierFlags chose --allow-net for it. A PATH `node` can be an older Node with no network gate
+  // (the non-author grade of #557 fetched 200 from an ungranted skill that way).
+  const res = spawnSync(process.execPath, [...tierFlags(tier, dir, meta.permission?.network), runnerPath(), dir], {
     // The envelope carries the network grant so the child can enforce its host allowlist; --allow-net
     // is all-or-nothing, and a tier-0 child cannot re-read its own meta.json to learn the list.
     input: JSON.stringify(
@@ -291,7 +296,8 @@ export async function executeSkillAsync(
     // (the runtime forwards RunDeps.tree_root), spawn the child there so the skill's code half runs
     // in the gig's tree, not the long-lived engine process's own directory. Absent a cwd the spawn
     // is unchanged: the child inherits the parent's working directory, exactly as before (I2).
-    const child = spawn("node", [...tierFlags(tier, dir, meta.permission?.network), runnerPath(), dir], {
+    // process.execPath, as in executeSkill: the child is the runtime the floor checked.
+    const child = spawn(process.execPath, [...tierFlags(tier, dir, meta.permission?.network), runnerPath(), dir], {
       stdio: ["pipe", "pipe", "pipe"], env: skillEnv(),
       ...(opts.cwd !== undefined ? { cwd: opts.cwd } : {}),
     });

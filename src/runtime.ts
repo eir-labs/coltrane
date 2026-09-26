@@ -41,7 +41,8 @@ import type { OutputStore, OutputRecord, InputResolution, ShardStamp } from "./o
 import { resolveSealedInputs } from "./sealed_inputs.js";
 import { expandFanOut, type FanOutInstance } from "./fan_out.js";
 import { checkGigConformance, type GigConformanceResult } from "./gig_conformance.js";
-import { drainGigHeader } from "./output_mirror.js";
+import { drainGigHeader, awaitOutputDrains, remoteConfigured, type GigHeaderRecord } from "./output_mirror.js";
+import { LeaseLost } from "./lease.js";
 import { LEDGER_SCHEMA_VERSION, type Ledger, type GigUsage } from "./ledger.js";
 import { PlacementRefused, type PlacementResolver } from "./placement.js";
 import type { Depth } from "./pricing.js";
@@ -380,6 +381,45 @@ export type ChairSelector = (
   view: ChairSelectionView,
 ) => readonly Chair[] | Promise<readonly Chair[]>;
 
+/** What became of one terminal header (see RunDeps.onTerminalHeader). */
+export interface TerminalHeaderOutcome {
+  status: GigHeaderRecord["status"];
+  /** False when no drain is configured: there is no store to tell, so nothing is owed. */
+  owed: boolean;
+  acknowledged: boolean;
+  /** Why it was not acknowledged (or not written). */
+  error?: string;
+}
+
+/**
+ * Write a terminal header, AWAITED and retried (drainGigHeader → drainServicePost), and report its
+ * fate. Never throws: a header the store would not take is a reported fact, not a new failure of the
+ * run. Logged whatever COLTRANE_DRAIN_DEBUG says — a lost terminal header is the double run.
+ *
+ * A run whose signal was aborted because the LEASE WAS LOST writes nothing: the gig is another
+ * worker's now, and a terminal write from this one would overwrite the holder's truth.
+ */
+async function drainTerminalHeader(deps: RunDeps, rec: GigHeaderRecord): Promise<void> {
+  const report = (o: Omit<TerminalHeaderOutcome, "status">): void => deps.onTerminalHeader?.({ status: rec.status, ...o });
+  if (deps.signal?.aborted && deps.signal.reason instanceof LeaseLost) {
+    report({ owed: false, acknowledged: false, error: deps.signal.reason.message });
+    return;
+  }
+  if (!remoteConfigured()) {
+    report({ owed: false, acknowledged: true });
+    return;
+  }
+  const withReason = deps.cold_run_reason !== undefined ? { ...rec, cold_run_reason: deps.cold_run_reason } : rec;
+  try {
+    await drainGigHeader(withReason);
+    report({ owed: true, acknowledged: true });
+  } catch (e) {
+    const why = e instanceof Error ? e.message : String(e);
+    console.error(`[drain] the ${rec.status} header for gig ${rec.gig_id} was NOT acknowledged by the store: ${why}`);
+    report({ owed: true, acknowledged: false, error: why });
+  }
+}
+
 export interface RunDeps {
   /**
    * THE AMEND LADDER — COLTRANE_TIER_LADDER's rungs (cheapest first, already narrowed to rungs this
@@ -462,6 +502,20 @@ export interface RunDeps {
    * `executeSkillAsync` spawns without blocking and SIGKILLs on the signal.
    */
   signal?: AbortSignal | undefined;
+  /**
+   * Why this run is COLD when a resume was possible in principle (the caller refused it, e.g. the
+   * genome moved). Carried onto the gig's terminal header manifest as `cold_run_reason`, so a second
+   * payment is recorded where the operator paying for it can see it. Absent = nothing to explain.
+   */
+  cold_run_reason?: string | undefined;
+  /**
+   * Told the fate of every terminal header this run owes the store (complete / failed /
+   * awaiting_approval): whether it was OWED at all (a drain is configured), and whether the store
+   * ACKNOWLEDGED it. A 'complete' header is only written after every output drain of the gig was
+   * acknowledged; when one was not, the header is withheld and this reports it. The drain worker
+   * turns it into `WorkOnceResult.acknowledged`. Absent = nobody is asking; the writes still happen.
+   */
+  onTerminalHeader?: ((outcome: TerminalHeaderOutcome) => void) | undefined;
   /**
    * #237 — the depth this gig was dispatched at, threaded to every invocation so it reaches
    * the thing that actually spends. Absent = each agent's own `depth_profile` stands.
@@ -2278,11 +2332,11 @@ export async function runGig(
         if (!approval) {
           checkpoint();
           emit({ type: "gig_awaiting_approval", phase: phase.name, role: hc.role });
-          // AWAITED, unlike the fire-and-forget completion drain: parking is the runtime's
-          // last act before the caller (often a CLI) exits, and an in-flight fetch dies with
-          // the process — which left the sink's row saying "running" about a gig that was
-          // waiting on a person. Parking is not latency-critical; the truth is.
-          await drainGigHeader({
+          // AWAITED, like every terminal header: parking is the runtime's last act before the
+          // caller (often a CLI) exits, and an in-flight fetch dies with the process — which left
+          // the sink's row saying "running" about a gig that was waiting on a person.
+          await awaitOutputDrains(gig_id);
+          await drainTerminalHeader(deps, {
             gig_id,
             standard_slug: standard.slug,
             status: "awaiting_approval",
@@ -2291,8 +2345,6 @@ export async function runGig(
             finished_at: new Date().toISOString(),
             outputs_count: produced.length,
             error: `awaiting approval at human chair "${hc.role}" (phase "${phase.name}")`,
-          }).catch((de) => {
-            if (process.env["COLTRANE_DRAIN_DEBUG"]) console.error(`[drain] awaiting header ${gig_id}: ${String(de)}`);
           });
           return {
             gig_id,
@@ -4298,21 +4350,37 @@ export async function runGig(
     ...(resumedFrom?.prior_usage !== undefined ? { prior_usage: resumedFrom.prior_usage } : {}),
   });
 
-  // Drain the gig HEADER to the sink (fire-and-forget, like every output before it) — the
-  // stub row the drain service fabricated for FK integrity is replaced by the run's own record.
-  void drainGigHeader({
-    gig_id,
-    standard_slug: standard.slug,
-    status: "complete",
-    genome_hash,
-    run_fingerprint,
-    started_at,
-    finished_at: gig_finished_at,
-    outputs_count: produced.length,
-    ...(settledUsage ? { usage: { total_cost_usd: settledUsage.total_cost_usd, input_tokens: settledUsage.input_tokens, output_tokens: settledUsage.output_tokens } } : {}),
-  }).catch((e) => {
-    if (process.env["COLTRANE_DRAIN_DEBUG"]) console.error(`[drain] gig header ${gig_id}: ${String(e)}`);
-  });
+  // Drain the gig HEADER to the sink — the row the drain service fabricated for FK integrity is
+  // replaced by the run's own record.
+  //
+  // OUTPUTS FIRST. 'completed' is written only after the store acknowledged every output row this
+  // gig sealed: once the store says 'completed' its terminal guard means nothing ever re-runs the
+  // gig, so a completion over a missing output is a finished gig with no work product. When an
+  // output never landed the header is WITHHELD — the row stays running, its lease lapses, and a
+  // re-claim finishes it from whatever did land — and the caller is told.
+  let completionAcknowledged = true;
+  const outputsLanded = remoteConfigured() ? await awaitOutputDrains(gig_id) : { acknowledged: true, failures: [] };
+  if (!outputsLanded.acknowledged) {
+    const why = `${outputsLanded.failures.length} output(s) never landed in the store, so the gig was NOT reported complete — ${outputsLanded.failures.join("; ")}`;
+    console.error(`[drain] gig ${gig_id}: ${why}`);
+    completionAcknowledged = false;
+    deps.onTerminalHeader?.({ status: "complete", owed: true, acknowledged: false, error: why });
+  } else {
+    await drainTerminalHeader({
+      ...deps,
+      onTerminalHeader: (o) => { completionAcknowledged = o.acknowledged || !o.owed; deps.onTerminalHeader?.(o); },
+    }, {
+      gig_id,
+      standard_slug: standard.slug,
+      status: "complete",
+      genome_hash,
+      run_fingerprint,
+      started_at,
+      finished_at: gig_finished_at,
+      outputs_count: produced.length,
+      ...(settledUsage ? { usage: { total_cost_usd: settledUsage.total_cost_usd, input_tokens: settledUsage.input_tokens, output_tokens: settledUsage.output_tokens } } : {}),
+    });
+  }
 
   // Cycle complete — when a snapshot exists (a ceiling OR a pool), mark it `settled` and surface
   // the final state in the manifest. Under a ceiling, the settled dollars are reconciled one last
@@ -4326,7 +4394,12 @@ export async function runGig(
   // every gig a deployment ever runs leaves a file behind forever. Only the SUCCESS path clears
   // it: a failed or aborted run's checkpoint is exactly what a later resume reads, and this line
   // is not reached on either.
-  try { deps.checkpoints?.remove(gig_id); } catch { /* reclaiming disk must not fail a run that succeeded */ }
+  //
+  // Kept when the store never learned of the completion: the row is still running and will be
+  // re-claimed, and on this box the local checkpoint is the cheapest way to finish it without paying.
+  if (completionAcknowledged) {
+    try { deps.checkpoints?.remove(gig_id); } catch { /* reclaiming disk must not fail a run that succeeded */ }
+  }
 
   const result: GigResult = {
     gig_id, standard_slug: standard.slug,
@@ -4374,10 +4447,14 @@ export async function runGig(
       if (partial) (e as Record<string, unknown>)["usage"] = partial;
       if (budget) (e as Record<string, unknown>)["budget_state"] = budget;
     }
-    // The sink learns the truth either way: a failed run drains a FAILED header (same
-    // fire-and-forget seam as the success path), so the queue row never sits stale on a
-    // local failure. Found live: the worker's first day exposed the success-only drain.
-    void drainGigHeader({
+    // The sink learns the truth either way: a failed run drains a FAILED header (awaited and
+    // retried, like the success path), so the queue row never sits stale on a local failure.
+    // Found live: the worker's first day exposed the success-only drain. The outputs the run DID
+    // seal are waited for first, so what the failed row points at has landed.
+    if (remoteConfigured() && !(deps.signal?.aborted && deps.signal.reason instanceof LeaseLost)) {
+      await awaitOutputDrains(gig_id);
+    }
+    await drainTerminalHeader(deps, {
       gig_id,
       standard_slug: standard.slug,
       status: "failed",
@@ -4387,8 +4464,6 @@ export async function runGig(
       outputs_count: produced.length,
       error: e instanceof Error ? e.message : String(e),
       ...(partial ? { usage: { total_cost_usd: partial.total_cost_usd, input_tokens: partial.input_tokens, output_tokens: partial.output_tokens } } : {}),
-    }).catch((de) => {
-      if (process.env["COLTRANE_DRAIN_DEBUG"]) console.error(`[drain] failed-gig header ${gig_id}: ${String(de)}`);
     });
     throw e;
   } finally {

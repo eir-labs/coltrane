@@ -31,7 +31,7 @@ import type { GenomeStore, GenomeClass } from "./genome_store.js";
 import { runSkillFixtures, executeSkill, loadFixtures } from "./skill_subprocess.js";
 import { evolveSkill } from "./skills.js";
 import { sealAgentDefinition, sealDefinition, sealSkillPackage, recordIdentity } from "./genome_writer.js";
-import { containedPath } from "./contained_path.js";
+import { containedPath, containedCallerPath } from "./contained_path.js";
 import {
   createOutputStore, defaultOutputsPersistDir, performanceRoot,
   type OutputStore, type OutputRecord, type TraceDirection, type TraceMissingNode, type TraceRecordNode,
@@ -2121,8 +2121,15 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         return { ok: true, requires_approval: proposal.approval_required, data: { new_version: proposal.next_version, changelog_entry: `${proposal.change_class}: +${newFields} field(s)`, change_class: proposal.change_class, effective_hash: tx?.effective_hash, content_hash: tx?.content_hash } };
       }
       case "charter_read": {
-        const path = args["path"] ? String(args["path"]) : "";
-        if (!path) return { ok: false, requires_approval: approval, error: "charter_read: path required (no default charter location)" };
+        const asked = args["path"] ? String(args["path"]) : "";
+        if (!asked) return { ok: false, requires_approval: approval, error: "charter_read: path required (no default charter location)" };
+        // #559 — a charter is read only from INSIDE the genome root, by the same whole-segment check
+        // as every derived path. With no genome root there is no inside, so the read is refused
+        // (absent means decline, never "any path the caller names").
+        if (!deps.genome_dir) {
+          return { ok: false, requires_approval: approval, error: `charter_read: this server has no genome root, so there is no inside to read a charter from; refused ${JSON.stringify(asked)}` };
+        }
+        const path = containedCallerPath("charter_read", deps.genome_dir, asked);
         if (!existsSync(path)) return { ok: false, requires_approval: approval, error: `charter_read: file not found at ${path}` };
         try {
           const raw = JSON.parse(readFileSync(path, "utf-8"));

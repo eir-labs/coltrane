@@ -16,7 +16,7 @@
 // all: a NUL byte (every fs call would throw — but only AFTER a caller may already have sealed an
 // identity for it), a backslash (a separator on Windows, an ordinary character on posix: the same
 // value would land in two different places), and an absolute path (join() would discard the site).
-import { isAbsolute, resolve, sep, win32 } from "node:path";
+import { isAbsolute, relative, resolve, sep, win32 } from "node:path";
 
 /** A caller's value would derive a path outside the directory it belongs to. The message always
  *  names the boundary ("root") and the site, so a refusal says WHERE it held and WHY. */
@@ -61,4 +61,27 @@ export function containedPath(site: string, siteDir: string, value: string, suff
   if (target === root) refuse("resolves to the root directory itself, not to anything inside the root");
   if (!target.startsWith(root + sep)) refuse(`resolves to ${target}, outside the root`);
   return target;
+}
+
+/**
+ * A caller-supplied PATH (not a name) that must resolve inside `root`: relative paths resolve
+ * against `root`, absolute ones are admitted only when they land inside it. The same whole-segment
+ * check as `containedPath` — the path is re-expressed relative to `root` and checked there — so
+ * `<root>/../<root-name>-sibling/x` is refused exactly as `../<root-name>-sibling/x` is. A refusal
+ * quotes the value the caller sent.
+ */
+export function containedCallerPath(site: string, root: string, value: string): string {
+  const base = resolve(root);
+  if (typeof value === "string" && (value.includes("\u0000") || value.includes("\\"))) {
+    return containedPath(site, base, value); // refuses, naming the NUL byte or the backslash
+  }
+  const rel = relative(base, resolve(base, value));
+  try {
+    return containedPath(site, base, rel);
+  } catch (e) {
+    if (e instanceof PathContainmentError) {
+      throw new PathContainmentError(site, base, value, `resolves to ${resolve(base, value)}, ${rel === "" ? "the root directory itself, not anything inside the root" : "outside the root"}`);
+    }
+    throw e;
+  }
 }

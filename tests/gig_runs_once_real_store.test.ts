@@ -213,3 +213,25 @@ describe("S2–S4 — the review's surviving plants, booked", () => {
       "the start header does not say which gig this one resumes, so the store cannot link them").toBe(O);
   });
 });
+
+describe("A1 — NO BLIND DRAIN: a drain key without a drain URL refuses the run", () => {
+  it("A1 COLTRANE_DRAIN_KEY set, COLTRANE_DRAIN_URL unset: no chair is invoked, and the refusal names COLTRANE_DRAIN_URL", async () => {
+    // Conductor ruling (round 6c): an absent drain URL is not allowed to stand in quietly. Today the
+    // missing URL is logged and the run goes ahead. It pays for chairs whose outputs, headers and lease
+    // renewals can reach nobody, then reports a completion no store will ever hear of. A drain that
+    // cannot reach its service does not run. It says which variable is missing.
+    env = hostedEnv();
+    delete process.env["COLTRANE_DRAIN_URL"];
+    expect(process.env["COLTRANE_DRAIN_KEY"], "precondition: the drain key IS set").toBeTruthy();
+    hostedStore({ claim: claimFor("one-chair-v0") });
+    const invoke = vi.fn(async () => sealableSignal);
+    const outcome = await workOnce(venueCtx(), { makeInvoke: () => invoke as unknown as AgentInvoker } as WorkOnceDeps).then(
+      (res) => JSON.stringify(res),
+      (e: unknown) => (e instanceof Error ? e.message : String(e)),
+    );
+    expect(invoke, "a drain with no URL ran a chair: every write it makes goes nowhere").not.toHaveBeenCalled();
+    expect(outcome, "the refusal (returned or thrown) must name the missing variable").toContain("COLTRANE_DRAIN_URL");
+    expect(outcome, "a blind drain reported a completion").not.toMatch(/"status":"complete"/);
+  });
+});
+

@@ -29,7 +29,11 @@ cd "$(dirname "$0")/.."
 # stopped being true at Node 24), and two pure flag-string laws replaced it in this band. The nine
 # laws that need a real request moved to tests/security — a band may reach out, the root suite may
 # not — so they are counted there, by file, not here.
-EXPECTED_LAWS="${EXPECTED_LAWS:-4227}"
+EXPECTED_LAWS="${EXPECTED_LAWS:-4232}"
+#   +5 one_output_gate round 3 — G7 the reload proof compares CONTENT; G8 a declared .mcp.json env cannot move
+#      the COLTRANE_GENOME pin; G9 SLUGS ARE NOT IDENTIFIERS (founder ruling): a slug never reaches the
+#      filesystem; G10 a 75-type org-shaped registry seats cleanly; G11 the refusal names the type(s) and why,
+#      in the chair's error and the gig's terminal record.
 #  merge of origin/main (#557) into #556: main's 4208 + this branch's 19 one_output_gate laws = 4227, as the
 #      merged suite collects (read from the run, not added up).
 #   +5 skill_runs_on_exec_path (new file, #557 round 2): a skill runs on process.execPath, never `node` from

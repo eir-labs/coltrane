@@ -72,6 +72,10 @@ export interface ModelReply {
   model?: string;
   message: { content: string | null; tool_calls?: ToolCall[]; raw?: unknown };
   usage?: TurnUsage;
+  /** What the transport says this round COST, in USD, when it reports one (a measurement, not an
+   *  estimate). It wins over the price table. Absent = not reported; it is never a stand-in 0, and a
+   *  reported 0 (a free model) is a known price. */
+  cost_usd?: number;
   stop?: "end" | "tool_use" | "max_tokens" | "refusal" | "other";
 }
 
@@ -114,7 +118,9 @@ export interface RoundRecord {
   usage?: TurnUsage;
   /** input + cache_read + cache_write. Absent when usage is absent. */
   context_tokens?: number;
-  /** Absent when the served model, or a reported token class, has no price. Never a stand-in 0. */
+  /** The transport's reported cost when it gave one, else the price table's; absent when neither
+   *  priced the round (no served model, no price, or a reported token class with no rate). Never a
+   *  stand-in 0. */
   cost_usd?: number;
   tool_calls: string[];
 }
@@ -227,12 +233,19 @@ function priceRound(
   let cost = 0;
   for (const [uKey, pKey] of PRICE_CLASSES) {
     const tokens = usage[uKey];
-    if (tokens === undefined) continue;
+    // Zero tokens cost nothing at any rate — a class reported as 0 (a provider that always sends
+    // cache_write_tokens) does not need a rate to be priced.
+    if (tokens === undefined || tokens === 0) continue;
     const rate = price[pKey];
     if (rate === undefined) return undefined;
     cost += (tokens * rate) / 1_000_000;
   }
   return cost;
+}
+
+/** A transport-reported cost the loop will settle at: finite and non-negative, else not a cost. */
+function reportedCost(cost: number | undefined): number | undefined {
+  return typeof cost === "number" && Number.isFinite(cost) && cost >= 0 ? cost : undefined;
 }
 
 /**
@@ -364,7 +377,8 @@ export async function runTurn(
       totals.cache_read_tokens += usage.cache_read_tokens ?? 0;
       totals.cache_write_tokens += usage.cache_write_tokens ?? 0;
       if (contextTokens > totals.peak_context_tokens) totals.peak_context_tokens = contextTokens;
-      const cost = priceRound(reply.model, usage, opts.prices);
+      // The transport's own charge wins; the table prices only a round that reports none.
+      const cost = reportedCost(reply.cost_usd) ?? priceRound(reply.model, usage, opts.prices);
       if (cost !== undefined) {
         record.cost_usd = cost;
         totals.cost_usd += cost;

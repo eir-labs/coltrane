@@ -1,5 +1,6 @@
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
+import { containedPath } from "./contained_path.js";
 import type { LineageRecordRefOutput } from "./genome_schema.js";
 import { applyLineageAdoption } from "./lineage_adoption.js";
 
@@ -41,7 +42,9 @@ export function persistLineageAdoption(
   institution_slug: string,
   ref: LineageRecordRefOutput,
 ): PersistResult {
-  const path = join(genomeRoot, "institutions", `${institution_slug}.json`);
+  // #559 — the institution document must live inside institutions/. A slug whose path lands
+  // anywhere else is refused before it is read (a parse error would echo its bytes) or rewritten.
+  const path = containedPath("lineage adoption", join(genomeRoot, "institutions"), institution_slug, ".json");
   if (!existsSync(path)) {
     return { reason: "no-such-institution", written: false,
       detail: `no institutions/${institution_slug}.json — a dead name writes nothing rather than inventing an institution to hold a lineage` };

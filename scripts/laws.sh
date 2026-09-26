@@ -29,7 +29,11 @@ cd "$(dirname "$0")/.."
 # stopped being true at Node 24), and two pure flag-string laws replaced it in this band. The nine
 # laws that need a real request moved to tests/security — a band may reach out, the root suite may
 # not — so they are counted there, by file, not here.
-EXPECTED_LAWS="${EXPECTED_LAWS:-4203}"
+EXPECTED_LAWS="${EXPECTED_LAWS:-4208}"
+#   +5 skill_runs_on_exec_path (new file, #557 round 2): a skill runs on process.execPath, never `node` from
+#      PATH. The floor checked the parent's Node while the skill ran on PATH's (grade issuecomment-5847532054:
+#      an ungranted skill on PATH node 24 fetched a listener and got 200). P1a-c executeSkill /
+#      executeSkillAsync / skill_execute; P3a bootstrap's fallback engine MCP server; P3b the relay's child.
 #  +10 Node 26 is enforced where skills run, not at install; the bus is not a hosted tool (founder ruling,
 #      26 Sep 2026; coltrane-ui #252's grade). +11 node_floor_where_skills_run (new file: F1 library import
 #      below 26, F2 install not refused, F3 skill execution refuses by name, F4 `coltrane work` refuses),
@@ -172,7 +176,7 @@ EXPECTED_LAWS="${EXPECTED_LAWS:-4203}"
 #       with the handler, the description does not. Its first draft could not fail — it forgave any
 #       token no tool anywhere declared, which is exactly what a renamed argument leaves behind.
 #       Sabotage said so (`current` -> `slug_current` stayed green); the exemption is gone.
-EXPECTED_FILES="${EXPECTED_FILES:-436}"   # + tests/node_floor_where_skills_run.test.ts, + tests/bus_not_hosted.test.ts, + tests/every_skill_runs_its_fixtures.test.ts, + tests/node_floor_refuses.test.ts, + tests/spec_reside_drive.test.ts (#537), + tests/a_red_law_names_its_plant.test.ts (#551), + tests/sealed_inputs.test.ts, tests/fan_out.test.ts, tests/completions_seal.test.ts, tests/tier_ladder.test.ts, tests/amend_ladder.test.ts, tests/completions_reasoning_effort.test.ts, tests/bus.test.ts, tests/bus_chair.test.ts, tests/bus_terminal.test.ts, tests/bus_verbs.test.ts, tests/bus_commit.test.ts, tests/code_tools.test.ts, tests/gig_input_validated.test.ts, tests/seat_reads_recorded.test.ts, tests/claude_seat_reads.test.ts, tests/optional_declared_input.test.ts, tests/simulate_names_seats.test.ts
+EXPECTED_FILES="${EXPECTED_FILES:-437}"   # + tests/skill_runs_on_exec_path.test.ts, + tests/node_floor_where_skills_run.test.ts, + tests/bus_not_hosted.test.ts, + tests/every_skill_runs_its_fixtures.test.ts, + tests/node_floor_refuses.test.ts, + tests/spec_reside_drive.test.ts (#537), + tests/a_red_law_names_its_plant.test.ts (#551), + tests/sealed_inputs.test.ts, tests/fan_out.test.ts, tests/completions_seal.test.ts, tests/tier_ladder.test.ts, tests/amend_ladder.test.ts, tests/completions_reasoning_effort.test.ts, tests/bus.test.ts, tests/bus_chair.test.ts, tests/bus_terminal.test.ts, tests/bus_verbs.test.ts, tests/bus_commit.test.ts, tests/code_tools.test.ts, tests/gig_input_validated.test.ts, tests/seat_reads_recorded.test.ts, tests/claude_seat_reads.test.ts, tests/optional_declared_input.test.ts, tests/simulate_names_seats.test.ts
 
 # THE OTHER BANDS. `vitest run` is ROOT-CONFIG ONLY — this repo's own workflow comments
 # record that four configs went unexecuted once for exactly that reason. So pinning only the
@@ -181,7 +185,7 @@ EXPECTED_FILES="${EXPECTED_FILES:-436}"   # + tests/node_floor_where_skills_run.
 # for leaving them unpinned while claiming the laws are counted.
 EXPECTED_FAILURE_MODES_FILES="${EXPECTED_FAILURE_MODES_FILES:-5}"
 EXPECTED_HONEST_BROKER_FILES="${EXPECTED_HONEST_BROKER_FILES:-2}"
-EXPECTED_SECURITY_FILES="${EXPECTED_SECURITY_FILES:-3}"   # + completions_long_wait.spec.ts: the 300s header limit needs a real socket to disprove   # + skill_network_grant.spec.ts: proving a network gate needs a real request, which the root suite forbids
+EXPECTED_SECURITY_FILES="${EXPECTED_SECURITY_FILES:-4}"   # + skill_runs_on_exec_path.spec.ts: an old PATH node must not open the network to an ungranted skill (a real request)   # + completions_long_wait.spec.ts: the 300s header limit needs a real socket to disprove   # + skill_network_grant.spec.ts: proving a network gate needs a real request, which the root suite forbids
 
 # THE FILES DELEGATED AWAY FROM THE ROOT BAND, by name.
 #

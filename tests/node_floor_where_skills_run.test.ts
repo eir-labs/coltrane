@@ -24,11 +24,11 @@
 //
 //   law  kind         drives                                                     plant (smallest production edit → red)
 //   F1   behavioural  every exports-map entry, dist/src/*.js (package.json)      add `import "./runtime_floor.js";` to src/tool_surface.ts
-//   F2a  behavioural  package.json scripts.preinstall/install/postinstall, run    (red today: preinstall = scripts/node_floor.cjs exits 1)
-//   F2b  structural   package.json engines.node                                  (red today: ">=26")
+//   F2a  behavioural  package.json scripts.preinstall/install/postinstall, run    add a preinstall that exits 1 below Node 26 (e.g. re-add scripts/node_floor.cjs)
+//   F2b  structural   package.json engines.node                                  set engines.node back to ">=26"
 //   F3a  behavioural  executeSkill — src/skill_subprocess.ts                     delete assertSandboxCapableRuntime() from executeSkill
 //   F3b  behavioural  executeSkillAsync — src/skill_subprocess.ts                delete assertSandboxCapableRuntime() from executeSkillAsync
-//   F3c  behavioural  createToolSurface(...).skill_execute — src/server.ts       delete assertSandboxCapableRuntime() from executeSkill
+//   F3c  behavioural  createToolSurface(...).skill_execute — src/server.ts       in skill_execute's case, catch executeSkill's throw and return ok:true with it as data
 //   F4   behavioural  dist/src/cli_entry.js `work` (src/runtime_floor.ts)        delete `import "./runtime_floor.js"` from src/cli_entry.ts
 //
 // Red today: F2a (preinstall refuses Node 24), F2b (engines ">=26"), F3a–c (the refusal names Node 26
@@ -166,7 +166,10 @@ const refusalOf = async (fn: () => unknown): Promise<string> => {
   try {
     const r = await fn();
     const o = r as { ok?: boolean; error?: string };
-    return o && o.ok === false && typeof o.error === "string" ? o.error : `NOT REFUSED: ${JSON.stringify(r).slice(0, 300)}`;
+    // A non-refusal returns a bare marker, never the result's text: a door that SWALLOWS the refusal
+    // into ok:true data would otherwise carry "Node 26 … network" through and pass (observed: F3c's
+    // plant stayed green until this line stopped quoting the result).
+    return o && o.ok === false && typeof o.error === "string" ? o.error : "NOT REFUSED (the call answered ok, or no error)";
   } catch (e) {
     return e instanceof Error ? e.message : String(e);
   }

@@ -104,7 +104,7 @@ const TOOL_DEFS: readonly Omit<MCPToolDef, "description">[] = [
   // #239 — `basis`/`sample_size` say WHERE the estimate came from (a measured mean of real runs,
   // the standard's real structure, or a per-slug guess). estimated_duration_ms is the key the
   // handler actually returns; the old `estimated_duration` was never present on a response.
-  { slug: "standard_simulate",             category: "build", input_schema: obj({ standard_slug: "string", mock_input: "object", depth: "string" }), output_schema: obj({ phases: "array", estimated_cost: "number", estimated_duration_ms: "number", basis: "string", sample_size: "number" }) },
+  { slug: "standard_simulate",             category: "build", input_schema: obj({ standard_slug: "string", mock_input: "object", depth: "string" }), output_schema: obj({ phases: "array", estimated_cost: "number", estimated_duration_ms: "number", basis: "string", sample_size: "number", seat_plan: "object", seal_drill: "object" }) },
   // #237 — `depth` is read now (and rejected when unrecognized); the response echoes the depth
   // the run actually took, so "I ran a cheap iteration" is verifiable rather than assumed.
   // #234 — every argument this tool reads is advertised, and every argument advertised is read.
@@ -185,6 +185,9 @@ const TOOL_DEFS: readonly Omit<MCPToolDef, "description">[] = [
   // resumes sessionUuidFor(gig_id, role) — the same session the amend loop resumes — and sends ONLY
   // the question. The asked seat is given no tools and seals nothing, so a reconciler can hear a
   // worker's reasoning without a fresh seat inventing it (the whole point of the asymmetry).
+  { slug: "bus_post",                      category: "run", input_schema: obj({ bus: "string", as: "string", text: "string", reply_to: "string" }), output_schema: obj({ id: "string", at: "string", mentions: "array" }) },
+  { slug: "bus_read",                      category: "understand", input_schema: obj({ bus: "string", as: "string", peek: "boolean" }), output_schema: obj({ lines: "array" }) },
+  { slug: "bus_owed",                      category: "understand", input_schema: obj({ bus: "string", as: "string" }), output_schema: obj({ lines: "array" }) },
   { slug: "seat_ask",                      category: "understand", input_schema: obj({ gig_id: "string", role: "string", question: "string", max_turns: "number" }), output_schema: obj({ answer: "string", session_id: "string", resumed: "boolean" }) },
   // venue_credential_mint — the verb that stands up a worker without a browser. `org_slug` scopes
   // the credential and `instance` binds it to one host; a key with an org and no instance is the
@@ -349,7 +352,7 @@ export const TOOL_DESCRIPTIONS: Record<string, string> = {
   venue_define:
     "Define a venue: the deny-by-default tool CEILING, ingress and egress origins, digest-pinned installs, credential surface and lifecycle. A venue can only ever narrow a seated agent, never widen one.",
   standard_simulate:
-    "Walk a standard's graph without running it: its phases, estimated cost and duration, and the BASIS that estimate came from — a measured mean of real runs, the standard's real structure, or a per-slug guess. Cheap to run before a dispatch is not.",
+    "Walk a standard's graph without running it: its phases, estimated cost and duration, and the BASIS that estimate came from — a measured mean of real runs, the standard's real structure, or a per-slug guess. With a `mock_input`, the answer also names WHO PLAYS: every chair by role, the seats a fan-out chair expands into (`role#key`, computed by the engine's own split), the BYTES each seat would be handed after narrowing, and the largest field inside each one — so a prompt too long to run is a number you read here, not a failure eight phases in. Cheap to run before a dispatch is not.",
   agent_promote:
     "Move an agent definition one step along its lifecycle: name the target `status` and the `current` one you believe it holds. The chain is draft, review, approved, active, retired — promotion is not a jump to active.",
   standard_promote:
@@ -372,6 +375,12 @@ export const TOOL_DESCRIPTIONS: Record<string, string> = {
     "Cancel a QUEUED gig before a worker claims it, so no worker ever runs it. Only a queued gig can be cancelled — a running one is stopped with gig_abort.",
   gig_approve:
     "Supply the verdict a parked human chair is waiting for, keyed by chair role. The verdict then seals through the same gate as every other output, recorded against who gave it.",
+  bus_post:
+    "Post a line to a shared bus as the member named `as`. `@member` in `text` means that member owes a reply; answer a line owed to you by posting with `reply_to` set to its id. Same bus `coltrane chat` uses.",
+  bus_read:
+    "Read the lines on a bus that the member named `as` has not read yet, and mark them read (`peek` leaves them unread). Untagged lines are passive signal: act on them only if they matter.",
+  bus_owed:
+    "List the lines on a bus that tag the member named `as` and that it has not yet answered (answer one with bus_post, replying to its id).",
   seat_ask:
     "Ask a past seat WHY, on the very conversation it held. Resumes that chair's own session by gig and role and puts one question to it — no re-reading of identity, method or inputs, because the conversation already holds them. The asked seat is given no tools and seals nothing, so it can explain the record without touching it; when its conversation is gone the ask refuses rather than letting a fresh seat imagine the reasoning.",
   venue_credential_mint:

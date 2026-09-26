@@ -6,12 +6,20 @@
  */
 import { runCli } from "./cli.js";
 
-const argv = process.argv.slice(2);
+import { entryArgv } from "./bus_terminal.js";
+
+// Bare `coltrane` in an interactive terminal opens the chat with the repo's chair; to a script or a pipe
+// it stays bare (usage, exit 2) — see src/bus_terminal.ts entryArgv.
+const argv = entryArgv(process.argv.slice(2), process.stdin.isTTY === true);
 
 // `serve` is the MCP stdio server. It owns stdin/stdout for the life of the process, so it
 // cannot share the request/response shape the other commands use — it branches before them,
 // and before any deps are built, so the genome is loaded exactly once.
-if (argv[0] === "serve") {
+if (argv[0] === "chat") {
+  // `chat` owns stdin for the life of the session, like `serve` — it branches before the request/response commands.
+  const { runChatTerminal } = await import("./bus_terminal.js");
+  process.exitCode = await runChatTerminal(argv.slice(1));
+} else if (argv[0] === "serve") {
   const { runStdioServer } = await import("./server.js");
   await runStdioServer();
 } else {

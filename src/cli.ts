@@ -22,10 +22,11 @@
  *     signature rather than a fix.
  *   - `--json` prints the tool's `data` verbatim; without it, a short human summary.
  */
-import { dispatchTool, bootstrapServerDeps, type ServerDeps, type ToolResult } from "./server.js";
+import { dispatchTool, bootstrapServerDeps, makeEngineToolSource, type ServerDeps, type ToolResult } from "./server.js";
 import { detectGenomeOrphans } from "./genome_writer.js";
 import { sealGenome, type SealGenomeReport } from "./seal_genome.js";
-import { FileLedger, defaultGenomeLedgerPath } from "./ledger.js";
+import { FileLedger, MemoryLedger, defaultGenomeLedgerPath } from "./ledger.js";
+import { createOutputStore } from "./outputs.js";
 import { COLTRANE_VERSION } from "./version.js";
 import { workOnce } from "./worker.js";
 import { runReside } from "./reside.js";
@@ -33,6 +34,8 @@ import { openLocalQueue, selectQueueBacking, LOCAL_QUEUE_DIR_VAR } from "./local
 import { workerCredentialMode } from "./worker_env.js";
 import { drainPreflight } from "./drain_preflight.js";
 import { selectChairInvoker } from "./invoker_selection.js";
+import type { Registry } from "./registry.js";
+import type { AgentInvoker } from "./runtime.js";
 import { dockerComposeRealizer } from "./venue_realizer.js";
 import { readFileSync } from "node:fs";
 
@@ -342,15 +345,7 @@ export async function runCli(argv: readonly string[], io: CliIO): Promise<number
         // tier the deployment did not map is a typed refusal at the chair, not a silent default. On
         // the host-tool path the drain passes ITS OWN options (registry, model and timeout only),
         // unchanged.
-        makeInvoke: (registry) =>
-          selectChairInvoker(process.env, {
-            registry,
-            claude: {
-              registry,
-              model: process.env["COLTRANE_MODEL"],
-              ...(process.env["COLTRANE_CHAIR_TIMEOUT_MS"] ? { timeout_ms: Number(process.env["COLTRANE_CHAIR_TIMEOUT_MS"]) } : {}),
-            },
-          }),
+        makeInvoke: (registry) => drainChairInvoker(process.env, registry),
         // The SAME realizer the interactive path constructs at src/server.ts:3486 — one bootstrap,
         // so the drain and the server cannot drift on which substrate a venue-named room is stood up
         // on. A box's claim gate (venueMayClaim) already promised it can stand this room up; without
@@ -675,4 +670,27 @@ export async function runCli(argv: readonly string[], io: CliIO): Promise<number
     }
   }
   return 2;
+}
+
+/**
+ * The drain's chair invoker (`coltrane work`), selected from the environment exactly as the dispatch
+ * door selects its own (src/invoker_selection.ts). Exported so the drain door's wiring is a law, not
+ * a closure no test can reach.
+ */
+export function drainChairInvoker(env: Record<string, string | undefined>, registry: Registry, fetchFn?: typeof fetch): AgentInvoker {
+  // The drain's completions seats seal through the same validate-pinned engine source the dispatch
+  // door uses — over the STORE registry (the types the org's outputs seal to). It serves output_write
+  // ONLY: the drain's local output store holds nothing of the org's, so any read verb here would
+  // answer "nothing sealed" to every seat. A seat granted one is refused before any model call.
+  const validation: ServerDeps = { registry, outputs: createOutputStore(registry), ledger: new MemoryLedger(), gig_runs: new Map() };
+  return selectChairInvoker(env, {
+    registry,
+    tools: makeEngineToolSource(() => validation, { only: ["output_write"] }),
+    ...(fetchFn ? { fetchFn } : {}),
+    claude: {
+      registry,
+      model: env["COLTRANE_MODEL"],
+      ...(env["COLTRANE_CHAIR_TIMEOUT_MS"] ? { timeout_ms: Number(env["COLTRANE_CHAIR_TIMEOUT_MS"]) } : {}),
+    },
+  });
 }

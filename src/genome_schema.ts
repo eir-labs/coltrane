@@ -212,6 +212,11 @@ export const ChairSchema = z.object({
   // #243 — which promised outputs may legitimately be absent. Deny-by-default: omitted
   // means every promised type is required. Subset of output_contract, checked at compose.
   optional_outputs: z.array(z.string()).default([]),
+  // Which DECLARED inputs may legitimately be absent — the twin of optional_outputs. Deny-by-default:
+  // omitted means every declared type is demanded, at compose, at the door and at the seat. A type
+  // named here is still declared, so when it IS present it is routed exactly as before: optional
+  // means "may be absent", never "ignored". Subset of input_contract, checked at compose.
+  optional_inputs: z.array(z.string()).default([]),
   /** The FLOOR. A skill named here must be held by whoever is seated — bound by slug or carried on
    *  the record — or the seating is refused at compose and the chair fails closed at run. */
   required_skills: z.array(z.string()).default([]),
@@ -252,6 +257,22 @@ export const ChairSchema = z.object({
   // runs COLD (no fork) rather than warm-starting a primer too large to be worth forking. OPTIONAL, so
   // an absent ceiling forks the primer whatever its size (the standing behaviour).
   fork_from: z.object({ primer: z.string(), max_context_tokens: z.number().optional() }).optional(),
+  /** FAN-OUT — one chair template, seated once per item of an input set, each instance seeing only
+   *  its item (and, per `join`, only the items of other sets that match it). The instance count comes
+   *  from the sealed data, never from the model; the split is the engine's, and each instance's seal
+   *  names the exact slice it read. `over.type` and every `join[].type` must be in `input_contract`.
+   *  `match` names a field of the OVER item; `on` a field of the JOIN item; either may hold a scalar
+   *  or an array, and an item joins when the two share a value. Strict: a misspelled key is a load
+   *  error, not a fan-out that silently degrades to one chair. */
+  fan_out: z
+    .object({
+      over: z.object({ type: z.string(), path: z.string(), key: z.string(), across_sources: z.boolean().optional(), carry: z.array(z.string()).optional() }).strict(),
+      join: z
+        .array(z.object({ type: z.string(), path: z.string(), on: z.string(), match: z.string() }).strict())
+        .optional(),
+    })
+    .strict()
+    .optional(),
 });
 export const PhaseSchema = z.object({ name: z.string(), chairs: z.array(ChairSchema) });
 /** Lifecycle status, shared by domain types and standards (#203). */

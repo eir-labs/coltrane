@@ -42,7 +42,9 @@ import {
 } from "./ledger.js";
 import { sealDrill } from "./seal_drill.js";
 import { standardSimulate } from "./simulate.js";
-import { runGig, BudgetExhausted, GigAborted, ResumeRefused, partialGigUsage, partialBudgetState, partitionGigInputKeys, unknownGigInputMessage, type AgentInvoker } from "./runtime.js";
+import { planSeats } from "./seat_plan.js";
+import { resolveSealedInputs } from "./sealed_inputs.js";
+import { runGig, outputSatisfiesType, BudgetExhausted, GigAborted, ResumeRefused, partialGigUsage, partialBudgetState, partitionGigInputKeys, unknownGigInputMessage, type AgentInvoker } from "./runtime.js";
 import { assembleRunDeps, resolveWorkingRepo } from "./run_deps.js";
 import { createCheckpointStore, createReuseStore, type CheckpointStore, type ReuseStore } from "./reuse.js";
 import { killLiveChairChildren, type SeatAsker } from "./claude_invoker.js";
@@ -52,7 +54,7 @@ import { institutionPlacementResolver } from "./placement_institutions.js";
 import type { PlacementResolver } from "./placement.js";
 import { isDepth, DEPTHS, type Depth } from "./pricing.js";
 import type { ToolProvider } from "./tool_providers.js";
-import { ENGINE_MCP_SERVER, isHostBuiltin, toolBaseName } from "./tool_providers.js";
+import { ENGINE_MCP_SERVER, isHostBuiltin, toolBaseName, mcpServerOf, toolSlugOf } from "./tool_providers.js";
 import type { ToolHook, ToolCallContext, PreOutcome } from "./hooks.js";
 import {
   gigScopeRefusal,
@@ -434,6 +436,63 @@ function metaToRow(meta: OutputMeta): Record<string, unknown> {
  * Pure tool dispatcher. Routes a tool call to its implementation. No transport,
  * no I/O beyond the injected deps — fully unit-testable.
  */
+/**
+ * THE IN-PROCESS HANDS for a completions seat (src/completions_invoker.ts `McpToolSource`).
+ *
+ * On a host running coltrane in-process the bridge is NOT an MCP client: `dispatchTool` already IS the
+ * tool surface, and the MCP server is a wrapper over it. So `call` goes straight to `dispatchTool` —
+ * unknown slugs refused by name, approval gating on every result, the same governed path every other
+ * door takes.
+ *
+ * The write boundary is PINNED to validate here, in code, never read from the environment: a seat's
+ * `output_write` adjudicates against the full seal predicate and persists nothing, and the runtime
+ * seals what passed exactly once. A source built over seal-mode deps would seal twice (or, over a
+ * store that refuses, not at all) and nothing would say so.
+ *
+ * `only` narrows the verbs this source serves. The drain uses it: its local output store is empty by
+ * construction, so serving `output_query` there would answer every seat "nothing sealed" — a
+ * plausible, wrong answer. A verb outside `only` is not LISTED, so a chair granted it is refused
+ * before any model call rather than handed a hollow tool.
+ */
+export function makeEngineToolSource(
+  getDeps: () => ServerDeps,
+  opts: { only?: readonly string[]; seal?: boolean } = {},
+): { list: () => Promise<{ name: string; description?: string; inputSchema: Record<string, unknown> }[]>; call: (name: string, args: Record<string, unknown>) => Promise<unknown> } {
+  const served = (slug: string): boolean => opts.only === undefined || opts.only.includes(slug);
+  return {
+    list: async () =>
+      MCP_TOOLS.filter((t) => served(t.slug)).map((t) => ({
+        name: `mcp__${ENGINE_MCP_SERVER}__${t.slug}`,
+        description: t.description,
+        inputSchema: t.input_schema as Record<string, unknown>,
+      })),
+    call: async (name, args) => {
+      const server = mcpServerOf(name);
+      if (server !== null && server !== ENGINE_MCP_SERVER) {
+        return { ok: false, error: `"${name}" is not an engine tool — this source serves only "${ENGINE_MCP_SERVER}"` };
+      }
+      const slug = toolSlugOf(name);
+      if (!served(slug)) return { ok: false, error: `"${slug}" is not served to this seat` };
+      // A gig seat's source VALIDATES (the runtime is its one sealer). A sealing source — a bus chair's,
+      // whose commitments have no runtime behind them — persists what the boundary accepts.
+      return dispatchTool(slug, args, opts.seal ? { ...getDeps(), output_write_mode: "seal" } : { ...getDeps(), output_write_mode: "validate" });
+    },
+  };
+}
+
+/** The named bus and the member speaking, from a bus verb's `bus` and `as` — or why not. */
+async function openNamedBus(busArg: unknown, asArg: unknown, slug: string): Promise<{ bus: import("./bus.js").Bus; as: string } | { error: string }> {
+  const as = typeof asArg === "string" ? asArg.trim() : "";
+  if (!as) return { error: `${slug} needs \`as\`: the member speaking or reading` };
+  const { openBus } = await import("./bus.js");
+  const { busPath } = await import("./bus_terminal.js");
+  try {
+    return { bus: openBus(busPath(String(busArg ?? ""))), as };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
 export async function dispatchTool(slug: string, args: Record<string, unknown>, deps: ServerDeps): Promise<ToolResult> {
   if (!KNOWN_SLUGS.has(slug)) {
     return { ok: false, error: `unknown tool "${slug}"` };
@@ -497,6 +556,29 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
           required_fields: arr(args["required_fields"]),
         });
         return { ok: true, requires_approval: approval, data: res };
+      }
+      // wiki spec.coltrane-bus — the bus on the MCP surface, so an MCP client (a Claude Code chair) is a
+      // member of the same bus `coltrane chat` uses, under the same rules. One case per verb, so each
+      // reads exactly the arguments it advertises (#234).
+      case "bus_post": {
+        const b = await openNamedBus(args["bus"], args["as"], slug);
+        if ("error" in b) return { ok: false, requires_approval: approval, error: b.error };
+        const text = typeof args["text"] === "string" ? args["text"] : "";
+        if (!text.trim()) return { ok: false, requires_approval: approval, error: "bus_post needs `text`" };
+        const reply_to = typeof args["reply_to"] === "string" && args["reply_to"] ? args["reply_to"] : undefined;
+        return { ok: true, requires_approval: approval, data: b.bus.post({ author: b.as, text, reply_to }) };
+      }
+      case "bus_read": {
+        const b = await openNamedBus(args["bus"], args["as"], slug);
+        if ("error" in b) return { ok: false, requires_approval: approval, error: b.error };
+        const lines = b.bus.unread(b.as);
+        if (args["peek"] !== true) b.bus.advance(b.as, lines.length);
+        return { ok: true, requires_approval: approval, data: { lines } };
+      }
+      case "bus_owed": {
+        const b = await openNamedBus(args["bus"], args["as"], slug);
+        if ("error" in b) return { ok: false, requires_approval: approval, error: b.error };
+        return { ok: true, requires_approval: approval, data: { lines: b.bus.owed(b.as) } };
       }
       case "seat_ask": {
         // contract-seat-ask-v1 — ask a PAST seat WHY, on the conversation it actually held. The
@@ -620,11 +702,49 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
           .filter(isGig)
           .map((e) => e.usage?.total_cost_usd)
           .filter((n): n is number => typeof n === "number" && n > 0);
+        // WHO PLAYS, before anything is spent. A chair with `fan_out` is a TEMPLATE: it becomes N
+        // seats at run time, and a gate that priced it as one chair quoted a fraction of the run it
+        // exists to validate. Computed with the engine's own split (see src/seat_plan.ts), against
+        // the sealed records the payload names, so plan and run cannot drift.
+        const simInput = (args["mock_input"] as Record<string, unknown>) ?? {};
+        let simRecords: readonly OutputRecord[] = [];
+        // The payload the CHAIRS will see, not the one the caller typed: a resolved marker leaves
+        // `gigInput` and arrives as a record, so planning against the raw payload would count the
+        // marker object as payload the seat reads — and, worse, report it as a source.
+        let simPayload = simInput;
+        try {
+          const resolved = resolveSealedInputs(simInput, {
+            outputs: deps.outputs,
+            declared: new Set<string>(std.input_types ?? []),
+            satisfies: outputSatisfiesType,
+          });
+          simRecords = [...resolved.byType.values()].flatMap((rs) => rs.map((r) => r.record));
+          simPayload = resolved.gigInput;
+        } catch {
+          // A payload whose markers do not resolve is dispatch's refusal to make, not the
+          // pre-flight's: plan what CAN be planned and let the chairs report what cannot.
+        }
+        const plan = planSeats({ standard: std, gig_input: simPayload, records: simRecords, satisfies: outputSatisfiesType });
         const res = standardSimulate({
           standard_slug: simSlug,
           mock_input: (args["mock_input"] as Record<string, unknown>) ?? {},
           depth: simDepth.depth ?? "standard",
-          ...(std ? { standard: { slug: std.slug, phases: std.phases.map((p) => ({ name: p.name, chairs: p.chairs.length })) } } : {}),
+          ...(std
+            ? {
+                standard: {
+                  slug: std.slug,
+                  // SEATS, not chair records: a fan-out chair that will seat 22 players is 22
+                  // dispatches and 22 prompts. Where the plan could not be computed (no payload to
+                  // split), the chair's own count stands in — honestly low, and `seat_plan` says so.
+                  phases: std.phases.map((p, i) => ({
+                    name: p.name,
+                    chairs: plan.phases[i]
+                      ? p.chairs.reduce((n, ch, j) => n + Math.max(plan.phases[i]!.chairs[j]?.seat_count ?? 1, ch.fan_out ? 0 : 1), 0)
+                      : p.chairs.length,
+                  })),
+                },
+              }
+            : {}),
           ...(observed.length > 0 ? { observed_costs_usd: observed } : {}),
         });
         // WU-0008 — the seal drill: before quoting a price, prove every chair contract
@@ -635,7 +755,7 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
           { phases: std.phases.map((p) => ({ name: p.name, chairs: p.chairs.map((c) => ({ role: c.role, output_contract: c.output_contract })) })) },
           deps.registry,
         );
-        return { ok: true, requires_approval: approval, data: { ...res, seal_drill: drill } };
+        return { ok: true, requires_approval: approval, data: { ...res, seal_drill: drill, seat_plan: plan } };
       }
       case "output_query": {
         const mirror = deps.output_mirror;
@@ -4148,7 +4268,12 @@ export function bootstrapServerDeps(genomeRoot?: string): ServerDeps {
   // sealed output — whether this process ran the gig or a separate CLI process did — lands in
   // one content-addressed store MCP retrieval reads. COLTRANE_MIRROR_DIR overrides (tests).
   const output_mirror = createOutputMirror(defaultMirrorDir(root));
-  return {
+  // The completions seat's hands are THIS deps object — the tool source reads it lazily, at call
+  // time, so it is the same store, registry and ledger every other verb on this door sees.
+  // eslint-disable-next-line prefer-const
+  let self: ServerDeps;
+  const engineTools = makeEngineToolSource(() => self);
+  self = {
     registry,
     toolProviders,
     mcpServerConfigs, // the SAME object handed to the invoker — the preflight guard resolves against it
@@ -4219,6 +4344,7 @@ export function bootstrapServerDeps(genomeRoot?: string): ServerDeps {
     // failing startup if it is malformed — the propagation this bootstrap owes.
     invoke: selectChairInvoker(process.env, {
       registry,
+      tools: engineTools,
       claude: {
         registry,
         model: process.env["COLTRANE_MODEL"],
@@ -4258,6 +4384,7 @@ export function bootstrapServerDeps(genomeRoot?: string): ServerDeps {
     checkpoints: createCheckpointStore(defaultOutputsPersistDir()),
     reuse: createReuseStore(defaultOutputsPersistDir()),
   };
+  return self;
 }
 
 /** The slice of `process` the shutdown path uses. Injected in tests — signal handling is

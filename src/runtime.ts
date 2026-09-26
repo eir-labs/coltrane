@@ -37,7 +37,9 @@ import { producersSha,
   type CheckpointStore, type CheckpointRole, type GigCheckpoint,
   type ReuseStore, type ReuseEntry, type ReuseOutput, type RunIdentity, type PriorBudgetState,
 } from "./reuse.js";
-import type { OutputStore, OutputRecord } from "./outputs.js";
+import type { OutputStore, OutputRecord, InputResolution, ShardStamp } from "./outputs.js";
+import { resolveSealedInputs } from "./sealed_inputs.js";
+import { expandFanOut, type FanOutInstance } from "./fan_out.js";
 import { checkGigConformance, type GigConformanceResult } from "./gig_conformance.js";
 import { drainGigHeader } from "./output_mirror.js";
 import { LEDGER_SCHEMA_VERSION, type Ledger, type GigUsage } from "./ledger.js";
@@ -206,6 +208,13 @@ export interface AgentInvocationContext {
   // conversation to carry that identity — trimming it would leave the seat unidentifiable. Absent on a
   // maker amend, whose trimmed continuation is correct because the failing verdict is its one new input.
   resume_keep_prompt?: boolean | undefined;
+  /**
+   * contract-reverify-carries-amendment-v1 (O3) — on a RE-VERIFY: the inputs this seat has not seen
+   * (see `amendedSince`). A resumed door renders them, because its resumed conversation holds only
+   * round one's. Absent on every other invocation. `carried_all` says the whole input set was sent
+   * for want of a round-one record (F1).
+   */
+  amended_inputs?: { records: readonly OutputRecord[]; carried_all: boolean } | undefined;
   // contract-seat-primer-v1 (O1/I2) — set on a PRIME chair. The invoker parses the seat's forwarded
   // `Read` events from the run's stdout and emits them (a `seat_reads` stream event) so the runtime
   // can seal the seat-primer record from exactly the files this seat read. Absent = a non-prime chair.
@@ -236,6 +245,12 @@ export interface AgentStreamEvent {
 // synchronous run. agent_event re-emits a chair's child events, tagged with phase+role.
 export type GigProgressEvent =
   | { type: "phase_start"; phase: string; roles: string[] }
+  /** A fan-out chair's join left items no instance received. Reported, never silently dropped. */
+  | { type: "fan_out_unmatched"; phase: string; role: string; set_type: string; path: string; on: string; values: unknown[] }
+  /** The amend ladder seated a maker one rung up: its last re-verify failed on different findings. */
+  | { type: "amend_escalated"; phase: string; role: string; round: number; from_tier: string; to_tier: string }
+  /** The amend ladder stopped the loop: the re-verify failed on the same findings as the verdict before. */
+  | { type: "amend_stalled"; phase: string; role: string; round: number; repeated: Array<{ method: string; target_ref: string }> }
   | { type: "chair_start"; phase: string; role: string; producer: string }
   | {
       type: "chair_complete"; phase: string; role: string; producer: string;
@@ -366,6 +381,13 @@ export type ChairSelector = (
 ) => readonly Chair[] | Promise<readonly Chair[]>;
 
 export interface RunDeps {
+  /**
+   * THE AMEND LADDER — COLTRANE_TIER_LADDER's rungs (cheapest first, already narrowed to rungs this
+   * deployment can seat). When set, the examine⇄amend loop reads each failed re-verify against the one
+   * before it: different findings seat the maker one rung up; the same findings stop the loop
+   * (`amend_stalled`). Absent → the loop is exactly what it was. See tests/amend_ladder.test.ts.
+   */
+  tier_ladder?: readonly string[] | undefined;
   outputs: OutputStore;
   ledger: Ledger;
   invoke: AgentInvoker;
@@ -1258,6 +1280,24 @@ const CORE_TYPE_SET: ReadonlySet<string> = new Set(CORE_TYPES);
 /** EXPORTED because the chart layer asks the same question at the movement boundary — which of a
  *  source movement's sealed records does an edge of type T carry — and two layers answering "does
  *  this record satisfy this declared type" differently is the #263 defect wearing a new hat. */
+/**
+ * contract-reverify-carries-amendment-v1 — which of a re-verify's CURRENT inputs the seat has not seen.
+ *
+ * Identity is the content_sha, never the record id (F3): a maker that re-seals under a familiar id is
+ * still carried. Engine-stamped only — the seat's own round-one record's `input_shas`, compared with the
+ * inputs' `content_sha` — so no model output decides what changed. With NO round-one record (the verdict
+ * never sealed, or the store holds none) every input is carried and `carried_all` says so (F1): an
+ * absent prior round must never read as "nothing changed" and carry nothing.
+ */
+export function amendedSince(
+  current: readonly OutputRecord[],
+  roundOne: readonly OutputRecord[] | undefined,
+): { records: OutputRecord[]; carried_all: boolean } {
+  if (!roundOne || roundOne.length === 0) return { records: [...current], carried_all: true };
+  const seen = new Set(roundOne.flatMap((r) => r.input_shas));
+  return { records: current.filter((i) => !seen.has(i.content_sha)), carried_all: false };
+}
+
 export function outputSatisfiesType(output: OutputRecord, declared: string): boolean {
   if (output.domain_type === declared) return true;
   if (CORE_TYPE_SET.has(declared) && output.core_type === declared) return true;
@@ -1404,7 +1444,10 @@ export async function runGig(
   // canonicalized on a run that never needs it — which is every run that uses none of the
   // three. Memoized, so it is computed at most once.
   let gigInputShaCache: string | undefined;
-  const gigInputSha = (): string => (gigInputShaCache ??= sha256Hex(canonJson(gigInput)));
+  // The payload AS DISPATCHED — sealed-input markers included — so the gig's input identity names
+  // the records it asked for even after resolution strips the markers out of `gigInput` below.
+  const dispatchedInput = gigInput;
+  const gigInputSha = (): string => (gigInputShaCache ??= sha256Hex(canonJson(dispatchedInput)));
 
   // #195 — settled model spend, accumulated from each agent invocation's `result` event (the
   // stream-json result carries usage + total_cost_usd + a per-model breakdown). These were
@@ -1430,8 +1473,9 @@ export async function runGig(
     /** F3 — whether THIS chair reported a settled `total_cost_usd` at least once. Distinct from
      *  `attributed`: a chair can report usage tokens (attributed) yet no cost (unverifiable). */
     reportedCost: () => boolean;
-    /** What the transport SAID about this one chair — measured, never inferred. */
-    reported: () => { model?: string; cost_usd?: number; tokens_used?: number };
+    /** What the transport SAID about this one chair — measured, never inferred. `tier` is set only
+     *  when the chair CLIMBED the tier ladder: the tier it sealed at, not the one its agent declares. */
+    reported: () => { model?: string; cost_usd?: number; tokens_used?: number; tier?: string };
     /** contract-spend-survives-v1 (O1) — this chair's OWN settled usage, as a GigUsage, for the
      *  durable chair_spend row. Undefined when the chair reported no usage payload (captured:false),
      *  so an unattributed chair carries no cost field rather than a $0 one (#235). */
@@ -1447,6 +1491,11 @@ export async function runGig(
     // accumulated across this chair's `result` events; `workingModel` picks the one that did the
     // work (the argmax) at report time rather than trusting the CLI's first key.
     const chairOutputByModel = new Map<string, number>();
+    // THE TIER LADDER. After a climb, the model that SEALED is the one that worked on the LAST rung —
+    // a failed cheap rung can out-produce the one that sealed, so the argmax over the whole chair
+    // would name the loser. Output since the last climb is kept apart; the spend stays whole.
+    let sealedTier: string | undefined;
+    let outputSinceClimb: Map<string, number> | undefined;
     let chairCost = 0;
     let chairTokens = 0;
     let chairSaw = false;
@@ -1456,14 +1505,23 @@ export async function runGig(
       usage: () => (chairSaw ? chairOwnUsage : undefined),
       reported: () => {
         if (!chairSaw) return {};
-        const model = workingModel(chairOutputByModel);
+        const model = workingModel(outputSinceClimb ?? chairOutputByModel);
         return {
           ...(model !== undefined ? { model } : {}),
           cost_usd: chairCost,
           tokens_used: chairTokens,
+          ...(sealedTier !== undefined ? { tier: sealedTier } : {}),
         };
       },
       fold(ev: AgentStreamEvent): void {
+        if (ev.type === "tier_escalated") {
+          const to = (ev.raw as Record<string, unknown> | undefined)?.["to_tier"];
+          if (typeof to === "string") {
+            sealedTier = to;
+            outputSinceClimb = new Map();
+          }
+          return;
+        }
         if (ev.type !== "result") return;
         const raw = ev.raw as Record<string, unknown> | undefined;
         if (!raw) return;
@@ -1516,6 +1574,7 @@ export async function runGig(
             // model that did none of the work. Accumulate per-model output; the gig-level `by_model`
             // total above is untouched.
             chairOutputByModel.set(model, (chairOutputByModel.get(model) ?? 0) + outTok);
+            outputSinceClimb?.set(model, (outputSinceClimb.get(model) ?? 0) + outTok);
           }
         } else {
           // The scalars moved but `by_model` did not — the breakdown cannot sum to the total.
@@ -1544,6 +1603,48 @@ export async function runGig(
   // any chair"). The payload is validated BEFORE any chair fires — a missing gig input is a
   // hard stop, so no model tokens are spent on bad input.
   const standardInputs = new Set<string>(standard.input_types ?? []);
+
+  // spec.coltrane-sealed-inputs — resolve every `$output` / `$query` marker in the payload BEFORE any
+  // chair runs: looked up in the store, re-hashed, type-checked, or the dispatch is refused. The
+  // markers leave `gigInput`; the records are delivered as inputs to every chair whose contract names
+  // the type, and what those chairs seal carries the engine's resolution (see `resolutionsOf`).
+  const sealedInputs = resolveSealedInputs(gigInput, {
+    outputs: deps.outputs,
+    declared: standardInputs,
+    satisfies: outputSatisfiesType,
+  });
+  gigInput = sealedInputs.gigInput;
+  const resolutionById = new Map<string, InputResolution>();
+  for (const recs of sealedInputs.byType.values()) for (const r of recs) resolutionById.set(r.record.id, r.resolution);
+  /** Offer a chair the dispatch-named records its contract declares, as records — so what it seals
+   *  carries their content_shas and their resolutions. */
+  const pullResolved = (inputs: OutputRecord[], wanted: readonly string[]): void => {
+    for (const t of wanted) {
+      for (const r of sealedInputs.byType.get(t) ?? []) if (!inputs.includes(r.record)) inputs.push(r.record);
+    }
+  };
+  /** FAN-OUT — each template's instances, as first expanded; the amend loop re-seats these. */
+  const instancesByTemplate = new Map<string, FanOutInstance[]>();
+  /** Expand a fan-out template against the WHOLE records it would receive, report any join items no
+   *  instance got, and remember the instances. */
+  const fanOutInstances = (chair: Chair, phaseName: string): FanOutInstance[] => {
+    const whole: OutputRecord[] = [];
+    if (chair.depends_on.length > 0) for (const d of chair.depends_on) whole.push(...(producedByRole.get(d) ?? []));
+    else whole.push(...produced);
+    pullResolved(whole, chair.input_contract);
+    const { instances, unmatched } = expandFanOut(chair, whole, gigInput, outputSatisfiesType);
+    for (const u of unmatched) {
+      emit({ type: "fan_out_unmatched", phase: phaseName, role: u.role, set_type: u.type, path: u.path, on: u.on, values: u.values });
+    }
+    instancesByTemplate.set(chair.role, instances);
+    return instances;
+  };
+  /** Every instance's current records, in item order. */
+  const templateRecords = (templateRole: string): OutputRecord[] =>
+    (instancesByTemplate.get(templateRole) ?? []).flatMap((i) => producedByRole.get(i.chair.role) ?? []);
+  /** The engine's resolutions for the dispatch-named records among a chair's inputs. */
+  const resolutionsOf = (inputs: readonly OutputRecord[]): InputResolution[] =>
+    inputs.flatMap((i) => { const r = resolutionById.get(i.id); return r ? [r] : []; });
 
   // Sealed records an earlier MOVEMENT handed to this one over a chart edge (RunDeps.seed_outputs).
   // They are inputs, not products: available to entry chairs, never folded into `produced`.
@@ -1628,9 +1729,12 @@ export async function runGig(
           ch.depends_on.length > 0
             ? ch.depends_on.flatMap((d) => sealedByRole.get(d) ?? [])
             : producedByEarlierPhases;
+        const optionalHere = new Set<string>(ch.optional_inputs ?? []);
         for (const need of ch.input_contract) {
+          if (optionalHere.has(need)) continue;         // declared optional — absence is not a defect
           if (!standardInputs.has(need)) continue;      // not a gig input — upstream's job
           if (gigInput[need] !== undefined) continue;   // supplied
+          if (sealedInputs.byType.has(need)) continue;  // supplied as sealed records
           if (reachable.some((t) => mightSatisfy(t, need))) continue; // an upstream can cover it
           // A chart edge satisfies a declared gig input with a SEALED RECORD rather than a payload
           // key. Without this the pre-flight would refuse a correctly-arranged movement at t=0.
@@ -1665,6 +1769,29 @@ export async function runGig(
     // door (src/server.ts) also calls, so the two doors cannot drift into two vocabularies. The
     // behaviour here is unchanged: a near miss throws the same RuntimeError, the extras emit the same
     // event. `isPresent` is `gigInput[d] !== undefined`, exactly the collision predicate as before.
+    // THE PAYLOAD IS CHECKED AGAINST THE TYPES IT CLAIMS TO BE (eir-drafting, 24 Sep). Outputs are
+    // validated at the seal boundary and sealed inputs at the door; a hand-typed payload was only
+    // HASHED, so a charter carrying four fields its type forbids ran for months and surfaced only when
+    // something happened to SEAL one. Validated here with the SAME compiled schema the seal enforces
+    // (registry.validate — which skips a type the registry does not hold and a bare core type), before
+    // any chair runs, and refused naming the type and the path.
+    for (const declared of standardInputs) {
+      const value = gigInput[declared];
+      // Only an OBJECT payload under a type the registry HOLDS is checked. A type the registry does not
+      // hold has no schema to check against (refusing there would fail every genome whose declared input
+      // type is unregistered, which is a compose-time question, not this door's). A non-object value is
+      // not a record of any type; the chair's input_contract still governs whether it may run at all.
+      if (value === undefined || typeof value !== "object" || value === null || Array.isArray(value)) continue;
+      if (deps.outputs.coreTypeOf(declared) === null) continue;
+      const verdict = deps.outputs.validateShape(declared, value as Record<string, unknown>);
+      if (!verdict.valid) {
+        throw new RuntimeError(
+          `gig input "${declared}" does not satisfy its type: ${verdict.errors.join("; ")}. ` +
+            `The dispatch payload is checked against the same schema the seal enforces, so a typo fails here ` +
+            `rather than at a chair that seals one eight phases later.`,
+        );
+      }
+    }
     const part = partitionGigInputKeys([...Object.keys(gigInput)], [...standardInputs], (d) => gigInput[d] !== undefined);
     if (part.nearMiss !== undefined) {
       throw new RuntimeError(unknownGigInputMessage(part.nearMiss.key, part.nearMiss.declaredKey, standard.slug));
@@ -2310,7 +2437,15 @@ export async function runGig(
       // synchronous pre-stage; only the actual invoker rejection is caught
       // and aggregated into a phase-level "chair(s) failed" RuntimeError that
       // names every failing chair.
-      const prepared = ready.map((chair) => prepareChair(chair, phase.name));
+      // FAN-OUT — a template chair becomes one seat per item of its `over` set, each handed only its
+      // slice. Expanded HERE, once its upstream has sealed, so the split reads the records it splits.
+      // A refusal (no source, empty set, duplicate key, …) throws before any seat in the batch runs.
+      const seats: Array<{ chair: Chair; instance?: FanOutInstance }> = ready.flatMap((chair) => {
+        if (!chair.fan_out) return [{ chair }];
+        const insts = fanOutInstances(chair, phase.name);
+        return insts.map((instance) => ({ chair: instance.chair, instance }));
+      });
+      const prepared = seats.map((u) => prepareChair(u.chair, phase.name, [], u.instance ? { instance: u.instance } : {}));
 
       const settled = await Promise.allSettled(
         prepared.map((p) => invokeAndWriteChair(p)),
@@ -2320,7 +2455,7 @@ export async function runGig(
       const failureErrors: string[] = [];
       for (let i = 0; i < settled.length; i++) {
         const r = settled[i]!;
-        const ch = ready[i]!;
+        const ch = seats[i]!.chair;
         if (r.status === "rejected") {
           failures.push(ch.role);
           const reason = r.reason instanceof Error ? r.reason.message : String(r.reason);
@@ -2329,7 +2464,19 @@ export async function runGig(
         } else {
           producedByRole.set(ch.role, r.value);
           produced.push(...r.value);
-          noteCheckpointRole(ch.role, phase.name, r.value);
+          // An instance's records are checkpointed under its TEMPLATE role once all its siblings
+          // have sealed (below) — a resume restores or re-runs a fan-out whole.
+          if (!seats[i]!.instance) noteCheckpointRole(ch.role, phase.name, r.value);
+        }
+      }
+      // A fan-out's template role holds every instance's records, in item order — what a
+      // downstream `depends_on: [<template>]` reads, so downstream wiring is unchanged by fan-out.
+      if (failures.length === 0) {
+        for (const ch of ready) {
+          if (!ch.fan_out) continue;
+          const all = templateRecords(ch.role);
+          producedByRole.set(ch.role, all);
+          noteCheckpointRole(ch.role, phase.name, all);
         }
       }
       // O2 — BATCH BOUNDARY reconcile: the settled dollars this batch added are folded into the
@@ -2434,6 +2581,16 @@ export async function runGig(
           (m) => !makerSet.some((other) => other.role !== m.role && transitiveDepsOf(other.role).has(m.role)),
         );
 
+        // THE AMEND LADDER (deps.tier_ladder). Findings are the failing verdict's checks as
+        // (method, target_ref) pairs; each failed re-verify is read against the verdict before it.
+        const findingsOf = (v: OutputRecord): Array<{ method: string; target_ref: string }> =>
+          ((v.data as { checks?: unknown }).checks as Array<Record<string, unknown>> | undefined ?? [])
+            .map((c) => ({ method: String(c["method"] ?? ""), target_ref: String(c["target_ref"] ?? "") }));
+        const findingsKey = (v: OutputRecord): string =>
+          findingsOf(v).map((f) => JSON.stringify([f.method, f.target_ref])).sort().join("\n");
+        const ladder = deps.tier_ladder;
+        const makerTier = new Map<string, string>(); // maker role → the rung it is seated on now
+
         for (let round = 1; round <= examineRounds && verdict; round++) {
           checkpoint();
           emit({ type: "phase_start", phase: `${phase.name}:amend#${round}`, roles: [...makers.map((m) => m.role), vch.role] });
@@ -2441,6 +2598,24 @@ export async function runGig(
           // AMEND: each maker re-runs with the failing verdict fed in as an extra input, so
           // the seat that built the change fixes the exact thing the verify caught.
           for (const mk of makers) {
+            // FAN-OUT — a fanned-out maker is amended INSTANCE BY INSTANCE, each with its own slice and
+            // its own prior work; the unexpanded template is never seated.
+            const insts = instancesByTemplate.get(mk.role);
+            if (insts) {
+              for (const inst of insts) {
+                const prior = producedByRole.get(inst.chair.role) ?? [];
+                const t = makerTier.get(mk.role);
+                const iprep = prepareChair(inst.chair, phaseNameOf(mk.role), [...prior, feedback], { resume: t === undefined, round: round + 1, instance: inst, ...(t ? { tier: t } : {}) });
+                const irecs = await invokeAndWriteChair(iprep);
+                dropFromProduced(prior);
+                producedByRole.set(inst.chair.role, irecs);
+                produced.push(...irecs);
+              }
+              const all = templateRecords(mk.role);
+              producedByRole.set(mk.role, all);
+              noteCheckpointRole(mk.role, phaseNameOf(mk.role), all);
+              continue;
+            }
             // O1/I3 — carry the maker's OWN work from the round just judged, plus the failing
             // verdict, INTO prepareChair, so both are among `inputs` when lookupReuse computes the
             // key. Pushing the verdict in AFTER prep (as this did) left the amend key identical to
@@ -2453,7 +2628,10 @@ export async function runGig(
             // O1 — the initial invocation is round 1 (the default), so the amend loop's iteration
             // `round` (1-based) stamps round `round + 1`: each re-run of a seat gets a distinct,
             // monotonic round and no two chair_spend rows for one role collide.
-            const prep = prepareChair(mk, phaseNameOf(mk.role), [...priorWork, feedback], { resume: true, round: round + 1 });
+            const mt = makerTier.get(mk.role);
+            // A maker seated on a NEW rung is a different player: it starts cold (no resume of the
+            // cheaper model's conversation), carrying its prior work and the verdict as inputs.
+            const prep = prepareChair(mk, phaseNameOf(mk.role), [...priorWork, feedback], { resume: mt === undefined, round: round + 1, ...(mt ? { tier: mt } : {}) });
             const recs = await invokeAndWriteChair(prep);
             dropFromProduced(producedByRole.get(mk.role) ?? []);
             producedByRole.set(mk.role, recs);
@@ -2470,6 +2648,10 @@ export async function runGig(
           // carry the verify seat's identity — the trimmed continuation would strip it. buildInvokerArgs
           // still emits `--resume` (it keys on `resume`, not the prompt), so O1's arg law holds.
           const vprep = prepareChair(vch, phase.name, [], { resume: true, keep_prompt: true, round: round + 1 });
+          // contract-reverify-carries-amendment-v1 (O3) — what the verify seat has not seen: its current
+          // inputs, less those its round-one verdict was sealed over. The verdict being re-judged is still
+          // in producedByRole here (it is replaced only after the re-verify seals).
+          vprep.amended_inputs = amendedSince(vprep.inputs, producedByRole.get(vch.role));
           const vrecs = await invokeAndWriteChair(vprep);
           dropFromProduced(producedByRole.get(vch.role) ?? []);
           producedByRole.set(vch.role, vrecs);
@@ -2477,7 +2659,25 @@ export async function runGig(
           noteCheckpointRole(vch.role, phase.name, vrecs);
           if (budget && hasCeiling) budget.spent_usd = usage.total_cost_usd;
           saveCheckpoint();
+          const previous = feedback;
           verdict = failingVerdict(vch.role); // undefined once it passes → loop ends
+          if (verdict && ladder && ladder.length > 0) {
+            if (findingsKey(verdict) === findingsKey(previous)) {
+              // The objection did not move. Stop: a better model meeting it again buys nothing.
+              emit({ type: "amend_stalled", phase: phase.name, role: vch.role, round, repeated: findingsOf(verdict) });
+              break;
+            }
+            // New findings, still failing: seat each maker one rung up (from its current rung), if
+            // there is one. At the top it stays where it is.
+            for (const mk of makers) {
+              const from = makerTier.get(mk.role) ?? standard.agents.find((a) => a.slug === mk.agent_slug)?.model_tier ?? "";
+              const at = ladder.indexOf(from);
+              const to = at >= 0 ? ladder[at + 1] : undefined;
+              if (to === undefined) continue;
+              makerTier.set(mk.role, to);
+              emit({ type: "amend_escalated", phase: phaseNameOf(mk.role), role: mk.role, round, from_tier: from, to_tier: to });
+            }
+          }
         }
       }
     }
@@ -2525,6 +2725,12 @@ export async function runGig(
     /** contract-resumed-gig-session-v1 (O1) — a re-VERIFY re-invocation: resumes the session (like
      *  `resume`) but the invoker keeps the FULL prompt, not the maker's trimmed amend continuation. */
     resume_keep_prompt?: boolean;
+    /** contract-reverify-carries-amendment-v1 — set on a re-verify prep; see ctx.amended_inputs. */
+    amended_inputs?: { records: readonly OutputRecord[]; carried_all: boolean };
+    /** FAN-OUT — set on an instance of a fanned-out chair: the payload it sees (its slice in place of
+     *  the whole set) and the stamp its seal carries. Absent on every other chair. */
+    gig_input?: Record<string, unknown>;
+    shard?: ShardStamp;
     /** contract-spend-survives-v1 (O1) — which round this invocation is, stamped on the chair_spend
      *  row: 1 on a first run, and the examine⇄amend re-run's round otherwise. Absent → 1. */
     round?: number;
@@ -2693,7 +2899,20 @@ export async function runGig(
     }
   }
 
-  function prepareChair(chair: Chair, phaseName: string, extraInputs: readonly OutputRecord[] = [], opts: { resume?: boolean; keep_prompt?: boolean; round?: number } = {}): PreparedChair {
+  function prepareChair(chair: Chair, phaseName: string, extraInputs: readonly OutputRecord[] = [], opts: { resume?: boolean; keep_prompt?: boolean; round?: number; instance?: FanOutInstance; tier?: string } = {}): PreparedChair {
+    // FAN-OUT — an instance receives the narrowed VIEW of each record the split cut, in the record's
+    // place (same id and content_sha: provenance names the whole record), and its payload slice.
+    const narrow = (inputs: OutputRecord[]): void => {
+      if (!opts.instance) return;
+      // A dropped record belongs to another seat's round: hand it to no one, or the seat reads the
+      // whole set it was split out of and the split bought nothing.
+      const drop = opts.instance.drop;
+      for (let k = inputs.length - 1; k >= 0; k--) if (drop.has(inputs[k]!.id)) inputs.splice(k, 1);
+      for (let k = 0; k < inputs.length; k++) inputs[k] = opts.instance.records.get(inputs[k]!.id) ?? inputs[k]!;
+    };
+    const instanceView = opts.instance
+      ? { gig_input: { ...gigInput, ...opts.instance.gig_input }, shard: opts.instance.stamp }
+      : {};
     // A skill-backed chair runs the skill's deterministic code half — no agent, no model.
     if (chair.skill_slug && (chair.agent_slug ?? "") === "") {
       const dir = deps.skill_dirs?.get(chair.skill_slug);
@@ -2710,13 +2929,17 @@ export async function runGig(
         inputs.push(...recs);
       }
       pullSeeds(chair, inputs, chair.input_contract);
+      pullResolved(inputs, chair.input_contract);
+      narrow(inputs);
       // Amend carriage: extra inputs (the maker's own prior work + the failing verdict) join the
       // frontier so they enter the reuse key — see the EXAMINE⇄AMEND block. Empty otherwise.
       for (const ex of extraInputs) if (!inputs.includes(ex)) inputs.push(ex);
       if (chair.input_contract.length > 0) {
+        const optionalHere = new Set<string>(chair.optional_inputs ?? []);
         for (const need of chair.input_contract) {
           // #156: a type satisfied by an upstream record OR by the gig payload (entry-chair seed).
           const fromGig = standardInputs.has(need) && gigInput[need] !== undefined;
+          if (optionalHere.has(need)) continue;  // declared optional — may be absent, still routed
           if (!fromGig && !inputs.some((o) => outputSatisfiesType(o, need))) {
             const provided = inputs.map((o) => o.domain_type).join(",");
             // #244 — this disjunction knows WHICH branch failed; don't discard that.
@@ -2744,7 +2967,7 @@ export async function runGig(
         ? undefined
         : lookupReuse({ chair, phaseName, inputs, output_specs, skill_provenance: skillIdentity, skills: [], producer_slug: chair.skill_slug!, domain: standard.domain });
       return {
-        chair, phaseName, skill_dir: dir, primitive, domain_type, output_specs, inputs,
+        chair, phaseName, skill_dir: dir, primitive, domain_type, output_specs, inputs, ...instanceView,
         skills: [], missing_skills: [],
         producer_slug: chair.skill_slug!, domain: standard.domain,
         ...(skillReuse ? { reuse_key: skillReuse.key } : {}),
@@ -2753,8 +2976,10 @@ export async function runGig(
       };
     }
 
-    const agent = standard.agents.find((a) => a.slug === chair.agent_slug);
-    if (!agent) throw new RuntimeError(`phase "${phaseName}" chair "${chair.role}" references unknown agent "${chair.agent_slug}"`);
+    const seated = standard.agents.find((a) => a.slug === chair.agent_slug);
+    if (!seated) throw new RuntimeError(`phase "${phaseName}" chair "${chair.role}" references unknown agent "${chair.agent_slug}"`);
+    // THE AMEND LADDER — a maker the ladder moved up is the same agent seated on a higher tier.
+    const agent: Agent = opts.tier !== undefined ? { ...seated, model_tier: opts.tier as Agent["model_tier"] } : seated;
     const primitive = agent.primitives[0];
     if (!primitive) throw new RuntimeError(`agent "${agent.slug}" declares no primitive`);
     const domain_type = agent.output_types[0];
@@ -2805,6 +3030,10 @@ export async function runGig(
       // upstream record — by type, as records, so provenance survives the movement boundary.
       pullSeeds(chair, inputs, [...chair.input_contract, ...agent.input_types]);
     }
+    // Dispatch-named sealed records reach EVERY chair whose contract declares their type — a gig
+    // input is available to any chair (#156), whether or not it names upstream roles.
+    pullResolved(inputs, chair.input_contract.length > 0 ? chair.input_contract : agent.input_types);
+    narrow(inputs);
 
     // Amend carriage (O1/I3): the maker's own round-just-judged artifact and the failing verdict are
     // threaded in as extra inputs so they enter `inputs` BEFORE lookupReuse — the amend key then
@@ -2818,9 +3047,11 @@ export async function runGig(
     // (docs/genome-extension.md): a core-type requirement is met by any domain
     // subtype extending it; a domain-type requirement stays exact. Empty skips.
     if (chair.input_contract.length > 0) {
+      const optionalHere = new Set<string>(chair.optional_inputs ?? []);
       for (const need of chair.input_contract) {
         // #156: satisfied by an upstream record OR the gig payload (entry-chair typed seed).
         const fromGig = standardInputs.has(need) && gigInput[need] !== undefined;
+        if (optionalHere.has(need)) continue;  // declared optional — may be absent, still routed
         if (!fromGig && !inputs.some((o) => outputSatisfiesType(o, need))) {
           const provided = inputs.map((o) => o.domain_type).join(",");
           // #244 — when `need` is a DECLARED gig input, the cause is a missing key in the
@@ -2997,7 +3228,7 @@ export async function runGig(
     }
 
     return {
-      chair, phaseName, agent, primitive, domain_type, output_specs, inputs, skills,
+      chair, phaseName, agent, primitive, domain_type, output_specs, inputs, skills, ...instanceView,
       missing_skills: missing, producer_slug: agent.slug, domain,
       ...(reserveOffer !== undefined ? { reserve_offer: reserveOffer } : {}),
       ...(lookup ? { reuse_key: lookup.key } : {}),
@@ -3032,9 +3263,12 @@ export async function runGig(
   }
 
   async function executeChair(p: PreparedChair): Promise<OutputRecord[]> {
+    // WHAT THIS SEAT READ through its tools, as the invoker reported it. Reported, never trusted: each
+    // ref is re-hashed against the store before it is stamped (spec.coltrane-sealed-inputs law 9).
+    const readRefs: Array<{ id: string; content_sha: string }> = [];
     // What the transport SAID about this chair, hoisted out of the invocation block so the seal
     // can prefer a measurement over the tier table's guess. Empty for a skill-backed chair.
-    let chairReport: { model?: string; cost_usd?: number; tokens_used?: number } = {};
+    let chairReport: { model?: string; cost_usd?: number; tokens_used?: number; tier?: string } = {};
     const { chair, phaseName, inputs, skills, output_specs, producer_slug, domain } = p;
     // contract-seat-time-monotonic-v1 (O1) — the chair's timings (first_write_ms, duration_ms below)
     // are monotonic differences (performance.now), never Date.now: a wall-clock jump mid-chair is
@@ -3113,6 +3347,8 @@ export async function runGig(
           data: o.data,
           input_refs: inputs.map((i) => i.id),
           input_shas: inputs.map((i) => i.content_sha),
+          input_resolutions: resolutionsOf(inputs),
+          ...(p.shard ? { shard: p.shard } : {}),
           ...(o.skill_provenance ? { skill_provenance: o.skill_provenance } : {}),
           reused_from: { output_id: o.source_output_id, gig_id: hit.source_gig_id, cache_key: hit.cache_key },
         });
@@ -3164,7 +3400,7 @@ export async function runGig(
       // model is never invoked. The skill reads the merged upstream data (or the gig input
       // when it's a root chair). This is the proper fix for "an LLM should not babysit a
       // deterministic command": the command IS the chair.
-      const skillInput = inputs.length > 0 ? Object.assign({}, ...inputs.map((i) => i.data)) : gigInput;
+      const skillInput = inputs.length > 0 ? Object.assign({}, ...inputs.map((i) => i.data)) : (p.gig_input ?? gigInput);
       // #253 — the ASYNC path, threaded with the run's abort signal. `executeSkill` uses
       // spawnSync, which blocks the event loop for the skill's whole timeout (120s by
       // default), so the cooperative abort chain could not run and the abort event could not
@@ -3266,7 +3502,7 @@ export async function runGig(
           } catch { primerStartSnapshot = undefined; }
         }
         data = await deps.invoke({
-          agent, phase: phaseName, role: chair.role, gig_id, inputs, gig_input: gigInput, skills,
+          agent, phase: phaseName, role: chair.role, gig_id, inputs, gig_input: p.gig_input ?? gigInput, skills,
           missing_skills: p.missing_skills, // #241 — what did NOT resolve, so the prompt can't assert it
           // THE SEAT IS WHERE THE INSTITUTION'S DATA ENTERS. Validated at compose time (the dead-slot
           // refusal) and, until now, dropped on the floor immediately afterwards.
@@ -3299,6 +3535,7 @@ export async function runGig(
           // contract-resumed-gig-session-v1 (O1) — a re-verify resumes its session but keeps the full
           // prompt; thread it so buildPrompt skips the maker's trimmed continuation for this seat.
           ...(p.resume_keep_prompt ? { resume_keep_prompt: true } : {}),
+          ...(p.amended_inputs ? { amended_inputs: p.amended_inputs } : {}),
           // contract-seat-primer-v1 (O1/I2) — a PRIME chair: the invoker parses its Read events and
           // emits them so the runtime seals the seat-primer from exactly what this seat read.
           ...(chair.prime ? { prime: chair.prime } : {}),
@@ -3321,6 +3558,14 @@ export async function runGig(
           ...(gigSubstrate?.seat ? { seatExec: gigSubstrate.seat } : {}),
           onEvent: (ev) => {
             sink.fold(ev);
+            if (ev.type === "seat_read") {
+              const raw = ev.raw as { refs?: Array<{ id?: unknown; content_sha?: unknown }> } | undefined;
+              for (const r of raw?.refs ?? []) {
+                if (typeof r?.id === "string" && typeof r.content_sha === "string" && !readRefs.some((x) => x.id === r.id)) {
+                  readRefs.push({ id: r.id, content_sha: r.content_sha });
+                }
+              }
+            }
             emit({ type: "agent_event", phase: phaseName, role: chair.role, event: ev });
             // contract-amend-resume-prompt-v1 (F1) — the invoker's cold-fallback signal. Captured here
             // (the one seam every chair event flows through) so chair_complete can record it.
@@ -3705,6 +3950,22 @@ export async function runGig(
       }
     }
 
+    // WHAT THE SEAT READ, VERIFIED. A record the seat pulled through a tool is named in what it seals —
+    // but only after the engine re-hashes it against the store, the same check the dispatch door makes
+    // (spec.coltrane-sealed-inputs law 9). A ref the store does not hold, or whose bytes no longer hash
+    // to its content_sha, is NOT stamped: a read the engine cannot stand behind must not read as one.
+    // Deduped against what was pushed, so a record both fed and re-read is named once.
+    const verifiedReads = readRefs.filter((r: { id: string; content_sha: string }) => {
+      if (inputs.some((i) => i.id === r.id)) return false;
+      const rec = deps.outputs.get(r.id);
+      if (!rec || rec.content_sha !== r.content_sha) return false;
+      const now = outputContentHash({
+        core_type: rec.core_type, domain_type: rec.domain_type, domain_type_version: rec.domain_type_version,
+        domain: rec.domain, primitive: rec.primitive, phase: rec.phase, agent_slug: rec.agent_slug, data: rec.data,
+      });
+      return now === rec.content_sha;
+    });
+
     // Only now does anything become durable.
     const written: OutputRecord[] = [];
     for (const { spec, slice } of resolved) {
@@ -3731,8 +3992,18 @@ export async function runGig(
         phase: phaseName,
         primitive: spec.primitive,
         data: slice,
-        input_refs: inputs.map((i) => i.id),
-        input_shas: inputs.map((i) => i.content_sha), // #196 — real predecessor hashes, engine-stamped
+        input_refs: [...inputs.map((i) => i.id), ...verifiedReads.map((r: { id: string }) => r.id)],
+        input_shas: [...inputs.map((i) => i.content_sha), ...verifiedReads.map((r: { content_sha: string }) => r.content_sha)],
+        // spec.coltrane-sealed-inputs — the cross-gig edge, for what was fed AND for what the seat read:
+        // a provision pulled from another gig is only walkable because the ENGINE verified and stamped it.
+        input_resolutions: [
+          ...resolutionsOf(inputs),
+          ...verifiedReads.map((r: { id: string; content_sha: string }) => ({
+            output_id: r.id, content_sha: r.content_sha,
+            from_gig: deps.outputs.get(r.id)?.gig_id ?? "", resolved_at: new Date().toISOString(), resolved_by: "read" as const,
+          })),
+        ],
+        ...(p.shard ? { shard: p.shard } : {}),          // fan-out — which slice this instance read
         // WHICH model produced this, resolved through the invoker's own function so the stamp
         // and the spawn cannot disagree. Absent for a skill-backed chair — no model ran, and
         // absent must mean unknown rather than "the default".
@@ -3746,7 +4017,7 @@ export async function runGig(
           ? {
               model: chairReport.model ?? resolveModel(p.agent.model_tier, deps.model_version),
               ...(chairReport.model !== undefined ? { model_reported: true } : {}),
-              ...(p.agent.model_tier ? { model_tier: p.agent.model_tier } : {}),
+              ...((chairReport.tier ?? p.agent.model_tier) ? { model_tier: chairReport.tier ?? p.agent.model_tier } : {}),
               // Per-chair spend, declared in the record's own schema since it was written and
               // populated by nothing. The gig total cannot separate two chairs on two tiers,
               // which is the only question per-chair routing asks. Attributed ONCE per invocation

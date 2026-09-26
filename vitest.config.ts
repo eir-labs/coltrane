@@ -65,6 +65,7 @@ export default defineConfig({
       "tests/security/**",
       "tests/honest_broker/**",
       "tests/spec_venue_room_live.test.ts",
+      "tests/spec_room_image_carries_runtime_deps.test.ts", // runs real containers — the room band owns it
       "node_modules/**",
       "dist/**",
     ],

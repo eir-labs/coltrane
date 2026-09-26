@@ -46,7 +46,8 @@ import { LEDGER_SCHEMA_VERSION, type Ledger, type GigUsage } from "./ledger.js";
 import { PlacementRefused, type PlacementResolver } from "./placement.js";
 import type { Depth } from "./pricing.js";
 import type { Effort, Layout } from "./genome_schema.js";
-import { resolveSeatGrants, targetPathsOf, globbedTargetPaths, describeRoleRefusals } from "./layout_grants.js";
+import { snapshotTree, snapshotDirectory, changedPaths, outOfScope, DiffGateWindows, type TreeGit, type TreeState, type GateWindow } from "./diff_gate.js";
+import { resolveSeatGrants, targetPathsOf, globbedTargetPaths, escapingTargetPaths, describeRoleRefusals, writeScopeOf, seatCanWrite } from "./layout_grants.js";
 import type { SkillRecord, EvalRecord } from "./loader.js";
 import { COLTRANE_VERSION } from "./version.js";
 
@@ -194,6 +195,12 @@ export interface AgentInvocationContext {
   // The wrap happens AFTER the confinement block that computes effective_tools, so moving the seat
   // NARROWS it by the room and never widens it. Absent = the seat runs on the host, unchanged.
   seatExec?: { container: string; workspace: string } | undefined;
+  /**
+   * The tree this seat runs against on the host — RunDeps.tree_root, threaded so the Claude invoker
+   * can build the Bash sandbox over ABSOLUTE paths in it (<tree>/coltrane.layout.json, .git, .claude
+   * denied). Ignored for a room seat, whose tree is seatExec.workspace. Absent → the spawn's own cwd.
+   */
+  tree_root?: string | undefined;
   // #turn-budget — the seated chair's turn budget, threaded from the chair (exactly as `depth`
   // is). The invoker resolves `--max-turns` as ctx.turn_budget ?? agent.max_tool_calls ?? engine
   // default. Absent = the agent's own cap stands; 0 is a deliberate hard floor, not a fall-through.
@@ -1884,6 +1891,26 @@ export async function runGig(
   // Resolve agent-by-slug once.
   const agentBySlug = new Map(standard.agents.map((a) => [a.slug, a]));
 
+  // THE DIFF GATE's view of the tree the seats run in (src/diff_gate.ts), always read from the HOST:
+  // the room's workspace when the seats run inside a room (the realizer bind-mounts it at the SAME
+  // absolute path, so the host reads exactly what the seat wrote — and never trusts a `git` binary
+  // inside a room a seat could have replaced), else the run's tree_root. Through git when it is a git
+  // work tree, through the filesystem itself when it is not. No tree named → no gate (a research run
+  // that touches no tree). One window registry per run, so concurrent chairs on the shared tree are
+  // judged against each other's scopes.
+  const diffWindows = new DiffGateWindows();
+  const gitOpts = { stdio: ["ignore", "pipe", "pipe"] as ["ignore", "pipe", "pipe"], maxBuffer: 256 * 1024 * 1024 };
+  const diffGateReader = (): (() => TreeState) | undefined => {
+    const tree = gigSubstrate?.seat?.workspace ?? deps.tree_root;
+    if (tree === undefined) return undefined;
+    const git: TreeGit = (args) => execFileSync("git", ["-C", tree, ...args], gitOpts);
+    return () => {
+      let isGit = false;
+      try { isGit = git(["rev-parse", "--is-inside-work-tree"]).toString("utf8").trim() === "true"; } catch { isGit = false; }
+      return isGit ? snapshotTree(git) : snapshotDirectory(tree);
+    };
+  };
+
   // ── dispatch preflight: the UNIFIED t=0 dead-reference sweep ────────────────
   // Four defect classes are ALL knowable at t=0 from the standard alone, yet three of them were, until
   // this sweep, discovered only MID-PHASE in prepareChair — after earlier chairs already ran and spent.
@@ -1916,6 +1943,7 @@ export async function runGig(
       (!Array.isArray(rawTargets) || rawTargets.some((t) => typeof t !== "string"));
     const gigTargets = targetPathsOf(gigInput);
     const globbedTargets = globbedTargetPaths(gigTargets);
+    const escapingTargets = escapingTargetPaths(gigTargets);
     for (const ph of standard.phases) {
       for (const ch of ph.chairs) {
         // A skill-backed chair (skill_slug set, no agent_slug) seats no agent → its dead reference is
@@ -1962,6 +1990,12 @@ export async function runGig(
           offenders.push({
             kind: "target-path", phase: ph.name, chair: ch.role, agent: ag.slug,
             detail: `target_paths entry "${entry}" carries glob metacharacters (* ? [ {) — target_paths are paths, and a glob would become a grant pattern`,
+          });
+        }
+        for (const entry of escapingTargets) {
+          offenders.push({
+            kind: "target-path", phase: ph.name, chair: ch.role, agent: ag.slug,
+            detail: `target_paths entry "${entry}" escapes the tree (a ".." segment, an absolute or home path, or a backslash) — it is refused, never normalised into a grant`,
           });
         }
         // ROLE TOKENS resolve through THIS run's layout. A token the layout cannot answer grants
@@ -3348,6 +3382,10 @@ export async function runGig(
     let resolvedEffort: Effort | undefined;
     // LAYOUT GRANTS — what the seat ran with, resolved at the invoke ctx site for chair_complete.
     let seatRecord: { grants: string[]; target_paths_applied: boolean } | undefined;
+    // THE DIFF GATE (src/diff_gate.ts) — the tree's state before this seat ran, and its open window.
+    const gateRead = diffGateReader();
+    let gateBefore: TreeState | undefined;
+    let gateWindow: GateWindow | undefined;
     // contract-amend-resume-prompt-v1 (F1) — set when the invoker reports a resume whose session was
     // gone and fell back cold (the `resume_fallback` stream event). Recorded on chair_complete so the
     // fallback is observable rather than a resume the record falsely claims happened.
@@ -3573,11 +3611,28 @@ export async function runGig(
           });
           seatRecord = { grants: seat.grants, target_paths_applied: seat.target_paths_applied };
         }
+        // THE DIFF GATE opens for every seat that CAN change the tree (a Write/Edit scope, or Bash):
+        // the tree's state BEFORE the seat, and this seat's write scope. A tree the gate cannot read
+        // is not a tree it can vouch for, so such a chair is refused (fail closed) rather than run
+        // ungated. A seat with no writing host tool is not gated — its cage denies every such tool.
+        if (gateRead !== undefined && seatCanWrite(agent, seatRecord.grants)) {
+          try {
+            gateBefore = gateRead();
+          } catch (e) {
+            throw new RuntimeError(
+              `chair "${chair.role}" (agent "${agent.slug}") refused: the diff gate cannot read the tree it runs in ` +
+                `(${e instanceof Error ? e.message.split("\n")[0] : String(e)}) — a seat whose changes cannot be judged is not run`,
+            );
+          }
+          gateWindow = diffWindows.enter(writeScopeOf(agent, seatRecord.grants));
+        }
         data = await deps.invoke({
           agent, phase: phaseName, role: chair.role, gig_id, inputs, gig_input: p.gig_input ?? gigInput, skills,
           // THE REPOSITORY'S LAYOUT reaches the seat, so the invoker expands its role tokens through
           // it. Absent → nothing threaded, and a role token fails closed in the invoker.
           ...(deps.layout !== undefined ? { layout: deps.layout } : {}),
+          // The tree the seat runs against, so its Bash sandbox can name that tree's protected paths.
+          ...(deps.tree_root !== undefined ? { tree_root: deps.tree_root } : {}),
           missing_skills: p.missing_skills, // #241 — what did NOT resolve, so the prompt can't assert it
           // THE SEAT IS WHERE THE INSTITUTION'S DATA ENTERS. Validated at compose time (the dead-slot
           // refusal) and, until now, dropped on the floor immediately afterwards.
@@ -3715,6 +3770,7 @@ export async function runGig(
         releaseHold();
         throw e;
       } finally {
+        if (gateWindow !== undefined) diffWindows.leave(gateWindow);
         if (sink.attributed()) attributedInvocations++;
         // F3 — under a ceiling, a chair that reported usage but NO settled usd leaves the next
         // batch unverifiable: the runtime cannot know whether it is affordable. Record it (never
@@ -3752,6 +3808,18 @@ export async function runGig(
         finished_at: new Date().toISOString(),
         ...(chairSettledUsage ? { usage: chairSettledUsage } : {}),
       });
+      // THE DIFF GATE closes: every path the tree changed while this seat ran must lie inside its
+      // Write/Edit scope (or an overlapping seat's). One that does not refuses the chair, naming the
+      // paths — BEFORE anything it made is sealed, so nothing from it is sealed or shipped.
+      if (gateRead !== undefined && gateWindow !== undefined && gateBefore !== undefined) {
+        const outside = outOfScope(changedPaths(gateBefore, gateRead()), gateWindow);
+        if (outside.length > 0) {
+          throw new RuntimeError(
+            `chair "${chair.role}" (agent "${agent.slug}") refused by the diff gate: it changed ${outside.length} path(s) ` +
+              `outside its Write/Edit scope [${outside.join(", ")}]. Nothing this chair made is sealed.`,
+          );
+        }
+      }
       // Runtime output_contract check: every type the chair promised must be covered by the
       // bound agent's declared output_types (compose-time mirror; a hand-rolled literal could
       // still ship a mismatch).

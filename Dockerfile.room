@@ -23,7 +23,7 @@
 # design, the floor is toolchain-IN by design, and that opposition is the point. Keep them distinct.
 
 # ── build ─────────────────────────────────────────────────────────────────────────────────────
-FROM node:22-alpine AS build
+FROM node:26-alpine AS build
 WORKDIR /app
 
 # Manifests first: this layer is invalidated by a dependency change, not by a source edit, so an
@@ -43,7 +43,7 @@ COPY scripts ./scripts
 RUN npm run build
 
 # ── room ──────────────────────────────────────────────────────────────────────────────────────
-FROM node:22-alpine AS room
+FROM node:26-alpine AS room
 WORKDIR /app
 
 # PRODUCTION DEPENDENCIES ONLY. A room holding a test runner and a compiler is a larger surface than

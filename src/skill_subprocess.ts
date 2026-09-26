@@ -98,20 +98,20 @@ function nodeMajor(): number {
  *
  * The sandbox spawns with `--permission`, which is Node 22+. On Node 20 the child dies with
  * `node: bad option: --permission` — a message that names the flag rather than the reason, and
- * appears once per skill rather than once per process. `engines` in package.json says `>=22`,
+ * appears once per skill rather than once per process. `engines` in package.json says `>=26`,
  * but npm treats that as advisory, so a consumer on 20 reaches here anyway.
  *
  * Refusing loudly is the only honest option. There is no degraded mode: running a skill on a
  * runtime with no permission model means running it UNSANDBOXED, and silently doing that would
  * invert the guarantee this module exists to provide.
  */
-export const MIN_NODE_FOR_SANDBOX = 22;
+export const MIN_NODE_FOR_SANDBOX = 26; // the floor (26 Sep 2026): --allow-net is 25+ (25 is end-of-life), so 26
 
-/** `--allow-net` arrived in Node 24. Below it there is no network gate at all: `--permission` has
+/** `--allow-net` arrived in Node 25 (corrected 26 Sep 2026: it was written as 24, and Node 24 rejects the flag as a bad option). Below it there is no network gate at all: `--permission` has
  *  no network flag, so a skill reaches out whatever its grant says. The loader refuses to admit a
  *  network-granted skill on such a runtime for that reason; tierFlags refuses to PASS the flag for
  *  the same one. */
-export const NODE_WITH_ALLOW_NET = 24;
+export const NODE_WITH_ALLOW_NET = 25;
 
 function assertSandboxCapableRuntime(): void {
   const major = nodeMajor();

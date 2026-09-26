@@ -18,6 +18,7 @@
 // never calls it, so `node dist/src/server.js` loads definitions and exits
 // without connecting a transport. This file is the executable boot.
 
+import "./runtime_floor.js"; // FIRST: refuse Node < 26 before anything else loads
 import { fileURLToPath } from "node:url";
 
 const DIRECT = process.env.COLTRANE_SERVER_DIRECT === "1";

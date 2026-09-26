@@ -25,7 +25,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 26
       - name: install the engine
         run: npm install --no-save @eir-labs/coltrane
       - name: the genome must load

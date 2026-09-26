@@ -1,5 +1,5 @@
 {
-  "spec_doc": "docs/specs/gig-runs-once.red-spec.json \u2014 engine half of the two-repo fix; the store half (coltrane_drain_renew / coltrane_drain_release, attempts/max_attempts, terminal-status guard on the header upsert, lease clearing on terminal writes, manifest merge) lands in eir-labs/coltrane-ui branch work/gig-runs-once and deploys first. CONTRACT SURFACE the laws pin \u2014 src/lease.ts: export const HOSTED_LEASE_MS = 60 * 60 * 1000; export const DRAIN_LEASE_ROUTES = { renew: '/rest/v1/rpc/coltrane_drain_renew', release: '/rest/v1/rpc/coltrane_drain_release' }; renew: POST ${COLTRANE_DRAIN_URL}${DRAIN_LEASE_ROUTES.renew} body {p_gig_id} ONLY, Bearer drain key (the route fills p_token), X-Coltrane-Instance (the route fills p_instance); 200 -> new lease_until; 403 / 42501 -> lease lost; release: POST ${COLTRANE_DRAIN_URL}${DRAIN_LEASE_ROUTES.release} body {p_gig_id, p_reason, p_terminal} ONLY, instance in X-Coltrane-Instance -> boolean; WorkOnceDeps.scheduleHeartbeat: (intervalMs: number, beat: () => Promise<unknown>) => () => void; default arms an unref'd setInterval; interval = HOSTED_LEASE_MS / 3; WorkOnceResult.acknowledged: boolean on a claimed result: true iff the store acknowledged the terminal header; terminal header attempts: 3; header status: 'running' is a new GigHeaderRecord status, sent awaited before the first chair with the run's genome_hash; manifest.cold_run_reason: string on a header written by a run that went cold because a resume was refused. ROUND 2: output drains are acknowledged (3 attempts) before the completed header; a 'running' header refused with 23514 or 403/42501 aborts the run with no terminal write. ROUND 3 (branch work/gig-runs-once-r3): G1 the heartbeat stays armed until the terminal header is acknowledged or exhausted; G2 no release after the outcome is decided when the terminal header is unacknowledged; REFUND a non-terminal release only before the first chair invocation; Q6 the drain deadline ends a gig aborted/timeout (WorkOnceResult status 'aborted', aborted:{reason:'timeout'}, header status 'aborted', no gig_fail); G4 (terminal rows only; founder ruling, Eugene: \"what's closed is closed. can refer to the sealed outputs on input if needed but reopening doesn't smell right.\"): the successful resume path at gig_dispatch(resume_gig_id) / `coltrane dispatch --resume` runs today under the OLD id (gigId = resumeArg ?? randomUUID()), which the store's terminal guard answers with 23514; a resume of a failed/aborted gig must dispatch a NEW gig carrying resumes:<old id>, take the old seals as inputs by reference (content_sha in input_shas, never re-sealed), and write nothing under the old id. The refused-resume case is covered by tests/resume_reuse_dispatch.test.ts:164. A parked \u2192 approved \u2192 re-claimed gig is not terminal and keeps its id (E6b records a cold run there). G4 hosted: the store's claim carries resumes:<old id|null>; workOnce runs under the claim's own id, takes the closed gig's drained seals (coltrane_mcp_gig_outputs for the old id) as inputs by reference, invokes no chair already sealed there, and writes nothing under the old id. The gig_dispatch resume law covers both terminal endings, failed and aborted. ROUND 4 (branch work/gig-runs-once-r4, on the implementation at 16b00dc): WorkOnceResult.status vocabulary is complete | failed | awaiting_approval | aborted | abandoned \u2014 `abandoned` = the lease was lost (a refused renew, or a start header refused with 23514 / 403-42501): the worker writes nothing terminal, no gig_fail, no release, and acknowledged:false; it is NOT a failure of the gig and NOT an outcome the store should record from this worker. L1 a late answer after a lost lease is never sealed; E7c a stale holder of a requeued local row is refused; Q6r the aborted header carries manifest.abort_reason = \"timeout\" as a field; L4 with a store present (ServerDeps.gigStatus \u2192 coltrane_mcp_gig_status) the store decides whether a gig is closed for G4. (G4b/G4h cite their laws at 5993cff on work/gig-runs-once-r3; they arrive on this line with the implementer's merge of 4ed5ef4.)",
+  "spec_doc": "docs/specs/gig-runs-once.red-spec.json \u2014 engine half of the two-repo fix; the store half (coltrane_drain_renew / coltrane_drain_release, attempts/max_attempts, terminal-status guard on the header upsert, lease clearing on terminal writes, manifest merge) lands in eir-labs/coltrane-ui branch work/gig-runs-once and deploys first. CONTRACT SURFACE the laws pin \u2014 src/lease.ts: export const HOSTED_LEASE_MS = 60 * 60 * 1000; export const DRAIN_LEASE_ROUTES = { renew: '/rest/v1/rpc/coltrane_drain_renew', release: '/rest/v1/rpc/coltrane_drain_release' }; renew: POST ${COLTRANE_DRAIN_URL}${DRAIN_LEASE_ROUTES.renew} body {p_gig_id} ONLY, Bearer drain key (the route fills p_token), X-Coltrane-Instance (the route fills p_instance); 200 -> new lease_until; 403 / 42501 -> lease lost; release: POST ${COLTRANE_DRAIN_URL}${DRAIN_LEASE_ROUTES.release} body {p_gig_id, p_reason, p_terminal} ONLY, instance in X-Coltrane-Instance -> boolean; WorkOnceDeps.scheduleHeartbeat: (intervalMs: number, beat: () => Promise<unknown>) => () => void; default arms an unref'd setInterval; interval = HOSTED_LEASE_MS / 3; WorkOnceResult.acknowledged: boolean on a claimed result: true iff the store acknowledged the terminal header; terminal header attempts: 3; header status: 'running' is a new GigHeaderRecord status, sent awaited before the first chair with the run's genome_hash; manifest.cold_run_reason: string on a header written by a run that went cold because a resume was refused. ROUND 2: output drains are acknowledged (3 attempts) before the completed header; a 'running' header refused with 23514 or 403/42501 aborts the run with no terminal write. ROUND 3 (branch work/gig-runs-once-r3): G1 the heartbeat stays armed until the terminal header is acknowledged or exhausted; G2 no release after the outcome is decided when the terminal header is unacknowledged; REFUND a non-terminal release only before the first chair invocation; Q6 the drain deadline ends a gig aborted/timeout (WorkOnceResult status 'aborted', aborted:{reason:'timeout'}, header status 'aborted', no gig_fail); G4 (terminal rows only; founder ruling, Eugene: \"what's closed is closed. can refer to the sealed outputs on input if needed but reopening doesn't smell right.\"): the successful resume path at gig_dispatch(resume_gig_id) / `coltrane dispatch --resume` runs today under the OLD id (gigId = resumeArg ?? randomUUID()), which the store's terminal guard answers with 23514; a resume of a failed/aborted gig must dispatch a NEW gig carrying resumes:<old id>, take the old seals as inputs by reference (content_sha in input_shas, never re-sealed), and write nothing under the old id. The refused-resume case is covered by tests/resume_reuse_dispatch.test.ts:164. A parked \u2192 approved \u2192 re-claimed gig is not terminal and keeps its id (E6b records a cold run there). G4 hosted: the store's claim carries resumes:<old id|null>; workOnce runs under the claim's own id, takes the closed gig's drained seals (coltrane_mcp_gig_outputs for the old id) as inputs by reference, invokes no chair already sealed there, and writes nothing under the old id. The gig_dispatch resume law covers both terminal endings, failed and aborted. ROUND 4 (branch work/gig-runs-once-r4, on the implementation at 16b00dc): WorkOnceResult.status vocabulary is complete | failed | awaiting_approval | aborted | abandoned \u2014 `abandoned` = the lease was lost (a refused renew, or a start header refused with 23514 / 403-42501): the worker writes nothing terminal, no gig_fail, no release, and acknowledged:false; it is NOT a failure of the gig and NOT an outcome the store should record from this worker. L1 a late answer after a lost lease is never sealed; E7c a stale holder of a requeued local row is refused; Q6r the aborted header carries manifest.abort_reason = \"timeout\" as a field; L4 with a store present (ServerDeps.gigStatus \u2192 coltrane_mcp_gig_status) the store decides whether a gig is closed for G4. (G4b/G4h cite their laws at 5993cff on work/gig-runs-once-r3; they arrive on this line with the implementer's merge of 4ed5ef4.) ROUND 5 (on 30183e1): R5.1 a resumed gig re-claimed on a fresh box rebuilds from the closed gig's seals AND its own; R5.2 a store that throws or never answers (30 s) refuses the resume \u2014 never a checkpoint fallback; R5.3 the closed set is failed|aborted|completed|cancelled, the open set running|queued|awaiting_approval; R5.4 rpcGigStatus (coltrane_mcp_gig_status \u2192 status) drives the decision. OBLIGATION OUTSIDE THIS REPO: the HOST (eir-labs/coltrane-ui) must wire ServerDeps.gigStatus = rpcGigStatus(...) the way it wires queueGig \u2014 until it does, no hosted door has a store to ask and the checkpoint decides. This is a coltrane-ui follow-up after #554 publishes.",
   "validation_criteria": [
     "every contract invariant E1-E8 has a red law that drives production code and names its plant",
     "the drain-service lease RPC routes live in ONE constant (DRAIN_LEASE_ROUTES, src/lease.ts)",
@@ -9,7 +9,8 @@
     "implementer obligation: tests/gig_header_drain.test.ts 'a chair failure produces one failed-header POST' picks the FIRST coltrane_gigs POST; if the 'running' header is written from runGig, that law must select by status",
     "implementer obligation: tests/drain_worker.test.ts 'refuses a gig the store leased without minting' matches /minted no credential/; the release-first path may keep that wording but should drop 'the row stays leased'",
     "implementer obligation: the local queue's I14/O4 laws re-complete a DONE gig by its holder; the new holder check must keep admitting the holder on a row already in done/",
-    "the instance travels once: X-Coltrane-Instance, never also in a lease RPC body (two sources for one fact)"
+    "the instance travels once: X-Coltrane-Instance, never also in a lease RPC body (two sources for one fact)",
+    "obligation outside this repo: eir-labs/coltrane-ui wires ServerDeps.gigStatus (rpcGigStatus) exactly as it wires queueGig; follow-up after #554 publishes"
   ],
   "input_refs": [
     "SPEC-worker-contract.md",
@@ -310,6 +311,82 @@
       "kind": "behavioural",
       "drives": "dispatchTool(\"gig_dispatch\", { resume_gig_id }, deps) \u2014 src/server.ts, with ServerDeps.gigStatus (the store seam, parallel to queueGig; the host wires coltrane_mcp_gig_status). CONDUCTOR RULING: with a store present, whether a gig is closed (failed/aborted/completed/cancelled) for G4 is decided by the STORE's status, never only by the local checkpoint; without a store the checkpoint decides.",
       "plant": "decide `resumesEnded` from `deps.checkpoints.read(resumeArg)?.ended` alone (today's src/server.ts), ignoring deps.gigStatus"
+    },
+    {
+      "invariant_id": "R5.1",
+      "test_name": "R5.1 \u2014 a resumed gig re-claimed on a fresh box pays only for what neither gig sealed > R5.1 N resumes closed O, seals its own chair, loses its box; the fresh re-claim invokes only the chair sealed in neither, and writes nothing under O",
+      "test_file": "tests/gig_runs_once_resumed_reclaim.test.ts",
+      "kind": "behavioural",
+      "drives": "workOnce(ctx, deps) \u2014 src/worker.ts, on a claim carrying resumes, three boxes over one stateful store (rebuildFromDrain / resumeStateFromDrain)",
+      "plant": "rebuild from `resumes ?? claim.gig_id` only (today's src/worker.ts): the claim's own drained seals are never read \u2014 RED AT HEAD 30183e1"
+    },
+    {
+      "invariant_id": "R5.2a",
+      "test_name": "R5.2 \u2014 a store that cannot answer refuses the resume; it never falls back to the checkpoint > R5.2a gigStatus THROWS: the resume is refused, the reason names the store, nothing runs under either id, and it holds even when the checkpoint says the gig ended",
+      "test_file": "tests/gig_runs_once_store_decides.test.ts",
+      "kind": "behavioural",
+      "drives": "dispatchTool(\"gig_dispatch\", { resume_gig_id }, deps) \u2014 src/server.ts, with ServerDeps.gigStatus throwing",
+      "plant": "on a gigStatus throw, fall back to `deps.checkpoints.read(resumeArg)?.ended` instead of refusing",
+      "plant_observed": "\u00d7 R5.2a \u2026 \u2192 the store could not answer and the door resumed anyway (checkpoint ended=true); it fell back to the checkpoint: expected true to be false"
+    },
+    {
+      "invariant_id": "R5.2b",
+      "test_name": "R5.2 \u2014 a store that cannot answer refuses the resume; it never falls back to the checkpoint > R5.2b gigStatus NEVER ANSWERS: within 30 s the resume is refused, naming the store, and not decided from the checkpoint",
+      "test_file": "tests/gig_runs_once_store_decides.test.ts",
+      "kind": "behavioural",
+      "drives": "dispatchTool(\"gig_dispatch\", { resume_gig_id }, deps) \u2014 src/server.ts, with ServerDeps.gigStatus never settling (fake timers, 30 s)",
+      "plant": "await deps.gigStatus with no timeout (today's src/server.ts) \u2014 RED AT HEAD 30183e1"
+    },
+    {
+      "invariant_id": "R5.3-completed",
+      "test_name": "R5.3 \u2014 the closed set is complete > R5.3 a store answering `completed` makes the resume a NEW gig carrying resumes (as failed/aborted do)",
+      "test_file": "tests/gig_runs_once_store_decides.test.ts",
+      "kind": "behavioural",
+      "drives": "dispatchTool(\"gig_dispatch\", { resume_gig_id }, deps) \u2014 src/server.ts, with ServerDeps.gigStatus",
+      "plant": "drop \"completed\" from CLOSED_GIG_STATUSES in src/server.ts",
+      "plant_observed": "\u00d7 R5.3 a store answering `completed` \u2026 \u2192 the store says `completed` and the door reopened the closed gig under its old id: expected '<id>' not to be '<id>'"
+    },
+    {
+      "invariant_id": "R5.3-cancelled",
+      "test_name": "R5.3 \u2014 the closed set is complete > R5.3 a store answering `cancelled` makes the resume a NEW gig carrying resumes (as failed/aborted do)",
+      "test_file": "tests/gig_runs_once_store_decides.test.ts",
+      "kind": "behavioural",
+      "drives": "dispatchTool(\"gig_dispatch\", { resume_gig_id }, deps) \u2014 src/server.ts, with ServerDeps.gigStatus",
+      "plant": "drop \"cancelled\" from CLOSED_GIG_STATUSES in src/server.ts",
+      "plant_observed": "\u00d7 R5.3 a store answering `cancelled` \u2026 \u2192 the store says `cancelled` and the door reopened the closed gig under its old id: expected '<id>' not to be '<id>'"
+    },
+    {
+      "invariant_id": "R5.3-running",
+      "test_name": "R5.3 \u2014 the closed set is complete > R5.3 a store answering `running` is OPEN: the resume keeps the gig's own id, even with a checkpoint that says it ended",
+      "test_file": "tests/gig_runs_once_store_decides.test.ts",
+      "kind": "behavioural",
+      "drives": "dispatchTool(\"gig_dispatch\", { resume_gig_id }, deps) \u2014 src/server.ts, with ServerDeps.gigStatus",
+      "plant": "add \"running\" to CLOSED_GIG_STATUSES (or let checkpoint.ended decide while a store is present)"
+    },
+    {
+      "invariant_id": "R5.3-queued",
+      "test_name": "R5.3 \u2014 the closed set is complete > R5.3 a store answering `queued` is OPEN: the resume keeps the gig's own id, even with a checkpoint that says it ended",
+      "test_file": "tests/gig_runs_once_store_decides.test.ts",
+      "kind": "behavioural",
+      "drives": "dispatchTool(\"gig_dispatch\", { resume_gig_id }, deps) \u2014 src/server.ts, with ServerDeps.gigStatus",
+      "plant": "add \"queued\" to CLOSED_GIG_STATUSES (or let checkpoint.ended decide while a store is present)"
+    },
+    {
+      "invariant_id": "R5.3-awaiting_approval",
+      "test_name": "R5.3 \u2014 the closed set is complete > R5.3 a store answering `awaiting_approval` is OPEN: the resume keeps the gig's own id, even with a checkpoint that says it ended",
+      "test_file": "tests/gig_runs_once_store_decides.test.ts",
+      "kind": "behavioural",
+      "drives": "dispatchTool(\"gig_dispatch\", { resume_gig_id }, deps) \u2014 src/server.ts, with ServerDeps.gigStatus",
+      "plant": "add \"awaiting_approval\" to CLOSED_GIG_STATUSES (or let checkpoint.ended decide while a store is present)"
+    },
+    {
+      "invariant_id": "R5.4",
+      "test_name": "R5.4 \u2014 rpcGigStatus is the reader, and its answer reaches the decision > R5.4 the real rpcGigStatus against a fake coltrane_mcp_gig_status: `failed` (row or one-row array) \u2192 a new gig; `awaiting_approval` \u2192 the old id; the bearer and gig ride the body",
+      "test_file": "tests/gig_runs_once_store_decides.test.ts",
+      "kind": "behavioural",
+      "drives": "rpcGigStatus(ctx) \u2014 src/genome_store.ts, as ServerDeps.gigStatus behind dispatchTool(\"gig_dispatch\", { resume_gig_id }, deps) \u2014 src/server.ts, with ServerDeps.gigStatus",
+      "plant": "read `(row as Record<string, unknown>)[\"state\"]` instead of [\"status\"] in rpcGigStatus",
+      "plant_observed": "\u00d7 R5.4 \u2026 \u2192 the store answered a header row saying failed through rpcGigStatus and the door did not treat it as closed: expected '<id>' not to be '<id>'"
     }
   ],
   "testing_method": "vitest, example-based and behavioural: every engine law drives workOnce (or runCli / openLocalQueue) through a stubbed global fetch that plays both hosts \u2014 the org store (ctx.baseUrl RPCs) and the drain service (COLTRANE_DRAIN_URL: header, outputs, storage, renew, release) \u2014 statefully, so a re-claim reads what the first worker's acknowledged writes left behind. The heartbeat's clock is injected (WorkOnceDeps.scheduleHeartbeat) and fired from inside the chair invocation; acknowledgement is observed by holding the store's answer back (a delayed Response) and asserting what had resolved when workOnce returned. E8 moves the lease constant with vi.doMock over src/lease.ts and asserts both derived numbers follow. New symbols are reached by variable specifiers and casts so tsc over tests/ stays clean.",
@@ -364,8 +441,16 @@
       "commit": "947f491bc685edd86dd8e4567b0411c71c08b9ea"
     },
     {
+      "path": "tests/gig_runs_once_resumed_reclaim.test.ts",
+      "commit": "b4503b7944f4367e79c1bfd6d8f4a78c13fef12c"
+    },
+    {
       "path": "tests/gig_runs_once_start_header.test.ts",
       "commit": "947f491bc685edd86dd8e4567b0411c71c08b9ea"
+    },
+    {
+      "path": "tests/gig_runs_once_store_decides.test.ts",
+      "commit": "b4503b7944f4367e79c1bfd6d8f4a78c13fef12c"
     },
     {
       "path": "tests/gig_runs_once_terminal_ack.test.ts",

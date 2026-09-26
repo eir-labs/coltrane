@@ -1208,7 +1208,28 @@ export async function workOnce(ctx: WorkerContext, deps: WorkOnceDeps): Promise<
       if (checkpoint) resumeFrom = resumes;
     }
     if (!checkpoint) {
-      const rebuilt = await rebuildFromDrain(ctx, claim, standard, outputs, resumes ?? claim.gig_id);
+      let rebuilt = await rebuildFromDrain(ctx, claim, standard, outputs, resumes ?? claim.gig_id);
+      // A RESUMING gig re-claimed on a fresh box has TWO sets of seals: the closed gig's (taken by
+      // reference) and its OWN, sealed and drained under its id before its box was lost. Rebuilding
+      // from the closed gig alone would pay again for every chair this gig already sealed. So its own
+      // drained seals are rebuilt too — as local copies under its own id, never drained back — and
+      // their roles join the closed gig's in the one checkpoint the resume reads.
+      if (resumes !== undefined) {
+        const own = await rebuildFromDrain(ctx, claim, standard, outputs, claim.gig_id);
+        if (own.ok && rebuilt.ok) {
+          const ownRoles = new Map(own.checkpoint.roles.map((r) => [r.role, r]));
+          rebuilt = {
+            ok: true,
+            checkpoint: {
+              ...rebuilt.checkpoint,
+              roles: [...rebuilt.checkpoint.roles.filter((r) => !ownRoles.has(r.role)), ...ownRoles.values()],
+              updated_at: own.checkpoint.updated_at > rebuilt.checkpoint.updated_at ? own.checkpoint.updated_at : rebuilt.checkpoint.updated_at,
+            },
+          };
+        } else if (own.ok) {
+          rebuilt = own;
+        }
+      }
       if (rebuilt.ok) {
         resumeFrom = rebuilt.checkpoint.gig_id;
         // Written to the LOCAL store because that is where the runtime's resume gate reads a

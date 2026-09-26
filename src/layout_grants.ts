@@ -75,6 +75,9 @@ export interface SeatGrants {
   /** Whether the seat holds a git role (Bash(@git_stage|@git_commit|@git_push)): its sandbox then
    *  opens `.git` — never `.git/hooks` or `.git/config`. */
   git_open: boolean;
+  /** Role tokens whose role the layout DECLARES absent (`null`): each granted nothing and refused
+   *  nothing — recorded so the chair's record shows why the seat holds less than its agent declares. */
+  absent_by_declaration: Array<{ token: string; role: string }>;
 }
 
 /**
@@ -196,6 +199,7 @@ export function resolveSeatGrants(args: ResolveSeatGrantsArgs): SeatGrants {
   const refusals: RoleRefusal[] = [];
   const refusedLiterals = new Set<string>();
   const heldRoles: string[] = [];
+  const absent: Array<{ token: string; role: string }> = [];
   /** An answered role whose entries carry grant structure is refused, naming the entry — an injected
    *  layout that never passed LayoutSchema is held to the same grammar. */
   const structural = (entries: readonly string[]): string | undefined => entries.find(carriesGrantStructure);
@@ -233,6 +237,10 @@ export function resolveSeatGrants(args: ResolveSeatGrantsArgs): SeatGrants {
       const prefixes = gitKey !== undefined
         ? (own(layout.git, gitKey) ? layout.git![gitKey] : undefined)
         : own(layout.commands, role) ? layout.commands![role as keyof NonNullable<Layout["commands"]>] : undefined;
+      if (prefixes === null) {
+        absent.push({ token: g, role }); // declared absent (`null`): grants nothing, refuses nothing
+        continue;
+      }
       if (!prefixes || prefixes.length === 0) {
         refusals.push({ token: g, role, reason: `the layout declares no ${gitKey !== undefined ? "git" : "command"} role "${role}", so the token grants nothing` });
         continue;
@@ -247,6 +255,10 @@ export function resolveSeatGrants(args: ResolveSeatGrantsArgs): SeatGrants {
       continue;
     }
     const globs = own(layout.paths, role) ? layout.paths![role as keyof NonNullable<Layout["paths"]>] : undefined;
+    if (globs === null) {
+      absent.push({ token: g, role }); // declared absent (`null`): grants nothing, refuses nothing
+      continue;
+    }
     if (!globs || globs.length === 0) {
       refusals.push({ token: g, role, reason: `the layout declares no path role "${role}", so the token grants nothing` });
       continue;
@@ -331,7 +343,7 @@ export function resolveSeatGrants(args: ResolveSeatGrantsArgs): SeatGrants {
   }
   const git_open = heldRoles.some((r) => own(GIT_ROLE_KEYS, r));
 
-  return { grants, refusals, target_paths_applied, denials, held_roles: heldRoles, egress_hosts, git_open };
+  return { grants, refusals, target_paths_applied, denials, held_roles: heldRoles, egress_hosts, git_open, absent_by_declaration: absent };
 }
 
 /** A path scope spelled in a form the CLI silently rewrites: a leading `./`, or `//` anywhere after the

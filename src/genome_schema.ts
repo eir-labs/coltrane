@@ -1567,16 +1567,20 @@ export const LAYOUT_COMMAND_ROLES = ["build", "test", "laws", "ship_dry", "publi
  *  to the seat's Bash sandbox — never `.git/hooks` or `.git/config`. */
 export const LAYOUT_GIT_ROLES = ["git_stage", "git_commit", "git_push"] as const;
 
+// A DECLARED ABSENCE. A role set to `null` — in paths, commands, git or egress — means "this repository
+// has none". A token for it grants NOTHING and does not refuse the chair (the resolver records it as
+// absent_by_declaration). A role that is simply MISSING is undeclared and still fails closed, and an
+// empty list is still refused: absence is only ever the explicit null.
 export const LayoutSchema = z
   .object({
     /** Path roles: each a list of globs, expanded to one `<Tool>(<glob>)` grant per glob. */
     paths: z
       .object({
-        source: LayoutGlobsSchema.optional(),
-        tests: LayoutGlobsSchema.optional(),
-        migrations: LayoutGlobsSchema.optional(),
-        scripts: LayoutGlobsSchema.optional(),
-        docs: LayoutGlobsSchema.optional(),
+        source: LayoutGlobsSchema.nullable().optional(),
+        tests: LayoutGlobsSchema.nullable().optional(),
+        migrations: LayoutGlobsSchema.nullable().optional(),
+        scripts: LayoutGlobsSchema.nullable().optional(),
+        docs: LayoutGlobsSchema.nullable().optional(),
       })
       .strict()
       .optional(),
@@ -1584,11 +1588,11 @@ export const LayoutSchema = z
      *  `publish` is the repository's publishing command (e.g. `gh pr create`). */
     commands: z
       .object({
-        build: LayoutEntriesSchema.optional(),
-        test: LayoutEntriesSchema.optional(),
-        laws: LayoutEntriesSchema.optional(),
-        ship_dry: LayoutEntriesSchema.optional(),
-        publish: LayoutEntriesSchema.optional(),
+        build: LayoutEntriesSchema.nullable().optional(),
+        test: LayoutEntriesSchema.nullable().optional(),
+        laws: LayoutEntriesSchema.nullable().optional(),
+        ship_dry: LayoutEntriesSchema.nullable().optional(),
+        publish: LayoutEntriesSchema.nullable().optional(),
       })
       .strict()
       .optional(),
@@ -1596,9 +1600,9 @@ export const LayoutSchema = z
      *  `Bash(@git_stage)`, `git.commit` by `Bash(@git_commit)`, `git.push` by `Bash(@git_push)`. */
     git: z
       .object({
-        stage: LayoutEntriesSchema.optional(),
-        commit: LayoutEntriesSchema.optional(),
-        push: LayoutEntriesSchema.optional(),
+        stage: LayoutEntriesSchema.nullable().optional(),
+        commit: LayoutEntriesSchema.nullable().optional(),
+        push: LayoutEntriesSchema.nullable().optional(),
       })
       .strict()
       .optional(),
@@ -1606,8 +1610,8 @@ export const LayoutSchema = z
      *  sandbox allows exactly the hosts of the roles it HOLDS (strictAllowlist); none by default. */
     egress: z
       .object(
-        Object.fromEntries([...LAYOUT_COMMAND_ROLES, ...LAYOUT_GIT_ROLES].map((r) => [r, LayoutEntriesSchema.optional()])) as
-          Record<(typeof LAYOUT_COMMAND_ROLES)[number] | (typeof LAYOUT_GIT_ROLES)[number], z.ZodOptional<typeof LayoutEntriesSchema>>,
+        Object.fromEntries([...LAYOUT_COMMAND_ROLES, ...LAYOUT_GIT_ROLES].map((r) => [r, LayoutEntriesSchema.nullable().optional()])) as
+          Record<(typeof LAYOUT_COMMAND_ROLES)[number] | (typeof LAYOUT_GIT_ROLES)[number], z.ZodOptional<z.ZodNullable<typeof LayoutEntriesSchema>>>,
       )
       .strict()
       .optional(),

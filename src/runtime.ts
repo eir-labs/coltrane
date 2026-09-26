@@ -302,6 +302,9 @@ export type GigProgressEvent =
        *  resolved_grants, false when the change named no target_paths — never absent for a model
        *  chair, so an un-narrowed seat is distinguishable from an unrecorded one. */
       target_paths_applied?: boolean;
+      /** Role tokens the layout DECLARED absent (`null`): granted nothing, refused nothing. Present
+       *  beside resolved_grants for a model chair. */
+      absent_by_declaration?: Array<{ token: string; role: string }>;
       /** contract-chair-session-continuity-v1 (O4) — the seat's `claude` session id (the uuid
        *  derived from (gig_id, role)) and whether THIS invocation RESUMED it (an amend round) rather
        *  than opening it. Present for a model chair; absent for a skill chair, which runs no session. */
@@ -3416,7 +3419,7 @@ export async function runGig(
     // chair, which runs no model at an effort.
     let resolvedEffort: Effort | undefined;
     // LAYOUT GRANTS — what the seat ran with, resolved at the invoke ctx site for chair_complete.
-    let seatRecord: { grants: string[]; target_paths_applied: boolean } | undefined;
+    let seatRecord: { grants: string[]; target_paths_applied: boolean; absent_by_declaration: Array<{ token: string; role: string }> } | undefined;
     // THE DIFF GATE (src/diff_gate.ts) — the tree's state before this seat ran, and its open window.
     const gateRead = diffGateReader();
     let gateBefore: TreeState | undefined;
@@ -3644,7 +3647,7 @@ export async function runGig(
             agent, layout: deps.layout, target_paths: targetPathsOf(p.gig_input ?? gigInput),
             venue: gigRealization && gigVenue ? gigVenue : undefined,
           });
-          seatRecord = { grants: seat.grants, target_paths_applied: seat.target_paths_applied };
+          seatRecord = { grants: seat.grants, target_paths_applied: seat.target_paths_applied, absent_by_declaration: seat.absent_by_declaration };
         }
         // THE DIFF GATE opens for every seat that CAN change the tree (a Write/Edit scope, or Bash):
         // the tree's state BEFORE the seat, and this seat's write scope. A tree the gate cannot read
@@ -4383,7 +4386,7 @@ export async function runGig(
       // leaves it undefined and the field stays absent).
       ...(resolvedEffort !== undefined ? { effort: resolvedEffort } : {}),
       // LAYOUT GRANTS — the grants the seat ran with, and whether target_paths narrowed them.
-      ...(seatRecord !== undefined ? { resolved_grants: seatRecord.grants, target_paths_applied: seatRecord.target_paths_applied } : {}),
+      ...(seatRecord !== undefined ? { resolved_grants: seatRecord.grants, target_paths_applied: seatRecord.target_paths_applied, absent_by_declaration: seatRecord.absent_by_declaration } : {}),
       // contract-chair-session-continuity-v1 (O4) — record the seat's session id (the uuid derived
       // from (gig_id, role)) and whether THIS invocation resumed it. A model chair only; a skill
       // chair (no p.agent) runs no session, so both fields stay absent. Computed here from the same

@@ -81,6 +81,18 @@ export const GENOME_ROWS = {
       ],
       output_types: ["Signal"],
     },
+    // one model chair, then a chair a PERSON holds: parks without an approval, resumes with one
+    {
+      slug: "scan-then-approve-v0", domain: "demo", status: "active",
+      phases: [
+        { name: "scan", chairs: [chair("scan", [], [])] },
+        {
+          name: "approve",
+          chairs: [{ role: "approve", human: true, agent_slug: "", depends_on: ["scan"], input_contract: [], output_contract: ["Judgment"], optional_outputs: [], required_skills: [] }],
+        },
+      ],
+      output_types: ["Signal", "Judgment"],
+    },
     // a human chair only — completes with ZERO model invocations when the claim carries its approval,
     // which is what lets the CLI law run `coltrane work` end to end with the real chair invoker
     {
@@ -139,6 +151,7 @@ export interface HostedOpts {
   renew?: (body: Record<string, unknown>) => Answer;
   release?: (body: Record<string, unknown>) => Answer;
   gigFail?: () => Answer;
+  gigPark?: () => Answer;
 }
 
 export interface HostedStore {
@@ -195,7 +208,7 @@ export function hostedStore(initial: HostedOpts): HostedStore {
         return ok(outputs.filter((o) => o["gig_id"] === body["p_gig"]));
       }
       if (fn === "coltrane_mcp_gig_fail") return opts.gigFail ? await opts.gigFail() : ok(true);
-      if (fn === "coltrane_mcp_gig_park") return ok(true);
+      if (fn === "coltrane_mcp_gig_park") return opts.gigPark ? await opts.gigPark() : ok(true);
       return new Response(`unexpected store rpc ${fn}`, { status: 500 });
     }
 

@@ -98,8 +98,9 @@ function nodeMajor(): number {
  *
  * The sandbox spawns with `--permission`, which is Node 22+. On Node 20 the child dies with
  * `node: bad option: --permission` — a message that names the flag rather than the reason, and
- * appears once per skill rather than once per process. `engines` in package.json says `>=26`,
- * but npm treats that as advisory, so a consumer on 20 reaches here anyway.
+ * appears once per skill rather than once per process. The package installs and imports as a library
+ * on Node 24 (founder ruling, 26 Sep 2026: the floor lives where skills run, not at install), so a
+ * library consumer below the floor reaches here — and this is where it is refused.
  *
  * Refusing loudly is the only honest option. There is no degraded mode: running a skill on a
  * runtime with no permission model means running it UNSANDBOXED, and silently doing that would
@@ -117,9 +118,10 @@ function assertSandboxCapableRuntime(): void {
   const major = nodeMajor();
   if (major < MIN_NODE_FOR_SANDBOX) {
     throw new Error(
-      `coltrane needs Node ${MIN_NODE_FOR_SANDBOX}+ to execute skills; this is Node ${process.versions.node}. ` +
-        `Skill execution is sandboxed with --permission, which does not exist before Node ${MIN_NODE_FOR_SANDBOX}. ` +
-        `Running without it would execute skill code unsandboxed, so it is refused rather than degraded.`,
+      `coltrane needs Node ${MIN_NODE_FOR_SANDBOX} or newer to execute skills; this is Node ${process.versions.node}. ` +
+        `A skill runs under the Node permission model, and its network controls (--allow-net, the only gate on a ` +
+        `skill's network grant) do not exist before Node ${NODE_WITH_ALLOW_NET}, which is end-of-life. ` +
+        `Running here would leave skill code without network controls, so it is refused rather than degraded.`,
     );
   }
 }

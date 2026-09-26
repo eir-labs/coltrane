@@ -12,6 +12,7 @@
 import { randomUUID } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { containedPath } from "./contained_path.js";
 import type { Registry } from "./registry.js";
 import { CORE_TYPES, type CoreType } from "./core_types.js";
 import { validateOutput } from "./output_validation.js";
@@ -846,6 +847,9 @@ export function createOutputStore(registry: Registry, options?: OutputStoreOptio
       // than the one this boundary actually asks.
       const gate = checkWritable({ core_type: o.core_type, domain_type: o.domain_type, data: o.data, input_refs: o.input_refs });
       if (!gate.valid) throw new OutputStoreError(gate.reason ?? "output rejected");
+      // #559 — the gig id is a caller argument (output_write); its row file must land inside the
+      // outputs directory. Checked before the record exists anywhere, memory included.
+      const outFile = outputsDir ? containedPath("output write", outputsDir, o.gig_id, ".jsonl") : undefined;
       const domain_type_version = o.domain_type_version ?? 1;
       const rec: OutputRecord = {
         id: randomUUID(),
@@ -886,10 +890,10 @@ export function createOutputStore(registry: Registry, options?: OutputStoreOptio
         ...(o.shard ? { shard: o.shard } : {}),
       };
       outputs.set(rec.id, rec);
-      if (outputsDir) {
+      if (outFile) {
         // Mark this gig hydrated so we don't re-read what we just wrote.
         hydratedGigs.add(rec.gig_id);
-        appendJsonl(path.join(outputsDir, `${rec.gig_id}.jsonl`), rec);
+        appendJsonl(outFile, rec);
       }
       // Two-tier mirror: a compact Tier-1 metadata row + a content-addressed Tier-2 payload
       // artifact (+ credential-gated remote drain). This is what MCP retrieval traverses, and it
@@ -940,10 +944,11 @@ export function createOutputStore(registry: Registry, options?: OutputStoreOptio
         primitive,
         created_at: new Date().toISOString(),
       };
+      // #559 — a record hydrated from disk carries whatever gig id its row says; contain it too,
+      // before the edge exists anywhere.
+      const refFile = refsDir ? containedPath("output ref write", refsDir, fromRec.gig_id, ".jsonl") : undefined;
       edges.push(ref);
-      if (refsDir) {
-        appendJsonl(path.join(refsDir, `${fromRec.gig_id}.jsonl`), ref);
-      }
+      if (refFile) appendJsonl(refFile, ref);
       return ref;
     },
 

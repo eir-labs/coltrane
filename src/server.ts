@@ -31,6 +31,7 @@ import type { GenomeStore, GenomeClass } from "./genome_store.js";
 import { runSkillFixtures, executeSkill, loadFixtures } from "./skill_subprocess.js";
 import { evolveSkill } from "./skills.js";
 import { sealAgentDefinition, sealDefinition, sealSkillPackage, recordIdentity } from "./genome_writer.js";
+import { containedPath } from "./contained_path.js";
 import {
   createOutputStore, defaultOutputsPersistDir, performanceRoot,
   type OutputStore, type OutputRecord, type TraceDirection, type TraceMissingNode, type TraceRecordNode,
@@ -1750,7 +1751,9 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         const roleFilter = args["role"] ? String(args["role"]) : undefined;
         const typeFilter = args["type"] ? String(args["type"]) : undefined;
         const tail = typeof args["tail"] === "number" ? (args["tail"] as number) : undefined;
-        const dir = deps.gig_log_base ? join(deps.gig_log_base, "gigs", gid) : undefined;
+        // #559 — the gig id is caller data, and this handler readdir()s and returns every .jsonl under
+        // the directory it names: that directory must be inside gigs/, or nothing is read.
+        const dir = deps.gig_log_base ? containedPath("gig_logs", join(deps.gig_log_base, "gigs"), gid) : undefined;
         if (!dir || !existsSync(dir)) {
           return { ok: true, requires_approval: approval, data: { gig_id: gid, roles: [], count: 0, events: [] } };
         }
@@ -2777,8 +2780,11 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
           // agents map (a hosted surface has no filesystem — the STORE genome is the base,
           // and the seam above persists the merged definition back through the store).
           let currentDef: AgentDef;
-          if (deps.genome_dir && existsSync(join(deps.genome_dir, "agents", `${evolveSlug}.json`))) {
-            currentDef = JSON.parse(readFileSync(join(deps.genome_dir, "agents", `${evolveSlug}.json`), "utf-8")) as AgentDef;
+          // #559 — the base file must be inside agents/: a slug whose path lands elsewhere is refused
+          // before it is read, so bytes from outside the root are never merged and echoed back.
+          const agentFile = deps.genome_dir ? containedPath("agent_evolve read", join(deps.genome_dir, "agents"), evolveSlug, ".json") : undefined;
+          if (agentFile && existsSync(agentFile)) {
+            currentDef = JSON.parse(readFileSync(agentFile, "utf-8")) as AgentDef;
           } else if (deps.agents?.has(evolveSlug)) {
             currentDef = deps.agents.get(evolveSlug) as unknown as AgentDef;
           } else {

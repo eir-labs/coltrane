@@ -569,6 +569,9 @@ export interface GigHeaderRecord {
   cold_run_reason?: string;
   /** The ENDED gig this one resumes as a new gig (what's closed stays closed). */
   resumes?: string;
+  /** Why an `aborted` run was stopped, as a token a consumer can read (`timeout` for the drain's
+   *  deadline) — not only as prose inside `error`. */
+  abort_reason?: string;
 }
 
 /** The sink row, derived entirely from the run's own record (engine "complete" → sink "completed"). */
@@ -585,6 +588,7 @@ export function gigHeaderBody(rec: GigHeaderRecord): Record<string, unknown> {
   if (rec.error !== undefined) manifest["error"] = rec.error;
   if (rec.cold_run_reason !== undefined) manifest["cold_run_reason"] = rec.cold_run_reason;
   if (rec.resumes !== undefined) manifest["resumes"] = rec.resumes;
+  if (rec.abort_reason !== undefined) manifest["abort_reason"] = rec.abort_reason;
   return {
     id: rec.gig_id,
     standard_slug: rec.standard_slug,

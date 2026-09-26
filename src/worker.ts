@@ -1031,6 +1031,8 @@ export function approvalWiring(
 
 /** The drain's own run deadline, as the abort reason — so the run ends `aborted`/timeout. */
 class DrainDeadline extends Error {
+  /** The token the aborted header's manifest.abort_reason carries (abortReasonCode, src/runtime.ts). */
+  readonly code = "timeout";
   constructor(readonly ms: number) {
     super(`timeout: the drain's run deadline (${ms} ms) passed before the gig finished`);
     this.name = "DrainDeadline";

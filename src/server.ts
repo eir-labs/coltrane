@@ -114,7 +114,20 @@ export function parseWindow(raw: unknown, now: number): { after?: string; error?
   return { after: new Date(now - n * ms).toISOString() };
 }
 
+/** Store statuses that mean a gig is CLOSED: what's closed is closed, so a resume of it is a new gig. */
+const CLOSED_GIG_STATUSES = new Set(["failed", "aborted", "completed", "complete", "cancelled", "canceled"]);
+
 export interface ServerDeps {
+  /**
+   * THE STORE'S ANSWER TO "IS THIS GIG CLOSED?" — the gig's status as the store holds it (the host
+   * wires coltrane_mcp_gig_status, e.g. rpcGigStatus(ctx) from ./genome_store). When present, it and
+   * not the local checkpoint decides whether a `resume_gig_id` names a CLOSED gig (failed, aborted,
+   * completed, cancelled), which is then resumed as a NEW gig. The checkpoint cannot know: a lost
+   * lease writes no `ended`, and a gig that ended on another box left nothing here. Absent = no
+   * store, and the checkpoint decides. A store that cannot answer REFUSES the resume rather than
+   * guessing which id to write under.
+   */
+  gigStatus?: ((gig_id: string) => Promise<string | null | undefined>) | undefined;
   registry: Registry;
   outputs: OutputStore;
   ledger: Ledger;
@@ -1170,7 +1183,16 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         // `resumes: <old id>`, that takes the old seals as inputs by reference. A PARKED gig is not
         // ended, and its approval-resume keeps its own id.
         let resumesEnded: string | undefined;
-        if (resumeArg !== undefined && deps.checkpoints) {
+        if (resumeArg !== undefined && deps.gigStatus) {
+          let status: string | null | undefined;
+          try {
+            status = await deps.gigStatus(resumeArg);
+          } catch (e) {
+            return { ok: false, requires_approval: approval,
+              error: `gig_dispatch: the store could not say whether gig "${resumeArg}" is closed, so the resume is refused rather than guessing which id to write under — ${e instanceof Error ? e.message : String(e)}` };
+          }
+          if (typeof status === "string" && CLOSED_GIG_STATUSES.has(status)) resumesEnded = resumeArg;
+        } else if (resumeArg !== undefined && deps.checkpoints) {
           try {
             if (deps.checkpoints.read(resumeArg)?.ended) resumesEnded = resumeArg;
           } catch { /* unreadable: the resume gate refuses it with the reason */ }

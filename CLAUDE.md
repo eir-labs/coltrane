@@ -421,6 +421,36 @@ cannot be computed (a rule rooted at `//` or `~`), the matcher denies.
   through the engine: `stampChangeAddresses` refuses a change-set that names one, and the engine has
   no `git add`/`commit`/`push` of its own.
 
+**Git and the network come only from the layout, through held role tokens.** A layout may declare:
+- `git: {stage, commit, push}`, command prefixes reached by `Bash(@git_stage)`, `Bash(@git_commit)`
+  and `Bash(@git_push)`;
+- `commands.publish`, reached by `Bash(@publish)`;
+- `egress: {<role>: [hosts]}`.
+
+A seat holding a git role has `.git` opened in its sandbox, except `.git/hooks` and `.git/config`,
+which stay denied. Every Bash seat's sandbox carries `network: {allowedDomains: <egress hosts of the
+roles it holds>, strictAllowlist: true}`, so it reaches no host by default. A literal
+`Bash(git add:*)` opens nothing, so the shipped git agents fail closed until they are migrated to role
+tokens (a separate genome change).
+
+**Grant grammar.** The CLI splits `--allowedTools` on `,` and on spaces outside parentheses, and the
+first `)` closes a grant (`Hp` in 2.1.283). So:
+- no layout entry may carry `(`, `)`, `,` or edge whitespace (`LayoutSchema`, and the resolver for an
+  injected layout);
+- every emitted grant must split into exactly itself (`splitAsTheCliDoes`);
+- the invoker re-splits the joined argv before spawning.
+
+A grant that smuggles another is refused, naming it.
+
+**Protected names are compared folded, never literally.** The fold (`foldName`) is NFKD, then drops
+combining marks, then full case-folds, then NFKC. So `coltrane.layout.jſon`, `.ｇｉｔ` and `.ġit` are
+the protected paths they spell on APFS. A target that is a symlink (at any component) or a hardlink
+is refused at dispatch, because protection follows the file, not its name.
+
+**Rooms never run as root.** A root drain's room runs as `1000:1000` (the images' `USER node`), and
+the realizer, running as root, chowns the workspace to that user. Any other drain's room runs as the
+drain's own uid.
+
 **The relative-path trap.** The CLI silently IGNORES a relative sandbox path: a relative deny is a
 deny that is not there. Every sandbox path is built absolute (and realpath-resolved on the host),
 and a non-absolute tree is refused rather than emitted.

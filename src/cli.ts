@@ -34,6 +34,7 @@ import { openLocalQueue, selectQueueBacking, LOCAL_QUEUE_DIR_VAR } from "./local
 import { workerCredentialMode } from "./worker_env.js";
 import { drainPreflight } from "./drain_preflight.js";
 import { selectChairInvoker } from "./invoker_selection.js";
+import { engineServerForRegistry } from "./run_genome_engine.js";
 import type { Registry } from "./registry.js";
 import type { AgentInvoker } from "./runtime.js";
 import { dockerComposeRealizer } from "./venue_realizer.js";
@@ -691,6 +692,15 @@ export function drainChairInvoker(env: Record<string, string | undefined>, regis
       registry,
       model: env["COLTRANE_MODEL"],
       ...(env["COLTRANE_CHAIR_TIMEOUT_MS"] ? { timeout_ms: Number(env["COLTRANE_CHAIR_TIMEOUT_MS"]) } : {}),
+      // THE CLAUDE SEAT'S IN-TURN GATE (gig cde960ea). Without these two the drained Claude seat was a
+      // TEXT seat: never offered output_write, so the seal was its first and only judgment and a
+      // rejection killed the gig with no repair turn. It now seals in-band like the server door's seat
+      // — but its engine child judges by the RUN's registry (the org store's types), materialized as the
+      // child's genome, never the file genome the child would otherwise load from an untrusted cwd.
+      // Built only when this door seats Claude: a completions door never spawns an engine child.
+      ...(env["COLTRANE_COMPLETIONS_URL"]
+        ? {}
+        : { sealVia: "output_write" as const, engineServer: engineServerForRegistry(registry) }),
     },
   });
 }

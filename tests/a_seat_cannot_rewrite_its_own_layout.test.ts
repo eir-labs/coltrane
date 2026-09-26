@@ -15,7 +15,8 @@
 //
 //   law                                          kind         drives                                      plant
 //   ** source → the layout file is denied        behavioural  resolveSeatGrants — src/layout_grants.ts    remove the layout-file exclusion (denials: [])
-//   bare Write → denied too                      behavioural  same                                        only deny for globs, not bare Write/Edit
+//   bare Write → denied too (access unset)       behavioural  same                                        only deny for scoped grants, not a bare Write/Edit
+//   code_tool_access full → denied               behavioural  same                                        drop the code_tool_access half of the deny
 //   a target naming the file is dropped          behavioural  same                                        keep Write(<target>) when the target is the
 //                                                                                                         layout file
 //   the spawn cannot write it (argv)             behavioural  makeClaudeInvoker(...) — src/claude_invoker  omit resolveSeatGrants().denials from the
@@ -32,8 +33,11 @@ const WIDE: Layout = { paths: { source: ["**"] } };
 const DENY_WRITE = `Write(${LAYOUT_FILE})`;
 const DENY_EDIT = `Edit(${LAYOUT_FILE})`;
 
-const writer = (allowed_tools: string[]) =>
-  testAgent({ slug: "writer", primitives: ["CREATE"], input_types: [], output_types: ["built-thing"], domain: "demo", allowed_tools, code_tool_access: "full" } as never);
+/** A seat holding exactly `allowed_tools`. `code_tool_access` is left at its default unless a law
+ *  names it: "write"/"full" independently keep bare Write/Edit in the cage, so a fixture that set it
+ *  everywhere could not tell whether the bare-GRANT half of the deny exists (round 3, surviving plant 1). */
+const writer = (allowed_tools: string[], code_tool_access?: "read" | "write" | "full") =>
+  testAgent({ slug: "writer", primitives: ["CREATE"], input_types: [], output_types: ["built-thing"], domain: "demo", allowed_tools, ...(code_tool_access ? { code_tool_access } : {}) } as never);
 
 async function spawnFlags(agent: Agent, over: Record<string, unknown>): Promise<{ spawned: boolean; allowed: string[]; disallowed: string[]; error: string }> {
   let args: string[] | undefined;
@@ -57,11 +61,19 @@ describe("no self-widening — the layout file is never writable by a seat", () 
     expect(r.grants).not.toContain(DENY_WRITE);
   });
 
-  it("a BARE Write literal reaches every file — the layout file is denied for it too", async () => {
+  it("a BARE Write literal reaches every file — the layout file is denied for it too (no code_tool_access in play)", async () => {
     const L = await loadLayoutGrants();
-    const r = L.resolveSeatGrants({ agent: writer(["Read", "Write"]) });
+    const agent = writer(["Read", "Write"]);
+    expect((agent as { code_tool_access?: string }).code_tool_access ?? "(unset)", "fixture: this law isolates the bare-grant half").not.toMatch(/^(write|full)$/);
+    const r = L.resolveSeatGrants({ agent });
     expect(r.grants, "the literal is unchanged (RED-DEF-14)").toEqual(["Read", "Write"]);
     expect(r.denials, "a bare Write can rewrite the layout file").toContain(DENY_WRITE);
+  });
+
+  it("code_tool_access \"full\" with NO Write grant still keeps Write in the cage — the layout file is denied for it", async () => {
+    const L = await loadLayoutGrants();
+    const r = L.resolveSeatGrants({ agent: writer(["Read"], "full") });
+    expect(r.denials, "the cage's implicit Write can rewrite the layout file").toEqual(expect.arrayContaining([DENY_WRITE, DENY_EDIT]));
   });
 
   it("a change whose target_paths NAME the layout file does not get a grant for it", async () => {
@@ -73,7 +85,7 @@ describe("no self-widening — the layout file is never writable by a seat", () 
   });
 
   it("the spawn: --disallowedTools carries the layout-file denials beside Write(**), and --allowedTools holds no exact grant that would cancel them", async () => {
-    const { spawned, allowed, disallowed, error } = await spawnFlags(writer(["Read", "Write(@source)", "Edit(@source)"]), { layout: WIDE });
+    const { spawned, allowed, disallowed, error } = await spawnFlags(writer(["Read", "Write(@source)", "Edit(@source)"], "full"), { layout: WIDE });
     expect(spawned, `the invoker never reached the spawn: ${error}`).toBe(true);
     expect(allowed, "non-vacuity: the ** source reached the spawn").toContain("Write(**)");
     expect(disallowed, "the spawn can write coltrane.layout.json").toEqual(expect.arrayContaining([DENY_WRITE, DENY_EDIT]));
@@ -82,7 +94,7 @@ describe("no self-widening — the layout file is never writable by a seat", () 
   });
 
   it("the spawn, targeted at the layout file: still denied, still no exact grant", async () => {
-    const { spawned, allowed, disallowed, error } = await spawnFlags(writer(["Write(@source)"]), {
+    const { spawned, allowed, disallowed, error } = await spawnFlags(writer(["Write(@source)"], "full"), {
       layout: WIDE, gig_input: { request_text: "x", target_paths: [LAYOUT_FILE, "src/a.ts"] },
     });
     expect(spawned, `the invoker never reached the spawn: ${error}`).toBe(true);

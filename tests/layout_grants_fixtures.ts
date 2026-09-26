@@ -31,6 +31,22 @@
 //   src/claude_invoker.ts, src/completions_invoker.ts
 //                          the seat's grants come from resolveSeatGrants(agent, ctx.layout,
 //                            ctx.gig_input.target_paths, ctx.venue).
+// ROUND 3:
+//   target_paths entries that are absolute, contain `..` segments or backslashes, or otherwise do not
+//     name a path inside the tree are REFUSED at dispatch (runGig, naming the entry) and never
+//     normalised into a grant by resolveSeatGrants.
+//   the completions invoker refuses a chair whose effective grants hold ANY scoped grant (`X(...)`),
+//     naming it, before any model call — it cannot enforce a scope.
+//   BASH SANDBOX: the Claude invoker's single `--settings` JSON carries, for any seat whose resolved
+//     grants include Bash, `sandbox: { enabled: true, failIfUnavailable: true,
+//     allowUnsandboxedCommands: false, excludedCommands: [] | absent, filesystem: { denyWrite: [...] } }`
+//     with ABSOLUTE paths only, denying <tree>/coltrane.layout.json, <tree>/.git and <tree>/.claude,
+//     where <tree> is ctx.seatExec.workspace in a room, else ctx.tree_root (threaded by runGig from
+//     RunDeps.tree_root). `--setting-sources` excludes project and local.
+//   DIFF GATE: after a seat returns, runGig compares the tree's `git status --porcelain -z` against the
+//     state before the seat ran; any changed path (modified, added, untracked, deleted, either side of a
+//     rename) outside the seat's resolved Write/Edit scope refuses the chair, naming the paths, and
+//     nothing from that chair is sealed.
 // target_paths travel where the change-request already travels: the gig payload (ctx.gig_input), flat,
 // exactly as `repository` does (resolveWorkingRepo reads claim.input.repository, src/run_deps.ts).
 import * as GenomeSchemaModule from "../src/genome_schema.js";
@@ -173,3 +189,13 @@ export const IMPLEMENTER_FILE: Record<string, unknown> = {
   behavioral_primitives: ["executor", "critic"],
   allowed_tools: ["Read", "Write(@source)", "Edit(@tests)"],
 };
+
+/** Every `--settings` JSON on an argv, parsed. */
+export function settingsOf(args: readonly string[]): Record<string, unknown>[] {
+  const out: Record<string, unknown>[] = [];
+  for (let i = 0; i < args.length - 1; i++) {
+    if (args[i] !== "--settings") continue;
+    try { out.push(JSON.parse(args[i + 1]!) as Record<string, unknown>); } catch { out.push({ unparseable: args[i + 1] }); }
+  }
+  return out;
+}

@@ -11,6 +11,7 @@
 //   no layout → nothing, refusal names role      behavioural  resolveSeatGrants — src/layout_grants.ts default a missing layout's role to ["**"]
 //   undeclared role → nothing, names it          behavioural  same                                    default a missing role to ["**"]
 //   literals beside survive                      behavioural  same                                    drop every grant when any role refuses
+//   preflight judges expanded grants             behavioural  runGig preflight — src/runtime.ts          resolveAgentGrants over ag.allowed_tools (raw tokens)
 //   the chair is refused at dispatch, by role    behavioural  runGig — src/runtime.ts                 ignore resolveSeatGrants().refusals when
 //                                                                                                     seating a chair (invoke anyway)
 import { describe, it, expect } from "vitest";
@@ -65,5 +66,34 @@ describe("RED-DEF-13 — fail closed on a missing role or layout", () => {
     }
     expect(invoked, "a chair whose role the layout does not declare was seated anyway").toBe(0);
     expect(said, `the refusal does not name the missing role: ${said.slice(0, 300)}`).toMatch(/migrations/);
+  });
+
+  // ROUND 3, surviving plant 7 — the dispatch preflight's provider check must judge the EXPANDED grants,
+  // never raw tokens. It is discriminating in exactly one shape, and this law is written to that shape:
+  // a role token over a NON-host tool (an MCP tool) that the layout cannot answer. Expanded, the token
+  // grants nothing, so the only offender is the missing role. Judged raw, `mcp__ghost__do(@source)` is
+  // ALSO reported as a dead tool name — a second, wrong diagnosis beside the right one. For a host tool
+  // (`Write(@source)`) raw and expanded resolve by the same base name, so no other shape can tell them
+  // apart; the law guards the diagnosis an operator reads, not an additional refusal.
+  it("the dispatch preflight judges the EXPANDED grants: an unanswered MCP role token is refused for its role, not also misnamed a dead tool", async () => {
+    const agent = seat(["Read", "mcp__ghost__do(@source)"]);
+    const standard = {
+      slug: "ghost-v1", domain: "demo", agents: [agent],
+      phases: [{ name: "p", chairs: [{ role: "m", agent_slug: "migrator", depends_on: [], input_contract: [], output_contract: ["note"], required_skills: [] }] }],
+    } as unknown as Standard;
+    const registry = createRegistry();
+    registry.registerType({ slug: "note", extends: "Signal", domain: "demo", schema: { properties: { value: { type: "string" } } }, required_fields: [] } as never);
+    let err: unknown;
+    try {
+      await runGig(standard, {}, {
+        outputs: createOutputStore(registry), ledger: new MemoryLedger(), invoke: () => ({}),
+        toolProviders: new Map(), mcpServerConfigs: {},
+      } as never);
+    } catch (e) {
+      err = e;
+    }
+    const kinds = ((err as { offenders?: Array<{ kind: string }> } | undefined)?.offenders ?? []).map((o) => o.kind);
+    expect(kinds, `the preflight did not refuse the unanswered role: ${String(err)}`).toContain("layout-role");
+    expect(kinds, "the preflight ALSO called the raw role token a dead tool name — it judged raw tokens, not the expansion").not.toContain("tool-grant");
   });
 });

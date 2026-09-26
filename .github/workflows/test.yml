@@ -36,7 +36,8 @@ permissions:
 
 # Node 26 only: the floor (26 Sep 2026). --allow-net, the only network gate for a skill, arrived in
 # Node 25 (odd, end-of-life June 2026); below it an ungranted skill can fetch freely.
-# package.json's engines field says >=26 to match.
+# The floor is enforced where skills run (runtime_floor, executeSkill); package.json's engines field
+# says >=24 so a library consumer can install and import.
 jobs:
   typecheck:
     name: typecheck (${{ matrix.os }}, node ${{ matrix.node }})

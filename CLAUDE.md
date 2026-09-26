@@ -367,8 +367,23 @@ entry is never normalised into a grant. The completions invoker refuses any scop
 (`Write(…)`, `Read(…)`, `Bash(…)`, `WebFetch(…)`), because it offers tools by base name and cannot
 carry a scope to the model.
 
-**No self-widening.** Whenever a seat's Write/Edit covers `coltrane.layout.json`, the spawn is
-denied `Write(coltrane.layout.json)`/`Edit(coltrane.layout.json)`.
+**No self-widening, no reach into protected paths.** The protected paths are
+`coltrane.layout.json`, `.git/`, `.claude/` and the engine's own `.coltrane/`. Whenever a seat's
+Write/Edit *could* reach one of them under the CLI's own matching, the spawn is denied it:
+`Write(coltrane.layout.json)`, `Write(.coltrane/**)`, and the same for `.git/**` and `.claude/**`,
+each with its Edit twin. A bare Write or `code_tool_access` write/full counts. No target path, and no
+exact grant, ever names a protected path.
+
+**Scope matching follows the CLI, not node.** The installed CLI (2.1.283) matches a Write/Edit rule
+with the `ignore` package, i.e. gitignore semantics. This was read from its bundle
+(`matchingRuleForInput`). Three consequences:
+- `**` reaches dot-directories (node's `matchesGlob` says it does not);
+- a pattern with no slash matches at any depth;
+- a matched directory covers its contents.
+
+The engine uses one matcher that reimplements those rules (`src/grant_scope.ts`, checked against
+`ignore` 5.3.2). The resolver, the denials and the diff gate all use it. Where the CLI's answer
+cannot be computed (a rule rooted at `//` or `~`), the matcher denies.
 
 **Bash is path-scoped by two mechanisms.**
 - **Outside the tree and the protected files: the sandbox.** Every seat that can run Bash (granted,
@@ -386,8 +401,10 @@ denied `Write(coltrane.layout.json)`/`Edit(coltrane.layout.json)`.
   is sealed or shipped. This covers modified, added, untracked and deleted files, and both sides of
   a rename.
 
-  The gate does not see paths git ignores, nor the engine's own `.coltrane/` (which the sandbox
-  denies to Bash).
+  The gate does not see paths git ignores, nor the engine's own `.coltrane/`. `.coltrane/` is denied
+  to Bash by the sandbox and to Write/Edit by the denials. An ignored path never leaves the tree
+  through the engine: `stampChangeAddresses` refuses a change-set that names one, and the engine has
+  no `git add`/`commit`/`push` of its own.
 
 **The relative-path trap.** The CLI silently IGNORES a relative sandbox path: a relative deny is a
 deny that is not there. Every sandbox path is built absolute (and realpath-resolved on the host),

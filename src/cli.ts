@@ -34,6 +34,7 @@ import { openLocalQueue, selectQueueBacking, LOCAL_QUEUE_DIR_VAR } from "./local
 import { workerCredentialMode } from "./worker_env.js";
 import { drainPreflight } from "./drain_preflight.js";
 import { selectChairInvoker } from "./invoker_selection.js";
+import { engineServerForRegistry } from "./run_genome_engine.js";
 import type { Registry } from "./registry.js";
 import type { AgentInvoker } from "./runtime.js";
 import { dockerComposeRealizer } from "./venue_realizer.js";
@@ -515,7 +516,12 @@ export async function runCli(argv: readonly string[], io: CliIO): Promise<number
             (n, row) => n + ((row as { usage?: { total_cost_usd?: number } }).usage?.total_cost_usd ?? 0),
             0,
           );
-          line(io, `  captured spend: $${total.toFixed(2)} across ${settledRows.length} chair invocation(s) that settled`);
+          const unpriced = capturedRows.reduce(
+            (n, row) => n + ((row as { usage?: { unpriced_invocations?: number } }).usage?.unpriced_invocations ?? 0),
+            0,
+          );
+          line(io, `  captured spend: $${total.toFixed(2)} across ${settledRows.length} chair invocation(s) that settled` +
+            (unpriced > 0 ? `; ${unpriced} unpriced (no known price), so the total is a lower bound` : ""));
         } else {
           line(io, `  captured spend: not captured — no chair invocation settled a usage report before the failure`);
         }
@@ -541,9 +547,20 @@ export async function runCli(argv: readonly string[], io: CliIO): Promise<number
         return 0; // waiting on a person is not a failure
       }
       if (d.manifest) {
-        const m = d.manifest as { output_count?: number; run_fingerprint?: string; usage?: { total_cost_usd?: number } };
+        const m = d.manifest as {
+          output_count?: number; run_fingerprint?: string; usage?: { total_cost_usd?: number; unpriced_invocations?: number };
+        };
+        // An invocation with no known price is never folded in as a bare total: "$0.00" over an unpriced
+        // run reads as "ran free". Say unpriced, and what the priced part came to.
+        const unpriced = m.usage?.unpriced_invocations ?? 0;
+        const spend =
+          m.usage?.total_cost_usd === undefined
+            ? ""
+            : unpriced > 0
+              ? `, unpriced (${unpriced} invocation(s) with no known price; $${m.usage.total_cost_usd.toFixed(2)} priced)`
+              : `, $${m.usage.total_cost_usd.toFixed(2)}`;
         line(io, `complete — ${m.output_count ?? 0} sealed output(s)` +
-          (m.usage?.total_cost_usd !== undefined ? `, $${m.usage.total_cost_usd.toFixed(2)}` : "") +
+          spend +
           (m.run_fingerprint ? `, fingerprint ${m.run_fingerprint.slice(0, 12)}` : ""));
       }
       // contract-unknown-gig-input-v1 (O2, CLI) — a completing dispatch NAMES the payload keys the
@@ -691,6 +708,15 @@ export function drainChairInvoker(env: Record<string, string | undefined>, regis
       registry,
       model: env["COLTRANE_MODEL"],
       ...(env["COLTRANE_CHAIR_TIMEOUT_MS"] ? { timeout_ms: Number(env["COLTRANE_CHAIR_TIMEOUT_MS"]) } : {}),
+      // THE CLAUDE SEAT'S IN-TURN GATE (gig cde960ea). Without these two the drained Claude seat was a
+      // TEXT seat: never offered output_write, so the seal was its first and only judgment and a
+      // rejection killed the gig with no repair turn. It now seals in-band like the server door's seat
+      // — but its engine child judges by the RUN's registry (the org store's types), materialized as the
+      // child's genome, never the file genome the child would otherwise load from an untrusted cwd.
+      // Built only when this door seats Claude: a completions door never spawns an engine child.
+      ...(env["COLTRANE_COMPLETIONS_URL"]
+        ? {}
+        : { sealVia: "output_write" as const, engineServer: engineServerForRegistry(registry) }),
     },
   });
 }

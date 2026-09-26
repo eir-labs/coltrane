@@ -199,7 +199,10 @@ export const WORKER_ENV_CONTRACT: readonly WorkerEnvVar[] = [
     role: "tuning",
     required: "never",
     meaning:
-      "Overrides the model version a chair invokes and is recorded on outputs as the model that produced them.",
+      "The model a chair invokes. On the Claude seat it overrides the model version under the tier table and is recorded on " +
+      "outputs as the model that produced them. On the completions seat (COLTRANE_COMPLETIONS_URL set) it is the one-line " +
+      "model: it seats every tier that no COLTRANE_TIER_<X> maps, and a COLTRANE_TIER_<X> still wins for its own tier. " +
+      "With neither set, a completions chair is refused unresolved_tier — there is no default model.",
   },
   {
     name: "COLTRANE_CHAIR_TIMEOUT_MS",

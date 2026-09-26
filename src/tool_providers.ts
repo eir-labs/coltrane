@@ -51,6 +51,18 @@ const HOST_BUILTINS: ReadonlySet<string> = new Set([
   // by what it can load, not by whether it can run.
 ]);
 
+// The tools that can READ THE WORKING TREE. A verify seat holding one of these can re-derive its verdict
+// from the tree as it now stands; a seat holding none can only rule on the records it is handed.
+// Unexported, like HOST_BUILTINS: callers ask `grantsTreeReader`, never re-inline the set
+// (contract-reverify-carries-amendment-v1 O5). Scoped grants count by their base name — a seat granted
+// `Bash(git diff:*)` can read the tree.
+const TREE_READERS: ReadonlySet<string> = new Set(["Read", "Grep", "Glob", "LS", "Bash", "LSP"]);
+
+/** Does this grant set hold a tool that can read the working tree? */
+export function grantsTreeReader(allowed: readonly string[] | undefined): boolean {
+  return (allowed ?? []).some((g) => TREE_READERS.has(toolBaseName(g)));
+}
+
 /** The engine's own MCP server slug — the key the repo's .mcp.json ships it under, and the prefix
  *  its tools are advertised behind (mcp__coltrane__<tool>). In-house engine tools are bridged through
  *  this server, so an in-house grant resolves to it (#204). */
@@ -118,6 +130,16 @@ export interface ResolvedGrants {
 export function mcpServerOf(grant: string): string | null {
   const m = toolBaseName(grant).match(/^mcp__(.+?)__/);
   return m ? m[1]! : null;
+}
+
+/** The tool's own slug under its server: `mcp__coltrane__output_write` → `output_write`; a bare slug is
+ *  returned as-is. NOT `toolBaseName`, which strips only a scope suffix (`Bash(git add:*)` → `Bash`)
+ *  and leaves the server prefix on — so dispatching `toolBaseName(namespaced)` names a verb no
+ *  surface has, and every namespaced call is refused as unknown. */
+export function toolSlugOf(name: string): string {
+  const base = toolBaseName(name);
+  const server = mcpServerOf(base);
+  return server === null ? base : base.slice(`mcp__${server}__`.length);
 }
 
 /** Resolve an agent's allowed_tools to providers. In order: a host-builtin passes (no server); an

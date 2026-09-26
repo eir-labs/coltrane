@@ -12,7 +12,8 @@ import type { Registry } from "./registry.js";
 import type { Depth, ModelTier } from "./pricing.js";
 import type { Effort } from "./genome_schema.js";
 import type { CodeToolAccess } from "./composition.js";
-import { resolveAgentGrants, hostBuiltinDenials, toolBaseName, ENGINE_MCP_SERVER, type ToolProviderRegistry } from "./tool_providers.js";
+import { resolveAgentGrants, hostBuiltinDenials, toolBaseName, grantsTreeReader, ENGINE_MCP_SERVER, type ToolProviderRegistry } from "./tool_providers.js";
+import type { OutputRecord } from "./outputs.js";
 import { venueEffectiveTools } from "./chart.js";
 import { CORE_TYPES } from "./core_types.js";
 
@@ -358,6 +359,10 @@ function buildReverifyResumePrompt(
   outputSchema: Record<string, unknown> | undefined,
   outputSchemas: Record<string, Record<string, unknown> | undefined> | undefined,
   seal: OutputWriteSeal | undefined,
+  // contract-reverify-carries-amendment-v1 — what to carry (resolved by the RUNTIME; rendered, never
+  // computed, here) and whether this seat can reach the tree at all (O4).
+  amended: { records: readonly OutputRecord[]; carried_all: boolean } | undefined,
+  readsTree: boolean,
 ): string {
   const types = sealTypes.length ? sealTypes : ["output"];
   const contract = seal
@@ -376,12 +381,26 @@ function buildReverifyResumePrompt(
           .join("\n")
     : `Re-seal your output — ${types.map((t) => `"${t}"`).join(", ")} — exactly as you did in round one: ` +
         `respond with ONLY the single JSON object (the output's data), no prose, no code fence.`;
+  const records = amended?.records ?? [];
+  const evidence = readsTree
+    ? `re-derive your verdict from the CURRENT working tree — read the amended artifact as it now stands, ` +
+      `do not rely on what you saw in round one — and rule again.`
+    : `the carried records are your evidence: you hold no tool that reaches a working tree, so rule on ` +
+      `the amended records below as they now stand, not on what you saw in round one.`;
   return [
     `# Re-verify (amend round)`,
     `The makers AMENDED their work in response to your failing verdict. You are RESUMING the conversation ` +
       `that already holds your disposition, identity, method, tools and the gig input, so this prompt ` +
-      `carries only what is new: re-derive your verdict from the CURRENT working tree — read the amended ` +
-      `artifact as it now stands, do not rely on what you saw in round one — and rule again.`,
+      `carries only what is new: ${evidence}`,
+    ...(records.length > 0
+      ? [
+          `# Amended records\n` +
+            (amended?.carried_all
+              ? `No round-one record of what you saw was found, so EVERY current input is carried below.\n`
+              : `The inputs that changed since your round-one verdict:\n`) +
+            records.map((o) => `- ${o.domain_type} (from ${o.agent_slug}): ${JSON.stringify(o.data)}`).join("\n"),
+        ]
+      : []),
     `# Output contract\n${contract}`,
   ].join("\n\n");
 }
@@ -396,7 +415,7 @@ function buildReverifyResumePrompt(
 // `output_trace` reported an intact chain over garbage.
 //
 // This is now ONE implementation shared by all four production call sites (:319, :325,
-// bifrost_invoker.ts, document_factory.ts) — see #226; the judge's half-fixed duplicate is
+// document_factory.ts) — see #226; the judge's half-fixed duplicate is
 // gone.
 
 /** Bound on the raw-output excerpt a parse failure carries, so no blob lands in a log line. */
@@ -632,7 +651,7 @@ function schemaPropertyNames(schema: Record<string, unknown> | undefined): strin
 
 /**
  * Build the extractor's options for a chair from what the invoker already resolved.
- * Shared by the Claude and Bifrost invokers so the key signal reaches every call site —
+ * Shared by the Claude and completions invokers so the key signal reaches every call site —
  * behaviour propagates through the shared import, but `expectKeys` does not unless each
  * site passes it (#221 policy 5).
  *
@@ -883,6 +902,47 @@ export function captureSeatDenials(stdout: string): SeatDenial[] {
     out.push({ tool: typeof e["tool_name"] === "string" ? e["tool_name"] : "unknown", reason });
   }
   return out;
+}
+
+/**
+ * THE SEALED RECORDS THIS SEAT'S TOOLS RETURNED (spec.coltrane-sealed-inputs law 9, Claude door).
+ *
+ * A completions seat's tools are in-process, so its invoker sees every result. A Claude seat calls its
+ * MCP server as a CHILD, so its reads live only in the stream — the same place `captureOutputWrites`
+ * reads its seals from. Every {id, content_sha} pair a tool RESULT carried is a record it was handed.
+ * The seat's own `output_write` results are excluded: a chair naming its own seal as something it read
+ * would be false provenance. Reported, never trusted — the runtime re-hashes each ref before stamping.
+ */
+export function captureSeatReads(stdout: string): Array<{ id: string; content_sha: string }> {
+  const ownWrites = new Set<string>();
+  const refs: Array<{ id: string; content_sha: string }> = [];
+  const harvest = (value: unknown, depth = 0): void => {
+    if (depth > 8 || value === null || typeof value !== "object") return;
+    if (Array.isArray(value)) { for (const v of value) harvest(v, depth + 1); return; }
+    const o = value as Record<string, unknown>;
+    if (typeof o["id"] === "string" && typeof o["content_sha"] === "string" && !refs.some((r) => r.id === o["id"])) {
+      refs.push({ id: o["id"] as string, content_sha: o["content_sha"] as string });
+    }
+    for (const v of Object.values(o)) harvest(v, depth + 1);
+  };
+  for (const raw of stdout.split("\n")) {
+    const l = raw.trim();
+    if (!l) continue;
+    let e: Record<string, unknown>;
+    try { e = JSON.parse(l) as Record<string, unknown>; } catch { continue; } // a torn line is not fatal
+    const msg = e["message"];
+    if (!msg || typeof msg !== "object") continue;
+    for (const b of ((msg as { content?: Array<Record<string, unknown>> }).content ?? [])) {
+      const kind = String(b["type"] ?? "");
+      if (kind === "tool_use" && isOutputWriteToolName(String(b["name"] ?? ""))) ownWrites.add(String(b["id"] ?? ""));
+      if (kind !== "tool_result" || ownWrites.has(String(b["tool_use_id"] ?? ""))) continue;
+      const content = b["content"];
+      if (typeof content === "string") {
+        try { harvest(JSON.parse(content)); } catch { /* not JSON: nothing a record could be read from */ }
+      } else harvest(content);
+    }
+  }
+  return refs;
 }
 
 export function captureOutputWrites(
@@ -1690,7 +1750,7 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
     const reverifyResume = resumingWithSession && ctx.resume_keep_prompt === true;
     const fullPrompt = buildPrompt(resumingWithSession ? { ...ctx, resume: false } : ctx, schema, outputSchemas, seal);
     const prompt = reverifyResume
-      ? buildReverifyResumePrompt(sealTypes, schema, outputSchemas, seal)
+      ? buildReverifyResumePrompt(sealTypes, schema, outputSchemas, seal, ctx.amended_inputs, grantsTreeReader(ctx.agent.allowed_tools))
       : resumingWithSession
         ? buildPrompt(ctx, schema, outputSchemas, seal)
         : fullPrompt;
@@ -2040,6 +2100,12 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
       // Every stream whose writes count toward the seal. Diverges from `stdout` only when a reserve
       // was granted, which is the one case where a chair's output spans more than one invocation.
       let sealStdout = stdout;
+
+      // WHAT THE SEAT READ (spec.coltrane-sealed-inputs law 9), reported as the same `seat_read` event
+      // the completions door emits — so the runtime's ONE verification path (re-hash, dedup, stamp)
+      // serves both doors. Here, where every seal path sees the stream: a text-seal chair reads too.
+      const seatReads = captureSeatReads(stdout);
+      if (seatReads.length > 0) ctx.onEvent?.({ type: "seat_read", raw: { refs: seatReads } } as AgentStreamEvent);
 
       if (budgetStopped && reserveTurns > 0 && seal !== undefined) {
         const sealedSoFar = captureOutputWrites(stdout, sealTypes);

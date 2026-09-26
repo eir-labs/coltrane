@@ -120,6 +120,56 @@ export interface OutputRecord {
    * ("a reused output is indistinguishable in substance from a fresh one") would be false.
    */
   reused_from?: { output_id: string; gig_id: string; cache_key: string } | undefined;
+  /**
+   * spec.coltrane-sealed-inputs — the sealed records from ANOTHER gig this record consumed because
+   * its gig's dispatch named them (`$output` / `$query`), each as the engine resolved it.
+   *
+   * This is the one thing that lets `trace()` cross a gig boundary. `input_refs` alone cannot: the
+   * MCP `output_write` door accepts caller-supplied `input_refs`, so a reference into another gig
+   * is only trustworthy when the ENGINE did the resolving — which is exactly when this is stamped.
+   * No door forwards a caller's value for it (PR #85 stays closed).
+   *
+   * Absent when the record consumed nothing from another gig. Not folded into `content_sha`.
+   */
+  input_resolutions?: readonly InputResolution[] | undefined;
+  /**
+   * FAN-OUT — set when this record was sealed by one INSTANCE of a fanned-out chair. Names the
+   * template role, the key and value that picked this instance, and, for every input the engine
+   * narrowed, the sha of the exact slice the chair was handed and the whole record it was cut from.
+   * `input_refs`/`input_shas` still name the whole records; this says which part of them was read.
+   * Engine-stamped; no door forwards a caller's value. Not folded into `content_sha`.
+   */
+  shard?: ShardStamp | undefined;
+}
+
+/** See OutputRecord.shard. */
+export interface ShardStamp {
+  /** The template chair's role; the instance's role is `<of>#<value>`. */
+  of: string;
+  key: string;
+  value: string;
+  slices: ReadonlyArray<{
+    type: string;
+    /** The sealed record the slice was cut from, or "gig_input" when the set arrived in the payload. */
+    source: string;
+    content_sha?: string | undefined;
+    path: string;
+    count: number;
+    slice_sha: string;
+  }>;
+}
+
+/** One engine-resolved cross-gig input. See OutputRecord.input_resolutions. */
+export interface InputResolution {
+  output_id: string;
+  content_sha: string;
+  from_gig: string;
+  resolved_at: string;
+  /** How the engine came to hold this record: named in the dispatch, matched by a dispatch query, or
+   *  READ by the seat through a tool and re-hashed here before it was stamped. */
+  resolved_by: "dispatch" | "query" | "read";
+  /** The query text, when the record was resolved by `$query`. */
+  query?: Record<string, unknown> | undefined;
 }
 
 // What a caller supplies to write(). id + created_at are assigned by the store;
@@ -152,6 +202,10 @@ export interface OutputWrite {
   skill_provenance?: { slug: string; version: number; code_hash: string; tier: number } | undefined;
   /** See OutputRecord.reused_from — recall, not derivation. */
   reused_from?: { output_id: string; gig_id: string; cache_key: string } | undefined;
+  /** See OutputRecord.input_resolutions. Supplied by the RUNTIME only; no MCP door forwards it. */
+  input_resolutions?: readonly InputResolution[] | undefined;
+  /** See OutputRecord.shard. Supplied by the RUNTIME only; no MCP door forwards it. */
+  shard?: ShardStamp | undefined;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
@@ -218,6 +272,10 @@ export interface TraceLabels {
   /** Set when this node's gig_id differs from the seed's — the walk CROSSED a boundary to reach
    *  it. Crossing is never silent: a consumer reads it off the node. */
   crossed?: true | undefined;
+  /** Set when the walk reached this node over an ENGINE-RESOLVED cross-gig input
+   *  (`OutputRecord.input_resolutions`) — out of the seed's performance, and admitted only because
+   *  the engine, not a caller, named the edge (spec.coltrane-sealed-inputs). */
+  cross_gig?: true | undefined;
   /** Never set. The discriminant against `TraceMissingNode`. */
   missing?: undefined;
 }
@@ -380,6 +438,13 @@ export interface OutputStore {
    * cannot offer that guarantee mid-loop, so the check has to be separable from the effect.
    * One implementation backs both, so the two answers cannot drift.
    */
+  /**
+   * Does this data satisfy the DOMAIN SCHEMA of `domain_type` — the same compiled schema the seal
+   * enforces — without the core substance floor? For a DISPATCH PAYLOAD, which is not a sealed output:
+   * it claims to be a charter, so it must be shaped like one, but it owes none of the seal's floor.
+   * A type the registry does not hold, and a bare core type, are not checked (registry.validate's rule).
+   */
+  validateShape(domain_type: string, data: Record<string, unknown>): { valid: boolean; errors: string[] };
   validateWrite(o: { core_type: string; domain_type: string; data: Record<string, unknown> }): {
     valid: boolean;
     reason?: string;
@@ -817,6 +882,8 @@ export function createOutputStore(registry: Registry, options?: OutputStoreOptio
         model_tier: o.model_tier,
         skill_provenance: o.skill_provenance,
         reused_from: o.reused_from,
+        ...(o.input_resolutions && o.input_resolutions.length > 0 ? { input_resolutions: o.input_resolutions } : {}),
+        ...(o.shard ? { shard: o.shard } : {}),
       };
       outputs.set(rec.id, rec);
       if (outputsDir) {
@@ -911,19 +978,30 @@ export function createOutputStore(registry: Registry, options?: OutputStoreOptio
       const seed = outputs.get(id);
       const seedGigId = seed?.gig_id;
       const family = seedGigId === undefined ? undefined : performanceRoot(seedGigId);
-      const inFamily = (rec: OutputRecord): boolean =>
-        family === undefined || performanceRoot(rec.gig_id) === family;
+      // THE EDGE RULE. An edge child→parent (the child consumed the parent) is walkable when both
+      // sit in one performance — or when the CHILD carries an engine-stamped resolution naming the
+      // parent by id AND content_sha (spec.coltrane-sealed-inputs). The resolution is the only
+      // thing that crosses: a caller-supplied `input_refs` entry into another gig is still refused,
+      // because no door lets a caller stamp `input_resolutions` (PR #85 stays closed). Decided per
+      // EDGE, not against the seed's family, so admitting one resolved hop never lets a
+      // hand-authored reference ride in behind it.
+      const resolvedEdge = (child: OutputRecord, parent: OutputRecord): boolean =>
+        (child.input_resolutions ?? []).some((x) => x.output_id === parent.id && x.content_sha === parent.content_sha);
+      const walkable = (child: OutputRecord, parent: OutputRecord): boolean =>
+        performanceRoot(child.gig_id) === performanceRoot(parent.gig_id) || resolvedEdge(child, parent);
 
       /** The record, wearing the labels it has earned — and NOTHING when it has earned none, so a
        *  plain gig's trace hands back the store's own rows exactly as it always did. */
       const label = (rec: OutputRecord): TraceRecordNode => {
         const movement = movementOfGigId(rec.gig_id);
         const crossed = seedGigId !== undefined && rec.gig_id !== seedGigId;
+        const crossGig = family !== undefined && performanceRoot(rec.gig_id) !== family;
         if (movement === undefined && !crossed) return rec;
         return {
           ...rec,
           ...(movement !== undefined ? { movement, performance_gig_id: performanceRoot(rec.gig_id) } : {}),
           ...(crossed ? { crossed: true as const } : {}),
+          ...(crossGig ? { cross_gig: true as const } : {}),
         };
       };
 
@@ -957,14 +1035,20 @@ export function createOutputStore(registry: Registry, options?: OutputStoreOptio
         while (stack.length) {
           const { id: cur, depth, from } = stack.pop()!;
           if (walked.has(cur)) continue;
-          walked.add(cur);
           const rec = outputs.get(cur);
           if (!rec) {
+            walked.add(cur);
             if (from !== undefined) order.push(hole(cur, from));
             continue;
           }
           if (cur !== id) {
-            if (!inFamily(rec)) continue;
+            // Refused edges are not marked walked: the same record may still be reachable over an
+            // edge that IS walkable, and a refusal must not shadow it.
+            const child = from !== undefined ? outputs.get(from) : undefined;
+            if (!child || !walkable(child, rec)) continue;
+          }
+          walked.add(cur);
+          if (cur !== id) {
             emitted.add(cur);
             order.push(label(rec));
           }
@@ -988,8 +1072,11 @@ export function createOutputStore(registry: Registry, options?: OutputStoreOptio
           const next = new Set<string>();
           for (const o of all) {
             if (emitted.has(o.id)) continue;
-            if (!o.input_refs.some((r) => frontier.has(r))) continue;
-            if (!inFamily(o)) continue;
+            if (!o.input_refs.some((r) => {
+              if (!frontier.has(r)) return false;
+              const parent = outputs.get(r);
+              return parent !== undefined && walkable(o, parent);
+            })) continue;
             emitted.add(o.id);
             order.push(label(o));
             next.add(o.id);
@@ -1038,6 +1125,9 @@ export function createOutputStore(registry: Registry, options?: OutputStoreOptio
       return resolveTypeVersion(typeSlug);
     },
 
+    validateShape(domain_type, data) {
+      return registry.validate({ domain_type, data } as never);
+    },
     validateWrite(o) {
       return checkWritable(o);
     },

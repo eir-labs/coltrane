@@ -60,6 +60,9 @@ export interface ModelRequest {
   messages: readonly TurnMessage[];
   tools: readonly ToolDef[];
   max_tokens?: number;
+  /** The seat's resolved reasoning effort (engine vocabulary). The PORT maps it onto its provider's
+   *  wire; absent = send nothing and let the provider default stand. */
+  effort?: string;
   /** Fires on the caller's abort OR the per-call timeout, whichever comes first. */
   signal: AbortSignal;
 }
@@ -327,6 +330,7 @@ export async function runTurn(
         messages: transcript,
         tools: offered,
         ...(opts.max_tokens !== undefined ? { max_tokens: opts.max_tokens } : {}),
+        ...(opts.effort !== undefined ? { effort: opts.effort } : {}),
         signal: callController.signal,
       });
     } catch (e) {

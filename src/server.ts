@@ -115,6 +115,8 @@ export function parseWindow(raw: unknown, now: number): { after?: string; error?
 }
 
 /** Store statuses that mean a gig is CLOSED: what's closed is closed, so a resume of it is a new gig. */
+/** How long the resume door waits on the store's gigStatus before refusing. */
+const GIG_STATUS_TIMEOUT_MS = 10_000;
 const CLOSED_GIG_STATUSES = new Set(["failed", "aborted", "completed", "complete", "cancelled", "canceled"]);
 
 export interface ServerDeps {
@@ -1186,7 +1188,19 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         if (resumeArg !== undefined && deps.gigStatus) {
           let status: string | null | undefined;
           try {
-            status = await deps.gigStatus(resumeArg);
+            // BOUNDED. A store that never answers is not an answer: the resume is refused after
+            // GIG_STATUS_TIMEOUT_MS rather than hanging the door forever or guessing from the checkpoint.
+            let timer: ReturnType<typeof setTimeout> | undefined;
+            try {
+              status = await Promise.race([
+                deps.gigStatus(resumeArg),
+                new Promise<never>((_, reject) => {
+                  timer = setTimeout(() => reject(new Error(`the store did not answer within ${GIG_STATUS_TIMEOUT_MS} ms`)), GIG_STATUS_TIMEOUT_MS);
+                }),
+              ]);
+            } finally {
+              if (timer !== undefined) clearTimeout(timer);
+            }
           } catch (e) {
             return { ok: false, requires_approval: approval,
               error: `gig_dispatch: the store could not say whether gig "${resumeArg}" is closed, so the resume is refused rather than guessing which id to write under — ${e instanceof Error ? e.message : String(e)}` };

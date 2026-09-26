@@ -40,12 +40,13 @@
 //                     completions invoker)
 //   R    behavioural  runGig → executeChair seal gate — src/runtime.ts     (red now: the live failure)
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { mkdtempSync, writeFileSync, readFileSync, chmodSync, rmSync, existsSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync, chmodSync, rmSync, existsSync, cpSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadGenome } from "../src/loader.js";
-import { loadRegistry, createRegistry } from "../src/registry.js";
+import { loadRegistry, createRegistry, domainTypeDefect, type Registry } from "../src/registry.js";
+import { bootstrapServerDeps } from "../src/server.js";
 import { createOutputStore } from "../src/outputs.js";
 import { reconstructGenome } from "../src/genome_store.js";
 import { drainChairInvoker } from "../src/cli.js";
@@ -70,6 +71,18 @@ const VERDICT = {
   recommendation: "accept",
 } as const;
 const LIVE = { ...VERDICT, decision_ref: null };
+// Every law hands production its OWN deep copy (`clone`), and the shared fixtures are deep-frozen: a
+// store that mutates a caller's object cannot reach another law's input, and the snapshot G3e compares
+// against is a string no law can touch. (Round 1's G3e compared a mutated LIVE with a mutated LIVE —
+// G3a had handed the shared object to validateWrite uncopied — and could not fail in a full-file run.)
+const deepFreeze = <T>(x: T): T => {
+  if (x && typeof x === "object") { for (const v of Object.values(x)) deepFreeze(v); Object.freeze(x); }
+  return x;
+};
+deepFreeze(VERDICT);
+deepFreeze(LIVE);
+const LIVE_SNAPSHOT = JSON.stringify(LIVE);
+const clone = <T>(x: T): T => structuredClone(x) as T;
 
 // ── G1 ─────────────────────────────────────────────────────────────────────────────────────────────
 // The run's genome comes from a STORE backing (reconstructGenome — the one reconstruction both store
@@ -97,8 +110,8 @@ const orgVerdictRow = {
 };
 const storeGenome = reconstructGenome({ core_types: [], domain_types: [orgVerdictRow], agents: [], standards: [], skills: [] } as never);
 const storeRegistry = loadRegistry(storeGenome);
-const P_ORG_OK = { ...VERDICT, org_ticket: "OPS-7" };
-const P_FILE_OK = { ...VERDICT };
+const P_ORG_OK = { ...clone(VERDICT), org_ticket: "OPS-7" };
+const P_FILE_OK = clone(VERDICT);
 
 describe("G1 · one gate: on the drain, what the in-turn output_write accepts the seal accepts, and what the seal rejects the chair is told in-turn", () => {
   let dir: string;
@@ -126,7 +139,14 @@ describe("G1 · one gate: on the drain, what the in-turn output_write accepts th
 
   /** Seat one drained Claude chair that sends `data` to output_write; return what the in-turn gate said
    *  (the stand-in's report), what the invoker handed back for sealing, and what the seal would say. */
-  async function seat(data: Record<string, unknown>, tag: string) {
+  async function seat(
+    data: Record<string, unknown>,
+    tag: string,
+    door: { invoke: () => AgentInvoker; sealRegistry: Registry; cwd?: string } = {
+      invoke: () => drainChairInvoker({ ...process.env, COLTRANE_COMPLETIONS_URL: undefined }, storeRegistry),
+      sealRegistry: storeRegistry,
+    },
+  ) {
     const logPath = join(dir, `${tag}.json`);
     if (existsSync(logPath)) rmSync(logPath);
     process.env["GATE_FAKE_LOG"] = logPath;
@@ -134,22 +154,26 @@ describe("G1 · one gate: on the drain, what the in-turn output_write accepts th
       core_type: "Verdict", domain_type: "change-verdict", gig_id: "gig-one-gate", phase: "review",
       agent_slug: "change-reviewer", data,
     });
-    const invoke = drainChairInvoker({ ...process.env, COLTRANE_COMPLETIONS_URL: undefined }, storeRegistry);
     const agent = testAgent({ slug: "change-reviewer", primitives: ["VERIFY"], output_types: ["change-verdict"], domain: "software-change" });
     let returned: unknown;
     let threw: string | undefined;
+    const home = process.cwd();
     try {
+      if (door.cwd) process.chdir(door.cwd);
+      const invoke = door.invoke();
       returned = await invoke({
         agent, phase: "review", role: "review-change", gig_id: "gig-one-gate",
         inputs: [], gig_input: {}, output_types: ["change-verdict"],
       } as never);
     } catch (e) {
       threw = e instanceof Error ? e.message : String(e);
+    } finally {
+      process.chdir(home);
     }
     const report = existsSync(logPath)
       ? (JSON.parse(readFileSync(logPath, "utf8")) as { offered: boolean; servers?: string[]; isError?: boolean; result?: { ok?: boolean; error?: string }; crashed?: string })
       : undefined;
-    const seal = createOutputStore(storeRegistry).validateWrite({ core_type: "Verdict", domain_type: "change-verdict", data });
+    const seal = createOutputStore(door.sealRegistry).validateWrite({ core_type: "Verdict", domain_type: "change-verdict", data });
     return { report, returned, threw, seal };
   }
 
@@ -186,6 +210,115 @@ describe("G1 · one gate: on the drain, what the in-turn output_write accepts th
     const sealed = (returned as Record<string, unknown[]>)["change-verdict"];
     expect(sealed, "the accepted write was not handed back for sealing").toEqual([P_ORG_OK]);
   }, 90_000);
+
+  // ── G5 · the reload check (O5) ────────────────────────────────────────────────────────────────────
+  // The drain's engine child boots from a genome root WRITTEN from the run's registry and RELOADED by
+  // the loader (src/run_genome_engine.ts). A registry can hold a type the loader will not load: the
+  // loader runs domainTypeDefect on every file, createRegistry does not. Such a type vanishes on reload,
+  // and the child's gate answers "unknown domain_type" (or worse, nothing) where the seal answers by the
+  // type — the two gates disagreeing again, one layer down. The only honest answer is to refuse the
+  // chair before anything is spawned, naming the type.
+  it("G5 · a run-registry type the loader would DROP on reload refuses the chair loudly, naming it — and no claude, no engine child, is spawned", async () => {
+    const dropped = {
+      slug: "org-refusal-report", extends: "Artifact", domain: "ops",
+      schema: { type: "object", properties: { ok: { type: "boolean" }, refusal: { type: "string" }, message: { type: "string" } } },
+      required_fields: ["message"],
+    };
+    expect(domainTypeDefect(dropped), "fixture: the loader must refuse this type on reload").not.toBeNull();
+    const runRegistry = createRegistry([...storeRegistry.listTypes(), dropped] as never);
+    expect(runRegistry.listTypes().some((t) => t.slug === dropped.slug), "fixture: the run registry holds the type").toBe(true);
+    const { report, threw } = await seat(P_ORG_OK, "reload-drop", {
+      invoke: () => drainChairInvoker({ ...process.env, COLTRANE_COMPLETIONS_URL: undefined }, runRegistry),
+      sealRegistry: runRegistry,
+    });
+    expect(
+      report,
+      `the chair was SEATED over a genome root that does not reload as the run's registry — claude was spawned ` +
+        `(offered an engine server: ${String(report?.offered)}) with an engine child that has never heard of "${dropped.slug}"`,
+    ).toBeUndefined();
+    expect(threw, "the chair was neither seated nor refused").toBeDefined();
+    expect(threw, `the refusal does not name the type the reload drops: ${threw}`).toContain(dropped.slug);
+  }, 90_000);
+
+  // ── G6 · the server door ──────────────────────────────────────────────────────────────────────────
+  // The dispatch door (bootstrapServerDeps) bridges the engine server from .mcp.json — `node
+  // dist/src/server_entry.js`, a RELATIVE entry — and the child boots `COLTRANE_GENOME ?? cwd`. Nothing
+  // ties the claude child's cwd to the root the door was bootstrapped with. So a server bootstrapped on
+  // one genome (its explicit root) whose process sits in another directory hands every seat an in-turn
+  // gate judging by the CWD's genome — or no gate at all, when the relative entry is not there. Driven
+  // exactly so: the run's genome is a root holding the org's change-verdict v2 (org_ticket required);
+  // the cwd is a directory holding its OWN genome (the file v1, which forbids org_ticket).
+  describe("G6 · the server door: the seat's engine child judges by the run's genome, whatever the cwd", () => {
+    let runRoot: string;
+    let cwdRoot: string;
+    let savedGenome: string | undefined;
+    let deps: ReturnType<typeof bootstrapServerDeps>;
+    const genomeAt = (root: string, verdict: unknown) => {
+      cpSync(join(REPO_ROOT, "core_types"), join(root, "core_types"), { recursive: true });
+      cpSync(join(REPO_ROOT, "domain_types"), join(root, "domain_types"), { recursive: true });
+      writeFileSync(join(root, "domain_types", "change-verdict.json"), JSON.stringify(verdict, null, 2));
+    };
+    beforeAll(() => {
+      runRoot = mkdtempSync(join(tmpdir(), "coltrane-g6-run-"));
+      cwdRoot = mkdtempSync(join(tmpdir(), "coltrane-g6-cwd-"));
+      genomeAt(runRoot, orgVerdictRow);
+      genomeAt(cwdRoot, JSON.parse(readFileSync(join(REPO_ROOT, "domain_types", "change-verdict.json"), "utf8")));
+      // The cwd carries a build too (a checkout usually does), so the relative entry RESOLVES there and
+      // the law sees which genome the child judges by — not merely that a relative path went missing.
+      symlinkSync(join(REPO_ROOT, "dist"), join(cwdRoot, "dist"), "dir");
+      savedGenome = process.env["COLTRANE_GENOME"];
+      delete process.env["COLTRANE_GENOME"]; // the door is bootstrapped by ARGUMENT, as a host mounting it would
+      deps = bootstrapServerDeps(runRoot);
+    });
+    afterAll(() => {
+      if (savedGenome === undefined) delete process.env["COLTRANE_GENOME"]; else process.env["COLTRANE_GENOME"] = savedGenome;
+      rmSync(runRoot, { recursive: true, force: true });
+      rmSync(cwdRoot, { recursive: true, force: true });
+    });
+    const door = () => ({ invoke: () => deps.invoke!, sealRegistry: deps.registry, cwd: cwdRoot });
+
+    it("a payload the run's seal REJECTS is rejected in-turn, with the seal's reason — not judged by the cwd's genome", async () => {
+      const { report, seal } = await seat(P_FILE_OK, "g6-reject", door());
+      expect(seal.valid, "fixture: the run genome's seal must reject a verdict without org_ticket").toBe(false);
+      expect(report?.offered, "the server-door seat was offered no engine server").toBe(true);
+      expect(report!.crashed, `the seat's engine child did not answer from cwd ${cwdRoot}: ${report!.crashed}`).toBeUndefined();
+      expect(
+        report!.result?.ok,
+        `the in-turn gate ACCEPTED a payload the run's seal rejects (${seal.reason}) — the child judged by the cwd's genome`,
+      ).toBe(false);
+      expect(String(report!.result?.error)).toContain("org_ticket");
+    }, 90_000);
+
+    it("a payload the run's seal ACCEPTS is accepted in-turn and handed back for sealing", async () => {
+      const { report, returned, threw, seal } = await seat(P_ORG_OK, "g6-accept", door());
+      expect(seal.valid, `fixture: the run genome's seal must accept a verdict with org_ticket: ${seal.reason}`).toBe(true);
+      expect(report?.offered, "the server-door seat was offered no engine server").toBe(true);
+      expect(report!.crashed, `the seat's engine child did not answer from cwd ${cwdRoot}: ${report!.crashed}`).toBeUndefined();
+      expect(
+        report!.result?.ok,
+        `the in-turn gate REJECTED a payload the run's seal accepts: ${report!.result?.error} — the child judged by the cwd's genome`,
+      ).toBe(true);
+      expect(threw, `the invoker failed a chair whose write passed: ${threw}`).toBeUndefined();
+      expect((returned as Record<string, unknown[]>)["change-verdict"]).toEqual([P_ORG_OK]);
+    }, 90_000);
+
+    it("from a cwd holding NO build and no genome, the seat still gets a working gate that judges by the run's genome", async () => {
+      const bare = mkdtempSync(join(tmpdir(), "coltrane-g6-bare-"));
+      try {
+        const { report, seal } = await seat(P_FILE_OK, "g6-bare", { ...door(), cwd: bare });
+        expect(seal.valid, "fixture: the run genome's seal must reject a verdict without org_ticket").toBe(false);
+        expect(report?.offered, "the server-door seat was offered no engine server").toBe(true);
+        expect(
+          report!.crashed,
+          `the engine child could not start from a cwd with no dist/ — its entry is resolved against the cwd: ${report!.crashed}`,
+        ).toBeUndefined();
+        expect(report!.result?.ok, "the in-turn gate accepted a payload the run's seal rejects").toBe(false);
+        expect(String(report!.result?.error)).toContain("org_ticket");
+      } finally {
+        rmSync(bare, { recursive: true, force: true });
+      }
+    }, 90_000);
+  });
 });
 
 // ── G2 ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -194,13 +327,15 @@ describe("G1 · one gate: on the drain, what the in-turn output_write accepts th
 // gate refused whenever the flag is absent (a CLI build, a relay, a transport that drops it).
 const toolUse = (id: string, data: unknown) =>
   JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", id, name: "mcp__coltrane__output_write", input: { core_type: "Verdict", domain_type: "change-verdict", data } }] } });
-const toolResult = (id: string, body: unknown, opts: { is_error?: boolean; asString?: boolean } = {}) =>
+const toolResult = (id: string, body: unknown, opts: { is_error?: boolean; asString?: boolean; raw?: boolean } = {}) =>
   JSON.stringify({
     type: "user",
     message: {
       content: [{
         type: "tool_result", tool_use_id: id,
-        content: opts.asString ? JSON.stringify(body) : [{ type: "text", text: JSON.stringify(body) }],
+        content: opts.asString
+          ? (opts.raw ? String(body) : JSON.stringify(body))
+          : [{ type: "text", text: opts.raw ? String(body) : JSON.stringify(body) }],
         ...(opts.is_error !== undefined ? { is_error: opts.is_error } : {}),
       }],
     },
@@ -211,7 +346,7 @@ const PASSED = { ok: true, requires_approval: false, data: { validated: true, se
 describe("G2 · a rejected write is never captured, however the CLI flags it", () => {
   it("an output_write whose result is {ok:false} is not captured when the CLI OMITS is_error (content as blocks, and as a string)", () => {
     for (const asString of [false, true]) {
-      const stdout = [toolUse("t1", LIVE), toolResult("t1", REFUSED, { asString })].join("\n");
+      const stdout = [toolUse("t1", clone(LIVE)), toolResult("t1", REFUSED, { asString })].join("\n");
       expect(
         captureOutputWrites(stdout, ["change-verdict"]),
         `a write the gate REFUSED was captured for sealing because the CLI did not flag is_error (content as ${asString ? "string" : "blocks"})`,
@@ -220,21 +355,40 @@ describe("G2 · a rejected write is never captured, however the CLI flags it", (
   });
 
   it("an output_write whose result is {ok:false} is not captured when the CLI says is_error:false", () => {
-    const stdout = [toolUse("t1", LIVE), toolResult("t1", REFUSED, { is_error: false })].join("\n");
+    const stdout = [toolUse("t1", clone(LIVE)), toolResult("t1", REFUSED, { is_error: false })].join("\n");
     expect(captureOutputWrites(stdout, ["change-verdict"]), "a refused write was captured because is_error was false").toEqual({});
   });
 
   it("the corrected second write after a refusal IS captured — and only it", () => {
     const stdout = [
-      toolUse("t1", LIVE), toolResult("t1", REFUSED),
-      toolUse("t2", VERDICT), toolResult("t2", PASSED),
+      toolUse("t1", clone(LIVE)), toolResult("t1", REFUSED),
+      toolUse("t2", clone(VERDICT)), toolResult("t2", PASSED),
     ].join("\n");
     expect(captureOutputWrites(stdout, ["change-verdict"])).toEqual({ "change-verdict": [VERDICT] });
   });
 
   it("an is_error result is still not captured (the flag keeps working)", () => {
-    const stdout = [toolUse("t1", LIVE), toolResult("t1", REFUSED, { is_error: true })].join("\n");
+    const stdout = [toolUse("t1", clone(LIVE)), toolResult("t1", REFUSED, { is_error: true })].join("\n");
     expect(captureOutputWrites(stdout, ["change-verdict"])).toEqual({});
+  });
+
+  // The flag must still count ON ITS OWN. A capture that tested only the body would keep a write whose
+  // result the CLI flagged is_error but whose body says nothing parseable (a transport or MCP-layer
+  // failure: the server never answered) — or, oddly, says ok:true. Round 1's G2d carried an {ok:false}
+  // body beside the flag, so a body-only capture refused it anyway and the law could not see the plant.
+  it("an is_error result is not captured when its body is NOT JSON, or says ok:true — the flag alone refuses it", () => {
+    for (const [label, body, raw] of [
+      ["a non-JSON body", "MCP error -32001: Request timed out", true],
+      ["an {ok:true} body", PASSED, false],
+    ] as const) {
+      for (const asString of [false, true]) {
+        const stdout = [toolUse("t1", clone(LIVE)), toolResult("t1", body, { is_error: true, asString, raw })].join("\n");
+        expect(
+          captureOutputWrites(stdout, ["change-verdict"]),
+          `an is_error result with ${label} (content as ${asString ? "string" : "blocks"}) was captured — the flag was ignored`,
+        ).toEqual({});
+      }
+    }
   });
 });
 
@@ -252,20 +406,20 @@ const write = (data: Record<string, unknown>) =>
 
 describe("G3 · null on an optional field is absence — in the one predicate both gates share", () => {
   it("the gate accepts a change-verdict whose optional decision_ref is null (the live payload)", () => {
-    const v = createOutputStore(fileRegistry).validateWrite({ core_type: "Verdict", domain_type: "change-verdict", data: LIVE });
+    const v = createOutputStore(fileRegistry).validateWrite({ core_type: "Verdict", domain_type: "change-verdict", data: clone(LIVE) });
     expect(v.valid, `the live payload is still refused: ${v.reason}`).toBe(true);
   });
 
   it("the SEALED record has no decision_ref key, and its content_sha equals the same payload with the key omitted", () => {
     let rec: ReturnType<typeof write> | undefined;
-    expect(() => { rec = write({ ...LIVE }); }, "the live payload does not seal").not.toThrow();
+    expect(() => { rec = write(clone(LIVE)); }, "the live payload does not seal").not.toThrow();
     expect("decision_ref" in rec!.data, `a null was SEALED: data.decision_ref = ${JSON.stringify(rec!.data["decision_ref"])}`).toBe(false);
-    const omitted = write({ ...VERDICT });
+    const omitted = write(clone(VERDICT));
     expect(rec!.content_sha, "null and omitted seal to different content — the hash saw the null").toBe(omitted.content_sha);
   });
 
   it("a null on a REQUIRED field is still refused — at validate and at write", () => {
-    const data = { ...VERDICT, recommendation: null };
+    const data = { ...clone(VERDICT), recommendation: null };
     const v = createOutputStore(fileRegistry).validateWrite({ core_type: "Verdict", domain_type: "change-verdict", data });
     expect(v.valid, "a null on the REQUIRED `recommendation` was accepted").toBe(false);
     // Stripping a required null and then refusing its ABSENCE gives the same verdict for the wrong
@@ -276,18 +430,22 @@ describe("G3 · null on an optional field is absence — in the one predicate bo
   });
 
   it("a null inside an array member is untouched — the member is still judged, and refused", () => {
-    const data = { ...VERDICT, checks: [{ method: "ran the law file", result: null }] };
+    const data = { ...clone(VERDICT), checks: [{ method: "ran the law file", result: null }] };
     const v = createOutputStore(fileRegistry).validateWrite({ core_type: "Verdict", domain_type: "change-verdict", data });
     expect(v.valid, "a null inside checks[0] was stripped; only a top-level optional property is absence").toBe(false);
-    const alsoArray = { ...VERDICT, failures_verbatim: ["one", null] };
+    const alsoArray = { ...clone(VERDICT), failures_verbatim: ["one", null] };
     const w = createOutputStore(fileRegistry).validateWrite({ core_type: "Verdict", domain_type: "change-verdict", data: alsoArray });
     expect(w.valid, "a null element of an array was dropped from the array").toBe(false);
   });
 
-  it("the caller's object is not mutated by the strip", () => {
-    const data: Record<string, unknown> = { ...LIVE };
-    try { write(data); } catch { /* G3's other laws own the refusal */ }
-    expect(data, "the store mutated the caller's payload").toEqual(LIVE);
+  it("the caller's object is not mutated by the strip — neither by validateWrite nor by write", () => {
+    const asked: Record<string, unknown> = clone(LIVE);
+    createOutputStore(fileRegistry).validateWrite({ core_type: "Verdict", domain_type: "change-verdict", data: asked });
+    expect(asked, "validateWrite deleted a key from the caller's payload").toEqual(JSON.parse(LIVE_SNAPSHOT));
+    const sealed: Record<string, unknown> = clone(LIVE);
+    try { write(sealed); } catch { /* G3's other laws own the refusal */ }
+    expect(sealed, "write deleted a key from the caller's payload").toEqual(JSON.parse(LIVE_SNAPSHOT));
+    expect("decision_ref" in sealed, "the caller's decision_ref key is gone").toBe(true);
   });
 });
 
@@ -325,7 +483,7 @@ describe("R · the live payload seals", () => {
       slug: "review-replay", domain: "software-change", agents: [reviewer],
       phases: [{ name: "review", chairs: [{ role: "review-change", agent_slug: "change-reviewer", depends_on: [], input_contract: [], output_contract: ["change-verdict"], required_skills: [] }] }],
     };
-    const invoke: AgentInvoker = () => ({ ...LIVE });
+    const invoke: AgentInvoker = () => clone(LIVE) as Record<string, unknown>;
     const registry = createRegistry([...fileGenome.domain_types.values()] as never);
     let res: Awaited<ReturnType<typeof runGig>> | undefined;
     let failure: string | undefined;

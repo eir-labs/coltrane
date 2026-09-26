@@ -515,7 +515,12 @@ export async function runCli(argv: readonly string[], io: CliIO): Promise<number
             (n, row) => n + ((row as { usage?: { total_cost_usd?: number } }).usage?.total_cost_usd ?? 0),
             0,
           );
-          line(io, `  captured spend: $${total.toFixed(2)} across ${settledRows.length} chair invocation(s) that settled`);
+          const unpriced = capturedRows.reduce(
+            (n, row) => n + ((row as { usage?: { unpriced_invocations?: number } }).usage?.unpriced_invocations ?? 0),
+            0,
+          );
+          line(io, `  captured spend: $${total.toFixed(2)} across ${settledRows.length} chair invocation(s) that settled` +
+            (unpriced > 0 ? `; ${unpriced} unpriced (no known price), so the total is a lower bound` : ""));
         } else {
           line(io, `  captured spend: not captured — no chair invocation settled a usage report before the failure`);
         }
@@ -541,9 +546,20 @@ export async function runCli(argv: readonly string[], io: CliIO): Promise<number
         return 0; // waiting on a person is not a failure
       }
       if (d.manifest) {
-        const m = d.manifest as { output_count?: number; run_fingerprint?: string; usage?: { total_cost_usd?: number } };
+        const m = d.manifest as {
+          output_count?: number; run_fingerprint?: string; usage?: { total_cost_usd?: number; unpriced_invocations?: number };
+        };
+        // An invocation with no known price is never folded in as a bare total: "$0.00" over an unpriced
+        // run reads as "ran free". Say unpriced, and what the priced part came to.
+        const unpriced = m.usage?.unpriced_invocations ?? 0;
+        const spend =
+          m.usage?.total_cost_usd === undefined
+            ? ""
+            : unpriced > 0
+              ? `, unpriced (${unpriced} invocation(s) with no known price; $${m.usage.total_cost_usd.toFixed(2)} priced)`
+              : `, $${m.usage.total_cost_usd.toFixed(2)}`;
         line(io, `complete — ${m.output_count ?? 0} sealed output(s)` +
-          (m.usage?.total_cost_usd !== undefined ? `, $${m.usage.total_cost_usd.toFixed(2)}` : "") +
+          spend +
           (m.run_fingerprint ? `, fingerprint ${m.run_fingerprint.slice(0, 12)}` : ""));
       }
       // contract-unknown-gig-input-v1 (O2, CLI) — a completing dispatch NAMES the payload keys the

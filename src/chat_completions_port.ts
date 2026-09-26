@@ -119,7 +119,11 @@ interface WireChoice {
 interface WireUsage {
   prompt_tokens?: number;
   completion_tokens?: number;
-  prompt_tokens_details?: { cached_tokens?: number };
+  // cache_write_tokens: tokens WRITTEN to the cache this round, a part of prompt_tokens priced at
+  // their own rate (reported by a provider for models with explicit caching and cache-write pricing).
+  prompt_tokens_details?: { cached_tokens?: number; cache_write_tokens?: number };
+  /** What the provider charged for this round, in USD ("the total amount charged to your account"). */
+  cost?: number;
   // A provider that reports cache hits and misses as SEPARATE counts (rather than folding hits into
   // prompt_tokens_details.cached_tokens). Both shapes describe the same whole prompt; only the way
   // the split is reported differs.
@@ -161,7 +165,12 @@ function toWireMessage(m: TurnMessage): Record<string, unknown> {
  *  hits and misses SEPARATELY names them `prompt_cache_hit_tokens` / `prompt_cache_miss_tokens`;
  *  there the cache hits are the hit count and the uncached input is the reported miss count directly.
  *  Either way the prompt stays whole and only the reported split differs — pricing cache hits as
- *  uncached input (the pre-cache-hit bug) would overcharge a run priced in cents. */
+ *  uncached input (the pre-cache-hit bug) would overcharge a run priced in cents.
+ *
+ *  Cache WRITES (`prompt_tokens_details.cache_write_tokens`) are a third part of the same
+ *  prompt: taken out of the uncached input and reported as their own class, so a price table charges
+ *  them at the cache-write rate. That they are a SUBSET of prompt_tokens is what the provider's documented
+ *  example implies (prompt_tokens 194 with 100 written); a recorded live response settles it. */
 function mapUsage(u: WireUsage | undefined): TurnUsage | undefined {
   if (!u) return undefined;
   const cached = typeof u.prompt_cache_hit_tokens === "number"
@@ -169,10 +178,14 @@ function mapUsage(u: WireUsage | undefined): TurnUsage | undefined {
     : typeof u.prompt_tokens_details?.cached_tokens === "number"
       ? u.prompt_tokens_details.cached_tokens
       : 0;
+  const written = u.prompt_tokens_details?.cache_write_tokens;
   const usage: TurnUsage = {};
   if (typeof u.prompt_cache_miss_tokens === "number") usage.input_tokens = u.prompt_cache_miss_tokens;
-  else if (typeof u.prompt_tokens === "number") usage.input_tokens = u.prompt_tokens - cached;
+  else if (typeof u.prompt_tokens === "number") usage.input_tokens = u.prompt_tokens - cached - (typeof written === "number" ? written : 0);
   if (cached > 0) usage.cache_read_tokens = cached;
+  // A reported write count is a class of its own, even when 0: it is priced at the cache-write rate,
+  // never as uncached input.
+  if (typeof written === "number") usage.cache_write_tokens = written;
   if (typeof u.completion_tokens === "number") usage.output_tokens = u.completion_tokens;
   return usage;
 }
@@ -289,6 +302,9 @@ export function makeChatCompletionsPort(opts: ChatCompletionsPortOptions): Model
     if (typeof wire.model === "string") reply.model = wire.model;
     const usage = mapUsage(wire.usage);
     if (usage !== undefined) reply.usage = usage;
+    // The provider's own charge, when it reports one. A reported 0 is a known price; an absent cost
+    // is not 0 — the loop falls back to the price table, or leaves the round unpriced.
+    if (typeof wire.usage?.cost === "number") reply.cost_usd = wire.usage.cost;
     const stop = mapStop(choice?.finish_reason);
     if (stop !== undefined) reply.stop = stop;
     return reply;

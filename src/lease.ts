@@ -19,6 +19,12 @@ import { drainServicePost, DrainWriteError } from "./output_mirror.js";
 /** The store's lease on a claimed row: sixty minutes. */
 export const HOSTED_LEASE_MS = 60 * 60 * 1000;
 
+/**
+ * The PLAYER path's lease: coltrane_mcp_claim leases a row for thirty minutes, and that path has no
+ * renew door. So a player-mode run's timeout is the only thing keeping it under its lease.
+ */
+export const PLAYER_LEASE_MS = 30 * 60 * 1000;
+
 /** The drain service's lease doors. */
 export const DRAIN_LEASE_ROUTES = {
   renew: "/rest/v1/rpc/coltrane_drain_renew",

@@ -29,7 +29,7 @@ import { amendLadderFromEnv } from "./invoker_selection.js";
 import { MCP_TOOLS } from "./mcp.js";
 import { ENGINE_MCP_SERVER, type ToolProvider, type ToolProviderRegistry } from "./tool_providers.js";
 import type { BudgetInput, RunDeps } from "./runtime.js";
-import { HOSTED_LEASE_MS } from "./lease.js";
+import { HOSTED_LEASE_MS, PLAYER_LEASE_MS } from "./lease.js";
 
 /**
  * Every engine tool as an in-house provider, tagged with the engine's own MCP server.
@@ -80,9 +80,15 @@ export function drainBudget(input: Record<string, unknown> | undefined): BudgetI
  * gig to another drain, and the last sixth is room for the terminal writes (outputs, then the header,
  * each retried). Computed at call time from the imported binding, so moving the constant moves this.
  */
-export function drainTimeoutMs(): number {
+/**
+ * PER MODE, because the leases differ. A venue drain holds the hosted lease (HOSTED_LEASE_MS) and
+ * renews it; a PLAYER (coltrane_mcp_claim) holds a thirty-minute lease (PLAYER_LEASE_MS) and has no
+ * renew at all, so its run must end inside that one lease or another player claims it mid-run.
+ */
+export function drainTimeoutMs(mode: "venue" | "player" = "venue"): number {
   const env = Number(process.env["COLTRANE_GIG_TIMEOUT_MS"]);
-  return Number.isFinite(env) && env > 0 ? env : Math.floor((HOSTED_LEASE_MS * 5) / 6);
+  const lease = mode === "player" ? PLAYER_LEASE_MS : HOSTED_LEASE_MS;
+  return Number.isFinite(env) && env > 0 ? env : Math.floor((lease * 5) / 6);
 }
 
 /**

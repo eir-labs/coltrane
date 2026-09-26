@@ -9,7 +9,10 @@
 // minted". The drain service's coltrane_drain_release speaks through the VENUE credential — the one
 // the box always holds — so that premise no longer holds, and neither does the price.
 //
-// The contract: release(p_instance, p_gig_id, p_reason, p_terminal). Refusals that are not the gig's
+// The contract (store PR eir-labs/coltrane-ui #250): coltrane_drain_release(p_token, p_instance, p_gig_id,
+// p_reason, p_terminal), where the ROUTE fills p_token from the bearer and p_instance from
+// X-Coltrane-Instance — so the engine's body is {p_gig_id, p_reason, p_terminal} and the instance
+// travels only in the header. Refusals that are not the gig's
 // fault release NON-terminally (the row goes back to the queue for a box that can run it), naming
 // the cause; a failure the store would not record falls back to a TERMINAL release carrying the error.
 import { describe, it, expect, afterEach, vi } from "vitest";
@@ -28,8 +31,9 @@ async function expectRelease(store: ReturnType<typeof hostedStore>, terminal: bo
   const rel = store.releases();
   expect(rel.length, "the row was left leased — no release was sent").toBe(1);
   const b = rel[0]!.body;
-  expect(b["p_instance"]).toBe(INSTANCE);
+  expect(Object.keys(b).sort(), "release's body is the store route's shape: {p_gig_id, p_reason, p_terminal}; the instance rides the header only").toEqual(["p_gig_id", "p_reason", "p_terminal"]);
   expect(b["p_gig_id"]).toBe(GIG_ID);
+  expect(rel[0]!.headers["X-Coltrane-Instance"], "the instance travels in the header the route reads").toBe(INSTANCE);
   expect(b["p_terminal"], terminal ? "a failure the store would not record must release TERMINALLY" : "a refusal that is not the gig's fault must release NON-terminally, back to the queue").toBe(terminal);
   expect(String(b["p_reason"] ?? ""), "the release must name its cause").toMatch(reason);
   expect(rel[0]!.headers["Authorization"], "release speaks with the venue credential, the one the box always holds").toBe(`Bearer ${DRAIN_KEY}`);

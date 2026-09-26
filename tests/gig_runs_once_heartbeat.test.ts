@@ -7,8 +7,9 @@
 // finishes second overwrites the first. The run timeout (drainTimeoutMs, src/run_deps.ts) was meant
 // to keep one gig under one lease, and its comment still believes the lease is thirty minutes.
 //
-// E3: while a gig runs, the worker renews through the drain service (coltrane_drain_renew, carrying
-//     the claim's instance and gig id) every HOSTED_LEASE_MS / 3.
+// E3: while a gig runs, the worker renews through the drain service (coltrane_drain_renew) every
+//     HOSTED_LEASE_MS / 3: body {p_gig_id}; the instance ONLY in X-Coltrane-Instance and the drain key
+//     ONLY as the bearer — the route fills p_instance and p_token from them (store PR coltrane-ui #250).
 // E4: a renewal the store REFUSES (403 / 42501 — the lease is someone else's now) aborts the run:
 //     no further chair, nothing further drained, and no terminal write by a worker that no longer
 //     holds the row — the new holder owns the gig's truth.
@@ -43,7 +44,7 @@ let env: ReturnType<typeof hostedEnv>;
 afterEach(() => env?.cleanup());
 
 describe("E3 — the heartbeat renews the lease while the gig runs", () => {
-  it("E3 a heartbeat is armed before the first chair, every HOSTED_LEASE_MS/3, and renews with the claim's instance and gig id", async () => {
+  it("E3 a heartbeat is armed before the first chair, every HOSTED_LEASE_MS/3, and renews with body {p_gig_id} and the instance only in its header", async () => {
     env = hostedEnv();
     const store = hostedStore({ claim: claimFor("one-chair-v0") });
     const seam = heartbeatSeam();
@@ -64,8 +65,10 @@ describe("E3 — the heartbeat renews the lease while the gig runs", () => {
     expect(armedAtFirstChair, "the heartbeat was armed only AFTER the first chair started").toBe(1);
     const renews = store.renews();
     expect(renews.length, "the heartbeat fired but nothing renewed the lease").toBe(1);
-    expect(renews[0]!.body["p_instance"], "renew must name the instance that holds the lease").toBe(INSTANCE);
-    expect(renews[0]!.body["p_gig_id"], "renew must name the claimed gig").toBe(GIG_ID);
+    // THE STORE'S BODY SHAPE, EXACTLY (eir-labs/coltrane-ui #250): the route fills p_token from the
+    // bearer and p_instance from X-Coltrane-Instance. The instance travels in ONE place — a second copy
+    // in the body is two sources for one fact, the drift this battery exists to avoid.
+    expect(renews[0]!.body, "renew's body is the store route's shape: {p_gig_id} and nothing else").toEqual({ p_gig_id: GIG_ID });
     expect(renews[0]!.headers["Authorization"], "renew speaks with the venue credential").toBe(`Bearer ${DRAIN_KEY}`);
     expect(renews[0]!.headers["X-Coltrane-Instance"]).toBe(INSTANCE);
     expect(seam.scheduled[0]!.stopped, "the heartbeat outlived the gig — a finished worker kept renewing a lease it no longer needs").toBe(true);

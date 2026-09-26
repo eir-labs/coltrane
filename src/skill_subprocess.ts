@@ -221,7 +221,10 @@ export function executeSkill(skillDir: string, input: unknown, timeoutMs = 120_0
   const started = Date.now();
   assertSandboxCapableRuntime();
   const dir = realDir(skillDir);
-  const res = spawnSync("node", [...tierFlags(tier, dir, meta.permission?.network), runnerPath(), dir], {
+  // process.execPath, never `node` on PATH: the floor above checked THIS runtime's version, and
+  // tierFlags chose --allow-net for it. A PATH `node` can be an older Node with no network gate
+  // (the non-author grade of #557 fetched 200 from an ungranted skill that way).
+  const res = spawnSync(process.execPath, [...tierFlags(tier, dir, meta.permission?.network), runnerPath(), dir], {
     // The envelope carries the network grant so the child can enforce its host allowlist; --allow-net
     // is all-or-nothing, and a tier-0 child cannot re-read its own meta.json to learn the list.
     input: JSON.stringify(
@@ -293,7 +296,8 @@ export async function executeSkillAsync(
     // (the runtime forwards RunDeps.tree_root), spawn the child there so the skill's code half runs
     // in the gig's tree, not the long-lived engine process's own directory. Absent a cwd the spawn
     // is unchanged: the child inherits the parent's working directory, exactly as before (I2).
-    const child = spawn("node", [...tierFlags(tier, dir, meta.permission?.network), runnerPath(), dir], {
+    // process.execPath, as in executeSkill: the child is the runtime the floor checked.
+    const child = spawn(process.execPath, [...tierFlags(tier, dir, meta.permission?.network), runnerPath(), dir], {
       stdio: ["pipe", "pipe", "pipe"], env: skillEnv(),
       ...(opts.cwd !== undefined ? { cwd: opts.cwd } : {}),
     });

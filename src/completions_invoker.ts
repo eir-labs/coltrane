@@ -136,10 +136,10 @@ export type CompletionsRefusal =
   // LAYOUT GRANTS — a role token (`Write(@source)`) the repository's layout does not answer, or any
   // role token with no layout: it grants nothing and the chair is refused naming the role.
   | "layout_role_unresolved"
-  // LAYOUT GRANTS — the chair's effective grants hold a path-scoped Write/Edit. This invoker offers a
-  // grant by its BASE name, so `Write(src/a.ts)` would reach the model as a tree-wide Write: the scope
-  // cannot survive here, so the chair is refused rather than widened.
-  | "scoped_write_unenforceable";
+  // LAYOUT GRANTS — the chair's effective grants hold a SCOPED grant (`Write(src/a.ts)`,
+  // `Bash(npm test:*)`, `Read(src/**)`, `WebFetch(https://…)`). This invoker offers a grant by its BASE
+  // name, so the scope cannot survive here: the chair is refused rather than widened.
+  | "scoped_grant_unenforceable";
 
 export const COMPLETIONS_REFUSALS: readonly CompletionsRefusal[] = [
   "host_tool_denied",
@@ -153,7 +153,7 @@ export const COMPLETIONS_REFUSALS: readonly CompletionsRefusal[] = [
   "tool_name_collision",
   "no_seal",
   "layout_role_unresolved",
-  "scoped_write_unenforceable",
+  "scoped_grant_unenforceable",
 ];
 
 /** The engine's own seal verb, as the tool source lists it. */
@@ -235,20 +235,21 @@ export function makeCompletionsInvoker(opts: CompletionsInvokerOptions): AgentIn
       );
     }
 
-    // (1b) A PATH-SCOPED WRITE CANNOT SURVIVE THIS INVOKER. mapGrant keeps only a grant's base, so
-    // `Write(src/a.ts)` — literal or expanded from a role — would be offered to the model as `Write`,
-    // the whole tree. Refused before any model call, naming the grant: fail closed, never widened. A
-    // bare Write is refused above as a host builtin, as it always was.
-    const scopedWrites = effective.filter((g) => {
-      const base = toolBaseName(g);
-      return (base === "Write" || base === "Edit") && g.trim() !== base;
+    // (1b) A SCOPED GRANT CANNOT SURVIVE THIS INVOKER. mapGrant keeps only a grant's base, so ANY
+    // scope is dropped on the way to the model: `Write(src/a.ts)` would be offered as the whole tree,
+    // `Bash(npm test:*)` as the whole of Bash, `Read(src/**)` as every file, `WebFetch(https://x/*)` as
+    // every URL. Refused before any model call, naming the grant — literal or expanded from a role:
+    // fail closed, never widened. A bare host builtin is refused above, as it always was.
+    const scopedGrants = effective.filter((g) => {
+      const open = g.indexOf("(");
+      return open > 0 && g.trim().endsWith(")");
     });
-    if (scopedWrites.length > 0) {
+    if (scopedGrants.length > 0) {
       return refuse(
-        "scoped_write_unenforceable",
-        `agent "${ctx.agent.slug}" holds path-scoped write grant(s) [${scopedWrites.join(", ")}], which this ` +
+        "scoped_grant_unenforceable",
+        `agent "${ctx.agent.slug}" holds scoped grant(s) [${scopedGrants.join(", ")}], which this ` +
           `invoker cannot enforce — it offers a tool by its base name, so the scope would be widened to the ` +
-          `whole tree. Run this chair on the host-tool invoker, which carries the scope to the cage.`,
+          `whole tool. Run this chair on the host-tool invoker, which carries the scope to the cage.`,
       );
     }
 

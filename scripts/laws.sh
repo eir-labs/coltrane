@@ -29,7 +29,8 @@ cd "$(dirname "$0")/.."
 # stopped being true at Node 24), and two pure flag-string laws replaced it in this band. The nine
 # laws that need a real request moved to tests/security — a band may reach out, the root suite may
 # not — so they are counted there, by file, not here.
-EXPECTED_LAWS="${EXPECTED_LAWS:-4589}"
+EXPECTED_LAWS="${EXPECTED_LAWS:-4650}"
+#  merge of main (#559 containment: 4310 in 440) into #553 (4589 in 470): resolved to the COLLECTED counts: 4650 laws in 471 files, read from the run (4589 + 61, 470 + 1).
 #  merge of main (#557 + #556 + #558: 4249 in 439) into #553 (layout grants: 4533 in 465), both from 4193 in 434:
 #  4249 + 340 = 4589 laws, 439 + 31 = 470 files, read from the run.
 #  +40 layout grants, round 8: a_repository_can_declare_a_role_absent (40) — a role set to null is a DECLARED ABSENCE
@@ -63,6 +64,19 @@ EXPECTED_LAWS="${EXPECTED_LAWS:-4589}"
 #      literal_grants_resolve_unchanged (3), seat_grant_resolution_only_narrows (5),
 #      the_layout_is_read_from_the_genome_tree (5), both_invokers_grant_through_the_layout (7),
 #      the_chair_records_its_resolved_grants (4). Read from the run.
+#  merge of main (#556 + #558: 4249 in 439) into #559 (containment: 4269 in 438), both from 4208 in 437:
+#  4249 + 61 = 4310 laws, 439 + 1 = 440 files, read from the run.
+#  +21 genome_writes_stay_in_root, the two survivors of #559's first grade: 12 laws give every site a value that
+#      lands beside its OWN directory (../agents-evil/x — a helper without the trailing separator admits it),
+#      and 9 give every suffix-less site a value that IS its directory (".", "a/..", "./", "").
+#  +3 genome_writes_stay_in_root, charter_read (conductor's decision on #559): a charter is read only from
+#      inside the genome root — a control, the hostile paths refused by name with nothing returned, and no
+#      genome root means refused.
+#  +37 genome_writes_stay_in_root (new file, RED at e6c89ff): no path the engine derives leaves its root —
+#      founder ruling "SLUGS ARE NOT IDENTIFIERS". 12 controls (a normal slug still writes inside the root) and
+#      25 red laws: six local genome-writing doors, agent_evolve's traversal read, the history snapshot, the
+#      three blessed writers on their own (4), the hosted store upsert per door (7) and the port for every class,
+#      persistLineageAdoption, the skill chain append and read, output_write's gig id, gig_logs' gig id.
 #  merge of main (#556, one_output_gate: 4232) into #558 (openrouter_reference: 4225): 4208 + 24 + 17 = 4249, read from the run.
 #   +6 openrouter_reference round 2 (on 02c591f): L2g a reported 0 is a known price, L2h a negative cost is never a
 #      credit, L2i a zero-token class needs no rate, L2j chair_spend carries the unpriced count, L2k the negative-input
@@ -227,7 +241,7 @@ EXPECTED_LAWS="${EXPECTED_LAWS:-4589}"
 #       with the handler, the description does not. Its first draft could not fail — it forgave any
 #       token no tool anywhere declared, which is exactly what a renamed argument leaves behind.
 #       Sabotage said so (`current` -> `slug_current` stayed green); the exemption is gone.
-EXPECTED_FILES="${EXPECTED_FILES:-470}"   # + the thirty-one layout-grants law files (docs/specs/layout-grants.red-spec.json), + tests/every_skill_runs_its_fixtures.test.ts, + tests/node_floor_refuses.test.ts, + tests/spec_reside_drive.test.ts (#537), + tests/a_red_law_names_its_plant.test.ts (#551), + tests/sealed_inputs.test.ts, tests/fan_out.test.ts, tests/completions_seal.test.ts, tests/tier_ladder.test.ts, tests/amend_ladder.test.ts, tests/completions_reasoning_effort.test.ts, tests/bus.test.ts, tests/bus_chair.test.ts, tests/bus_terminal.test.ts, tests/bus_verbs.test.ts, tests/bus_commit.test.ts, tests/code_tools.test.ts, tests/gig_input_validated.test.ts, tests/seat_reads_recorded.test.ts, tests/claude_seat_reads.test.ts, tests/optional_declared_input.test.ts, tests/simulate_names_seats.test.ts
+EXPECTED_FILES="${EXPECTED_FILES:-471}"   # merge: #553 layout-grants files + #559 tests/genome_writes_stay_in_root.test.ts (collected). + the thirty-one layout-grants law files (docs/specs/layout-grants.red-spec.json), + tests/every_skill_runs_its_fixtures.test.ts, + tests/node_floor_refuses.test.ts, + tests/spec_reside_drive.test.ts (#537), + tests/a_red_law_names_its_plant.test.ts (#551), + tests/sealed_inputs.test.ts, tests/fan_out.test.ts, tests/completions_seal.test.ts, tests/tier_ladder.test.ts, tests/amend_ladder.test.ts, tests/completions_reasoning_effort.test.ts, tests/bus.test.ts, tests/bus_chair.test.ts, tests/bus_terminal.test.ts, tests/bus_verbs.test.ts, tests/bus_commit.test.ts, tests/code_tools.test.ts, tests/gig_input_validated.test.ts, tests/seat_reads_recorded.test.ts, tests/claude_seat_reads.test.ts, tests/optional_declared_input.test.ts, tests/simulate_names_seats.test.ts
 
 # THE OTHER BANDS. `vitest run` is ROOT-CONFIG ONLY — this repo's own workflow comments
 # record that four configs went unexecuted once for exactly that reason. So pinning only the

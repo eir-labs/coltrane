@@ -53,14 +53,16 @@ afterEach(() => {
 const answer = (phase: string) => ({ id: `sig-${phase}`, source: "test", data: { seen: phase }, completeness: 1, acquisition_cost: 0 });
 
 /** A chair that settles CHAIR_USD, reported the way a real invoker does (a `result` stream event). */
-function payingChairs(): { invoke: AgentInvoker; phases: string[] } {
+function payingChairs(usd: number = CHAIR_USD): { invoke: AgentInvoker; phases: string[]; roles: string[] } {
   const phases: string[] = [];
+  const roles: string[] = [];
   const invoke = (async (ctx: AgentInvocationContext) => {
     phases.push(ctx.phase);
-    ctx.onEvent?.({ type: "result", raw: { usage: { input_tokens: 10, output_tokens: 5 }, total_cost_usd: CHAIR_USD } });
-    return answer(ctx.phase);
+    roles.push(String((ctx as unknown as { role?: string }).role ?? ""));
+    ctx.onEvent?.({ type: "result", raw: { usage: { input_tokens: 10, output_tokens: 5 }, total_cost_usd: usd } });
+    return answer(`${ctx.phase}-${roles.length}`);
   }) as unknown as AgentInvoker;
-  return { invoke, phases };
+  return { invoke, phases, roles };
 }
 
 async function onFreshBox(deps: WorkOnceDeps): Promise<Awaited<ReturnType<typeof workOnce>>> {
@@ -156,3 +158,35 @@ describe("B2 — a `resumes` claim whose closed gig cannot be read is REFUSED, n
     }, 30_000);
   }
 });
+
+describe("B1 (6f) — the ceiling is checked before each CHAIR, and in integer micro-dollars", () => {
+  it("B1c chairs in sequence INSIDE ONE PHASE: the ceiling is hit after the second, so the third never starts (a check at phase start only would let all four run)", async () => {
+    // The runtime runs a phase as successive dispatch batches: each batch is the chairs whose
+    // depends_on are satisfied (src/runtime.ts, the `while (remaining.size > 0)` loop). c1 → c2 → c3 → c4
+    // in one phase is four batches, and the gate sits before every one of them.
+    env = hostedEnv();
+    delete process.env["COLTRANE_DRAIN_MAX_USD"];
+    hostedStore({ claim: claimFor("chain-one-phase-v0", { budget_micro_usd: 8_000_000 }) });
+    const { invoke, roles } = payingChairs(CHAIR_USD);
+    const res = await onFreshBox({ makeInvoke: () => invoke } as WorkOnceDeps);
+    expect(roles, "a chair inside the phase started after settled spend had reached the ceiling; the gate runs only at phase start").toEqual(["c1", "c2"]);
+    expect(res.claimed && res.status).not.toBe("complete");
+  });
+
+  it("B1f a float sum that drifts BELOW the ceiling (0.3 + 0.3 + 0.3 = 0.8999999999999999 USD) against a ceiling of exactly 900000 micro-dollars: the integer path stops after the third chair", async () => {
+    // Three chairs settle 0.3 USD each. In floats the sum is 0.8999999999999999, which is below 0.9; in
+    // integer micro-dollars it is 900000, which equals the ceiling. The integer rule (#555: money is
+    // integer micro-dollars) says the ceiling is reached and c4 does not start. A float comparison
+    // believes $0.0000000000000001 of budget remains, and lets one more chair run.
+    env = hostedEnv();
+    delete process.env["COLTRANE_DRAIN_MAX_USD"];
+    expect(0.3 + 0.3 + 0.3 < 0.9, "precondition: the float sum drifts below the boundary").toBe(true);
+    expect(Math.round((0.3 + 0.3 + 0.3) * 1_000_000), "precondition: the same sum in micro-dollars IS the boundary").toBe(900_000);
+    hostedStore({ claim: claimFor("chain-one-phase-v0", { budget_micro_usd: 900_000 }) });
+    const { invoke, roles } = payingChairs(0.3);
+    const res = await onFreshBox({ makeInvoke: () => invoke } as WorkOnceDeps);
+    expect(roles, "the ceiling was compared in floats: a fourth chair ran on a budget that, in integer micro-dollars, was already spent").toEqual(["c1", "c2", "c3"]);
+    expect(res.claimed && res.status).not.toBe("complete");
+  });
+});
+

@@ -15,5 +15,4 @@
 export const HP_SOURCE =
   'function Hp(e){if(e.length===0)return[];let t=[];for(let n of e){if(!n)continue;let r="",s=!1;for(let o of n)switch(o){case"(":s=!0,r+=o;break;case")":s=!1,r+=o;break;case",":if(s)r+=o;else{if(r.trim())t.push(r.trim());r=""}break;case" ":if(s)r+=o;else if(r.trim())t.push(r.trim()),r="";break;default:r+=o}if(r.trim())t.push(r.trim())}return t}';
 
-// eslint-disable-next-line @typescript-eslint/no-implied-eval
 export const cliSplitGrants: (values: readonly string[]) => string[] = new Function(`${HP_SOURCE}; return Hp;`)() as (v: readonly string[]) => string[];

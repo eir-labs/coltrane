@@ -1330,26 +1330,24 @@ export async function workOnce(ctx: WorkerContext, deps: WorkOnceDeps): Promise<
         // been retried under E2's policy (drainServicePost), and a run whose identity never reached
         // the store is a run nobody can resume — so it is given back, not run blind.
         const why = e instanceof Error ? e.message : String(e);
-        // The one exception: a drain CONFIGURED so that nothing reaches the service (a key with no
-        // COLTRANE_DRAIN_URL) sent no request and got no answer. That is the operator's to fix, and it
-        // is said loudly; the run proceeds as a box with no reachable store did before this header
-        // existed, and its unacknowledged terminal state is reported (acknowledged:false).
-        if (e instanceof DrainConfigError) {
-          console.error(`[drain] gig ${claim.gig_id}: the 'running' header could not be sent — the drain is misconfigured: ${why}`);
-        } else {
-          const refusedOutright = e instanceof DrainWriteError && (e.refused || isNotOursRefusal(e));
-          const error = refusedOutright
-            ? `the store refused this gig's 'running' header, so it is not this worker's to run — ${why}`
-            : `the store never acknowledged this gig's 'running' header, so it is given back before any chair runs — ${why}`;
-          log(`gig ${claim.gig_id} abandoned: ${error}`);
-          console.error(`[drain] gig ${claim.gig_id}: ${error}`);
-          // Not a refusal: nothing has been spent, so the row goes back to the queue (non-terminal).
-          if (!refusedOutright && leaseCred) {
-            const rel = await releaseLease(claim.gig_id, error, false, leaseCred);
-            if (!rel.ok) log(`the release of ${claim.gig_id} was not recorded either (${rel.detail}) — the row is held until its lease lapses`);
-          }
-          return { claimed: true, gig_id: claim.gig_id, status: "abandoned", error, acknowledged: false };
+        // NO BLIND DRAIN: a drain configured so that no request can reach its service (a key with no
+        // COLTRANE_DRAIN_URL) refuses too. It would pay for chairs whose outputs, headers and renewals
+        // reach nobody, then report a completion no store will ever hear of.
+        const misconfigured = e instanceof DrainConfigError;
+        const refusedOutright = misconfigured || (e instanceof DrainWriteError && (e.refused || isNotOursRefusal(e)));
+        const error = misconfigured
+          ? `this drain cannot reach its service, so it runs nothing — ${why}`
+          : refusedOutright
+          ? `the store refused this gig's 'running' header, so it is not this worker's to run — ${why}`
+          : `the store never acknowledged this gig's 'running' header, so it is given back before any chair runs — ${why}`;
+        log(`gig ${claim.gig_id} abandoned: ${error}`);
+        console.error(`[drain] gig ${claim.gig_id}: ${error}`);
+        // Not a refusal: nothing has been spent, so the row goes back to the queue (non-terminal).
+        if (!refusedOutright && leaseCred) {
+          const rel = await releaseLease(claim.gig_id, error, false, leaseCred);
+          if (!rel.ok) log(`the release of ${claim.gig_id} was not recorded either (${rel.detail}) — the row is held until its lease lapses`);
         }
+        return { claimed: true, gig_id: claim.gig_id, status: "abandoned", error, acknowledged: false };
       }
     }
 

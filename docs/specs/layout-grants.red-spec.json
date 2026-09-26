@@ -33,112 +33,139 @@
     "ROUND 5: grantCovers agrees with the Claude CLI 2.1.283's Write/Edit matcher — the bundled `ignore` 7.0.5 behind the CLI's dct/tn/Gn rule preprocessing, verified from the binary by the drafter — on a fixed table and a generated corpus; every protected path is denied to a Write/Edit grant iff the CLI could reach it; the spawn carries the .git and .claude denials. `ignore@7.0.5` is an exact devDependency used only as the oracle.",
     "ROUND 5 FINDINGS (red at 5776395): Write(./**) — `**` to the CLI — gets NO protected-path denial (fail-open); `./x`, `a//b` and `**/**` are not preprocessed as the CLI does; `x/**` does not cover `x` (fail-closed at the gate); `[!…]` is negated by the engine but literal in ignore 7.0.5. Note the implementer compared against ignore 5.3.2; the CLI bundles 7.0.5.",
     "ROUND 6: a literal Write/Edit spelled `./` or `//` refuses the chair (naming it) and is never spawned; a layout glob so spelled is a load_error; scope matching is case-insensitive like the CLI's; upper-cased protected paths are never granted, are denied to reaching grants, and are never excused by the diff gate; the room images carry every runtime dependency of the engine (room band; skipped as UNVERIFIED without Docker or the image).",
-    "ROUND 6 NOTE: the CI `room` job builds only coltrane/room:ephemeral, so the floor-image law skips (UNVERIFIED) in CI; building Dockerfile.floor there too would verify it."
+    "ROUND 6 NOTE: the CI `room` job builds only coltrane/room:ephemeral, so the floor-image law skips (UNVERIFIED) in CI; building Dockerfile.floor there too would verify it.",
+    "ROUND 7 (the non-author grade, issuecomment-5847662352): (1) no layout entry carries (, ), or , or edge whitespace — the CLI 2.1.283 --allowedTools splitter (Hp, vendored and tied to the binary) must read every emitted grant as exactly itself; (2) protection never compares literal names: casefold + NFKC + confusable folding (NFD, drop Mn) for the matcher and the diff gate, and realpath/inode where the file exists; (3) the sandbox opens .git (never hooks or config) and the network only through layout-declared git/egress roles the seat holds as tokens; (4) a root drain never makes a root room and /proc/sys stays unwritable; (5) the engine's ignore is fingerprinted against the installed CLI binary; (6) the sandbox denies <tree>/.coltrane.",
+    "ROLLOUT OBLIGATION (outside this repo): the sandbox settings keys (sandbox.enabled, failIfUnavailable, allowUnsandboxedCommands, filesystem.*, network.allowedDomains/strictAllowlist) EXIST in Claude Code 2.1.247 and 2.1.278 — the drains' versions — but are NOT runtime-verified there. The drain rollout must verify them live on each drain's CLI (a sandboxed write outside the tree, to the layout file and to .git/hooks refused; an undeclared host refused) before relying on them, and the drain hosts need bwrap and socat.",
+    "ROUND 7 FINDING: deploy-agent holds only WebFetch(https://api.vercel.com/*) with code_tool_access \"none\" — no Bash, so no sandbox; its fetch is an in-process CLI tool which the CLI 2.1.283 schema says the sandbox network setting does not gate. The grade's `fly` is not in its grants."
   ],
   "laws": [
     {
       "path": "tests/a_grant_never_crosses_repositories.test.ts",
-      "commit": "72bd6561314b21b3614f62a01b3369f2958a2e61"
+      "commit": "eaa7454022224dbc6f51e6abf5bec4625ea3a84e"
+    },
+    {
+      "path": "tests/a_grant_never_smuggles_another_grant.test.ts",
+      "commit": "eaa7454022224dbc6f51e6abf5bec4625ea3a84e"
     },
     {
       "path": "tests/a_missing_role_or_layout_grants_nothing.test.ts",
-      "commit": "72bd6561314b21b3614f62a01b3369f2958a2e61"
+      "commit": "eaa7454022224dbc6f51e6abf5bec4625ea3a84e"
     },
     {
       "path": "tests/a_new_repository_shape_needs_no_agent_amendment.test.ts",
-      "commit": "72bd6561314b21b3614f62a01b3369f2958a2e61"
+      "commit": "eaa7454022224dbc6f51e6abf5bec4625ea3a84e"
+    },
+    {
+      "path": "tests/a_protected_path_has_no_other_spelling.test.ts",
+      "commit": "eaa7454022224dbc6f51e6abf5bec4625ea3a84e"
+    },
+    {
+      "path": "tests/a_room_never_runs_as_root.test.ts",
+      "commit": "eaa7454022224dbc6f51e6abf5bec4625ea3a84e"
     },
     {
       "path": "tests/a_seat_cannot_rewrite_its_own_layout.test.ts",
-      "commit": "72bd6561314b21b3614f62a01b3369f2958a2e61"
+      "commit": "eaa7454022224dbc6f51e6abf5bec4625ea3a84e"
     },
     {
       "path": "tests/a_seat_cannot_write_outside_its_target_paths.test.ts",
-      "commit": "72bd6561314b21b3614f62a01b3369f2958a2e61"
+      "commit": "eaa7454022224dbc6f51e6abf5bec4625ea3a84e"
     },
     {
       "path": "tests/a_seat_cannot_write_the_engines_state.test.ts",
-      "commit": "72bd6561314b21b3614f62a01b3369f2958a2e61"
+      "commit": "eaa7454022224dbc6f51e6abf5bec4625ea3a84e"
+    },
+    {
+      "path": "tests/a_seat_reaches_git_and_the_network_only_as_declared.test.ts",
+      "commit": "eaa7454022224dbc6f51e6abf5bec4625ea3a84e"
     },
     {
       "path": "tests/a_seat_that_writes_outside_its_grant_is_refused.test.ts",
-      "commit": "72bd6561314b21b3614f62a01b3369f2958a2e61"
+      "commit": "eaa7454022224dbc6f51e6abf5bec4625ea3a84e"
     },
     {
       "path": "tests/a_seats_bash_runs_in_a_sandbox.test.ts",
-      "commit": "72bd6561314b21b3614f62a01b3369f2958a2e61"
+      "commit": "eaa7454022224dbc6f51e6abf5bec4625ea3a84e"
     },
     {
       "path": "tests/a_spelling_or_case_never_widens_a_grant.test.ts",
-      "commit": "72bd6561314b21b3614f62a01b3369f2958a2e61"
+      "commit": "eaa7454022224dbc6f51e6abf5bec4625ea3a84e"
     },
     {
       "path": "tests/a_target_path_never_escapes_the_tree.test.ts",
-      "commit": "72bd6561314b21b3614f62a01b3369f2958a2e61"
+      "commit": "eaa7454022224dbc6f51e6abf5bec4625ea3a84e"
     },
     {
       "path": "tests/an_empty_or_globbed_scope_fails_closed.test.ts",
-      "commit": "72bd6561314b21b3614f62a01b3369f2958a2e61"
+      "commit": "eaa7454022224dbc6f51e6abf5bec4625ea3a84e"
     },
     {
       "path": "tests/both_invokers_grant_through_the_layout.test.ts",
-      "commit": "72bd6561314b21b3614f62a01b3369f2958a2e61"
+      "commit": "eaa7454022224dbc6f51e6abf5bec4625ea3a84e"
     },
     {
       "path": "tests/every_door_carries_the_current_layout.test.ts",
-      "commit": "72bd6561314b21b3614f62a01b3369f2958a2e61"
+      "commit": "eaa7454022224dbc6f51e6abf5bec4625ea3a84e"
     },
     {
       "path": "tests/every_protected_path_is_denied_where_the_cli_could_reach_it.test.ts",
-      "commit": "72bd6561314b21b3614f62a01b3369f2958a2e61"
+      "commit": "eaa7454022224dbc6f51e6abf5bec4625ea3a84e"
     },
     {
       "path": "tests/literal_grants_resolve_unchanged.test.ts",
-      "commit": "72bd6561314b21b3614f62a01b3369f2958a2e61"
+      "commit": "eaa7454022224dbc6f51e6abf5bec4625ea3a84e"
     },
     {
       "path": "tests/seat_grant_resolution_only_narrows.test.ts",
-      "commit": "72bd6561314b21b3614f62a01b3369f2958a2e61"
+      "commit": "eaa7454022224dbc6f51e6abf5bec4625ea3a84e"
     },
     {
       "path": "tests/spec_room_image_carries_runtime_deps.test.ts",
-      "commit": "72bd6561314b21b3614f62a01b3369f2958a2e61"
+      "commit": "eaa7454022224dbc6f51e6abf5bec4625ea3a84e"
+    },
+    {
+      "path": "tests/spec_room_runs_non_root_live.test.ts",
+      "commit": "eaa7454022224dbc6f51e6abf5bec4625ea3a84e"
     },
     {
       "path": "tests/the_chair_records_its_resolved_grants.test.ts",
-      "commit": "72bd6561314b21b3614f62a01b3369f2958a2e61"
+      "commit": "eaa7454022224dbc6f51e6abf5bec4625ea3a84e"
     },
     {
       "path": "tests/the_diff_gate_never_fails_open.test.ts",
-      "commit": "72bd6561314b21b3614f62a01b3369f2958a2e61"
+      "commit": "eaa7454022224dbc6f51e6abf5bec4625ea3a84e"
     },
     {
       "path": "tests/the_drain_takes_its_layout_from_the_store.test.ts",
-      "commit": "72bd6561314b21b3614f62a01b3369f2958a2e61"
+      "commit": "eaa7454022224dbc6f51e6abf5bec4625ea3a84e"
     },
     {
       "path": "tests/the_engine_matches_scopes_as_the_cli_does.test.ts",
-      "commit": "72bd6561314b21b3614f62a01b3369f2958a2e61"
+      "commit": "eaa7454022224dbc6f51e6abf5bec4625ea3a84e"
     },
     {
       "path": "tests/the_engine_never_publishes_an_ignored_path.test.ts",
-      "commit": "72bd6561314b21b3614f62a01b3369f2958a2e61"
+      "commit": "eaa7454022224dbc6f51e6abf5bec4625ea3a84e"
     },
     {
       "path": "tests/the_layout_is_read_from_the_genome_tree.test.ts",
-      "commit": "72bd6561314b21b3614f62a01b3369f2958a2e61"
+      "commit": "eaa7454022224dbc6f51e6abf5bec4625ea3a84e"
     },
     {
       "path": "tests/the_room_can_start_the_sandbox_and_nothing_more.test.ts",
-      "commit": "72bd6561314b21b3614f62a01b3369f2958a2e61"
+      "commit": "eaa7454022224dbc6f51e6abf5bec4625ea3a84e"
     },
     {
       "path": "tests/the_sandbox_refuses_a_real_write.test.ts",
-      "commit": "72bd6561314b21b3614f62a01b3369f2958a2e61"
+      "commit": "eaa7454022224dbc6f51e6abf5bec4625ea3a84e"
     },
     {
       "path": "tests/the_sandbox_tree_is_always_absolute.test.ts",
-      "commit": "72bd6561314b21b3614f62a01b3369f2958a2e61"
+      "commit": "eaa7454022224dbc6f51e6abf5bec4625ea3a84e"
+    },
+    {
+      "path": "tests/the_scope_oracle_is_the_installed_clis.test.ts",
+      "commit": "eaa7454022224dbc6f51e6abf5bec4625ea3a84e"
     }
   ],
   "coverage_map": [
@@ -2019,8 +2046,654 @@
       "drives": "the built image coltrane/floor:seat (Dockerfile.room / Dockerfile.floor), run with its own node",
       "plant": "build the image from a manifest that predates a runtime dependency (or with `ignore` in devDependencies under npm ci --omit=dev)",
       "plant_observed": "observed 27 Sep on the drafter's host with the images built before round 5 (coltrane/floor:seat): AssertionError: coltrane/floor:seat was built from a manifest whose runtime dependencies differ from this tree's — rebuild it: expected { …(6) } to deeply equal { …(7) }. Green after rebuilding both images at 0a8d1be."
+    },
+    {
+      "test_name": "the CLI's grant grammar, as the engine must respect it > non-vacuity: the vendored splitter really does smuggle a bare Write out of the example",
+      "test_file": "tests/a_grant_never_smuggles_another_grant.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "NO-GRANT-SMUGGLING",
+      "drives": "the vendored CLI splitter (Hp)",
+      "plant": "— a control on the oracle itself"
+    },
+    {
+      "test_name": "the CLI's grant grammar, as the engine must respect it > the vendored splitter is byte-for-byte the installed CLI's (skipped as UNVERIFIED when no claude binary is installed)",
+      "test_file": "tests/a_grant_never_smuggles_another_grant.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "NO-GRANT-SMUGGLING",
+      "drives": "the installed claude binary's bytes vs tests/support/cli_allowed_tools_splitter.ts",
+      "plant": "point CLAUDE_BIN at a binary whose splitter differs",
+      "plant_observed": "CLAUDE_BIN=<fixture binary without the 2.1.283 splitter> → AssertionError: the installed CLI (…/fake-claude-706.bin) no longer contains the vendored splitter — its --allowedTools grammar changed"
+    },
+    {
+      "test_name": "LayoutSchema refuses every entry the grammar would treat as structure > command prefix \"npx vitest run),Write,Bash(true\" is refused",
+      "test_file": "tests/a_grant_never_smuggles_another_grant.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "NO-GRANT-SMUGGLING",
+      "drives": "LayoutSchema / loadGenome — src/genome_schema.ts, src/loader.ts",
+      "plant": "(RED at 24a26de) the layout schema admits ( ) , and edge whitespace"
+    },
+    {
+      "test_name": "LayoutSchema refuses every entry the grammar would treat as structure > command prefix \"npx vitest run(x\" is refused",
+      "test_file": "tests/a_grant_never_smuggles_another_grant.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "NO-GRANT-SMUGGLING",
+      "drives": "LayoutSchema / loadGenome — src/genome_schema.ts, src/loader.ts",
+      "plant": "(RED at 24a26de) the layout schema admits ( ) , and edge whitespace"
+    },
+    {
+      "test_name": "LayoutSchema refuses every entry the grammar would treat as structure > command prefix \"a,b\" is refused",
+      "test_file": "tests/a_grant_never_smuggles_another_grant.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "NO-GRANT-SMUGGLING",
+      "drives": "LayoutSchema / loadGenome — src/genome_schema.ts, src/loader.ts",
+      "plant": "(RED at 24a26de) the layout schema admits ( ) , and edge whitespace"
+    },
+    {
+      "test_name": "LayoutSchema refuses every entry the grammar would treat as structure > command prefix \"x)y\" is refused",
+      "test_file": "tests/a_grant_never_smuggles_another_grant.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "NO-GRANT-SMUGGLING",
+      "drives": "LayoutSchema / loadGenome — src/genome_schema.ts, src/loader.ts",
+      "plant": "(RED at 24a26de) the layout schema admits ( ) , and edge whitespace"
+    },
+    {
+      "test_name": "LayoutSchema refuses every entry the grammar would treat as structure > command prefix \" npx vitest run\" is refused",
+      "test_file": "tests/a_grant_never_smuggles_another_grant.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "NO-GRANT-SMUGGLING",
+      "drives": "LayoutSchema / loadGenome — src/genome_schema.ts, src/loader.ts",
+      "plant": "(RED at 24a26de) the layout schema admits ( ) , and edge whitespace"
+    },
+    {
+      "test_name": "LayoutSchema refuses every entry the grammar would treat as structure > command prefix \"npx vitest run \" is refused",
+      "test_file": "tests/a_grant_never_smuggles_another_grant.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "NO-GRANT-SMUGGLING",
+      "drives": "LayoutSchema / loadGenome — src/genome_schema.ts, src/loader.ts",
+      "plant": "(RED at 24a26de) the layout schema admits ( ) , and edge whitespace"
+    },
+    {
+      "test_name": "LayoutSchema refuses every entry the grammar would treat as structure > command prefix \"\\tnpm test\" is refused",
+      "test_file": "tests/a_grant_never_smuggles_another_grant.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "NO-GRANT-SMUGGLING",
+      "drives": "LayoutSchema / loadGenome — src/genome_schema.ts, src/loader.ts",
+      "plant": "(RED at 24a26de) the layout schema admits ( ) , and edge whitespace"
+    },
+    {
+      "test_name": "LayoutSchema refuses every entry the grammar would treat as structure > path glob \"src/**),Write(coltrane.layout.json\" is refused",
+      "test_file": "tests/a_grant_never_smuggles_another_grant.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "NO-GRANT-SMUGGLING",
+      "drives": "LayoutSchema / loadGenome — src/genome_schema.ts, src/loader.ts",
+      "plant": "(RED at 24a26de) the layout schema admits ( ) , and edge whitespace"
+    },
+    {
+      "test_name": "LayoutSchema refuses every entry the grammar would treat as structure > path glob \"src/(x)/**\" is refused",
+      "test_file": "tests/a_grant_never_smuggles_another_grant.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "NO-GRANT-SMUGGLING",
+      "drives": "LayoutSchema / loadGenome — src/genome_schema.ts, src/loader.ts",
+      "plant": "(RED at 24a26de) the layout schema admits ( ) , and edge whitespace"
+    },
+    {
+      "test_name": "LayoutSchema refuses every entry the grammar would treat as structure > path glob \"src/a,b\" is refused",
+      "test_file": "tests/a_grant_never_smuggles_another_grant.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "NO-GRANT-SMUGGLING",
+      "drives": "LayoutSchema / loadGenome — src/genome_schema.ts, src/loader.ts",
+      "plant": "(RED at 24a26de) the layout schema admits ( ) , and edge whitespace"
+    },
+    {
+      "test_name": "LayoutSchema refuses every entry the grammar would treat as structure > path glob \" src/**\" is refused",
+      "test_file": "tests/a_grant_never_smuggles_another_grant.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "NO-GRANT-SMUGGLING",
+      "drives": "LayoutSchema / loadGenome — src/genome_schema.ts, src/loader.ts",
+      "plant": "(RED at 24a26de) the layout schema admits ( ) , and edge whitespace"
+    },
+    {
+      "test_name": "LayoutSchema refuses every entry the grammar would treat as structure > path glob \"src/** \" is refused",
+      "test_file": "tests/a_grant_never_smuggles_another_grant.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "NO-GRANT-SMUGGLING",
+      "drives": "LayoutSchema / loadGenome — src/genome_schema.ts, src/loader.ts",
+      "plant": "(RED at 24a26de) the layout schema admits ( ) , and edge whitespace"
+    },
+    {
+      "test_name": "LayoutSchema refuses every entry the grammar would treat as structure > control — ordinary prefixes and globs with INNER spaces are admitted",
+      "test_file": "tests/a_grant_never_smuggles_another_grant.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "NO-GRANT-SMUGGLING",
+      "drives": "LayoutSchema / loadGenome — src/genome_schema.ts, src/loader.ts",
+      "plant": "refuse inner spaces — a control"
+    },
+    {
+      "test_name": "LayoutSchema refuses every entry the grammar would treat as structure > a tree whose coltrane.layout.json smuggles a grant loads with a load_error and no layout",
+      "test_file": "tests/a_grant_never_smuggles_another_grant.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "NO-GRANT-SMUGGLING",
+      "drives": "LayoutSchema / loadGenome — src/genome_schema.ts, src/loader.ts",
+      "plant": "(RED at 24a26de) the layout schema admits ( ) , and edge whitespace"
+    },
+    {
+      "test_name": "every grant the engine emits splits, under the CLI's grammar, into exactly itself > property: for any layout LayoutSchema admits, each expanded grant is one grant to the CLI",
+      "test_file": "tests/a_grant_never_smuggles_another_grant.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "NO-GRANT-SMUGGLING",
+      "drives": "LayoutSchema / loadGenome — src/genome_schema.ts, src/loader.ts",
+      "plant": "(RED at 24a26de) the layout schema admits ( ) , and edge whitespace"
+    },
+    {
+      "test_name": "the final argv never carries a smuggled grant > a smuggling COMMAND handed straight to the invoker: refused before the spawn, or the CLI reads no bare Write",
+      "test_file": "tests/a_grant_never_smuggles_another_grant.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "NO-GRANT-SMUGGLING",
+      "drives": "makeClaudeInvoker(...) argv — src/claude_invoker.ts, split by the CLI splitter",
+      "plant": "(RED at 24a26de) ctx.layout is used without validation"
+    },
+    {
+      "test_name": "the final argv never carries a smuggled grant > a smuggling PATH GLOB handed straight to the invoker (no target_paths): refused before the spawn, or the CLI reads no Write of the layout file",
+      "test_file": "tests/a_grant_never_smuggles_another_grant.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "NO-GRANT-SMUGGLING",
+      "drives": "makeClaudeInvoker(...) argv — src/claude_invoker.ts, split by the CLI splitter",
+      "plant": "(RED at 24a26de) ctx.layout is used without validation"
+    },
+    {
+      "test_name": "the final argv never carries a smuggled grant > control — an honest layout's argv splits into exactly the seat's grants",
+      "test_file": "tests/a_grant_never_smuggles_another_grant.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "NO-GRANT-SMUGGLING",
+      "drives": "makeClaudeInvoker(...) argv — src/claude_invoker.ts, split by the CLI splitter",
+      "plant": "— a control: an honest argv splits into exactly its grants"
+    },
+    {
+      "test_name": "the final argv never carries a smuggled grant > dispatch refuses a smuggling layout, naming the entry — no seat is invoked",
+      "test_file": "tests/a_grant_never_smuggles_another_grant.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "NO-GRANT-SMUGGLING",
+      "drives": "runGig preflight — src/runtime.ts",
+      "plant": "(RED at 24a26de) a layout handed to runGig is not validated"
+    },
+    {
+      "test_name": "no Unicode spelling of a protected path is granted as a target > \"coltrane.layout.jſon\" (long s (U+017F)) is never granted — not even to a bare Write",
+      "test_file": "tests/a_protected_path_has_no_other_spelling.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "PROTECTED-NO-OTHER-SPELLING",
+      "drives": "resolveSeatGrants targets — src/layout_grants.ts (isProtectedPath)",
+      "plant": "(RED at 24a26de) isProtectedPath folds with toLowerCase only"
+    },
+    {
+      "test_name": "no Unicode spelling of a protected path is granted as a target > \"ｃｏｌｔｒａｎｅ.layout.json\" (fullwidth letters) is never granted — not even to a bare Write",
+      "test_file": "tests/a_protected_path_has_no_other_spelling.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "PROTECTED-NO-OTHER-SPELLING",
+      "drives": "resolveSeatGrants targets — src/layout_grants.ts (isProtectedPath)",
+      "plant": "(RED at 24a26de) isProtectedPath folds with toLowerCase only"
+    },
+    {
+      "test_name": "no Unicode spelling of a protected path is granted as a target > \"ċoltrane.layout.json\" (c with dot above, NFC) is never granted — not even to a bare Write",
+      "test_file": "tests/a_protected_path_has_no_other_spelling.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "PROTECTED-NO-OTHER-SPELLING",
+      "drives": "resolveSeatGrants targets — src/layout_grants.ts (isProtectedPath)",
+      "plant": "(RED at 24a26de) isProtectedPath folds with toLowerCase only"
+    },
+    {
+      "test_name": "no Unicode spelling of a protected path is granted as a target > \"ċoltrane.layout.json\" (c + combining dot, NFD) is never granted — not even to a bare Write",
+      "test_file": "tests/a_protected_path_has_no_other_spelling.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "PROTECTED-NO-OTHER-SPELLING",
+      "drives": "resolveSeatGrants targets — src/layout_grants.ts (isProtectedPath)",
+      "plant": "(RED at 24a26de) isProtectedPath folds with toLowerCase only"
+    },
+    {
+      "test_name": "no Unicode spelling of a protected path is granted as a target > \".ｇｉｔ/config\" (fullwidth letters) is never granted — not even to a bare Write",
+      "test_file": "tests/a_protected_path_has_no_other_spelling.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "PROTECTED-NO-OTHER-SPELLING",
+      "drives": "resolveSeatGrants targets — src/layout_grants.ts (isProtectedPath)",
+      "plant": "(RED at 24a26de) isProtectedPath folds with toLowerCase only"
+    },
+    {
+      "test_name": "no Unicode spelling of a protected path is granted as a target > \".𝐠𝐢𝐭/hooks/pre-commit\" (mathematical bold letters (NFKC)) is never granted — not even to a bare Write",
+      "test_file": "tests/a_protected_path_has_no_other_spelling.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "PROTECTED-NO-OTHER-SPELLING",
+      "drives": "resolveSeatGrants targets — src/layout_grants.ts (isProtectedPath)",
+      "plant": "(RED at 24a26de) isProtectedPath folds with toLowerCase only"
+    },
+    {
+      "test_name": "no Unicode spelling of a protected path is granted as a target > \".ġit/config\" (g with dot above, NFC) is never granted — not even to a bare Write",
+      "test_file": "tests/a_protected_path_has_no_other_spelling.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "PROTECTED-NO-OTHER-SPELLING",
+      "drives": "resolveSeatGrants targets — src/layout_grants.ts (isProtectedPath)",
+      "plant": "(RED at 24a26de) isProtectedPath folds with toLowerCase only"
+    },
+    {
+      "test_name": "no Unicode spelling of a protected path is granted as a target > \".gi̇t/config\" (i + combining dot above) is never granted — not even to a bare Write",
+      "test_file": "tests/a_protected_path_has_no_other_spelling.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "PROTECTED-NO-OTHER-SPELLING",
+      "drives": "resolveSeatGrants targets — src/layout_grants.ts (isProtectedPath)",
+      "plant": "(RED at 24a26de) isProtectedPath folds with toLowerCase only"
+    },
+    {
+      "test_name": "no Unicode spelling of a protected path is granted as a target > \".ｃｌａｕｄｅ/settings.json\" (fullwidth letters) is never granted — not even to a bare Write",
+      "test_file": "tests/a_protected_path_has_no_other_spelling.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "PROTECTED-NO-OTHER-SPELLING",
+      "drives": "resolveSeatGrants targets — src/layout_grants.ts (isProtectedPath)",
+      "plant": "(RED at 24a26de) isProtectedPath folds with toLowerCase only"
+    },
+    {
+      "test_name": "no Unicode spelling of a protected path is granted as a target > \".ċlaude/settings.json\" (c with dot above, NFC) is never granted — not even to a bare Write",
+      "test_file": "tests/a_protected_path_has_no_other_spelling.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "PROTECTED-NO-OTHER-SPELLING",
+      "drives": "resolveSeatGrants targets — src/layout_grants.ts (isProtectedPath)",
+      "plant": "(RED at 24a26de) isProtectedPath folds with toLowerCase only"
+    },
+    {
+      "test_name": "no Unicode spelling of a protected path is granted as a target > \".ċlaude/settings.json\" (c + combining dot, NFD) is never granted — not even to a bare Write",
+      "test_file": "tests/a_protected_path_has_no_other_spelling.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "PROTECTED-NO-OTHER-SPELLING",
+      "drives": "resolveSeatGrants targets — src/layout_grants.ts (isProtectedPath)",
+      "plant": "(RED at 24a26de) isProtectedPath folds with toLowerCase only"
+    },
+    {
+      "test_name": "no Unicode spelling of a protected path is granted as a target > \".ｃｏｌｔｒａｎｅ/ledger.jsonl\" (fullwidth letters) is never granted — not even to a bare Write",
+      "test_file": "tests/a_protected_path_has_no_other_spelling.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "PROTECTED-NO-OTHER-SPELLING",
+      "drives": "resolveSeatGrants targets — src/layout_grants.ts (isProtectedPath)",
+      "plant": "(RED at 24a26de) isProtectedPath folds with toLowerCase only"
+    },
+    {
+      "test_name": "no Unicode spelling of a protected path is granted as a target > \".COLTRANE/x\" (upper case (control of the folding)) is never granted — not even to a bare Write",
+      "test_file": "tests/a_protected_path_has_no_other_spelling.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "PROTECTED-NO-OTHER-SPELLING",
+      "drives": "resolveSeatGrants targets — src/layout_grants.ts (isProtectedPath)",
+      "plant": "drop case folding — the upper-case control"
+    },
+    {
+      "test_name": "a grant spelled with a variant is denied the real protected path > Write(coltrane.layout.jſon) carries the denial Write(coltrane.layout.json)",
+      "test_file": "tests/a_protected_path_has_no_other_spelling.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "PROTECTED-NO-OTHER-SPELLING",
+      "drives": "resolveSeatGrants denials — src/layout_grants.ts (grantMayReach)",
+      "plant": "(RED at 24a26de) protected paths matched on the literal spelling"
+    },
+    {
+      "test_name": "a grant spelled with a variant is denied the real protected path > Write(.ｇｉｔ/**) carries the denial Write(.git/**)",
+      "test_file": "tests/a_protected_path_has_no_other_spelling.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "PROTECTED-NO-OTHER-SPELLING",
+      "drives": "resolveSeatGrants denials — src/layout_grants.ts (grantMayReach)",
+      "plant": "(RED at 24a26de) protected paths matched on the literal spelling"
+    },
+    {
+      "test_name": "a grant spelled with a variant is denied the real protected path > Write(.ｃｌａｕｄｅ/*) carries the denial Write(.claude/**)",
+      "test_file": "tests/a_protected_path_has_no_other_spelling.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "PROTECTED-NO-OTHER-SPELLING",
+      "drives": "resolveSeatGrants denials — src/layout_grants.ts (grantMayReach)",
+      "plant": "(RED at 24a26de) protected paths matched on the literal spelling"
+    },
+    {
+      "test_name": "a grant spelled with a variant is denied the real protected path > Write(.ġit/**) carries the denial Write(.git/**)",
+      "test_file": "tests/a_protected_path_has_no_other_spelling.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "PROTECTED-NO-OTHER-SPELLING",
+      "drives": "resolveSeatGrants denials — src/layout_grants.ts (grantMayReach)",
+      "plant": "(RED at 24a26de) protected paths matched on the literal spelling"
+    },
+    {
+      "test_name": "a grant spelled with a variant is denied the real protected path > Write(.ｃｏｌｔｒａｎｅ/**) carries the denial Write(.coltrane/**)",
+      "test_file": "tests/a_protected_path_has_no_other_spelling.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "PROTECTED-NO-OTHER-SPELLING",
+      "drives": "resolveSeatGrants denials — src/layout_grants.ts (grantMayReach)",
+      "plant": "(RED at 24a26de) protected paths matched on the literal spelling"
+    },
+    {
+      "test_name": "on the real file system > probe: whether THIS host's file system opens coltrane.layout.jſon as coltrane.layout.json (APFS does)",
+      "test_file": "tests/a_protected_path_has_no_other_spelling.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "PROTECTED-NO-OTHER-SPELLING",
+      "drives": "the host file system",
+      "plant": "— a probe of the FS the laws run on (darwin: folds U+017F)"
+    },
+    {
+      "test_name": "on the real file system > a Write(**) seat that writes \"coltrane.layout.jſon\" (long s (U+017F)) is refused and nothing it made is sealed",
+      "test_file": "tests/a_protected_path_has_no_other_spelling.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "PROTECTED-NO-OTHER-SPELLING",
+      "drives": "runGig diff gate — src/runtime.ts, isProtectedPath (src/grant_scope.ts)",
+      "plant": "(RED at 24a26de) isProtectedPath folds with toLowerCase only (no NFKC / confusable folding)"
+    },
+    {
+      "test_name": "on the real file system > a Write(**) seat that writes \"ｃｏｌｔｒａｎｅ.layout.json\" (fullwidth letters) is refused and nothing it made is sealed",
+      "test_file": "tests/a_protected_path_has_no_other_spelling.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "PROTECTED-NO-OTHER-SPELLING",
+      "drives": "runGig diff gate — src/runtime.ts, isProtectedPath (src/grant_scope.ts)",
+      "plant": "(RED at 24a26de) isProtectedPath folds with toLowerCase only (no NFKC / confusable folding)"
+    },
+    {
+      "test_name": "on the real file system > a Write(**) seat that writes \"ċoltrane.layout.json\" (c with dot above, NFC) is refused and nothing it made is sealed",
+      "test_file": "tests/a_protected_path_has_no_other_spelling.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "PROTECTED-NO-OTHER-SPELLING",
+      "drives": "runGig diff gate — src/runtime.ts, isProtectedPath (src/grant_scope.ts)",
+      "plant": "(RED at 24a26de) isProtectedPath folds with toLowerCase only (no NFKC / confusable folding)"
+    },
+    {
+      "test_name": "on the real file system > a Write(**) seat that writes \"ċoltrane.layout.json\" (c + combining dot, NFD) is refused and nothing it made is sealed",
+      "test_file": "tests/a_protected_path_has_no_other_spelling.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "PROTECTED-NO-OTHER-SPELLING",
+      "drives": "runGig diff gate — src/runtime.ts, isProtectedPath (src/grant_scope.ts)",
+      "plant": "(RED at 24a26de) isProtectedPath folds with toLowerCase only (no NFKC / confusable folding)"
+    },
+    {
+      "test_name": "on the real file system > a Write(**) seat that writes \".ｇｉｔ/config\" (fullwidth letters) is refused and nothing it made is sealed",
+      "test_file": "tests/a_protected_path_has_no_other_spelling.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "PROTECTED-NO-OTHER-SPELLING",
+      "drives": "runGig diff gate — src/runtime.ts, isProtectedPath (src/grant_scope.ts)",
+      "plant": "(RED at 24a26de) isProtectedPath folds with toLowerCase only (no NFKC / confusable folding)"
+    },
+    {
+      "test_name": "on the real file system > a Write(**) seat that writes \".𝐠𝐢𝐭/hooks/pre-commit\" (mathematical bold letters (NFKC)) is refused and nothing it made is sealed",
+      "test_file": "tests/a_protected_path_has_no_other_spelling.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "PROTECTED-NO-OTHER-SPELLING",
+      "drives": "runGig diff gate — src/runtime.ts, isProtectedPath (src/grant_scope.ts)",
+      "plant": "(RED at 24a26de) isProtectedPath folds with toLowerCase only (no NFKC / confusable folding)"
+    },
+    {
+      "test_name": "on the real file system > a Write(**) seat that writes \".ġit/config\" (g with dot above, NFC) is refused and nothing it made is sealed",
+      "test_file": "tests/a_protected_path_has_no_other_spelling.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "PROTECTED-NO-OTHER-SPELLING",
+      "drives": "runGig diff gate — src/runtime.ts, isProtectedPath (src/grant_scope.ts)",
+      "plant": "(RED at 24a26de) isProtectedPath folds with toLowerCase only (no NFKC / confusable folding)"
+    },
+    {
+      "test_name": "on the real file system > a Write(**) seat that writes \".gi̇t/config\" (i + combining dot above) is refused and nothing it made is sealed",
+      "test_file": "tests/a_protected_path_has_no_other_spelling.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "PROTECTED-NO-OTHER-SPELLING",
+      "drives": "runGig diff gate — src/runtime.ts, isProtectedPath (src/grant_scope.ts)",
+      "plant": "(RED at 24a26de) isProtectedPath folds with toLowerCase only (no NFKC / confusable folding)"
+    },
+    {
+      "test_name": "on the real file system > a Write(**) seat that writes \".ｃｌａｕｄｅ/settings.json\" (fullwidth letters) is refused and nothing it made is sealed",
+      "test_file": "tests/a_protected_path_has_no_other_spelling.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "PROTECTED-NO-OTHER-SPELLING",
+      "drives": "runGig diff gate — src/runtime.ts, isProtectedPath (src/grant_scope.ts)",
+      "plant": "(RED at 24a26de) isProtectedPath folds with toLowerCase only (no NFKC / confusable folding)"
+    },
+    {
+      "test_name": "on the real file system > a Write(**) seat that writes \".ċlaude/settings.json\" (c with dot above, NFC) is refused and nothing it made is sealed",
+      "test_file": "tests/a_protected_path_has_no_other_spelling.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "PROTECTED-NO-OTHER-SPELLING",
+      "drives": "runGig diff gate — src/runtime.ts, isProtectedPath (src/grant_scope.ts)",
+      "plant": "(RED at 24a26de) isProtectedPath folds with toLowerCase only (no NFKC / confusable folding)"
+    },
+    {
+      "test_name": "on the real file system > a Write(**) seat that writes \".ċlaude/settings.json\" (c + combining dot, NFD) is refused and nothing it made is sealed",
+      "test_file": "tests/a_protected_path_has_no_other_spelling.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "PROTECTED-NO-OTHER-SPELLING",
+      "drives": "runGig diff gate — src/runtime.ts, isProtectedPath (src/grant_scope.ts)",
+      "plant": "(RED at 24a26de) isProtectedPath folds with toLowerCase only (no NFKC / confusable folding)"
+    },
+    {
+      "test_name": "on the real file system > a Write(**) seat that writes \".ｃｏｌｔｒａｎｅ/ledger.jsonl\" (fullwidth letters) is refused and nothing it made is sealed",
+      "test_file": "tests/a_protected_path_has_no_other_spelling.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "PROTECTED-NO-OTHER-SPELLING",
+      "drives": "runGig diff gate — src/runtime.ts, isProtectedPath (src/grant_scope.ts)",
+      "plant": "(RED at 24a26de) isProtectedPath folds with toLowerCase only (no NFKC / confusable folding)"
+    },
+    {
+      "test_name": "on the real file system > a target that is a symlink to coltrane.layout.json is never granted — protection follows the file, not its name",
+      "test_file": "tests/a_protected_path_has_no_other_spelling.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "PROTECTED-NO-OTHER-SPELLING",
+      "drives": "runGig → resolveSeatGrants with the tree — src/runtime.ts, src/layout_grants.ts",
+      "plant": "(RED at 24a26de) protect by name only, not by realpath/inode"
+    },
+    {
+      "test_name": "on the real file system > a target that is a hardlink to coltrane.layout.json is never granted — protection follows the file, not its name",
+      "test_file": "tests/a_protected_path_has_no_other_spelling.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "PROTECTED-NO-OTHER-SPELLING",
+      "drives": "runGig → resolveSeatGrants with the tree — src/runtime.ts, src/layout_grants.ts",
+      "plant": "(RED at 24a26de) protect by name only, not by realpath/inode"
+    },
+    {
+      "test_name": "a root drain never makes a root room > with the drain running as uid 0, a floor room is refused — or rendered with a non-root user",
+      "test_file": "tests/a_room_never_runs_as_root.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "ROOM-NON-ROOT",
+      "drives": "renderComposeConfig — src/venue_realizer.ts",
+      "plant": "(RED at 24a26de) a root drain renders `user: 0:0`"
+    },
+    {
+      "test_name": "a root drain never makes a root room > control — a non-root drain renders its own uid",
+      "test_file": "tests/a_room_never_runs_as_root.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "ROOM-NON-ROOT",
+      "drives": "renderComposeConfig — src/venue_realizer.ts",
+      "plant": "render `user: 0:0` in the room (src/venue_realizer.ts)",
+      "plant_observed": "render user 0:0 applied at 24a26de → AssertionError: expected '0:0' to be '501:20'"
+    },
+    {
+      "test_name": "the layout declares what a repository permits > LayoutSchema admits git, egress and commands.publish",
+      "test_file": "tests/a_seat_reaches_git_and_the_network_only_as_declared.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "GIT-EGRESS-AS-DECLARED",
+      "drives": "makeClaudeInvoker(...) argv / LayoutSchema — src/claude_invoker.ts, src/genome_schema.ts",
+      "plant": "(RED at 24a26de) the git / egress / publish contract does not exist; the sandbox denies .git wholesale and all network"
+    },
+    {
+      "test_name": "the layout declares what a repository permits > …and refuses an egress key that names no role",
+      "test_file": "tests/a_seat_reaches_git_and_the_network_only_as_declared.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "GIT-EGRESS-AS-DECLARED",
+      "drives": "makeClaudeInvoker(...) argv / LayoutSchema — src/claude_invoker.ts, src/genome_schema.ts",
+      "plant": "open .git or the network by default / allow every declared host regardless of held tokens / sandbox a seat with no Bash"
+    },
+    {
+      "test_name": "argv: the sandbox follows the tokens a seat holds (runs everywhere) > a declared git seat (migrated code-implementer): .git is not denied wholesale, hooks and config are, and the network is a strict, empty allowlist",
+      "test_file": "tests/a_seat_reaches_git_and_the_network_only_as_declared.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "GIT-EGRESS-AS-DECLARED",
+      "drives": "makeClaudeInvoker(...) argv / LayoutSchema — src/claude_invoker.ts, src/genome_schema.ts",
+      "plant": "(RED at 24a26de) the git / egress / publish contract does not exist; the sandbox denies .git wholesale and all network"
+    },
+    {
+      "test_name": "argv: the sandbox follows the tokens a seat holds (runs everywhere) > a declared publishing seat (migrated pr-publisher) is allowed exactly the hosts of the roles it holds",
+      "test_file": "tests/a_seat_reaches_git_and_the_network_only_as_declared.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "GIT-EGRESS-AS-DECLARED",
+      "drives": "makeClaudeInvoker(...) argv / LayoutSchema — src/claude_invoker.ts, src/genome_schema.ts",
+      "plant": "(RED at 24a26de) the git / egress / publish contract does not exist; the sandbox denies .git wholesale and all network"
+    },
+    {
+      "test_name": "argv: the sandbox follows the tokens a seat holds (runs everywhere) > egress follows HELD tokens: a seat holding only Bash(@laws) gets none of the layout's hosts",
+      "test_file": "tests/a_seat_reaches_git_and_the_network_only_as_declared.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "GIT-EGRESS-AS-DECLARED",
+      "drives": "makeClaudeInvoker(...) argv / LayoutSchema — src/claude_invoker.ts, src/genome_schema.ts",
+      "plant": "open .git or the network by default / allow every declared host regardless of held tokens / sandbox a seat with no Bash"
+    },
+    {
+      "test_name": "argv: the sandbox follows the tokens a seat holds (runs everywhere) > an undeclared seat (the SHIPPED code-implementer, literal Bash(git add:*)) keeps .git denied and has no network — fail closed",
+      "test_file": "tests/a_seat_reaches_git_and_the_network_only_as_declared.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "GIT-EGRESS-AS-DECLARED",
+      "drives": "makeClaudeInvoker(...) argv / LayoutSchema — src/claude_invoker.ts, src/genome_schema.ts",
+      "plant": "open .git or the network by default / allow every declared host regardless of held tokens / sandbox a seat with no Bash"
+    },
+    {
+      "test_name": "argv: the sandbox follows the tokens a seat holds (runs everywhere) > a migrated agent under a layout that declares no git is refused before the spawn, naming the role",
+      "test_file": "tests/a_seat_reaches_git_and_the_network_only_as_declared.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "GIT-EGRESS-AS-DECLARED",
+      "drives": "makeClaudeInvoker(...) argv / LayoutSchema — src/claude_invoker.ts, src/genome_schema.ts",
+      "plant": "open .git or the network by default / allow every declared host regardless of held tokens / sandbox a seat with no Bash"
+    },
+    {
+      "test_name": "argv: the sandbox follows the tokens a seat holds (runs everywhere) > deploy-agent: its real work is an in-process WebFetch — it holds no Bash, so no sandbox is built and its grant reaches the spawn",
+      "test_file": "tests/a_seat_reaches_git_and_the_network_only_as_declared.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "GIT-EGRESS-AS-DECLARED",
+      "drives": "makeClaudeInvoker(...) argv / LayoutSchema — src/claude_invoker.ts, src/genome_schema.ts",
+      "plant": "open .git or the network by default / allow every declared host regardless of held tokens / sandbox a seat with no Bash"
+    },
+    {
+      "test_name": "REAL: each agent's own git and network work, inside the sandbox (skipped as UNVERIFIED without srt + an OS sandbox) > code-implementer (declared): `git add src/a.ts` succeeds and the file is staged",
+      "test_file": "tests/a_seat_reaches_git_and_the_network_only_as_declared.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "GIT-EGRESS-AS-DECLARED",
+      "drives": "the invoker's --settings sandbox, enforced by @anthropic-ai/sandbox-runtime (srt) — skipped as UNVERIFIED without srt",
+      "plant": "(RED at 24a26de) the git / egress / publish contract does not exist; the sandbox denies .git wholesale and all network"
+    },
+    {
+      "test_name": "REAL: each agent's own git and network work, inside the sandbox (skipped as UNVERIFIED without srt + an OS sandbox) > code-implementer (SHIPPED, undeclared): `git add src/a.ts` fails closed — .git stays denied",
+      "test_file": "tests/a_seat_reaches_git_and_the_network_only_as_declared.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "GIT-EGRESS-AS-DECLARED",
+      "drives": "the invoker's --settings sandbox, enforced by @anthropic-ai/sandbox-runtime (srt) — skipped as UNVERIFIED without srt",
+      "plant": "open .git or the network by default / allow every declared host regardless of held tokens / sandbox a seat with no Bash"
+    },
+    {
+      "test_name": "REAL: each agent's own git and network work, inside the sandbox (skipped as UNVERIFIED without srt + an OS sandbox) > red-spec-drafter (declared): `git add tests/x.test.ts` succeeds and the file is staged",
+      "test_file": "tests/a_seat_reaches_git_and_the_network_only_as_declared.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "GIT-EGRESS-AS-DECLARED",
+      "drives": "the invoker's --settings sandbox, enforced by @anthropic-ai/sandbox-runtime (srt) — skipped as UNVERIFIED without srt",
+      "plant": "(RED at 24a26de) the git / egress / publish contract does not exist; the sandbox denies .git wholesale and all network"
+    },
+    {
+      "test_name": "REAL: each agent's own git and network work, inside the sandbox (skipped as UNVERIFIED without srt + an OS sandbox) > red-spec-drafter (SHIPPED, undeclared): `git add tests/x.test.ts` fails closed — .git stays denied",
+      "test_file": "tests/a_seat_reaches_git_and_the_network_only_as_declared.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "GIT-EGRESS-AS-DECLARED",
+      "drives": "the invoker's --settings sandbox, enforced by @anthropic-ai/sandbox-runtime (srt) — skipped as UNVERIFIED without srt",
+      "plant": "open .git or the network by default / allow every declared host regardless of held tokens / sandbox a seat with no Bash"
+    },
+    {
+      "test_name": "REAL: each agent's own git and network work, inside the sandbox (skipped as UNVERIFIED without srt + an OS sandbox) > pr-publisher (declared): switch, add, commit and push to the remote, and the publish call reaches the API stand-in",
+      "test_file": "tests/a_seat_reaches_git_and_the_network_only_as_declared.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "GIT-EGRESS-AS-DECLARED",
+      "drives": "the invoker's --settings sandbox, enforced by @anthropic-ai/sandbox-runtime (srt) — skipped as UNVERIFIED without srt",
+      "plant": "(RED at 24a26de) the git / egress / publish contract does not exist; the sandbox denies .git wholesale and all network"
+    },
+    {
+      "test_name": "REAL: each agent's own git and network work, inside the sandbox (skipped as UNVERIFIED without srt + an OS sandbox) > pr-publisher (SHIPPED, undeclared): the push and the publish call both fail closed — no host is reachable by default",
+      "test_file": "tests/a_seat_reaches_git_and_the_network_only_as_declared.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "GIT-EGRESS-AS-DECLARED",
+      "drives": "the invoker's --settings sandbox, enforced by @anthropic-ai/sandbox-runtime (srt) — skipped as UNVERIFIED without srt",
+      "plant": "open .git or the network by default / allow every declared host regardless of held tokens / sandbox a seat with no Bash"
+    },
+    {
+      "test_name": "REAL: each agent's own git and network work, inside the sandbox (skipped as UNVERIFIED without srt + an OS sandbox) > a declared git seat still cannot write .git/hooks or .git/config",
+      "test_file": "tests/a_seat_reaches_git_and_the_network_only_as_declared.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "GIT-EGRESS-AS-DECLARED",
+      "drives": "the invoker's --settings sandbox, enforced by @anthropic-ai/sandbox-runtime (srt) — skipped as UNVERIFIED without srt",
+      "plant": "(RED at 24a26de) the git / egress / publish contract does not exist; the sandbox denies .git wholesale and all network"
+    },
+    {
+      "test_name": "D2 — the sandbox denies the layout, .git and .claude by ABSOLUTE path > denyWrite holds <tree>/.coltrane — the engine's own ledger, locks and checkpoints (round 7: a surviving plant)",
+      "test_file": "tests/a_seats_bash_runs_in_a_sandbox.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "D2-COLTRANE",
+      "drives": "makeClaudeInvoker(...) argv — src/claude_invoker.ts (bashSandboxFor)",
+      "plant": "drop <tree>/.coltrane from denyWrite",
+      "plant_observed": "dropped at 24a26de → AssertionError: the sandbox lets Bash rewrite the engine's .coltrane state, which the diff gate exempts by design: expected [ …(3) ] to include '/srv/coltrane-tree/gig-1/.coltrane'"
+    },
+    {
+      "test_name": "the engine's `ignore` is exactly the one the installed CLI bundles > package.json pins ignore EXACTLY, and node_modules holds that version",
+      "test_file": "tests/the_scope_oracle_is_the_installed_clis.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "ORACLE-IS-THE-CLI",
+      "drives": "compareBundledIgnore — tests/support/cli_bundle_fingerprint.ts over the installed claude binary / package.json + node_modules/ignore",
+      "plant": "bump the installed ignore",
+      "plant_observed": "npm i --no-save ignore@7.0.7 → the pin law FAILED (7.0.7 installed, 7.0.5 pinned)"
+    },
+    {
+      "test_name": "the engine's `ignore` is exactly the one the installed CLI bundles > the installed claude binary bundles exactly node_modules/ignore — every regex source present, every release marker agreeing",
+      "test_file": "tests/the_scope_oracle_is_the_installed_clis.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "ORACLE-IS-THE-CLI",
+      "drives": "compareBundledIgnore — tests/support/cli_bundle_fingerprint.ts over the installed claude binary / package.json + node_modules/ignore",
+      "plant": "bump the dependency (npm i ignore@7.0.7), or point CLAUDE_BIN at a binary bundling another ignore",
+      "plant_observed": "npm i --no-save ignore@7.0.7 → AssertionError: ignore@7.0.7's matching regexes are not in the CLI at …/2.1.283 — expected [ '^\\^*(?:\\\\\\*\\\\\\*\\\\\\/)+', …(1) ] to deeply equal []; CLAUDE_BIN=<fixture bundling 7.0.6> → AssertionError: ignore@7.0.5's matching regexes are not in the CLI at …/fake-claude-706.bin"
+    },
+    {
+      "test_name": "the comparator can go red (fixture binaries — no claude needed) > control: a 'binary' that bundles the dependency's own source matches",
+      "test_file": "tests/the_scope_oracle_is_the_installed_clis.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "ORACLE-IS-THE-CLI",
+      "drives": "compareBundledIgnore — tests/support/cli_bundle_fingerprint.ts over the installed claude binary / package.json + node_modules/ignore",
+      "plant": "a comparator that refuses everything — a control"
+    },
+    {
+      "test_name": "the comparator can go red (fixture binaries — no claude needed) > a binary bundling ignore 7.0.6 (its repeated-`**/` rule) is refused",
+      "test_file": "tests/the_scope_oracle_is_the_installed_clis.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "ORACLE-IS-THE-CLI",
+      "drives": "compareBundledIgnore — tests/support/cli_bundle_fingerprint.ts over the installed claude binary / package.json + node_modules/ignore",
+      "plant": "a comparator that ignores regex sources / release markers"
+    },
+    {
+      "test_name": "the comparator can go red (fixture binaries — no claude needed) > a binary bundling ignore 7.0.7 (which adds _basenameOnly) is refused",
+      "test_file": "tests/the_scope_oracle_is_the_installed_clis.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "ORACLE-IS-THE-CLI",
+      "drives": "compareBundledIgnore — tests/support/cli_bundle_fingerprint.ts over the installed claude binary / package.json + node_modules/ignore",
+      "plant": "a comparator that ignores regex sources / release markers"
+    },
+    {
+      "test_name": "the room images declare a non-root USER (skipped as UNVERIFIED without Docker or the image) > coltrane/room:ephemeral: Config.User is set and is not root",
+      "test_file": "tests/spec_room_runs_non_root_live.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "ROOM-NON-ROOT",
+      "drives": "docker run with the RENDERED room options / docker image inspect",
+      "plant": "`USER root` (or no USER) in Dockerfile.room / Dockerfile.floor (not applied: needs an image rebuild)"
+    },
+    {
+      "test_name": "the room images declare a non-root USER (skipped as UNVERIFIED without Docker or the image) > coltrane/floor:seat: Config.User is set and is not root",
+      "test_file": "tests/spec_room_runs_non_root_live.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "ROOM-NON-ROOT",
+      "drives": "docker run with the RENDERED room options / docker image inspect",
+      "plant": "`USER root` (or no USER) in Dockerfile.room / Dockerfile.floor (not applied: needs an image rebuild)"
+    },
+    {
+      "test_name": "LIVE: a process in a room is not root and cannot write /proc/sys (skipped as UNVERIFIED without Docker or the floor image) > under the RENDERED room options: uid != 0, and a no-op write of kernel.sysrq's current value is refused",
+      "test_file": "tests/spec_room_runs_non_root_live.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "ROOM-NON-ROOT",
+      "drives": "docker run with the RENDERED room options / docker image inspect",
+      "plant": "render `user: 0:0` in the room (src/venue_realizer.ts)",
+      "plant_observed": "render user 0:0 applied at 24a26de → AssertionError: a room process runs as uid 0: expected +0 not to be +0 (the no-op sysrq write was then permitted)"
     }
   ],
-  "testing_method": "vitest, example-based laws plus fast-check properties (RED-DEF-15: expansion draws only on declared tokens + the layout; the target and venue steps never add). Every law drives the production symbol named in `drives`; symbols that do not exist yet are reached through a runtime import (tests/layout_grants_fixtures.ts) so the shared tsc gate stays green and each law fails where it asserts. The invokers are observed through the seams the suite already uses: the Claude invoker's injected `run` (the exact argv), and the completions invoker's model request body and typed refusals. The chair record is observed on chair_complete through RunDeps.onProgress; the dispatch door by bootstrapServerDeps over a genome tree on disk with the invoke seam replaced. The resolver-level plants were rehearsed by the drafter against a throwaway reference resolver, deleted before commit; each turned its law red. plant_observed is omitted (the v5 type refuses null) and is filled by the grader once production exists. Round 3: the laws for the implementer's surviving plants (NO-SELF-WIDENING-2 isolation, DOOR-CHART, DOOR-RELOAD, TARGET-ESCAPE, LAYERED, RECORD-VENUE, PREFLIGHT-EXPANDED) are green against the implementation at cef6f97, and each plant was applied, observed red and reverted by the drafter. The target-escape laws for README/backslash/drive-letter entries and the dispatch refusals are red, because the ruling (refuse, never normalise) is new. The completions any-scope laws for Read/Bash, and every D1/D2/D3/D5 law, are red (the behaviour is new). D4 runs a REAL sandboxed process through @anthropic-ai/sandbox-runtime (srt), because `claude -p` cannot run a Bash command without a model; it is SKIPPED and printed as UNVERIFIED when srt or an OS sandbox is absent, and was observed red (no sandbox config on the argv) with srt present on macOS. The drafter's manual srt probe confirmed the target config shape (absolute allowWrite tree + absolute denyWrite) is enforced: inside src/ written, outside refused, the layout file refused. plant_observed is omitted; the grader fills it. Round 4: every law for the implementer's surviving plants (items 2–10) is green against 9ff943c, and each plant was applied to that production code, observed red, and reverted; plant_observed records the failing assertion. The laws for the conductor's two new rulings (.coltrane denial; ignored path never sealed) are red today because the behaviour does not exist yet; their plant_observed is left for the grader. Round 5: each of the implementer's six dot-path plants (OWN-A…F) was applied to src/grant_scope.ts at 5776395 and the new laws observed red (OWN-A 22 laws beyond the 4 findings, OWN-C 2, OWN-E 9, OWN-F 12, OWN-B 6, OWN-D 5); plant_observed records one failing assertion per law. Controls and laws no plant touched carry no plant_observed. Round 6: the four surviving plants (literal-spelling refusal removed, schema admitting ./ and //, case-sensitive matcher, case-sensitive isProtectedPath) were each applied at 0a8d1be and observed red (4 / 3 / 10 / 5 laws). The room-image law was observed red against the stale pre-round-5 images on the drafter's host, then green after rebuilding both images.",
+  "testing_method": "vitest, example-based laws plus fast-check properties (RED-DEF-15: expansion draws only on declared tokens + the layout; the target and venue steps never add). Every law drives the production symbol named in `drives`; symbols that do not exist yet are reached through a runtime import (tests/layout_grants_fixtures.ts) so the shared tsc gate stays green and each law fails where it asserts. The invokers are observed through the seams the suite already uses: the Claude invoker's injected `run` (the exact argv), and the completions invoker's model request body and typed refusals. The chair record is observed on chair_complete through RunDeps.onProgress; the dispatch door by bootstrapServerDeps over a genome tree on disk with the invoke seam replaced. The resolver-level plants were rehearsed by the drafter against a throwaway reference resolver, deleted before commit; each turned its law red. plant_observed is omitted (the v5 type refuses null) and is filled by the grader once production exists. Round 3: the laws for the implementer's surviving plants (NO-SELF-WIDENING-2 isolation, DOOR-CHART, DOOR-RELOAD, TARGET-ESCAPE, LAYERED, RECORD-VENUE, PREFLIGHT-EXPANDED) are green against the implementation at cef6f97, and each plant was applied, observed red and reverted by the drafter. The target-escape laws for README/backslash/drive-letter entries and the dispatch refusals are red, because the ruling (refuse, never normalise) is new. The completions any-scope laws for Read/Bash, and every D1/D2/D3/D5 law, are red (the behaviour is new). D4 runs a REAL sandboxed process through @anthropic-ai/sandbox-runtime (srt), because `claude -p` cannot run a Bash command without a model; it is SKIPPED and printed as UNVERIFIED when srt or an OS sandbox is absent, and was observed red (no sandbox config on the argv) with srt present on macOS. The drafter's manual srt probe confirmed the target config shape (absolute allowWrite tree + absolute denyWrite) is enforced: inside src/ written, outside refused, the layout file refused. plant_observed is omitted; the grader fills it. Round 4: every law for the implementer's surviving plants (items 2–10) is green against 9ff943c, and each plant was applied to that production code, observed red, and reverted; plant_observed records the failing assertion. The laws for the conductor's two new rulings (.coltrane denial; ignored path never sealed) are red today because the behaviour does not exist yet; their plant_observed is left for the grader. Round 5: each of the implementer's six dot-path plants (OWN-A…F) was applied to src/grant_scope.ts at 5776395 and the new laws observed red (OWN-A 22 laws beyond the 4 findings, OWN-C 2, OWN-E 9, OWN-F 12, OWN-B 6, OWN-D 5); plant_observed records one failing assertion per law. Controls and laws no plant touched carry no plant_observed. Round 6: the four surviving plants (literal-spelling refusal removed, schema admitting ./ and //, case-sensitive matcher, case-sensitive isProtectedPath) were each applied at 0a8d1be and observed red (4 / 3 / 10 / 5 laws). The room-image law was observed red against the stale pre-round-5 images on the drafter's host, then green after rebuilding both images. Round 7: laws for the six blockers are red at 24a26de where the behaviour does not exist (smuggling, Unicode spellings, git/egress, the root drain); the laws for surviving or tie-in plants were shown red by applying the plant at 24a26de (.coltrane deny dropped; the room rendered as root, live; the ignore dependency bumped to 7.0.7; CLAUDE_BIN pointed at a fixture binary bundling ignore 7.0.6 and lacking the splitter). The real-process git/network laws were run with srt 0.0.77 on macOS; they SKIP as UNVERIFIED without it.",
   "uncovered": []
 }

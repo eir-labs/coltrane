@@ -513,3 +513,59 @@ describe("gig_logs (server.ts:1753-1761) reads gigs/<gig_id>/ only inside the lo
     }
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+// 8. charter_read (server.ts:2123) — CONDUCTOR'S DECISION: a charter may be read only from INSIDE
+//    the genome root. A caller-supplied path that resolves outside it — by the same whole-segment
+//    check as every other site in #559 — is refused by name, and nothing it points at is returned.
+//    With no genome root there is no inside, so the read is refused (absent means decline).
+//    Not lawed here: a layout-declared charter path outside the genome root (#553's extension).
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+describe("charter_read (server.ts:2123) reads a charter only from inside the genome root", () => {
+  const charter = (subject_name: string) => JSON.stringify({
+    subject_name, subject_type: "solo", charter: "build the tool", north_stars: [], products: [],
+    pain_points: [], tech_stack: [], existing_tools: [], access_grants: [],
+  }) + "\n";
+
+  it("control: a charter inside the genome root still reads", async () => {
+    const a = arena();
+    mkdirSync(join(a.root, "charters"), { recursive: true });
+    writeFileSync(join(a.root, "charters", "c.json"), charter("inside-the-root"));
+    const r = await surface({ genome_dir: a.root }).call("charter_read", { path: join(a.root, "charters", "c.json") });
+    expect(r.ok, JSON.stringify(r).slice(0, 400)).toBe(true);
+    expect((r.data as { subject_name: string }).subject_name).toBe("inside-the-root");
+  });
+
+  it("a path that resolves outside the genome root is refused by name, and nothing it points at is returned", async () => {
+    const a = arena();
+    // Charter-shaped sentinels where each hostile path lands, so an unchecked read would VALIDATE and
+    // echo them — plus a non-JSON sentinel, so a parse error that quotes its input would leak it too.
+    mkdirSync(join(a.base, "d1", "etc"), { recursive: true });
+    writeFileSync(join(a.base, "d1", "etc", "passwd"), charter(SENTINEL));   // root/../../etc/passwd
+    writeFileSync(join(a.sibling, "charter.json"), charter(SENTINEL));       // the prefix-sharing sibling
+    writeFileSync(join(a.parent, "secret.txt"), `root:x:0:0:${SENTINEL}\n`); // not JSON
+    const cases: Array<[string, string]> = [
+      ["../../etc/passwd", "a relative path that climbs out of the root"],
+      [join(a.parent, "secret.txt"), "an absolute path outside the root"],
+      [join(a.sibling, "charter.json"), "an absolute path into a directory whose NAME shares the root's prefix"],
+      ["../g-sibling/charter.json", "a relative path into the prefix-sharing sibling"],
+      [`${a.root}/../g-sibling/charter.json`, "an absolute path that starts with the root, then climbs out"],
+      [join(a.root, "a\u0000b.json"), "a NUL byte"],
+    ];
+    for (const [path, why] of cases) {
+      const before = snapshot(a.base);
+      const r = await surface({ genome_dir: a.root }).call("charter_read", { path });
+      expectRefusedByName(r, `charter_read of ${JSON.stringify(path)} (${why})`);
+      expect.soft(JSON.stringify(r), `charter_read of ${JSON.stringify(path)} (${why}) returned bytes from OUTSIDE the root`).not.toContain(SENTINEL);
+      expect.soft(snapshot(a.base), `charter_read of ${JSON.stringify(path)} changed the filesystem`).toEqual(before);
+    }
+  });
+
+  it("with no genome root there is no inside: charter_read refuses by name rather than reading an arbitrary path", async () => {
+    const a = arena();
+    writeFileSync(join(a.sibling, "charter.json"), charter(SENTINEL));
+    const r = await surface({}).call("charter_read", { path: join(a.sibling, "charter.json") });
+    expectRefusedByName(r, "charter_read with no genome root");
+    expect(JSON.stringify(r), "charter_read with no genome root returned the file's contents").not.toContain(SENTINEL);
+  });
+});

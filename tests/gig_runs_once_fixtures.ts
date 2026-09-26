@@ -115,16 +115,40 @@ export const VERDICT = {
   reasoning_chain: ["read it; it is right"],
 };
 
-export const claimFor = (standard_slug: string, extra: Record<string, unknown> = {}) => ({
-  gig_id: GIG_ID,
-  standard_slug,
-  standard_version: null,
-  mode: "rehearsal",
-  input: { subject: "the wire" },
-  acting_for: "steve-1",
-  token: "ctk_pergig_runs_once",
-  ...extra,
-});
+/** A claim as coltrane_drain_claim answers it. The minted token is SCOPED TO THIS GIG (ctk_<gig id>),
+ *  as the live store mints it. The fake store below enforces that scope (see `scopeRefusal`). */
+export const claimFor = (standard_slug: string, extra: Record<string, unknown> = {}) => {
+  const c: Record<string, unknown> = {
+    gig_id: GIG_ID,
+    standard_slug,
+    standard_version: null,
+    mode: "rehearsal",
+    input: { subject: "the wire" },
+    acting_for: "steve-1",
+    ...extra,
+  };
+  if (!("token" in extra)) c["token"] = `ctk_${String(c["gig_id"])}`;
+  return c;
+};
+
+/**
+ * THE DRAIN SERVICE'S REAL REFUSAL SHAPE (eir-labs/coltrane-ui main: src/lib/drain-service.ts
+ * `drainErrorStatus`, and the route at src/app/rest/v1/coltrane_gigs/route.ts). The body is
+ * `{ error: <the store's message> }` with NO `code`, and the status is decided by the message
+ * text alone: invalid/revoked key → 401, "lacks drain:write" or "no live lease" → 403, and
+ * EVERYTHING ELSE → 400. That includes the terminal guard, whose 23514 reaches the engine as a
+ * plain 400 with no code.
+ *
+ * The first fixture answered 409 with a `code`, which is a shape the service never produces, and
+ * that is how a refused start header went unrecognised while every law stayed green (review
+ * 5326196799, finding 3).
+ */
+export function drainServiceRefusal(message: string): Response {
+  const status = /invalid or revoked drain key/i.test(message) ? 401
+    : /lacks drain:write|no live lease/i.test(message) ? 403
+    : 400;
+  return new Response(JSON.stringify({ error: message }), { status });
+}
 
 export const sealableSignal = { id: "sig-1", source: "test", data: { seen: true }, completeness: 1, acquisition_cost: 0 };
 
@@ -177,6 +201,22 @@ export function hostedStore(initial: HostedOpts): HostedStore {
   const outputs: Array<Record<string, unknown>> = [];
   const attempts = new Map<string, number>();
   let seq = 0;
+  // THE LIVE STORE'S SCOPE RULES for a gig-scoped token (post eir-labs/coltrane-ui #250), enforced
+  // here because the first fixture answered for ANY gig and was blind to review 5326196799 finding 1.
+  // A gig token may read its OWN gig's status and outputs. It may also read the OUTPUTS, and only the
+  // outputs, of exactly the gig its row `resumes`; #250 put the resume exception in
+  // coltrane_mcp_gig_outputs alone. Anything else is 42501 "scoped to a single gig", answered
+  // PostgREST-style (403 + {code, message}). A token this store never minted for a gig, such as a
+  // player's own token, is not gig-scoped and passes.
+  const gigTokens = new Map<string, { gig: string; resumes: string | null }>();
+  const scopeRefusal = (body: Record<string, unknown>, what: "status" | "outputs" | "own"): Response | undefined => {
+    const scope = gigTokens.get(String(body["p_bearer"] ?? ""));
+    if (!scope) return undefined;
+    const gig = String(body["p_gig"]);
+    if (gig === scope.gig) return undefined;
+    if (what === "outputs" && scope.resumes !== null && gig === scope.resumes) return undefined;
+    return new Response(JSON.stringify({ code: "42501", message: "gig token is scoped to a single gig" }), { status: 403 });
+  };
 
   const fetchFake = vi.fn(async (url: string | URL, init?: RequestInit): Promise<Response> => {
     const u = new URL(String(url));
@@ -193,19 +233,33 @@ export function hostedStore(initial: HostedOpts): HostedStore {
 
     if (host === "store") {
       const fn = u.pathname.replace(/^\/rest\/v1\/rpc\//, "");
-      if (fn === "coltrane_drain_claim") {
+      if (fn === "coltrane_drain_claim" || fn === "coltrane_mcp_claim") {
         const c = typeof opts.claim === "function" ? (opts.claim as () => unknown)() : opts.claim;
+        if (fn === "coltrane_drain_claim" && c && typeof c === "object") {
+          const cc = c as Record<string, unknown>;
+          if (typeof cc["token"] === "string") {
+            gigTokens.set(cc["token"], { gig: String(cc["gig_id"]), resumes: typeof cc["resumes"] === "string" ? cc["resumes"] : null });
+          }
+        }
         return ok(c ?? null);
       }
       if (fn === "coltrane_mcp_genome") return ok(GENOME_ROWS);
       if (fn === "coltrane_mcp_gig_status") {
+        const refused = scopeRefusal(body, "status");
+        if (refused) return refused;
         const row = gigs.get(String(body["p_gig"]));
         return ok(row ?? null);
       }
       if (fn === "coltrane_mcp_gig_outputs") {
+        const refused = scopeRefusal(body, "outputs");
+        if (refused) return refused;
         return ok(outputs.filter((o) => o["gig_id"] === body["p_gig"]));
       }
-      if (fn === "coltrane_mcp_gig_fail") return opts.gigFail ? await opts.gigFail() : ok(true);
+      if (fn === "coltrane_mcp_gig_fail") {
+        const refused = scopeRefusal(body, "own");
+        if (refused) return refused;
+        return opts.gigFail ? await opts.gigFail() : ok(true);
+      }
       if (fn === "coltrane_mcp_gig_park") return ok(true);
       return new Response(`unexpected store rpc ${fn}`, { status: 500 });
     }

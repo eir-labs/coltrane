@@ -5,12 +5,16 @@ model-agnostic chair invoker in `src/completions_invoker.ts`, which runs over an
 `/chat/completions` endpoint. The engine names no provider. Everything below is deployment
 configuration.
 
-> **Status.** The one-line mode (`COLTRANE_MODEL` seating every tier), reading OpenRouter's
-> `usage.cost`, and mapping `cache_write_tokens` are specified in
-> `docs/specs/openrouter-reference.red-spec.json` and pinned by `tests/openrouter_reference.test.ts`.
-> Until that change is built they are **not live**. The live smoke
-> (`tests/security/openrouter_live_smoke.spec.ts`) has **not been run against OpenRouter yet**. It
-> prints `UNVERIFIED` until someone runs it with a real key.
+> **Verified live** on 2026-09-26 with `deepseek/deepseek-v4.1-flash`: the live smoke
+> (`tests/security/openrouter_live_smoke.spec.ts`) ran a maker ⇄ verifier gig through
+> `https://openrouter.ai/api/v1` — 5 completions, $0.0025 settled,
+> 0 unpriced invocations. Its recorded response is now
+> `tests/fixtures/completions_usage/openrouter_chat_completion.json`.
+>
+> **Finding.** Cache READS are counted inside `prompt_tokens` (1408 cached of 1920 prompt tokens).
+> Whether cache WRITES are also counted inside is **still unverified**: this model reported 0 cache
+> writes. If a response ever counts them outside, the port refuses that round loudly rather than
+> mispricing it (see "Cost: what gets recorded").
 
 ## The flip
 
@@ -105,8 +109,8 @@ account", in US dollars.
   still settles as the gig's `input_tokens`. A class that reports 0 tokens needs no rate in the price
   table.
 - **Cache reads plus cache writes must not exceed `prompt_tokens`.** The engine treats both as parts
-  of `prompt_tokens`. OpenRouter's documented example implies this, but it has not been confirmed
-  live. If a response breaks this rule, the port refuses the round (`transport_failed`) and names
+  of `prompt_tokens`. For cache reads this is confirmed live (1408 cached of 1920 prompt tokens); for
+  cache writes OpenRouter's documented example implies it, but it is still unverified live. If a response breaks this rule, the port refuses the round (`transport_failed`) and names
   `prompt_tokens`, `cached_tokens` and `cache_write_tokens` with their values. It does not clamp the
   uncached input to 0.
 

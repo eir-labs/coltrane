@@ -73,16 +73,32 @@ A completions seat **seals by calling `output_write`**, so every seat makes at l
 even a seat with no other tools. A model without function calling cannot seal and is refused `no_seal`.
 Check the model's page on OpenRouter: its parameter list must include `tools` (and `tool_choice`).
 
-These models were verified on **2026-09-27** to list `tools` and `tool_choice` as accepted parameters,
-both on their model pages and in `https://openrouter.ai/api/v1/models?supported_parameters=tools`:
+These three models accept `tools` and `tool_choice`. That was checked on each model page and in
+`https://openrouter.ai/api/v1/models?supported_parameters=tools` (first on 2026-09-27, and again on
+2026-09-27 04:43 JST, which is 2026-09-26 19:43 UTC).
 
-| model | page | listed price (USD / M tokens: input · output · cache read · cache write) |
-|---|---|---|
-| `deepseek/deepseek-v4.1-flash` | https://openrouter.ai/deepseek/deepseek-v4.1-flash | 0.30 · 1.20 · 0.006 · — |
-| `qwen/qwen3.8-flash` | https://openrouter.ai/qwen/qwen3.8-flash | 0.15 · 0.47 · 0.016 · 0.20 |
-| `openai/gpt-5.6-sol` | https://openrouter.ai/openai/gpt-5.6-sol | 1.00 · 5.00 · 0.10 · 1.25 (prompts over 272k tokens: 2.00 · 7.50 · 0.20 · 2.50) |
+**Where the prices come from, and why a model has more than one.** OpenRouter serves each model
+through one or more providers (endpoints), and each provider sets its own price. The models list
+reports a single `pricing` object per model, and for `openai/gpt-5.6-sol` that object matches the
+cheapest endpoint (`openai/flex`), not the standard one. The fetched model page shows no prices,
+because they render client-side. So every price below comes from OpenRouter's per-endpoint API,
+`https://openrouter.ai/api/v1/models/<model>/endpoints`, fetched 2026-09-27 04:43 JST (2026-09-26
+19:43 UTC). All prices are USD per million tokens.
 
-Prices and support change. Re-check the page before relying on either.
+| model | endpoint (provider tag) | input · output · cache read · cache write | source |
+|---|---|---|---|
+| `openai/gpt-5.6-sol` | `openai` (standard) | 2.00 · 10.00 · 0.20 · 2.50. Prompts of 272k tokens or more: 4.00 · 15.00 · 0.40 · 5.00 | https://openrouter.ai/api/v1/models/openai/gpt-5.6-sol/endpoints ([page](https://openrouter.ai/openai/gpt-5.6-sol)) |
+| `openai/gpt-5.6-sol` | `openai/flex` | 1.00 · 5.00 · 0.10 · 1.25. Prompts of 272k tokens or more: 2.00 · 7.50 · 0.20 · 2.50 | same |
+| `qwen/qwen3.8-flash` | `alibaba` (the only endpoint) | 0.15 · 0.47 · 0.016 · 0.20 | https://openrouter.ai/api/v1/models/qwen/qwen3.8-flash/endpoints ([page](https://openrouter.ai/qwen/qwen3.8-flash)) |
+| `deepseek/deepseek-v4.1-flash` | `deepseek` (first-party) | 0.15 · 0.60 · 0.003 · none listed. On weekdays between 01:00 and 04:00 UTC and between 06:00 and 10:00 UTC: 0.30 · 1.20 · 0.006 | https://openrouter.ai/api/v1/models/deepseek/deepseek-v4.1-flash/endpoints ([page](https://openrouter.ai/deepseek/deepseek-v4.1-flash)) |
+
+`deepseek/deepseek-v4.1-flash` is served by 28 endpoints. Their input prices run from 0.035
+(`inference-net`) to 0.375 (`venice/fp8`), and one endpoint (`dekallm`) does not accept `tools`.
+Because provider prices differ like this, the engine settles each round at OpenRouter's reported
+`usage.cost`, not a price-table entry (see below).
+
+Prices, providers and tool support all change. Check the endpoints API before relying on any of
+these figures.
 
 ## Cost: what gets recorded
 
@@ -127,6 +143,10 @@ unpriced (it is not priced at some other rate).
   "deepseek/deepseek-v4.1-flash": { "input": 0.30, "output": 1.20, "cache_read": 0.006 }
 }
 ```
+
+This example uses the qwen rates (its only endpoint) and DeepSeek's first-party peak rates, taken
+from the endpoints API above. A flat table cannot express per-provider or time-of-day pricing, so
+treat it as a fallback. Rounds that report `usage.cost` settle at that cost.
 
 The key must match the `model` field of the **response**, which is the model that actually served the
 request. It is not necessarily the id you asked for. If OpenRouter serves a dated variant, add that

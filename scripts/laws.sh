@@ -29,7 +29,8 @@ cd "$(dirname "$0")/.."
 # stopped being true at Node 24), and two pure flag-string laws replaced it in this band. The nine
 # laws that need a real request moved to tests/security — a band may reach out, the root suite may
 # not — so they are counted there, by file, not here.
-EXPECTED_LAWS="${EXPECTED_LAWS:-4141}"
+EXPECTED_LAWS="${EXPECTED_LAWS:-4142}"
+#   +1 node_floor_refuses: THIS runtime accepts --allow-net, probed (the constant said 24; it is 25). Floor → 26.
 #   +8 the Node floor is 24 (26 Sep 2026, the sovereign: "22 is no starter given lack of network
 #      controls"): node_floor_refuses (6, new file) — install and start refuse Node < 24; and
 #      skill_sandbox_confinement +2 — the floor backs a network grant; every CI/container pin meets it.

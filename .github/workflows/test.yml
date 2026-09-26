@@ -34,9 +34,9 @@ concurrency:
 permissions:
   contents: read
 
-# Node 22 only. The skill sandbox spawns with `--permission`, which does not exist before
-# Node 22 — on 20 every code-bearing skill dies with `node: bad option: --permission`.
-# package.json's engines field now says >=22 to match.
+# Node 26 only: the floor (26 Sep 2026). --allow-net, the only network gate for a skill, arrived in
+# Node 25 (odd, end-of-life June 2026); below it an ungranted skill can fetch freely.
+# package.json's engines field says >=26 to match.
 jobs:
   typecheck:
     name: typecheck (${{ matrix.os }}, node ${{ matrix.node }})
@@ -56,7 +56,7 @@ jobs:
         # anything ships, instead of on every intermediate commit of every
         # branch.
         os: ${{ github.event_name == 'push' && fromJSON('["ubuntu-latest","macos-latest"]') || fromJSON('["ubuntu-latest"]') }}
-        node: ["24.x"]
+        node: ["26.x"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -84,7 +84,7 @@ jobs:
         # anything ships, instead of on every intermediate commit of every
         # branch.
         os: ${{ github.event_name == 'push' && fromJSON('["ubuntu-latest","macos-latest"]') || fromJSON('["ubuntu-latest"]') }}
-        node: ["24.x"]
+        node: ["26.x"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -117,7 +117,7 @@ jobs:
         # anything ships, instead of on every intermediate commit of every
         # branch.
         os: ${{ github.event_name == 'push' && fromJSON('["ubuntu-latest","macos-latest"]') || fromJSON('["ubuntu-latest"]') }}
-        node: ["24.x"]
+        node: ["26.x"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -133,13 +133,13 @@ jobs:
       - run: npm run test:security
 
   e2e-offline:
-    name: e2e (offline half, ubuntu, node 22)
+    name: e2e (offline half, ubuntu, node 26)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "24.x"
+          node-version: "26.x"
           cache: "npm"
       - run: npm ci
       # Runs the e2e specs that need no model. The script builds first: this band drives

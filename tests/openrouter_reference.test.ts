@@ -53,6 +53,9 @@ interface OrFixture {
   response: { model: string; usage: OrUsage; choices: unknown[] };
 }
 const OR: OrFixture = JSON.parse(readFileSync(join(FIXTURES, "openrouter_chat_completion.json"), "utf8"));
+/** SYNTHETIC — built to OpenRouter's documented type, NOT a recording. The recorded live response reports
+ *  cache_write_tokens: 0, which cannot show a cache write priced at its own rate; this one carries writes. */
+const ORW: OrFixture = JSON.parse(readFileSync(join(FIXTURES, "openrouter_cache_write.synthetic.json"), "utf8"));
 const DS = JSON.parse(readFileSync(join(FIXTURES, "deepseek_usage.json"), "utf8")) as { usage: Record<string, number>; usage_discriminating: Record<string, number> };
 
 /** What the engine must read out of the OpenRouter fixture — computed from the fixture's own counts, so
@@ -242,6 +245,13 @@ describe("OpenRouter as a reference provider — the one-line flip", () => {
     const r = await port({ model: OR.response.model, messages: [{ role: "user", content: "x" }], tools: [], signal: new AbortController().signal });
     expect(r.model).toBe(OR.response.model);
     expect(r.usage, "OpenRouter's cache split was not read into the engine's usage classes").toMatchObject(expectedOrSplit(u));
+    // The recording writes nothing to the cache, so the cache-write mapping is held on the synthetic fixture.
+    expect(ORW._provenance.label).toMatch(/synthetic: built to OpenRouter's documented type; NOT a recording/);
+    const w = ORW.response.usage;
+    expect(w.prompt_tokens_details?.cache_write_tokens ?? 0, "the synthetic fixture writes nothing to the cache — the cache_write_tokens mapping would be untested").toBeGreaterThan(0);
+    const wport = makeChatCompletionsPort({ baseUrl: URL_BASE, apiKey: "k", fetchFn: (async () => ({ ok: true, status: 200, json: async () => ORW.response, text: async () => "" })) as unknown as typeof fetch });
+    const rw = await wport({ model: ORW.response.model, messages: [{ role: "user", content: "x" }], tools: [], signal: new AbortController().signal });
+    expect(rw.usage, "cache writes were not read as their own class (or were left in the uncached input)").toMatchObject(expectedOrSplit(w));
   });
 
   it("L2b — the port maps DeepSeek's prompt_cache_hit_tokens / prompt_cache_miss_tokens, EACH from its own field", async () => {
@@ -290,16 +300,19 @@ describe("OpenRouter as a reference provider — the one-line flip", () => {
   });
 
   it("L2e — no reported cost: the price table prices the round, cache reads AND cache writes at their own rates", async () => {
-    const noCost = (): OrUsage => { const u = structuredClone(OR.response.usage); delete u.cost; return u; };
-    const { fn, sent } = openrouter(OR.response.model, noCost);
+    // SYNTHETIC fixture: the recorded live response has cache_write_tokens 0, which would make this law
+    // vacuous (writes folded into input cost the same at 0 tokens).
+    expect(ORW.response.usage.prompt_tokens_details?.cache_write_tokens ?? 0, "the fixture writes nothing to the cache — this law would be vacuous").toBeGreaterThan(0);
+    const noCost = (): OrUsage => { const u = structuredClone(ORW.response.usage); delete u.cost; return u; };
+    const { fn, sent } = openrouter(ORW.response.model, noCost);
     vi.stubGlobal("fetch", fn);
     const prices = join(root, "prices.json");
     const rate = { input: 0.15, output: 0.47, cache_read: 0.016, cache_write: 0.2 };
-    writeFileSync(prices, JSON.stringify({ [OR.response.model]: rate }));
-    env({ COLTRANE_COMPLETIONS_URL: URL_BASE, COLTRANE_COMPLETIONS_KEY: "k", COLTRANE_TIER_STANDARD: OR.response.model, COLTRANE_PRICES_FILE: prices });
+    writeFileSync(prices, JSON.stringify({ [ORW.response.model]: rate }));
+    env({ COLTRANE_COMPLETIONS_URL: URL_BASE, COLTRANE_COMPLETIONS_KEY: "k", COLTRANE_TIER_STANDARD: ORW.response.model, COLTRANE_PRICES_FILE: prices });
     const res = await dispatch(bootstrapServerDeps(root), "one-seat");
     expect(res.ok, res.error ?? "").toBe(true);
-    const s = expectedOrSplit(OR.response.usage);
+    const s = expectedOrSplit(ORW.response.usage);
     const perRound = (s.input_tokens * rate.input + s.cache_read_tokens * rate.cache_read + (s.cache_write_tokens ?? 0) * rate.cache_write + s.output_tokens * rate.output) / 1_000_000;
     expect(manifestOf(res)?.usage?.total_cost_usd, "cache writes were priced as uncached input (or not priced at their own rate)").toBeCloseTo(sent.length * perRound, 12);
   });

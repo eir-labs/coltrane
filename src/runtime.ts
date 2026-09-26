@@ -1464,6 +1464,9 @@ export async function runGig(
   let startedInvocations = 0;
   let attributedInvocations = 0;
   let byModelPartial = false;
+  // Invocations that reported tokens but NO cost: neither the transport nor a price table priced
+  // them. Their spend is unknown, so it is counted here rather than folded into the total as $0.
+  let unpricedInvocations = 0;
 
   // One sink per chair — `onEvent` is already per-chair, so attribution is expressible at the
   // only granularity that means anything. Returns whether THIS chair ever reported usage.
@@ -1499,6 +1502,9 @@ export async function runGig(
     let chairCost = 0;
     let chairTokens = 0;
     let chairSaw = false;
+    // Whether any of this chair's results reported tokens with no cost. Such a chair has no known
+    // cost, so its record carries no cost_usd at all (never a stand-in 0).
+    let chairUnpriced = false;
     return {
       attributed: () => saw,
       reportedCost: () => sawCost,
@@ -1508,7 +1514,7 @@ export async function runGig(
         const model = workingModel(outputSinceClimb ?? chairOutputByModel);
         return {
           ...(model !== undefined ? { model } : {}),
-          cost_usd: chairCost,
+          ...(chairUnpriced ? {} : { cost_usd: chairCost }),
           tokens_used: chairTokens,
           ...(sealedTier !== undefined ? { tier: sealedTier } : {}),
         };
@@ -1540,6 +1546,11 @@ export async function runGig(
 
         chairSaw = true;
         if (hasCost) sawCost = true;
+        if (hasTokens && !hasCost) {
+          chairUnpriced = true;
+          unpricedInvocations++;
+          chairOwnUsage.unpriced_invocations = (chairOwnUsage.unpriced_invocations ?? 0) + 1;
+        }
         chairTokens +=
           (typeof inRaw === "number" ? inRaw : 0) + (typeof outRaw === "number" ? outRaw : 0);
         chairCost += hasCost ? (costRaw as number) : 0;
@@ -1595,6 +1606,8 @@ export async function runGig(
     else delete usage.partial;
     if (byModelPartial) usage.by_model_partial = true;
     else delete usage.by_model_partial;
+    if (unpricedInvocations > 0) usage.unpriced_invocations = unpricedInvocations;
+    else delete usage.unpriced_invocations;
     return usage;
   };
 

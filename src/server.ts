@@ -1164,6 +1164,17 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         if (resumeArg !== undefined && deps.gig_runs?.get(resumeArg)?.status === "running") {
           return { ok: false, requires_approval: approval, error: `gig_dispatch: gig "${resumeArg}" is still running — abort it before resuming` };
         }
+        // WHAT'S CLOSED IS CLOSED (founder ruling, G4). A resume of a gig that ENDED — failed or
+        // aborted, as its checkpoint records — does not reopen it: the store's terminal guard refuses
+        // every write under that id, and its lease is gone. It dispatches a NEW gig, carrying
+        // `resumes: <old id>`, that takes the old seals as inputs by reference. A PARKED gig is not
+        // ended, and its approval-resume keeps its own id.
+        let resumesEnded: string | undefined;
+        if (resumeArg !== undefined && deps.checkpoints) {
+          try {
+            if (deps.checkpoints.read(resumeArg)?.ended) resumesEnded = resumeArg;
+          } catch { /* unreadable: the resume gate refuses it with the reason */ }
+        }
         const reuseOn = args["reuse"] === true;
         if (reuseOn && !deps.reuse) {
           return { ok: false, requires_approval: approval, error: `gig_dispatch: reuse was requested but this server has no reuse store wired` };
@@ -1178,6 +1189,7 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         const reuseWiring = {
           ...(deps.checkpoints ? { checkpoints: deps.checkpoints } : {}),
           ...(resumeArg !== undefined ? { resume_from: resumeArg } : {}),
+          ...(resumesEnded !== undefined ? { resume_as_new_gig: true } : {}),
           ...(reuseOn && deps.reuse ? { reuse: deps.reuse } : {}),
           ...(gigInputOmitted ? { gig_input_omitted: true } : {}),
         };
@@ -1458,7 +1470,8 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
 
         // The gig id this run seals under — minted ONCE for both doors so the single-flight lock
         // names the same holder whether the caller blocked (wait:true) or polled (async default).
-        const gigId = resumeArg ?? randomUUID();
+        // A resume of an ENDED gig is a new gig (see resumesEnded); every other resume continues its own.
+        const gigId = resumesEnded !== undefined ? randomUUID() : resumeArg ?? randomUUID();
         // ── single-flight: claim the working tree BEFORE any chair runs ─────────────────────────
         // Every LOCAL dispatch entry point funnels here (the in-process gig_dispatch tool AND the
         // CLI, which calls dispatchTool). The lock is per genome ROOT (deps.genome_dir): two gigs
@@ -1501,6 +1514,7 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
               ok: true, requires_approval: approval,
               data: {
                 gig_id: res.gig_id,
+                ...(resumesEnded !== undefined ? { resumes: resumesEnded } : {}),
                 // The run's own verdict on itself. A parked gig reported as nothing at all read
                 // as a completed one to every caller of the synchronous path.
                 status: res.status,
@@ -1664,6 +1678,7 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
             // Echo the opt-ins back. A caller who typo'd `reuse` and paid full price for a run
             // they believed was cached has no other way to find out.
             ...(resumeArg !== undefined ? { resumed_from: resumeArg } : {}),
+            ...(resumesEnded !== undefined ? { resumes: resumesEnded } : {}),
             ...(reuseOn ? { reuse: true } : {}),
           },
         };

@@ -563,6 +563,8 @@ export interface GigHeaderRecord {
   /** Why this run went COLD when it could have resumed — recorded where the operator paying for it
    *  can see it (the header manifest), not only in a log line. */
   cold_run_reason?: string;
+  /** The ENDED gig this one resumes as a new gig (what's closed stays closed). */
+  resumes?: string;
 }
 
 /** The sink row, derived entirely from the run's own record (engine "complete" → sink "completed"). */
@@ -578,6 +580,7 @@ export function gigHeaderBody(rec: GigHeaderRecord): Record<string, unknown> {
   if (rec.outputs_count !== undefined) manifest["output_count"] = rec.outputs_count;
   if (rec.error !== undefined) manifest["error"] = rec.error;
   if (rec.cold_run_reason !== undefined) manifest["cold_run_reason"] = rec.cold_run_reason;
+  if (rec.resumes !== undefined) manifest["resumes"] = rec.resumes;
   return {
     id: rec.gig_id,
     standard_slug: rec.standard_slug,

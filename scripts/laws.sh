@@ -29,7 +29,10 @@ cd "$(dirname "$0")/.."
 # stopped being true at Node 24), and two pure flag-string laws replaced it in this band. The nine
 # laws that need a real request moved to tests/security — a band may reach out, the root suite may
 # not — so they are counted there, by file, not here.
-EXPECTED_LAWS="${EXPECTED_LAWS:-4248}"
+EXPECTED_LAWS="${EXPECTED_LAWS:-4269}"
+#  +21 genome_writes_stay_in_root, the two survivors of #559's first grade: 12 laws give every site a value that
+#      lands beside its OWN directory (../agents-evil/x — a helper without the trailing separator admits it),
+#      and 9 give every suffix-less site a value that IS its directory (".", "a/..", "./", "").
 #  +3 genome_writes_stay_in_root, charter_read (conductor's decision on #559): a charter is read only from
 #      inside the genome root — a control, the hostile paths refused by name with nothing returned, and no
 #      genome root means refused.

@@ -1,0 +1,379 @@
+{
+  "spec_doc": "docs/specs/layout-grants.red-spec.json",
+  "input_refs": [
+    "chancery/handoffs/coltrane-layout-grants-2026-09-26.md",
+    "wiki review.coltrane.wo-004-execution — Addendum, 26 Sep: grants belong to the repo's layout, not the agent"
+  ],
+  "validation_criteria": [
+    "A role token (Write(@source), Edit(@tests), Bash(@laws)) expands ONLY through the coltrane.layout.json of the genome tree the gig runs against: path roles to one grant per glob, command roles to Bash(<prefix>:*).",
+    "Write/Edit grants are intersected with the change-request's target_paths (a grant survives only for target paths its glob covers, narrowed to those paths); target_paths absent → no narrowing and target_paths_applied: false.",
+    "The effective grant is then intersected with the venue's equipment via venueEffectiveTools; every step after expansion only removes or narrows.",
+    "A role token whose role the layout lacks, or any role token with no layout, grants nothing, yields a refusal naming the role, and the chair is refused at dispatch naming it. Never a ** default.",
+    "Literal grants pass through untouched except for the narrowing steps: every agent in the shipped genome resolves to exactly its declared allowed_tools.",
+    "The layout's shape is ONE Zod schema (LayoutSchema, src/genome_schema.ts); the loader exposes it as genome.layout (absent → undefined; malformed → load_error and absent).",
+    "Both invokers build their grants through resolveSeatGrants; the layout reaches the chair's ctx from the run's deps and the dispatch door; chair_complete records resolved_grants and target_paths_applied.",
+    "IMPLEMENTER OBLIGATION (no law pins it): domain_types/change-request.json: target_paths' description says 'Paths the requester believes are in scope. A belief, not a finding — the reading phase may contradict it.' Enforcement makes it a grant boundary; rewrite the description (via type_extend) to say Write/Edit grants are narrowed to it. No law pins the wording.",
+    "IMPLEMENTER OBLIGATION (no law pins it): Thread the layout through every door: server.ts (both dispatch branches, via assembleRunDeps), worker.ts (see uncovered), chart.ts movements (inherit via movementDeps).",
+    "IMPLEMENTER OBLIGATION (no law pins it): Add `layout` to LoadError-kind handling: a malformed layout is a load_error whose path names coltrane.layout.json (the kind union in src/loader.ts may need a 'layout' member).",
+    "IMPLEMENTER OBLIGATION (no law pins it): The runtime's dispatch preflight (resolveAgentGrants in runGig) must not reject a role token as an unresolvable tool before resolveSeatGrants has expanded it."
+  ],
+  "laws": [
+    {
+      "path": "tests/a_grant_never_crosses_repositories.test.ts",
+      "commit": "05a33c502e5d99654fda332d171254bece78bb22"
+    },
+    {
+      "path": "tests/a_seat_cannot_write_outside_its_target_paths.test.ts",
+      "commit": "05a33c502e5d99654fda332d171254bece78bb22"
+    },
+    {
+      "path": "tests/a_new_repository_shape_needs_no_agent_amendment.test.ts",
+      "commit": "05a33c502e5d99654fda332d171254bece78bb22"
+    },
+    {
+      "path": "tests/a_missing_role_or_layout_grants_nothing.test.ts",
+      "commit": "05a33c502e5d99654fda332d171254bece78bb22"
+    },
+    {
+      "path": "tests/literal_grants_resolve_unchanged.test.ts",
+      "commit": "05a33c502e5d99654fda332d171254bece78bb22"
+    },
+    {
+      "path": "tests/seat_grant_resolution_only_narrows.test.ts",
+      "commit": "05a33c502e5d99654fda332d171254bece78bb22"
+    },
+    {
+      "path": "tests/the_layout_is_read_from_the_genome_tree.test.ts",
+      "commit": "05a33c502e5d99654fda332d171254bece78bb22"
+    },
+    {
+      "path": "tests/both_invokers_grant_through_the_layout.test.ts",
+      "commit": "05a33c502e5d99654fda332d171254bece78bb22"
+    },
+    {
+      "path": "tests/the_chair_records_its_resolved_grants.test.ts",
+      "commit": "05a33c502e5d99654fda332d171254bece78bb22"
+    }
+  ],
+  "coverage_map": [
+    {
+      "invariant_id": "RED-DEF-10",
+      "test_name": "RED-DEF-10 — a grant never crosses repositories > an implementer holding Write(@source), seated against a layout whose source is src/**, holds exactly Write(src/**) and nothing that reaches ios/",
+      "test_file": "tests/a_grant_never_crosses_repositories.test.ts",
+      "kind": "behavioural",
+      "drives": "resolveSeatGrants — src/layout_grants.ts",
+      "plant": "in src/layout_grants.ts, expand path role tokens from a module-level ROLE_GLOBS table (e.g. source: [src/**, ios/**, scripts/**]) instead of from args.layout",
+      "plant_observed": null
+    },
+    {
+      "invariant_id": "RED-DEF-10",
+      "test_name": "RED-DEF-10 — a grant never crosses repositories > the same agent answers differently in two repositories — the expansion is the layout's, not a table the engine carries",
+      "test_file": "tests/a_grant_never_crosses_repositories.test.ts",
+      "kind": "behavioural",
+      "drives": "resolveSeatGrants — src/layout_grants.ts",
+      "plant": "same plant: expand from a module-level ROLE_GLOBS table instead of args.layout",
+      "plant_observed": null
+    },
+    {
+      "invariant_id": "RED-DEF-11",
+      "test_name": "RED-DEF-11 — a seat cannot write outside its change's target_paths > Write/Edit(@source) against targets [src/a.ts, docs/x.md] survive ONLY as src/a.ts — the covered target, narrowed to it",
+      "test_file": "tests/a_seat_cannot_write_outside_its_target_paths.test.ts",
+      "kind": "behavioural",
+      "drives": "resolveSeatGrants — src/layout_grants.ts",
+      "plant": "skip the target_paths intersection step in resolveSeatGrants (return the expanded grants unnarrowed)",
+      "plant_observed": null
+    },
+    {
+      "invariant_id": "RED-DEF-11",
+      "test_name": "RED-DEF-11 — a seat cannot write outside its change's target_paths > a literal Write(src/**) is narrowed by target_paths too — the intersection is not only for role tokens",
+      "test_file": "tests/a_seat_cannot_write_outside_its_target_paths.test.ts",
+      "kind": "behavioural",
+      "drives": "resolveSeatGrants — src/layout_grants.ts",
+      "plant": "apply the target_paths intersection only to grants that came from a role token, passing literal Write/Edit grants through",
+      "plant_observed": null
+    },
+    {
+      "invariant_id": "RED-DEF-11",
+      "test_name": "RED-DEF-11 — a seat cannot write outside its change's target_paths > Bash and Read are not path grants — target_paths leave them exactly as expanded",
+      "test_file": "tests/a_seat_cannot_write_outside_its_target_paths.test.ts",
+      "kind": "behavioural",
+      "drives": "resolveSeatGrants — src/layout_grants.ts",
+      "plant": "apply the target_paths intersection to every grant (drop any grant not scoped to a covered target), not only Write/Edit",
+      "plant_observed": null
+    },
+    {
+      "invariant_id": "RED-DEF-11",
+      "test_name": "RED-DEF-11 — a seat cannot write outside its change's target_paths > target_paths ABSENT → no target narrowing, and the result records target_paths_applied: false",
+      "test_file": "tests/a_seat_cannot_write_outside_its_target_paths.test.ts",
+      "kind": "behavioural",
+      "drives": "resolveSeatGrants — src/layout_grants.ts",
+      "plant": "return target_paths_applied: true unconditionally from resolveSeatGrants",
+      "plant_observed": null
+    },
+    {
+      "invariant_id": "RED-DEF-12",
+      "test_name": "RED-DEF-12 — a new repository shape needs no agent amendment > an iOS tree's layout lets the tree's own implementer write ios/Sources/** — the agent file never changed",
+      "test_file": "tests/a_new_repository_shape_needs_no_agent_amendment.test.ts",
+      "kind": "behavioural",
+      "drives": "loadGenome — src/loader.ts, then resolveSeatGrants — src/layout_grants.ts",
+      "plant": "resolve from the agent's own allowed_tools alone, ignoring args.layout (role tokens pass through verbatim)",
+      "plant_observed": null
+    },
+    {
+      "invariant_id": "RED-DEF-12",
+      "test_name": "RED-DEF-12 — a new repository shape needs no agent amendment > the SAME agent object resolves per repository, and is never amended by resolving",
+      "test_file": "tests/a_new_repository_shape_needs_no_agent_amendment.test.ts",
+      "kind": "behavioural",
+      "drives": "resolveSeatGrants — src/layout_grants.ts",
+      "plant": "write the expanded grants back onto args.agent.allowed_tools inside resolveSeatGrants",
+      "plant_observed": null
+    },
+    {
+      "invariant_id": "RED-DEF-13",
+      "test_name": "RED-DEF-13 — fail closed on a missing role or layout > NO layout: every role token grants nothing and is refused by its role; the literal beside it survives",
+      "test_file": "tests/a_missing_role_or_layout_grants_nothing.test.ts",
+      "kind": "behavioural",
+      "drives": "resolveSeatGrants — src/layout_grants.ts",
+      "plant": "when args.layout is undefined, expand a path role token to [\"**\"] (Write(**)) instead of refusing it",
+      "plant_observed": null
+    },
+    {
+      "invariant_id": "RED-DEF-13",
+      "test_name": "RED-DEF-13 — fail closed on a missing role or layout > a layout that does not declare the role: the token grants nothing — never ** — and the refusal names `migrations`",
+      "test_file": "tests/a_missing_role_or_layout_grants_nothing.test.ts",
+      "kind": "behavioural",
+      "drives": "resolveSeatGrants — src/layout_grants.ts",
+      "plant": "default a role the layout does not declare to [\"**\"] instead of refusing it",
+      "plant_observed": null
+    },
+    {
+      "invariant_id": "RED-DEF-13",
+      "test_name": "RED-DEF-13 — fail closed on a missing role or layout > the chair is refused at dispatch naming the missing role — no seat is invoked",
+      "test_file": "tests/a_missing_role_or_layout_grants_nothing.test.ts",
+      "kind": "behavioural",
+      "drives": "runGig — src/runtime.ts",
+      "plant": "ignore resolveSeatGrants(...).refusals where runGig seats a chair (invoke the chair anyway)",
+      "plant_observed": null
+    },
+    {
+      "invariant_id": "RED-DEF-14",
+      "test_name": "RED-DEF-14 — literal grants are unchanged > every shipped agent resolves — no layout, no target_paths, no venue — to exactly its declared allowed_tools",
+      "test_file": "tests/literal_grants_resolve_unchanged.test.ts",
+      "kind": "behavioural",
+      "drives": "loadGenome — src/loader.ts over this tree's agents/, then resolveSeatGrants — src/layout_grants.ts",
+      "plant": "alter a literal on the way through resolveSeatGrants — e.g. sort or dedupe the grant list, or normalise Bash(x:*) to Bash(x)",
+      "plant_observed": null
+    },
+    {
+      "invariant_id": "RED-DEF-14",
+      "test_name": "RED-DEF-14 — literal grants are unchanged > …and with a layout present, still exactly — a layout answers role tokens and touches nothing else",
+      "test_file": "tests/literal_grants_resolve_unchanged.test.ts",
+      "kind": "behavioural",
+      "drives": "loadGenome — src/loader.ts over this tree's agents/, then resolveSeatGrants — src/layout_grants.ts",
+      "plant": "treat a scoped literal Write/Edit (e.g. Write(src/**)) as a role and re-expand it through the layout",
+      "plant_observed": null
+    },
+    {
+      "invariant_id": "RED-DEF-14",
+      "test_name": "RED-DEF-14 — literal grants are unchanged > the shipped genome has agents, and they hold literal grants (non-vacuity)",
+      "test_file": "tests/literal_grants_resolve_unchanged.test.ts",
+      "kind": "behavioural",
+      "drives": "loadGenome — src/loader.ts",
+      "plant": "a loader change that drops agents/ from the load (genome.agents empty) — a non-vacuity control, green today",
+      "plant_observed": null
+    },
+    {
+      "invariant_id": "RED-DEF-15",
+      "test_name": "RED-DEF-15 — resolution only narrows > expansion alone draws only on the agent's own literals and the layout's answers to the agent's own tokens",
+      "test_file": "tests/seat_grant_resolution_only_narrows.test.ts",
+      "kind": "behavioural",
+      "drives": "resolveSeatGrants — src/layout_grants.ts",
+      "plant": "expand a role token to its layout globs PLUS every glob of every other role in the layout",
+      "plant_observed": null
+    },
+    {
+      "invariant_id": "RED-DEF-15",
+      "test_name": "RED-DEF-15 — resolution only narrows > target_paths and the venue never add: every final grant is an expanded grant, or a Write/Edit narrowed to a target an expanded glob already covered, held in the room",
+      "test_file": "tests/seat_grant_resolution_only_narrows.test.ts",
+      "kind": "behavioural",
+      "drives": "resolveSeatGrants — src/layout_grants.ts",
+      "plant": "in the target step, push Write(<t>) for every target t whether or not an expanded glob covers it",
+      "plant_observed": null
+    },
+    {
+      "invariant_id": "RED-DEF-15",
+      "test_name": "RED-DEF-15 — resolution only narrows > a room that equips tools the agent never claimed adds none of them",
+      "test_file": "tests/seat_grant_resolution_only_narrows.test.ts",
+      "kind": "behavioural",
+      "drives": "resolveSeatGrants — src/layout_grants.ts",
+      "plant": "in the venue step, union venue.equipment.tools into the grants instead of calling venueEffectiveTools",
+      "plant_observed": null
+    },
+    {
+      "invariant_id": "RED-DEF-15",
+      "test_name": "RED-DEF-15 — resolution only narrows > a room that does not equip Bash removes the laws command the layout expanded",
+      "test_file": "tests/seat_grant_resolution_only_narrows.test.ts",
+      "kind": "behavioural",
+      "drives": "resolveSeatGrants — src/layout_grants.ts",
+      "plant": "skip the venue step when args.venue is present",
+      "plant_observed": null
+    },
+    {
+      "invariant_id": "RED-DEF-15",
+      "test_name": "RED-DEF-15 — resolution only narrows > a target outside every glob the seat holds adds nothing",
+      "test_file": "tests/seat_grant_resolution_only_narrows.test.ts",
+      "kind": "behavioural",
+      "drives": "resolveSeatGrants — src/layout_grants.ts",
+      "plant": "in the target step, push Write(<t>) for every target t whether or not an expanded glob covers it",
+      "plant_observed": null
+    },
+    {
+      "invariant_id": "LAYOUT-1",
+      "test_name": "the layout is read from the genome tree the gig runs against > a tree with coltrane.layout.json loads it as genome.layout, exactly as written",
+      "test_file": "tests/the_layout_is_read_from_the_genome_tree.test.ts",
+      "kind": "behavioural",
+      "drives": "loadGenome — src/loader.ts",
+      "plant": "never read <root>/coltrane.layout.json in loadGenome (layout stays undefined)",
+      "plant_observed": null
+    },
+    {
+      "invariant_id": "LAYOUT-2",
+      "test_name": "the layout is read from the genome tree the gig runs against > a tree with NO layout file loads as today: layout undefined, no load error",
+      "test_file": "tests/the_layout_is_read_from_the_genome_tree.test.ts",
+      "kind": "behavioural",
+      "drives": "loadGenome — src/loader.ts",
+      "plant": "default an absent layout to {} (or a house layout) in loadGenome — a control, green today",
+      "plant_observed": null
+    },
+    {
+      "invariant_id": "LAYOUT-3",
+      "test_name": "the layout is read from the genome tree the gig runs against > a MALFORMED layout is a load_error naming the file, and the genome carries no layout",
+      "test_file": "tests/the_layout_is_read_from_the_genome_tree.test.ts",
+      "kind": "behavioural",
+      "drives": "loadGenome — src/loader.ts",
+      "plant": "keep the raw parsed JSON on genome.layout when LayoutSchema refuses it (or skip the load_errors push)",
+      "plant_observed": null
+    },
+    {
+      "invariant_id": "LAYOUT-4",
+      "test_name": "the layout is read from the genome tree the gig runs against > LayoutSchema is the one source: it admits the declared roles and refuses an undeclared one",
+      "test_file": "tests/the_layout_is_read_from_the_genome_tree.test.ts",
+      "kind": "behavioural",
+      "drives": "LayoutSchema.safeParse — src/genome_schema.ts",
+      "plant": "drop .strict() from LayoutSchema's paths object (a misspelt role `sources` is admitted)",
+      "plant_observed": null
+    },
+    {
+      "invariant_id": "LAYOUT-5",
+      "test_name": "the layout is read from the genome tree the gig runs against > assembleRunDeps threads the layout to the run — the one assembler every door builds its deps from",
+      "test_file": "tests/the_layout_is_read_from_the_genome_tree.test.ts",
+      "kind": "behavioural",
+      "drives": "assembleRunDeps — src/run_deps.ts",
+      "plant": "omit `layout` from assembleRunDeps' returned object",
+      "plant_observed": null
+    },
+    {
+      "invariant_id": "WIRE-CLAUDE-1",
+      "test_name": "the Claude invoker grants through resolveSeatGrants > --allowedTools carries the role tokens EXPANDED by ctx.layout and NARROWED by gig_input.target_paths",
+      "test_file": "tests/both_invokers_grant_through_the_layout.test.ts",
+      "kind": "behavioural",
+      "drives": "makeClaudeInvoker(...)(ctx) → --allowedTools via the injected run seam — src/claude_invoker.ts",
+      "plant": "build effectiveAllowed from ctx.agent.allowed_tools instead of resolveSeatGrants(...).grants in the invoker's grant block",
+      "plant_observed": null
+    },
+    {
+      "invariant_id": "WIRE-CLAUDE-2",
+      "test_name": "the Claude invoker grants through resolveSeatGrants > in a room that does not equip Bash, no role token reaches EITHER flag and the laws command is not allowed",
+      "test_file": "tests/both_invokers_grant_through_the_layout.test.ts",
+      "kind": "behavioural",
+      "drives": "makeClaudeInvoker(...)(ctx) → --allowedTools/--disallowedTools, venue path (venueExcluded + the disallow union) — src/claude_invoker.ts",
+      "plant": "compute venueExcluded (and the venue-narrowed allow list) from a.allowed_tools — the raw tokens — instead of the resolved grants",
+      "plant_observed": null
+    },
+    {
+      "invariant_id": "WIRE-CLAUDE-3",
+      "test_name": "the Claude invoker grants through resolveSeatGrants > a role the layout does not declare refuses the chair naming it — nothing is spawned",
+      "test_file": "tests/both_invokers_grant_through_the_layout.test.ts",
+      "kind": "behavioural",
+      "drives": "makeClaudeInvoker(...)(ctx) — src/claude_invoker.ts",
+      "plant": "ignore resolveSeatGrants(...).refusals in the Claude invoker (spawn anyway)",
+      "plant_observed": null
+    },
+    {
+      "invariant_id": "WIRE-CLAUDE-4",
+      "test_name": "the Claude invoker grants through resolveSeatGrants > NO layout on the invocation: a role token refuses the chair naming the role — never a ** default",
+      "test_file": "tests/both_invokers_grant_through_the_layout.test.ts",
+      "kind": "behavioural",
+      "drives": "makeClaudeInvoker(...)(ctx) — src/claude_invoker.ts",
+      "plant": "when ctx.layout is undefined, skip resolveSeatGrants and pass ctx.agent.allowed_tools through",
+      "plant_observed": null
+    },
+    {
+      "invariant_id": "WIRE-COMPLETIONS-0",
+      "test_name": "the completions invoker grants through resolveSeatGrants > control — a target the source glob covers: Write is offered",
+      "test_file": "tests/both_invokers_grant_through_the_layout.test.ts",
+      "kind": "behavioural",
+      "drives": "makeCompletionsInvoker(...)(ctx) → the model request's tools — src/completions_invoker.ts",
+      "plant": "narrow every Write away regardless of target_paths — a control, green today",
+      "plant_observed": null
+    },
+    {
+      "invariant_id": "WIRE-COMPLETIONS-1",
+      "test_name": "the completions invoker grants through resolveSeatGrants > a target_paths set the source glob never covers: Write(@source) resolves to nothing, and the model is NOT offered Write",
+      "test_file": "tests/both_invokers_grant_through_the_layout.test.ts",
+      "kind": "behavioural",
+      "drives": "makeCompletionsInvoker(...)(ctx) → chairGrants → allow → the model request's tools — src/completions_invoker.ts",
+      "plant": "compute chairGrants from ctx.agent.allowed_tools (or venueEffectiveTools(ctx.agent, venue)) instead of resolveSeatGrants(...).grants",
+      "plant_observed": null
+    },
+    {
+      "invariant_id": "WIRE-COMPLETIONS-2",
+      "test_name": "the completions invoker grants through resolveSeatGrants > a role the layout does not declare is refused naming it, before any model call",
+      "test_file": "tests/both_invokers_grant_through_the_layout.test.ts",
+      "kind": "behavioural",
+      "drives": "makeCompletionsInvoker(...)(ctx) — src/completions_invoker.ts",
+      "plant": "ignore resolveSeatGrants(...).refusals in the completions invoker",
+      "plant_observed": null
+    },
+    {
+      "invariant_id": "RECORD-1",
+      "test_name": "the chair records its resolved grants > chair_complete records the grants the seat ran WITH — expanded by the layout, narrowed by the change's target_paths",
+      "test_file": "tests/the_chair_records_its_resolved_grants.test.ts",
+      "kind": "behavioural",
+      "drives": "runGig — src/runtime.ts (the chair_complete emit)",
+      "plant": "drop resolved_grants from the chair_complete emit in runGig",
+      "plant_observed": null
+    },
+    {
+      "invariant_id": "RECORD-2",
+      "test_name": "the chair records its resolved grants > a change with NO target_paths is recorded as un-narrowed — target_paths_applied: false, present, never absent",
+      "test_file": "tests/the_chair_records_its_resolved_grants.test.ts",
+      "kind": "behavioural",
+      "drives": "runGig — src/runtime.ts (the chair_complete emit)",
+      "plant": "emit target_paths_applied only when true (conditional spread), or record it as true unconditionally",
+      "plant_observed": null
+    },
+    {
+      "invariant_id": "RECORD-3",
+      "test_name": "the chair records its resolved grants > the layout on the run reaches the chair's invocation as ctx.layout — the invoker resolves against it",
+      "test_file": "tests/the_chair_records_its_resolved_grants.test.ts",
+      "kind": "behavioural",
+      "drives": "runGig — src/runtime.ts (the deps.invoke ctx)",
+      "plant": "omit `layout` from the ctx runGig passes to deps.invoke",
+      "plant_observed": null
+    },
+    {
+      "invariant_id": "DOOR-DISPATCH",
+      "test_name": "the dispatch door carries the layout of the tree it runs against > bootstrapServerDeps(<tree with coltrane.layout.json>) → gig_dispatch → the chair's invocation holds THAT tree's layout",
+      "test_file": "tests/the_chair_records_its_resolved_grants.test.ts",
+      "kind": "behavioural",
+      "drives": "bootstrapServerDeps + dispatchTool(\"gig_dispatch\") — src/server.ts",
+      "plant": "omit `layout` from the assembleRunDeps call in server.ts's dispatch door (or never load it onto ServerDeps in bootstrapServerDeps)",
+      "plant_observed": null
+    }
+  ],
+  "testing_method": "vitest, example-based laws plus fast-check properties (RED-DEF-15: expansion draws only on declared tokens + the layout; the target and venue steps never add). Every law drives the production symbol named in `drives`; symbols that do not exist yet are reached through a runtime import (tests/layout_grants_fixtures.ts) so the shared tsc gate stays green and each law fails where it asserts. The invokers are observed through the seams the suite already uses: the Claude invoker's injected `run` (the exact argv), and the completions invoker's model request body and typed refusals. The chair record is observed on chair_complete through RunDeps.onProgress; the dispatch door by bootstrapServerDeps over a genome tree on disk with the invoke seam replaced. The resolver-level plants were rehearsed by the drafter against a throwaway reference resolver that was deleted before commit; plant_observed is left null for the implementer's grader, as production does not exist yet.",
+  "uncovered": [
+    "DRAIN DOOR (src/worker.ts): the drain loads its genome from the org store, not a tree, so 'the genome instance the gig runs against' has no coltrane.layout.json to read; the layout presumably comes from the working clone (tree_root). The handoff does not decide this, so no law pins it. Until decided, a drained gig whose agents hold role tokens fails closed at every chair."
+  ]
+}

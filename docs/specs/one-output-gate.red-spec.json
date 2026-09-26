@@ -1,0 +1,135 @@
+{
+  "spec_doc": "docs/specs/one-output-gate.red-spec.json",
+  "validation_criteria": [
+    "G1: on the drain, a Claude seat's in-turn output_write gate and the seal judge by the same genome (the run's, from its store): what one accepts the other accepts, and a seal rejection is returned to the chair in-turn first",
+    "G2: an output_write whose tool result says ok:false is never captured for sealing, whether is_error is true, false or absent",
+    "G3: in checkWritable/write, a top-level property that is not required and is null is removed before validation, hashing and writing; required nulls and nulls inside arrays are untouched; the caller's object is not mutated",
+    "G4: both seal briefs tell the chair to omit an optional field it has no value for and never send null",
+    "R: the live cde960ea payload shape (change-verdict, decision_ref:null) seals through runGig without the key"
+  ],
+  "input_refs": [
+    "live: gig cde960ea, 26 Sep 2026, drain @eir-labs/coltrane@0.24.20 — chair review-change cannot seal change-verdict: type at /decision_ref: must be string"
+  ],
+  "laws": [
+    {
+      "path": "tests/one_output_gate.test.ts",
+      "commit": "5553b7ab8a8e1bc939a34e8c38feaf1e45771700"
+    }
+  ],
+  "coverage_map": [
+    {
+      "invariant_id": "G1a",
+      "test_name": "G1 · one gate: on the drain, what the in-turn output_write accepts the seal accepts, and what the seal rejects the chair is told in-turn > a payload the seal REJECTS is rejected in-turn first — by the engine server the drain's Claude seat is handed — and the reason reaches the chair",
+      "test_file": "tests/one_output_gate.test.ts",
+      "kind": "behavioural",
+      "drives": "drainChairInvoker(env, storeRegistry) — src/cli.ts → makeClaudeInvoker real spawn + per-gig mcp-config — src/claude_invoker.ts → engine server entry dist/src/server_entry.js output_write (validate mode) — src/server.ts; genome via reconstructGenome — src/genome_store.ts",
+      "plant": "in drainChairInvoker (src/cli.ts) wire the Claude seat with sealVia:'output_write' and the engine server config {command:'node', args:['dist/src/server_entry.js']} with no genome of its own, so the child loads the FILE genome from cwd instead of the run's registry"
+    },
+    {
+      "invariant_id": "G1b",
+      "test_name": "G1 · one gate: on the drain, what the in-turn output_write accepts the seal accepts, and what the seal rejects the chair is told in-turn > a payload the in-turn gate ACCEPTS, the seal accepts — and it is what the invoker hands back for sealing",
+      "test_file": "tests/one_output_gate.test.ts",
+      "kind": "behavioural",
+      "drives": "same as G1a; plus the invoker's returned blob (captureOutputWrites over the real stream) — src/claude_invoker.ts",
+      "plant": "same as G1a: the drain's engine child built from the file genome, whose closed change-verdict v1 refuses the org's required org_ticket"
+    },
+    {
+      "invariant_id": "G2a",
+      "test_name": "G2 · a rejected write is never captured, however the CLI flags it > an output_write whose result is {ok:false} is not captured when the CLI OMITS is_error (content as blocks, and as a string)",
+      "test_file": "tests/one_output_gate.test.ts",
+      "kind": "behavioural",
+      "drives": "captureOutputWrites — src/claude_invoker.ts",
+      "plant": "captureOutputWrites decides 'errored' only from tool_result.is_error === true (the code at origin/main), ignoring the {ok:false} body"
+    },
+    {
+      "invariant_id": "G2b",
+      "test_name": "G2 · a rejected write is never captured, however the CLI flags it > an output_write whose result is {ok:false} is not captured when the CLI says is_error:false",
+      "test_file": "tests/one_output_gate.test.ts",
+      "kind": "behavioural",
+      "drives": "captureOutputWrites — src/claude_invoker.ts",
+      "plant": "capture keyed only on is_error (origin/main)"
+    },
+    {
+      "invariant_id": "G2c",
+      "test_name": "G2 · a rejected write is never captured, however the CLI flags it > the corrected second write after a refusal IS captured — and only it",
+      "test_file": "tests/one_output_gate.test.ts",
+      "kind": "behavioural",
+      "drives": "captureOutputWrites — src/claude_invoker.ts",
+      "plant": "capture keyed only on is_error (origin/main); or, over-fixed, drop every write once any was refused"
+    },
+    {
+      "invariant_id": "G2d",
+      "test_name": "G2 · a rejected write is never captured, however the CLI flags it > an is_error result is still not captured (the flag keeps working)",
+      "test_file": "tests/one_output_gate.test.ts",
+      "kind": "behavioural",
+      "drives": "captureOutputWrites — src/claude_invoker.ts",
+      "plant": "replace the is_error test with the body test alone, so an is_error result whose content is not JSON is captured"
+    },
+    {
+      "invariant_id": "G3a",
+      "test_name": "G3 · null on an optional field is absence — in the one predicate both gates share > the gate accepts a change-verdict whose optional decision_ref is null (the live payload)",
+      "test_file": "tests/one_output_gate.test.ts",
+      "kind": "behavioural",
+      "drives": "createOutputStore(registry).validateWrite → checkWritable — src/outputs.ts",
+      "plant": "no null strip in checkWritable (origin/main): Ajv refuses 'type at /decision_ref: must be string'"
+    },
+    {
+      "invariant_id": "G3b",
+      "test_name": "G3 · null on an optional field is absence — in the one predicate both gates share > the SEALED record has no decision_ref key, and its content_sha equals the same payload with the key omitted",
+      "test_file": "tests/one_output_gate.test.ts",
+      "kind": "behavioural",
+      "drives": "createOutputStore(registry).write — src/outputs.ts (checkWritable + outputContentHash)",
+      "plant": "strip non-required nulls only inside checkWritable, and let write() hash and seal o.data as sent"
+    },
+    {
+      "invariant_id": "G3c",
+      "test_name": "G3 · null on an optional field is absence — in the one predicate both gates share > a null on a REQUIRED field is still refused — at validate and at write",
+      "test_file": "tests/one_output_gate.test.ts",
+      "kind": "behavioural",
+      "drives": "validateWrite / write — src/outputs.ts",
+      "plant": "strip every top-level null, required or not: the refusal becomes 'must have required property recommendation', telling the chair it omitted a field it sent"
+    },
+    {
+      "invariant_id": "G3d",
+      "test_name": "G3 · null on an optional field is absence — in the one predicate both gates share > a null inside an array member is untouched — the member is still judged, and refused",
+      "test_file": "tests/one_output_gate.test.ts",
+      "kind": "behavioural",
+      "drives": "validateWrite — src/outputs.ts",
+      "plant": "make the strip recursive (drop nulls from array elements and from objects inside arrays)"
+    },
+    {
+      "invariant_id": "G3e",
+      "test_name": "G3 · null on an optional field is absence — in the one predicate both gates share > the caller's object is not mutated by the strip",
+      "test_file": "tests/one_output_gate.test.ts",
+      "kind": "behavioural",
+      "drives": "write — src/outputs.ts",
+      "plant": "implement the strip as `delete o.data[k]` on the caller's object instead of a copy"
+    },
+    {
+      "invariant_id": "G4a",
+      "test_name": "G4 · the brief says how to express absence > the in-band seal brief (output_write) tells the chair to omit an optional field it has no value for, never null",
+      "test_file": "tests/one_output_gate.test.ts",
+      "kind": "behavioural",
+      "drives": "buildPrompt(ctx, schema, undefined, seal) — src/claude_invoker.ts (the completions invoker builds from the same function)",
+      "plant": "remove the absence sentence from the output_write Task layer of buildPrompt (it is absent at origin/main)"
+    },
+    {
+      "invariant_id": "G4b",
+      "test_name": "G4 · the brief says how to express absence > the text seal brief says the same",
+      "test_file": "tests/one_output_gate.test.ts",
+      "kind": "behavioural",
+      "drives": "buildPrompt(ctx, schema) — src/claude_invoker.ts",
+      "plant": "remove the absence sentence from the text-seal Task layer of buildPrompt (it is absent at origin/main)"
+    },
+    {
+      "invariant_id": "R",
+      "test_name": "R · the live payload seals > runGig seals a change-verdict carrying decision_ref:null, and the sealed record carries no decision_ref",
+      "test_file": "tests/one_output_gate.test.ts",
+      "kind": "behavioural",
+      "drives": "runGig → executeChair seal gate (validateWrite) and write — src/runtime.ts, src/outputs.ts",
+      "plant": "no null strip (origin/main) reproduces the live error verbatim; a validate-only strip seals the null"
+    }
+  ],
+  "testing_method": "vitest, example-based. G1 drives the real drainChairInvoker and the real claude invoker spawn. A stand-in claude on PATH (tests/_support/gate_fake_claude.mjs) reads the per-gig --mcp-config, starts the engine server it names over stdio (or http) with the MCP SDK client, and calls output_write, so the in-turn gate the law sees is the real server. The run's genome comes from reconstructGenome over a store row whose change-verdict is v2 and requires org_ticket, which the file genome's closed v1 forbids, so a gate built from the wrong genome shows up in either direction. G2 drives captureOutputWrites over CLI-shaped stream-json. G3 and R drive the output store and runGig on the repo genome. Plants were applied to a scratch copy of src, observed red, and reverted: the file-genome engine child (G1a/G1b), a validation-only strip (G3b, R), stripping required nulls (G3c), a recursive strip (G3d). A sketched fix (materialising the run registry's types as the child's COLTRANE_GENOME) turned G1 green, so the fixture can pass. SUSPECTS. (iii) path skips validate mode: CONFIRMED from source and reproduced (G1a red at origin/main: the mcp-config names servers [] and no engine server). drainChairInvoker (src/cli.ts) builds makeClaudeInvoker({registry, model, timeout_ms}) with no sealVia and no mcpServerConfigs, so a drained Claude seat seals from text. No in-turn gate exists; the seal is the only judgment. The drain's completions seats do use a validate-pinned source over the store registry, so their gates agree. (i) child holds another genome: LATENT. The fix for (iii) would walk into it. The engine child is bootstrapServerDeps(COLTRANE_GENOME ?? cwd), which is the file genome, while the drain seals against the org store's types. Observed with the plant: the file child accepted a payload the store seal refuses (missing org_ticket) and refused one it accepts (additionalProperties org_ticket). (ii) rejection without is_error: Not the live cause. createColtraneServer sets isError: !result.ok. But captureOutputWrites trusts only the CLI's is_error and never reads the ok:false body, so G2 hardens it.",
+  "uncovered": []
+}

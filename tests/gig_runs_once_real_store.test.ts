@@ -20,6 +20,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { workOnce, type WorkOnceDeps, type WorkerContext } from "../src/worker.js";
+import { runCli, type CliIO } from "../src/cli.js";
 import type { AgentInvoker, AgentInvocationContext } from "../src/runtime.js";
 import {
   hostedStore, hostedEnv, venueCtx, claimFor, sealableSignal, sealedLocally, settle, drainServiceRefusal,
@@ -232,6 +233,52 @@ describe("A1 — NO BLIND DRAIN: a drain key without a drain URL refuses the run
     expect(invoke, "a drain with no URL ran a chair: every write it makes goes nowhere").not.toHaveBeenCalled();
     expect(outcome, "the refusal (returned or thrown) must name the missing variable").toContain("COLTRANE_DRAIN_URL");
     expect(outcome, "a blind drain reported a completion").not.toMatch(/"status":"complete"/);
+  });
+});
+
+describe("A2 — a blind drain makes NO claim: it refuses at startup, before the store is asked for work", () => {
+  // A1 stops the chair. But a refusal AFTER the claim still leases the row. The row then sits there
+  // until its lease lapses and spends one of the gig's attempts, and this worker cannot release it,
+  // because the release goes through the very drain service it cannot reach. The missing URL is
+  // known before any claim is made, so the refusal belongs there.
+  const claims = (store: ReturnType<typeof hostedStore>) =>
+    store.calls.filter((c) => c.host === "store" && /\/rpc\/coltrane_(drain|mcp)_claim$/.test(c.path));
+
+  it("A2 workOnce with COLTRANE_DRAIN_KEY set and COLTRANE_DRAIN_URL unset: zero claim calls, no chair, and the refusal names COLTRANE_DRAIN_URL", async () => {
+    env = hostedEnv();
+    delete process.env["COLTRANE_DRAIN_URL"];
+    const store = hostedStore({ claim: claimFor("one-chair-v0") });
+    const invoke = vi.fn(async () => sealableSignal);
+    const outcome = await workOnce(venueCtx(), { makeInvoke: () => invoke as unknown as AgentInvoker } as WorkOnceDeps).then(
+      (res) => JSON.stringify(res),
+      (e: unknown) => (e instanceof Error ? e.message : String(e)),
+    );
+    expect(claims(store).map((c) => c.path), "a drain that cannot reach its service CLAIMED a gig; the row is now leased until it lapses and an attempt is spent").toEqual([]);
+    expect(invoke).not.toHaveBeenCalled();
+    expect(outcome, "the refusal must name the missing variable").toContain("COLTRANE_DRAIN_URL");
+  });
+
+  it("A2 `coltrane work` with a drain key and no COLTRANE_DRAIN_URL exits non-zero naming it, and the store sees zero claim calls", async () => {
+    env = hostedEnv();
+    delete process.env["COLTRANE_DRAIN_URL"];
+    const saved = { url: process.env["COLTRANE_STORE_URL"], anon: process.env["COLTRANE_STORE_ANON"], tok: process.env["COLTRANE_AGENT_TOKEN"] };
+    process.env["COLTRANE_STORE_URL"] = STORE;
+    process.env["COLTRANE_STORE_ANON"] = "anon-key";
+    delete process.env["COLTRANE_AGENT_TOKEN"];
+    try {
+      const store = hostedStore({ claim: claimFor("one-chair-v0") });
+      let out = "";
+      const io: CliIO = { out: (x) => { out += x; }, err: (x) => { out += x; } };
+      const code = await runCli(["work"], io);
+      expect(claims(store).map((c) => c.path), `\`coltrane work\` claimed a gig with no drain URL to report it to:\n${out}`).toEqual([]);
+      expect(code, `a blind drain exited ${code}`).not.toBe(0);
+      expect(out, "the refusal must name the missing variable").toContain("COLTRANE_DRAIN_URL");
+    } finally {
+      for (const [k, v] of [["COLTRANE_STORE_URL", saved.url], ["COLTRANE_STORE_ANON", saved.anon], ["COLTRANE_AGENT_TOKEN", saved.tok]] as const) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+    }
   });
 });
 

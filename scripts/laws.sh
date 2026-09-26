@@ -29,7 +29,9 @@ cd "$(dirname "$0")/.."
 # stopped being true at Node 24), and two pure flag-string laws replaced it in this band. The nine
 # laws that need a real request moved to tests/security — a band may reach out, the root suite may
 # not — so they are counted there, by file, not here.
-EXPECTED_LAWS="${EXPECTED_LAWS:-4283}"
+EXPECTED_LAWS="${EXPECTED_LAWS:-4285}"
+#   +2 gig-runs-once round 6d, on efd10a1: real_store A2 (workOnce and `coltrane work`) — a drain key with no
+#      COLTRANE_DRAIN_URL makes NO claim; it refuses at startup naming the variable. RED at efd10a1.
 #  +16 gig-runs-once round 6c, on 2597854: hosted_dispatch H4 loses `budget` (-1: coltrane-ui #253 carries it now)
 #      and gains H5 (+10: budget.max_usd -> integer budget_micro_usd, exact; >6 decimals / negative / non-finite /
 #      non-number refused by name; absent -> no key); queue_clients (new file, +6: postgrestQueueGig/rpcQueueGig

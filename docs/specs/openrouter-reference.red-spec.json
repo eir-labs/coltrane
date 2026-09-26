@@ -1,5 +1,5 @@
 {
-  "spec_doc": "docs/specs/openrouter-reference.red-spec.json — OpenRouter as the reference provider for the completions seat: the one-line flip. Provider doc: docs/providers/openrouter.md. Laws: tests/openrouter_reference.test.ts (11, root band) and tests/security/openrouter_live_smoke.spec.ts (1, spends; named skip). MEASURED at origin/main 471169e: (1) selectChairInvoker builds the tier map from COLTRANE_TIER_ECONOMY/_STANDARD/_PREMIUM only, so one model named once leaves two tiers refused unresolved_tier; (2) mapUsage reads prompt_tokens_details.cached_tokens and DeepSeek's prompt_cache_hit/miss_tokens but not OpenRouter's documented prompt_tokens_details.cache_write_tokens, so cache writes are priced as uncached input; (3) OpenRouter's usage.cost (documented as always included, in USD) is dropped; (4) a chair that reports tokens but no cost seals cost_usd: 0 on its record (makeUsageSink.reported returns chairCost) and folds 0 into manifest.usage.total_cost_usd with no marker. THE MODEL VARIABLE: the codebase already has a name for 'the model a chair invokes' — COLTRANE_MODEL (src/worker_env.ts; the Claude seat's fallback under its tier table via resolveModel: tier wins, then the fallback). The one-line mode reuses it with the SAME precedence rather than minting COLTRANE_COMPLETIONS_MODEL: COLTRANE_TIER_<X> wins for its tier; COLTRANE_MODEL seats every other tier; neither → unresolved_tier, nothing sent. COST DECISION (usage.cost): the engine USES a transport-reported cost. A round whose reply carries a finite, non-negative reported cost settles at that cost, even when COLTRANE_PRICES_FILE also prices the served model; the price table prices only rounds that report none; a round with neither is unpriced. Reason: usage.cost is what OpenRouter charged ('the total amount charged to your account'), MEASURED; the table is the deployment's estimate, and OpenRouter routes one model slug across upstream providers at different prices, so a flat per-model table cannot be exact where the provider's own charge is. It also means the one-line flip settles real spend with no price file at all. A reported 0 (a :free model) is a known price and settles as 0; an ABSENT cost is not 0. SHAPE THE LAWS PIN (the implementer chooses the internal carrier, e.g. ModelReply.cost_usd from the port, preferred by priceRound): manifest.usage.total_cost_usd; GigUsage.unpriced_invocations?: number (invocations that reported tokens but no cost — a new optional field in src/ledger.ts beside unattributed_invocations; when > 0, total_cost_usd is a lower bound); an unpriced chair's sealed record carries NO cost_usd. OPEN (to be settled by the live smoke, not guessed): whether OpenRouter's prompt_tokens includes cache_write_tokens as well as cached_tokens — the documented example (prompt_tokens 194, cache_write_tokens 100) implies subset, and the laws assume it; BYOK (is_byok, cost_details.upstream_inference_cost) is not modelled.",
+  "spec_doc": "docs/specs/openrouter-reference.red-spec.json — OpenRouter as the reference provider for the completions seat: the one-line flip. Provider doc: docs/providers/openrouter.md. Laws: tests/openrouter_reference.test.ts (11, root band) and tests/security/openrouter_live_smoke.spec.ts (1, spends; named skip). MEASURED at origin/main 471169e: (1) selectChairInvoker builds the tier map from COLTRANE_TIER_ECONOMY/_STANDARD/_PREMIUM only, so one model named once leaves two tiers refused unresolved_tier; (2) mapUsage reads prompt_tokens_details.cached_tokens and DeepSeek's prompt_cache_hit/miss_tokens but not OpenRouter's documented prompt_tokens_details.cache_write_tokens, so cache writes are priced as uncached input; (3) OpenRouter's usage.cost (documented as always included, in USD) is dropped; (4) a chair that reports tokens but no cost seals cost_usd: 0 on its record (makeUsageSink.reported returns chairCost) and folds 0 into manifest.usage.total_cost_usd with no marker. THE MODEL VARIABLE: the codebase already has a name for 'the model a chair invokes' — COLTRANE_MODEL (src/worker_env.ts; the Claude seat's fallback under its tier table via resolveModel: tier wins, then the fallback). The one-line mode reuses it with the SAME precedence rather than minting COLTRANE_COMPLETIONS_MODEL: COLTRANE_TIER_<X> wins for its tier; COLTRANE_MODEL seats every other tier; neither → unresolved_tier, nothing sent. COST DECISION (usage.cost): the engine USES a transport-reported cost. A round whose reply carries a finite, non-negative reported cost settles at that cost, even when COLTRANE_PRICES_FILE also prices the served model; the price table prices only rounds that report none; a round with neither is unpriced. Reason: usage.cost is what OpenRouter charged ('the total amount charged to your account'), MEASURED; the table is the deployment's estimate, and OpenRouter routes one model slug across upstream providers at different prices, so a flat per-model table cannot be exact where the provider's own charge is. It also means the one-line flip settles real spend with no price file at all. A reported 0 (a :free model) is a known price and settles as 0; an ABSENT cost is not 0. SHAPE THE LAWS PIN (the implementer chooses the internal carrier, e.g. ModelReply.cost_usd from the port, preferred by priceRound): manifest.usage.total_cost_usd; GigUsage.unpriced_invocations?: number (invocations that reported tokens but no cost — a new optional field in src/ledger.ts beside unattributed_invocations; when > 0, total_cost_usd is a lower bound); an unpriced chair's sealed record carries NO cost_usd. OPEN (to be settled by the live smoke, not guessed): whether OpenRouter's prompt_tokens includes cache_write_tokens as well as cached_tokens — the documented example (prompt_tokens 194, cache_write_tokens 100) implies subset, and the laws assume it; BYOK (is_byok, cost_details.upstream_inference_cost) is not modelled. ROUND 2 (on the implementation at 02c591f, implementer comment 5847855288; survivors pinned): (a) A REPORTED 0 IS A KNOWN PRICE: a :free model's usage.cost 0 settles at $0, is not unpriced, and wins over a table price (L2g). (b) NEGATIVE / NON-FINITE REPORTED COST — DECISION: DISREGARDED as a cost, never refused and never a credit: the round falls to the price table, and with none it is unpriced (L2h). A negative number is not what anyone was charged, so it cannot be a measurement; refusing would throw away a round's tokens over one bad field. JSON cannot carry a non-finite number, so L2h pins the negative case; reportedCost's Number.isFinite covers any in-process port. (c) A token class that reports 0 needs no rate (L2i). (d) chair_spend.usage.unpriced_invocations carries the per-chair count (L2j). (e) NEGATIVE-INPUT GUARD — DECISION: REFUSE, never clamp. When cache reads + cache writes exceed prompt_tokens, the port throws (typed transport_failed by the loop) with a message naming prompt_tokens, cached_tokens and cache_write_tokens and their values (L2k). A clamped 0 would hide exactly what the live smoke exists to find (whether OpenRouter counts writes inside prompt_tokens), and would misprice every round after it. The guard is pinned; the subset assumption is still OPEN and the live smoke settles it. (f) The CLI dispatch summary says 'unpriced (N …)' when any invocation is unpriced (L2l). (g) L2b now discriminates the DeepSeek hit and miss branches separately, using a deliberately inconsistent fixture labelled as such.",
   "validation_criteria": [
     "every non-skipped law is red at origin/main 471169e for its own reason, or holds there and is turned red by its plant (L1c, L2b — planted, observed red, reverted)",
     "the gig-level usage laws (L2c-L2f) seat their chair through COLTRANE_TIER_STANDARD, so they are red for the usage/cost defect and not for the missing one-line variable",
@@ -8,9 +8,9 @@
     "the live smoke is skipped and prints UNVERIFIED unless COLTRANE_COMPLETIONS_URL is https://openrouter.ai/... and COLTRANE_COMPLETIONS_KEY is set; run live it writes the RECORDED response, dated, over the fixture (only one that carries a cache read)",
     "tsc --noEmit clean; the rest of the suite green; scripts/laws.sh counts bumped (root +11 laws / +1 file, security +1 file)",
     "implementer obligation: src/worker_env.ts COLTRANE_MODEL meaning names its completions-seat role (the one-line model under the tier map)",
-    "implementer obligation: the `coltrane dispatch` CLI summary (src/cli.ts, the '$x.xx' line) says 'unpriced' when usage.unpriced_invocations > 0 rather than printing a bare total",
     "follow-up, not in this change: `coltrane chat` (src/bus_terminal.ts) reads COLTRANE_TIER_<tier> only and should share the selector's resolution",
-    "package independence: the laws touch the completions path; the fix touches src/invoker_selection.ts, src/chat_completions_port.ts, src/turn_loop.ts, src/completions_invoker.ts, src/runtime.ts (usage sink) and src/ledger.ts (GigUsage). Overlaps: #553 (src/completions_invoker.ts, src/runtime.ts, scripts/laws.sh), #554 (src/runtime.ts, scripts/laws.sh), #557 (scripts/laws.sh only). Merge after them; the runtime edit is local to makeUsageSink/finalizeUsage."
+    "package independence: the laws touch the completions path; the fix touches src/invoker_selection.ts, src/chat_completions_port.ts, src/turn_loop.ts, src/completions_invoker.ts, src/runtime.ts (usage sink) and src/ledger.ts (GigUsage). Overlaps: #553 (src/completions_invoker.ts, src/runtime.ts, scripts/laws.sh), #554 (src/runtime.ts, scripts/laws.sh), #557 (scripts/laws.sh only). Merge after them; the runtime edit is local to makeUsageSink/finalizeUsage.",
+    "round 2: each survivor law (L2b amended, L2g-L2l) is shown red on 02c591f by its plant (M1, M1b, M3, M4, M5, M6, P6), then reverted; L2k is red on 02c591f with no plant (input_tokens=-30)"
   ],
   "input_refs": [
     "docs/specs/completions-seat.red-spec.md",
@@ -70,11 +70,11 @@
     },
     {
       "invariant_id": "I2-deepseek-cache-split",
-      "test_name": "OpenRouter as a reference provider — the one-line flip > L2b — the port maps DeepSeek's prompt_cache_hit_tokens / prompt_cache_miss_tokens",
+      "test_name": "OpenRouter as a reference provider — the one-line flip > L2b — the port maps DeepSeek's prompt_cache_hit_tokens / prompt_cache_miss_tokens, EACH from its own field",
       "test_file": "tests/openrouter_reference.test.ts",
       "kind": "behavioural",
       "drives": "makeChatCompletionsPort — src/chat_completions_port.ts (mapUsage)",
-      "plant": "in mapUsage drop the prompt_cache_hit_tokens / prompt_cache_miss_tokens branches, falling back to prompt_tokens - cached_tokens"
+      "plant": "in mapUsage drop ONLY the prompt_cache_miss_tokens branch (input falls back to prompt_tokens - hit), or ONLY the prompt_cache_hit_tokens branch — the discriminating fixture (prompt != hit + miss) separates the two"
     },
     {
       "invariant_id": "O3-reported-cost-used",
@@ -109,6 +109,54 @@
       "plant": "in makeUsageSink.reported() (src/runtime.ts) return cost_usd: chairCost even when the chair never reported a cost; or never stamp usage.unpriced_invocations in finalizeUsage"
     },
     {
+      "invariant_id": "I4-reported-zero-known",
+      "test_name": "OpenRouter as a reference provider — the one-line flip > L2g — a REPORTED 0 is a known price: a :free model settles at $0 and is NOT unpriced, even over a price table",
+      "test_file": "tests/openrouter_reference.test.ts",
+      "kind": "behavioural",
+      "drives": "bootstrapServerDeps + dispatchTool('gig_dispatch') — src/server.ts → makeChatCompletionsPort — src/chat_completions_port.ts → runTurn/priceRound — src/turn_loop.ts → makeCompletionsInvoker result event — src/completions_invoker.ts → makeUsageSink/finalizeUsage — src/runtime.ts",
+      "plant": "M1: in reportedCost (src/turn_loop.ts) accept only cost > 0 (a 0 treated as missing); M1b: in the port set reply.cost_usd only when wire.usage.cost is truthy"
+    },
+    {
+      "invariant_id": "I5-negative-cost-not-credit",
+      "test_name": "OpenRouter as a reference provider — the one-line flip > L2h — a NEGATIVE reported cost is never a credit: it is not a cost, so with no price table the round is unpriced",
+      "test_file": "tests/openrouter_reference.test.ts",
+      "kind": "behavioural",
+      "drives": "bootstrapServerDeps + dispatchTool('gig_dispatch') — src/server.ts → makeChatCompletionsPort — src/chat_completions_port.ts → runTurn/priceRound — src/turn_loop.ts → makeCompletionsInvoker result event — src/completions_invoker.ts → makeUsageSink/finalizeUsage — src/runtime.ts",
+      "plant": "M5: in reportedCost (src/turn_loop.ts) drop the `cost >= 0` check, so a negative report settles as a credit"
+    },
+    {
+      "invariant_id": "I6-zero-class-needs-no-rate",
+      "test_name": "OpenRouter as a reference provider — the one-line flip > L2i — a token class reporting 0 needs no rate: cache_write_tokens 0 on a model with no cache_write price is still priced",
+      "test_file": "tests/openrouter_reference.test.ts",
+      "kind": "behavioural",
+      "drives": "bootstrapServerDeps + dispatchTool('gig_dispatch') — src/server.ts → makeChatCompletionsPort — src/chat_completions_port.ts → runTurn/priceRound — src/turn_loop.ts → makeCompletionsInvoker result event — src/completions_invoker.ts → makeUsageSink/finalizeUsage — src/runtime.ts",
+      "plant": "M4: in priceRound (src/turn_loop.ts) skip only undefined classes again (`if (tokens === undefined) continue;`), so a 0-token class with no rate unprices the round"
+    },
+    {
+      "invariant_id": "I7-chair-spend-unpriced",
+      "test_name": "OpenRouter as a reference provider — the one-line flip > L2j — the per-chair chair_spend row carries the unpriced count, not a bare $0",
+      "test_file": "tests/openrouter_reference.test.ts",
+      "kind": "behavioural",
+      "drives": "bootstrapServerDeps + dispatchTool('gig_dispatch') — src/server.ts → makeChatCompletionsPort — src/chat_completions_port.ts → runTurn/priceRound — src/turn_loop.ts → makeCompletionsInvoker result event — src/completions_invoker.ts → makeUsageSink/finalizeUsage — src/runtime.ts → chair_spend ledger row (runGig, src/runtime.ts)",
+      "plant": "M6: in makeUsageSink.fold (src/runtime.ts) stop incrementing chairOwnUsage.unpriced_invocations"
+    },
+    {
+      "invariant_id": "I8-negative-input-guard",
+      "test_name": "OpenRouter as a reference provider — the one-line flip > L2k — NEGATIVE-INPUT GUARD: cache reads + writes exceeding prompt_tokens is REFUSED loudly, naming the fields; input never goes negative",
+      "test_file": "tests/openrouter_reference.test.ts",
+      "kind": "behavioural",
+      "drives": "makeChatCompletionsPort — src/chat_completions_port.ts (mapUsage)",
+      "plant": "remove the guard from mapUsage (src/chat_completions_port.ts): input_tokens = prompt_tokens - cached - written with no check (at 02c591f: input_tokens = -30)"
+    },
+    {
+      "invariant_id": "I9-cli-says-unpriced",
+      "test_name": "OpenRouter as a reference provider — the one-line flip > L2l — the CLI dispatch summary says \"unpriced (N …)\" whenever an invocation is unpriced, never a bare total",
+      "test_file": "tests/openrouter_reference.test.ts",
+      "kind": "behavioural",
+      "drives": "runCli(['dispatch', ..., '--wait']) — src/cli.ts over bootstrapServerDeps + the completions door",
+      "plant": "M3: in the dispatch case of runCli (src/cli.ts) print `, $${total_cost_usd.toFixed(2)}` regardless of usage.unpriced_invocations"
+    },
+    {
       "invariant_id": "O4-provider-doc",
       "test_name": "OpenRouter as a reference provider — the one-line flip > L3 — docs/providers/openrouter.md names the flip and EVERY COLTRANE_* variable the completions door reads",
       "test_file": "tests/openrouter_reference.test.ts",
@@ -130,7 +178,7 @@
   "laws": [
     {
       "path": "tests/openrouter_reference.test.ts",
-      "commit": "9726a5f7528939427de22bf64525eefc627f84cf"
+      "commit": "7c1677628ee7029c55e62dd623a0fd539e6e3f44"
     },
     {
       "path": "tests/security/openrouter_live_smoke.spec.ts",

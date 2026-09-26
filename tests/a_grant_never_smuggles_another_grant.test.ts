@@ -56,7 +56,11 @@ describe("the CLI's grant grammar, as the engine must respect it", () => {
       console.warn("[UNVERIFIED] the installed CLI's splitter was not compared: no claude binary"); return;
     }
     const bytes = readFileSync(bin);
-    expect(bytes.includes(Buffer.from(HP_SOURCE)), `the installed CLI (${bin}) no longer contains the vendored splitter — its --allowedTools grammar changed; re-derive the structure characters`).toBe(true);
+    // Compared NAME-AGNOSTICALLY: the minifier names the function per build (`Hp` in the darwin-arm64 2.1.283
+    // binary, `Op` in linux-x64 2.1.283 — measured by the CI sandbox job's first run), while the body is identical.
+    const body = HP_SOURCE.replace(/^function Hp/, "");
+    expect(body.startsWith("(e){"), "fixture: the vendored source no longer starts `function Hp(e){`").toBe(true);
+    expect(bytes.includes(Buffer.from(body)), `the installed CLI (${bin}) no longer contains the vendored splitter body — its --allowedTools grammar changed; re-derive the structure characters`).toBe(true);
   });
 });
 

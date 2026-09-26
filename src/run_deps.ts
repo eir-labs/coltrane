@@ -157,6 +157,15 @@ export type AssembleRunDepsArgs = Pick<
   | "tree_root"
 > & {
   /**
+   * The layout of the repository this run works in — what its seats' role tokens mean. Supplied
+   * per door and never defaulted: the dispatch door and the CLI pass the genome tree's own
+   * coltrane.layout.json; the drain passes the ORG STORE's row for the gig's repository
+   * (`genome.layouts.get(resolveWorkingRepo(claim))`) and never its clone's file. REQUIRED as a
+   * property (it may hold undefined) so every door states this wire at its call site — an omitted
+   * layout would silently fail every role token closed, or worse, invite a door to find one itself.
+   */
+  layout: RunDeps["layout"];
+  /**
    * The enforcement environment, supplied per door: {} on the drain, the bootstrap map on the server
    * (which is itself `Record | undefined`). REQUIRED — the property may hold undefined but may never be
    * OMITTED, so every door states this wire at its call site rather than inheriting a silent default;
@@ -193,6 +202,9 @@ export function assembleRunDeps(args: AssembleRunDepsArgs): RunDeps {
     // threaded only when present, so a research gig that names no tree stays byte-identical and a
     // laws/changes seal with no tree_root refuses `tree_root_unknown` rather than reading process.cwd().
     ...(args.tree_root ? { tree_root: args.tree_root } : {}),
+    // THE REPOSITORY'S LAYOUT — threaded only when present, so a layout-less run stays byte-identical
+    // and its role tokens fail closed at preflight.
+    ...(args.layout !== undefined ? { layout: args.layout } : {}),
     // THE AMEND LADDER, from the deployment's environment — here, in the one assembler, so the dispatch
     // door and the drain cannot disagree about it. Absent → no key → the loop is what it was.
     ...(() => { const l = amendLadderFromEnv(process.env); return l ? { tier_ladder: l } : {}; })(),

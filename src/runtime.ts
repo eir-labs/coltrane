@@ -45,7 +45,8 @@ import { drainGigHeader } from "./output_mirror.js";
 import { LEDGER_SCHEMA_VERSION, type Ledger, type GigUsage } from "./ledger.js";
 import { PlacementRefused, type PlacementResolver } from "./placement.js";
 import type { Depth } from "./pricing.js";
-import type { Effort } from "./genome_schema.js";
+import type { Effort, Layout } from "./genome_schema.js";
+import { resolveSeatGrants, targetPathsOf, globbedTargetPaths, describeRoleRefusals } from "./layout_grants.js";
 import type { SkillRecord, EvalRecord } from "./loader.js";
 import { COLTRANE_VERSION } from "./version.js";
 
@@ -165,6 +166,13 @@ export interface AgentInvocationContext {
   // deny-by-default allowlist. Absent on both fields = a venue-less dispatch, unnarrowed.
   realization?: Realization | undefined;
   venue?: Venue | undefined;
+  /**
+   * THE LAYOUT OF THE REPOSITORY THIS CHAIR RUNS AGAINST — threaded by runGig from RunDeps.layout.
+   * Both invokers resolve the seat's grants through it (resolveSeatGrants, src/layout_grants.ts):
+   * role tokens expand through it, Write/Edit narrow to `gig_input.target_paths`. Absent → every
+   * role token grants nothing and the chair is refused naming the role (never a `**` default).
+   */
+  layout?: Layout | undefined;
   // ── the SUBSTRATE the room was realized on (substrate → spawn wiring) ──────────
   // When the gig's venue declares mcp_servers AND a VenueRealizer is supplied on RunDeps, runGig
   // realizes the SUBSTRATE (not just the policy `realization` above) and threads the resulting
@@ -278,6 +286,15 @@ export type GigProgressEvent =
        *  runtime (dispatch ▷ agent ▷ tier ▷ medium). Present for a model chair; absent for a skill
        *  chair, which runs no model at an effort. */
       effort?: Effort;
+      /** LAYOUT GRANTS — the grants the seat ran WITH: its agent's grants with role tokens expanded
+       *  by the run's layout, Write/Edit narrowed to the change's target_paths, narrowed by the room
+       *  (resolveSeatGrants). What makes "why could this seat write that path" auditable afterwards.
+       *  Present for a model chair; absent for a skill chair, which holds no grants. */
+      resolved_grants?: string[];
+      /** Whether the change's target_paths narrowed the seat's Write/Edit. Recorded beside
+       *  resolved_grants, false when the change named no target_paths — never absent for a model
+       *  chair, so an un-narrowed seat is distinguishable from an unrecorded one. */
+      target_paths_applied?: boolean;
       /** contract-chair-session-continuity-v1 (O4) — the seat's `claude` session id (the uuid
        *  derived from (gig_id, role)) and whether THIS invocation RESUMED it (an amend round) rather
        *  than opening it. Present for a model chair; absent for a skill chair, which runs no session. */
@@ -657,6 +674,14 @@ export interface RunDeps {
    * an ambient host path.
    */
   tree_root?: string | undefined;
+  /**
+   * The layout of the repository this RUN works in (coltrane.layout.json, LayoutSchema) — what a
+   * seat's role tokens (`Write(@source)`, `Bash(@laws)`) mean here. Threaded to every chair as
+   * ctx.layout. Supplied per door by assembleRunDeps: the dispatch door and the CLI take the genome
+   * tree's own file; the DRAIN takes the org store's row for the gig's repository and never its
+   * clone's file. Absent → role tokens fail closed at preflight, naming the role.
+   */
+  layout?: Layout | undefined;
 }
 
 /**
@@ -915,7 +940,7 @@ export class RuntimeError extends Error {}
  * an output type offends both) — each is its own row.
  */
 export interface PreflightOffender {
-  readonly kind: "tool-grant" | "missing-skill-dir" | "unknown-agent" | "no-primitive" | "no-output-type";
+  readonly kind: "tool-grant" | "missing-skill-dir" | "unknown-agent" | "no-primitive" | "no-output-type" | "layout-role" | "target-path";
   readonly phase: string;
   readonly chair: string;
   readonly agent?: string;
@@ -1881,6 +1906,16 @@ export async function runGig(
   {
     const providersWired = deps.toolProviders !== undefined && deps.mcpServerConfigs !== undefined;
     const offenders: PreflightOffender[] = [];
+    // LAYOUT GRANTS (src/layout_grants.ts). The change's target_paths are PATHS: an entry carrying
+    // glob metacharacters would become a grant pattern and widen a seat through the payload, and a
+    // target_paths that is not a list of strings cannot say which paths the change names. Either
+    // refuses every seated chair at t=0, naming the entry.
+    const rawTargets = gigInput["target_paths"];
+    const targetsMalformed =
+      rawTargets !== undefined && rawTargets !== null &&
+      (!Array.isArray(rawTargets) || rawTargets.some((t) => typeof t !== "string"));
+    const gigTargets = targetPathsOf(gigInput);
+    const globbedTargets = globbedTargetPaths(gigTargets);
     for (const ph of standard.phases) {
       for (const ch of ph.chairs) {
         // A skill-backed chair (skill_slug set, no agent_slug) seats no agent → its dead reference is
@@ -1917,8 +1952,34 @@ export async function runGig(
             detail: `seats agent "${ag.slug}" which declares no output_type`,
           });
         }
+        if (targetsMalformed) {
+          offenders.push({
+            kind: "target-path", phase: ph.name, chair: ch.role, agent: ag.slug,
+            detail: `the change's target_paths is not a list of repository-relative paths (${JSON.stringify(rawTargets).slice(0, 120)})`,
+          });
+        }
+        for (const entry of globbedTargets) {
+          offenders.push({
+            kind: "target-path", phase: ph.name, chair: ch.role, agent: ag.slug,
+            detail: `target_paths entry "${entry}" carries glob metacharacters (* ? [ {) — target_paths are paths, and a glob would become a grant pattern`,
+          });
+        }
+        // ROLE TOKENS resolve through THIS run's layout. A token the layout cannot answer grants
+        // nothing, and the chair is refused naming the role — before any seat is spawned.
+        const seat = resolveSeatGrants({ agent: ag, layout: deps.layout, target_paths: gigTargets });
+        if (seat.refusals.length > 0) {
+          offenders.push({
+            kind: "layout-role", phase: ph.name, chair: ch.role, agent: ag.slug,
+            detail: describeRoleRefusals(ag.slug, seat.refusals),
+          });
+        }
         if (providersWired && ag.allowed_tools?.length) {
-          const resolved = resolveAgentGrants(ag, deps.toolProviders!, deps.mcpServerConfigs!);
+          // Resolve the EXPANDED grants, never the raw tokens: `Write(@source)` is not a tool name,
+          // and judging it a dead one would refuse every layout-granted chair as unprovided. The
+          // expansion (before target narrowing, so an empty target list cannot hide a dead grant)
+          // is what the spawn will hold.
+          const expanded = resolveSeatGrants({ agent: ag, layout: deps.layout }).grants;
+          const resolved = resolveAgentGrants({ ...ag, allowed_tools: expanded }, deps.toolProviders!, deps.mcpServerConfigs!);
           if (resolved.unknown.length > 0) {
             offenders.push({
               kind: "tool-grant", phase: ph.name, chair: ch.role, agent: ag.slug, tools: resolved.unknown,
@@ -3285,6 +3346,8 @@ export async function runGig(
     // (below) so the chair_complete emit can record what the seat ran at. Stays undefined for a skill
     // chair, which runs no model at an effort.
     let resolvedEffort: Effort | undefined;
+    // LAYOUT GRANTS — what the seat ran with, resolved at the invoke ctx site for chair_complete.
+    let seatRecord: { grants: string[]; target_paths_applied: boolean } | undefined;
     // contract-amend-resume-prompt-v1 (F1) — set when the invoker reports a resume whose session was
     // gone and fell back cold (the `resume_fallback` stream event). Recorded on chair_complete so the
     // fallback is observable rather than a resume the record falsely claims happened.
@@ -3501,8 +3564,20 @@ export async function runGig(
             primerStartSnapshot = created.length > 0 ? created : gitInTree(deps.tree_root, ["rev-parse", "HEAD"]).trim();
           } catch { primerStartSnapshot = undefined; }
         }
+        // LAYOUT GRANTS — the record of what this seat runs WITH, resolved through the SAME function
+        // the invoker grants through, against the same layout, target_paths and room.
+        {
+          const seat = resolveSeatGrants({
+            agent, layout: deps.layout, target_paths: targetPathsOf(p.gig_input ?? gigInput),
+            venue: gigRealization && gigVenue ? gigVenue : undefined,
+          });
+          seatRecord = { grants: seat.grants, target_paths_applied: seat.target_paths_applied };
+        }
         data = await deps.invoke({
           agent, phase: phaseName, role: chair.role, gig_id, inputs, gig_input: p.gig_input ?? gigInput, skills,
+          // THE REPOSITORY'S LAYOUT reaches the seat, so the invoker expands its role tokens through
+          // it. Absent → nothing threaded, and a role token fails closed in the invoker.
+          ...(deps.layout !== undefined ? { layout: deps.layout } : {}),
           missing_skills: p.missing_skills, // #241 — what did NOT resolve, so the prompt can't assert it
           // THE SEAT IS WHERE THE INSTITUTION'S DATA ENTERS. Validated at compose time (the dead-slot
           // refusal) and, until now, dropped on the floor immediately afterwards.
@@ -4204,6 +4279,8 @@ export async function runGig(
       // #seat-effort (O5) — record the effort the seat ran at (a model chair only; a skill chair
       // leaves it undefined and the field stays absent).
       ...(resolvedEffort !== undefined ? { effort: resolvedEffort } : {}),
+      // LAYOUT GRANTS — the grants the seat ran with, and whether target_paths narrowed them.
+      ...(seatRecord !== undefined ? { resolved_grants: seatRecord.grants, target_paths_applied: seatRecord.target_paths_applied } : {}),
       // contract-chair-session-continuity-v1 (O4) — record the seat's session id (the uuid derived
       // from (gig_id, role)) and whether THIS invocation resumed it. A model chair only; a skill
       // chair (no p.agent) runs no session, so both fields stay absent. Computed here from the same

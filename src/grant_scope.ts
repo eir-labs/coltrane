@@ -40,10 +40,23 @@ export const PROTECTED_PATHS: ReadonlyArray<{ path: string; kind: "file" | "dir"
   { path: ".coltrane", kind: "dir" },
 ];
 
-/** Is this tree-relative path one no grant may reach? Case-INSENSITIVE, like the CLI's matcher and the
- *  default macOS filesystem: `.GIT/config` is `.git/config` there. */
+/**
+ * THE FOLD a protected name is compared under — never its literal spelling. APFS (every macOS drain
+ * host) is case-insensitive AND normalization-insensitive with Unicode case folding: it opens
+ * `coltrane.layout.jſon` (U+017F) as `coltrane.layout.json`. So a name is folded by: compatibility
+ * decomposition (NFKD — ſ→s, fullwidth and mathematical letters → ASCII, ligatures → their letters),
+ * dropping every combining mark (so `.ġit` and `.g` + U+0307 `it` are `.git`), full case folding
+ * (upper then lower, so ß→ss), and NFKC. It over-approximates any real file system's folding, which is
+ * the direction a guard over protected paths must err in.
+ */
+export function foldName(s: string): string {
+  return s.normalize("NFKD").replace(/\p{M}/gu, "").toUpperCase().toLowerCase().normalize("NFKC");
+}
+
+/** Is this tree-relative path one no grant may reach? Compared under foldName, so no Unicode, case or
+ *  normalization spelling of a protected path escapes it. */
 export function isProtectedPath(path: string): boolean {
-  const p = path.toLowerCase();
+  const p = foldName(path);
   return PROTECTED_PATHS.some((x) => (x.kind === "file" ? p === x.path : p === x.path || p.startsWith(`${x.path}/`)));
 }
 
@@ -101,6 +114,13 @@ export function grantCovers(scope: string, path: string): boolean {
  */
 export function grantMayReach(scope: string | undefined, target: { path: string; kind: "file" | "dir" }): boolean {
   if (scope === undefined || rootedOutsideTree(scope)) return true;
+  // A scope that SPELLS a protected path another way (ſ, fullwidth, a combining dot) reaches it on a
+  // folding file system: judge the folded scope too, and deny if either reading reaches.
+  const folded = foldName(scope);
+  return reaches(scope, target) || (folded !== scope && reaches(folded, target));
+}
+
+function reaches(scope: string, target: { path: string; kind: "file" | "dir" }): boolean {
   if (target.kind === "file") return grantCovers(scope, target.path);
   const pattern = cliAllowPattern(scope);
   if (pattern.startsWith("!")) return false; // a lone negation rule ignores (grants) nothing

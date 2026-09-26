@@ -31,9 +31,10 @@
 //
 // Resolution never mutates the agent it is handed.
 import { posix } from "node:path";
+import { lstatSync } from "node:fs";
 import { venueEffectiveTools, type Venue } from "./chart.js";
 import type { Agent } from "./composition.js";
-import type { Layout } from "./genome_schema.js";
+import { carriesGrantStructure, type Layout } from "./genome_schema.js";
 import { toolBaseName } from "./tool_providers.js";
 import { grantCovers, grantMayReach, isProtectedPath, PROTECTED_PATHS, LAYOUT_FILE } from "./grant_scope.js";
 
@@ -66,7 +67,49 @@ export interface SeatGrants {
   target_paths_applied: boolean;
   /** Deny entries the spawn must carry so no grant can write the layout file. */
   denials: string[];
+  /** The roles this seat HOLDS — each role token the layout answered. */
+  held_roles: string[];
+  /** The hosts the seat's Bash sandbox may reach: the layout's `egress` for the roles it holds, and
+   *  nothing else. Empty by default (strictAllowlist, no host). */
+  egress_hosts: string[];
+  /** Whether the seat holds a git role (Bash(@git_stage|@git_commit|@git_push)): its sandbox then
+   *  opens `.git` — never `.git/hooks` or `.git/config`. */
+  git_open: boolean;
 }
+
+/**
+ * THE CLI's `--allowedTools` SPLITTER (Claude Code 2.1.283's `Hp`), mirrored here: a value splits into
+ * grants on `,` and on space OUTSIDE parentheses; `(` enters, the first `)` leaves (no nesting). The
+ * engine uses it to prove every grant it emits is ONE grant to the CLI — a grant that splits into more
+ * (a smuggled `Write`) is refused, and the invoker re-splits the joined argv before spawning.
+ */
+export function splitAsTheCliDoes(values: readonly string[]): string[] {
+  const out: string[] = [];
+  for (const v of values) {
+    if (!v) continue;
+    let cur = "";
+    let inside = false;
+    for (const ch of v) {
+      if (ch === "(") { inside = true; cur += ch; }
+      else if (ch === ")") { inside = false; cur += ch; }
+      else if (ch === "," && !inside) { if (cur.trim()) out.push(cur.trim()); cur = ""; }
+      else if (ch === " " && !inside) { if (cur.trim()) { out.push(cur.trim()); cur = ""; } }
+      else if (ch === "," || ch === " ") cur += ch;
+      else cur += ch;
+    }
+    if (cur.trim()) out.push(cur.trim());
+  }
+  return out;
+}
+
+/** Is `grant` exactly one grant to the CLI? */
+function isOneGrant(grant: string): boolean {
+  const split = splitAsTheCliDoes([grant]);
+  return split.length === 1 && split[0] === grant;
+}
+
+/** Git role → the layout's `git.<op>` key. */
+const GIT_ROLE_KEYS: Readonly<Record<string, "stage" | "commit" | "push">> = { git_stage: "stage", git_commit: "commit", git_push: "push" };
 
 export interface ResolveSeatGrantsArgs {
   agent: Agent;
@@ -152,6 +195,10 @@ export function resolveSeatGrants(args: ResolveSeatGrantsArgs): SeatGrants {
   const expanded: string[] = [];
   const refusals: RoleRefusal[] = [];
   const refusedLiterals = new Set<string>();
+  const heldRoles: string[] = [];
+  /** An answered role whose entries carry grant structure is refused, naming the entry — an injected
+   *  layout that never passed LayoutSchema is held to the same grammar. */
+  const structural = (entries: readonly string[]): string | undefined => entries.find(carriesGrantStructure);
   const pushGenerated = (g: string) => {
     if (!expanded.includes(g)) expanded.push(g);
   };
@@ -182,12 +229,21 @@ export function resolveSeatGrants(args: ResolveSeatGrantsArgs): SeatGrants {
       continue;
     }
     if (tool === "Bash") {
-      const prefixes = own(layout.commands, role) ? layout.commands![role as keyof NonNullable<Layout["commands"]>] : undefined;
+      const gitKey = own(GIT_ROLE_KEYS, role) ? GIT_ROLE_KEYS[role] : undefined;
+      const prefixes = gitKey !== undefined
+        ? (own(layout.git, gitKey) ? layout.git![gitKey] : undefined)
+        : own(layout.commands, role) ? layout.commands![role as keyof NonNullable<Layout["commands"]>] : undefined;
       if (!prefixes || prefixes.length === 0) {
-        refusals.push({ token: g, role, reason: `the layout declares no command role "${role}", so the token grants nothing` });
+        refusals.push({ token: g, role, reason: `the layout declares no ${gitKey !== undefined ? "git" : "command"} role "${role}", so the token grants nothing` });
+        continue;
+      }
+      const bad = structural(prefixes);
+      if (bad !== undefined) {
+        refusals.push({ token: g, role, reason: `the layout's entry "${bad}" for role "${role}" carries ( ) , or edge whitespace — the CLI would read it as grant structure and seat a grant nobody declared` });
         continue;
       }
       for (const p of prefixes) pushGenerated(`Bash(${p}:*)`);
+      heldRoles.push(role);
       continue;
     }
     const globs = own(layout.paths, role) ? layout.paths![role as keyof NonNullable<Layout["paths"]>] : undefined;
@@ -195,7 +251,13 @@ export function resolveSeatGrants(args: ResolveSeatGrantsArgs): SeatGrants {
       refusals.push({ token: g, role, reason: `the layout declares no path role "${role}", so the token grants nothing` });
       continue;
     }
+    const bad = structural(globs);
+    if (bad !== undefined) {
+      refusals.push({ token: g, role, reason: `the layout's entry "${bad}" for role "${role}" carries ( ) , or edge whitespace — the CLI would read it as grant structure and seat a grant nobody declared` });
+      continue;
+    }
     for (const glob of globs) pushGenerated(`${tool}(${glob})`);
+    heldRoles.push(role);
   }
 
   // ── no self-widening: deny every PROTECTED path (the layout file, .git, .claude, .coltrane) to
@@ -248,9 +310,28 @@ export function resolveSeatGrants(args: ResolveSeatGrantsArgs): SeatGrants {
   }
 
   // ── 3 · narrow by the room (the shared oracle; a room can only ever remove) ──────────────────
-  const grants = venue ? venueEffectiveTools({ ...agent, allowed_tools: narrowed }, venue) : narrowed;
+  const roomed = venue ? venueEffectiveTools({ ...agent, allowed_tools: narrowed }, venue) : narrowed;
 
-  return { grants, refusals, target_paths_applied, denials };
+  // ── the CLI's grammar: every grant the seat is handed must be ONE grant to the CLI's splitter. A
+  // literal that is several (`Bash(x),Write`) is refused, naming it — never emitted.
+  const grants: string[] = [];
+  for (const g of roomed) {
+    if (isOneGrant(g)) { grants.push(g); continue; }
+    refusals.push({ token: g, role: "(grant grammar)", reason: `the CLI's --allowedTools splitter reads "${g}" as ${JSON.stringify(splitAsTheCliDoes([g]))} — a grant that smuggles another is never seated` });
+  }
+
+  // ── the network and git the seat's Bash may reach: only what the layout declares for roles it holds.
+  const egress_hosts: string[] = [];
+  for (const role of heldRoles) {
+    const hosts = layout?.egress && own(layout.egress, role) ? layout.egress[role as keyof NonNullable<Layout["egress"]>] : undefined;
+    for (const h of hosts ?? []) {
+      if (carriesGrantStructure(h)) continue;
+      if (!egress_hosts.includes(h)) egress_hosts.push(h);
+    }
+  }
+  const git_open = heldRoles.some((r) => own(GIT_ROLE_KEYS, r));
+
+  return { grants, refusals, target_paths_applied, denials, held_roles: heldRoles, egress_hosts, git_open };
 }
 
 /** A path scope spelled in a form the CLI silently rewrites: a leading `./`, or `//` anywhere after the
@@ -307,4 +388,29 @@ export function inWriteScope(path: string, scope: WriteScope): boolean {
 export function seatCanWrite(agent: Agent, grants: readonly string[]): boolean {
   const scope = writeScopeOf(agent, grants);
   return scope.everywhere || scope.globs.length > 0 || agent.code_tool_access === "full" || grants.some((g) => toolBaseName(g) === "Bash");
+}
+
+/**
+ * A target that names a protected file by ANOTHER PATH: a symlink (the target itself or any directory
+ * above it), or a hardlink. Protection follows the FILE, not its name — `alias.json -> coltrane.layout.json`
+ * and a second link to the layout file's inode are the layout file. Judged against the real tree where
+ * the path exists: any component that is a symlink, or an existing file with more than one link, refuses
+ * the target (a hardlink's other names cannot be enumerated cheaply, so none is trusted). Returns the
+ * reason, or undefined for a plain path (including one that does not exist yet).
+ */
+export function linkedTargetRefusal(tree: string, target: string): string | undefined {
+  const parts = target.split("/").filter((p) => p.length > 0);
+  let cur = tree;
+  for (let i = 0; i < parts.length; i++) {
+    cur = `${cur}/${parts[i]}`;
+    let st;
+    try { st = lstatSync(cur); } catch { return undefined; } // does not exist from here down: a new file
+    if (st.isSymbolicLink()) {
+      return `target_paths entry "${target}" passes through a symlink ("${parts.slice(0, i + 1).join("/")}") — a protected path is judged by the file, and a link can name a protected one`;
+    }
+    if (i === parts.length - 1 && st.isFile() && st.nlink > 1) {
+      return `target_paths entry "${target}" is a hardlink (${st.nlink} links) — a protected path is judged by the file, and a link can be the layout file`;
+    }
+  }
+  return undefined;
 }

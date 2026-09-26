@@ -25,76 +25,100 @@
     "ROUND 3: the completions invoker refuses any scoped grant (X(...)) in the effective set — literal or expanded, any tool — naming it, before any model call.",
     "ROUND 3: every Bash seat spawns with the OS sandbox (--settings sandbox: enabled, failIfUnavailable, allowUnsandboxedCommands false, no excludedCommands), --setting-sources excluding project/local, and ABSOLUTE denyWrite over <tree>/coltrane.layout.json, <tree>/.git, <tree>/.claude — <tree> being ctx.seatExec.workspace in a room, else ctx.tree_root (RunDeps.tree_root threaded to the ctx).",
     "ROUND 3: after a seat returns, runGig diffs git status --porcelain -z against the pre-seat state; any changed path (untracked, modified, deleted, either side of a rename) outside the seat's resolved Write/Edit scope — or the layout file itself — refuses the chair, naming the paths, and nothing from the chair is sealed.",
-    "ROUND 3 FINDING (no law can fix it here): Dockerfile.room and Dockerfile.floor (node:26-alpine) install neither bubblewrap nor socat, which the Linux sandbox needs. With failIfUnavailable, every room seat holding Bash will be REFUSED until the floor image adds them (apk add bubblewrap socat) and the container is run with what bwrap needs (user namespaces / seccomp profile permitting them)."
+    "ROUND 3 FINDING (no law can fix it here): Dockerfile.room and Dockerfile.floor (node:26-alpine) install neither bubblewrap nor socat, which the Linux sandbox needs. With failIfUnavailable, every room seat holding Bash will be REFUSED until the floor image adds them (apk add bubblewrap socat) and the container is run with what bwrap needs (user namespaces / seccomp profile permitting them).",
+    "ROUND 4: a relative tree_root / room workspace is resolved or the seat refused — never a relative sandbox path; Bash kept by code_tool_access is sandboxed like granted Bash; a floor room renders seccomp=<seat profile> + systempaths=unconfined, never privileged, never cap_add; the profile is moby v24.0.2's default (digest 2c2917c5…) + one unconditional rule for unshare/clone/mount/umount2/pivot_root/setns; the diff gate refuses an unreadable tree before and after, never lets an overlap excuse a change outside both scopes, reads a room seat's workspace, and exempts exactly `.coltrane`; `~` targets are refused.",
+    "ROUND 4 RULING (a): no Write/Edit grant may cover `.coltrane/**` — the resolver denies Write(.coltrane/**)/Edit(.coltrane/**) whenever a held Write/Edit reaches it (bare, glob, or code_tool_access write/full), never grants a .coltrane/ target, and the Claude invoker carries the denials.",
+    "ROUND 4 RULING (b), NAMED NON-GOAL: the diff gate does not see gitignored paths (git status does not list them). This is a documented limit and is NOT enforced by this change. Enforced instead: the engine never seals a gitignored path (stampChangeAddresses refuses it) and has no publish step (no git add/commit/push in src/ — publishing is a seat's sandboxed Bash).",
+    "ROUND 4 NOTE: D4-REAL cannot observe the relative-path trap (srt resolves relative paths; the CLI ignores them). That plant is covered by D2-ABSOLUTE, where it was observed red."
   ],
   "laws": [
     {
       "path": "tests/a_grant_never_crosses_repositories.test.ts",
-      "commit": "4b17bb5b55277822e315f2ad5d0069d458e5be76"
+      "commit": "8ddc9fccfe203641d3823cc7f9aa68362376bad4"
     },
     {
       "path": "tests/a_missing_role_or_layout_grants_nothing.test.ts",
-      "commit": "4b17bb5b55277822e315f2ad5d0069d458e5be76"
+      "commit": "8ddc9fccfe203641d3823cc7f9aa68362376bad4"
     },
     {
       "path": "tests/a_new_repository_shape_needs_no_agent_amendment.test.ts",
-      "commit": "4b17bb5b55277822e315f2ad5d0069d458e5be76"
+      "commit": "8ddc9fccfe203641d3823cc7f9aa68362376bad4"
     },
     {
       "path": "tests/a_seat_cannot_rewrite_its_own_layout.test.ts",
-      "commit": "4b17bb5b55277822e315f2ad5d0069d458e5be76"
+      "commit": "8ddc9fccfe203641d3823cc7f9aa68362376bad4"
     },
     {
       "path": "tests/a_seat_cannot_write_outside_its_target_paths.test.ts",
-      "commit": "4b17bb5b55277822e315f2ad5d0069d458e5be76"
+      "commit": "8ddc9fccfe203641d3823cc7f9aa68362376bad4"
+    },
+    {
+      "path": "tests/a_seat_cannot_write_the_engines_state.test.ts",
+      "commit": "8ddc9fccfe203641d3823cc7f9aa68362376bad4"
     },
     {
       "path": "tests/a_seat_that_writes_outside_its_grant_is_refused.test.ts",
-      "commit": "4b17bb5b55277822e315f2ad5d0069d458e5be76"
+      "commit": "8ddc9fccfe203641d3823cc7f9aa68362376bad4"
     },
     {
       "path": "tests/a_seats_bash_runs_in_a_sandbox.test.ts",
-      "commit": "4b17bb5b55277822e315f2ad5d0069d458e5be76"
+      "commit": "8ddc9fccfe203641d3823cc7f9aa68362376bad4"
     },
     {
       "path": "tests/a_target_path_never_escapes_the_tree.test.ts",
-      "commit": "4b17bb5b55277822e315f2ad5d0069d458e5be76"
+      "commit": "8ddc9fccfe203641d3823cc7f9aa68362376bad4"
     },
     {
       "path": "tests/an_empty_or_globbed_scope_fails_closed.test.ts",
-      "commit": "4b17bb5b55277822e315f2ad5d0069d458e5be76"
+      "commit": "8ddc9fccfe203641d3823cc7f9aa68362376bad4"
     },
     {
       "path": "tests/both_invokers_grant_through_the_layout.test.ts",
-      "commit": "4b17bb5b55277822e315f2ad5d0069d458e5be76"
+      "commit": "8ddc9fccfe203641d3823cc7f9aa68362376bad4"
     },
     {
       "path": "tests/every_door_carries_the_current_layout.test.ts",
-      "commit": "4b17bb5b55277822e315f2ad5d0069d458e5be76"
+      "commit": "8ddc9fccfe203641d3823cc7f9aa68362376bad4"
     },
     {
       "path": "tests/literal_grants_resolve_unchanged.test.ts",
-      "commit": "4b17bb5b55277822e315f2ad5d0069d458e5be76"
+      "commit": "8ddc9fccfe203641d3823cc7f9aa68362376bad4"
     },
     {
       "path": "tests/seat_grant_resolution_only_narrows.test.ts",
-      "commit": "4b17bb5b55277822e315f2ad5d0069d458e5be76"
+      "commit": "8ddc9fccfe203641d3823cc7f9aa68362376bad4"
     },
     {
       "path": "tests/the_chair_records_its_resolved_grants.test.ts",
-      "commit": "4b17bb5b55277822e315f2ad5d0069d458e5be76"
+      "commit": "8ddc9fccfe203641d3823cc7f9aa68362376bad4"
+    },
+    {
+      "path": "tests/the_diff_gate_never_fails_open.test.ts",
+      "commit": "8ddc9fccfe203641d3823cc7f9aa68362376bad4"
     },
     {
       "path": "tests/the_drain_takes_its_layout_from_the_store.test.ts",
-      "commit": "4b17bb5b55277822e315f2ad5d0069d458e5be76"
+      "commit": "8ddc9fccfe203641d3823cc7f9aa68362376bad4"
+    },
+    {
+      "path": "tests/the_engine_never_publishes_an_ignored_path.test.ts",
+      "commit": "8ddc9fccfe203641d3823cc7f9aa68362376bad4"
     },
     {
       "path": "tests/the_layout_is_read_from_the_genome_tree.test.ts",
-      "commit": "4b17bb5b55277822e315f2ad5d0069d458e5be76"
+      "commit": "8ddc9fccfe203641d3823cc7f9aa68362376bad4"
+    },
+    {
+      "path": "tests/the_room_can_start_the_sandbox_and_nothing_more.test.ts",
+      "commit": "8ddc9fccfe203641d3823cc7f9aa68362376bad4"
     },
     {
       "path": "tests/the_sandbox_refuses_a_real_write.test.ts",
-      "commit": "4b17bb5b55277822e315f2ad5d0069d458e5be76"
+      "commit": "8ddc9fccfe203641d3823cc7f9aa68362376bad4"
+    },
+    {
+      "path": "tests/the_sandbox_tree_is_always_absolute.test.ts",
+      "commit": "8ddc9fccfe203641d3823cc7f9aa68362376bad4"
     }
   ],
   "coverage_map": [
@@ -864,9 +888,291 @@
       "test_file": "tests/the_sandbox_refuses_a_real_write.test.ts",
       "kind": "behavioural",
       "drives": "makeClaudeInvoker(...) argv → the sandbox.filesystem it builds, enforced by @anthropic-ai/sandbox-runtime (srt) on the host OS sandbox",
-      "plant": "write the layout deny as a relative path (\"coltrane.layout.json\"), or omit sandbox.filesystem.denyWrite"
+      "plant": "omit sandbox.filesystem.denyWrite from the invoker's --settings (srt then allows the layout-file write). NOTE: the relative-path trap is NOT observable here — srt resolves a relative path against cwd, the CLI ignores it — and is covered by D2-ABSOLUTE instead"
+    },
+    {
+      "invariant_id": "ROOM-SECCOMP-BWRAP",
+      "test_name": "the seat room's seccomp profile > allows exactly unshare, clone, mount, umount2, pivot_root and setns — unconditionally, in one appended rule",
+      "test_file": "tests/the_room_can_start_the_sandbox_and_nothing_more.test.ts",
+      "kind": "behavioural",
+      "drives": "roomSeatSeccompProfile — src/room_seat_seccomp.ts",
+      "plant": "drop the appended bubblewrap rule (syscalls: [...base.syscalls])",
+      "plant_observed": "AssertionError: the profile has no bubblewrap rule — every room seat's sandbox is refused: expected [ 'perf_event_open' ] to deeply equal [ Array(6) ]"
+    },
+    {
+      "invariant_id": "ROOM-SECCOMP-DEFAULT",
+      "test_name": "the seat room's seccomp profile > is Docker's default profile (moby v24.0.2) in every other rule and key — pinned by digest",
+      "test_file": "tests/the_room_can_start_the_sandbox_and_nothing_more.test.ts",
+      "kind": "behavioural",
+      "drives": "roomSeatSeccompProfile — src/room_seat_seccomp.ts",
+      "plant": "prepend an unconditional ALLOW for bpf to the default rules",
+      "plant_observed": "AssertionError: the profile differs from Docker's default beyond the one bubblewrap rule: expected 'bb9a023318b6ff381addb5cd3ba9006b6c82f…' to be '2c2917c58715fe65258b72b9941cc9223f52f…'"
+    },
+    {
+      "invariant_id": "ROOM-SECURITY-OPT",
+      "test_name": "the rendered room > a FLOOR room runs under the seat profile with /proc unmasked",
+      "test_file": "tests/the_room_can_start_the_sandbox_and_nothing_more.test.ts",
+      "kind": "behavioural",
+      "drives": "renderComposeConfig — src/venue_realizer.ts",
+      "plant": "drop `security_opt` from the floor room",
+      "plant_observed": "AssertionError: a seat-bearing room was rendered with Docker's default seccomp — its seats' sandboxes cannot start: expected undefined to deeply equal ArrayContaining{…}"
+    },
+    {
+      "invariant_id": "ROOM-NO-PRIVILEGE",
+      "test_name": "the rendered room > a floor room is never privileged, holds no added capability, and shares no host namespace",
+      "test_file": "tests/the_room_can_start_the_sandbox_and_nothing_more.test.ts",
+      "kind": "behavioural",
+      "drives": "renderComposeConfig — src/venue_realizer.ts",
+      "plant": "add room[\"cap_add\"] = [\"SYS_ADMIN\"] for a floor room",
+      "plant_observed": "AssertionError: the seat room was handed capabilities: [\"SYS_ADMIN\"]: expected [ 'SYS_ADMIN' ] to be undefined"
+    },
+    {
+      "invariant_id": "ROOM-SEATLESS-DEFAULTS",
+      "test_name": "the rendered room > a production-only room (no floor) runs no seat and keeps Docker's defaults",
+      "test_file": "tests/the_room_can_start_the_sandbox_and_nothing_more.test.ts",
+      "kind": "behavioural",
+      "drives": "renderComposeConfig — src/venue_realizer.ts",
+      "plant": "give every room the seat profile (if (v.floor || true))",
+      "plant_observed": "AssertionError: a seat-less room was given the seat profile: expected [ …(2) ] to be undefined"
+    },
+    {
+      "invariant_id": "ROOM-PROFILE-WRITTEN",
+      "test_name": "realize() writes that exact profile beside the compose document > the file the room's seccomp= points at is roomSeatSeccompProfile()",
+      "test_file": "tests/the_room_can_start_the_sandbox_and_nothing_more.test.ts",
+      "kind": "behavioural",
+      "drives": "dockerComposeRealizer({run}).realize — src/venue_realizer.ts",
+      "plant": "drop the floor room's security_opt (the realizer then writes no profile)",
+      "plant_observed": "AssertionError: the realizer wrote no seccomp profile at …/coltrane-realizations/gig-5ea70000/seat-seccomp.json: expected false to be true"
+    },
+    {
+      "invariant_id": "SANDBOX-TREE-ABS",
+      "test_name": "a relative tree never becomes a relative sandbox path > a relative tree_root: the seat spawns with ABSOLUTE sandbox paths, or is refused before the spawn",
+      "test_file": "tests/the_sandbox_tree_is_always_absolute.test.ts",
+      "kind": "behavioural",
+      "drives": "makeClaudeInvoker(...)(ctx) argv via the run seam — src/claude_invoker.ts",
+      "plant": "pass ctx.tree_root / seatExec.workspace to bashSandboxFor unresolved AND drop its absolute check",
+      "plant_observed": "AssertionError: a relative sandbox path reached the spawn — the CLI ignores it, so the deny is not enforced: [\"relative/tree-that-does-not-exist\", …/coltrane.layout.json, …]"
+    },
+    {
+      "invariant_id": "SANDBOX-TREE-ABS",
+      "test_name": "a relative tree never becomes a relative sandbox path > a ./-relative tree_root: the seat spawns with ABSOLUTE sandbox paths, or is refused before the spawn",
+      "test_file": "tests/the_sandbox_tree_is_always_absolute.test.ts",
+      "kind": "behavioural",
+      "drives": "makeClaudeInvoker(...)(ctx) argv via the run seam — src/claude_invoker.ts",
+      "plant": "pass ctx.tree_root / seatExec.workspace to bashSandboxFor unresolved AND drop its absolute check",
+      "plant_observed": "AssertionError: a relative sandbox path reached the spawn … [\"./relative/tree\", …]"
+    },
+    {
+      "invariant_id": "SANDBOX-TREE-ABS",
+      "test_name": "a relative tree never becomes a relative sandbox path > a relative room workspace: the seat spawns with ABSOLUTE sandbox paths, or is refused before the spawn",
+      "test_file": "tests/the_sandbox_tree_is_always_absolute.test.ts",
+      "kind": "behavioural",
+      "drives": "makeClaudeInvoker(...)(ctx) argv via the run seam — src/claude_invoker.ts",
+      "plant": "pass ctx.tree_root / seatExec.workspace to bashSandboxFor unresolved AND drop its absolute check",
+      "plant_observed": "AssertionError: a relative sandbox path reached the spawn … [\"workspace/g1\", …]"
+    },
+    {
+      "invariant_id": "SANDBOX-CTA-BASH",
+      "test_name": "Bash kept by code_tool_access \"full\" is sandboxed exactly like granted Bash > a seat with NO Bash grant but code_tool_access \"full\" spawns sandboxed, fail-closed, no hatch, with the same denies",
+      "test_file": "tests/the_sandbox_tree_is_always_absolute.test.ts",
+      "kind": "behavioural",
+      "drives": "makeClaudeInvoker(...)(ctx) argv via the run seam — src/claude_invoker.ts",
+      "plant": "compute seatHoldsBash from effectiveAllowed (granted tools) only, ignoring code_tool_access",
+      "plant_observed": "AssertionError: a seat that can run Bash through code_tool_access spawned with NO sandbox: expected undefined to be defined"
+    },
+    {
+      "invariant_id": "GATE-UNREADABLE-BEFORE",
+      "test_name": "an unreadable tree refuses the writing seat > BEFORE the seat: a tree_root that cannot be read → the seat is never invoked, and the refusal says why",
+      "test_file": "tests/the_diff_gate_never_fails_open.test.ts",
+      "kind": "behavioural",
+      "drives": "runGig — src/runtime.ts (the diff gate)",
+      "plant": "swallow the pre-seat gateRead() failure (gateBefore = undefined) and run the seat ungated",
+      "plant_observed": "AssertionError: a writing seat ran over a tree its gate could not read: expected 1 to be +0"
+    },
+    {
+      "invariant_id": "GATE-UNREADABLE-AFTER",
+      "test_name": "an unreadable tree refuses the writing seat > AFTER the seat: a seat that leaves the tree unreadable is refused, and nothing it made is sealed",
+      "test_file": "tests/the_diff_gate_never_fails_open.test.ts",
+      "kind": "behavioural",
+      "drives": "runGig — src/runtime.ts (the diff gate)",
+      "plant": "catch the post-seat gateRead() failure and judge against the pre-seat state (no changes)",
+      "plant_observed": "AssertionError: a seat whose effect could not be judged was sealed: … expected [ { …(23) } ] to have a length of +0 but got 1"
+    },
+    {
+      "invariant_id": "GATE-CONCURRENT",
+      "test_name": "concurrent chairs on one tree > an overlapping chair never excuses a change outside BOTH scopes",
+      "test_file": "tests/the_diff_gate_never_fails_open.test.ts",
+      "kind": "behavioural",
+      "drives": "outOfScope via runGig — src/diff_gate.ts",
+      "plant": "outOfScope returns [] whenever any chair overlapped",
+      "plant_observed": "AssertionError: the refusal does not name the path outside both scopes: expected '{\"gig_id\":…' to contain 'scripts/evil.sh'"
+    },
+    {
+      "invariant_id": "GATE-CONCURRENT-CONTROL",
+      "test_name": "concurrent chairs on one tree > control — a change inside the OTHER chair's scope is left to that chair: both seal",
+      "test_file": "tests/the_diff_gate_never_fails_open.test.ts",
+      "kind": "behavioural",
+      "drives": "outOfScope via runGig — src/diff_gate.ts",
+      "plant": "ignore overlaps (judge each change against the chair's own scope only)",
+      "plant_observed": "AssertionError: in-scope concurrent work was refused: … src-seat … outside its Write/Edit scope [docs/mine.txt] … expected +0 to be 2"
+    },
+    {
+      "invariant_id": "GATE-ROOM-WORKSPACE",
+      "test_name": "a room seat's gate reads the ROOM's workspace > a seat that writes outside its grant IN THE ROOM WORKSPACE is refused — the host tree_root is not the tree it ran in",
+      "test_file": "tests/the_diff_gate_never_fails_open.test.ts",
+      "kind": "behavioural",
+      "drives": "runGig — src/runtime.ts (the diff gate)",
+      "plant": "read deps.tree_root instead of gigSubstrate.seat.workspace",
+      "plant_observed": "AssertionError: the gate read the host tree_root and never saw the room seat's write: expected [ { …(23) } ] to have a length of +0 but got 1"
+    },
+    {
+      "invariant_id": "GATE-EXEMPTION-EXACT",
+      "test_name": "the .coltrane exemption is exactly .coltrane > a seat that writes .claude/settings.json is judged — and refused",
+      "test_file": "tests/the_diff_gate_never_fails_open.test.ts",
+      "kind": "behavioural",
+      "drives": "changedPaths via runGig — src/diff_gate.ts",
+      "plant": "widen the exemption to .claude/",
+      "plant_observed": "AssertionError: .claude/settings.json was treated as the engine's own state and not judged"
+    },
+    {
+      "invariant_id": "GATE-EXEMPTION-EXACT",
+      "test_name": "the .coltrane exemption is exactly .coltrane > a seat that writes .coltrane-evil/x is judged — and refused",
+      "test_file": "tests/the_diff_gate_never_fails_open.test.ts",
+      "kind": "behavioural",
+      "drives": "changedPaths via runGig — src/diff_gate.ts",
+      "plant": "exempt by bare prefix: !p.startsWith(\".coltrane\")",
+      "plant_observed": "AssertionError: .coltrane-evil/x was treated as the engine's own state and not judged"
+    },
+    {
+      "invariant_id": "GATE-EXEMPTION-EXACT",
+      "test_name": "the .coltrane exemption is exactly .coltrane > a seat that writes .coltranex is judged — and refused",
+      "test_file": "tests/the_diff_gate_never_fails_open.test.ts",
+      "kind": "behavioural",
+      "drives": "changedPaths via runGig — src/diff_gate.ts",
+      "plant": "exempt by bare prefix: !p.startsWith(\".coltrane\")",
+      "plant_observed": "AssertionError: .coltranex was treated as the engine's own state and not judged"
+    },
+    {
+      "invariant_id": "GATE-EXEMPTION-CONTROL",
+      "test_name": "the .coltrane exemption is exactly .coltrane > control — the engine's own .coltrane/ changing during a seat is not blamed on it",
+      "test_file": "tests/the_diff_gate_never_fails_open.test.ts",
+      "kind": "behavioural",
+      "drives": "changedPaths via runGig — src/diff_gate.ts",
+      "plant": "remove the .coltrane exemption",
+      "plant_observed": "AssertionError: the engine's own state dir was blamed on the seat: … [.coltrane/ledger.jsonl] … expected [] to have a length of 1"
+    },
+    {
+      "invariant_id": "TARGET-TILDE",
+      "test_name": "a target path never escapes the tree > \"~/x\" grants nothing under a ** source — only the plain target beside it is granted",
+      "test_file": "tests/a_target_path_never_escapes_the_tree.test.ts",
+      "kind": "behavioural",
+      "drives": "resolveSeatGrants — src/layout_grants.ts",
+      "plant": "drop the leading-`~` refusal from escapesTree (src/layout_grants.ts)",
+      "plant_observed": "AssertionError: the escaping target \"~/x\" became (or normalised into) a grant"
+    },
+    {
+      "invariant_id": "TARGET-TILDE",
+      "test_name": "a target path never escapes the tree > \"~user/x\" grants nothing under a ** source — only the plain target beside it is granted",
+      "test_file": "tests/a_target_path_never_escapes_the_tree.test.ts",
+      "kind": "behavioural",
+      "drives": "resolveSeatGrants — src/layout_grants.ts",
+      "plant": "drop the leading-`~` refusal from escapesTree (src/layout_grants.ts)",
+      "plant_observed": "AssertionError: the escaping target \"~user/x\" became (or normalised into) a grant"
+    },
+    {
+      "invariant_id": "TARGET-TILDE-DISPATCH",
+      "test_name": "a target path never escapes the tree > the chair is refused at dispatch, naming the entry > \"~/x\" refuses the chair before any seat is invoked",
+      "test_file": "tests/a_target_path_never_escapes_the_tree.test.ts",
+      "kind": "behavioural",
+      "drives": "runGig — src/runtime.ts (target preflight)",
+      "plant": "drop the leading-`~` refusal from escapesTree (src/layout_grants.ts)",
+      "plant_observed": "AssertionError: an escaping target (~/x) reached a seat: expected 1 to be +0"
+    },
+    {
+      "invariant_id": "TARGET-TILDE-DISPATCH",
+      "test_name": "a target path never escapes the tree > the chair is refused at dispatch, naming the entry > \"~user/x\" refuses the chair before any seat is invoked",
+      "test_file": "tests/a_target_path_never_escapes_the_tree.test.ts",
+      "kind": "behavioural",
+      "drives": "runGig — src/runtime.ts (target preflight)",
+      "plant": "drop the leading-`~` refusal from escapesTree (src/layout_grants.ts)",
+      "plant_observed": "AssertionError: an escaping target (~user/x) reached a seat: expected 1 to be +0"
+    },
+    {
+      "invariant_id": "NO-ENGINE-STATE-1",
+      "test_name": "no Write/Edit grant reaches .coltrane/ > a ** source: denials carry Write(.coltrane/**) and Edit(.coltrane/**)",
+      "test_file": "tests/a_seat_cannot_write_the_engines_state.test.ts",
+      "kind": "behavioural",
+      "drives": "resolveSeatGrants — src/layout_grants.ts",
+      "plant": "a ** grant reaching .coltrane with no .coltrane denial (red today: the denial is not implemented)"
+    },
+    {
+      "invariant_id": "NO-ENGINE-STATE-2",
+      "test_name": "no Write/Edit grant reaches .coltrane/ > a bare Write literal (no code_tool_access) is denied .coltrane too",
+      "test_file": "tests/a_seat_cannot_write_the_engines_state.test.ts",
+      "kind": "behavioural",
+      "drives": "resolveSeatGrants — src/layout_grants.ts",
+      "plant": "deny .coltrane only for scoped grants"
+    },
+    {
+      "invariant_id": "NO-ENGINE-STATE-3",
+      "test_name": "no Write/Edit grant reaches .coltrane/ > code_tool_access \"full\" with no Write grant is denied .coltrane too",
+      "test_file": "tests/a_seat_cannot_write_the_engines_state.test.ts",
+      "kind": "behavioural",
+      "drives": "resolveSeatGrants — src/layout_grants.ts",
+      "plant": "drop the code_tool_access half of the .coltrane denial"
+    },
+    {
+      "invariant_id": "NO-ENGINE-STATE-4",
+      "test_name": "no Write/Edit grant reaches .coltrane/ > a target_paths entry under .coltrane/ is never granted — not even to a bare Write, which covers every path",
+      "test_file": "tests/a_seat_cannot_write_the_engines_state.test.ts",
+      "kind": "behavioural",
+      "drives": "resolveSeatGrants — src/layout_grants.ts",
+      "plant": "keep Write(<target>) for a .coltrane/ target"
+    },
+    {
+      "invariant_id": "NO-ENGINE-STATE-5",
+      "test_name": "no Write/Edit grant reaches .coltrane/ > a src/** seat, which cannot reach .coltrane/, carries no .coltrane denial (the deny follows reach)",
+      "test_file": "tests/a_seat_cannot_write_the_engines_state.test.ts",
+      "kind": "behavioural",
+      "drives": "resolveSeatGrants — src/layout_grants.ts",
+      "plant": "deny .coltrane for every seat regardless of reach"
+    },
+    {
+      "invariant_id": "NO-ENGINE-STATE-6",
+      "test_name": "no Write/Edit grant reaches .coltrane/ > the spawn: --disallowedTools carries both denials beside Write(**)",
+      "test_file": "tests/a_seat_cannot_write_the_engines_state.test.ts",
+      "kind": "behavioural",
+      "drives": "makeClaudeInvoker(...) argv — src/claude_invoker.ts",
+      "plant": "omit the .coltrane denials from the --disallowedTools union"
+    },
+    {
+      "invariant_id": "IGNORED-CONTROL",
+      "test_name": "a gitignored path never leaves the tree through the engine > control — a tracked, changed path is stamped",
+      "test_file": "tests/the_engine_never_publishes_an_ignored_path.test.ts",
+      "kind": "behavioural",
+      "drives": "stampChangeAddresses — src/runtime.ts",
+      "plant": "refuse every change",
+      "plant_observed": "AssertionError: … expected 'refuse all' to contain 'secret.env' (and the control threw)"
+    },
+    {
+      "invariant_id": "IGNORED-NEVER-SEALED",
+      "test_name": "a gitignored path never leaves the tree through the engine > a change-set naming an IGNORED path is refused, naming it — its bytes are never sealed",
+      "test_file": "tests/the_engine_never_publishes_an_ignored_path.test.ts",
+      "kind": "behavioural",
+      "drives": "stampChangeAddresses — src/runtime.ts",
+      "plant": "stamp every named path without asking git check-ignore (red today: the refusal is not implemented)"
+    },
+    {
+      "invariant_id": "NO-PUBLISH-STEP",
+      "test_name": "a gitignored path never leaves the tree through the engine > the engine has no publish step: no src/ file runs git add, commit or push",
+      "test_file": "tests/the_engine_never_publishes_an_ignored_path.test.ts",
+      "kind": "structural",
+      "drives": "src/*.ts (every git invocation site)",
+      "plant": "add gitInTree(tree_root, [\"add\", \"-A\"]) to src/ (e.g. at the top of stampChangeAddresses)",
+      "plant_observed": "AssertionError: the engine grew a publish step — it would ship whatever the tree holds, including ignored paths the gate never saw: runtime.ts:…: gitInTree(tree_root, [\"add\", \"-A\"]);",
+      "structural_reason": "The invariant is the ABSENCE of a call site: no engine code path adds, commits or pushes. No behavioural law can enumerate every future caller of git; the text of src/ is the only place the absence can be checked. Checked by the drafter at 9ff943c: there is no such call today — publishing is done by seats (pr-publisher, spec-publisher) through their own sandboxed Bash."
     }
   ],
-  "testing_method": "vitest, example-based laws plus fast-check properties (RED-DEF-15: expansion draws only on declared tokens + the layout; the target and venue steps never add). Every law drives the production symbol named in `drives`; symbols that do not exist yet are reached through a runtime import (tests/layout_grants_fixtures.ts) so the shared tsc gate stays green and each law fails where it asserts. The invokers are observed through the seams the suite already uses: the Claude invoker's injected `run` (the exact argv), and the completions invoker's model request body and typed refusals. The chair record is observed on chair_complete through RunDeps.onProgress; the dispatch door by bootstrapServerDeps over a genome tree on disk with the invoke seam replaced. The resolver-level plants were rehearsed by the drafter against a throwaway reference resolver, deleted before commit; each turned its law red. plant_observed is omitted (the v5 type refuses null) and is filled by the grader once production exists. Round 3: the laws for the implementer's surviving plants (NO-SELF-WIDENING-2 isolation, DOOR-CHART, DOOR-RELOAD, TARGET-ESCAPE, LAYERED, RECORD-VENUE, PREFLIGHT-EXPANDED) are green against the implementation at cef6f97, and each plant was applied, observed red and reverted by the drafter. The target-escape laws for README/backslash/drive-letter entries and the dispatch refusals are red, because the ruling (refuse, never normalise) is new. The completions any-scope laws for Read/Bash, and every D1/D2/D3/D5 law, are red (the behaviour is new). D4 runs a REAL sandboxed process through @anthropic-ai/sandbox-runtime (srt), because `claude -p` cannot run a Bash command without a model; it is SKIPPED and printed as UNVERIFIED when srt or an OS sandbox is absent, and was observed red (no sandbox config on the argv) with srt present on macOS. The drafter's manual srt probe confirmed the target config shape (absolute allowWrite tree + absolute denyWrite) is enforced: inside src/ written, outside refused, the layout file refused. plant_observed is omitted; the grader fills it.",
+  "testing_method": "vitest, example-based laws plus fast-check properties (RED-DEF-15: expansion draws only on declared tokens + the layout; the target and venue steps never add). Every law drives the production symbol named in `drives`; symbols that do not exist yet are reached through a runtime import (tests/layout_grants_fixtures.ts) so the shared tsc gate stays green and each law fails where it asserts. The invokers are observed through the seams the suite already uses: the Claude invoker's injected `run` (the exact argv), and the completions invoker's model request body and typed refusals. The chair record is observed on chair_complete through RunDeps.onProgress; the dispatch door by bootstrapServerDeps over a genome tree on disk with the invoke seam replaced. The resolver-level plants were rehearsed by the drafter against a throwaway reference resolver, deleted before commit; each turned its law red. plant_observed is omitted (the v5 type refuses null) and is filled by the grader once production exists. Round 3: the laws for the implementer's surviving plants (NO-SELF-WIDENING-2 isolation, DOOR-CHART, DOOR-RELOAD, TARGET-ESCAPE, LAYERED, RECORD-VENUE, PREFLIGHT-EXPANDED) are green against the implementation at cef6f97, and each plant was applied, observed red and reverted by the drafter. The target-escape laws for README/backslash/drive-letter entries and the dispatch refusals are red, because the ruling (refuse, never normalise) is new. The completions any-scope laws for Read/Bash, and every D1/D2/D3/D5 law, are red (the behaviour is new). D4 runs a REAL sandboxed process through @anthropic-ai/sandbox-runtime (srt), because `claude -p` cannot run a Bash command without a model; it is SKIPPED and printed as UNVERIFIED when srt or an OS sandbox is absent, and was observed red (no sandbox config on the argv) with srt present on macOS. The drafter's manual srt probe confirmed the target config shape (absolute allowWrite tree + absolute denyWrite) is enforced: inside src/ written, outside refused, the layout file refused. plant_observed is omitted; the grader fills it. Round 4: every law for the implementer's surviving plants (items 2–10) is green against 9ff943c, and each plant was applied to that production code, observed red, and reverted; plant_observed records the failing assertion. The laws for the conductor's two new rulings (.coltrane denial; ignored path never sealed) are red today because the behaviour does not exist yet; their plant_observed is left for the grader.",
   "uncovered": []
 }

@@ -59,73 +59,110 @@ afterEach(() => {
   headersDrained.length = 0;
 });
 
-describe("G4 — a resume of a TERMINAL gig is a new gig linked to the old one", () => {
-  it("G4 gig_dispatch({resume_gig_id}) of a FAILED gig runs under a NEW id carrying `resumes: <old id>`, takes the old seals as inputs by reference, and writes nothing under the old id", async () => {
-    process.env["COLTRANE_DRAIN_URL"] = "https://coltrane.example";
-    process.env["COLTRANE_DRAIN_KEY"] = "cdk_terminal_resume";
-    vi.stubGlobal("fetch", vi.fn(async (url: string | URL, init?: RequestInit) => {
-      if (new URL(String(url)).pathname === "/rest/v1/coltrane_gigs" && init?.body) {
-        headersDrained.push(JSON.parse(String(init.body)) as Record<string, unknown>);
-      }
-      return new Response("null", { status: 201 });
-    }));
+type Ending = "failed" | "aborted";
 
-    const registry = createRegistry();
-    registry.registerType(note);
-    registry.registerType(callT);
-    const std = standard();
-    const calls: Record<string, number> = {};
-    let failGate = true;
-    const invoke: AgentInvoker = (ctx) => {
-      calls[ctx.agent.slug] = (calls[ctx.agent.slug] ?? 0) + 1;
-      if (ctx.agent.slug === "gate" && failGate) throw new Error("stub gate failure");
-      return ctx.agent.slug === "solo" ? { ...NOTE } : { ...CALL };
-    };
-    const d: ServerDeps = {
-      registry, outputs: createOutputStore(registry), ledger: new MemoryLedger(),
-      standards: new Map([[std.slug, std]]), invoke, gig_runs: new Map(),
-      checkpoints: createMemoryCheckpointStore(),
-    };
-
-    // Attempt 1 FAILS at the gate. The gig is terminal: failed.
+/** A gig that ENDED `how`, with the sense chair sealed and the gate never sealed. */
+async function endedGig(how: Ending): Promise<{ d: ServerDeps; oldId: string; calls: Record<string, number>; heal(): void }> {
+  process.env["COLTRANE_DRAIN_URL"] = "https://coltrane.example";
+  process.env["COLTRANE_DRAIN_KEY"] = "cdk_terminal_resume";
+  vi.stubGlobal("fetch", vi.fn(async (url: string | URL, init?: RequestInit) => {
+    if (new URL(String(url)).pathname === "/rest/v1/coltrane_gigs" && init?.body) {
+      headersDrained.push(JSON.parse(String(init.body)) as Record<string, unknown>);
+    }
+    return new Response("null", { status: 201 });
+  }));
+  const registry = createRegistry();
+  registry.registerType(note);
+  registry.registerType(callT);
+  const std = standard();
+  const calls: Record<string, number> = {};
+  let broken = true;
+  let started!: () => void;
+  const solStarted = new Promise<void>((r) => { started = r; });
+  let release!: () => void;
+  const solReleased = new Promise<void>((r) => { release = r; });
+  const invoke: AgentInvoker = async (ctx) => {
+    calls[ctx.agent.slug] = (calls[ctx.agent.slug] ?? 0) + 1;
+    if (ctx.agent.slug === "solo") {
+      if (how === "aborted" && broken) { started(); await solReleased; }
+      return { ...NOTE };
+    }
+    if (how === "failed" && broken) throw new Error("stub gate failure");
+    return { ...CALL };
+  };
+  const d: ServerDeps = {
+    registry, outputs: createOutputStore(registry), ledger: new MemoryLedger(),
+    standards: new Map([[std.slug, std]]), invoke, gig_runs: new Map(),
+    checkpoints: createMemoryCheckpointStore(),
+  };
+  let oldId: string;
+  if (how === "failed") {
     const r1 = await dispatchTool("gig_dispatch", { standard_slug: std.slug, input: {}, wait: true }, d);
     expect(r1.ok, "precondition: attempt 1 fails at the gate").toBe(false);
-    const oldId = d.outputs.all()[0]!.gig_id;
-    await new Promise((r) => setTimeout(r, 20)); // let attempt 1's own (failed) header drain land
-    const oldRows = d.outputs.all().filter((o) => o.gig_id === oldId).length;
-    const headersBefore = headersDrained.length;
+    oldId = d.outputs.all()[0]!.gig_id;
+  } else {
+    // Aborted between phases: the sense chair is in flight when gig_abort lands, finishes and seals,
+    // and the run stops before the gate (the #249/#250 cancellation checkpoint).
+    const disp = await dispatchTool("gig_dispatch", { standard_slug: std.slug, input: {} }, d);
+    oldId = String((disp.data as { gig_id: string }).gig_id);
+    await solStarted;
+    const ab = await dispatchTool("gig_abort", { gig_id: oldId, reason: "operator stop" }, d);
+    expect((ab.data as { aborted?: boolean }).aborted, "precondition: the abort was delivered").toBe(true);
+    release();
+    const t0 = Date.now();
+    for (;;) {
+      const m = (await dispatchTool("gig_monitor", { gig_id: oldId }, d)).data as Record<string, unknown>;
+      if (m["status"] !== "running") { expect(m["status"], "precondition: the gig ended aborted").toBe("aborted"); break; }
+      if (Date.now() - t0 > 3000) throw new Error("the aborted gig never settled");
+      await new Promise((r) => setTimeout(r, 5));
+    }
+    expect(calls, "precondition: the gate never ran on the aborted gig").toEqual({ solo: 1 });
+  }
+  await new Promise((r) => setTimeout(r, 20)); // let attempt 1's own header drain land
+  return { d, oldId, calls, heal: () => { broken = false; for (const k of Object.keys(calls)) delete calls[k]; } };
+}
 
-    // The explicit resume.
-    failGate = false;
-    for (const k of Object.keys(calls)) delete calls[k];
-    const r2 = await dispatchTool("gig_dispatch", { standard_slug: std.slug, input: {}, wait: true, resume_gig_id: oldId }, d);
-    await new Promise((r) => setTimeout(r, 20));
-    expect(r2.ok, `precondition: the resume succeeds: ${JSON.stringify(r2)}`).toBe(true);
-    expect(calls, "precondition: the sealed chair is reused, not paid for again").toEqual({ gate: 1 });
+describe("G4 — a resume of a TERMINAL gig is a new gig linked to the old one", () => {
+  for (const how of ["failed", "aborted"] as const) {
+    const title = how === "failed"
+      ? "G4 gig_dispatch({resume_gig_id}) of a FAILED gig runs under a NEW id carrying `resumes: <old id>`, takes the old seals as inputs by reference, and writes nothing under the old id"
+      : "G4 gig_dispatch({resume_gig_id}) of an ABORTED gig runs under a NEW id carrying `resumes: <old id>`, takes the old seals as inputs by reference, and writes nothing under the old id";
+    it(title, async () => {
+      const { d, oldId, calls, heal } = await endedGig(how);
+      const oldRows = d.outputs.all().filter((o) => o.gig_id === oldId).length;
+      const headersBefore = headersDrained.length;
 
-    const data = r2.data as Record<string, unknown>;
-    const newId = String(data["gig_id"]);
-    expect(newId, "the resume of a FAILED gig ran under the OLD gig's id; the store's terminal guard refuses every write it makes").not.toBe(oldId);
-    const resumes = data["resumes"] ?? (data["manifest"] as Record<string, unknown> | undefined)?.["resumes"];
-    expect(resumes, "the new gig must say which gig it resumes").toBe(oldId);
+      // The explicit resume.
+      heal();
+      const r2 = await dispatchTool("gig_dispatch", { standard_slug: "terminal-resume-demo", input: {}, wait: true, resume_gig_id: oldId }, d);
+      await new Promise((r) => setTimeout(r, 20));
+      expect(r2.ok, `precondition: the resume succeeds: ${JSON.stringify(r2)}`).toBe(true);
+      expect(calls, "precondition: the sealed chair is reused, not paid for again").toEqual({ gate: 1 });
 
-    const resumeHeaders = headersDrained.slice(headersBefore);
-    expect(resumeHeaders.filter((h) => h["id"] === oldId).map((h) => h["status"]),
-      "the resume drained headers onto the terminal gig (the store answers 23514)").toEqual([]);
-    expect(resumeHeaders.some((h) => h["id"] === newId), "the new gig's header was never drained").toBe(true);
-    expect(d.outputs.all().filter((o) => o.gig_id === oldId).length, "the resume sealed outputs into the terminal gig").toBe(oldRows);
-    expect(d.ledger.query({ kind: "gig" }).filter((e) => (e as { gig_id?: string }).gig_id === oldId).length,
-      "the resume wrote the terminal gig's ledger row").toBe(0);
+      const data = r2.data as Record<string, unknown>;
+      const newId = String(data["gig_id"]);
+      expect(newId, `the resume of the ${how.toUpperCase()} gig ran under the OLD gig's id; the store's terminal guard refuses every write it makes`).not.toBe(oldId);
+      const resumes = data["resumes"] ?? (data["manifest"] as Record<string, unknown> | undefined)?.["resumes"];
+      expect(resumes, "the new gig must say which gig it resumes").toBe(oldId);
 
-    // WHAT'S CLOSED IS CLOSED. The old gig's sealed note enters the new gig as an INPUT BY REFERENCE:
-    // the new gate's input_shas name the OLD seal's content_sha, so provenance points back at the old
-    // gig. The note is never re-sealed as the new gig's own work.
-    const oldNote = d.outputs.all().find((o) => o.gig_id === oldId && o.domain_type === "note")!;
-    const newOutputs = d.outputs.all().filter((o) => o.gig_id === newId);
-    expect(newOutputs.filter((o) => o.domain_type === "note").map((o) => o.content_sha),
-      "the old gig's sealed note was RE-SEALED as the new gig's own work; it must enter by reference only").toEqual([]);
-    const gate = newOutputs.find((o) => o.domain_type === "call");
-    expect(gate, "the new gig sealed no gate verdict").toBeDefined();
-    expect(gate!.input_shas, "the new gate's provenance does not point at the OLD gig's seal").toContain(oldNote.content_sha);
-  });
+      const resumeHeaders = headersDrained.slice(headersBefore);
+      expect(resumeHeaders.filter((h) => h["id"] === oldId).map((h) => h["status"]),
+        "the resume drained headers onto the terminal gig (the store answers 23514)").toEqual([]);
+      expect(resumeHeaders.some((h) => h["id"] === newId), "the new gig's header was never drained").toBe(true);
+      expect(d.outputs.all().filter((o) => o.gig_id === oldId).length, "the resume sealed outputs into the terminal gig").toBe(oldRows);
+      expect(d.ledger.query({ kind: "gig" }).filter((e) => (e as { gig_id?: string }).gig_id === oldId).length,
+        "the resume wrote the terminal gig's ledger row").toBe(0);
+
+      // WHAT'S CLOSED IS CLOSED. The old gig's sealed note enters the new gig as an INPUT BY REFERENCE:
+      // the new gate's input_shas name the OLD seal's content_sha, so provenance points back at the old
+      // gig. The note is never re-sealed as the new gig's own work.
+      const oldNote = d.outputs.all().find((o) => o.gig_id === oldId && o.domain_type === "note")!;
+      const newOutputs = d.outputs.all().filter((o) => o.gig_id === newId);
+      expect(newOutputs.filter((o) => o.domain_type === "note").map((o) => o.content_sha),
+        "the old gig's sealed note was RE-SEALED as the new gig's own work; it must enter by reference only").toEqual([]);
+      const gate = newOutputs.find((o) => o.domain_type === "call");
+      expect(gate, "the new gig sealed no gate verdict").toBeDefined();
+      expect(gate!.input_shas, "the new gate's provenance does not point at the OLD gig's seal").toContain(oldNote.content_sha);
+    });
+  }
 });

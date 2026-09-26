@@ -13,46 +13,63 @@
     "The layout's shape is ONE Zod schema (LayoutSchema, src/genome_schema.ts); the loader exposes it as genome.layout (absent → undefined; malformed → load_error and absent).",
     "Both invokers build their grants through resolveSeatGrants; the layout reaches the chair's ctx from the run's deps and the dispatch door; chair_complete records resolved_grants and target_paths_applied.",
     "IMPLEMENTER OBLIGATION (no law pins it): domain_types/change-request.json: target_paths' description says 'Paths the requester believes are in scope. A belief, not a finding — the reading phase may contradict it.' Enforcement makes it a grant boundary; rewrite the description (via type_extend) to say Write/Edit grants are narrowed to it. No law pins the wording.",
-    "IMPLEMENTER OBLIGATION (no law pins it): Thread the layout through every door: server.ts (both dispatch branches, via assembleRunDeps), worker.ts (see uncovered), chart.ts movements (inherit via movementDeps).",
     "IMPLEMENTER OBLIGATION (no law pins it): Add `layout` to LoadError-kind handling: a malformed layout is a load_error whose path names coltrane.layout.json (the kind union in src/loader.ts may need a 'layout' member).",
-    "IMPLEMENTER OBLIGATION (no law pins it): The runtime's dispatch preflight (resolveAgentGrants in runGig) must not reject a role token as an unresolvable tool before resolveSeatGrants has expanded it."
+    "IMPLEMENTER OBLIGATION (no law pins it): The runtime's dispatch preflight (resolveAgentGrants in runGig) must not reject a role token as an unresolvable tool before resolveSeatGrants has expanded it.",
+    "NO SELF-WIDENING: no resolved grant may permit writing coltrane.layout.json. The FORM is a deny: resolveSeatGrants returns denials Write(coltrane.layout.json)/Edit(coltrane.layout.json) whenever a Write/Edit grant (glob or bare) covers the file, and never returns the exact grant; the Claude invoker adds denials to --disallowedTools.",
+    "target_paths: [] grants no Write/Edit (target_paths_applied: true). A layout role declared as [] is refused by LayoutSchema (min 1). A target_paths entry with * ? [ or { refuses the chair at dispatch, naming the entry.",
+    "A drained gig's layout is the org store's row for its repository (resolveWorkingRepo(claim)), carried through reconstructGenome (GenomeRows.layouts → LoadedGenome.layouts) and assembleRunDeps to ctx.layout; the clone's coltrane.layout.json is never read. The files backing exposes the tree's own file as genome.layout.",
+    "The completions invoker refuses, before any model call and naming the grant, a chair whose effective grants hold any path-scoped Write/Edit (literal or expanded); a bare unscoped Write is refused as a host builtin, as today.",
+    "IMPLEMENTER OBLIGATION (no law pins it): thread the layout through every door — server.ts (both dispatch branches, via assembleRunDeps), worker.ts (the store row, per the drain laws), chart.ts movements (inherit via movementDeps).",
+    "STORE SIDE (outside this repo; not invented here): a table coltrane_repository_layouts (org_id uuid not null references the org, repository text not null, definition jsonb not null, unique (org_id, repository), RLS as the other genome tables); coltrane_mcp_genome must return `layouts: [{repository, definition}]` for the token's org; the PostgREST backing needs a Q.layouts select (repository,definition); authoring a row needs a governed upsert branch (class 'layout', keyed by repository) — which is itself an authority to widen seats and so belongs to a governor, not an agent token. The repository key must be byte-identical to what resolveWorkingRepo returns for the claim (input.repository, else repo_url)."
   ],
   "laws": [
     {
       "path": "tests/a_grant_never_crosses_repositories.test.ts",
-      "commit": "05a33c502e5d99654fda332d171254bece78bb22"
-    },
-    {
-      "path": "tests/a_seat_cannot_write_outside_its_target_paths.test.ts",
-      "commit": "05a33c502e5d99654fda332d171254bece78bb22"
-    },
-    {
-      "path": "tests/a_new_repository_shape_needs_no_agent_amendment.test.ts",
-      "commit": "05a33c502e5d99654fda332d171254bece78bb22"
+      "commit": "164fdc75a3195edd574cf98026536491b9ddfb91"
     },
     {
       "path": "tests/a_missing_role_or_layout_grants_nothing.test.ts",
-      "commit": "05a33c502e5d99654fda332d171254bece78bb22"
+      "commit": "164fdc75a3195edd574cf98026536491b9ddfb91"
     },
     {
-      "path": "tests/literal_grants_resolve_unchanged.test.ts",
-      "commit": "05a33c502e5d99654fda332d171254bece78bb22"
+      "path": "tests/a_new_repository_shape_needs_no_agent_amendment.test.ts",
+      "commit": "164fdc75a3195edd574cf98026536491b9ddfb91"
     },
     {
-      "path": "tests/seat_grant_resolution_only_narrows.test.ts",
-      "commit": "05a33c502e5d99654fda332d171254bece78bb22"
+      "path": "tests/a_seat_cannot_rewrite_its_own_layout.test.ts",
+      "commit": "164fdc75a3195edd574cf98026536491b9ddfb91"
     },
     {
-      "path": "tests/the_layout_is_read_from_the_genome_tree.test.ts",
-      "commit": "05a33c502e5d99654fda332d171254bece78bb22"
+      "path": "tests/a_seat_cannot_write_outside_its_target_paths.test.ts",
+      "commit": "164fdc75a3195edd574cf98026536491b9ddfb91"
+    },
+    {
+      "path": "tests/an_empty_or_globbed_scope_fails_closed.test.ts",
+      "commit": "164fdc75a3195edd574cf98026536491b9ddfb91"
     },
     {
       "path": "tests/both_invokers_grant_through_the_layout.test.ts",
-      "commit": "05a33c502e5d99654fda332d171254bece78bb22"
+      "commit": "164fdc75a3195edd574cf98026536491b9ddfb91"
+    },
+    {
+      "path": "tests/literal_grants_resolve_unchanged.test.ts",
+      "commit": "164fdc75a3195edd574cf98026536491b9ddfb91"
+    },
+    {
+      "path": "tests/seat_grant_resolution_only_narrows.test.ts",
+      "commit": "164fdc75a3195edd574cf98026536491b9ddfb91"
     },
     {
       "path": "tests/the_chair_records_its_resolved_grants.test.ts",
-      "commit": "05a33c502e5d99654fda332d171254bece78bb22"
+      "commit": "164fdc75a3195edd574cf98026536491b9ddfb91"
+    },
+    {
+      "path": "tests/the_drain_takes_its_layout_from_the_store.test.ts",
+      "commit": "164fdc75a3195edd574cf98026536491b9ddfb91"
+    },
+    {
+      "path": "tests/the_layout_is_read_from_the_genome_tree.test.ts",
+      "commit": "164fdc75a3195edd574cf98026536491b9ddfb91"
     }
   ],
   "coverage_map": [
@@ -62,8 +79,7 @@
       "test_file": "tests/a_grant_never_crosses_repositories.test.ts",
       "kind": "behavioural",
       "drives": "resolveSeatGrants — src/layout_grants.ts",
-      "plant": "in src/layout_grants.ts, expand path role tokens from a module-level ROLE_GLOBS table (e.g. source: [src/**, ios/**, scripts/**]) instead of from args.layout",
-      "plant_observed": null
+      "plant": "in src/layout_grants.ts, expand path role tokens from a module-level ROLE_GLOBS table (e.g. source: [src/**, ios/**, scripts/**]) instead of from args.layout"
     },
     {
       "invariant_id": "RED-DEF-10",
@@ -71,8 +87,7 @@
       "test_file": "tests/a_grant_never_crosses_repositories.test.ts",
       "kind": "behavioural",
       "drives": "resolveSeatGrants — src/layout_grants.ts",
-      "plant": "same plant: expand from a module-level ROLE_GLOBS table instead of args.layout",
-      "plant_observed": null
+      "plant": "same plant: expand from a module-level ROLE_GLOBS table instead of args.layout"
     },
     {
       "invariant_id": "RED-DEF-11",
@@ -80,8 +95,7 @@
       "test_file": "tests/a_seat_cannot_write_outside_its_target_paths.test.ts",
       "kind": "behavioural",
       "drives": "resolveSeatGrants — src/layout_grants.ts",
-      "plant": "skip the target_paths intersection step in resolveSeatGrants (return the expanded grants unnarrowed)",
-      "plant_observed": null
+      "plant": "skip the target_paths intersection step in resolveSeatGrants (return the expanded grants unnarrowed)"
     },
     {
       "invariant_id": "RED-DEF-11",
@@ -89,8 +103,7 @@
       "test_file": "tests/a_seat_cannot_write_outside_its_target_paths.test.ts",
       "kind": "behavioural",
       "drives": "resolveSeatGrants — src/layout_grants.ts",
-      "plant": "apply the target_paths intersection only to grants that came from a role token, passing literal Write/Edit grants through",
-      "plant_observed": null
+      "plant": "apply the target_paths intersection only to grants that came from a role token, passing literal Write/Edit grants through"
     },
     {
       "invariant_id": "RED-DEF-11",
@@ -98,8 +111,7 @@
       "test_file": "tests/a_seat_cannot_write_outside_its_target_paths.test.ts",
       "kind": "behavioural",
       "drives": "resolveSeatGrants — src/layout_grants.ts",
-      "plant": "apply the target_paths intersection to every grant (drop any grant not scoped to a covered target), not only Write/Edit",
-      "plant_observed": null
+      "plant": "apply the target_paths intersection to every grant (drop any grant not scoped to a covered target), not only Write/Edit"
     },
     {
       "invariant_id": "RED-DEF-11",
@@ -107,8 +119,7 @@
       "test_file": "tests/a_seat_cannot_write_outside_its_target_paths.test.ts",
       "kind": "behavioural",
       "drives": "resolveSeatGrants — src/layout_grants.ts",
-      "plant": "return target_paths_applied: true unconditionally from resolveSeatGrants",
-      "plant_observed": null
+      "plant": "return target_paths_applied: true unconditionally from resolveSeatGrants"
     },
     {
       "invariant_id": "RED-DEF-12",
@@ -116,8 +127,7 @@
       "test_file": "tests/a_new_repository_shape_needs_no_agent_amendment.test.ts",
       "kind": "behavioural",
       "drives": "loadGenome — src/loader.ts, then resolveSeatGrants — src/layout_grants.ts",
-      "plant": "resolve from the agent's own allowed_tools alone, ignoring args.layout (role tokens pass through verbatim)",
-      "plant_observed": null
+      "plant": "resolve from the agent's own allowed_tools alone, ignoring args.layout (role tokens pass through verbatim)"
     },
     {
       "invariant_id": "RED-DEF-12",
@@ -125,8 +135,7 @@
       "test_file": "tests/a_new_repository_shape_needs_no_agent_amendment.test.ts",
       "kind": "behavioural",
       "drives": "resolveSeatGrants — src/layout_grants.ts",
-      "plant": "write the expanded grants back onto args.agent.allowed_tools inside resolveSeatGrants",
-      "plant_observed": null
+      "plant": "write the expanded grants back onto args.agent.allowed_tools inside resolveSeatGrants"
     },
     {
       "invariant_id": "RED-DEF-13",
@@ -134,8 +143,7 @@
       "test_file": "tests/a_missing_role_or_layout_grants_nothing.test.ts",
       "kind": "behavioural",
       "drives": "resolveSeatGrants — src/layout_grants.ts",
-      "plant": "when args.layout is undefined, expand a path role token to [\"**\"] (Write(**)) instead of refusing it",
-      "plant_observed": null
+      "plant": "when args.layout is undefined, expand a path role token to [\"**\"] (Write(**)) instead of refusing it"
     },
     {
       "invariant_id": "RED-DEF-13",
@@ -143,8 +151,7 @@
       "test_file": "tests/a_missing_role_or_layout_grants_nothing.test.ts",
       "kind": "behavioural",
       "drives": "resolveSeatGrants — src/layout_grants.ts",
-      "plant": "default a role the layout does not declare to [\"**\"] instead of refusing it",
-      "plant_observed": null
+      "plant": "default a role the layout does not declare to [\"**\"] instead of refusing it"
     },
     {
       "invariant_id": "RED-DEF-13",
@@ -152,8 +159,7 @@
       "test_file": "tests/a_missing_role_or_layout_grants_nothing.test.ts",
       "kind": "behavioural",
       "drives": "runGig — src/runtime.ts",
-      "plant": "ignore resolveSeatGrants(...).refusals where runGig seats a chair (invoke the chair anyway)",
-      "plant_observed": null
+      "plant": "ignore resolveSeatGrants(...).refusals where runGig seats a chair (invoke the chair anyway)"
     },
     {
       "invariant_id": "RED-DEF-14",
@@ -161,8 +167,7 @@
       "test_file": "tests/literal_grants_resolve_unchanged.test.ts",
       "kind": "behavioural",
       "drives": "loadGenome — src/loader.ts over this tree's agents/, then resolveSeatGrants — src/layout_grants.ts",
-      "plant": "alter a literal on the way through resolveSeatGrants — e.g. sort or dedupe the grant list, or normalise Bash(x:*) to Bash(x)",
-      "plant_observed": null
+      "plant": "alter a literal on the way through resolveSeatGrants — e.g. sort or dedupe the grant list, or normalise Bash(x:*) to Bash(x)"
     },
     {
       "invariant_id": "RED-DEF-14",
@@ -170,8 +175,7 @@
       "test_file": "tests/literal_grants_resolve_unchanged.test.ts",
       "kind": "behavioural",
       "drives": "loadGenome — src/loader.ts over this tree's agents/, then resolveSeatGrants — src/layout_grants.ts",
-      "plant": "treat a scoped literal Write/Edit (e.g. Write(src/**)) as a role and re-expand it through the layout",
-      "plant_observed": null
+      "plant": "treat a scoped literal Write/Edit (e.g. Write(src/**)) as a role and re-expand it through the layout"
     },
     {
       "invariant_id": "RED-DEF-14",
@@ -179,8 +183,7 @@
       "test_file": "tests/literal_grants_resolve_unchanged.test.ts",
       "kind": "behavioural",
       "drives": "loadGenome — src/loader.ts",
-      "plant": "a loader change that drops agents/ from the load (genome.agents empty) — a non-vacuity control, green today",
-      "plant_observed": null
+      "plant": "a loader change that drops agents/ from the load (genome.agents empty) — a non-vacuity control, green today"
     },
     {
       "invariant_id": "RED-DEF-15",
@@ -188,8 +191,7 @@
       "test_file": "tests/seat_grant_resolution_only_narrows.test.ts",
       "kind": "behavioural",
       "drives": "resolveSeatGrants — src/layout_grants.ts",
-      "plant": "expand a role token to its layout globs PLUS every glob of every other role in the layout",
-      "plant_observed": null
+      "plant": "expand a role token to its layout globs PLUS every glob of every other role in the layout"
     },
     {
       "invariant_id": "RED-DEF-15",
@@ -197,8 +199,7 @@
       "test_file": "tests/seat_grant_resolution_only_narrows.test.ts",
       "kind": "behavioural",
       "drives": "resolveSeatGrants — src/layout_grants.ts",
-      "plant": "in the target step, push Write(<t>) for every target t whether or not an expanded glob covers it",
-      "plant_observed": null
+      "plant": "in the target step, push Write(<t>) for every target t whether or not an expanded glob covers it"
     },
     {
       "invariant_id": "RED-DEF-15",
@@ -206,8 +207,7 @@
       "test_file": "tests/seat_grant_resolution_only_narrows.test.ts",
       "kind": "behavioural",
       "drives": "resolveSeatGrants — src/layout_grants.ts",
-      "plant": "in the venue step, union venue.equipment.tools into the grants instead of calling venueEffectiveTools",
-      "plant_observed": null
+      "plant": "in the venue step, union venue.equipment.tools into the grants instead of calling venueEffectiveTools"
     },
     {
       "invariant_id": "RED-DEF-15",
@@ -215,8 +215,7 @@
       "test_file": "tests/seat_grant_resolution_only_narrows.test.ts",
       "kind": "behavioural",
       "drives": "resolveSeatGrants — src/layout_grants.ts",
-      "plant": "skip the venue step when args.venue is present",
-      "plant_observed": null
+      "plant": "skip the venue step when args.venue is present"
     },
     {
       "invariant_id": "RED-DEF-15",
@@ -224,8 +223,7 @@
       "test_file": "tests/seat_grant_resolution_only_narrows.test.ts",
       "kind": "behavioural",
       "drives": "resolveSeatGrants — src/layout_grants.ts",
-      "plant": "in the target step, push Write(<t>) for every target t whether or not an expanded glob covers it",
-      "plant_observed": null
+      "plant": "in the target step, push Write(<t>) for every target t whether or not an expanded glob covers it"
     },
     {
       "invariant_id": "LAYOUT-1",
@@ -233,8 +231,7 @@
       "test_file": "tests/the_layout_is_read_from_the_genome_tree.test.ts",
       "kind": "behavioural",
       "drives": "loadGenome — src/loader.ts",
-      "plant": "never read <root>/coltrane.layout.json in loadGenome (layout stays undefined)",
-      "plant_observed": null
+      "plant": "never read <root>/coltrane.layout.json in loadGenome (layout stays undefined)"
     },
     {
       "invariant_id": "LAYOUT-2",
@@ -242,8 +239,7 @@
       "test_file": "tests/the_layout_is_read_from_the_genome_tree.test.ts",
       "kind": "behavioural",
       "drives": "loadGenome — src/loader.ts",
-      "plant": "default an absent layout to {} (or a house layout) in loadGenome — a control, green today",
-      "plant_observed": null
+      "plant": "default an absent layout to {} (or a house layout) in loadGenome — a control, green today"
     },
     {
       "invariant_id": "LAYOUT-3",
@@ -251,8 +247,7 @@
       "test_file": "tests/the_layout_is_read_from_the_genome_tree.test.ts",
       "kind": "behavioural",
       "drives": "loadGenome — src/loader.ts",
-      "plant": "keep the raw parsed JSON on genome.layout when LayoutSchema refuses it (or skip the load_errors push)",
-      "plant_observed": null
+      "plant": "keep the raw parsed JSON on genome.layout when LayoutSchema refuses it (or skip the load_errors push)"
     },
     {
       "invariant_id": "LAYOUT-4",
@@ -260,8 +255,7 @@
       "test_file": "tests/the_layout_is_read_from_the_genome_tree.test.ts",
       "kind": "behavioural",
       "drives": "LayoutSchema.safeParse — src/genome_schema.ts",
-      "plant": "drop .strict() from LayoutSchema's paths object (a misspelt role `sources` is admitted)",
-      "plant_observed": null
+      "plant": "drop .strict() from LayoutSchema's paths object (a misspelt role `sources` is admitted)"
     },
     {
       "invariant_id": "LAYOUT-5",
@@ -269,8 +263,7 @@
       "test_file": "tests/the_layout_is_read_from_the_genome_tree.test.ts",
       "kind": "behavioural",
       "drives": "assembleRunDeps — src/run_deps.ts",
-      "plant": "omit `layout` from assembleRunDeps' returned object",
-      "plant_observed": null
+      "plant": "omit `layout` from assembleRunDeps' returned object"
     },
     {
       "invariant_id": "WIRE-CLAUDE-1",
@@ -278,8 +271,7 @@
       "test_file": "tests/both_invokers_grant_through_the_layout.test.ts",
       "kind": "behavioural",
       "drives": "makeClaudeInvoker(...)(ctx) → --allowedTools via the injected run seam — src/claude_invoker.ts",
-      "plant": "build effectiveAllowed from ctx.agent.allowed_tools instead of resolveSeatGrants(...).grants in the invoker's grant block",
-      "plant_observed": null
+      "plant": "build effectiveAllowed from ctx.agent.allowed_tools instead of resolveSeatGrants(...).grants in the invoker's grant block"
     },
     {
       "invariant_id": "WIRE-CLAUDE-2",
@@ -287,8 +279,7 @@
       "test_file": "tests/both_invokers_grant_through_the_layout.test.ts",
       "kind": "behavioural",
       "drives": "makeClaudeInvoker(...)(ctx) → --allowedTools/--disallowedTools, venue path (venueExcluded + the disallow union) — src/claude_invoker.ts",
-      "plant": "compute venueExcluded (and the venue-narrowed allow list) from a.allowed_tools — the raw tokens — instead of the resolved grants",
-      "plant_observed": null
+      "plant": "compute venueExcluded (and the venue-narrowed allow list) from a.allowed_tools — the raw tokens — instead of the resolved grants"
     },
     {
       "invariant_id": "WIRE-CLAUDE-3",
@@ -296,8 +287,7 @@
       "test_file": "tests/both_invokers_grant_through_the_layout.test.ts",
       "kind": "behavioural",
       "drives": "makeClaudeInvoker(...)(ctx) — src/claude_invoker.ts",
-      "plant": "ignore resolveSeatGrants(...).refusals in the Claude invoker (spawn anyway)",
-      "plant_observed": null
+      "plant": "ignore resolveSeatGrants(...).refusals in the Claude invoker (spawn anyway)"
     },
     {
       "invariant_id": "WIRE-CLAUDE-4",
@@ -305,35 +295,7 @@
       "test_file": "tests/both_invokers_grant_through_the_layout.test.ts",
       "kind": "behavioural",
       "drives": "makeClaudeInvoker(...)(ctx) — src/claude_invoker.ts",
-      "plant": "when ctx.layout is undefined, skip resolveSeatGrants and pass ctx.agent.allowed_tools through",
-      "plant_observed": null
-    },
-    {
-      "invariant_id": "WIRE-COMPLETIONS-0",
-      "test_name": "the completions invoker grants through resolveSeatGrants > control — a target the source glob covers: Write is offered",
-      "test_file": "tests/both_invokers_grant_through_the_layout.test.ts",
-      "kind": "behavioural",
-      "drives": "makeCompletionsInvoker(...)(ctx) → the model request's tools — src/completions_invoker.ts",
-      "plant": "narrow every Write away regardless of target_paths — a control, green today",
-      "plant_observed": null
-    },
-    {
-      "invariant_id": "WIRE-COMPLETIONS-1",
-      "test_name": "the completions invoker grants through resolveSeatGrants > a target_paths set the source glob never covers: Write(@source) resolves to nothing, and the model is NOT offered Write",
-      "test_file": "tests/both_invokers_grant_through_the_layout.test.ts",
-      "kind": "behavioural",
-      "drives": "makeCompletionsInvoker(...)(ctx) → chairGrants → allow → the model request's tools — src/completions_invoker.ts",
-      "plant": "compute chairGrants from ctx.agent.allowed_tools (or venueEffectiveTools(ctx.agent, venue)) instead of resolveSeatGrants(...).grants",
-      "plant_observed": null
-    },
-    {
-      "invariant_id": "WIRE-COMPLETIONS-2",
-      "test_name": "the completions invoker grants through resolveSeatGrants > a role the layout does not declare is refused naming it, before any model call",
-      "test_file": "tests/both_invokers_grant_through_the_layout.test.ts",
-      "kind": "behavioural",
-      "drives": "makeCompletionsInvoker(...)(ctx) — src/completions_invoker.ts",
-      "plant": "ignore resolveSeatGrants(...).refusals in the completions invoker",
-      "plant_observed": null
+      "plant": "when ctx.layout is undefined, skip resolveSeatGrants and pass ctx.agent.allowed_tools through"
     },
     {
       "invariant_id": "RECORD-1",
@@ -341,8 +303,7 @@
       "test_file": "tests/the_chair_records_its_resolved_grants.test.ts",
       "kind": "behavioural",
       "drives": "runGig — src/runtime.ts (the chair_complete emit)",
-      "plant": "drop resolved_grants from the chair_complete emit in runGig",
-      "plant_observed": null
+      "plant": "drop resolved_grants from the chair_complete emit in runGig"
     },
     {
       "invariant_id": "RECORD-2",
@@ -350,8 +311,7 @@
       "test_file": "tests/the_chair_records_its_resolved_grants.test.ts",
       "kind": "behavioural",
       "drives": "runGig — src/runtime.ts (the chair_complete emit)",
-      "plant": "emit target_paths_applied only when true (conditional spread), or record it as true unconditionally",
-      "plant_observed": null
+      "plant": "emit target_paths_applied only when true (conditional spread), or record it as true unconditionally"
     },
     {
       "invariant_id": "RECORD-3",
@@ -359,8 +319,7 @@
       "test_file": "tests/the_chair_records_its_resolved_grants.test.ts",
       "kind": "behavioural",
       "drives": "runGig — src/runtime.ts (the deps.invoke ctx)",
-      "plant": "omit `layout` from the ctx runGig passes to deps.invoke",
-      "plant_observed": null
+      "plant": "omit `layout` from the ctx runGig passes to deps.invoke"
     },
     {
       "invariant_id": "DOOR-DISPATCH",
@@ -368,12 +327,193 @@
       "test_file": "tests/the_chair_records_its_resolved_grants.test.ts",
       "kind": "behavioural",
       "drives": "bootstrapServerDeps + dispatchTool(\"gig_dispatch\") — src/server.ts",
-      "plant": "omit `layout` from the assembleRunDeps call in server.ts's dispatch door (or never load it onto ServerDeps in bootstrapServerDeps)",
-      "plant_observed": null
+      "plant": "omit `layout` from the assembleRunDeps call in server.ts's dispatch door (or never load it onto ServerDeps in bootstrapServerDeps)"
+    },
+    {
+      "invariant_id": "WIRE-COMPLETIONS-0",
+      "test_name": "the completions invoker grants through resolveSeatGrants — and fails closed on a scoped write > control — a chair holding no scoped write still runs under a layout and target_paths, offered its MCP tools",
+      "test_file": "tests/both_invokers_grant_through_the_layout.test.ts",
+      "kind": "behavioural",
+      "drives": "makeCompletionsInvoker(...)(ctx) — src/completions_invoker.ts",
+      "plant": "refuse every chair that has a layout or target_paths on its ctx — a control, green today"
+    },
+    {
+      "invariant_id": "WIRE-COMPLETIONS-1",
+      "test_name": "the completions invoker grants through resolveSeatGrants — and fails closed on a scoped write > a target_paths set the source glob never covers: Write(@source) resolves to nothing — the chair runs, and is NOT offered Write",
+      "test_file": "tests/both_invokers_grant_through_the_layout.test.ts",
+      "kind": "behavioural",
+      "drives": "makeCompletionsInvoker(...)(ctx) — src/completions_invoker.ts (chairGrants → allow → the request's tools)",
+      "plant": "compute chairGrants from ctx.agent.allowed_tools (or venueEffectiveTools(ctx.agent, venue)) instead of resolveSeatGrants(...).grants"
+    },
+    {
+      "invariant_id": "COMPLETIONS-FAIL-CLOSED-1",
+      "test_name": "the completions invoker grants through resolveSeatGrants — and fails closed on a scoped write > an EXPANDED scoped write (Write(@source) → Write(src/a.ts)) refuses the chair naming the grant, before any model call",
+      "test_file": "tests/both_invokers_grant_through_the_layout.test.ts",
+      "kind": "behavioural",
+      "drives": "makeCompletionsInvoker(...)(ctx) — src/completions_invoker.ts",
+      "plant": "remove the scoped-Write/Edit refusal from the completions invoker (mapGrant strips the scope and offers bare Write)"
+    },
+    {
+      "invariant_id": "COMPLETIONS-FAIL-CLOSED-2",
+      "test_name": "the completions invoker grants through resolveSeatGrants — and fails closed on a scoped write > a LITERAL scoped write (Edit(src/**)) refuses the chair naming the grant, before any model call",
+      "test_file": "tests/both_invokers_grant_through_the_layout.test.ts",
+      "kind": "behavioural",
+      "drives": "makeCompletionsInvoker(...)(ctx) — src/completions_invoker.ts",
+      "plant": "apply the scoped-write refusal only to grants expanded from role tokens, not literals"
+    },
+    {
+      "invariant_id": "WIRE-COMPLETIONS-2",
+      "test_name": "the completions invoker grants through resolveSeatGrants — and fails closed on a scoped write > a role the layout does not declare is refused naming it, before any model call",
+      "test_file": "tests/both_invokers_grant_through_the_layout.test.ts",
+      "kind": "behavioural",
+      "drives": "makeCompletionsInvoker(...)(ctx) — src/completions_invoker.ts",
+      "plant": "ignore resolveSeatGrants(...).refusals in the completions invoker"
+    },
+    {
+      "invariant_id": "NO-SELF-WIDENING-1",
+      "test_name": "no self-widening — the layout file is never writable by a seat > a source of ** : the resolver denies Write and Edit of the layout file beside the grant",
+      "test_file": "tests/a_seat_cannot_rewrite_its_own_layout.test.ts",
+      "kind": "behavioural",
+      "drives": "resolveSeatGrants — src/layout_grants.ts",
+      "plant": "remove the layout-file exclusion (return denials: [])"
+    },
+    {
+      "invariant_id": "NO-SELF-WIDENING-2",
+      "test_name": "no self-widening — the layout file is never writable by a seat > a BARE Write literal reaches every file — the layout file is denied for it too",
+      "test_file": "tests/a_seat_cannot_rewrite_its_own_layout.test.ts",
+      "kind": "behavioural",
+      "drives": "resolveSeatGrants — src/layout_grants.ts",
+      "plant": "add the layout-file denial only for globbed grants, not a bare Write/Edit"
+    },
+    {
+      "invariant_id": "NO-SELF-WIDENING-3",
+      "test_name": "no self-widening — the layout file is never writable by a seat > a change whose target_paths NAME the layout file does not get a grant for it",
+      "test_file": "tests/a_seat_cannot_rewrite_its_own_layout.test.ts",
+      "kind": "behavioural",
+      "drives": "resolveSeatGrants — src/layout_grants.ts",
+      "plant": "keep Write(<target>) in the target step when the target is coltrane.layout.json"
+    },
+    {
+      "invariant_id": "NO-SELF-WIDENING-4",
+      "test_name": "no self-widening — the layout file is never writable by a seat > the spawn: --disallowedTools carries the layout-file denials beside Write(**), and --allowedTools holds no exact grant that would cancel them",
+      "test_file": "tests/a_seat_cannot_rewrite_its_own_layout.test.ts",
+      "kind": "behavioural",
+      "drives": "makeClaudeInvoker(...)(ctx) → --allowedTools/--disallowedTools via the run seam — src/claude_invoker.ts",
+      "plant": "leave resolveSeatGrants(...).denials out of the --disallowedTools union"
+    },
+    {
+      "invariant_id": "NO-SELF-WIDENING-5",
+      "test_name": "no self-widening — the layout file is never writable by a seat > the spawn, targeted at the layout file: still denied, still no exact grant",
+      "test_file": "tests/a_seat_cannot_rewrite_its_own_layout.test.ts",
+      "kind": "behavioural",
+      "drives": "makeClaudeInvoker(...)(ctx) → --allowedTools/--disallowedTools via the run seam — src/claude_invoker.ts",
+      "plant": "pass the exact grant Write(coltrane.layout.json) through to --allowedTools (the NO OVER-DENIAL filter then drops the deny)"
+    },
+    {
+      "invariant_id": "EDGE-EMPTY-TARGETS",
+      "test_name": "target_paths: [] — present but empty > grants no Write and no Edit, keeps Read and the laws command, and records target_paths_applied: true",
+      "test_file": "tests/an_empty_or_globbed_scope_fails_closed.test.ts",
+      "kind": "behavioural",
+      "drives": "resolveSeatGrants — src/layout_grants.ts",
+      "plant": "treat target_paths.length === 0 as absent (skip the target step)"
+    },
+    {
+      "invariant_id": "EDGE-EMPTY-ROLE-1",
+      "test_name": "a layout role declared as an empty list > LayoutSchema refuses an empty path role and an empty command role (min 1)",
+      "test_file": "tests/an_empty_or_globbed_scope_fails_closed.test.ts",
+      "kind": "behavioural",
+      "drives": "LayoutSchema.safeParse — src/genome_schema.ts",
+      "plant": "drop .min(1) from LayoutSchema's role lists"
+    },
+    {
+      "invariant_id": "EDGE-EMPTY-ROLE-2",
+      "test_name": "a layout role declared as an empty list > the loader turns it into a load_error and carries no layout",
+      "test_file": "tests/an_empty_or_globbed_scope_fails_closed.test.ts",
+      "kind": "behavioural",
+      "drives": "loadGenome — src/loader.ts",
+      "plant": "same plant: drop .min(1) from the role lists"
+    },
+    {
+      "invariant_id": "EDGE-GLOB-TARGET-0",
+      "test_name": "a target_paths entry with glob metacharacters refuses the chair at dispatch > control — plain paths dispatch",
+      "test_file": "tests/an_empty_or_globbed_scope_fails_closed.test.ts",
+      "kind": "behavioural",
+      "drives": "runGig — src/runtime.ts",
+      "plant": "refuse any target_paths entry containing '/' or '.' — a control, green today"
+    },
+    {
+      "invariant_id": "EDGE-GLOB-TARGET",
+      "test_name": "a target_paths entry with glob metacharacters refuses the chair at dispatch > \"src/*.ts\" is refused, by name, before any seat is invoked",
+      "test_file": "tests/an_empty_or_globbed_scope_fails_closed.test.ts",
+      "kind": "behavioural",
+      "drives": "runGig — src/runtime.ts",
+      "plant": "skip the glob-metacharacter check on gig_input.target_paths (or check only '*')"
+    },
+    {
+      "invariant_id": "EDGE-GLOB-TARGET",
+      "test_name": "a target_paths entry with glob metacharacters refuses the chair at dispatch > \"src/a?.ts\" is refused, by name, before any seat is invoked",
+      "test_file": "tests/an_empty_or_globbed_scope_fails_closed.test.ts",
+      "kind": "behavioural",
+      "drives": "runGig — src/runtime.ts",
+      "plant": "skip the glob-metacharacter check on gig_input.target_paths (or check only '*')"
+    },
+    {
+      "invariant_id": "EDGE-GLOB-TARGET",
+      "test_name": "a target_paths entry with glob metacharacters refuses the chair at dispatch > \"src/[ab].ts\" is refused, by name, before any seat is invoked",
+      "test_file": "tests/an_empty_or_globbed_scope_fails_closed.test.ts",
+      "kind": "behavioural",
+      "drives": "runGig — src/runtime.ts",
+      "plant": "skip the glob-metacharacter check on gig_input.target_paths (or check only '*')"
+    },
+    {
+      "invariant_id": "EDGE-GLOB-TARGET",
+      "test_name": "a target_paths entry with glob metacharacters refuses the chair at dispatch > \"src/{a,b}.ts\" is refused, by name, before any seat is invoked",
+      "test_file": "tests/an_empty_or_globbed_scope_fails_closed.test.ts",
+      "kind": "behavioural",
+      "drives": "runGig — src/runtime.ts",
+      "plant": "skip the glob-metacharacter check on gig_input.target_paths (or check only '*')"
+    },
+    {
+      "invariant_id": "DRAIN-LAYOUT-A",
+      "test_name": "the GenomeStore port carries layouts > (a) the FILES backing exposes the tree's coltrane.layout.json as that tree's layout",
+      "test_file": "tests/the_drain_takes_its_layout_from_the_store.test.ts",
+      "kind": "behavioural",
+      "drives": "fileGenomeStore(root).load — src/genome_store.ts",
+      "plant": "never read coltrane.layout.json on the files backing's load path"
+    },
+    {
+      "invariant_id": "DRAIN-LAYOUT-ROWS",
+      "test_name": "the GenomeStore port carries layouts > the shared reconstruction carries one layout per repository, validated",
+      "test_file": "tests/the_drain_takes_its_layout_from_the_store.test.ts",
+      "kind": "behavioural",
+      "drives": "reconstructGenome — src/genome_store.ts",
+      "plant": "drop rows.layouts in reconstructGenome"
+    },
+    {
+      "invariant_id": "DRAIN-LAYOUT-ROWS-BAD",
+      "test_name": "the GenomeStore port carries layouts > a layout row LayoutSchema refuses is a load_error and is absent from the map",
+      "test_file": "tests/the_drain_takes_its_layout_from_the_store.test.ts",
+      "kind": "behavioural",
+      "drives": "reconstructGenome — src/genome_store.ts",
+      "plant": "admit a layout row without LayoutSchema validation"
+    },
+    {
+      "invariant_id": "DRAIN-LAYOUT-B-C",
+      "test_name": "the drain seats its chairs under the STORE's layout for the gig's repository > (b)+(c) the chair's ctx.layout is the store row for the gig's repository — not the WIDER file committed in the clone",
+      "test_file": "tests/the_drain_takes_its_layout_from_the_store.test.ts",
+      "kind": "behavioural",
+      "drives": "workOnce — src/worker.ts (→ assembleRunDeps → runGig ctx.layout)",
+      "plant": "take the drain's layout from resolveGenome(workspace.dir).layout (the clone's file)"
+    },
+    {
+      "invariant_id": "DRAIN-LAYOUT-C",
+      "test_name": "the drain seats its chairs under the STORE's layout for the gig's repository > (c) no store row for the repository → the chair has NO layout, whatever the clone's file says",
+      "test_file": "tests/the_drain_takes_its_layout_from_the_store.test.ts",
+      "kind": "behavioural",
+      "drives": "workOnce — src/worker.ts",
+      "plant": "fall back to the clone's coltrane.layout.json when the store has no row for the repository — a guard, green today"
     }
   ],
   "testing_method": "vitest, example-based laws plus fast-check properties (RED-DEF-15: expansion draws only on declared tokens + the layout; the target and venue steps never add). Every law drives the production symbol named in `drives`; symbols that do not exist yet are reached through a runtime import (tests/layout_grants_fixtures.ts) so the shared tsc gate stays green and each law fails where it asserts. The invokers are observed through the seams the suite already uses: the Claude invoker's injected `run` (the exact argv), and the completions invoker's model request body and typed refusals. The chair record is observed on chair_complete through RunDeps.onProgress; the dispatch door by bootstrapServerDeps over a genome tree on disk with the invoke seam replaced. The resolver-level plants were rehearsed by the drafter against a throwaway reference resolver that was deleted before commit; plant_observed is left null for the implementer's grader, as production does not exist yet.",
-  "uncovered": [
-    "DRAIN DOOR (src/worker.ts): the drain loads its genome from the org store, not a tree, so 'the genome instance the gig runs against' has no coltrane.layout.json to read; the layout presumably comes from the working clone (tree_root). The handoff does not decide this, so no law pins it. Until decided, a drained gig whose agents hold role tokens fails closed at every chair."
-  ]
+  "uncovered": []
 }

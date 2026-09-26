@@ -281,7 +281,11 @@ export type WorkOnceResult =
        *  `abandoned` is the store saying this gig is NOT this worker's to run — its lease was lost,
        *  or the store refused the 'running' header (the row is finished, or someone else holds it).
        *  The worker stopped and wrote nothing terminal; `error` says which. */
-      status: "complete" | "failed" | "awaiting_approval" | "abandoned";
+      status: "complete" | "failed" | "awaiting_approval" | "abandoned" | "aborted";
+      /** Present iff `aborted`: why the run was stopped. `timeout` = the drain's run deadline
+       *  (drainTimeoutMs) fired. A deadline is how long the work was allowed to take, not a defect in
+       *  it, so the gig ends aborted (header `aborted`), never failed through gig_fail. */
+      aborted?: { reason: "timeout" };
       /**
        * Did the store ACKNOWLEDGE this run's terminal state? For a completion: every output row landed
        * and then the 'completed' header did. For a failure: the failed header, the failGig RPC or a
@@ -1014,6 +1018,14 @@ export function approvalWiring(
   };
 }
 
+/** The drain's own run deadline, as the abort reason — so the run ends `aborted`/timeout. */
+class DrainDeadline extends Error {
+  constructor(readonly ms: number) {
+    super(`timeout: the drain's run deadline (${ms} ms) passed before the gig finished`);
+    this.name = "DrainDeadline";
+  }
+}
+
 /** 23514: the row is terminal (the store's terminal guard). 403 / 42501: the lease is not ours. */
 function isNotOursRefusal(e: DrainWriteError): boolean {
   return e.code === "23514" || e.code === "42501" || e.status === 403 || e.status === 409;
@@ -1194,7 +1206,8 @@ export async function workOnce(ctx: WorkerContext, deps: WorkOnceDeps): Promise<
     // cwd is a freshly cloned repository, so honouring a `.mcp.json` there would let a repo declare
     // servers for the seat reading it. Present enables resolution; empty makes any grant naming a
     // server other than the engine's own fail closed.
-    deadline = setTimeout(() => aborter.abort(), drainTimeoutMs());
+    const timeoutMs = drainTimeoutMs();
+    deadline = setTimeout(() => aborter.abort(new DrainDeadline(timeoutMs)), timeoutMs);
     // unref so a finished gig exits promptly instead of waiting out its own timeout.
     if (typeof deadline === "object" && "unref" in deadline) deadline.unref();
 
@@ -1381,11 +1394,24 @@ export async function workOnce(ctx: WorkerContext, deps: WorkOnceDeps): Promise<
       log(`gig ${claim.gig_id} abandoned: ${lost.message}`);
       return { claimed: true, gig_id: claim.gig_id, status: "abandoned", error: lost.message, acknowledged: false };
     }
+    // THE DEADLINE ENDS A GIG ABORTED. runGig already wrote the `aborted` header (awaited, retried);
+    // gig_fail would be a second, contradictory terminal write, which the store's guard refuses.
+    if (aborter.signal.aborted && aborter.signal.reason instanceof DrainDeadline) {
+      const error = aborter.signal.reason.message;
+      const acknowledged = terminalAcknowledged();
+      log(`gig ${claim.gig_id} aborted: ${error}${acknowledged ? "" : " — and the store did NOT acknowledge the aborted header"}`);
+      return { claimed: true, gig_id: claim.gig_id, status: "aborted", aborted: { reason: "timeout" }, error, acknowledged };
+    }
     const message = e instanceof Error ? e.message : String(e);
     log(`gig ${claim.gig_id} failed: ${message}`);
-    let recorded = terminalAcknowledged() && terminal !== undefined;
+    // `acknowledged` answers for the TERMINAL HEADER when runGig owed one. When the failure came
+    // before any header was owed (the genome, the venue guard), the store learns it through gig_fail
+    // or the terminal release, and that is what answers.
+    const headerOwed = terminal !== undefined && terminal.owed;
+    let recorded = headerOwed ? terminal!.acknowledged : false;
+    const headerless = !headerOwed;
     try {
-      if (await failGig(ctx, claim.gig_id, message)) recorded = true;
+      if ((await failGig(ctx, claim.gig_id, message)) && headerless) recorded = true;
     } catch (fe) {
       // The failure could not be recorded through the per-gig credential. Fall back to a TERMINAL
       // release through the venue credential, carrying the run's error — holding the row instead would
@@ -1394,7 +1420,7 @@ export async function workOnce(ctx: WorkerContext, deps: WorkOnceDeps): Promise<
       if (leaseCred) {
         const rel = await releaseLease(claim.gig_id, message, true, leaseCred);
         if (rel.ok) {
-          recorded = true;
+          if (headerless) recorded = true;
           log(`could not record failure through failGig (${why}); released ${claim.gig_id} terminally instead`);
         } else {
           log(`could not record failure (${why}), and the terminal release was refused too (${rel.detail}) — the row is held until its lease lapses`);

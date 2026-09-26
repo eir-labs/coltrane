@@ -373,7 +373,7 @@ export async function runCli(argv: readonly string[], io: CliIO): Promise<number
     // `=== false`, not falsy: the field is required on every result workOnce builds, and a stand-in
     // workOnce (the laws that pin this door's wiring) that predates it is not a report of a loss.
     const unacknowledged = res.acknowledged === false;
-    const code = res.status === "failed" || unacknowledged ? 1 : 0;
+    const code = res.status === "failed" || res.status === "aborted" || unacknowledged ? 1 : 0;
     if (unacknowledged) line(io, `the store did NOT acknowledge this gig's ${res.status} state`);
     if (emitJson(io, json, res)) return code;
     io.out(res.gig_id + "\n");

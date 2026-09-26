@@ -93,10 +93,22 @@ account", in US dollars.
   OpenRouter, or a response without `usage.cost`.
 - **A round with neither is unpriced, never $0.** The chair's sealed record carries no `cost_usd`, and
   the gig's `usage.unpriced_invocations` counts the invocations that could not be priced.
-  `total_cost_usd` is then a lower bound.
+  `total_cost_usd` is then a lower bound. The same count appears on each chair's `chair_spend` row, and
+  the `coltrane dispatch` summary prints `unpriced (N invocation(s) with no known price; $x.xx
+  priced)` instead of a bare total.
+- **A reported 0 is a known price.** A `:free` model's `cost: 0` settles at $0 and is not counted as
+  unpriced, even when a price table lists that model at a non-zero rate.
+- **A negative reported cost is ignored, not treated as a credit.** The round falls back to the
+  price table; if there is no table entry either, the round is unpriced.
 - Cache reads (`prompt_tokens_details.cached_tokens`) and cache writes
   (`prompt_tokens_details.cache_write_tokens`) are settled as their own token classes. The full prompt
-  still settles as the gig's `input_tokens`.
+  still settles as the gig's `input_tokens`. A class that reports 0 tokens needs no rate in the price
+  table.
+- **Cache reads plus cache writes must not exceed `prompt_tokens`.** The engine treats both as parts
+  of `prompt_tokens`. OpenRouter's documented example implies this, but it has not been confirmed
+  live. If a response breaks this rule, the port refuses the round (`transport_failed`) and names
+  `prompt_tokens`, `cached_tokens` and `cache_write_tokens` with their values. It does not clamp the
+  uncached input to 0.
 
 ### The price file
 

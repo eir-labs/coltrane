@@ -35,6 +35,7 @@ import { fileURLToPath } from "node:url";
 import { bootstrapServerDeps, dispatchTool, type ServerDeps } from "../src/server.js";
 import { makeChatCompletionsPort } from "../src/chat_completions_port.js";
 import { selectChairInvoker, amendLadderFromEnv } from "../src/invoker_selection.js";
+import { runCli, type CliIO } from "../src/cli.js";
 import { TEST_BEHAVIOR } from "./_support/agents.js";
 
 const REPO_ROOT = fileURLToPath(new URL("..", import.meta.url));
@@ -52,7 +53,7 @@ interface OrFixture {
   response: { model: string; usage: OrUsage; choices: unknown[] };
 }
 const OR: OrFixture = JSON.parse(readFileSync(join(FIXTURES, "openrouter_chat_completion.json"), "utf8"));
-const DS = JSON.parse(readFileSync(join(FIXTURES, "deepseek_usage.json"), "utf8")) as { usage: Record<string, number> };
+const DS = JSON.parse(readFileSync(join(FIXTURES, "deepseek_usage.json"), "utf8")) as { usage: Record<string, number>; usage_discriminating: Record<string, number> };
 
 /** What the engine must read out of the OpenRouter fixture — computed from the fixture's own counts, so
  *  the live smoke's recorded response can replace it without editing this file. */
@@ -243,17 +244,24 @@ describe("OpenRouter as a reference provider — the one-line flip", () => {
     expect(r.usage, "OpenRouter's cache split was not read into the engine's usage classes").toMatchObject(expectedOrSplit(u));
   });
 
-  it("L2b — the port maps DeepSeek's prompt_cache_hit_tokens / prompt_cache_miss_tokens", async () => {
-    // Holds at origin/main (the every-door law 7 shape); the plant drops the hit/miss branch.
-    const fetchFn = (async () => ({
-      ok: true, status: 200, text: async () => "",
-      json: async () => ({ choices: [{ message: { role: "assistant", content: "hi" }, finish_reason: "stop" }], model: "deepseek/deepseek-v4.1-flash", usage: DS.usage }),
-    })) as unknown as typeof fetch;
-    const port = makeChatCompletionsPort({ baseUrl: URL_BASE, apiKey: "k", fetchFn });
-    const r = await port({ model: "m", messages: [{ role: "user", content: "x" }], tools: [], signal: new AbortController().signal });
-    expect(r.usage, "DeepSeek's cache hits were priced as uncached input").toMatchObject({
-      input_tokens: DS.usage["prompt_cache_miss_tokens"], cache_read_tokens: DS.usage["prompt_cache_hit_tokens"], output_tokens: DS.usage["completion_tokens"],
+  it("L2b — the port maps DeepSeek's prompt_cache_hit_tokens / prompt_cache_miss_tokens, EACH from its own field", async () => {
+    // Holds at origin/main (the every-door law 7 shape). Round 2: the documented shape has prompt = hit + miss,
+    // so dropping ONLY the miss branch (input = prompt - hit) gave the same number and survived. The
+    // discriminating usage breaks that equality on purpose (see the fixture's provenance), so each branch
+    // is read from its own field or the law goes red.
+    const portFor = (usage: Record<string, number>) => makeChatCompletionsPort({
+      baseUrl: URL_BASE, apiKey: "k",
+      fetchFn: (async () => ({
+        ok: true, status: 200, text: async () => "",
+        json: async () => ({ choices: [{ message: { role: "assistant", content: "hi" }, finish_reason: "stop" }], model: "deepseek/deepseek-v4.1-flash", usage }),
+      })) as unknown as typeof fetch,
     });
+    for (const [label, usage] of [["documented shape", DS.usage], ["discriminating shape (prompt != hit + miss)", DS.usage_discriminating]] as const) {
+      const r = await portFor(usage)({ model: "m", messages: [{ role: "user", content: "x" }], tools: [], signal: new AbortController().signal });
+      expect(r.usage, `${label}: the input is not the reported MISS count, or the cache reads are not the reported HIT count`).toMatchObject({
+        input_tokens: usage["prompt_cache_miss_tokens"], cache_read_tokens: usage["prompt_cache_hit_tokens"], output_tokens: usage["completion_tokens"],
+      });
+    }
   });
 
   it("L2c — OpenRouter's reported usage.cost SETTLES the gig with no price table; the full prompt settles as input", async () => {
@@ -316,6 +324,121 @@ describe("OpenRouter as a reference provider — the one-line flip", () => {
     for (const r of records) {
       expect(r.cost_usd, `sealed record ${r.id} claims cost_usd=${String(r.cost_usd)} for a chair no price was known for`).toBeUndefined();
     }
+  });
+
+  // ── ROUND 2 (on 02c591f) — survivors the implementer's plants left standing ─────────────────────
+
+  /** A dispatch whose one chair is served `served` with `usage` on every round, under `prices` (or none). */
+  async function settle(served: string, usage: () => OrUsage, prices?: Record<string, unknown>) {
+    const { fn, sent } = openrouter(served, usage);
+    vi.stubGlobal("fetch", fn);
+    const vars: Partial<Record<(typeof ENV_KEYS)[number], string>> = { COLTRANE_COMPLETIONS_URL: URL_BASE, COLTRANE_COMPLETIONS_KEY: "k", COLTRANE_TIER_STANDARD: served };
+    if (prices) {
+      const f = join(root, "prices.json");
+      writeFileSync(f, JSON.stringify(prices));
+      vars.COLTRANE_PRICES_FILE = f;
+    }
+    env(vars);
+    const deps = bootstrapServerDeps(root);
+    const res = await dispatch(deps, "one-seat");
+    expect(res.ok, res.error ?? "").toBe(true);
+    return { deps, res, sent, usage: manifestOf(res)?.usage, records: deps.outputs.all().filter((o) => o.gig_id === gigIdOf(res)) };
+  }
+  const withCost = (cost: number | undefined) => (): OrUsage => {
+    const u = structuredClone(OR.response.usage);
+    if (cost === undefined) delete u.cost; else u.cost = cost;
+    return u;
+  };
+
+  it("L2g — a REPORTED 0 is a known price: a :free model settles at $0 and is NOT unpriced, even over a price table", async () => {
+    // Priced at a non-zero rate in the table, so a 0 treated as "missing" would fall through to the
+    // table (a positive total) — and with no table it would be unpriced. Both are red.
+    const free = "qwen/qwen3.8-27b:free";
+    for (const prices of [undefined, { [free]: { input: 0.42, output: 3, cache_read: 0.085, cache_write: 0.5 } }]) {
+      const { usage, records } = await settle(free, withCost(0), prices);
+      const where = prices ? "with a price table" : "with no price table";
+      expect(usage?.unpriced_invocations ?? 0, `${where}: a reported cost of 0 was treated as no cost (unpriced)`).toBe(0);
+      expect(usage?.total_cost_usd, `${where}: a reported cost of 0 did not settle as $0`).toBe(0);
+      expect(records.length).toBeGreaterThan(0);
+      expect(records[0]!.cost_usd, `${where}: the free chair's record does not carry its known $0`).toBe(0);
+    }
+  });
+
+  it("L2h — a NEGATIVE reported cost is never a credit: it is not a cost, so with no price table the round is unpriced", async () => {
+    // DECISION (red-spec): a reported cost that is negative or non-finite is DISREGARDED as a cost — the
+    // round falls to the price table, and with none it is unpriced. It is never settled, never subtracted.
+    const { usage, records } = await settle(OR.response.model, withCost(-0.5));
+    expect(usage?.total_cost_usd ?? 0, "a negative reported cost was settled as a credit").toBeGreaterThanOrEqual(0);
+    expect(usage?.unpriced_invocations, "a negative reported cost was accepted as a known price").toBe(1);
+    for (const r of records) expect(r.cost_usd, "a record carries a cost derived from a negative report").toBeUndefined();
+  });
+
+  it("L2i — a token class reporting 0 needs no rate: cache_write_tokens 0 on a model with no cache_write price is still priced", async () => {
+    const zeroWrites = (): OrUsage => {
+      const u = withCost(undefined)();
+      u.prompt_tokens_details = { ...u.prompt_tokens_details, cache_write_tokens: 0 };
+      return u;
+    };
+    const rate = { input: 0.3, output: 1.2, cache_read: 0.006 }; // deepseek-style: no cache_write rate
+    const { usage, sent } = await settle(OR.response.model, zeroWrites, { [OR.response.model]: rate });
+    expect(usage?.unpriced_invocations ?? 0, "a zero-token class with no rate left the round unpriced").toBe(0);
+    const u = OR.response.usage;
+    const read = u.prompt_tokens_details?.cached_tokens ?? 0;
+    const perRound = ((u.prompt_tokens - read) * rate.input + read * rate.cache_read + u.completion_tokens * rate.output) / 1_000_000;
+    expect(usage?.total_cost_usd).toBeCloseTo(sent.length * perRound, 12);
+  });
+
+  it("L2j — the per-chair chair_spend row carries the unpriced count, not a bare $0", async () => {
+    const { deps, res } = await settle(`${OR.response.model}-0901`, withCost(undefined), { [OR.response.model]: { input: 0.15, output: 0.47 } });
+    const rows = deps.ledger.query({ gig_id: gigIdOf(res) }).filter((e) => e.kind === "chair_spend") as Array<{ captured?: boolean; usage?: { unpriced_invocations?: number; total_cost_usd?: number } }>;
+    expect(rows.length, "no chair_spend row was written for the chair").toBeGreaterThan(0);
+    const unpriced = rows.reduce((n, r) => n + (r.usage?.unpriced_invocations ?? 0), 0);
+    expect(unpriced, `the chair_spend row(s) settled total_cost_usd=${rows.map((r) => String(r.usage?.total_cost_usd)).join(",")} with nothing marking them unpriced`).toBe(1);
+  });
+
+  it("L2k — NEGATIVE-INPUT GUARD: cache reads + writes exceeding prompt_tokens is REFUSED loudly, naming the fields; input never goes negative", async () => {
+    // DECISION (red-spec): refuse, never clamp. If OpenRouter counts cache writes OUTSIDE prompt_tokens,
+    // the subset reading is wrong and every number derived from it is wrong; a clamped 0 would hide
+    // exactly the fact the live smoke exists to find. The port throws, which the loop types as
+    // transport_failed, and the message names the three fields and their values.
+    const portWith = (usage: OrUsage) => makeChatCompletionsPort({
+      baseUrl: URL_BASE, apiKey: "k",
+      fetchFn: (async () => ({ ok: true, status: 200, text: async () => "", json: async () => ({ ...OR.response, usage }) })) as unknown as typeof fetch,
+    });
+    const req = { model: OR.response.model, messages: [{ role: "user" as const, content: "x" }], tools: [], signal: new AbortController().signal };
+    const over: OrUsage = { prompt_tokens: 100, completion_tokens: 5, prompt_tokens_details: { cached_tokens: 80, cache_write_tokens: 50 } };
+    let reply: unknown;
+    let error: unknown;
+    try { reply = await portWith(over)(req); } catch (e) { error = e; }
+    const input = (reply as { usage?: { input_tokens?: number } } | undefined)?.usage?.input_tokens;
+    expect(error, `reads 80 + writes 50 > prompt 100 was mapped (input_tokens=${String(input)}) instead of refused`).toBeInstanceOf(Error);
+    const msg = String((error as Error).message);
+    for (const field of ["prompt_tokens", "cached_tokens", "cache_write_tokens"]) {
+      expect(msg, `the refusal does not name ${field}`).toContain(field);
+    }
+    // Non-vacuity: reads + writes EQUAL to the prompt is consistent — mapped, with zero uncached input.
+    const exact = await portWith({ prompt_tokens: 130, completion_tokens: 5, prompt_tokens_details: { cached_tokens: 80, cache_write_tokens: 50 } })(req);
+    expect(exact.usage).toMatchObject({ input_tokens: 0, cache_read_tokens: 80, cache_write_tokens: 50 });
+  });
+
+  it("L2l — the CLI dispatch summary says \"unpriced (N …)\" whenever an invocation is unpriced, never a bare total", async () => {
+    const { fn } = openrouter(`${OR.response.model}-0901`, withCost(undefined));
+    vi.stubGlobal("fetch", fn);
+    env({ COLTRANE_COMPLETIONS_URL: URL_BASE, COLTRANE_COMPLETIONS_KEY: "k", COLTRANE_TIER_STANDARD: OR.response.model });
+    const errBuf: string[] = [];
+    const io: CliIO = { out: () => {}, err: (s: string) => { errBuf.push(s); }, deps: bootstrapServerDeps(root) };
+    process.env["PATH"] = dirname(process.execPath);
+    let code: number;
+    try {
+      code = await runCli(["dispatch", "one-seat", "--wait", "--input", JSON.stringify({ topic: "t" })], io);
+    } finally {
+      process.env["PATH"] = savedPath;
+    }
+    const out = errBuf.join("");
+    expect(code, out).toBe(0);
+    const complete = out.split("\n").find((l) => l.startsWith("complete")) ?? "";
+    expect(complete, "the dispatch printed no completion summary").not.toBe("");
+    expect(complete, `the summary over an unpriced run does not say unpriced: ${complete}`).toMatch(/unpriced \(1 /);
   });
 
   // ── LAW 3 — THE PROVIDER DOC NAMES WHAT THE DOOR READS ─────────────────────────────────────────

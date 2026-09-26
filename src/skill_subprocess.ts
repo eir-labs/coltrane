@@ -105,7 +105,7 @@ function nodeMajor(): number {
  * runtime with no permission model means running it UNSANDBOXED, and silently doing that would
  * invert the guarantee this module exists to provide.
  */
-export const MIN_NODE_FOR_SANDBOX = 22;
+export const MIN_NODE_FOR_SANDBOX = 24; // the floor (26 Sep 2026): --permission is 22+, but a network grant needs --allow-net, 24+
 
 /** `--allow-net` arrived in Node 24. Below it there is no network gate at all: `--permission` has
  *  no network flag, so a skill reaches out whatever its grant says. The loader refuses to admit a

@@ -1,7 +1,7 @@
 {
   "name": "@eir-labs/coltrane",
   "version": "0.12.0",
-  "description": "A methodology engine \u2014 a typed substrate for defining agents, composing multi-phase standards, dispatching gigs, and sealing every output to a content-addressed ledger. Ships as an MCP server.",
+  "description": "A methodology engine — a typed substrate for defining agents, composing multi-phase standards, dispatching gigs, and sealing every output to a content-addressed ledger. Ships as an MCP server.",
   "type": "module",
   "license": "Apache-2.0",
   "author": "Eir",
@@ -22,7 +22,7 @@
     "workflow-engine"
   ],
   "engines": {
-    "node": ">=22"
+    "node": ">=24"
   },
   "bin": {
     "coltrane": "./dist/src/cli_entry.js",
@@ -78,12 +78,14 @@
     "evals",
     "README.md",
     "LICENSE",
-    "releases.json"
+    "releases.json",
+    "scripts/node_floor.cjs"
   ],
   "publishConfig": {
     "access": "public"
   },
   "scripts": {
+    "preinstall": "node scripts/node_floor.cjs",
     "build": "tsc && cp src/skill_runner.mjs dist/src/ && chmod +x dist/src/server_entry.js dist/src/server_relay.js dist/src/cli_entry.js && node scripts/emit_releases.mjs --allow-unavailable",
     "dev": "tsc --watch",
     "prepare": "npm run build",

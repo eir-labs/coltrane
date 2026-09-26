@@ -14,6 +14,8 @@
 //                                                                                                        matched against the glob)
 //   …not even after normalising                   behavioural  same                                      normalise `..` and grant the result
 //                                                                                                        (today's behaviour)
+//   `~/x`, `~user/x` (the CLI reads `~` as     behavioural  resolveSeatGrants + runGig                 drop the leading-`~` refusal from escapesTree
+//   HOME) grant nothing, refused by name
 //   the chair is refused at dispatch, by entry    behavioural  runGig — src/runtime.ts                   skip the escaping-entry check in the
 //                                                                                                        target preflight
 import { describe, it, expect } from "vitest";
@@ -35,6 +37,8 @@ const ESCAPES = [
   "src\\..\\coltrane.layout.json",
   "..\\outside.ts",
   "C:\\abs\\path",
+  "~/x",
+  "~user/x",
 ];
 
 const implementer = testAgent({
@@ -79,7 +83,7 @@ describe("a target path never escapes the tree", () => {
       return { invoked, said };
     }
 
-    for (const bad of ["src/../coltrane.layout.json", "/abs/path", "src\\..\\x.ts"]) {
+    for (const bad of ["src/../coltrane.layout.json", "/abs/path", "src\\..\\x.ts", "~/x", "~user/x"]) {
       it(`"${bad}" refuses the chair before any seat is invoked`, async () => {
         const { invoked, said } = await dispatch(["src/ok.ts", bad]);
         expect(invoked, `an escaping target (${bad}) reached a seat`).toBe(0);

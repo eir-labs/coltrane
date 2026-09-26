@@ -29,7 +29,10 @@ cd "$(dirname "$0")/.."
 # stopped being true at Node 24), and two pure flag-string laws replaced it in this band. The nine
 # laws that need a real request moved to tests/security — a band may reach out, the root suite may
 # not — so they are counted there, by file, not here.
-EXPECTED_LAWS="${EXPECTED_LAWS:-4245}"
+EXPECTED_LAWS="${EXPECTED_LAWS:-4248}"
+#  +3 genome_writes_stay_in_root, charter_read (conductor's decision on #559): a charter is read only from
+#      inside the genome root — a control, the hostile paths refused by name with nothing returned, and no
+#      genome root means refused.
 #  +37 genome_writes_stay_in_root (new file, RED at e6c89ff): no path the engine derives leaves its root —
 #      founder ruling "SLUGS ARE NOT IDENTIFIERS". 12 controls (a normal slug still writes inside the root) and
 #      25 red laws: six local genome-writing doors, agent_evolve's traversal read, the history snapshot, the

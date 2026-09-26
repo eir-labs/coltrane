@@ -88,6 +88,13 @@ export const EXTERNAL_SUBSTRATE: Record<string, string> = {
   // discipline + a real grant on it, exactly as it does for deploy-agent, rather than the
   // agent file carrying those constraints voluntarily.
   "pr-publisher": "git + GitHub (gh CLI) — the branch it pushes and the PR it opens",
+  // The landscape seats (domain-landscape-discovery-v0). Their substrate is the open web: a
+  // landscape maps what already EXISTS, so every item must come from a page fetched in the run and
+  // carry a verbatim quote from it. Declared here so the floor enforces retrieval discipline and a
+  // real grant on each, rather than the agent files carrying those constraints voluntarily.
+  "landscape-scout": "web (standards bodies, specs, repositories, corpora)",
+  "landscape-relator": "web (the item pages a relation is claimed from)",
+  "landscape-attacker": "web (what the scouts missed)",
   // The defect-investigator (defect-investigation-v1): its substrate is the working tree and a
   // subprocess — it reproduces a failing case with Bash and reads code with Read/Glob/Grep, and
   // every location and sweep result it seals must come from a tool result in the run. Declared

@@ -1,0 +1,75 @@
+{
+  "id": "verified-only",
+  "description": "Only verified items reach the map, and findings are carried",
+  "input": {
+    "scans": [
+      {
+        "data": {
+          "layer": "x",
+          "items": [
+            {
+              "handle": "a",
+              "name": "A",
+              "layer": "x",
+              "what_it_models": "m",
+              "url": "u"
+            },
+            {
+              "handle": "b",
+              "name": "B",
+              "layer": "x",
+              "what_it_models": "m",
+              "url": "u"
+            }
+          ]
+        }
+      }
+    ],
+    "verification": {
+      "verified_handles": [
+        "a"
+      ]
+    },
+    "fit": {
+      "fits": [
+        {
+          "handle": "a",
+          "decision": "adopt",
+          "rationale": "r"
+        }
+      ],
+      "uncovered_questions": [
+        "cq-9"
+      ]
+    },
+    "attack": {
+      "findings": [
+        {
+          "kind": "missing-item",
+          "claim": "X is absent",
+          "severity": "high"
+        }
+      ]
+    },
+    "relations": {
+      "relations": []
+    }
+  },
+  "assertions": [
+    {
+      "path": "items.length",
+      "op": "equals",
+      "value": 1
+    },
+    {
+      "path": "open_findings.length",
+      "op": "equals",
+      "value": 1
+    },
+    {
+      "path": "uncovered_questions.0",
+      "op": "equals",
+      "value": "cq-9"
+    }
+  ]
+}

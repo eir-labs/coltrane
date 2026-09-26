@@ -1,0 +1,12 @@
+{
+  "slug": "landscape-gate",
+  "version": 1,
+  "skill_type": "verification",
+  "input_type": "landscape-map",
+  "output_type": "landscape-map",
+  "determinism_ratio": 1.0,
+  "permission": {
+    "tier": 0
+  },
+  "description": "The hard guard on a landscape map: only items verified by the evidence check and carrying a url plus quote survive; relations and fits touching a dropped item go with it; an unresolved blocker finding marks the map BLOCKED; an empty map is EMPTY, never READY; uncovered competency questions are always carried. The wrong map cannot be sealed."
+}

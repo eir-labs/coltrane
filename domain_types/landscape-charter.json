@@ -1,0 +1,79 @@
+{
+  "slug": "landscape-charter",
+  "version": 1,
+  "extends": "Plan",
+  "domain": "landscape",
+  "status": "active",
+  "description": "The frame for a landscape discovery: the domain, the business needs, competency questions the eventual types must answer, and one scouting step per layer. objective = what the landscape is for; steps = one per layer; budget = intended spend in dollars.",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "domain": {
+        "type": "string"
+      },
+      "needs": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "competency_questions": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "question": {
+              "type": "string"
+            },
+            "need": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "question"
+          ]
+        },
+        "minItems": 1
+      },
+      "layers": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "question": {
+              "type": "string"
+            },
+            "seed_candidates": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "id",
+            "question"
+          ]
+        },
+        "minItems": 1
+      },
+      "exclusions": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  "required_fields": [
+    "competency_questions",
+    "layers"
+  ]
+}

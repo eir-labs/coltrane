@@ -1,0 +1,12 @@
+{
+  "slug": "landscape-cartograph",
+  "version": 1,
+  "skill_type": "synthesis",
+  "input_type": "landscape-fit",
+  "output_type": "landscape-map",
+  "determinism_ratio": 1.0,
+  "permission": {
+    "tier": 0
+  },
+  "description": "Assemble the landscape map from sealed records. Deterministic: a map is a projection, so every fact in it is already sealed upstream and assembling it is layout rather than judgement. Replaces a model seat that hit the 32k output ceiling trying to emit 64 items in one response — deterministic assembly has no such ceiling. Carries every attack finding forward rather than summarising them away."
+}

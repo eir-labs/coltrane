@@ -1,0 +1,15 @@
+{
+  "id": "empty-never-passes",
+  "description": "No scans means no pass",
+  "input": {
+    "scans": [],
+    "mock_pages": {}
+  },
+  "assertions": [
+    {
+      "path": "pass",
+      "op": "equals",
+      "value": false
+    }
+  ]
+}

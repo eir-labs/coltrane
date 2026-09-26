@@ -1,0 +1,49 @@
+{
+  "id": "script-close-with-space-is-stripped",
+  "description": "Text inside a <script> block closed as </script > (space before >) is not page text: a quote found only there is refused (CodeQL: the strip regex missed that closing tag)",
+  "input": {
+    "scans": [
+      {
+        "source": "web:landscape:x",
+        "data": {
+          "layer": "x",
+          "items": [
+            {
+              "handle": "x",
+              "name": "x",
+              "kind": "standard",
+              "layer": "x",
+              "url": "https://a.org",
+              "what_it_models": "m",
+              "evidence": [
+                {
+                  "url": "https://a.org",
+                  "quote": "hidden claim only in a script",
+                  "retrieved_at": "2026-09-19"
+                }
+              ]
+            }
+          ],
+          "queries_run": [
+            "q"
+          ]
+        }
+      }
+    ],
+    "mock_pages": {
+      "https://a.org": "<p>PROV-O provides a set of classes</p><script>var q = \"hidden claim only in a script\";</script >"
+    }
+  },
+  "assertions": [
+    {
+      "path": "refused.0.handle",
+      "op": "equals",
+      "value": "x"
+    },
+    {
+      "path": "pass",
+      "op": "equals",
+      "value": false
+    }
+  ]
+}

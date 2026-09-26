@@ -1,0 +1,211 @@
+{
+  "slug": "landscape-map",
+  "version": 1,
+  "extends": "Artifact",
+  "domain": "landscape",
+  "status": "active",
+  "description": "The landscape as a layered map: verified items by layer with fit decisions, relations, open attack findings, and uncovered competency questions. content = the readable markdown map; gate = the deterministic gate's outcome (READY / BLOCKED / EMPTY). The input to type formalisation and source gathering.",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "layers": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "summary": {
+              "type": "string"
+            },
+            "recommended": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "gaps": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "items": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "type": "string",
+              "description": "kebab-case id, unique across the whole landscape"
+            },
+            "name": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "standard",
+                "schema",
+                "ontology",
+                "vocabulary",
+                "data-model",
+                "dataset",
+                "form-library",
+                "package",
+                "specification",
+                "identifier-scheme",
+                "other"
+              ]
+            },
+            "layer": {
+              "type": "string"
+            },
+            "url": {
+              "type": "string"
+            },
+            "governing_body": {
+              "type": "string"
+            },
+            "licence": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "active",
+                "maintained",
+                "dormant",
+                "superseded",
+                "draft",
+                "unknown"
+              ]
+            },
+            "latest_version": {
+              "type": "string"
+            },
+            "latest_release_date": {
+              "type": "string"
+            },
+            "jurisdictions": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "what_it_models": {
+              "type": "string"
+            },
+            "core_concepts": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "The item's own named classes, types or fields, verbatim."
+            },
+            "evidence": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "url": {
+                    "type": "string"
+                  },
+                  "quote": {
+                    "type": "string",
+                    "description": "Copied VERBATIM from the fetched page (HTML page preferred over PDF). Never paraphrased, never translated."
+                  },
+                  "retrieved_at": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "url",
+                  "quote"
+                ]
+              },
+              "minItems": 1
+            }
+          },
+          "required": [
+            "handle",
+            "name",
+            "kind",
+            "layer",
+            "url",
+            "what_it_models",
+            "evidence"
+          ]
+        }
+      },
+      "relations": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {}
+        }
+      },
+      "fits": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {}
+        }
+      },
+      "open_findings": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {}
+        }
+      },
+      "uncovered_questions": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "gate": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "READY",
+              "BLOCKED",
+              "EMPTY"
+            ]
+          },
+          "kept": {
+            "type": "number"
+          },
+          "dropped": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "handle": {
+                  "type": "string"
+                },
+                "reason": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "blockers": {
+            "type": "number"
+          }
+        }
+      }
+    }
+  },
+  "required_fields": [
+    "items",
+    "uncovered_questions"
+  ]
+}

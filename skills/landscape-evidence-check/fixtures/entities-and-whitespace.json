@@ -1,0 +1,44 @@
+{
+  "id": "entities-and-whitespace",
+  "description": "Entities decode and whitespace collapses on both sides; case is not folded",
+  "input": {
+    "scans": [
+      {
+        "source": "web:landscape:x",
+        "data": {
+          "layer": "x",
+          "items": [
+            {
+              "handle": "z",
+              "name": "z",
+              "kind": "standard",
+              "layer": "x",
+              "url": "https://b.org",
+              "what_it_models": "m",
+              "evidence": [
+                {
+                  "url": "https://b.org",
+                  "quote": "Terms & Conditions apply",
+                  "retrieved_at": "2026-09-19"
+                }
+              ]
+            }
+          ],
+          "queries_run": [
+            "q"
+          ]
+        }
+      }
+    ],
+    "mock_pages": {
+      "https://b.org": "<b>Terms</b>\n &amp;   Conditions apply"
+    }
+  },
+  "assertions": [
+    {
+      "path": "verified_handles.0",
+      "op": "equals",
+      "value": "z"
+    }
+  ]
+}

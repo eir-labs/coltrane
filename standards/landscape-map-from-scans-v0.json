@@ -1,0 +1,138 @@
+{
+  "slug": "landscape-map-from-scans-v0",
+  "domain": "landscape",
+  "status": "draft",
+  "description": "The judgement half of a landscape, run over scans that already exist. domain-landscape-discovery-v0 does the whole arc — frame, scout, evidence, then relate → fit → attack → map (deterministic assembly) → gate — and its scouting phase is by far its most expensive. When the scans and their evidence check are already sealed (a run that stopped after them, or a landscape being re-judged against changed needs), this standard takes the charter, the landscape-scan records and the landscape-verification as its dispatch payload and runs only the judgement: relate → fit → attack → map (deterministic assembly) → gate. Same seats, same gate, same refusal discipline — an item the evidence check did not verify cannot enter the map here either.",
+  "agent_slugs": [
+    "landscape-relator",
+    "landscape-fitter",
+    "landscape-attacker"
+  ],
+  "input_types": [
+    "landscape-charter",
+    "landscape-scan",
+    "landscape-verification"
+  ],
+  "output_types": [
+    "landscape-map"
+  ],
+  "phases": [
+    {
+      "name": "relate",
+      "intent": "Connect the verified items into a typed relation graph, each relation with evidence. Scans and verification arrive as the dispatch payload.",
+      "chairs": [
+        {
+          "role": "relate",
+          "agent_slug": "landscape-relator",
+          "depends_on": [],
+          "input_contract": [
+            "landscape-scan",
+            "landscape-verification"
+          ],
+          "output_contract": [
+            "landscape-relations"
+          ],
+          "required_skills": []
+        }
+      ]
+    },
+    {
+      "name": "fit",
+      "intent": "Judge each verified item against the needs and competency questions; name the questions nothing covers.",
+      "chairs": [
+        {
+          "role": "fit",
+          "agent_slug": "landscape-fitter",
+          "depends_on": [
+            "relate"
+          ],
+          "input_contract": [
+            "landscape-charter",
+            "landscape-scan",
+            "landscape-verification",
+            "landscape-relations"
+          ],
+          "output_contract": [
+            "landscape-fit"
+          ],
+          "required_skills": []
+        }
+      ]
+    },
+    {
+      "name": "attack",
+      "intent": "Break the landscape: missing items, wrong layers, overclaims, relations that do not hold, questions falsely covered.",
+      "chairs": [
+        {
+          "role": "attack",
+          "agent_slug": "landscape-attacker",
+          "depends_on": [
+            "relate",
+            "fit"
+          ],
+          "input_contract": [
+            "landscape-charter",
+            "landscape-scan",
+            "landscape-verification",
+            "landscape-relations",
+            "landscape-fit"
+          ],
+          "output_contract": [
+            "landscape-attack"
+          ],
+          "required_skills": []
+        }
+      ]
+    },
+    {
+      "name": "map",
+      "intent": "Assemble the layered map from sealed results only. Deterministic: a map is a projection, so assembly is layout rather than judgement — and a model seat here hit the 32k output ceiling trying to emit 64 items in one response.",
+      "chairs": [
+        {
+          "role": "map",
+          "depends_on": [
+            "relate",
+            "fit",
+            "attack"
+          ],
+          "input_contract": [
+            "landscape-charter",
+            "landscape-scan",
+            "landscape-verification",
+            "landscape-relations",
+            "landscape-fit",
+            "landscape-attack"
+          ],
+          "output_contract": [
+            "landscape-map"
+          ],
+          "required_skills": [],
+          "skill_slug": "landscape-cartograph"
+        }
+      ]
+    },
+    {
+      "name": "gate",
+      "intent": "Deterministic guard: only verified, evidenced items survive; relations and fits touching a dropped item go with them; an unresolved blocker marks the map BLOCKED; an empty map is never READY.",
+      "chairs": [
+        {
+          "role": "gate",
+          "skill_slug": "landscape-gate",
+          "depends_on": [
+            "map",
+            "attack"
+          ],
+          "input_contract": [
+            "landscape-map",
+            "landscape-verification",
+            "landscape-attack"
+          ],
+          "output_contract": [
+            "landscape-map"
+          ],
+          "required_skills": []
+        }
+      ]
+    }
+  ]
+}

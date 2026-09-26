@@ -5,7 +5,9 @@
     "G2: an output_write whose tool result says ok:false is never captured for sealing, whether is_error is true, false or absent",
     "G3: in checkWritable/write, a top-level property that is not required and is null is removed before validation, hashing and writing; required nulls and nulls inside arrays are untouched; the caller's object is not mutated",
     "G4: both seal briefs tell the chair to omit an optional field it has no value for and never send null",
-    "R: the live cde960ea payload shape (change-verdict, decision_ref:null) seals through runGig without the key"
+    "R: the live cde960ea payload shape (change-verdict, decision_ref:null) seals through runGig without the key",
+    "G5 (O5): the drain refuses a Claude chair, naming the type, before spawning anything, when a run-registry type does not reload through the loader unchanged",
+    "G6: on the server door, the seat's engine child judges by the genome the door was bootstrapped with, from any cwd (including one with its own genome, and one with no build)"
   ],
   "input_refs": [
     "live: gig cde960ea, 26 Sep 2026, drain @eir-labs/coltrane@0.24.20 — chair review-change cannot seal change-verdict: type at /decision_ref: must be string"
@@ -13,7 +15,7 @@
   "laws": [
     {
       "path": "tests/one_output_gate.test.ts",
-      "commit": "5553b7ab8a8e1bc939a34e8c38feaf1e45771700"
+      "commit": "156b5ec42dbb711d637727cbaba4fe20dacb7e1b"
     }
   ],
   "coverage_map": [
@@ -63,7 +65,16 @@
       "test_file": "tests/one_output_gate.test.ts",
       "kind": "behavioural",
       "drives": "captureOutputWrites — src/claude_invoker.ts",
-      "plant": "replace the is_error test with the body test alone, so an is_error result whose content is not JSON is captured"
+      "plant": "capture refuses a write only when toolResultSaysNotOk(content) — the is_error flag ignored (see G2e)"
+    },
+    {
+      "invariant_id": "G2e",
+      "test_name": "G2 · a rejected write is never captured, however the CLI flags it > an is_error result is not captured when its body is NOT JSON, or says ok:true — the flag alone refuses it",
+      "test_file": "tests/one_output_gate.test.ts",
+      "kind": "behavioural",
+      "drives": "captureOutputWrites — src/claude_invoker.ts",
+      "plant": "in captureOutputWrites replace (b.is_error === true || toolResultSaysNotOk(b.content)) with toolResultSaysNotOk(b.content) alone",
+      "plant_observed": "'an is_error result with a non-JSON body (content as blocks) was captured — the flag was ignored: expected { change-verdict: [ … ] } to deeply equal {}'"
     },
     {
       "invariant_id": "G3a",
@@ -99,11 +110,12 @@
     },
     {
       "invariant_id": "G3e",
-      "test_name": "G3 · null on an optional field is absence — in the one predicate both gates share > the caller's object is not mutated by the strip",
+      "test_name": "G3 · null on an optional field is absence — in the one predicate both gates share > the caller's object is not mutated by the strip — neither by validateWrite nor by write",
       "test_file": "tests/one_output_gate.test.ts",
       "kind": "behavioural",
-      "drives": "write — src/outputs.ts",
-      "plant": "implement the strip as `delete o.data[k]` on the caller's object instead of a copy"
+      "drives": "validateWrite and write — src/outputs.ts (withoutOptionalNulls); each law gets its own structuredClone of deep-frozen fixtures, compared against a JSON snapshot no law touches",
+      "plant": "make withoutOptionalNulls delete on the caller's object (out ??= o.data instead of a copy)",
+      "plant_observed": "full-file run: 'validateWrite deleted a key from the caller's payload: expected {…(7)} to deeply equal {…(8)}'"
     },
     {
       "invariant_id": "G4a",
@@ -128,8 +140,41 @@
       "kind": "behavioural",
       "drives": "runGig → executeChair seal gate (validateWrite) and write — src/runtime.ts, src/outputs.ts",
       "plant": "no null strip (origin/main) reproduces the live error verbatim; a validate-only strip seals the null"
+    },
+    {
+      "invariant_id": "G5",
+      "test_name": "G1 · one gate: on the drain, what the in-turn output_write accepts the seal accepts, and what the seal rejects the chair is told in-turn > G5 · a run-registry type the loader would DROP on reload refuses the chair loudly, naming it — and no claude, no engine child, is spawned",
+      "test_file": "tests/one_output_gate.test.ts",
+      "kind": "behavioural",
+      "drives": "drainChairInvoker(env, runRegistry) — src/cli.ts → engineServerForRegistry → materializeRunGenome's reload proof — src/run_genome_engine.ts; the run registry holds a type (the reserved {ok, refusal, message} triple) that createRegistry keeps and the loader's domainTypeDefect drops",
+      "plant": "skip the reload proof in materializeRunGenome: `if (!proves(staging))` → `if (!(proves(staging) || staging.length > 0))`",
+      "plant_observed": "'the chair was SEATED over a genome root that does not reload as the run's registry — claude was spawned … with an engine child that has never heard of \"org-refusal-report\": expected { offered: true, …(3) } to be undefined'"
+    },
+    {
+      "invariant_id": "G6a",
+      "test_name": "G1 · one gate: on the drain, what the in-turn output_write accepts the seal accepts, and what the seal rejects the chair is told in-turn > G6 · the server door: the seat's engine child judges by the run's genome, whatever the cwd > a payload the run's seal REJECTS is rejected in-turn, with the seal's reason — not judged by the cwd's genome",
+      "test_file": "tests/one_output_gate.test.ts",
+      "kind": "behavioural",
+      "drives": "bootstrapServerDeps(runRoot).invoke — src/server.ts (selectChairInvoker → makeClaudeInvoker, sealVia output_write, mcpServerConfigs from readMcpServerConfigs) → real spawn from a cwd whose own genome differs → the engine server entry's output_write",
+      "plant": "the engine child loads COLTRANE_GENOME ?? cwd — no COLTRANE_GENOME tied to the root bootstrapServerDeps was given (the state at 769d6de)"
+    },
+    {
+      "invariant_id": "G6b",
+      "test_name": "G1 · one gate: on the drain, what the in-turn output_write accepts the seal accepts, and what the seal rejects the chair is told in-turn > G6 · the server door: the seat's engine child judges by the run's genome, whatever the cwd > a payload the run's seal ACCEPTS is accepted in-turn and handed back for sealing",
+      "test_file": "tests/one_output_gate.test.ts",
+      "kind": "behavioural",
+      "drives": "bootstrapServerDeps(runRoot).invoke — src/server.ts (selectChairInvoker → makeClaudeInvoker, sealVia output_write, mcpServerConfigs from readMcpServerConfigs) → real spawn from a cwd whose own genome differs → the engine server entry's output_write",
+      "plant": "the engine child loads COLTRANE_GENOME ?? cwd — no COLTRANE_GENOME tied to the root bootstrapServerDeps was given (the state at 769d6de)"
+    },
+    {
+      "invariant_id": "G6c",
+      "test_name": "G1 · one gate: on the drain, what the in-turn output_write accepts the seal accepts, and what the seal rejects the chair is told in-turn > G6 · the server door: the seat's engine child judges by the run's genome, whatever the cwd > from a cwd holding NO build and no genome, the seat still gets a working gate that judges by the run's genome",
+      "test_file": "tests/one_output_gate.test.ts",
+      "kind": "behavioural",
+      "drives": "bootstrapServerDeps(runRoot).invoke — src/server.ts (selectChairInvoker → makeClaudeInvoker, sealVia output_write, mcpServerConfigs from readMcpServerConfigs) → real spawn from a cwd whose own genome differs → the engine server entry's output_write",
+      "plant": "the engine child's entry resolved against the cwd (the relative `dist/src/server_entry.js` of readMcpServerConfigs' fallback / .mcp.json) — origin state at 769d6de"
     }
   ],
-  "testing_method": "vitest, example-based. G1 drives the real drainChairInvoker and the real claude invoker spawn. A stand-in claude on PATH (tests/_support/gate_fake_claude.mjs) reads the per-gig --mcp-config, starts the engine server it names over stdio (or http) with the MCP SDK client, and calls output_write, so the in-turn gate the law sees is the real server. The run's genome comes from reconstructGenome over a store row whose change-verdict is v2 and requires org_ticket, which the file genome's closed v1 forbids, so a gate built from the wrong genome shows up in either direction. G2 drives captureOutputWrites over CLI-shaped stream-json. G3 and R drive the output store and runGig on the repo genome. Plants were applied to a scratch copy of src, observed red, and reverted: the file-genome engine child (G1a/G1b), a validation-only strip (G3b, R), stripping required nulls (G3c), a recursive strip (G3d). A sketched fix (materialising the run registry's types as the child's COLTRANE_GENOME) turned G1 green, so the fixture can pass. SUSPECTS. (iii) path skips validate mode: CONFIRMED from source and reproduced (G1a red at origin/main: the mcp-config names servers [] and no engine server). drainChairInvoker (src/cli.ts) builds makeClaudeInvoker({registry, model, timeout_ms}) with no sealVia and no mcpServerConfigs, so a drained Claude seat seals from text. No in-turn gate exists; the seal is the only judgment. The drain's completions seats do use a validate-pinned source over the store registry, so their gates agree. (i) child holds another genome: LATENT. The fix for (iii) would walk into it. The engine child is bootstrapServerDeps(COLTRANE_GENOME ?? cwd), which is the file genome, while the drain seals against the org store's types. Observed with the plant: the file child accepted a payload the store seal refuses (missing org_ticket) and refused one it accepts (additionalProperties org_ticket). (ii) rejection without is_error: Not the live cause. createColtraneServer sets isError: !result.ok. But captureOutputWrites trusts only the CLI's is_error and never reads the ok:false body, so G2 hardens it.",
+  "testing_method": "vitest, example-based. G1 drives the real drainChairInvoker and the real claude invoker spawn. A stand-in claude on PATH (tests/_support/gate_fake_claude.mjs) reads the per-gig --mcp-config, starts the engine server it names over stdio (or http) with the MCP SDK client, and calls output_write, so the in-turn gate the law sees is the real server. The run's genome comes from reconstructGenome over a store row whose change-verdict is v2 and requires org_ticket, which the file genome's closed v1 forbids, so a gate built from the wrong genome shows up in either direction. G2 drives captureOutputWrites over CLI-shaped stream-json. G3 and R drive the output store and runGig on the repo genome. Plants were applied to a scratch copy of src, observed red, and reverted: the file-genome engine child (G1a/G1b), a validation-only strip (G3b, R), stripping required nulls (G3c), a recursive strip (G3d). A sketched fix (materialising the run registry's types as the child's COLTRANE_GENOME) turned G1 green, so the fixture can pass. SUSPECTS. (iii) path skips validate mode: CONFIRMED from source and reproduced (G1a red at origin/main: the mcp-config names servers [] and no engine server). drainChairInvoker (src/cli.ts) builds makeClaudeInvoker({registry, model, timeout_ms}) with no sealVia and no mcpServerConfigs, so a drained Claude seat seals from text. No in-turn gate exists; the seal is the only judgment. The drain's completions seats do use a validate-pinned source over the store registry, so their gates agree. (i) child holds another genome: LATENT. The fix for (iii) would walk into it. The engine child is bootstrapServerDeps(COLTRANE_GENOME ?? cwd), which is the file genome, while the drain seals against the org store's types. Observed with the plant: the file child accepted a payload the store seal refuses (missing org_ticket) and refused one it accepts (additionalProperties org_ticket). (ii) rejection without is_error: Not the live cause. createColtraneServer sets isError: !result.ok. But captureOutputWrites trusts only the CLI's is_error and never reads the ok:false body, so G2 hardens it. ROUND 2 (after the implementer's 769d6de): the shared fixtures are deep-frozen and every law is handed its own structuredClone, so G3e can fail in a full-file run. G2e shows the is_error flag refusing on its own. G5 feeds drainChairInvoker a run registry holding a type the loader drops on reload. G6 bootstraps the server door on a run root holding the org's change-verdict v2, then chdirs into a directory with its own genome (file v1, dist symlinked so the relative entry resolves) and into a bare directory. A scratch fix turned G6 green and was reverted: an absolute entry plus COLTRANE_GENOME set to the bootstrap root in the engine config.",
   "uncovered": []
 }

@@ -12,8 +12,6 @@
 //     Writes ride the coltrane_genome_upsert RPC as the caller.
 //
 // No new dependencies: plain fetch, and the Zod schemas the engine already owns.
-import { mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
 import {
   resolveGenome,
   GenomeLoadError,
@@ -24,7 +22,7 @@ import {
   type SkillRecord,
   type EvalRecord,
 } from "./loader.js";
-import { writeGenomeFileVersioned } from "./genome_writer.js";
+import { writeGenomeFileVersioned, stageSkillPackage } from "./genome_writer.js";
 import { defineAgent, composeStandard, type Agent, type Standard, type PhaseDef } from "./composition.js";
 import { composeChart, chartEntrySeedTypes, type Chart, type Venue } from "./chart.js";
 import { DomainTypeSchema, SkillSchema, ChartSchema, VenueSchema, venueDefect } from "./genome_schema.js";
@@ -92,22 +90,12 @@ export function fileGenomeStore(root: string): GenomeStore {
     async upsert(cls: GenomeClass, payload: Record<string, unknown>): Promise<void> {
       const slug = typeof payload["slug"] === "string" ? payload["slug"].trim() : "";
       if (!slug) throw new Error(`genome upsert: ${cls} payload has no slug`);
+      // #559 — both branches hold the boundary themselves: the slug's path must land inside the
+      // class's own directory under this store's root, or the upsert is refused before any byte moves.
       if (cls === "skill") {
-        // Skills are PACKAGE directories (the loader's only skill format) — mirror
-        // sealSkillPackage's file half: meta.json + code/md halves + fixtures.
-        const pkgDir = join(root, "skills", slug);
-        mkdirSync(pkgDir, { recursive: true });
-        const { fixtures, code, md, ...meta } = payload;
-        writeFileSync(join(pkgDir, "meta.json"), JSON.stringify(meta, null, 2) + "\n");
-        if (typeof code === "string") writeFileSync(join(pkgDir, "skill.mjs"), code);
-        if (typeof md === "string") writeFileSync(join(pkgDir, "skill.md"), md);
-        if (Array.isArray(fixtures)) {
-          const fxDir = join(pkgDir, "fixtures");
-          mkdirSync(fxDir, { recursive: true });
-          fixtures.forEach((fx, i) =>
-            writeFileSync(join(fxDir, `fixture-${String(i + 1).padStart(3, "0")}.json`), JSON.stringify(fx, null, 2) + "\n"),
-          );
-        }
+        // Skills are PACKAGE directories (the loader's only skill format) — the SAME stager the
+        // blessed writer uses (sealSkillPackage's file half), so the two cannot drift.
+        stageSkillPackage(root, { ...payload, slug }).commit();
         return;
       }
       writeGenomeFileVersioned(root, CLASS_SUBDIR[cls], slug, JSON.stringify(payload, null, 2) + "\n");

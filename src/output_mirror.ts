@@ -20,6 +20,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { OutputRecord } from "./outputs.js";
+import { containedPath } from "./contained_path.js";
 
 // TIER 1 — the compact metadata row. Deliberately does NOT carry `data`: a caller traversing the
 // chain reads these; the payload is a second, explicit fetch.
@@ -160,7 +161,9 @@ export function createOutputMirror(mirrorRoot: string): OutputMirror {
   }
 
   function metaFile(gig_id: string): string {
-    return path.join(metaDir, `${gig_id}.jsonl`);
+    // #559 — the gig id is caller data (output_write, output_query's filter); its row file must
+    // land inside the meta directory.
+    return containedPath("output mirror meta", metaDir, gig_id, ".jsonl");
   }
 
   return {

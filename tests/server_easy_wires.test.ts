@@ -113,7 +113,9 @@ describe("charter_read", () => {
         access_grants: [],
       }),
     );
-    const r = await dispatchTool("charter_read", { path: file }, makeDeps());
+    // A charter is read only from inside the genome root (#559, conductor's decision), so the
+    // explicit path lives in a genome root this server is given.
+    const r = await dispatchTool("charter_read", { path: file }, { ...makeDeps(), genome_dir: tmp });
     expect(r.ok).toBe(true);
     const data = r.data as { subject_name: string };
     expect(data.subject_name).toBe("solo-test");

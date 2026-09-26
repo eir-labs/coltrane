@@ -15,6 +15,7 @@ import type { CodeToolAccess } from "./composition.js";
 import { resolveAgentGrants, hostBuiltinDenials, toolBaseName, grantsTreeReader, ENGINE_MCP_SERVER, type ToolProviderRegistry } from "./tool_providers.js";
 import type { OutputRecord } from "./outputs.js";
 import { venueEffectiveTools } from "./chart.js";
+import { resolveSeatGrants, targetPathsOf, describeRoleRefusals } from "./layout_grants.js";
 import { CORE_TYPES } from "./core_types.js";
 
 const EMPTY_TOOL_REGISTRY: ToolProviderRegistry = new Map();
@@ -1595,6 +1596,21 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
     if (ctx.signal?.aborted) {
       throw new Error(`chair "${ctx.agent.slug}" not started — gig aborted (${abortReasonText(ctx.signal)})`);
     }
+    // LAYOUT GRANTS — the seat's grants come from the layout of the repository it runs against
+    // (src/layout_grants.ts): role tokens expand through ctx.layout, Write/Edit narrow to the change's
+    // target_paths. A token the layout cannot answer grants nothing and REFUSES the chair here, before
+    // anything is spawned — never a `**` default. From here on the chair's agent carries its RESOLVED
+    // grants, so provider resolution, the room's ceiling, the host-builtin complement and the prompt
+    // all see what the seat actually holds, never a raw token. The room is applied below, by the
+    // existing venue block, over these resolved grants. `denials` (the layout file, never writable)
+    // join the --disallowedTools union.
+    const seatGrants = resolveSeatGrants({ agent: ctx.agent, layout: ctx.layout, target_paths: targetPathsOf(ctx.gig_input) });
+    if (seatGrants.refusals.length > 0) {
+      throw new Error(`chair "${ctx.agent.slug}" refused before spawn: ${describeRoleRefusals(ctx.agent.slug, seatGrants.refusals)}`);
+    }
+    if (ctx.agent.allowed_tools !== undefined) {
+      ctx = { ...ctx, agent: { ...ctx.agent, allowed_tools: seatGrants.grants } };
+    }
     // Resolve THIS agent's grants → the MCP servers it needs, FIRST: a grant with no resolvable
     // provider is a dead name, so fail the chair closed before we build a prompt or spawn a child
     // that advertises a tool it can't call.
@@ -1836,6 +1852,9 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
         ...codeToolDenials(a.code_tool_access),
         ...hostBuiltinDenials(allowForComplement),
         ...venueExcluded,
+        // (e) NO SELF-WIDENING: the layout file, denied beside any Write/Edit that covers it. Scoped,
+        // so the NO OVER-DENIAL filter below keeps it (the resolver never returns the exact grant).
+        ...seatGrants.denials,
       ];
       // NO OVER-DENIAL (LAW 5, and LAW 2's structural half): nothing the seat legitimately holds may be
       // denied — most sharply OUTPUT_WRITE_TOOL, which effectiveAllowed now carries on the seal path.

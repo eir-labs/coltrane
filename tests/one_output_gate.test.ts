@@ -39,8 +39,8 @@
 //   G4   behavioural  buildPrompt — src/claude_invoker.ts (shared by the   the absence sentence removed
 //                     completions invoker)
 //   R    behavioural  runGig → executeChair seal gate — src/runtime.ts     (red now: the live failure)
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { mkdtempSync, writeFileSync, readFileSync, chmodSync, rmSync, existsSync, cpSync, symlinkSync } from "node:fs";
+import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
+import { mkdtempSync, writeFileSync, readFileSync, chmodSync, rmSync, existsSync, cpSync, symlinkSync, mkdirSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -50,6 +50,7 @@ import { bootstrapServerDeps } from "../src/server.js";
 import { createOutputStore } from "../src/outputs.js";
 import { reconstructGenome } from "../src/genome_store.js";
 import { drainChairInvoker } from "../src/cli.js";
+import { workOnce } from "../src/worker.js";
 import { captureOutputWrites, buildPrompt } from "../src/claude_invoker.js";
 import { runGig, MemoryLedger, type Standard, type AgentInvoker } from "../src/index.js";
 import { testAgent } from "./_support/agents.js";
@@ -84,6 +85,14 @@ deepFreeze(LIVE);
 const LIVE_SNAPSHOT = JSON.stringify(LIVE);
 const clone = <T>(x: T): T => structuredClone(x) as T;
 
+/** What the stand-in claude reports: whether it was offered an engine server, the root that server was
+ *  pinned to, and what each output_write answered. */
+type Report = {
+  offered: boolean; servers?: string[]; genomeRoot?: string; isError?: boolean; crashed?: string;
+  result?: { ok?: boolean; error?: string };
+  results?: { domain_type: string; isError: boolean; result: { ok?: boolean; error?: string } }[];
+};
+
 // ── G1 ─────────────────────────────────────────────────────────────────────────────────────────────
 // The run's genome comes from a STORE backing (reconstructGenome — the one reconstruction both store
 // backings share), and in it the org's change-verdict is NOT the file's: v2 requires `org_ticket`,
@@ -117,7 +126,7 @@ describe("G1 · one gate: on the drain, what the in-turn output_write accepts th
   let dir: string;
   let savedPath: string | undefined;
   const savedEnv: Record<string, string | undefined> = {};
-  const ENV = ["GATE_FAKE_PAYLOAD", "GATE_FAKE_LOG", "COLTRANE_COMPLETIONS_URL", "COLTRANE_PROMPT_MODE"];
+  const ENV = ["GATE_FAKE_PAYLOAD", "GATE_FAKE_PAYLOADS", "GATE_FAKE_LOG", "COLTRANE_COMPLETIONS_URL", "COLTRANE_PROMPT_MODE", "TMPDIR"];
 
   beforeAll(() => {
     dir = mkdtempSync(join(tmpdir(), "coltrane-one-gate-"));
@@ -171,7 +180,7 @@ describe("G1 · one gate: on the drain, what the in-turn output_write accepts th
       process.chdir(home);
     }
     const report = existsSync(logPath)
-      ? (JSON.parse(readFileSync(logPath, "utf8")) as { offered: boolean; servers?: string[]; isError?: boolean; result?: { ok?: boolean; error?: string }; crashed?: string })
+      ? (JSON.parse(readFileSync(logPath, "utf8")) as Report)
       : undefined;
     const seal = createOutputStore(door.sealRegistry).validateWrite({ core_type: "Verdict", domain_type: "change-verdict", data });
     return { report, returned, threw, seal };
@@ -319,6 +328,178 @@ describe("G1 · one gate: on the drain, what the in-turn output_write accepts th
       }
     }, 90_000);
   });
+
+  // ── G7 · the reload proof compares CONTENT, not names (round 3, item 2) ──────────────────────────
+  // A type can come back from the round trip under the same slug with a different schema — here a value
+  // JSON cannot carry (a Date default comes back a string). A proof over slugs alone calls that "the
+  // same registry" and seats a chair whose in-turn gate judges by a schema the seal does not hold.
+  it("G7 · a run-registry type whose CONTENT changes on reload refuses the chair, naming it — nothing is spawned", async () => {
+    const changed = {
+      slug: "org-dated-note", extends: "Verdict", domain: "ops",
+      schema: { type: "object", properties: { due: { type: "string", default: new Date(0) } } },
+      required_fields: [],
+    };
+    const runRegistry = createRegistry([...storeRegistry.listTypes(), changed] as never);
+    const { report, threw } = await seat(P_ORG_OK, "reload-content", {
+      invoke: () => drainChairInvoker({ ...process.env, COLTRANE_COMPLETIONS_URL: undefined }, runRegistry),
+      sealRegistry: runRegistry,
+    });
+    expect(report, `a chair was seated over a root whose "${changed.slug}" reloads with a different schema`).toBeUndefined();
+    expect(threw, "the chair was neither seated nor refused").toBeDefined();
+    expect(threw, `the refusal does not name the type whose content changed: ${threw}`).toContain(changed.slug);
+  }, 90_000);
+
+  // ── G8 · a declared env cannot move the pin (round 3, item 3) ─────────────────────────────────────
+  // The server door re-pins the engine entry it finds in the deployment's .mcp.json, and passes that
+  // entry's own env through. A declared COLTRANE_GENOME in that env is exactly the pin; if it wins, the
+  // child judges by whatever genome the file names. Refused or ignored BY NAME: the child's genome is the
+  // door's root whatever the declaration says.
+  describe("G8 · a declared engine env cannot override the genome pin", () => {
+    let runRoot: string;
+    let decoyRoot: string;
+    let deps: ReturnType<typeof bootstrapServerDeps>;
+    let savedGenome: string | undefined;
+    beforeAll(() => {
+      runRoot = mkdtempSync(join(tmpdir(), "coltrane-g8-run-"));
+      decoyRoot = mkdtempSync(join(tmpdir(), "coltrane-g8-decoy-"));
+      for (const [root, verdict] of [[runRoot, orgVerdictRow], [decoyRoot, JSON.parse(readFileSync(join(REPO_ROOT, "domain_types", "change-verdict.json"), "utf8"))]] as const) {
+        cpSync(join(REPO_ROOT, "core_types"), join(root, "core_types"), { recursive: true });
+        cpSync(join(REPO_ROOT, "domain_types"), join(root, "domain_types"), { recursive: true });
+        writeFileSync(join(root, "domain_types", "change-verdict.json"), JSON.stringify(verdict, null, 2));
+      }
+      writeFileSync(join(runRoot, ".mcp.json"), JSON.stringify({
+        mcpServers: { coltrane: { command: "node", args: ["dist/src/server_entry.js"], env: { COLTRANE_GENOME: decoyRoot, DEPLOYMENT_NOTE: "kept" } } },
+      }));
+      savedGenome = process.env["COLTRANE_GENOME"];
+      delete process.env["COLTRANE_GENOME"];
+      deps = bootstrapServerDeps(runRoot);
+    });
+    afterAll(() => {
+      if (savedGenome === undefined) delete process.env["COLTRANE_GENOME"]; else process.env["COLTRANE_GENOME"] = savedGenome;
+      rmSync(runRoot, { recursive: true, force: true });
+      rmSync(decoyRoot, { recursive: true, force: true });
+    });
+
+    it("the child judges by the door's root, not the COLTRANE_GENOME the .mcp.json declares — both directions", async () => {
+      const bare = mkdtempSync(join(tmpdir(), "coltrane-g8-bare-"));
+      try {
+        const door = { invoke: () => deps.invoke!, sealRegistry: deps.registry, cwd: bare };
+        const rej = await seat(P_FILE_OK, "g8-reject", door);
+        expect(rej.seal.valid, "fixture: the door's seal rejects a verdict without org_ticket").toBe(false);
+        expect(rej.report?.crashed, `the seat's engine child did not answer: ${rej.report?.crashed}`).toBeUndefined();
+        expect(
+          rej.report?.result?.ok,
+          `the in-turn gate ACCEPTED what the door's seal rejects — the declared env's COLTRANE_GENOME (${decoyRoot}) won over the pin`,
+        ).toBe(false);
+        expect(String(rej.report?.result?.error)).toContain("org_ticket");
+        const acc = await seat(P_ORG_OK, "g8-accept", door);
+        expect(acc.report?.result?.ok, `the in-turn gate REJECTED what the door's seal accepts: ${acc.report?.result?.error}`).toBe(true);
+      } finally {
+        rmSync(bare, { recursive: true, force: true });
+      }
+    }, 90_000);
+  });
+
+  // ── G9 · SLUGS ARE NOT IDENTIFIERS (founder ruling, 27 Sep 2026 — replaces a slug grammar) ─────────
+  // The drain's run genome was written as domain_types/<slug>.json, and an org type's slug is a
+  // tenant-controlled string: `../../grade556-escaped` wrote $TMPDIR/grade556-escaped.json before the
+  // reload proof refused (grade, issuecomment-5847851004). The ruling: the fix is not a grammar — a slug
+  // never reaches the filesystem. Every file and directory under the run genome is named by the engine
+  // (a content hash or other engine-derived id), and the child finds a type by its slug through what it
+  // reads INSIDE the genome, never by joining the slug into a path. Driven through the drain's real door
+  // with TMPDIR pointed at a fresh directory, so "anywhere else" is a directory the law can see whole.
+  it("G9 · hostile slugs never reach the filesystem: no path under the run genome or its parent carries slug text, nothing lands outside the root, and the child resolves every type", async () => {
+    const HOSTILE = [
+      "../../escaped-by-slug", "/abs-escaped-by-slug", "nul\u0000escaped-by-slug", "a/b-escaped-by-slug",
+      "a\\b-escaped-by-slug", ".", "..", "plain-kebab-type",
+    ];
+    const STEMS = ["escaped-by-slug", "plain-kebab-type"];
+    const hostileTypes = HOSTILE.map((slug) => ({ slug, extends: "Verdict", domain: "ops", schema: { type: "object", properties: {} }, required_fields: [] }));
+    const runRegistry = createRegistry([...storeRegistry.listTypes(), ...hostileTypes] as never);
+    expect(HOSTILE.every((sl) => runRegistry.listTypes().some((t) => t.slug === sl)), "fixture: the run registry holds every hostile slug").toBe(true);
+
+    const parent = mkdtempSync(join(tmpdir(), "coltrane-g9-parent-"));
+    const fresh = join(parent, "tmp");
+    mkdirSync(fresh);
+    process.env["TMPDIR"] = fresh;
+    process.env["GATE_FAKE_PAYLOADS"] = JSON.stringify(HOSTILE.map((slug) => ({
+      core_type: "Verdict", domain_type: slug, gig_id: "gig-g9", phase: "review", agent_slug: "change-reviewer",
+      data: { checks: [{ method: "m" }], target_ref: "t", pass: true },
+    })));
+    let out: Awaited<ReturnType<typeof seat>>;
+    try {
+      out = await seat(P_ORG_OK, "g9", {
+        invoke: () => drainChairInvoker({ ...process.env, COLTRANE_COMPLETIONS_URL: undefined }, runRegistry),
+        sealRegistry: runRegistry,
+      });
+    } finally {
+      delete process.env["GATE_FAKE_PAYLOADS"];
+      if (savedEnv["TMPDIR"] === undefined) delete process.env["TMPDIR"]; else process.env["TMPDIR"] = savedEnv["TMPDIR"];
+    }
+    const walk = (d: string, rel = ""): string[] =>
+      readdirSync(d, { withFileTypes: true }).flatMap((e) => {
+        const r = rel ? `${rel}/${e.name}` : e.name;
+        return e.isDirectory() && !e.isSymbolicLink() ? [r, ...walk(join(d, e.name), r)] : [r];
+      });
+    try {
+      const everything = walk(parent);
+      const carrying = everything.filter((p) =>
+        STEMS.some((st) => p.includes(st)) ||
+        p.split("/").some((seg) => HOSTILE.some((sl) => seg === `${sl}.json` || seg === sl)));
+      expect(carrying, `a path under ${parent} carries slug text — a slug reached the filesystem: ${carrying.join(", ")}`).toEqual([]);
+      expect(readdirSync(parent), `something was written in the temp root's PARENT: ${readdirSync(parent).join(", ")}`).toEqual(["tmp"]);
+      const { report, threw } = out!;
+      expect(threw, `the drain refused a registry whose slugs are merely strange: ${threw}`).toBeUndefined();
+      expect(report?.offered, "the chair was offered no engine server").toBe(true);
+      expect(report!.crashed, `the engine child did not answer: ${report!.crashed}`).toBeUndefined();
+      const root = String(report!.genomeRoot);
+      expect(root.startsWith(fresh), `the child's genome root ${root} is not under the fresh temp root ${fresh}`).toBe(true);
+      const outside = walk(fresh).filter((p) => {
+        const abs = join(fresh, p);
+        return !abs.startsWith(root) && !root.startsWith(abs) && !/^coltrane-mcp-/.test(p);
+      });
+      expect(outside, `files were created in the temp root outside the run genome: ${outside.join(", ")}`).toEqual([]);
+      for (const r of report!.results ?? []) {
+        expect(r.result?.ok, `the child does not resolve type ${JSON.stringify(r.domain_type)}: ${r.result?.error}`).toBe(true);
+      }
+      expect((report!.results ?? []).length, "the stand-in did not send every hostile type").toBe(HOSTILE.length);
+    } finally {
+      rmSync(parent, { recursive: true, force: true });
+    }
+  }, 90_000);
+
+  // ── G10 · an org-shaped registry seats cleanly (round 3, item 4 — read-only shape check) ───────────
+  // The grade's strand risk: one type that does not round-trip fails EVERY Claude gig of that org. Before
+  // any drain upgrades, a registry shaped like production's largest org (75 kebab slugs, at most 22
+  // characters, all six cores, built from store rows through the store's own reconstruction — never by
+  // querying production from a test) must seat a chair with a working gate.
+  it("G10 · a 75-type org-shaped registry, reconstructed from store rows, seats a chair whose gate works", async () => {
+    const CORES = ["Signal", "Interpretation", "Judgment", "Plan", "Artifact", "Verdict"];
+    const NOUNS = ["brief", "claim", "clause", "deal", "draft", "finding", "lead", "memo", "note", "plan", "review", "risk", "scope"];
+    const rows: Record<string, unknown>[] = [orgVerdictRow];
+    for (let i = 0; rows.length < 75; i++) {
+      const slug = `${NOUNS[i % NOUNS.length]}-${["intake", "check", "summary", "record", "map", "score"][Math.floor(i / NOUNS.length) % 6]}-${i}`;
+      rows.push({
+        slug, version: 1 + (i % 3), extends: CORES[i % CORES.length], domain: `org-${i % 5}`, status: "active",
+        description: `org type ${i}`,
+        schema: { type: "object", properties: { [`field_${i}`]: { type: "string" }, [`count_${i}`]: { type: "integer" } } },
+        required_fields: [],
+      });
+    }
+    expect(rows.every((r) => /^[a-z0-9][a-z0-9-]{0,21}$/.test(String(r["slug"]))), "fixture: every slug is production-shaped").toBe(true);
+    const genome = reconstructGenome({ core_types: [], domain_types: rows, agents: [], standards: [], skills: [] } as never);
+    expect(genome.load_errors, "fixture: the store reconstruction takes all 75").toEqual([]);
+    const orgRegistry = loadRegistry(genome);
+    expect(orgRegistry.listTypes().length).toBe(75);
+    const { report, threw } = await seat(P_ORG_OK, "g10", {
+      invoke: () => drainChairInvoker({ ...process.env, COLTRANE_COMPLETIONS_URL: undefined }, orgRegistry),
+      sealRegistry: orgRegistry,
+    });
+    expect(threw, `an org-shaped registry did not seat: ${threw}`).toBeUndefined();
+    expect(report?.offered).toBe(true);
+    expect(report!.crashed, `the engine child did not answer: ${report!.crashed}`).toBeUndefined();
+    expect(report!.result?.ok, `the gate refused a payload its seal accepts: ${report!.result?.error}`).toBe(true);
+  }, 90_000);
 });
 
 // ── G2 ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -497,4 +678,77 @@ describe("R · the live payload seals", () => {
     expect(sealed, "no change-verdict was sealed").toBeDefined();
     expect("decision_ref" in sealed!.data, "the replay sealed a null").toBe(false);
   });
+});
+
+// ── G11 · an operator can see WHY (round 3, item 4) ─────────────────────────────────────────────────
+// One type that does not round-trip refuses every Claude chair of its org on the drain. That is the
+// correct call — the alternative is a gate that disagrees with the seal — but it is only survivable if
+// the refusal says which type(s) and why, where an operator looks: the chair's error AND the gig's
+// terminal record (the error the worker writes through coltrane_mcp_gig_fail). Driven through workOnce
+// with a store stub; the run registry carries one type the loader DROPS on reload (the reserved
+// {ok, refusal, message} triple) and one whose CONTENT changes on reload.
+describe("G11 · the refusal names the offending type(s) and the reason, in the chair's error and the gig's terminal record", () => {
+  const CLAIM = { gig_id: "99999999-2222-3333-4444-555555555555", standard_slug: "wire-run-v0", standard_version: null, mode: "rehearsal", input: {}, acting_for: "steve-1" };
+  const ROWS = {
+    core_types: [], domain_types: [orgVerdictRow], skills: [],
+    agents: [{
+      slug: "scout", primitives: ["SENSE"], input_types: [], output_types: ["Signal"], domain: "demo",
+      identity: "you are scout", method: "1. look 2. report", constraints: [], behavioral_primitives: ["explorer", "critic"],
+      permissions: {}, default_skills: [],
+    }],
+    standards: [{
+      slug: "wire-run-v0", domain: "demo", status: "active", output_types: ["Signal"],
+      phases: [{ name: "scan", chairs: [{ role: "scan", agent_slug: "scout", depends_on: [], input_contract: [], output_contract: ["Signal"], optional_outputs: [], required_skills: [] }] }],
+    }],
+  };
+  const DROPPED = {
+    slug: "org-refusal-report", extends: "Artifact", domain: "ops",
+    schema: { type: "object", properties: { ok: { type: "boolean" }, refusal: { type: "string" }, message: { type: "string" } } },
+    required_fields: ["message"],
+  };
+  const CHANGED = {
+    slug: "org-dated-note", extends: "Verdict", domain: "ops",
+    schema: { type: "object", properties: { due: { type: "string", default: new Date(0) } } },
+    required_fields: [],
+  };
+  let stateRoot: string;
+  beforeAll(() => {
+    stateRoot = mkdtempSync(join(tmpdir(), "coltrane-g11-state-"));
+    process.env["COLTRANE_WORKER_CHECKPOINTS"] = stateRoot;
+  });
+  afterAll(() => {
+    vi.unstubAllGlobals();
+    delete process.env["COLTRANE_WORKER_CHECKPOINTS"];
+    rmSync(stateRoot, { recursive: true, force: true });
+  });
+
+  it("workOnce fails the gig with an error naming BOTH types and each one's reason, and writes that error to the gig's terminal record", async () => {
+    const failed: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string | URL, init?: RequestInit) => {
+      const u = String(url);
+      const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {};
+      if (u.endsWith("/rpc/coltrane_mcp_claim")) return new Response(JSON.stringify(CLAIM), { status: 200 });
+      if (u.endsWith("/rpc/coltrane_mcp_genome")) return new Response(JSON.stringify(ROWS), { status: 200 });
+      if (u.endsWith("/rpc/coltrane_mcp_gig_fail")) { failed.push(String(body["p_error"])); return new Response("true", { status: 200 }); }
+      if (u.endsWith("/rpc/coltrane_mcp_gig_outputs")) return new Response("[]", { status: 200 });
+      return new Response("null", { status: 200 });
+    }));
+    const res = await workOnce(
+      { baseUrl: "https://store.example", anonKey: "anon", agentToken: "ctk_test000", worker: "g11" },
+      {
+        makeInvoke: (registry) =>
+          drainChairInvoker({ ...process.env, COLTRANE_COMPLETIONS_URL: undefined }, createRegistry([...registry.listTypes(), DROPPED, CHANGED] as never)),
+        log: () => {},
+      },
+    );
+    vi.unstubAllGlobals();
+    expect((res as { status?: string }).status, "the gig did not fail").toBe("failed");
+    const error = String((res as { error?: string }).error);
+    for (const where of [["the chair's error", error], ["the gig's terminal record", failed[0] ?? "(nothing written)"]] as const) {
+      const [label, text] = where;
+      expect(text, `${label} does not name the type the reload DROPS: ${text}`).toContain(DROPPED.slug);
+      expect(text, `${label} does not say why it is dropped (the loader's own reason): ${text}`).toMatch(/reserved triple/);
+      expect(text, `${label} does not name the type whose CONTENT changes on reload: ${text}`).toContain(CHANGED.slug);
+    }
+  }, 90_000);
 });

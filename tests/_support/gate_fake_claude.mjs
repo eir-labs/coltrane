@@ -7,7 +7,9 @@
 //
 // Contract (env — the invoker gives the spawn no other seam):
 //   GATE_FAKE_PAYLOAD  JSON {core_type, domain_type, data} — what the "model" sends to output_write
-//   GATE_FAKE_LOG      a path; a JSON report is written there:
+//   GATE_FAKE_PAYLOADS optional JSON array of such payloads — each is sent, in order; `results` logs each
+//   GATE_FAKE_LOG      a path; a JSON report is written there (always with `genomeRoot`: the engine
+//                      server's declared COLTRANE_GENOME, so a law can walk the root the child boots from):
 //                        { offered: false, servers: [...] }                       — no engine server
 //                        { offered: true, tools: [...], isError, result }         — the in-turn answer
 //
@@ -50,17 +52,25 @@ const client = new Client({ name: "gate-fake-claude", version: "0.0.0" });
 try {
   await client.connect(transport);
   const tools = (await client.listTools()).tools.map((t) => t.name);
+  const extra = process.env["GATE_FAKE_PAYLOADS"] ? JSON.parse(process.env["GATE_FAKE_PAYLOADS"]) : [];
+  const results = [];
+  for (const p of extra) {
+    const x = await client.callTool({ name: "output_write", arguments: p });
+    const t = (x.content ?? []).map((c) => c.text ?? "").join("");
+    let body; try { body = JSON.parse(t); } catch { body = t; }
+    results.push({ domain_type: p.domain_type, isError: x.isError === true, result: body });
+  }
   const r = await client.callTool({ name: "output_write", arguments: payload });
   const text = (r.content ?? []).map((c) => c.text ?? "").join("");
   let result;
   try { result = JSON.parse(text); } catch { result = text; }
-  log({ offered: true, tools, isError: r.isError === true, result });
+  log({ offered: true, genomeRoot: engine.env?.COLTRANE_GENOME, tools, isError: r.isError === true, result, results });
   await out({ type: "system", subtype: "init", session_id: "gate-fake" });
   await out({ type: "assistant", message: { content: [{ type: "tool_use", id: "tu_gate_1", name: "mcp__coltrane__output_write", input: payload }] } });
   await out({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: "tu_gate_1", content: [{ type: "text", text }], ...(r.isError ? { is_error: true } : {}) }] } });
   await out({ type: "result", subtype: "success", is_error: false, result: "done" });
 } catch (e) {
-  log({ offered: true, crashed: String(e && e.stack || e) });
+  log({ offered: true, genomeRoot: engine.env?.COLTRANE_GENOME, crashed: String(e && e.stack || e) });
   await out({ type: "result", subtype: "success", is_error: false, result: "done" });
 } finally {
   try { await client.close(); } catch { /* the server may already be gone */ }

@@ -380,6 +380,39 @@ async function boundedWorkerRpc(ctx: WorkerContext, fn: string, body: Record<str
   }
 }
 
+/**
+ * A store RPC that answered, and REFUSED. Carries the two facts the message throws away: the HTTP
+ * status and PostgREST's `code`.
+ *
+ * Both exist for one decision — is this refusal one the next poll would get again? The message text
+ * cannot answer that ("gig token is scoped to a single gig" and "internal error" read alike to a
+ * regexp), and a caller that cannot tell a refusal from a hiccup can only pick one wrong policy for
+ * both: retry a permanent refusal forever, or give up on a transient one.
+ */
+export class StoreRpcError extends Error {
+  constructor(message: string, readonly status: number, readonly code?: string) {
+    super(message);
+    this.name = "StoreRpcError";
+  }
+}
+
+/**
+ * Will this box get the same refusal on the next poll?
+ *
+ * TRUE for an answered 4xx: the store understood the request and declined it. A gig token scoped to
+ * another gig (42501), an acting agent that holds no seat (also 42501), a row that is not there —
+ * none of those change because a worker asks again in thirty seconds.
+ *
+ * FALSE for 408/429 (the store itself says "later"), for any 5xx, and for everything that is not an
+ * answer at all: a network error, a timeout, a store that never replies. Those are the failures a
+ * second poll can legitimately win.
+ */
+export function isPermanentStoreRefusal(e: unknown): boolean {
+  if (!(e instanceof StoreRpcError)) return false;
+  if (e.status === 408 || e.status === 429) return false;
+  return e.status >= 400 && e.status < 500;
+}
+
 async function workerRpc(ctx: WorkerContext, fn: string, body: Record<string, unknown>): Promise<unknown> {
   const res = await fetch(`${ctx.baseUrl}/rest/v1/rpc/${fn}`, {
     method: "POST",
@@ -395,11 +428,13 @@ async function workerRpc(ctx: WorkerContext, fn: string, body: Record<string, un
   const text = await res.text();
   if (!res.ok) {
     let message = text || `store error ${res.status}`;
+    let code: string | undefined;
     try {
-      const parsed = JSON.parse(text) as { message?: string };
+      const parsed = JSON.parse(text) as { message?: string; code?: string };
       if (parsed.message) message = parsed.message;
+      if (typeof parsed.code === "string") code = parsed.code;
     } catch { /* keep the raw text */ }
-    throw new Error(`${fn}: ${message}`);
+    throw new StoreRpcError(`${fn}: ${message}`, res.status, code);
   }
   return text ? (JSON.parse(text) as unknown) : null;
 }
@@ -655,7 +690,7 @@ export type DrainResumeState =
 export async function fetchDrainedOutputs(
   ctx: WorkerContext,
   gig_id: string,
-): Promise<{ rows: DrainedOutput[]; error?: string }> {
+): Promise<{ rows: DrainedOutput[]; error?: string; permanent?: boolean }> {
   let out: unknown;
   try {
     out = await boundedWorkerRpc(ctx, "coltrane_mcp_gig_outputs", { p_bearer: ctx.agentToken, p_gig: gig_id });
@@ -663,7 +698,10 @@ export async function fetchDrainedOutputs(
     // Every failure here is the same kind of event: resume state could not be read. The queue
     // row is still runnable work, so this never fails the claim — it costs a cold run, which is
     // exactly what the worker did before this path existed.
-    return { rows: [], error: e instanceof Error ? e.message : String(e) };
+    //
+    // `permanent` is carried out because a caller that must NOT run cold (a `resumes` claim) has a
+    // third option beyond cold and refund, and needs this fact to choose it.
+    return { rows: [], error: e instanceof Error ? e.message : String(e), permanent: isPermanentStoreRefusal(e) };
   }
   if (!Array.isArray(out)) return { rows: [] };
   return { rows: out.filter((r): r is DrainedOutput => !!r && typeof r === "object") };
@@ -688,12 +726,12 @@ export async function fetchDrainedOutputs(
 export async function fetchDrainedGenomeHash(
   ctx: WorkerContext,
   gig_id: string,
-): Promise<{ genome_hash?: string; error?: string }> {
+): Promise<{ genome_hash?: string; error?: string; permanent?: boolean }> {
   let out: unknown;
   try {
     out = await boundedWorkerRpc(ctx, "coltrane_mcp_gig_status", { p_bearer: ctx.agentToken, p_gig: gig_id });
   } catch (e) {
-    return { error: e instanceof Error ? e.message : String(e) };
+    return { error: e instanceof Error ? e.message : String(e), permanent: isPermanentStoreRefusal(e) };
   }
   // The RPC may answer with the header row or a single-row array; both are the same fact.
   const row = Array.isArray(out) ? out[0] : out;
@@ -990,9 +1028,15 @@ async function rebuildFromDrain(
   outputs: OutputStore,
   /** The gig whose seals to rebuild from: the claim's own, or the closed gig it `resumes`. */
   source: string = claim.gig_id,
-): Promise<DrainResumeState | { ok: false; reason: string; nothing: true } | { ok: false; reason: string; unreadable: true }> {
+): Promise<
+  | DrainResumeState
+  | { ok: false; reason: string; nothing: true }
+  | { ok: false; reason: string; unreadable: true; permanent: boolean }
+> {
   const drained = await fetchDrainedOutputs(ctx, source);
-  if (drained.error !== undefined) return { ok: false, reason: `the sink's outputs could not be read — ${drained.error}`, unreadable: true };
+  if (drained.error !== undefined) {
+    return { ok: false, reason: `the sink's outputs could not be read — ${drained.error}`, unreadable: true, permanent: drained.permanent === true };
+  }
   if (drained.rows.length === 0) return { ok: false, reason: "the sink holds no sealed outputs for this gig", nothing: true };
 
   const header = await fetchDrainedGenomeHash(ctx, source);
@@ -1000,7 +1044,7 @@ async function rebuildFromDrain(
   if (header.error !== undefined) {
     // The status could not be READ (refused, errored, unanswered) — a different fact from a header
     // that carries no genome_hash. A caller that must not run cold (a `resumes` claim) refuses on it.
-    return { ok: false, reason: `the sink's status for gig ${source} could not be read — ${header.error}`, unreadable: true };
+    return { ok: false, reason: `the sink's status for gig ${source} could not be read — ${header.error}`, unreadable: true, permanent: header.permanent === true };
   }
   if (header.genome_hash === undefined) {
     // A miss is free; a wrong hit is not. An identity that cannot be checked resolves to doing
@@ -1023,6 +1067,116 @@ async function rebuildFromDrain(
     rows: drained.rows,
     outputs,
   });
+}
+
+/**
+ * How many TRANSIENT failures to read a resume's closed gig the worker fleet will spend before the
+ * resuming gig is ENDED. Three: enough to ride out a store restart or a brief outage, few enough
+ * that the organization's queue is not held for long behind a gig nobody can start.
+ */
+export const RESUME_READ_MAX_ATTEMPTS = 3;
+
+/** The manifest key the count is kept under, on the RESUMING gig's own header. */
+export const RESUME_READ_FAILURES_KEY = "resume_read_failures";
+
+/**
+ * The worker's own retry count for THIS resume, read from the resuming gig's header, incremented by
+ * one for the failure that just happened. `undefined` means it could not be established.
+ *
+ * WHY THE HEADER HOLDS THE COUNT. The store REFUNDS the attempt on every non-terminal release
+ * (coltrane-ui 20260926040000) and the claim carries no attempt count at all — so a resume that
+ * refunds a transient read failure can never reach the store's own cap. The same row is the oldest
+ * eligible one on the next poll, is claimed again, refuses again, refunds again, and every gig
+ * behind it in the organization waits forever. The bound therefore has to be the WORKER's, kept
+ * where the worker can find it again: each poll may be a different box, so a box-local counter
+ * counts to one forever, and the only per-gig place this engine already writes AND reads back is
+ * the gig header.
+ *
+ * An unestablished count is NOT a zero. Standing a default in for it re-opens the very spin this
+ * closes, so the caller ends the gig rather than refund it blind.
+ */
+async function nextResumeReadFailureCount(ctx: WorkerContext, gig_id: string): Promise<{ count: number } | { detail: string }> {
+  if (!remoteConfigured()) {
+    return { detail: "there is no drain to keep this gig's retry count on, so the retry cannot be bounded" };
+  }
+  try {
+    const out = await boundedWorkerRpc(ctx, "coltrane_mcp_gig_status", { p_bearer: ctx.agentToken, p_gig: gig_id });
+    const row = Array.isArray(out) ? out[0] : out;
+    const manifest = row && typeof row === "object" ? (row as Record<string, unknown>)["manifest"] : undefined;
+    const held = manifest && typeof manifest === "object" ? (manifest as Record<string, unknown>)[RESUME_READ_FAILURES_KEY] : undefined;
+    // No header yet, or a header that has never counted one: this is the first failure.
+    if (held === undefined || held === null) return { count: 1 };
+    if (typeof held === "number" && Number.isInteger(held) && held >= 0) return { count: held + 1 };
+    return { detail: `this gig's header holds a ${RESUME_READ_FAILURES_KEY} that is not a count (${JSON.stringify(held)})` };
+  } catch (e) {
+    return { detail: `this gig's own header could not be read — ${e instanceof Error ? e.message : String(e)}` };
+  }
+}
+
+/**
+ * The claimed gig's IDENTITY, written to the sink before the resume is refused.
+ *
+ * A gig that is claimed and then handed back or ended still happened, and the sink is where an
+ * operator finds out what it was: which standard, which genome, and — the fact this whole path
+ * turns on — which closed gig it was trying to resume. Written with `status: "running"` because
+ * that is what the row is at this moment: claimed, leased, not yet finished either way. It is the
+ * same header the first chair would have been preceded by, minus the run.
+ *
+ * It also CARRIES the retry count, which is what makes the count a bound rather than a note: a
+ * count that does not land leaves the next poll reading the same prior, and the row would retry
+ * from that number for as long as the store stays unwell. False means it did not land.
+ */
+async function drainRefusedResumeHeader(
+  claim: ClaimedGig,
+  standard: Standard,
+  resumes: string,
+  failures: number | undefined,
+  log: (line: string) => void,
+): Promise<boolean> {
+  try {
+    await drainGigHeader({
+      gig_id: claim.gig_id,
+      standard_slug: standard.slug,
+      status: "running",
+      genome_hash: genomeHash(standard),
+      started_at: new Date().toISOString(),
+      resumes,
+      ...(failures !== undefined ? { resume_read_failures: failures } : {}),
+    });
+    return true;
+  } catch (e) {
+    log(`the header for ${claim.gig_id} did not land (${e instanceof Error ? e.message : String(e)})`);
+    return false;
+  }
+}
+
+/**
+ * End a claimed gig here and now: it is not runnable and no later poll will make it so.
+ *
+ * TERMINAL RELEASE FIRST, `gig_fail` as the fallback. The release goes through the drain service on
+ * the VENUE credential this box always holds and both ends the row and gives the lease back in one
+ * call; `coltrane_mcp_gig_fail` goes to the store on the gig's own token and is the door left when
+ * no lease credential was minted. Either is enough, and what must NOT happen is a NON-terminal
+ * release: that refunds the attempt and puts the dead row back at the head of the queue.
+ */
+async function endClaimedGig(
+  ctx: WorkerContext,
+  gig_id: string,
+  reason: string,
+  leaseCred: LeaseCredential | undefined,
+  log: (line: string) => void,
+): Promise<boolean> {
+  if (leaseCred) {
+    const rel = await releaseLease(gig_id, reason, true, leaseCred);
+    if (rel.ok) return true;
+    log(`the terminal release of ${gig_id} was not recorded (${rel.detail}) — failing it on the store instead`);
+  }
+  try {
+    return await failGig(ctx, gig_id, reason);
+  } catch (e) {
+    log(`${gig_id} could not be failed on the store either (${e instanceof Error ? e.message : String(e)}) — the row is held until its lease lapses`);
+    return false;
+  }
 }
 
 /**
@@ -1256,10 +1410,50 @@ export async function workOnce(ctx: WorkerContext, deps: WorkOnceDeps): Promise<
       // unanswered) is REFUSED, never run cold: a cold run re-pays for every chair the closed gig
       // already sealed. Nothing has been spent, so the row goes back non-terminally (the attempt
       // refunds) for a box — or a store — that can read it.
-      if (resumes !== undefined && !rebuilt.ok && "unreadable" in rebuilt) {
-        const error = `cannot resume closed gig ${resumes}: its seals could not be read, and a resume is never run cold — ${rebuilt.reason}`;
-        log(`gig ${claim.gig_id} refused: ${error}`);
-        console.error(`[drain] gig ${claim.gig_id}: ${error}`);
+      if (resumes !== undefined && !rebuilt.ok && ("unreadable" in rebuilt || "nothing" in rebuilt)) {
+        // WHICH FAILURE IS THIS?
+        //   PERMANENT — an answered 4xx (42501 for a token scoped elsewhere, 42501 again for an
+        //   acting agent who holds no seat), or a closed gig the sink holds NOTHING for. The next
+        //   poll gets the same answer, so there is nothing to wait for.
+        //   TRANSIENT — a 5xx, a network error, a store that never answered. A later poll may win,
+        //   but only a BOUNDED number of them: see countResumeReadFailure.
+        const permanent = "nothing" in rebuilt || rebuilt.permanent;
+        const why = "nothing" in rebuilt
+          ? `the sink holds no sealed outputs for gig ${resumes}`
+          : rebuilt.reason;
+        const error = `cannot resume closed gig ${resumes}: its seals could not be read, and a resume is never run cold — ${why}`;
+        // A permanent refusal TERMINATES the gig. Refunding it would put the same unrunnable row
+        // back at the head of the organization's oldest-first queue on every poll — it would be
+        // re-claimed, refused and refunded forever, the store's attempts cap would never trip, and
+        // every gig behind it would never run (review 5327331488, seen twice on a real store).
+        let terminal = permanent
+          ? `${error}. This refusal will not change on a retry, so the gig is ended here.`
+          : undefined;
+        // A transient one may be retried, but only a BOUNDED number of times, and the bound is a
+        // count the worker keeps on this gig's own header.
+        let failures: number | undefined;
+        if (terminal === undefined) {
+          const counted = await nextResumeReadFailureCount(ctx, claim.gig_id);
+          if ("detail" in counted) {
+            terminal = `${error}. The retry could not be bounded (${counted.detail}), so the gig is ended here rather than left to re-claim forever.`;
+          } else if (counted.count >= RESUME_READ_MAX_ATTEMPTS) {
+            terminal = `${error}. This is attempt ${counted.count} of ${RESUME_READ_MAX_ATTEMPTS} to read it, so the gig is ended here.`;
+          } else {
+            failures = counted.count;
+          }
+        }
+        const landed = await drainRefusedResumeHeader(claim, standard, resumes, failures, log);
+        if (terminal === undefined && !landed) {
+          terminal = `${error}. The retry count did not reach this gig's header, so the retry cannot be bounded and the gig is ended here.`;
+        }
+        log(`gig ${claim.gig_id} refused: ${terminal ?? error}`);
+        console.error(`[drain] gig ${claim.gig_id}: ${terminal ?? error}`);
+        if (terminal !== undefined) {
+          const ended = await endClaimedGig(ctx, claim.gig_id, terminal, leaseCred, log);
+          return { claimed: true, gig_id: claim.gig_id, status: "failed", error: terminal, acknowledged: ended };
+        }
+        // Transient and still inside the bound: nothing has been spent, so the row goes back
+        // non-terminally (the attempt refunds) for a box — or a store — that can read it.
         if (leaseCred) {
           const rel = await releaseLease(claim.gig_id, error, false, leaseCred);
           if (!rel.ok) log(`the release of ${claim.gig_id} was not recorded either (${rel.detail}) — the row is held until its lease lapses`);

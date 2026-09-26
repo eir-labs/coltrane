@@ -1,5 +1,5 @@
 {
-  "spec_doc": "docs/specs/gig-runs-once.red-spec.json \u2014 engine half of the two-repo fix; the store half (coltrane_drain_renew / coltrane_drain_release, attempts/max_attempts, terminal-status guard on the header upsert, lease clearing on terminal writes, manifest merge) lands in eir-labs/coltrane-ui branch work/gig-runs-once and deploys first. CONTRACT SURFACE the laws pin \u2014 src/lease.ts: export const HOSTED_LEASE_MS = 60 * 60 * 1000; export const DRAIN_LEASE_ROUTES = { renew: '/rest/v1/rpc/coltrane_drain_renew', release: '/rest/v1/rpc/coltrane_drain_release' }; renew: POST ${COLTRANE_DRAIN_URL}${DRAIN_LEASE_ROUTES.renew} body {p_instance, p_gig_id}, Bearer drain key, X-Coltrane-Instance; 200 -> new lease_until; 403 / 42501 -> lease lost; release: POST ${COLTRANE_DRAIN_URL}${DRAIN_LEASE_ROUTES.release} body {p_instance, p_gig_id, p_reason, p_terminal} -> boolean; WorkOnceDeps.scheduleHeartbeat: (intervalMs: number, beat: () => Promise<unknown>) => () => void; default arms an unref'd setInterval; interval = HOSTED_LEASE_MS / 3; WorkOnceResult.acknowledged: boolean on a claimed result: true iff the store acknowledged the terminal header; terminal header attempts: 3; header status: 'running' is a new GigHeaderRecord status, sent awaited before the first chair with the run's genome_hash; manifest.cold_run_reason: string on a header written by a run that went cold because a resume was refused.",
+  "spec_doc": "docs/specs/gig-runs-once.red-spec.json \u2014 engine half of the two-repo fix; the store half (coltrane_drain_renew / coltrane_drain_release, attempts/max_attempts, terminal-status guard on the header upsert, lease clearing on terminal writes, manifest merge) lands in eir-labs/coltrane-ui branch work/gig-runs-once and deploys first. CONTRACT SURFACE the laws pin \u2014 src/lease.ts: export const HOSTED_LEASE_MS = 60 * 60 * 1000; export const DRAIN_LEASE_ROUTES = { renew: '/rest/v1/rpc/coltrane_drain_renew', release: '/rest/v1/rpc/coltrane_drain_release' }; renew: POST ${COLTRANE_DRAIN_URL}${DRAIN_LEASE_ROUTES.renew} body {p_gig_id} ONLY, Bearer drain key (the route fills p_token), X-Coltrane-Instance (the route fills p_instance); 200 -> new lease_until; 403 / 42501 -> lease lost; release: POST ${COLTRANE_DRAIN_URL}${DRAIN_LEASE_ROUTES.release} body {p_gig_id, p_reason, p_terminal} ONLY, instance in X-Coltrane-Instance -> boolean; WorkOnceDeps.scheduleHeartbeat: (intervalMs: number, beat: () => Promise<unknown>) => () => void; default arms an unref'd setInterval; interval = HOSTED_LEASE_MS / 3; WorkOnceResult.acknowledged: boolean on a claimed result: true iff the store acknowledged the terminal header; terminal header attempts: 3; header status: 'running' is a new GigHeaderRecord status, sent awaited before the first chair with the run's genome_hash; manifest.cold_run_reason: string on a header written by a run that went cold because a resume was refused. ROUND 2: output drains are acknowledged (3 attempts) before the completed header; a 'running' header refused with 23514 or 403/42501 aborts the run with no terminal write.",
   "validation_criteria": [
     "every contract invariant E1-E8 has a red law that drives production code and names its plant",
     "the drain-service lease RPC routes live in ONE constant (DRAIN_LEASE_ROUTES, src/lease.ts)",
@@ -8,7 +8,8 @@
     "implementer obligation: retire the stale 'thirty minutes' lease comments in src/worker.ts (no-mint refusal) and src/run_deps.ts (above the drain timeout), and the 'lease ... is thirty minutes' remark in workOnce's finally",
     "implementer obligation: tests/gig_header_drain.test.ts 'a chair failure produces one failed-header POST' picks the FIRST coltrane_gigs POST; if the 'running' header is written from runGig, that law must select by status",
     "implementer obligation: tests/drain_worker.test.ts 'refuses a gig the store leased without minting' matches /minted no credential/; the release-first path may keep that wording but should drop 'the row stays leased'",
-    "implementer obligation: the local queue's I14/O4 laws re-complete a DONE gig by its holder; the new holder check must keep admitting the holder on a row already in done/"
+    "implementer obligation: the local queue's I14/O4 laws re-complete a DONE gig by its holder; the new holder check must keep admitting the holder on a row already in done/",
+    "the instance travels once: X-Coltrane-Instance, never also in a lease RPC body (two sources for one fact)"
   ],
   "input_refs": [
     "SPEC-worker-contract.md",
@@ -70,11 +71,11 @@
     },
     {
       "invariant_id": "E3",
-      "test_name": "E3 \u2014 the heartbeat renews the lease while the gig runs > E3 a heartbeat is armed before the first chair, every HOSTED_LEASE_MS/3, and renews with the claim's instance and gig id",
+      "test_name": "E3 \u2014 the heartbeat renews the lease while the gig runs > E3 a heartbeat is armed before the first chair, every HOSTED_LEASE_MS/3, and renews with body {p_gig_id} and the instance only in its header",
       "test_file": "tests/gig_runs_once_heartbeat.test.ts",
       "kind": "behavioural",
       "drives": "workOnce(ctx, deps) \u2014 src/worker.ts \u2014 WorkOnceDeps.scheduleHeartbeat + the coltrane_drain_renew call through the drain service (src/output_mirror.ts drainPost)",
-      "plant": "delete the scheduleHeartbeat(...) arming in workOnce (no heartbeat)"
+      "plant": "delete the scheduleHeartbeat(...) arming in workOnce (no heartbeat) \u2014 or add p_instance to the renew body"
     },
     {
       "invariant_id": "E3r",
@@ -98,7 +99,7 @@
       "test_file": "tests/gig_runs_once_release.test.ts",
       "kind": "behavioural",
       "drives": "workOnce(ctx, deps) \u2014 src/worker.ts \u2192 claimNextGig \u2014 src/worker.ts; coltrane_drain_release via the drain service",
-      "plant": "throw the 'minted no credential' error in claimNextGig without first calling release"
+      "plant": "throw the 'minted no credential' error in claimNextGig without first calling release (or send p_instance in the release body \u2014 the instance rides X-Coltrane-Instance only)"
     },
     {
       "invariant_id": "E5b",
@@ -106,7 +107,7 @@
       "test_file": "tests/gig_runs_once_release.test.ts",
       "kind": "behavioural",
       "drives": "workOnce(ctx, deps) \u2014 src/worker.ts \u2192 claimNextGig venue-mode venueMayClaim refusal \u2014 src/worker.ts",
-      "plant": "throw the unrealizable-venue error in claimNextGig without first calling release"
+      "plant": "throw the unrealizable-venue error in claimNextGig without first calling release (or send p_instance in the release body \u2014 the instance rides X-Coltrane-Instance only)"
     },
     {
       "invariant_id": "E5c",
@@ -114,7 +115,7 @@
       "test_file": "tests/gig_runs_once_release.test.ts",
       "kind": "behavioural",
       "drives": "workOnce(ctx, deps) \u2014 src/worker.ts (the catch around failGig)",
-      "plant": "in workOnce's catch, only log when failGig throws (drop the release(terminal=true) fallback)"
+      "plant": "in workOnce's catch, only log when failGig throws (drop the release(terminal=true) fallback) (or send p_instance in the release body \u2014 the instance rides X-Coltrane-Instance only)"
     },
     {
       "invariant_id": "E6a",
@@ -163,6 +164,46 @@
       "kind": "behavioural",
       "drives": "workOnce (heartbeat interval) \u2014 src/worker.ts; drainTimeoutMs() \u2014 src/run_deps.ts; both under a module mock of src/lease.ts",
       "plant": "hard-code the heartbeat interval in workOnce as 20 * 60 * 1000 (or keep DEFAULT_DRAIN_TIMEOUT_MS = 25 * 60 * 1000 in src/run_deps.ts)"
+    },
+    {
+      "invariant_id": "E9a",
+      "test_name": "E9 \u2014 outputs are acknowledged before the gig is reported complete > E9a the 'completed' header is sent only AFTER the store acknowledged every output row of the gig",
+      "test_file": "tests/gig_runs_once_outputs_first.test.ts",
+      "kind": "behavioural",
+      "drives": "workOnce(ctx, deps) \u2014 src/worker.ts (mirror.persist \u2192 drainRemote \u2014 src/output_mirror.ts; the completed-header write in runGig \u2014 src/runtime.ts)",
+      "plant": "restore `void drainRemote(rec)` in createOutputMirror().persist in src/output_mirror.ts, or write the completed header before awaiting the gig's pending output drains"
+    },
+    {
+      "invariant_id": "E9b",
+      "test_name": "E9 \u2014 outputs are acknowledged before the gig is reported complete > E9b an output row the drain service NEVER acknowledges: retried to the bound, NO completed header, acknowledged:false, logged without debug",
+      "test_file": "tests/gig_runs_once_outputs_first.test.ts",
+      "kind": "behavioural",
+      "drives": "workOnce(ctx, deps) \u2014 src/worker.ts \u2014 WorkOnceResult.acknowledged over the output drains",
+      "plant": "remove the retry around drainViaPostgrest's row POST, or write the completed header even when an output drain failed"
+    },
+    {
+      "invariant_id": "E9c",
+      "test_name": "E9 \u2014 outputs are acknowledged before the gig is reported complete > E9c `coltrane work` exits NON-ZERO when a sealed output never reached the store",
+      "test_file": "tests/gig_runs_once_outputs_first.test.ts",
+      "kind": "behavioural",
+      "drives": "runCli([\"work\"], io) \u2014 src/cli.ts (over workOnce \u2014 src/worker.ts)",
+      "plant": "report acknowledged:true from workOnce when only the header (not the outputs) was acknowledged"
+    },
+    {
+      "invariant_id": "E10a",
+      "test_name": "E10 \u2014 a refused start header stops the worker before it spends > E10 the store refuses the 'running' header with 23514 \u2014 the terminal guard: the row is already finished: no chair, no seal, no terminal write",
+      "test_file": "tests/gig_runs_once_refused_header.test.ts",
+      "kind": "behavioural",
+      "drives": "workOnce(ctx, deps) \u2014 src/worker.ts \u2014 the awaited start header's refusal wired to the run's abort and the terminal-write suppression",
+      "plant": "log and ignore a refused 'running' header (continue into the first chair)"
+    },
+    {
+      "invariant_id": "E10b",
+      "test_name": "E10 \u2014 a refused start header stops the worker before it spends > E10 the store refuses the 'running' header with 403 / 42501 \u2014 the lease is not this worker's: no chair, no seal, no terminal write",
+      "test_file": "tests/gig_runs_once_refused_header.test.ts",
+      "kind": "behavioural",
+      "drives": "workOnce(ctx, deps) \u2014 src/worker.ts \u2014 same",
+      "plant": "log and ignore a refused 'running' header (continue into the first chair)"
     }
   ],
   "testing_method": "vitest, example-based and behavioural: every engine law drives workOnce (or runCli / openLocalQueue) through a stubbed global fetch that plays both hosts \u2014 the org store (ctx.baseUrl RPCs) and the drain service (COLTRANE_DRAIN_URL: header, outputs, storage, renew, release) \u2014 statefully, so a re-claim reads what the first worker's acknowledged writes left behind. The heartbeat's clock is injected (WorkOnceDeps.scheduleHeartbeat) and fired from inside the chair invocation; acknowledgement is observed by holding the store's answer back (a delayed Response) and asserting what had resolved when workOnce returned. E8 moves the lease constant with vi.doMock over src/lease.ts and asserts both derived numbers follow. New symbols are reached by variable specifiers and casts so tsc over tests/ stays clean.",
@@ -170,31 +211,39 @@
   "laws": [
     {
       "path": "tests/gig_runs_once_heartbeat.test.ts",
-      "commit": "cf75e650ac4090baf7b73ee88d09b5fa2ee40b0e"
+      "commit": "a5c2e92f19e9ce04533b2efa602c89b3e08ca1e4"
     },
     {
       "path": "tests/gig_runs_once_lease_constant.test.ts",
-      "commit": "cf75e650ac4090baf7b73ee88d09b5fa2ee40b0e"
+      "commit": "a5c2e92f19e9ce04533b2efa602c89b3e08ca1e4"
     },
     {
       "path": "tests/gig_runs_once_local_complete.test.ts",
-      "commit": "cf75e650ac4090baf7b73ee88d09b5fa2ee40b0e"
+      "commit": "a5c2e92f19e9ce04533b2efa602c89b3e08ca1e4"
+    },
+    {
+      "path": "tests/gig_runs_once_outputs_first.test.ts",
+      "commit": "a5c2e92f19e9ce04533b2efa602c89b3e08ca1e4"
     },
     {
       "path": "tests/gig_runs_once_reclaim.test.ts",
-      "commit": "cf75e650ac4090baf7b73ee88d09b5fa2ee40b0e"
+      "commit": "a5c2e92f19e9ce04533b2efa602c89b3e08ca1e4"
+    },
+    {
+      "path": "tests/gig_runs_once_refused_header.test.ts",
+      "commit": "a5c2e92f19e9ce04533b2efa602c89b3e08ca1e4"
     },
     {
       "path": "tests/gig_runs_once_release.test.ts",
-      "commit": "cf75e650ac4090baf7b73ee88d09b5fa2ee40b0e"
+      "commit": "a5c2e92f19e9ce04533b2efa602c89b3e08ca1e4"
     },
     {
       "path": "tests/gig_runs_once_start_header.test.ts",
-      "commit": "cf75e650ac4090baf7b73ee88d09b5fa2ee40b0e"
+      "commit": "a5c2e92f19e9ce04533b2efa602c89b3e08ca1e4"
     },
     {
       "path": "tests/gig_runs_once_terminal_ack.test.ts",
-      "commit": "cf75e650ac4090baf7b73ee88d09b5fa2ee40b0e"
+      "commit": "a5c2e92f19e9ce04533b2efa602c89b3e08ca1e4"
     }
   ]
 }

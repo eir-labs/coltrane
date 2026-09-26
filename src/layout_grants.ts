@@ -95,13 +95,33 @@ function covers(scope: string | undefined, path: string): boolean {
   return scope === path || posix.matchesGlob(path, scope);
 }
 
-/** A target as the grant will name it: normalised, repository-relative. Undefined → unusable (it
- *  escapes the tree, is absolute, or carries glob metacharacters) and is narrowed away. */
+/**
+ * Does this target_paths entry try to name a path OUTSIDE the tree, or by a spelling the grant check
+ * does not see? A `..` segment (`src/../coltrane.layout.json` — which `src/**` matches by prefix), an
+ * absolute path (`/etc/x`, `C:\\x`), a backslash (a Windows separator the posix glob reads as a
+ * filename character), or a leading `~` (the CLI reads `Write(~/x)` as the home directory). Such an
+ * entry is REFUSED — never normalised into something that looks plain, because the change did not
+ * name that plain path.
+ */
+export function escapesTree(t: string): boolean {
+  if (t.includes("\\")) return true;
+  if (t.startsWith("/") || t.startsWith("~") || /^[A-Za-z]:/.test(t)) return true;
+  return t.split("/").some((seg) => seg === "..");
+}
+
+/** A target as the grant will name it. Undefined → unusable (escaping, globbed, or empty) and narrowed
+ *  away; the dispatch door has already refused the chair by name for the first two. Only a harmless
+ *  spelling is tidied (a leading `./`, a doubled `/`) — nothing that could move the path. */
 function normaliseTarget(t: string): string | undefined {
-  if (GLOB_META.test(t)) return undefined;
-  const n = posix.normalize(t.trim()).replace(/^\.\//, "");
-  if (n === "" || n === "." || n.startsWith("../") || n === ".." || posix.isAbsolute(n)) return undefined;
+  if (GLOB_META.test(t) || escapesTree(t)) return undefined;
+  const n = posix.normalize(t).replace(/^\.\//, "");
+  if (n === "" || n === "." || escapesTree(n)) return undefined;
   return n;
+}
+
+/** target_paths entries that escape the tree — the dispatch door refuses these by name. */
+export function escapingTargetPaths(targets: readonly string[] | undefined): string[] {
+  return (targets ?? []).filter(escapesTree);
 }
 
 const own = (o: object | undefined, k: string): boolean => o !== undefined && Object.prototype.hasOwnProperty.call(o, k);
@@ -174,7 +194,7 @@ export function resolveSeatGrants(args: ResolveSeatGrantsArgs): SeatGrants {
       denials.push(`${tool}(${LAYOUT_FILE})`);
     }
   }
-  const isExactLayoutGrant = (g: string) => WRITE_TOOLS.has(toolBaseName(g)) && scopeOf(g) !== undefined && normaliseTarget(scopeOf(g)!) === LAYOUT_FILE;
+  const isExactLayoutGrant = (g: string) => WRITE_TOOLS.has(toolBaseName(g)) && scopeOf(g) !== undefined && posix.normalize(scopeOf(g)!).replace(/^\.\//, "") === LAYOUT_FILE;
 
   // ── 2 · narrow Write/Edit to the change's target_paths ───────────────────────────────────────
   const target_paths_applied = target_paths !== undefined;
@@ -213,4 +233,50 @@ export function describeRoleRefusals(agentSlug: string, refusals: readonly RoleR
     refusals.map((r) => `${r.token} (role "${r.role}": ${r.reason})`).join("; ") +
     `. A role token with no answer grants nothing and the chair is refused rather than widened.`
   );
+}
+
+/**
+ * THE WRITE SCOPE a seat holds, as the post-seat DIFF GATE judges it (runGig): the scopes of its
+ * resolved Write/Edit grants — target-narrowed when target_paths applied, the expanded globs when not.
+ * A bare Write/Edit grant, or `code_tool_access` "write"/"full" (which keeps bare Write/Edit in the
+ * cage), reaches every path. Bash contributes NOTHING: a command prefix names no paths, so whatever a
+ * seat's Bash changed must still lie inside its Write/Edit scope.
+ */
+export interface WriteScope {
+  everywhere: boolean;
+  globs: string[];
+}
+
+export function writeScopeOf(agent: Agent, grants: readonly string[]): WriteScope {
+  let everywhere = agent.code_tool_access === "write" || agent.code_tool_access === "full";
+  const globs: string[] = [];
+  for (const g of grants) {
+    if (!WRITE_TOOLS.has(toolBaseName(g))) continue;
+    const s = scopeOf(g);
+    if (s === undefined) everywhere = true;
+    else if (!globs.includes(s)) globs.push(s);
+  }
+  return { everywhere, globs };
+}
+
+/** Paths no grant ever covers: the layout (no self-widening), the CLI's settings dir, git's own. */
+export function isProtectedPath(path: string): boolean {
+  return path === LAYOUT_FILE || path === ".claude" || path.startsWith(".claude/") || path === ".git" || path.startsWith(".git/");
+}
+
+/** Is this repository-relative path one the scope may change? Protected paths never are. */
+export function inWriteScope(path: string, scope: WriteScope): boolean {
+  if (isProtectedPath(path)) return false;
+  return scope.everywhere || scope.globs.some((g) => covers(g, path));
+}
+
+/**
+ * Can this seat change the tree at all through its host tools? A Write/Edit scope, or Bash (granted,
+ * or kept by `code_tool_access` "full"). A seat with none of these has no host tool that writes — the
+ * cage denies every unheld builtin — so the diff gate has nothing of its to judge. Every seat that CAN
+ * write is gated, and refused if its tree cannot be read.
+ */
+export function seatCanWrite(agent: Agent, grants: readonly string[]): boolean {
+  const scope = writeScopeOf(agent, grants);
+  return scope.everywhere || scope.globs.length > 0 || agent.code_tool_access === "full" || grants.some((g) => toolBaseName(g) === "Bash");
 }

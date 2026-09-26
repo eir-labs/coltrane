@@ -11,6 +11,25 @@ the MCP handshake reports the constant rather than a hardcoded literal.
 
 ### Changed — breaking
 
+- **A red law names what it drives and the production defect that turns it red, or the red-spec does
+  not seal.** `red-spec` v4 → v5: every `coverage_map` entry now REQUIRES `kind` (`behavioural` |
+  `structural`), `drives` (the production symbol the law invokes, with its file) and `plant` (the
+  smallest edit to PRODUCTION code that must turn the law red); `plant_observed` records the failing
+  assertion the drafter saw, and `kind: structural` additionally requires `structural_reason`. The
+  seal's own schema check (`registry.validate`, run by `outputs.write`) enforces it, so a red-spec
+  carrying the v4 `coverage_map` shape is refused. `red-spec-drafter` step 6 now obliges the drafter
+  to plant each defect, watch the red, and revert before staging, and to write behavioural laws
+  against the seam the enforcement will occupy; `red-spec-attester` carries the fields from the spec's
+  law table and lists a row without them as `uncovered` rather than inventing a plant.
+
+  Why: laws that read source for a token, called a stand-in, or built their own copy of the thing
+  they guarded passed their seal and stayed green under planted defects in the production call
+  sites they claimed to guard. Three lanes of one work order, each caught only by adversarial review
+  after publication. `type_extend` classifies the change `additive` because it reads only top-level
+  properties; for a producer it is breaking, hence this section. `plant_observed` is the drafter's
+  claim — the engine validates its shape, not its truth. Law: `tests/a_red_law_names_its_plant.test.ts`
+  (7 laws, each planted against).
+
 - **Gap 3 realized: the worker environment is one enumerated contract, and a worker pointed at the
   wrong host now REFUSES at startup.** `src/worker_env.ts` exports `WORKER_ENV_CONTRACT` — one table
   where every variable names its host, its role and its meaning — together with `normalizeWorkerEnv`

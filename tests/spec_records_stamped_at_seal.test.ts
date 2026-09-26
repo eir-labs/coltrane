@@ -68,7 +68,7 @@ describe("a gig seals records stamped by the engine", () => {
       const { error, sealed } = await run("red-spec", {
         validation_criteria: ["every invariant has a failing test"], input_refs: ["contract-x"],
         laws: [{ path: "tests/x.test.ts", commit }],
-        coverage_map: [{ invariant_id: "I1", test_name: "the first law", test_file: "tests/x.test.ts" }],
+        coverage_map: [{ invariant_id: "I1", test_name: "the first law", test_file: "tests/x.test.ts", kind: "behavioural", drives: "f — src/f.ts", plant: "make f return the wrong value" }],
         testing_method: "vitest",
       }, dir);
       expect(sealed, `the seal path refused or never sealed an address-shaped red-spec: ${String((error as Error)?.message ?? error).slice(0, 300)}`).toBeDefined();
@@ -107,7 +107,7 @@ describe("a gig seals records stamped by the engine", () => {
       const { error, sealed } = await run("red-spec", {
         validation_criteria: ["x"], input_refs: ["y"],
         laws: [{ path: "tests/nope.test.ts", commit }],
-        coverage_map: [{ invariant_id: "I1", test_name: "t", test_file: "tests/nope.test.ts" }],
+        coverage_map: [{ invariant_id: "I1", test_name: "t", test_file: "tests/nope.test.ts", kind: "behavioural", drives: "f — src/f.ts", plant: "make f return the wrong value" }],
         testing_method: "vitest",
       }, dir);
       expect(String((error as Error)?.message ?? error), "the chair did not fail with the typed refusal naming the address").toMatch(/law_record_unresolvable[\s\S]*tests\/nope\.test\.ts/);

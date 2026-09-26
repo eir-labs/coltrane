@@ -39,7 +39,7 @@ describe("the engine's `ignore` is exactly the one the installed CLI bundles", (
     expect(c.regexCount, "non-vacuity: the fingerprint has regexes to compare").toBeGreaterThan(15);
     expect(c.missingInBinary, `ignore@${dep.version}'s matching regexes are not in the CLI at ${bin} — the CLI's matcher is a different ignore`).toEqual([]);
     expect(c.markerMismatches, `release markers differ between ignore@${dep.version} and the CLI at ${bin}`).toEqual([]);
-  });
+  }, 60_000); // reads a ~225 MB binary: vitest's 5s default timed out on a loaded host (the r7+r8 grade)
 });
 
 describe("the comparator can go red (fixture binaries — no claude needed)", () => {

@@ -1532,7 +1532,21 @@ export type TourOutput = z.output<typeof TourSchema>;
 // strict: a misspelt role (`sources`) would otherwise load clean and silently answer nothing. A
 // role declared as an EMPTY list is refused (min 1) — an answer of "nothing" must be an absence the
 // resolver refuses by name, never a declared role that passes review and grants nothing.
-const LayoutEntriesSchema = z.array(z.string().min(1)).min(1);
+/**
+ * THE CLI's GRANT GRAMMAR (Claude Code 2.1.283's `--allowedTools` splitter, `Hp`): a flag value splits
+ * into grants on `,` and on whitespace OUTSIDE parentheses; `(` enters, the FIRST `)` leaves, with no
+ * nesting. So a layout entry carrying `(`, `)` or `,` — or leading/trailing whitespace, which the
+ * splitter trims — can close its own grant early and smuggle another: `npx vitest run),Write,Bash(true`
+ * expands to `Bash(npx vitest run),Write,Bash(true:*)`, a BARE Write. Every layout entry (command
+ * prefix, path glob, git prefix, egress host) is refused if it carries one; the resolver re-checks an
+ * injected layout with the same predicate, and the invoker re-splits the final argv.
+ */
+export function carriesGrantStructure(entry: string): boolean {
+  return /[(),]/.test(entry) || /^\s|\s$/.test(entry);
+}
+const GRANT_STRUCTURE_MESSAGE = "a layout entry may not carry ( ) , or leading/trailing whitespace — the CLI's --allowedTools grammar would read it as grant structure";
+const LayoutEntry = z.string().min(1).refine((e) => !carriesGrantStructure(e), { message: GRANT_STRUCTURE_MESSAGE });
+const LayoutEntriesSchema = z.array(LayoutEntry).min(1);
 // A PATH role's globs are tree-relative and plainly spelled. The CLI reads `Write(//x)` as an absolute
 // path and `Write(~/x)` as the home directory; it silently rewrites a leading `./` and an inner `//`
 // (`./**` is `**` to it); a `..` segment or a backslash names a path by a spelling nothing judges. Each
@@ -1540,12 +1554,18 @@ const LayoutEntriesSchema = z.array(z.string().min(1)).min(1);
 // isAmbiguousSpelling) — one rule, refuse, in both places.
 const LayoutGlobsSchema = z
   .array(
-    z.string().min(1).refine(
+    LayoutEntry.refine(
       (g) => !g.startsWith("~") && !g.includes("//") && !g.startsWith("./") && !g.includes("\\") && !g.split("/").includes(".."),
       { message: "a layout path glob must be tree-relative and plainly spelled: no leading ~ or ./, no //, no .. segment, no backslash" },
     ),
   )
   .min(1);
+
+/** The command roles a layout may declare (`commands.<role>`), each reached by `Bash(@<role>)`. */
+export const LAYOUT_COMMAND_ROLES = ["build", "test", "laws", "ship_dry", "publish"] as const;
+/** The git roles (`git.<op>`), each reached by `Bash(@git_<op>)`. Holding any of them opens `.git`
+ *  to the seat's Bash sandbox — never `.git/hooks` or `.git/config`. */
+export const LAYOUT_GIT_ROLES = ["git_stage", "git_commit", "git_push"] as const;
 
 export const LayoutSchema = z
   .object({
@@ -1560,14 +1580,35 @@ export const LayoutSchema = z
       })
       .strict()
       .optional(),
-    /** Command roles: each a list of exact command prefixes, expanded to `Bash(<prefix>:*)`. */
+    /** Command roles: each a list of exact command prefixes, expanded to `Bash(<prefix>:*)`.
+     *  `publish` is the repository's publishing command (e.g. `gh pr create`). */
     commands: z
       .object({
         build: LayoutEntriesSchema.optional(),
         test: LayoutEntriesSchema.optional(),
         laws: LayoutEntriesSchema.optional(),
         ship_dry: LayoutEntriesSchema.optional(),
+        publish: LayoutEntriesSchema.optional(),
       })
+      .strict()
+      .optional(),
+    /** What git this repository permits a seat, as command prefixes: `git.stage` is reached by
+     *  `Bash(@git_stage)`, `git.commit` by `Bash(@git_commit)`, `git.push` by `Bash(@git_push)`. */
+    git: z
+      .object({
+        stage: LayoutEntriesSchema.optional(),
+        commit: LayoutEntriesSchema.optional(),
+        push: LayoutEntriesSchema.optional(),
+      })
+      .strict()
+      .optional(),
+    /** The network a role may reach: `<role>: [hosts]`, role ∈ the command and git roles. A seat's
+     *  sandbox allows exactly the hosts of the roles it HOLDS (strictAllowlist); none by default. */
+    egress: z
+      .object(
+        Object.fromEntries([...LAYOUT_COMMAND_ROLES, ...LAYOUT_GIT_ROLES].map((r) => [r, LayoutEntriesSchema.optional()])) as
+          Record<(typeof LAYOUT_COMMAND_ROLES)[number] | (typeof LAYOUT_GIT_ROLES)[number], z.ZodOptional<typeof LayoutEntriesSchema>>,
+      )
       .strict()
       .optional(),
   })

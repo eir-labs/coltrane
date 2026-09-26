@@ -201,20 +201,25 @@ export function hostedStore(initial: HostedOpts): HostedStore {
   const outputs: Array<Record<string, unknown>> = [];
   const attempts = new Map<string, number>();
   let seq = 0;
-  // THE LIVE STORE'S SCOPE RULES for a gig-scoped token (post eir-labs/coltrane-ui #250), enforced
-  // here because the first fixture answered for ANY gig and was blind to review 5326196799 finding 1.
-  // A gig token may read its OWN gig's status and outputs. It may also read the OUTPUTS, and only the
-  // outputs, of exactly the gig its row `resumes`; #250 put the resume exception in
-  // coltrane_mcp_gig_outputs alone. Anything else is 42501 "scoped to a single gig", answered
-  // PostgREST-style (403 + {code, message}). A token this store never minted for a gig, such as a
-  // player's own token, is not gig-scoped and passes.
+  // THE STORE'S SCOPE RULES for a gig-scoped token, enforced here because the first fixture
+  // answered for ANY gig and was blind to review 5326196799 finding 1.
+  //
+  // THIS MIRRORS THE coltrane-ui FOLLOW-UP, NOT #250 AS MERGED. #250 put the read-only resume
+  // exception in coltrane_mcp_gig_outputs alone. The conductor's D1 decision widens it, in a
+  // coltrane-ui law and migration, to coltrane_mcp_gig_STATUS for exactly the gig the token's row
+  // resumes, mirroring outputs. Until that deploys, the live store still refuses the status read.
+  //   READS  (status, outputs): the token's own gig, plus exactly the gig its row `resumes`.
+  //   WRITES (gig_fail, gig_park): the token's own gig only.
+  //   Anything else: 42501 "scoped to a single gig", answered PostgREST-style (403 + {code, message}).
+  // A token this store never minted for a gig, such as a player's own token, is not gig-scoped and
+  // passes.
   const gigTokens = new Map<string, { gig: string; resumes: string | null }>();
-  const scopeRefusal = (body: Record<string, unknown>, what: "status" | "outputs" | "own"): Response | undefined => {
+  const scopeRefusal = (body: Record<string, unknown>, what: "read" | "own"): Response | undefined => {
     const scope = gigTokens.get(String(body["p_bearer"] ?? ""));
     if (!scope) return undefined;
     const gig = String(body["p_gig"]);
     if (gig === scope.gig) return undefined;
-    if (what === "outputs" && scope.resumes !== null && gig === scope.resumes) return undefined;
+    if (what === "read" && scope.resumes !== null && gig === scope.resumes) return undefined;
     return new Response(JSON.stringify({ code: "42501", message: "gig token is scoped to a single gig" }), { status: 403 });
   };
 
@@ -245,13 +250,13 @@ export function hostedStore(initial: HostedOpts): HostedStore {
       }
       if (fn === "coltrane_mcp_genome") return ok(GENOME_ROWS);
       if (fn === "coltrane_mcp_gig_status") {
-        const refused = scopeRefusal(body, "status");
+        const refused = scopeRefusal(body, "read");
         if (refused) return refused;
         const row = gigs.get(String(body["p_gig"]));
         return ok(row ?? null);
       }
       if (fn === "coltrane_mcp_gig_outputs") {
-        const refused = scopeRefusal(body, "outputs");
+        const refused = scopeRefusal(body, "read");
         if (refused) return refused;
         return ok(outputs.filter((o) => o["gig_id"] === body["p_gig"]));
       }
@@ -260,7 +265,11 @@ export function hostedStore(initial: HostedOpts): HostedStore {
         if (refused) return refused;
         return opts.gigFail ? await opts.gigFail() : ok(true);
       }
-      if (fn === "coltrane_mcp_gig_park") return ok(true);
+      if (fn === "coltrane_mcp_gig_park") {
+        const refused = scopeRefusal(body, "own");
+        if (refused) return refused;
+        return ok(true);
+      }
       return new Response(`unexpected store rpc ${fn}`, { status: 500 });
     }
 

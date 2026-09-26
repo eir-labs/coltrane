@@ -145,6 +145,12 @@ describe("D3 — ANY refusal of the start header stops the run before the first 
       const res = await workOnce(venueCtx(), { makeInvoke: () => invoke as unknown as AgentInvoker } as WorkOnceDeps);
       await settle();
       expect(store.headers().some((c) => c.body["status"] === "running"), "precondition: the start header was sent").toBe(true);
+      if (label.includes("503")) {
+        // A 5xx is transient: E2's policy retries it (3 attempts in all). The run stops only once the
+        // retries are exhausted, never after the first 503 and never by running anyway.
+        expect(store.headers().filter((c) => c.body["status"] === "running").length,
+          "a 5xx on the start header must be retried under E2's policy (3 attempts) before the run stops").toBe(3);
+      }
       expect(invoke, `the start header was refused (${label}) and the chair ran anyway`).not.toHaveBeenCalled();
       expect(sealedLocally(env.stateRoot, GIG_ID)).toEqual([]);
       expect(store.headers().filter((c) => TERMINAL.has(String(c.body["status"]))).map((c) => c.body["status"]),

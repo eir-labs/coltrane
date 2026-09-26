@@ -3,9 +3,9 @@
 // nothing but Claude Code"). buildPrompt is pure + testable; runClaude is the one
 // non-deterministic seam (spawns the CLI, parses structured output).
 import { spawn, type ChildProcess } from "node:child_process";
-import { writeFileSync, unlinkSync } from "node:fs";
+import { writeFileSync, unlinkSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve as resolvePath, posix as posixPath } from "node:path";
 import { randomUUID, createHash } from "node:crypto";
 import { abortReasonText, type AgentInvocationContext, type AgentInvoker, type AgentStreamEvent } from "./runtime.js";
 import type { Registry } from "./registry.js";
@@ -15,7 +15,7 @@ import type { CodeToolAccess } from "./composition.js";
 import { resolveAgentGrants, hostBuiltinDenials, toolBaseName, grantsTreeReader, ENGINE_MCP_SERVER, type ToolProviderRegistry } from "./tool_providers.js";
 import type { OutputRecord } from "./outputs.js";
 import { venueEffectiveTools } from "./chart.js";
-import { resolveSeatGrants, targetPathsOf, describeRoleRefusals } from "./layout_grants.js";
+import { resolveSeatGrants, targetPathsOf, describeRoleRefusals, LAYOUT_FILE } from "./layout_grants.js";
 import { CORE_TYPES } from "./core_types.js";
 
 const EMPTY_TOOL_REGISTRY: ToolProviderRegistry = new Map();
@@ -1433,10 +1433,50 @@ function sessionIdInUse(stdout: string, message: string): boolean {
   return false;
 }
 
+/** The `sandbox` block of a seat's --settings (Claude Code's OS sandbox for Bash). */
+export interface BashSandbox {
+  enabled: true;
+  failIfUnavailable: true;
+  allowUnsandboxedCommands: false;
+  filesystem: { allowWrite: string[]; denyWrite: string[] };
+}
+
+/**
+ * THE BASH SANDBOX FOR A SEAT RUNNING IN `tree` (an ABSOLUTE path). A Bash grant is a command prefix,
+ * not a path: `Bash(sed:*)` can `sed -i` any file. So every seat that holds Bash spawns inside the
+ * CLI's OS sandbox:
+ *   · enabled, and failIfUnavailable — a host with no sandbox REFUSES the seat, never runs it bare;
+ *   · allowUnsandboxedCommands false and no excludedCommands — no escape hatch for any command;
+ *   · writes allowed in the tree (the seat's own cwd stays writable by the CLI's default), and DENIED
+ *     for <tree>/coltrane.layout.json (the grant boundary), <tree>/.git (hooks, config, refs) and
+ *     <tree>/.claude (settings the next seat would load), and <tree>/.coltrane (the engine's own state:
+ *     ledger, checkpoints, locks — which the diff gate cannot judge, because the engine writes it too).
+ *     denyWrite beats allowWrite.
+ * ABSOLUTE paths only: the CLI silently IGNORES a relative sandbox path (measured, 2.1.283) — a
+ * relative deny is a deny that is not there. A non-absolute tree is refused rather than emitted.
+ * What the sandbox cannot see is what Bash changed INSIDE the tree; the post-seat diff gate in runGig
+ * judges that against the seat's Write/Edit scope.
+ */
+export function bashSandboxFor(tree: string): BashSandbox {
+  if (!posixPath.isAbsolute(tree)) {
+    throw new Error(`the Bash sandbox needs an ABSOLUTE tree path, got "${tree}" — a relative sandbox path is silently ignored by the CLI`);
+  }
+  const t = tree.length > 1 ? tree.replace(/\/+$/, "") : tree;
+  return {
+    enabled: true,
+    failIfUnavailable: true,
+    allowUnsandboxedCommands: false,
+    filesystem: {
+      allowWrite: [t],
+      denyWrite: [`${t}/${LAYOUT_FILE}`, `${t}/.git`, `${t}/.claude`, `${t}/.coltrane`],
+    },
+  };
+}
+
 export function buildInvokerArgs(
   prompt: string,
   mcpConfigPath: string,
-  opts: { model?: string | undefined; allowed_tools?: readonly string[] | undefined; disallowed_tools?: readonly string[] | undefined; max_tool_calls?: number | undefined; effort?: Effort | undefined; session_id?: string | undefined; resume?: boolean | undefined; fork_from_session?: string | undefined; resume_session_at?: string | undefined },
+  opts: { model?: string | undefined; allowed_tools?: readonly string[] | undefined; disallowed_tools?: readonly string[] | undefined; max_tool_calls?: number | undefined; effort?: Effort | undefined; session_id?: string | undefined; resume?: boolean | undefined; fork_from_session?: string | undefined; resume_session_at?: string | undefined; sandbox?: BashSandbox | undefined },
 ): string[] {
   // `-p` is a BOOLEAN flag and the prompt is a POSITIONAL argument, which is what makes the
   // large-prompt path clean: keep the flag, drop the positional, write it to stdin. The
@@ -1497,7 +1537,10 @@ export function buildInvokerArgs(
   // kind is built from (first run, resumed amend, reserve continuation, cold fallback), so the pair
   // rides through every arg-list transform. Disjoint from --setting-sources / --effort / the session
   // flags, so the effort and session-continuity contracts are untouched.
-  args.push("--settings", JSON.stringify({ autoMemoryEnabled: false }));
+  //
+  // THE BASH SANDBOX rides in the SAME --settings JSON (bashSandboxFor): exactly one --settings, so
+  // no second settings source can merge beside it.
+  args.push("--settings", JSON.stringify({ autoMemoryEnabled: false, ...(opts.sandbox ? { sandbox: opts.sandbox } : {}) }));
   if (opts.allowed_tools && opts.allowed_tools.length > 0) args.push("--allowedTools", opts.allowed_tools.join(","));
   if (opts.disallowed_tools && opts.disallowed_tools.length > 0) args.push("--disallowedTools", opts.disallowed_tools.join(","));
   return args;
@@ -1890,7 +1933,18 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
       // so an undeclared, untiered seat (or any hand-built ctx) still spawns with an explicit
       // --effort rather than the operator's settings-file effort. Hoisted so baseArgs and the cold
       // arg list below share ONE opts object rather than two parallel derivations.
+      // THE BASH SANDBOX. Any seat that can run Bash — granted, or kept by code_tool_access — and is
+      // not denied it spawns sandboxed over the tree it runs in: the room's workspace when it sits in
+      // a room (the `docker exec -w` directory), else the run's tree_root, else the directory the spawn
+      // inherits (process.cwd()). On the host the path is made absolute and real (a symlinked tmpdir
+      // would otherwise name a path the OS sandbox never sees).
+      const seatHoldsBash =
+        allowForComplement.some((g) => toolBaseName(g) === "Bash") && !disallowedTools.includes("Bash");
+      const sandbox = seatHoldsBash
+        ? bashSandboxFor(ctx.seatExec ? ctx.seatExec.workspace : realOrResolved(ctx.tree_root ?? process.cwd()))
+        : undefined;
       const invokerOpts = {
+        sandbox,
         model: resolveModel(a.model_tier, opts.model),
         allowed_tools: effectiveAllowed,
         disallowed_tools: disallowedTools,
@@ -2722,4 +2776,10 @@ function providerNoticeFrom(stdout: string): string {
     distinct.push(t);
   }
   return distinct.join(" — ");
+}
+
+/** An absolute, symlink-resolved host path (the path as given, made absolute, when it does not exist). */
+function realOrResolved(p: string): string {
+  const abs = resolvePath(p);
+  try { return realpathSync(abs); } catch { return abs; }
 }

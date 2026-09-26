@@ -1,0 +1,2026 @@
+{
+  "spec_doc": "docs/specs/layout-grants.red-spec.json",
+  "input_refs": [
+    "chancery/handoffs/coltrane-layout-grants-2026-09-26.md",
+    "wiki review.coltrane.wo-004-execution — Addendum, 26 Sep: grants belong to the repo's layout, not the agent"
+  ],
+  "validation_criteria": [
+    "A role token (Write(@source), Edit(@tests), Bash(@laws)) expands ONLY through the coltrane.layout.json of the genome tree the gig runs against: path roles to one grant per glob, command roles to Bash(<prefix>:*).",
+    "Write/Edit grants are intersected with the change-request's target_paths (a grant survives only for target paths its glob covers, narrowed to those paths); target_paths absent → no narrowing and target_paths_applied: false.",
+    "The effective grant is then intersected with the venue's equipment via venueEffectiveTools; every step after expansion only removes or narrows.",
+    "A role token whose role the layout lacks, or any role token with no layout, grants nothing, yields a refusal naming the role, and the chair is refused at dispatch naming it. Never a ** default.",
+    "Literal grants pass through untouched except for the narrowing steps: every agent in the shipped genome resolves to exactly its declared allowed_tools.",
+    "The layout's shape is ONE Zod schema (LayoutSchema, src/genome_schema.ts); the loader exposes it as genome.layout (absent → undefined; malformed → load_error and absent).",
+    "Both invokers build their grants through resolveSeatGrants; the layout reaches the chair's ctx from the run's deps and the dispatch door; chair_complete records resolved_grants and target_paths_applied.",
+    "IMPLEMENTER OBLIGATION (no law pins it): domain_types/change-request.json: target_paths' description says 'Paths the requester believes are in scope. A belief, not a finding — the reading phase may contradict it.' Enforcement makes it a grant boundary; rewrite the description (via type_extend) to say Write/Edit grants are narrowed to it. No law pins the wording.",
+    "IMPLEMENTER OBLIGATION (no law pins it): Add `layout` to LoadError-kind handling: a malformed layout is a load_error whose path names coltrane.layout.json (the kind union in src/loader.ts may need a 'layout' member).",
+    "IMPLEMENTER OBLIGATION (no law pins it): The runtime's dispatch preflight (resolveAgentGrants in runGig) must not reject a role token as an unresolvable tool before resolveSeatGrants has expanded it.",
+    "NO SELF-WIDENING: no resolved grant may permit writing coltrane.layout.json. The FORM is a deny: resolveSeatGrants returns denials Write(coltrane.layout.json)/Edit(coltrane.layout.json) whenever a Write/Edit grant (glob or bare) covers the file, and never returns the exact grant; the Claude invoker adds denials to --disallowedTools.",
+    "target_paths: [] grants no Write/Edit (target_paths_applied: true). A layout role declared as [] is refused by LayoutSchema (min 1). A target_paths entry with * ? [ or { refuses the chair at dispatch, naming the entry.",
+    "A drained gig's layout is the org store's row for its repository (resolveWorkingRepo(claim)), carried through reconstructGenome (GenomeRows.layouts → LoadedGenome.layouts) and assembleRunDeps to ctx.layout; the clone's coltrane.layout.json is never read. The files backing exposes the tree's own file as genome.layout.",
+    "The completions invoker refuses, before any model call and naming the grant, a chair whose effective grants hold any path-scoped Write/Edit (literal or expanded); a bare unscoped Write is refused as a host builtin, as today.",
+    "IMPLEMENTER OBLIGATION (no law pins it): thread the layout through every door — server.ts (both dispatch branches, via assembleRunDeps), worker.ts (the store row, per the drain laws), chart.ts movements (inherit via movementDeps).",
+    "STORE SIDE (outside this repo; not invented here): a table coltrane_repository_layouts (org_id uuid not null references the org, repository text not null, definition jsonb not null, unique (org_id, repository), RLS as the other genome tables); coltrane_mcp_genome must return `layouts: [{repository, definition}]` for the token's org; the PostgREST backing needs a Q.layouts select (repository,definition); authoring a row needs a governed upsert branch (class 'layout', keyed by repository) — which is itself an authority to widen seats and so belongs to a governor, not an agent token. The repository key must be byte-identical to what resolveWorkingRepo returns for the claim (input.repository, else repo_url).",
+    "ROUND 3: target_paths entries that climb (..), are absolute, or carry backslashes are refused at dispatch (naming the entry) and never normalised into a grant.",
+    "ROUND 3: the completions invoker refuses any scoped grant (X(...)) in the effective set — literal or expanded, any tool — naming it, before any model call.",
+    "ROUND 3: every Bash seat spawns with the OS sandbox (--settings sandbox: enabled, failIfUnavailable, allowUnsandboxedCommands false, no excludedCommands), --setting-sources excluding project/local, and ABSOLUTE denyWrite over <tree>/coltrane.layout.json, <tree>/.git, <tree>/.claude — <tree> being ctx.seatExec.workspace in a room, else ctx.tree_root (RunDeps.tree_root threaded to the ctx).",
+    "ROUND 3: after a seat returns, runGig diffs git status --porcelain -z against the pre-seat state; any changed path (untracked, modified, deleted, either side of a rename) outside the seat's resolved Write/Edit scope — or the layout file itself — refuses the chair, naming the paths, and nothing from the chair is sealed.",
+    "ROUND 3 FINDING (no law can fix it here): Dockerfile.room and Dockerfile.floor (node:26-alpine) install neither bubblewrap nor socat, which the Linux sandbox needs. With failIfUnavailable, every room seat holding Bash will be REFUSED until the floor image adds them (apk add bubblewrap socat) and the container is run with what bwrap needs (user namespaces / seccomp profile permitting them).",
+    "ROUND 4: a relative tree_root / room workspace is resolved or the seat refused — never a relative sandbox path; Bash kept by code_tool_access is sandboxed like granted Bash; a floor room renders seccomp=<seat profile> + systempaths=unconfined, never privileged, never cap_add; the profile is moby v24.0.2's default (digest 2c2917c5…) + one unconditional rule for unshare/clone/mount/umount2/pivot_root/setns; the diff gate refuses an unreadable tree before and after, never lets an overlap excuse a change outside both scopes, reads a room seat's workspace, and exempts exactly `.coltrane`; `~` targets are refused.",
+    "ROUND 4 RULING (a): no Write/Edit grant may cover `.coltrane/**` — the resolver denies Write(.coltrane/**)/Edit(.coltrane/**) whenever a held Write/Edit reaches it (bare, glob, or code_tool_access write/full), never grants a .coltrane/ target, and the Claude invoker carries the denials.",
+    "ROUND 4 RULING (b), NAMED NON-GOAL: the diff gate does not see gitignored paths (git status does not list them). This is a documented limit and is NOT enforced by this change. Enforced instead: the engine never seals a gitignored path (stampChangeAddresses refuses it) and has no publish step (no git add/commit/push in src/ — publishing is a seat's sandboxed Bash).",
+    "ROUND 4 NOTE: D4-REAL cannot observe the relative-path trap (srt resolves relative paths; the CLI ignores them). That plant is covered by D2-ABSOLUTE, where it was observed red.",
+    "ROUND 5: grantCovers agrees with the Claude CLI 2.1.283's Write/Edit matcher — the bundled `ignore` 7.0.5 behind the CLI's dct/tn/Gn rule preprocessing, verified from the binary by the drafter — on a fixed table and a generated corpus; every protected path is denied to a Write/Edit grant iff the CLI could reach it; the spawn carries the .git and .claude denials. `ignore@7.0.5` is an exact devDependency used only as the oracle.",
+    "ROUND 5 FINDINGS (red at 5776395): Write(./**) — `**` to the CLI — gets NO protected-path denial (fail-open); `./x`, `a//b` and `**/**` are not preprocessed as the CLI does; `x/**` does not cover `x` (fail-closed at the gate); `[!…]` is negated by the engine but literal in ignore 7.0.5. Note the implementer compared against ignore 5.3.2; the CLI bundles 7.0.5.",
+    "ROUND 6: a literal Write/Edit spelled `./` or `//` refuses the chair (naming it) and is never spawned; a layout glob so spelled is a load_error; scope matching is case-insensitive like the CLI's; upper-cased protected paths are never granted, are denied to reaching grants, and are never excused by the diff gate; the room images carry every runtime dependency of the engine (room band; skipped as UNVERIFIED without Docker or the image).",
+    "ROUND 6 NOTE: the CI `room` job builds only coltrane/room:ephemeral, so the floor-image law skips (UNVERIFIED) in CI; building Dockerfile.floor there too would verify it."
+  ],
+  "laws": [
+    {
+      "path": "tests/a_grant_never_crosses_repositories.test.ts",
+      "commit": "72bd6561314b21b3614f62a01b3369f2958a2e61"
+    },
+    {
+      "path": "tests/a_missing_role_or_layout_grants_nothing.test.ts",
+      "commit": "72bd6561314b21b3614f62a01b3369f2958a2e61"
+    },
+    {
+      "path": "tests/a_new_repository_shape_needs_no_agent_amendment.test.ts",
+      "commit": "72bd6561314b21b3614f62a01b3369f2958a2e61"
+    },
+    {
+      "path": "tests/a_seat_cannot_rewrite_its_own_layout.test.ts",
+      "commit": "72bd6561314b21b3614f62a01b3369f2958a2e61"
+    },
+    {
+      "path": "tests/a_seat_cannot_write_outside_its_target_paths.test.ts",
+      "commit": "72bd6561314b21b3614f62a01b3369f2958a2e61"
+    },
+    {
+      "path": "tests/a_seat_cannot_write_the_engines_state.test.ts",
+      "commit": "72bd6561314b21b3614f62a01b3369f2958a2e61"
+    },
+    {
+      "path": "tests/a_seat_that_writes_outside_its_grant_is_refused.test.ts",
+      "commit": "72bd6561314b21b3614f62a01b3369f2958a2e61"
+    },
+    {
+      "path": "tests/a_seats_bash_runs_in_a_sandbox.test.ts",
+      "commit": "72bd6561314b21b3614f62a01b3369f2958a2e61"
+    },
+    {
+      "path": "tests/a_spelling_or_case_never_widens_a_grant.test.ts",
+      "commit": "72bd6561314b21b3614f62a01b3369f2958a2e61"
+    },
+    {
+      "path": "tests/a_target_path_never_escapes_the_tree.test.ts",
+      "commit": "72bd6561314b21b3614f62a01b3369f2958a2e61"
+    },
+    {
+      "path": "tests/an_empty_or_globbed_scope_fails_closed.test.ts",
+      "commit": "72bd6561314b21b3614f62a01b3369f2958a2e61"
+    },
+    {
+      "path": "tests/both_invokers_grant_through_the_layout.test.ts",
+      "commit": "72bd6561314b21b3614f62a01b3369f2958a2e61"
+    },
+    {
+      "path": "tests/every_door_carries_the_current_layout.test.ts",
+      "commit": "72bd6561314b21b3614f62a01b3369f2958a2e61"
+    },
+    {
+      "path": "tests/every_protected_path_is_denied_where_the_cli_could_reach_it.test.ts",
+      "commit": "72bd6561314b21b3614f62a01b3369f2958a2e61"
+    },
+    {
+      "path": "tests/literal_grants_resolve_unchanged.test.ts",
+      "commit": "72bd6561314b21b3614f62a01b3369f2958a2e61"
+    },
+    {
+      "path": "tests/seat_grant_resolution_only_narrows.test.ts",
+      "commit": "72bd6561314b21b3614f62a01b3369f2958a2e61"
+    },
+    {
+      "path": "tests/spec_room_image_carries_runtime_deps.test.ts",
+      "commit": "72bd6561314b21b3614f62a01b3369f2958a2e61"
+    },
+    {
+      "path": "tests/the_chair_records_its_resolved_grants.test.ts",
+      "commit": "72bd6561314b21b3614f62a01b3369f2958a2e61"
+    },
+    {
+      "path": "tests/the_diff_gate_never_fails_open.test.ts",
+      "commit": "72bd6561314b21b3614f62a01b3369f2958a2e61"
+    },
+    {
+      "path": "tests/the_drain_takes_its_layout_from_the_store.test.ts",
+      "commit": "72bd6561314b21b3614f62a01b3369f2958a2e61"
+    },
+    {
+      "path": "tests/the_engine_matches_scopes_as_the_cli_does.test.ts",
+      "commit": "72bd6561314b21b3614f62a01b3369f2958a2e61"
+    },
+    {
+      "path": "tests/the_engine_never_publishes_an_ignored_path.test.ts",
+      "commit": "72bd6561314b21b3614f62a01b3369f2958a2e61"
+    },
+    {
+      "path": "tests/the_layout_is_read_from_the_genome_tree.test.ts",
+      "commit": "72bd6561314b21b3614f62a01b3369f2958a2e61"
+    },
+    {
+      "path": "tests/the_room_can_start_the_sandbox_and_nothing_more.test.ts",
+      "commit": "72bd6561314b21b3614f62a01b3369f2958a2e61"
+    },
+    {
+      "path": "tests/the_sandbox_refuses_a_real_write.test.ts",
+      "commit": "72bd6561314b21b3614f62a01b3369f2958a2e61"
+    },
+    {
+      "path": "tests/the_sandbox_tree_is_always_absolute.test.ts",
+      "commit": "72bd6561314b21b3614f62a01b3369f2958a2e61"
+    }
+  ],
+  "coverage_map": [
+    {
+      "invariant_id": "RED-DEF-10",
+      "test_name": "RED-DEF-10 — a grant never crosses repositories > an implementer holding Write(@source), seated against a layout whose source is src/**, holds exactly Write(src/**) and nothing that reaches ios/",
+      "test_file": "tests/a_grant_never_crosses_repositories.test.ts",
+      "kind": "behavioural",
+      "drives": "resolveSeatGrants — src/layout_grants.ts",
+      "plant": "in src/layout_grants.ts, expand path role tokens from a module-level ROLE_GLOBS table (e.g. source: [src/**, ios/**, scripts/**]) instead of from args.layout"
+    },
+    {
+      "invariant_id": "RED-DEF-10",
+      "test_name": "RED-DEF-10 — a grant never crosses repositories > the same agent answers differently in two repositories — the expansion is the layout's, not a table the engine carries",
+      "test_file": "tests/a_grant_never_crosses_repositories.test.ts",
+      "kind": "behavioural",
+      "drives": "resolveSeatGrants — src/layout_grants.ts",
+      "plant": "same plant: expand from a module-level ROLE_GLOBS table instead of args.layout"
+    },
+    {
+      "invariant_id": "RED-DEF-11",
+      "test_name": "RED-DEF-11 — a seat cannot write outside its change's target_paths > Write/Edit(@source) against targets [src/a.ts, docs/x.md] survive ONLY as src/a.ts — the covered target, narrowed to it",
+      "test_file": "tests/a_seat_cannot_write_outside_its_target_paths.test.ts",
+      "kind": "behavioural",
+      "drives": "resolveSeatGrants — src/layout_grants.ts",
+      "plant": "skip the target_paths intersection step in resolveSeatGrants (return the expanded grants unnarrowed)"
+    },
+    {
+      "invariant_id": "RED-DEF-11",
+      "test_name": "RED-DEF-11 — a seat cannot write outside its change's target_paths > a literal Write(src/**) is narrowed by target_paths too — the intersection is not only for role tokens",
+      "test_file": "tests/a_seat_cannot_write_outside_its_target_paths.test.ts",
+      "kind": "behavioural",
+      "drives": "resolveSeatGrants — src/layout_grants.ts",
+      "plant": "apply the target_paths intersection only to grants that came from a role token, passing literal Write/Edit grants through"
+    },
+    {
+      "invariant_id": "RED-DEF-11",
+      "test_name": "RED-DEF-11 — a seat cannot write outside its change's target_paths > Bash and Read are not path grants — target_paths leave them exactly as expanded",
+      "test_file": "tests/a_seat_cannot_write_outside_its_target_paths.test.ts",
+      "kind": "behavioural",
+      "drives": "resolveSeatGrants — src/layout_grants.ts",
+      "plant": "apply the target_paths intersection to every grant (drop any grant not scoped to a covered target), not only Write/Edit"
+    },
+    {
+      "invariant_id": "RED-DEF-11",
+      "test_name": "RED-DEF-11 — a seat cannot write outside its change's target_paths > target_paths ABSENT → no target narrowing, and the result records target_paths_applied: false",
+      "test_file": "tests/a_seat_cannot_write_outside_its_target_paths.test.ts",
+      "kind": "behavioural",
+      "drives": "resolveSeatGrants — src/layout_grants.ts",
+      "plant": "return target_paths_applied: true unconditionally from resolveSeatGrants"
+    },
+    {
+      "invariant_id": "RED-DEF-12",
+      "test_name": "RED-DEF-12 — a new repository shape needs no agent amendment > an iOS tree's layout lets the tree's own implementer write ios/Sources/** — the agent file never changed",
+      "test_file": "tests/a_new_repository_shape_needs_no_agent_amendment.test.ts",
+      "kind": "behavioural",
+      "drives": "loadGenome — src/loader.ts, then resolveSeatGrants — src/layout_grants.ts",
+      "plant": "resolve from the agent's own allowed_tools alone, ignoring args.layout (role tokens pass through verbatim)"
+    },
+    {
+      "invariant_id": "RED-DEF-12",
+      "test_name": "RED-DEF-12 — a new repository shape needs no agent amendment > the SAME agent object resolves per repository, and is never amended by resolving",
+      "test_file": "tests/a_new_repository_shape_needs_no_agent_amendment.test.ts",
+      "kind": "behavioural",
+      "drives": "resolveSeatGrants — src/layout_grants.ts",
+      "plant": "write the expanded grants back onto args.agent.allowed_tools inside resolveSeatGrants"
+    },
+    {
+      "invariant_id": "RED-DEF-13",
+      "test_name": "RED-DEF-13 — fail closed on a missing role or layout > NO layout: every role token grants nothing and is refused by its role; the literal beside it survives",
+      "test_file": "tests/a_missing_role_or_layout_grants_nothing.test.ts",
+      "kind": "behavioural",
+      "drives": "resolveSeatGrants — src/layout_grants.ts",
+      "plant": "when args.layout is undefined, expand a path role token to [\"**\"] (Write(**)) instead of refusing it"
+    },
+    {
+      "invariant_id": "RED-DEF-13",
+      "test_name": "RED-DEF-13 — fail closed on a missing role or layout > a layout that does not declare the role: the token grants nothing — never ** — and the refusal names `migrations`",
+      "test_file": "tests/a_missing_role_or_layout_grants_nothing.test.ts",
+      "kind": "behavioural",
+      "drives": "resolveSeatGrants — src/layout_grants.ts",
+      "plant": "default a role the layout does not declare to [\"**\"] instead of refusing it"
+    },
+    {
+      "invariant_id": "RED-DEF-13",
+      "test_name": "RED-DEF-13 — fail closed on a missing role or layout > the chair is refused at dispatch naming the missing role — no seat is invoked",
+      "test_file": "tests/a_missing_role_or_layout_grants_nothing.test.ts",
+      "kind": "behavioural",
+      "drives": "runGig — src/runtime.ts",
+      "plant": "ignore resolveSeatGrants(...).refusals where runGig seats a chair (invoke the chair anyway)"
+    },
+    {
+      "invariant_id": "RED-DEF-14",
+      "test_name": "RED-DEF-14 — literal grants are unchanged > every shipped agent resolves — no layout, no target_paths, no venue — to exactly its declared allowed_tools",
+      "test_file": "tests/literal_grants_resolve_unchanged.test.ts",
+      "kind": "behavioural",
+      "drives": "loadGenome — src/loader.ts over this tree's agents/, then resolveSeatGrants — src/layout_grants.ts",
+      "plant": "alter a literal on the way through resolveSeatGrants — e.g. sort or dedupe the grant list, or normalise Bash(x:*) to Bash(x)"
+    },
+    {
+      "invariant_id": "RED-DEF-14",
+      "test_name": "RED-DEF-14 — literal grants are unchanged > …and with a layout present, still exactly — a layout answers role tokens and touches nothing else",
+      "test_file": "tests/literal_grants_resolve_unchanged.test.ts",
+      "kind": "behavioural",
+      "drives": "loadGenome — src/loader.ts over this tree's agents/, then resolveSeatGrants — src/layout_grants.ts",
+      "plant": "treat a scoped literal Write/Edit (e.g. Write(src/**)) as a role and re-expand it through the layout"
+    },
+    {
+      "invariant_id": "RED-DEF-14",
+      "test_name": "RED-DEF-14 — literal grants are unchanged > the shipped genome has agents, and they hold literal grants (non-vacuity)",
+      "test_file": "tests/literal_grants_resolve_unchanged.test.ts",
+      "kind": "behavioural",
+      "drives": "loadGenome — src/loader.ts",
+      "plant": "a loader change that drops agents/ from the load (genome.agents empty) — a non-vacuity control, green today"
+    },
+    {
+      "invariant_id": "RED-DEF-15",
+      "test_name": "RED-DEF-15 — resolution only narrows > expansion alone draws only on the agent's own literals and the layout's answers to the agent's own tokens",
+      "test_file": "tests/seat_grant_resolution_only_narrows.test.ts",
+      "kind": "behavioural",
+      "drives": "resolveSeatGrants — src/layout_grants.ts",
+      "plant": "expand a role token to its layout globs PLUS every glob of every other role in the layout"
+    },
+    {
+      "invariant_id": "RED-DEF-15",
+      "test_name": "RED-DEF-15 — resolution only narrows > target_paths and the venue never add: every final grant is an expanded grant, or a Write/Edit narrowed to a target an expanded glob already covered, held in the room",
+      "test_file": "tests/seat_grant_resolution_only_narrows.test.ts",
+      "kind": "behavioural",
+      "drives": "resolveSeatGrants — src/layout_grants.ts",
+      "plant": "in the target step, push Write(<t>) for every target t whether or not an expanded glob covers it"
+    },
+    {
+      "invariant_id": "RED-DEF-15",
+      "test_name": "RED-DEF-15 — resolution only narrows > a room that equips tools the agent never claimed adds none of them",
+      "test_file": "tests/seat_grant_resolution_only_narrows.test.ts",
+      "kind": "behavioural",
+      "drives": "resolveSeatGrants — src/layout_grants.ts",
+      "plant": "in the venue step, union venue.equipment.tools into the grants instead of calling venueEffectiveTools"
+    },
+    {
+      "invariant_id": "RED-DEF-15",
+      "test_name": "RED-DEF-15 — resolution only narrows > a room that does not equip Bash removes the laws command the layout expanded",
+      "test_file": "tests/seat_grant_resolution_only_narrows.test.ts",
+      "kind": "behavioural",
+      "drives": "resolveSeatGrants — src/layout_grants.ts",
+      "plant": "skip the venue step when args.venue is present"
+    },
+    {
+      "invariant_id": "RED-DEF-15",
+      "test_name": "RED-DEF-15 — resolution only narrows > a target outside every glob the seat holds adds nothing",
+      "test_file": "tests/seat_grant_resolution_only_narrows.test.ts",
+      "kind": "behavioural",
+      "drives": "resolveSeatGrants — src/layout_grants.ts",
+      "plant": "in the target step, push Write(<t>) for every target t whether or not an expanded glob covers it"
+    },
+    {
+      "invariant_id": "LAYOUT-1",
+      "test_name": "the layout is read from the genome tree the gig runs against > a tree with coltrane.layout.json loads it as genome.layout, exactly as written",
+      "test_file": "tests/the_layout_is_read_from_the_genome_tree.test.ts",
+      "kind": "behavioural",
+      "drives": "loadGenome — src/loader.ts",
+      "plant": "never read <root>/coltrane.layout.json in loadGenome (layout stays undefined)"
+    },
+    {
+      "invariant_id": "LAYOUT-2",
+      "test_name": "the layout is read from the genome tree the gig runs against > a tree with NO layout file loads as today: layout undefined, no load error",
+      "test_file": "tests/the_layout_is_read_from_the_genome_tree.test.ts",
+      "kind": "behavioural",
+      "drives": "loadGenome — src/loader.ts",
+      "plant": "default an absent layout to {} (or a house layout) in loadGenome — a control, green today"
+    },
+    {
+      "invariant_id": "LAYOUT-3",
+      "test_name": "the layout is read from the genome tree the gig runs against > a MALFORMED layout is a load_error naming the file, and the genome carries no layout",
+      "test_file": "tests/the_layout_is_read_from_the_genome_tree.test.ts",
+      "kind": "behavioural",
+      "drives": "loadGenome — src/loader.ts",
+      "plant": "keep the raw parsed JSON on genome.layout when LayoutSchema refuses it (or skip the load_errors push)"
+    },
+    {
+      "invariant_id": "LAYOUT-4",
+      "test_name": "the layout is read from the genome tree the gig runs against > LayoutSchema is the one source: it admits the declared roles and refuses an undeclared one",
+      "test_file": "tests/the_layout_is_read_from_the_genome_tree.test.ts",
+      "kind": "behavioural",
+      "drives": "LayoutSchema.safeParse — src/genome_schema.ts",
+      "plant": "drop .strict() from LayoutSchema's paths object (a misspelt role `sources` is admitted)"
+    },
+    {
+      "invariant_id": "LAYOUT-5",
+      "test_name": "the layout is read from the genome tree the gig runs against > assembleRunDeps threads the layout to the run — the one assembler every door builds its deps from",
+      "test_file": "tests/the_layout_is_read_from_the_genome_tree.test.ts",
+      "kind": "behavioural",
+      "drives": "assembleRunDeps — src/run_deps.ts",
+      "plant": "omit `layout` from assembleRunDeps' returned object"
+    },
+    {
+      "invariant_id": "WIRE-CLAUDE-1",
+      "test_name": "the Claude invoker grants through resolveSeatGrants > --allowedTools carries the role tokens EXPANDED by ctx.layout and NARROWED by gig_input.target_paths",
+      "test_file": "tests/both_invokers_grant_through_the_layout.test.ts",
+      "kind": "behavioural",
+      "drives": "makeClaudeInvoker(...)(ctx) → --allowedTools via the injected run seam — src/claude_invoker.ts",
+      "plant": "build effectiveAllowed from ctx.agent.allowed_tools instead of resolveSeatGrants(...).grants in the invoker's grant block"
+    },
+    {
+      "invariant_id": "WIRE-CLAUDE-2",
+      "test_name": "the Claude invoker grants through resolveSeatGrants > in a room that does not equip Bash, no role token reaches EITHER flag and the laws command is not allowed",
+      "test_file": "tests/both_invokers_grant_through_the_layout.test.ts",
+      "kind": "behavioural",
+      "drives": "makeClaudeInvoker(...)(ctx) → --allowedTools/--disallowedTools, venue path (venueExcluded + the disallow union) — src/claude_invoker.ts",
+      "plant": "compute venueExcluded (and the venue-narrowed allow list) from a.allowed_tools — the raw tokens — instead of the resolved grants"
+    },
+    {
+      "invariant_id": "WIRE-CLAUDE-3",
+      "test_name": "the Claude invoker grants through resolveSeatGrants > a role the layout does not declare refuses the chair naming it — nothing is spawned",
+      "test_file": "tests/both_invokers_grant_through_the_layout.test.ts",
+      "kind": "behavioural",
+      "drives": "makeClaudeInvoker(...)(ctx) — src/claude_invoker.ts",
+      "plant": "ignore resolveSeatGrants(...).refusals in the Claude invoker (spawn anyway)"
+    },
+    {
+      "invariant_id": "WIRE-CLAUDE-4",
+      "test_name": "the Claude invoker grants through resolveSeatGrants > NO layout on the invocation: a role token refuses the chair naming the role — never a ** default",
+      "test_file": "tests/both_invokers_grant_through_the_layout.test.ts",
+      "kind": "behavioural",
+      "drives": "makeClaudeInvoker(...)(ctx) — src/claude_invoker.ts",
+      "plant": "when ctx.layout is undefined, skip resolveSeatGrants and pass ctx.agent.allowed_tools through"
+    },
+    {
+      "invariant_id": "RECORD-1",
+      "test_name": "the chair records its resolved grants > chair_complete records the grants the seat ran WITH — expanded by the layout, narrowed by the change's target_paths",
+      "test_file": "tests/the_chair_records_its_resolved_grants.test.ts",
+      "kind": "behavioural",
+      "drives": "runGig — src/runtime.ts (the chair_complete emit)",
+      "plant": "drop resolved_grants from the chair_complete emit in runGig"
+    },
+    {
+      "invariant_id": "RECORD-2",
+      "test_name": "the chair records its resolved grants > a change with NO target_paths is recorded as un-narrowed — target_paths_applied: false, present, never absent",
+      "test_file": "tests/the_chair_records_its_resolved_grants.test.ts",
+      "kind": "behavioural",
+      "drives": "runGig — src/runtime.ts (the chair_complete emit)",
+      "plant": "emit target_paths_applied only when true (conditional spread), or record it as true unconditionally"
+    },
+    {
+      "invariant_id": "RECORD-3",
+      "test_name": "the chair records its resolved grants > the layout on the run reaches the chair's invocation as ctx.layout — the invoker resolves against it",
+      "test_file": "tests/the_chair_records_its_resolved_grants.test.ts",
+      "kind": "behavioural",
+      "drives": "runGig — src/runtime.ts (the deps.invoke ctx)",
+      "plant": "omit `layout` from the ctx runGig passes to deps.invoke"
+    },
+    {
+      "invariant_id": "DOOR-DISPATCH",
+      "test_name": "the dispatch door carries the layout of the tree it runs against > bootstrapServerDeps(<tree with coltrane.layout.json>) → gig_dispatch → the chair's invocation holds THAT tree's layout",
+      "test_file": "tests/the_chair_records_its_resolved_grants.test.ts",
+      "kind": "behavioural",
+      "drives": "bootstrapServerDeps + dispatchTool(\"gig_dispatch\") — src/server.ts",
+      "plant": "omit `layout` from the assembleRunDeps call in server.ts's dispatch door (or never load it onto ServerDeps in bootstrapServerDeps)"
+    },
+    {
+      "invariant_id": "WIRE-COMPLETIONS-0",
+      "test_name": "the completions invoker grants through resolveSeatGrants — and fails closed on ANY scoped grant > control — a chair holding only UNSCOPED grants still runs under a layout and target_paths, offered its MCP tools",
+      "test_file": "tests/both_invokers_grant_through_the_layout.test.ts",
+      "kind": "behavioural",
+      "drives": "makeCompletionsInvoker(...)(ctx) — src/completions_invoker.ts",
+      "plant": "refuse every chair that has a layout or target_paths on its ctx, or refuse unscoped MCP grants — a control, green today"
+    },
+    {
+      "invariant_id": "WIRE-COMPLETIONS-1",
+      "test_name": "the completions invoker grants through resolveSeatGrants — and fails closed on ANY scoped grant > a target_paths set the source glob never covers: Write(@source) resolves to nothing — the chair runs, and is NOT offered Write",
+      "test_file": "tests/both_invokers_grant_through_the_layout.test.ts",
+      "kind": "behavioural",
+      "drives": "makeCompletionsInvoker(...)(ctx) — src/completions_invoker.ts (chairGrants → allow → the request's tools)",
+      "plant": "compute chairGrants from ctx.agent.allowed_tools (or venueEffectiveTools(ctx.agent, venue)) instead of resolveSeatGrants(...).grants"
+    },
+    {
+      "invariant_id": "WIRE-COMPLETIONS-2",
+      "test_name": "the completions invoker grants through resolveSeatGrants — and fails closed on ANY scoped grant > a role the layout does not declare is refused naming it, before any model call",
+      "test_file": "tests/both_invokers_grant_through_the_layout.test.ts",
+      "kind": "behavioural",
+      "drives": "makeCompletionsInvoker(...)(ctx) — src/completions_invoker.ts",
+      "plant": "ignore resolveSeatGrants(...).refusals in the completions invoker"
+    },
+    {
+      "invariant_id": "NO-SELF-WIDENING-1",
+      "test_name": "no self-widening — the layout file is never writable by a seat > a source of ** : the resolver denies Write and Edit of the layout file beside the grant",
+      "test_file": "tests/a_seat_cannot_rewrite_its_own_layout.test.ts",
+      "kind": "behavioural",
+      "drives": "resolveSeatGrants — src/layout_grants.ts",
+      "plant": "remove the layout-file exclusion (return denials: [])"
+    },
+    {
+      "invariant_id": "NO-SELF-WIDENING-2",
+      "test_name": "no self-widening — the layout file is never writable by a seat > a BARE Write literal reaches every file — the layout file is denied for it too (no code_tool_access in play)",
+      "test_file": "tests/a_seat_cannot_rewrite_its_own_layout.test.ts",
+      "kind": "behavioural",
+      "drives": "resolveSeatGrants — src/layout_grants.ts",
+      "plant": "compute the layout-file denial only for SCOPED grants (the bare Write/Edit half removed); the fixture leaves code_tool_access unset so the access half cannot mask it"
+    },
+    {
+      "invariant_id": "NO-SELF-WIDENING-3",
+      "test_name": "no self-widening — the layout file is never writable by a seat > a change whose target_paths NAME the layout file does not get a grant for it",
+      "test_file": "tests/a_seat_cannot_rewrite_its_own_layout.test.ts",
+      "kind": "behavioural",
+      "drives": "resolveSeatGrants — src/layout_grants.ts",
+      "plant": "keep Write(<target>) in the target step when the target is coltrane.layout.json"
+    },
+    {
+      "invariant_id": "NO-SELF-WIDENING-4",
+      "test_name": "no self-widening — the layout file is never writable by a seat > the spawn: --disallowedTools carries the layout-file denials beside Write(**), and --allowedTools holds no exact grant that would cancel them",
+      "test_file": "tests/a_seat_cannot_rewrite_its_own_layout.test.ts",
+      "kind": "behavioural",
+      "drives": "makeClaudeInvoker(...)(ctx) → --allowedTools/--disallowedTools via the run seam — src/claude_invoker.ts",
+      "plant": "leave resolveSeatGrants(...).denials out of the --disallowedTools union"
+    },
+    {
+      "invariant_id": "NO-SELF-WIDENING-5",
+      "test_name": "no self-widening — the layout file is never writable by a seat > the spawn, targeted at the layout file: still denied, still no exact grant",
+      "test_file": "tests/a_seat_cannot_rewrite_its_own_layout.test.ts",
+      "kind": "behavioural",
+      "drives": "makeClaudeInvoker(...)(ctx) → --allowedTools/--disallowedTools via the run seam — src/claude_invoker.ts",
+      "plant": "pass the exact grant Write(coltrane.layout.json) through to --allowedTools (the NO OVER-DENIAL filter then drops the deny)"
+    },
+    {
+      "invariant_id": "EDGE-EMPTY-TARGETS",
+      "test_name": "target_paths: [] — present but empty > grants no Write and no Edit, keeps Read and the laws command, and records target_paths_applied: true",
+      "test_file": "tests/an_empty_or_globbed_scope_fails_closed.test.ts",
+      "kind": "behavioural",
+      "drives": "resolveSeatGrants — src/layout_grants.ts",
+      "plant": "treat target_paths.length === 0 as absent (skip the target step)"
+    },
+    {
+      "invariant_id": "EDGE-EMPTY-ROLE-1",
+      "test_name": "a layout role declared as an empty list > LayoutSchema refuses an empty path role and an empty command role (min 1)",
+      "test_file": "tests/an_empty_or_globbed_scope_fails_closed.test.ts",
+      "kind": "behavioural",
+      "drives": "LayoutSchema.safeParse — src/genome_schema.ts",
+      "plant": "drop .min(1) from LayoutSchema's role lists"
+    },
+    {
+      "invariant_id": "EDGE-EMPTY-ROLE-2",
+      "test_name": "a layout role declared as an empty list > the loader turns it into a load_error and carries no layout",
+      "test_file": "tests/an_empty_or_globbed_scope_fails_closed.test.ts",
+      "kind": "behavioural",
+      "drives": "loadGenome — src/loader.ts",
+      "plant": "same plant: drop .min(1) from the role lists"
+    },
+    {
+      "invariant_id": "EDGE-GLOB-TARGET-0",
+      "test_name": "a target_paths entry with glob metacharacters refuses the chair at dispatch > control — plain paths dispatch",
+      "test_file": "tests/an_empty_or_globbed_scope_fails_closed.test.ts",
+      "kind": "behavioural",
+      "drives": "runGig — src/runtime.ts",
+      "plant": "refuse any target_paths entry containing '/' or '.' — a control, green today"
+    },
+    {
+      "invariant_id": "EDGE-GLOB-TARGET",
+      "test_name": "a target_paths entry with glob metacharacters refuses the chair at dispatch > \"src/*.ts\" is refused, by name, before any seat is invoked",
+      "test_file": "tests/an_empty_or_globbed_scope_fails_closed.test.ts",
+      "kind": "behavioural",
+      "drives": "runGig — src/runtime.ts",
+      "plant": "skip the glob-metacharacter check on gig_input.target_paths (or check only '*')"
+    },
+    {
+      "invariant_id": "EDGE-GLOB-TARGET",
+      "test_name": "a target_paths entry with glob metacharacters refuses the chair at dispatch > \"src/a?.ts\" is refused, by name, before any seat is invoked",
+      "test_file": "tests/an_empty_or_globbed_scope_fails_closed.test.ts",
+      "kind": "behavioural",
+      "drives": "runGig — src/runtime.ts",
+      "plant": "skip the glob-metacharacter check on gig_input.target_paths (or check only '*')"
+    },
+    {
+      "invariant_id": "EDGE-GLOB-TARGET",
+      "test_name": "a target_paths entry with glob metacharacters refuses the chair at dispatch > \"src/[ab].ts\" is refused, by name, before any seat is invoked",
+      "test_file": "tests/an_empty_or_globbed_scope_fails_closed.test.ts",
+      "kind": "behavioural",
+      "drives": "runGig — src/runtime.ts",
+      "plant": "skip the glob-metacharacter check on gig_input.target_paths (or check only '*')"
+    },
+    {
+      "invariant_id": "EDGE-GLOB-TARGET",
+      "test_name": "a target_paths entry with glob metacharacters refuses the chair at dispatch > \"src/{a,b}.ts\" is refused, by name, before any seat is invoked",
+      "test_file": "tests/an_empty_or_globbed_scope_fails_closed.test.ts",
+      "kind": "behavioural",
+      "drives": "runGig — src/runtime.ts",
+      "plant": "skip the glob-metacharacter check on gig_input.target_paths (or check only '*')"
+    },
+    {
+      "invariant_id": "DRAIN-LAYOUT-A",
+      "test_name": "the GenomeStore port carries layouts > (a) the FILES backing exposes the tree's coltrane.layout.json as that tree's layout",
+      "test_file": "tests/the_drain_takes_its_layout_from_the_store.test.ts",
+      "kind": "behavioural",
+      "drives": "fileGenomeStore(root).load — src/genome_store.ts",
+      "plant": "never read coltrane.layout.json on the files backing's load path"
+    },
+    {
+      "invariant_id": "DRAIN-LAYOUT-ROWS",
+      "test_name": "the GenomeStore port carries layouts > the shared reconstruction carries one layout per repository, validated",
+      "test_file": "tests/the_drain_takes_its_layout_from_the_store.test.ts",
+      "kind": "behavioural",
+      "drives": "reconstructGenome — src/genome_store.ts",
+      "plant": "drop rows.layouts in reconstructGenome"
+    },
+    {
+      "invariant_id": "DRAIN-LAYOUT-ROWS-BAD",
+      "test_name": "the GenomeStore port carries layouts > a layout row LayoutSchema refuses is a load_error and is absent from the map",
+      "test_file": "tests/the_drain_takes_its_layout_from_the_store.test.ts",
+      "kind": "behavioural",
+      "drives": "reconstructGenome — src/genome_store.ts",
+      "plant": "admit a layout row without LayoutSchema validation"
+    },
+    {
+      "invariant_id": "DRAIN-LAYOUT-B-C",
+      "test_name": "the drain seats its chairs under the STORE's layout for the gig's repository > (b)+(c) the chair's ctx.layout is the store row for the gig's repository — not the WIDER file committed in the clone",
+      "test_file": "tests/the_drain_takes_its_layout_from_the_store.test.ts",
+      "kind": "behavioural",
+      "drives": "workOnce — src/worker.ts (→ assembleRunDeps → runGig ctx.layout)",
+      "plant": "take the drain's layout from resolveGenome(workspace.dir).layout (the clone's file)"
+    },
+    {
+      "invariant_id": "DRAIN-LAYOUT-C",
+      "test_name": "the drain seats its chairs under the STORE's layout for the gig's repository > (c) no store row for the repository → the chair has NO layout, whatever the clone's file says",
+      "test_file": "tests/the_drain_takes_its_layout_from_the_store.test.ts",
+      "kind": "behavioural",
+      "drives": "workOnce — src/worker.ts",
+      "plant": "fall back to the clone's coltrane.layout.json when the store has no row for the repository — a guard, green today"
+    },
+    {
+      "invariant_id": "COMPLETIONS-ANY-SCOPE-1",
+      "test_name": "the completions invoker grants through resolveSeatGrants — and fails closed on ANY scoped grant > an EXPANDED scoped Write (Write(@source) → Write(src/a.ts)) refuses the chair naming the grant, before any model call",
+      "test_file": "tests/both_invokers_grant_through_the_layout.test.ts",
+      "kind": "behavioural",
+      "drives": "makeCompletionsInvoker(...)(ctx) — src/completions_invoker.ts",
+      "plant": "refuse only scoped Write/Edit (today's scoped_write_unenforceable), letting mapGrant strip the scope from Write and offer it unscoped"
+    },
+    {
+      "invariant_id": "COMPLETIONS-ANY-SCOPE-2",
+      "test_name": "the completions invoker grants through resolveSeatGrants — and fails closed on ANY scoped grant > a LITERAL scoped Edit (Edit(src/**)) refuses the chair naming the grant, before any model call",
+      "test_file": "tests/both_invokers_grant_through_the_layout.test.ts",
+      "kind": "behavioural",
+      "drives": "makeCompletionsInvoker(...)(ctx) — src/completions_invoker.ts",
+      "plant": "refuse only scoped Write/Edit (today's scoped_write_unenforceable), letting mapGrant strip the scope from Edit and offer it unscoped"
+    },
+    {
+      "invariant_id": "COMPLETIONS-ANY-SCOPE-3",
+      "test_name": "the completions invoker grants through resolveSeatGrants — and fails closed on ANY scoped grant > a LITERAL scoped Read (Read(src/**)) refuses the chair naming the grant, before any model call",
+      "test_file": "tests/both_invokers_grant_through_the_layout.test.ts",
+      "kind": "behavioural",
+      "drives": "makeCompletionsInvoker(...)(ctx) — src/completions_invoker.ts",
+      "plant": "refuse only scoped Write/Edit (today's scoped_write_unenforceable), letting mapGrant strip the scope from Read and offer it unscoped"
+    },
+    {
+      "invariant_id": "COMPLETIONS-ANY-SCOPE-4",
+      "test_name": "the completions invoker grants through resolveSeatGrants — and fails closed on ANY scoped grant > a LITERAL scoped Bash (Bash(npm test:*)) refuses the chair naming the grant, before any model call",
+      "test_file": "tests/both_invokers_grant_through_the_layout.test.ts",
+      "kind": "behavioural",
+      "drives": "makeCompletionsInvoker(...)(ctx) — src/completions_invoker.ts",
+      "plant": "refuse only scoped Write/Edit (today's scoped_write_unenforceable), letting mapGrant strip the scope from Bash and offer it unscoped"
+    },
+    {
+      "invariant_id": "COMPLETIONS-ANY-SCOPE-5",
+      "test_name": "the completions invoker grants through resolveSeatGrants — and fails closed on ANY scoped grant > an EXPANDED scoped Bash (Bash(@laws) → Bash(npx vitest run:*)) refuses the chair naming the grant, before any model call",
+      "test_file": "tests/both_invokers_grant_through_the_layout.test.ts",
+      "kind": "behavioural",
+      "drives": "makeCompletionsInvoker(...)(ctx) — src/completions_invoker.ts",
+      "plant": "refuse only scoped Write/Edit (today's scoped_write_unenforceable), letting mapGrant strip the scope from Bash and offer it unscoped"
+    },
+    {
+      "invariant_id": "NO-SELF-WIDENING-6",
+      "test_name": "no self-widening — the layout file is never writable by a seat > code_tool_access \"full\" with NO Write grant still keeps Write in the cage — the layout file is denied for it",
+      "test_file": "tests/a_seat_cannot_rewrite_its_own_layout.test.ts",
+      "kind": "behavioural",
+      "drives": "resolveSeatGrants — src/layout_grants.ts",
+      "plant": "drop the code_tool_access half of the layout-file denial (implicitWrite = false)"
+    },
+    {
+      "invariant_id": "PREFLIGHT-EXPANDED",
+      "test_name": "RED-DEF-13 — fail closed on a missing role or layout > the dispatch preflight judges the EXPANDED grants: an unanswered MCP role token is refused for its role, not also misnamed a dead tool",
+      "test_file": "tests/a_missing_role_or_layout_grants_nothing.test.ts",
+      "kind": "behavioural",
+      "drives": "runGig preflight — src/runtime.ts",
+      "plant": "resolveAgentGrants(ag, …) over the raw allowed_tools instead of the expanded grants"
+    },
+    {
+      "invariant_id": "RECORD-VENUE",
+      "test_name": "the chair record reflects the room the chair sat in > a room that equips no Bash: chair_complete.resolved_grants holds no Bash — the record is what the seat could do IN THE ROOM",
+      "test_file": "tests/the_chair_records_its_resolved_grants.test.ts",
+      "kind": "behavioural",
+      "drives": "runGig — src/runtime.ts (the chair record's resolveSeatGrants)",
+      "plant": "drop `venue` from the chair record's resolveSeatGrants call"
+    },
+    {
+      "invariant_id": "DOOR-CHART",
+      "test_name": "the chart door carries the layout into every movement > both movements' chairs are invoked holding the server's layout",
+      "test_file": "tests/every_door_carries_the_current_layout.test.ts",
+      "kind": "behavioural",
+      "drives": "dispatchTool(\"gig_dispatch\", {chart_slug}) — src/server.ts (chartDeps) → runChart → runGig",
+      "plant": "remove `layout` from chartDeps in src/server.ts"
+    },
+    {
+      "invariant_id": "DOOR-RELOAD-1",
+      "test_name": "after genome_reload, the tree's NEW layout governs > an edited coltrane.layout.json is the one the next dispatch seats under",
+      "test_file": "tests/every_door_carries_the_current_layout.test.ts",
+      "kind": "behavioural",
+      "drives": "bootstrapServerDeps + dispatchTool(\"genome_reload\") then gig_dispatch — src/server.ts",
+      "plant": "drop `deps.layout = fresh.layout` in genome_reload"
+    },
+    {
+      "invariant_id": "DOOR-RELOAD-2",
+      "test_name": "after genome_reload, the tree's NEW layout governs > a reload after the layout file is removed leaves no layout — the stale one does not linger",
+      "test_file": "tests/every_door_carries_the_current_layout.test.ts",
+      "kind": "behavioural",
+      "drives": "same",
+      "plant": "drop `deps.layout = fresh.layout` in genome_reload (or assign only when fresh.layout is defined)"
+    },
+    {
+      "invariant_id": "LAYERED-1",
+      "test_name": "a layered genome's layout is the TOP layer's > base and top both declare one: the top's wins",
+      "test_file": "tests/every_door_carries_the_current_layout.test.ts",
+      "kind": "behavioural",
+      "drives": "resolveGenome → loadLayeredGenome — src/loader.ts",
+      "plant": "drop the top layer's layout in loadLayeredGenome (or fold layouts so the base's survives)"
+    },
+    {
+      "invariant_id": "LAYERED-2",
+      "test_name": "a layered genome's layout is the TOP layer's > only the top declares one: it is the genome's layout",
+      "test_file": "tests/every_door_carries_the_current_layout.test.ts",
+      "kind": "behavioural",
+      "drives": "same",
+      "plant": "drop the top layer's layout in loadLayeredGenome"
+    },
+    {
+      "invariant_id": "LAYERED-3",
+      "test_name": "a layered genome's layout is the TOP layer's > only the BASE declares one: the consumer has no layout — a base's shape is not the consumer repository's",
+      "test_file": "tests/every_door_carries_the_current_layout.test.ts",
+      "kind": "behavioural",
+      "drives": "same",
+      "plant": "fall back to the base layer's layout when the top declares none"
+    },
+    {
+      "invariant_id": "TARGET-ESCAPE",
+      "test_name": "a target path never escapes the tree > \"src/../coltrane.layout.json\" grants nothing under a ** source — only the plain target beside it is granted",
+      "test_file": "tests/a_target_path_never_escapes_the_tree.test.ts",
+      "kind": "behavioural",
+      "drives": "resolveSeatGrants — src/layout_grants.ts",
+      "plant": "remove normaliseTarget from the target step (the raw entry is matched against the glob) — or normalise `..`/backslashes and grant the result"
+    },
+    {
+      "invariant_id": "TARGET-ESCAPE",
+      "test_name": "a target path never escapes the tree > \"./src/../../etc/x\" grants nothing under a ** source — only the plain target beside it is granted",
+      "test_file": "tests/a_target_path_never_escapes_the_tree.test.ts",
+      "kind": "behavioural",
+      "drives": "resolveSeatGrants — src/layout_grants.ts",
+      "plant": "remove normaliseTarget from the target step (the raw entry is matched against the glob) — or normalise `..`/backslashes and grant the result"
+    },
+    {
+      "invariant_id": "TARGET-ESCAPE",
+      "test_name": "a target path never escapes the tree > \"../outside.ts\" grants nothing under a ** source — only the plain target beside it is granted",
+      "test_file": "tests/a_target_path_never_escapes_the_tree.test.ts",
+      "kind": "behavioural",
+      "drives": "resolveSeatGrants — src/layout_grants.ts",
+      "plant": "remove normaliseTarget from the target step (the raw entry is matched against the glob) — or normalise `..`/backslashes and grant the result"
+    },
+    {
+      "invariant_id": "TARGET-ESCAPE",
+      "test_name": "a target path never escapes the tree > \"src/../README.md\" grants nothing under a ** source — only the plain target beside it is granted",
+      "test_file": "tests/a_target_path_never_escapes_the_tree.test.ts",
+      "kind": "behavioural",
+      "drives": "resolveSeatGrants — src/layout_grants.ts",
+      "plant": "remove normaliseTarget from the target step (the raw entry is matched against the glob) — or normalise `..`/backslashes and grant the result"
+    },
+    {
+      "invariant_id": "TARGET-ESCAPE",
+      "test_name": "a target path never escapes the tree > \"/abs/path\" grants nothing under a ** source — only the plain target beside it is granted",
+      "test_file": "tests/a_target_path_never_escapes_the_tree.test.ts",
+      "kind": "behavioural",
+      "drives": "resolveSeatGrants — src/layout_grants.ts",
+      "plant": "remove normaliseTarget from the target step (the raw entry is matched against the glob) — or normalise `..`/backslashes and grant the result"
+    },
+    {
+      "invariant_id": "TARGET-ESCAPE",
+      "test_name": "a target path never escapes the tree > \"/etc/passwd\" grants nothing under a ** source — only the plain target beside it is granted",
+      "test_file": "tests/a_target_path_never_escapes_the_tree.test.ts",
+      "kind": "behavioural",
+      "drives": "resolveSeatGrants — src/layout_grants.ts",
+      "plant": "remove normaliseTarget from the target step (the raw entry is matched against the glob) — or normalise `..`/backslashes and grant the result"
+    },
+    {
+      "invariant_id": "TARGET-ESCAPE",
+      "test_name": "a target path never escapes the tree > \"src\\..\\coltrane.layout.json\" grants nothing under a ** source — only the plain target beside it is granted",
+      "test_file": "tests/a_target_path_never_escapes_the_tree.test.ts",
+      "kind": "behavioural",
+      "drives": "resolveSeatGrants — src/layout_grants.ts",
+      "plant": "remove normaliseTarget from the target step (the raw entry is matched against the glob) — or normalise `..`/backslashes and grant the result"
+    },
+    {
+      "invariant_id": "TARGET-ESCAPE",
+      "test_name": "a target path never escapes the tree > \"..\\outside.ts\" grants nothing under a ** source — only the plain target beside it is granted",
+      "test_file": "tests/a_target_path_never_escapes_the_tree.test.ts",
+      "kind": "behavioural",
+      "drives": "resolveSeatGrants — src/layout_grants.ts",
+      "plant": "remove normaliseTarget from the target step (the raw entry is matched against the glob) — or normalise `..`/backslashes and grant the result"
+    },
+    {
+      "invariant_id": "TARGET-ESCAPE",
+      "test_name": "a target path never escapes the tree > \"C:\\abs\\path\" grants nothing under a ** source — only the plain target beside it is granted",
+      "test_file": "tests/a_target_path_never_escapes_the_tree.test.ts",
+      "kind": "behavioural",
+      "drives": "resolveSeatGrants — src/layout_grants.ts",
+      "plant": "remove normaliseTarget from the target step (the raw entry is matched against the glob) — or normalise `..`/backslashes and grant the result"
+    },
+    {
+      "invariant_id": "TARGET-ESCAPE-PREFIX",
+      "test_name": "a target path never escapes the tree > under a src/** source, `src/../x` never survives by starting with src/",
+      "test_file": "tests/a_target_path_never_escapes_the_tree.test.ts",
+      "kind": "behavioural",
+      "drives": "resolveSeatGrants — src/layout_grants.ts",
+      "plant": "remove normaliseTarget (a climbing target matches src/** by its prefix)"
+    },
+    {
+      "invariant_id": "TARGET-ESCAPE-DISPATCH",
+      "test_name": "a target path never escapes the tree > the chair is refused at dispatch, naming the entry > \"src/../coltrane.layout.json\" refuses the chair before any seat is invoked",
+      "test_file": "tests/a_target_path_never_escapes_the_tree.test.ts",
+      "kind": "behavioural",
+      "drives": "runGig — src/runtime.ts (the target preflight)",
+      "plant": "refuse only glob metacharacters in the target preflight, not escaping entries"
+    },
+    {
+      "invariant_id": "TARGET-ESCAPE-DISPATCH",
+      "test_name": "a target path never escapes the tree > the chair is refused at dispatch, naming the entry > \"/abs/path\" refuses the chair before any seat is invoked",
+      "test_file": "tests/a_target_path_never_escapes_the_tree.test.ts",
+      "kind": "behavioural",
+      "drives": "runGig — src/runtime.ts (the target preflight)",
+      "plant": "refuse only glob metacharacters in the target preflight, not escaping entries"
+    },
+    {
+      "invariant_id": "TARGET-ESCAPE-DISPATCH",
+      "test_name": "a target path never escapes the tree > the chair is refused at dispatch, naming the entry > \"src\\..\\x.ts\" refuses the chair before any seat is invoked",
+      "test_file": "tests/a_target_path_never_escapes_the_tree.test.ts",
+      "kind": "behavioural",
+      "drives": "runGig — src/runtime.ts (the target preflight)",
+      "plant": "refuse only glob metacharacters in the target preflight, not escaping entries"
+    },
+    {
+      "invariant_id": "D1-SANDBOX",
+      "test_name": "D1 — a Bash seat spawns sandboxed, fail-closed, with no escape hatch > an expanded Bash role (Bash(@laws)): sandbox.enabled, failIfUnavailable, allowUnsandboxedCommands false, no excluded commands",
+      "test_file": "tests/a_seats_bash_runs_in_a_sandbox.test.ts",
+      "kind": "behavioural",
+      "drives": "makeClaudeInvoker(...)(ctx) argv via the run seam — src/claude_invoker.ts (buildInvokerArgs --settings)",
+      "plant": "omit `sandbox` from the --settings JSON, or set failIfUnavailable false / allowUnsandboxedCommands true"
+    },
+    {
+      "invariant_id": "D1-SANDBOX",
+      "test_name": "D1 — a Bash seat spawns sandboxed, fail-closed, with no escape hatch > a literal Bash prefix (Bash(git diff:*)): sandbox.enabled, failIfUnavailable, allowUnsandboxedCommands false, no excluded commands",
+      "test_file": "tests/a_seats_bash_runs_in_a_sandbox.test.ts",
+      "kind": "behavioural",
+      "drives": "makeClaudeInvoker(...)(ctx) argv via the run seam — src/claude_invoker.ts (buildInvokerArgs --settings)",
+      "plant": "build the sandbox only for role-expanded Bash grants, not literal ones"
+    },
+    {
+      "invariant_id": "D1-SOURCES",
+      "test_name": "D1 — a Bash seat spawns sandboxed, fail-closed, with no escape hatch > --setting-sources loads neither project nor local settings (a repo's .claude/settings.json cannot merge in allowWrite or excludedCommands)",
+      "test_file": "tests/a_seats_bash_runs_in_a_sandbox.test.ts",
+      "kind": "behavioural",
+      "drives": "makeClaudeInvoker(...)(ctx) argv via the run seam — src/claude_invoker.ts (buildInvokerArgs --settings)",
+      "plant": "--setting-sources user,project"
+    },
+    {
+      "invariant_id": "D2-DENIES",
+      "test_name": "D2 — the sandbox denies the layout, .git and .claude by ABSOLUTE path > denyWrite holds <tree>/coltrane.layout.json, <tree>/.git and <tree>/.claude",
+      "test_file": "tests/a_seats_bash_runs_in_a_sandbox.test.ts",
+      "kind": "behavioural",
+      "drives": "makeClaudeInvoker(...)(ctx) argv via the run seam — src/claude_invoker.ts (buildInvokerArgs --settings)",
+      "plant": "drop <tree>/.git from sandbox.filesystem.denyWrite"
+    },
+    {
+      "invariant_id": "D2-ABSOLUTE",
+      "test_name": "D2 — the sandbox denies the layout, .git and .claude by ABSOLUTE path > every path anywhere in the sandbox's filesystem config is absolute — a relative one is silently ignored by the CLI",
+      "test_file": "tests/a_seats_bash_runs_in_a_sandbox.test.ts",
+      "kind": "behavioural",
+      "drives": "makeClaudeInvoker(...)(ctx) argv via the run seam — src/claude_invoker.ts (buildInvokerArgs --settings)",
+      "plant": "write \"./coltrane.layout.json\" (relative) into sandbox.filesystem.denyWrite"
+    },
+    {
+      "invariant_id": "D5-ROOM",
+      "test_name": "D5 — a seat inside a room gets the same sandbox, over the ROOM's workspace > docker exec … claude carries the sandbox, and its denies name the room's workspace — not the host tree",
+      "test_file": "tests/a_seats_bash_runs_in_a_sandbox.test.ts",
+      "kind": "behavioural",
+      "drives": "makeClaudeInvoker(...)(ctx) argv via the run seam — src/claude_invoker.ts (buildInvokerArgs --settings) with ctx.seatExec (docker exec)",
+      "plant": "skip the sandbox when ctx.seatExec is set, or deny under ctx.tree_root instead of seatExec.workspace"
+    },
+    {
+      "invariant_id": "D3-CONTROL-1",
+      "test_name": "D3 — the diff gate > control — a seat that changes only paths inside its grant seals as usual",
+      "test_file": "tests/a_seat_that_writes_outside_its_grant_is_refused.test.ts",
+      "kind": "behavioural",
+      "drives": "runGig — src/runtime.ts (the post-seat diff gate over git status --porcelain -z)",
+      "plant": "refuse every chair whose tree changed at all — a control, green today"
+    },
+    {
+      "invariant_id": "D3-CONTROL-2",
+      "test_name": "D3 — the diff gate > control — a change that was already in the tree BEFORE the seat ran is not the seat's",
+      "test_file": "tests/a_seat_that_writes_outside_its_grant_is_refused.test.ts",
+      "kind": "behavioural",
+      "drives": "runGig — src/runtime.ts (the post-seat diff gate over git status --porcelain -z)",
+      "plant": "diff against HEAD instead of the pre-seat state — a control, green today"
+    },
+    {
+      "invariant_id": "D3-UNTRACKED",
+      "test_name": "D3 — the diff gate > an UNTRACKED file outside the grant refuses the chair",
+      "test_file": "tests/a_seat_that_writes_outside_its_grant_is_refused.test.ts",
+      "kind": "behavioural",
+      "drives": "runGig — src/runtime.ts (the post-seat diff gate over git status --porcelain -z)",
+      "plant": "skip the gate, or ignore untracked (`??`) entries"
+    },
+    {
+      "invariant_id": "D3-TRACKED",
+      "test_name": "D3 — the diff gate > a TRACKED file edited outside the grant refuses the chair",
+      "test_file": "tests/a_seat_that_writes_outside_its_grant_is_refused.test.ts",
+      "kind": "behavioural",
+      "drives": "runGig — src/runtime.ts (the post-seat diff gate over git status --porcelain -z)",
+      "plant": "skip the gate"
+    },
+    {
+      "invariant_id": "D3-DELETED",
+      "test_name": "D3 — the diff gate > a tracked file DELETED outside the grant refuses the chair",
+      "test_file": "tests/a_seat_that_writes_outside_its_grant_is_refused.test.ts",
+      "kind": "behavioural",
+      "drives": "runGig — src/runtime.ts (the post-seat diff gate over git status --porcelain -z)",
+      "plant": "count only added/modified entries, not deletions"
+    },
+    {
+      "invariant_id": "D3-RENAME",
+      "test_name": "D3 — the diff gate > a RENAME out of scope refuses by its SOURCE, even though its destination is in scope",
+      "test_file": "tests/a_seat_that_writes_outside_its_grant_is_refused.test.ts",
+      "kind": "behavioural",
+      "drives": "runGig — src/runtime.ts (the post-seat diff gate over git status --porcelain -z)",
+      "plant": "count a rename by its destination only"
+    },
+    {
+      "invariant_id": "D3-NARROWED",
+      "test_name": "D3 — the diff gate > with target_paths [src/a.ts], a sibling inside src/** refuses — the gate uses the NARROWED scope",
+      "test_file": "tests/a_seat_that_writes_outside_its_grant_is_refused.test.ts",
+      "kind": "behavioural",
+      "drives": "runGig — src/runtime.ts (the post-seat diff gate over git status --porcelain -z)",
+      "plant": "gate on the expanded globs even when target_paths applied"
+    },
+    {
+      "invariant_id": "D3-UNNARROWED",
+      "test_name": "D3 — the diff gate > with NO target_paths (target_paths_applied: false), the expanded globs gate — docs/ is still outside src/**",
+      "test_file": "tests/a_seat_that_writes_outside_its_grant_is_refused.test.ts",
+      "kind": "behavioural",
+      "drives": "runGig — src/runtime.ts (the post-seat diff gate over git status --porcelain -z)",
+      "plant": "skip the gate when target_paths_applied is false"
+    },
+    {
+      "invariant_id": "D3-LAYOUT",
+      "test_name": "D3 — the diff gate > a ** seat that rewrote the layout file refuses — no grant ever covers coltrane.layout.json",
+      "test_file": "tests/a_seat_that_writes_outside_its_grant_is_refused.test.ts",
+      "kind": "behavioural",
+      "drives": "runGig — src/runtime.ts (the post-seat diff gate over git status --porcelain -z)",
+      "plant": "judge the layout file by the globs alone (** covers it)"
+    },
+    {
+      "invariant_id": "D4-REAL",
+      "test_name": "D4 — the sandbox the invoker builds refuses a real write (skipped as UNVERIFIED without srt + an OS sandbox) > a write outside the tree and a write to the layout file are refused; a write inside src/ succeeds",
+      "test_file": "tests/the_sandbox_refuses_a_real_write.test.ts",
+      "kind": "behavioural",
+      "drives": "makeClaudeInvoker(...) argv → the sandbox.filesystem it builds, enforced by @anthropic-ai/sandbox-runtime (srt) on the host OS sandbox",
+      "plant": "omit sandbox.filesystem.denyWrite from the invoker's --settings (srt then allows the layout-file write). NOTE: the relative-path trap is NOT observable here — srt resolves a relative path against cwd, the CLI ignores it — and is covered by D2-ABSOLUTE instead"
+    },
+    {
+      "invariant_id": "ROOM-SECCOMP-BWRAP",
+      "test_name": "the seat room's seccomp profile > allows exactly unshare, clone, mount, umount2, pivot_root and setns — unconditionally, in one appended rule",
+      "test_file": "tests/the_room_can_start_the_sandbox_and_nothing_more.test.ts",
+      "kind": "behavioural",
+      "drives": "roomSeatSeccompProfile — src/room_seat_seccomp.ts",
+      "plant": "drop the appended bubblewrap rule (syscalls: [...base.syscalls])",
+      "plant_observed": "AssertionError: the profile has no bubblewrap rule — every room seat's sandbox is refused: expected [ 'perf_event_open' ] to deeply equal [ Array(6) ]"
+    },
+    {
+      "invariant_id": "ROOM-SECCOMP-DEFAULT",
+      "test_name": "the seat room's seccomp profile > is Docker's default profile (moby v24.0.2) in every other rule and key — pinned by digest",
+      "test_file": "tests/the_room_can_start_the_sandbox_and_nothing_more.test.ts",
+      "kind": "behavioural",
+      "drives": "roomSeatSeccompProfile — src/room_seat_seccomp.ts",
+      "plant": "prepend an unconditional ALLOW for bpf to the default rules",
+      "plant_observed": "AssertionError: the profile differs from Docker's default beyond the one bubblewrap rule: expected 'bb9a023318b6ff381addb5cd3ba9006b6c82f…' to be '2c2917c58715fe65258b72b9941cc9223f52f…'"
+    },
+    {
+      "invariant_id": "ROOM-SECURITY-OPT",
+      "test_name": "the rendered room > a FLOOR room runs under the seat profile with /proc unmasked",
+      "test_file": "tests/the_room_can_start_the_sandbox_and_nothing_more.test.ts",
+      "kind": "behavioural",
+      "drives": "renderComposeConfig — src/venue_realizer.ts",
+      "plant": "drop `security_opt` from the floor room",
+      "plant_observed": "AssertionError: a seat-bearing room was rendered with Docker's default seccomp — its seats' sandboxes cannot start: expected undefined to deeply equal ArrayContaining{…}"
+    },
+    {
+      "invariant_id": "ROOM-NO-PRIVILEGE",
+      "test_name": "the rendered room > a floor room is never privileged, holds no added capability, and shares no host namespace",
+      "test_file": "tests/the_room_can_start_the_sandbox_and_nothing_more.test.ts",
+      "kind": "behavioural",
+      "drives": "renderComposeConfig — src/venue_realizer.ts",
+      "plant": "add room[\"cap_add\"] = [\"SYS_ADMIN\"] for a floor room",
+      "plant_observed": "AssertionError: the seat room was handed capabilities: [\"SYS_ADMIN\"]: expected [ 'SYS_ADMIN' ] to be undefined"
+    },
+    {
+      "invariant_id": "ROOM-SEATLESS-DEFAULTS",
+      "test_name": "the rendered room > a production-only room (no floor) runs no seat and keeps Docker's defaults",
+      "test_file": "tests/the_room_can_start_the_sandbox_and_nothing_more.test.ts",
+      "kind": "behavioural",
+      "drives": "renderComposeConfig — src/venue_realizer.ts",
+      "plant": "give every room the seat profile (if (v.floor || true))",
+      "plant_observed": "AssertionError: a seat-less room was given the seat profile: expected [ …(2) ] to be undefined"
+    },
+    {
+      "invariant_id": "ROOM-PROFILE-WRITTEN",
+      "test_name": "realize() writes that exact profile beside the compose document > the file the room's seccomp= points at is roomSeatSeccompProfile()",
+      "test_file": "tests/the_room_can_start_the_sandbox_and_nothing_more.test.ts",
+      "kind": "behavioural",
+      "drives": "dockerComposeRealizer({run}).realize — src/venue_realizer.ts",
+      "plant": "drop the floor room's security_opt (the realizer then writes no profile)",
+      "plant_observed": "AssertionError: the realizer wrote no seccomp profile at …/coltrane-realizations/gig-5ea70000/seat-seccomp.json: expected false to be true"
+    },
+    {
+      "invariant_id": "SANDBOX-TREE-ABS",
+      "test_name": "a relative tree never becomes a relative sandbox path > a relative tree_root: the seat spawns with ABSOLUTE sandbox paths, or is refused before the spawn",
+      "test_file": "tests/the_sandbox_tree_is_always_absolute.test.ts",
+      "kind": "behavioural",
+      "drives": "makeClaudeInvoker(...)(ctx) argv via the run seam — src/claude_invoker.ts",
+      "plant": "pass ctx.tree_root / seatExec.workspace to bashSandboxFor unresolved AND drop its absolute check",
+      "plant_observed": "AssertionError: a relative sandbox path reached the spawn — the CLI ignores it, so the deny is not enforced: [\"relative/tree-that-does-not-exist\", …/coltrane.layout.json, …]"
+    },
+    {
+      "invariant_id": "SANDBOX-TREE-ABS",
+      "test_name": "a relative tree never becomes a relative sandbox path > a ./-relative tree_root: the seat spawns with ABSOLUTE sandbox paths, or is refused before the spawn",
+      "test_file": "tests/the_sandbox_tree_is_always_absolute.test.ts",
+      "kind": "behavioural",
+      "drives": "makeClaudeInvoker(...)(ctx) argv via the run seam — src/claude_invoker.ts",
+      "plant": "pass ctx.tree_root / seatExec.workspace to bashSandboxFor unresolved AND drop its absolute check",
+      "plant_observed": "AssertionError: a relative sandbox path reached the spawn … [\"./relative/tree\", …]"
+    },
+    {
+      "invariant_id": "SANDBOX-TREE-ABS",
+      "test_name": "a relative tree never becomes a relative sandbox path > a relative room workspace: the seat spawns with ABSOLUTE sandbox paths, or is refused before the spawn",
+      "test_file": "tests/the_sandbox_tree_is_always_absolute.test.ts",
+      "kind": "behavioural",
+      "drives": "makeClaudeInvoker(...)(ctx) argv via the run seam — src/claude_invoker.ts",
+      "plant": "pass ctx.tree_root / seatExec.workspace to bashSandboxFor unresolved AND drop its absolute check",
+      "plant_observed": "AssertionError: a relative sandbox path reached the spawn … [\"workspace/g1\", …]"
+    },
+    {
+      "invariant_id": "SANDBOX-CTA-BASH",
+      "test_name": "Bash kept by code_tool_access \"full\" is sandboxed exactly like granted Bash > a seat with NO Bash grant but code_tool_access \"full\" spawns sandboxed, fail-closed, no hatch, with the same denies",
+      "test_file": "tests/the_sandbox_tree_is_always_absolute.test.ts",
+      "kind": "behavioural",
+      "drives": "makeClaudeInvoker(...)(ctx) argv via the run seam — src/claude_invoker.ts",
+      "plant": "compute seatHoldsBash from effectiveAllowed (granted tools) only, ignoring code_tool_access",
+      "plant_observed": "AssertionError: a seat that can run Bash through code_tool_access spawned with NO sandbox: expected undefined to be defined"
+    },
+    {
+      "invariant_id": "GATE-UNREADABLE-BEFORE",
+      "test_name": "an unreadable tree refuses the writing seat > BEFORE the seat: a tree_root that cannot be read → the seat is never invoked, and the refusal says why",
+      "test_file": "tests/the_diff_gate_never_fails_open.test.ts",
+      "kind": "behavioural",
+      "drives": "runGig — src/runtime.ts (the diff gate)",
+      "plant": "swallow the pre-seat gateRead() failure (gateBefore = undefined) and run the seat ungated",
+      "plant_observed": "AssertionError: a writing seat ran over a tree its gate could not read: expected 1 to be +0"
+    },
+    {
+      "invariant_id": "GATE-UNREADABLE-AFTER",
+      "test_name": "an unreadable tree refuses the writing seat > AFTER the seat: a seat that leaves the tree unreadable is refused, and nothing it made is sealed",
+      "test_file": "tests/the_diff_gate_never_fails_open.test.ts",
+      "kind": "behavioural",
+      "drives": "runGig — src/runtime.ts (the diff gate)",
+      "plant": "catch the post-seat gateRead() failure and judge against the pre-seat state (no changes)",
+      "plant_observed": "AssertionError: a seat whose effect could not be judged was sealed: … expected [ { …(23) } ] to have a length of +0 but got 1"
+    },
+    {
+      "invariant_id": "GATE-CONCURRENT",
+      "test_name": "concurrent chairs on one tree > an overlapping chair never excuses a change outside BOTH scopes",
+      "test_file": "tests/the_diff_gate_never_fails_open.test.ts",
+      "kind": "behavioural",
+      "drives": "outOfScope via runGig — src/diff_gate.ts",
+      "plant": "outOfScope returns [] whenever any chair overlapped",
+      "plant_observed": "AssertionError: the refusal does not name the path outside both scopes: expected '{\"gig_id\":…' to contain 'scripts/evil.sh'"
+    },
+    {
+      "invariant_id": "GATE-CONCURRENT-CONTROL",
+      "test_name": "concurrent chairs on one tree > control — a change inside the OTHER chair's scope is left to that chair: both seal",
+      "test_file": "tests/the_diff_gate_never_fails_open.test.ts",
+      "kind": "behavioural",
+      "drives": "outOfScope via runGig — src/diff_gate.ts",
+      "plant": "ignore overlaps (judge each change against the chair's own scope only)",
+      "plant_observed": "AssertionError: in-scope concurrent work was refused: … src-seat … outside its Write/Edit scope [docs/mine.txt] … expected +0 to be 2"
+    },
+    {
+      "invariant_id": "GATE-ROOM-WORKSPACE",
+      "test_name": "a room seat's gate reads the ROOM's workspace > a seat that writes outside its grant IN THE ROOM WORKSPACE is refused — the host tree_root is not the tree it ran in",
+      "test_file": "tests/the_diff_gate_never_fails_open.test.ts",
+      "kind": "behavioural",
+      "drives": "runGig — src/runtime.ts (the diff gate)",
+      "plant": "read deps.tree_root instead of gigSubstrate.seat.workspace",
+      "plant_observed": "AssertionError: the gate read the host tree_root and never saw the room seat's write: expected [ { …(23) } ] to have a length of +0 but got 1"
+    },
+    {
+      "invariant_id": "GATE-EXEMPTION-EXACT",
+      "test_name": "the .coltrane exemption is exactly .coltrane > a seat that writes .claude/settings.json is judged — and refused",
+      "test_file": "tests/the_diff_gate_never_fails_open.test.ts",
+      "kind": "behavioural",
+      "drives": "changedPaths via runGig — src/diff_gate.ts",
+      "plant": "widen the exemption to .claude/",
+      "plant_observed": "AssertionError: .claude/settings.json was treated as the engine's own state and not judged"
+    },
+    {
+      "invariant_id": "GATE-EXEMPTION-EXACT",
+      "test_name": "the .coltrane exemption is exactly .coltrane > a seat that writes .coltrane-evil/x is judged — and refused",
+      "test_file": "tests/the_diff_gate_never_fails_open.test.ts",
+      "kind": "behavioural",
+      "drives": "changedPaths via runGig — src/diff_gate.ts",
+      "plant": "exempt by bare prefix: !p.startsWith(\".coltrane\")",
+      "plant_observed": "AssertionError: .coltrane-evil/x was treated as the engine's own state and not judged"
+    },
+    {
+      "invariant_id": "GATE-EXEMPTION-EXACT",
+      "test_name": "the .coltrane exemption is exactly .coltrane > a seat that writes .coltranex is judged — and refused",
+      "test_file": "tests/the_diff_gate_never_fails_open.test.ts",
+      "kind": "behavioural",
+      "drives": "changedPaths via runGig — src/diff_gate.ts",
+      "plant": "exempt by bare prefix: !p.startsWith(\".coltrane\")",
+      "plant_observed": "AssertionError: .coltranex was treated as the engine's own state and not judged"
+    },
+    {
+      "invariant_id": "GATE-EXEMPTION-CONTROL",
+      "test_name": "the .coltrane exemption is exactly .coltrane > control — the engine's own .coltrane/ changing during a seat is not blamed on it",
+      "test_file": "tests/the_diff_gate_never_fails_open.test.ts",
+      "kind": "behavioural",
+      "drives": "changedPaths via runGig — src/diff_gate.ts",
+      "plant": "remove the .coltrane exemption",
+      "plant_observed": "AssertionError: the engine's own state dir was blamed on the seat: … [.coltrane/ledger.jsonl] … expected [] to have a length of 1"
+    },
+    {
+      "invariant_id": "TARGET-TILDE",
+      "test_name": "a target path never escapes the tree > \"~/x\" grants nothing under a ** source — only the plain target beside it is granted",
+      "test_file": "tests/a_target_path_never_escapes_the_tree.test.ts",
+      "kind": "behavioural",
+      "drives": "resolveSeatGrants — src/layout_grants.ts",
+      "plant": "drop the leading-`~` refusal from escapesTree (src/layout_grants.ts)",
+      "plant_observed": "AssertionError: the escaping target \"~/x\" became (or normalised into) a grant"
+    },
+    {
+      "invariant_id": "TARGET-TILDE",
+      "test_name": "a target path never escapes the tree > \"~user/x\" grants nothing under a ** source — only the plain target beside it is granted",
+      "test_file": "tests/a_target_path_never_escapes_the_tree.test.ts",
+      "kind": "behavioural",
+      "drives": "resolveSeatGrants — src/layout_grants.ts",
+      "plant": "drop the leading-`~` refusal from escapesTree (src/layout_grants.ts)",
+      "plant_observed": "AssertionError: the escaping target \"~user/x\" became (or normalised into) a grant"
+    },
+    {
+      "invariant_id": "TARGET-TILDE-DISPATCH",
+      "test_name": "a target path never escapes the tree > the chair is refused at dispatch, naming the entry > \"~/x\" refuses the chair before any seat is invoked",
+      "test_file": "tests/a_target_path_never_escapes_the_tree.test.ts",
+      "kind": "behavioural",
+      "drives": "runGig — src/runtime.ts (target preflight)",
+      "plant": "drop the leading-`~` refusal from escapesTree (src/layout_grants.ts)",
+      "plant_observed": "AssertionError: an escaping target (~/x) reached a seat: expected 1 to be +0"
+    },
+    {
+      "invariant_id": "TARGET-TILDE-DISPATCH",
+      "test_name": "a target path never escapes the tree > the chair is refused at dispatch, naming the entry > \"~user/x\" refuses the chair before any seat is invoked",
+      "test_file": "tests/a_target_path_never_escapes_the_tree.test.ts",
+      "kind": "behavioural",
+      "drives": "runGig — src/runtime.ts (target preflight)",
+      "plant": "drop the leading-`~` refusal from escapesTree (src/layout_grants.ts)",
+      "plant_observed": "AssertionError: an escaping target (~user/x) reached a seat: expected 1 to be +0"
+    },
+    {
+      "invariant_id": "NO-ENGINE-STATE-1",
+      "test_name": "no Write/Edit grant reaches .coltrane/ > a ** source: denials carry Write(.coltrane/**) and Edit(.coltrane/**)",
+      "test_file": "tests/a_seat_cannot_write_the_engines_state.test.ts",
+      "kind": "behavioural",
+      "drives": "resolveSeatGrants — src/layout_grants.ts",
+      "plant": "a ** grant reaching .coltrane with no .coltrane denial (red today: the denial is not implemented)"
+    },
+    {
+      "invariant_id": "NO-ENGINE-STATE-2",
+      "test_name": "no Write/Edit grant reaches .coltrane/ > a bare Write literal (no code_tool_access) is denied .coltrane too",
+      "test_file": "tests/a_seat_cannot_write_the_engines_state.test.ts",
+      "kind": "behavioural",
+      "drives": "resolveSeatGrants — src/layout_grants.ts",
+      "plant": "deny .coltrane only for scoped grants"
+    },
+    {
+      "invariant_id": "NO-ENGINE-STATE-3",
+      "test_name": "no Write/Edit grant reaches .coltrane/ > code_tool_access \"full\" with no Write grant is denied .coltrane too",
+      "test_file": "tests/a_seat_cannot_write_the_engines_state.test.ts",
+      "kind": "behavioural",
+      "drives": "resolveSeatGrants — src/layout_grants.ts",
+      "plant": "drop the code_tool_access half of the .coltrane denial"
+    },
+    {
+      "invariant_id": "NO-ENGINE-STATE-4",
+      "test_name": "no Write/Edit grant reaches .coltrane/ > a target_paths entry under .coltrane/ is never granted — not even to a bare Write, which covers every path",
+      "test_file": "tests/a_seat_cannot_write_the_engines_state.test.ts",
+      "kind": "behavioural",
+      "drives": "resolveSeatGrants — src/layout_grants.ts",
+      "plant": "keep Write(<target>) for a .coltrane/ target"
+    },
+    {
+      "invariant_id": "NO-ENGINE-STATE-5",
+      "test_name": "no Write/Edit grant reaches .coltrane/ > a src/** seat, which cannot reach .coltrane/, carries no .coltrane denial (the deny follows reach)",
+      "test_file": "tests/a_seat_cannot_write_the_engines_state.test.ts",
+      "kind": "behavioural",
+      "drives": "resolveSeatGrants — src/layout_grants.ts",
+      "plant": "deny .coltrane for every seat regardless of reach"
+    },
+    {
+      "invariant_id": "NO-ENGINE-STATE-6",
+      "test_name": "no Write/Edit grant reaches .coltrane/ > the spawn: --disallowedTools carries both denials beside Write(**)",
+      "test_file": "tests/a_seat_cannot_write_the_engines_state.test.ts",
+      "kind": "behavioural",
+      "drives": "makeClaudeInvoker(...) argv — src/claude_invoker.ts",
+      "plant": "omit the .coltrane denials from the --disallowedTools union"
+    },
+    {
+      "invariant_id": "IGNORED-CONTROL",
+      "test_name": "a gitignored path never leaves the tree through the engine > control — a tracked, changed path is stamped",
+      "test_file": "tests/the_engine_never_publishes_an_ignored_path.test.ts",
+      "kind": "behavioural",
+      "drives": "stampChangeAddresses — src/runtime.ts",
+      "plant": "refuse every change",
+      "plant_observed": "AssertionError: … expected 'refuse all' to contain 'secret.env' (and the control threw)"
+    },
+    {
+      "invariant_id": "IGNORED-NEVER-SEALED",
+      "test_name": "a gitignored path never leaves the tree through the engine > a change-set naming an IGNORED path is refused, naming it — its bytes are never sealed",
+      "test_file": "tests/the_engine_never_publishes_an_ignored_path.test.ts",
+      "kind": "behavioural",
+      "drives": "stampChangeAddresses — src/runtime.ts",
+      "plant": "stamp every named path without asking git check-ignore (red today: the refusal is not implemented)"
+    },
+    {
+      "invariant_id": "NO-PUBLISH-STEP",
+      "test_name": "a gitignored path never leaves the tree through the engine > the engine has no publish step: no src/ file runs git add, commit or push",
+      "test_file": "tests/the_engine_never_publishes_an_ignored_path.test.ts",
+      "kind": "structural",
+      "drives": "src/*.ts (every git invocation site)",
+      "plant": "add gitInTree(tree_root, [\"add\", \"-A\"]) to src/ (e.g. at the top of stampChangeAddresses)",
+      "plant_observed": "AssertionError: the engine grew a publish step — it would ship whatever the tree holds, including ignored paths the gate never saw: runtime.ts:…: gitInTree(tree_root, [\"add\", \"-A\"]);",
+      "structural_reason": "The invariant is the ABSENCE of a call site: no engine code path adds, commits or pushes. No behavioural law can enumerate every future caller of git; the text of src/ is the only place the absence can be checked. Checked by the drafter at 9ff943c: there is no such call today — publishing is done by seats (pr-publisher, spec-publisher) through their own sandboxed Bash."
+    },
+    {
+      "invariant_id": "PROTECTED-DENIED",
+      "test_name": "every protected path is denied iff the CLI's matcher could reach it > non-vacuity: the expected answers discriminate (some grants reach, `src/*` reaches none)",
+      "test_file": "tests/every_protected_path_is_denied_where_the_cli_could_reach_it.test.ts",
+      "kind": "behavioural",
+      "drives": "resolveSeatGrants — src/layout_grants.ts (denials via grantMayReach / PROTECTED_PATHS, src/grant_scope.ts)",
+      "plant": "replace the oracle with the engine's own grantCovers (the oracle would then say ** misses .git/config under OWN-A)"
+    },
+    {
+      "invariant_id": "PROTECTED-DENIED",
+      "test_name": "every protected path is denied iff the CLI's matcher could reach it > Write(*.json) × coltrane.layout.json: DENIED",
+      "test_file": "tests/every_protected_path_is_denied_where_the_cli_could_reach_it.test.ts",
+      "kind": "behavioural",
+      "drives": "resolveSeatGrants — src/layout_grants.ts (denials via grantMayReach / PROTECTED_PATHS, src/grant_scope.ts)",
+      "plant": "a grantCovers change that disagrees with the CLI on this pair (none of OWN-A/B/C/D/E/F touches it)"
+    },
+    {
+      "invariant_id": "PROTECTED-DENIED",
+      "test_name": "every protected path is denied iff the CLI's matcher could reach it > Write(*.json) × .git: DENIED",
+      "test_file": "tests/every_protected_path_is_denied_where_the_cli_could_reach_it.test.ts",
+      "kind": "behavioural",
+      "drives": "resolveSeatGrants — src/layout_grants.ts (denials via grantMayReach / PROTECTED_PATHS, src/grant_scope.ts)",
+      "plant": "OWN-F: slashless patterns anchored at the root (anchored = true) OR OWN-B: grantMayReach judges an unanchored pattern by one probe path (<dir>/x) OR OWN-D: `.git` dropped from PROTECTED_PATHS",
+      "plant_observed": "OWN-F applied to src/grant_scope.ts at 5776395 → FAIL: Write(*.json) × .git: DENIED"
+    },
+    {
+      "invariant_id": "PROTECTED-DENIED",
+      "test_name": "every protected path is denied iff the CLI's matcher could reach it > Write(*.json) × .claude: DENIED",
+      "test_file": "tests/every_protected_path_is_denied_where_the_cli_could_reach_it.test.ts",
+      "kind": "behavioural",
+      "drives": "resolveSeatGrants — src/layout_grants.ts (denials via grantMayReach / PROTECTED_PATHS, src/grant_scope.ts)",
+      "plant": "OWN-F: slashless patterns anchored at the root (anchored = true) OR OWN-B: grantMayReach judges an unanchored pattern by one probe path (<dir>/x)",
+      "plant_observed": "OWN-F applied to src/grant_scope.ts at 5776395 → FAIL: Write(*.json) × .claude: DENIED"
+    },
+    {
+      "invariant_id": "PROTECTED-DENIED",
+      "test_name": "every protected path is denied iff the CLI's matcher could reach it > Write(*.json) × .coltrane: DENIED",
+      "test_file": "tests/every_protected_path_is_denied_where_the_cli_could_reach_it.test.ts",
+      "kind": "behavioural",
+      "drives": "resolveSeatGrants — src/layout_grants.ts (denials via grantMayReach / PROTECTED_PATHS, src/grant_scope.ts)",
+      "plant": "OWN-F: slashless patterns anchored at the root (anchored = true) OR OWN-B: grantMayReach judges an unanchored pattern by one probe path (<dir>/x)",
+      "plant_observed": "OWN-F applied to src/grant_scope.ts at 5776395 → FAIL: Write(*.json) × .coltrane: DENIED"
+    },
+    {
+      "invariant_id": "PROTECTED-DENIED",
+      "test_name": "every protected path is denied iff the CLI's matcher could reach it > Write(src/*) × coltrane.layout.json: not denied (control)",
+      "test_file": "tests/every_protected_path_is_denied_where_the_cli_could_reach_it.test.ts",
+      "kind": "behavioural",
+      "drives": "resolveSeatGrants — src/layout_grants.ts (denials via grantMayReach / PROTECTED_PATHS, src/grant_scope.ts)",
+      "plant": "deny every protected path to every grant (grantMayReach returns true unconditionally)"
+    },
+    {
+      "invariant_id": "PROTECTED-DENIED",
+      "test_name": "every protected path is denied iff the CLI's matcher could reach it > Write(src/*) × .git: not denied (control)",
+      "test_file": "tests/every_protected_path_is_denied_where_the_cli_could_reach_it.test.ts",
+      "kind": "behavioural",
+      "drives": "resolveSeatGrants — src/layout_grants.ts (denials via grantMayReach / PROTECTED_PATHS, src/grant_scope.ts)",
+      "plant": "deny every protected path to every grant (grantMayReach returns true unconditionally)"
+    },
+    {
+      "invariant_id": "PROTECTED-DENIED",
+      "test_name": "every protected path is denied iff the CLI's matcher could reach it > Write(src/*) × .claude: not denied (control)",
+      "test_file": "tests/every_protected_path_is_denied_where_the_cli_could_reach_it.test.ts",
+      "kind": "behavioural",
+      "drives": "resolveSeatGrants — src/layout_grants.ts (denials via grantMayReach / PROTECTED_PATHS, src/grant_scope.ts)",
+      "plant": "deny every protected path to every grant (grantMayReach returns true unconditionally)"
+    },
+    {
+      "invariant_id": "PROTECTED-DENIED",
+      "test_name": "every protected path is denied iff the CLI's matcher could reach it > Write(src/*) × .coltrane: not denied (control)",
+      "test_file": "tests/every_protected_path_is_denied_where_the_cli_could_reach_it.test.ts",
+      "kind": "behavioural",
+      "drives": "resolveSeatGrants — src/layout_grants.ts (denials via grantMayReach / PROTECTED_PATHS, src/grant_scope.ts)",
+      "plant": "deny every protected path to every grant (grantMayReach returns true unconditionally)"
+    },
+    {
+      "invariant_id": "PROTECTED-DENIED",
+      "test_name": "every protected path is denied iff the CLI's matcher could reach it > Write(**) × coltrane.layout.json: DENIED",
+      "test_file": "tests/every_protected_path_is_denied_where_the_cli_could_reach_it.test.ts",
+      "kind": "behavioural",
+      "drives": "resolveSeatGrants — src/layout_grants.ts (denials via grantMayReach / PROTECTED_PATHS, src/grant_scope.ts)",
+      "plant": "a grantCovers change that disagrees with the CLI on this pair (none of OWN-A/B/C/D/E/F touches it)"
+    },
+    {
+      "invariant_id": "PROTECTED-DENIED",
+      "test_name": "every protected path is denied iff the CLI's matcher could reach it > Write(**) × .git: DENIED",
+      "test_file": "tests/every_protected_path_is_denied_where_the_cli_could_reach_it.test.ts",
+      "kind": "behavioural",
+      "drives": "resolveSeatGrants — src/layout_grants.ts (denials via grantMayReach / PROTECTED_PATHS, src/grant_scope.ts)",
+      "plant": "OWN-D: `.git` dropped from PROTECTED_PATHS",
+      "plant_observed": "OWN-D applied to src/grant_scope.ts at 5776395 → AssertionError: Write(**) can reach .git at the CLI and the resolver did not deny it: expected [ 'Write(coltrane.layout.json)', …(2) ] to include 'Write(.git/**)'"
+    },
+    {
+      "invariant_id": "PROTECTED-DENIED",
+      "test_name": "every protected path is denied iff the CLI's matcher could reach it > Write(**) × .claude: DENIED",
+      "test_file": "tests/every_protected_path_is_denied_where_the_cli_could_reach_it.test.ts",
+      "kind": "behavioural",
+      "drives": "resolveSeatGrants — src/layout_grants.ts (denials via grantMayReach / PROTECTED_PATHS, src/grant_scope.ts)",
+      "plant": "a grantCovers change that disagrees with the CLI on this pair (none of OWN-A/B/C/D/E/F touches it)"
+    },
+    {
+      "invariant_id": "PROTECTED-DENIED",
+      "test_name": "every protected path is denied iff the CLI's matcher could reach it > Write(**) × .coltrane: DENIED",
+      "test_file": "tests/every_protected_path_is_denied_where_the_cli_could_reach_it.test.ts",
+      "kind": "behavioural",
+      "drives": "resolveSeatGrants — src/layout_grants.ts (denials via grantMayReach / PROTECTED_PATHS, src/grant_scope.ts)",
+      "plant": "a grantCovers change that disagrees with the CLI on this pair (none of OWN-A/B/C/D/E/F touches it)"
+    },
+    {
+      "invariant_id": "PROTECTED-DENIED",
+      "test_name": "every protected path is denied iff the CLI's matcher could reach it > Write(.*/**) × coltrane.layout.json: not denied (control)",
+      "test_file": "tests/every_protected_path_is_denied_where_the_cli_could_reach_it.test.ts",
+      "kind": "behavioural",
+      "drives": "resolveSeatGrants — src/layout_grants.ts (denials via grantMayReach / PROTECTED_PATHS, src/grant_scope.ts)",
+      "plant": "deny every protected path to every grant (grantMayReach returns true unconditionally)"
+    },
+    {
+      "invariant_id": "PROTECTED-DENIED",
+      "test_name": "every protected path is denied iff the CLI's matcher could reach it > Write(.*/**) × .git: DENIED",
+      "test_file": "tests/every_protected_path_is_denied_where_the_cli_could_reach_it.test.ts",
+      "kind": "behavioural",
+      "drives": "resolveSeatGrants — src/layout_grants.ts (denials via grantMayReach / PROTECTED_PATHS, src/grant_scope.ts)",
+      "plant": "OWN-D: `.git` dropped from PROTECTED_PATHS",
+      "plant_observed": "OWN-D applied to src/grant_scope.ts at 5776395 → AssertionError: Write(.*/**) can reach .git at the CLI and the resolver did not deny it: expected [ 'Write(.claude/**)', …(1) ] to include 'Write(.git/**)'"
+    },
+    {
+      "invariant_id": "PROTECTED-DENIED",
+      "test_name": "every protected path is denied iff the CLI's matcher could reach it > Write(.*/**) × .claude: DENIED",
+      "test_file": "tests/every_protected_path_is_denied_where_the_cli_could_reach_it.test.ts",
+      "kind": "behavioural",
+      "drives": "resolveSeatGrants — src/layout_grants.ts (denials via grantMayReach / PROTECTED_PATHS, src/grant_scope.ts)",
+      "plant": "a grantCovers change that disagrees with the CLI on this pair (none of OWN-A/B/C/D/E/F touches it)"
+    },
+    {
+      "invariant_id": "PROTECTED-DENIED",
+      "test_name": "every protected path is denied iff the CLI's matcher could reach it > Write(.*/**) × .coltrane: DENIED",
+      "test_file": "tests/every_protected_path_is_denied_where_the_cli_could_reach_it.test.ts",
+      "kind": "behavioural",
+      "drives": "resolveSeatGrants — src/layout_grants.ts (denials via grantMayReach / PROTECTED_PATHS, src/grant_scope.ts)",
+      "plant": "a grantCovers change that disagrees with the CLI on this pair (none of OWN-A/B/C/D/E/F touches it)"
+    },
+    {
+      "invariant_id": "PROTECTED-DENIED",
+      "test_name": "every protected path is denied iff the CLI's matcher could reach it > Write(config) × coltrane.layout.json: not denied (control)",
+      "test_file": "tests/every_protected_path_is_denied_where_the_cli_could_reach_it.test.ts",
+      "kind": "behavioural",
+      "drives": "resolveSeatGrants — src/layout_grants.ts (denials via grantMayReach / PROTECTED_PATHS, src/grant_scope.ts)",
+      "plant": "deny every protected path to every grant (grantMayReach returns true unconditionally)"
+    },
+    {
+      "invariant_id": "PROTECTED-DENIED",
+      "test_name": "every protected path is denied iff the CLI's matcher could reach it > Write(config) × .git: DENIED",
+      "test_file": "tests/every_protected_path_is_denied_where_the_cli_could_reach_it.test.ts",
+      "kind": "behavioural",
+      "drives": "resolveSeatGrants — src/layout_grants.ts (denials via grantMayReach / PROTECTED_PATHS, src/grant_scope.ts)",
+      "plant": "OWN-F: slashless patterns anchored at the root (anchored = true) OR OWN-B: grantMayReach judges an unanchored pattern by one probe path (<dir>/x) OR OWN-D: `.git` dropped from PROTECTED_PATHS",
+      "plant_observed": "OWN-F applied to src/grant_scope.ts at 5776395 → FAIL: Write(config) × .git: DENIED"
+    },
+    {
+      "invariant_id": "PROTECTED-DENIED",
+      "test_name": "every protected path is denied iff the CLI's matcher could reach it > Write(config) × .claude: DENIED",
+      "test_file": "tests/every_protected_path_is_denied_where_the_cli_could_reach_it.test.ts",
+      "kind": "behavioural",
+      "drives": "resolveSeatGrants — src/layout_grants.ts (denials via grantMayReach / PROTECTED_PATHS, src/grant_scope.ts)",
+      "plant": "OWN-F: slashless patterns anchored at the root (anchored = true) OR OWN-B: grantMayReach judges an unanchored pattern by one probe path (<dir>/x)",
+      "plant_observed": "OWN-F applied to src/grant_scope.ts at 5776395 → FAIL: Write(config) × .claude: DENIED"
+    },
+    {
+      "invariant_id": "PROTECTED-DENIED",
+      "test_name": "every protected path is denied iff the CLI's matcher could reach it > Write(config) × .coltrane: DENIED",
+      "test_file": "tests/every_protected_path_is_denied_where_the_cli_could_reach_it.test.ts",
+      "kind": "behavioural",
+      "drives": "resolveSeatGrants — src/layout_grants.ts (denials via grantMayReach / PROTECTED_PATHS, src/grant_scope.ts)",
+      "plant": "OWN-F: slashless patterns anchored at the root (anchored = true) OR OWN-B: grantMayReach judges an unanchored pattern by one probe path (<dir>/x)",
+      "plant_observed": "OWN-F applied to src/grant_scope.ts at 5776395 → FAIL: Write(config) × .coltrane: DENIED"
+    },
+    {
+      "invariant_id": "PROTECTED-DENIED-FINDING",
+      "test_name": "every protected path is denied iff the CLI's matcher could reach it > Write(./**) — the CLI drops the `./` and reads `**` — is denied every protected path",
+      "test_file": "tests/every_protected_path_is_denied_where_the_cli_could_reach_it.test.ts",
+      "kind": "behavioural",
+      "drives": "resolveSeatGrants — src/layout_grants.ts (denials via grantMayReach / PROTECTED_PATHS, src/grant_scope.ts)",
+      "plant": "(RED at 5776395) grantMayReach reads `./**` literally (anchored segment `.`), so Write(./**) gets no protected-path denial while the CLI reads it as `**`"
+    },
+    {
+      "invariant_id": "PROTECTED-DENIED",
+      "test_name": "the spawn carries the .git and .claude denials, not only .coltrane > a seat granted Write(**) and Edit(**) (code_tool_access unset) spawns with Write/Edit denials for .git/** and .claude/**",
+      "test_file": "tests/every_protected_path_is_denied_where_the_cli_could_reach_it.test.ts",
+      "kind": "behavioural",
+      "drives": "makeClaudeInvoker(...) argv via the run seam — src/claude_invoker.ts (denials from resolveSeatGrants)",
+      "plant": "OWN-D: `.git` dropped from PROTECTED_PATHS",
+      "plant_observed": "OWN-D applied to src/grant_scope.ts at 5776395 → AssertionError: the spawn can write .git through its ** grant: expected [ 'MultiEdit', 'NotebookEdit', …(20) ] to include 'Write(.git/**)'"
+    },
+    {
+      "invariant_id": "CLI-SCOPE",
+      "test_name": "the engine's scope matcher agrees with the CLI's (ignore 7.0.5 + the CLI's Gn preprocessing) > non-vacuity: the oracle itself says what the CLI measurably does on the dot-path seam",
+      "test_file": "tests/the_engine_matches_scopes_as_the_cli_does.test.ts",
+      "kind": "behavioural",
+      "drives": "grantCovers — src/grant_scope.ts (vs the CLI oracle, tests/support/cli_scope_oracle.ts)",
+      "plant": "replace the oracle with the engine's own grantCovers (the oracle would then say ** misses .git/config under OWN-A)"
+    },
+    {
+      "invariant_id": "CLI-SCOPE",
+      "test_name": "the engine's scope matcher agrees with the CLI's (ignore 7.0.5 + the CLI's Gn preprocessing) > Write(**) on \".coltrane/x\": engine and CLI agree",
+      "test_file": "tests/the_engine_matches_scopes_as_the_cli_does.test.ts",
+      "kind": "behavioural",
+      "drives": "grantCovers — src/grant_scope.ts (vs the CLI oracle, tests/support/cli_scope_oracle.ts)",
+      "plant": "OWN-A: grantCovers returns posix.matchesGlob(path, scope) (node glob semantics: ** skips dot-dirs, no any-depth basenames, no directory coverage)",
+      "plant_observed": "OWN-A applied to src/grant_scope.ts at 5776395 → FAIL: Write(**) on \".coltrane/x\": engine and CLI agree"
+    },
+    {
+      "invariant_id": "CLI-SCOPE",
+      "test_name": "the engine's scope matcher agrees with the CLI's (ignore 7.0.5 + the CLI's Gn preprocessing) > Write(**) on \".git/config\": engine and CLI agree",
+      "test_file": "tests/the_engine_matches_scopes_as_the_cli_does.test.ts",
+      "kind": "behavioural",
+      "drives": "grantCovers — src/grant_scope.ts (vs the CLI oracle, tests/support/cli_scope_oracle.ts)",
+      "plant": "OWN-A: grantCovers returns posix.matchesGlob(path, scope) (node glob semantics: ** skips dot-dirs, no any-depth basenames, no directory coverage)",
+      "plant_observed": "OWN-A applied to src/grant_scope.ts at 5776395 → FAIL: Write(**) on \".git/config\": engine and CLI agree"
+    },
+    {
+      "invariant_id": "CLI-SCOPE",
+      "test_name": "the engine's scope matcher agrees with the CLI's (ignore 7.0.5 + the CLI's Gn preprocessing) > Write(**) on \".claude/settings.json\": engine and CLI agree",
+      "test_file": "tests/the_engine_matches_scopes_as_the_cli_does.test.ts",
+      "kind": "behavioural",
+      "drives": "grantCovers — src/grant_scope.ts (vs the CLI oracle, tests/support/cli_scope_oracle.ts)",
+      "plant": "OWN-A: grantCovers returns posix.matchesGlob(path, scope) (node glob semantics: ** skips dot-dirs, no any-depth basenames, no directory coverage)",
+      "plant_observed": "OWN-A applied to src/grant_scope.ts at 5776395 → FAIL: Write(**) on \".claude/settings.json\": engine and CLI agree"
+    },
+    {
+      "invariant_id": "CLI-SCOPE",
+      "test_name": "the engine's scope matcher agrees with the CLI's (ignore 7.0.5 + the CLI's Gn preprocessing) > Write(**) on \"coltrane.layout.json\": engine and CLI agree",
+      "test_file": "tests/the_engine_matches_scopes_as_the_cli_does.test.ts",
+      "kind": "behavioural",
+      "drives": "grantCovers — src/grant_scope.ts (vs the CLI oracle, tests/support/cli_scope_oracle.ts)",
+      "plant": "a grantCovers change that disagrees with the CLI on this pair (none of OWN-A/B/C/D/E/F touches it)"
+    },
+    {
+      "invariant_id": "CLI-SCOPE",
+      "test_name": "the engine's scope matcher agrees with the CLI's (ignore 7.0.5 + the CLI's Gn preprocessing) > Write(**/*.json) on \".coltrane/a.json\": engine and CLI agree",
+      "test_file": "tests/the_engine_matches_scopes_as_the_cli_does.test.ts",
+      "kind": "behavioural",
+      "drives": "grantCovers — src/grant_scope.ts (vs the CLI oracle, tests/support/cli_scope_oracle.ts)",
+      "plant": "OWN-A: grantCovers returns posix.matchesGlob(path, scope) (node glob semantics: ** skips dot-dirs, no any-depth basenames, no directory coverage)",
+      "plant_observed": "OWN-A applied to src/grant_scope.ts at 5776395 → FAIL: Write(**/*.json) on \".coltrane/a.json\": engine and CLI agree"
+    },
+    {
+      "invariant_id": "CLI-SCOPE",
+      "test_name": "the engine's scope matcher agrees with the CLI's (ignore 7.0.5 + the CLI's Gn preprocessing) > Write(*) on \".git/config\": engine and CLI agree",
+      "test_file": "tests/the_engine_matches_scopes_as_the_cli_does.test.ts",
+      "kind": "behavioural",
+      "drives": "grantCovers — src/grant_scope.ts (vs the CLI oracle, tests/support/cli_scope_oracle.ts)",
+      "plant": "OWN-A: grantCovers returns posix.matchesGlob(path, scope) (node glob semantics: ** skips dot-dirs, no any-depth basenames, no directory coverage)",
+      "plant_observed": "OWN-A applied to src/grant_scope.ts at 5776395 → FAIL: Write(*) on \".git/config\": engine and CLI agree"
+    },
+    {
+      "invariant_id": "CLI-SCOPE",
+      "test_name": "the engine's scope matcher agrees with the CLI's (ignore 7.0.5 + the CLI's Gn preprocessing) > Write(*) on \".env\": engine and CLI agree",
+      "test_file": "tests/the_engine_matches_scopes_as_the_cli_does.test.ts",
+      "kind": "behavioural",
+      "drives": "grantCovers — src/grant_scope.ts (vs the CLI oracle, tests/support/cli_scope_oracle.ts)",
+      "plant": "OWN-A: grantCovers returns posix.matchesGlob(path, scope) (node glob semantics: ** skips dot-dirs, no any-depth basenames, no directory coverage) OR OWN-C: a leading * in a segment does not match a leading dot ((?!\\.)[^/]*)",
+      "plant_observed": "OWN-A applied to src/grant_scope.ts at 5776395 → FAIL: Write(*) on \".env\": engine and CLI agree"
+    },
+    {
+      "invariant_id": "CLI-SCOPE",
+      "test_name": "the engine's scope matcher agrees with the CLI's (ignore 7.0.5 + the CLI's Gn preprocessing) > Write(.*) on \".git/hooks/pre-commit\": engine and CLI agree",
+      "test_file": "tests/the_engine_matches_scopes_as_the_cli_does.test.ts",
+      "kind": "behavioural",
+      "drives": "grantCovers — src/grant_scope.ts (vs the CLI oracle, tests/support/cli_scope_oracle.ts)",
+      "plant": "OWN-A: grantCovers returns posix.matchesGlob(path, scope) (node glob semantics: ** skips dot-dirs, no any-depth basenames, no directory coverage) OR OWN-E: a matched directory no longer covers its contents (grantCovers tests only the full path)",
+      "plant_observed": "OWN-A applied to src/grant_scope.ts at 5776395 → FAIL: Write(.*) on \".git/hooks/pre-commit\": engine and CLI agree"
+    },
+    {
+      "invariant_id": "CLI-SCOPE",
+      "test_name": "the engine's scope matcher agrees with the CLI's (ignore 7.0.5 + the CLI's Gn preprocessing) > Write(.*/**) on \".claude/settings.json\": engine and CLI agree",
+      "test_file": "tests/the_engine_matches_scopes_as_the_cli_does.test.ts",
+      "kind": "behavioural",
+      "drives": "grantCovers — src/grant_scope.ts (vs the CLI oracle, tests/support/cli_scope_oracle.ts)",
+      "plant": "a grantCovers change that disagrees with the CLI on this pair (none of OWN-A/B/C/D/E/F touches it)"
+    },
+    {
+      "invariant_id": "CLI-SCOPE",
+      "test_name": "the engine's scope matcher agrees with the CLI's (ignore 7.0.5 + the CLI's Gn preprocessing) > Write(.*/**) on \"coltrane.layout.json\": engine and CLI agree",
+      "test_file": "tests/the_engine_matches_scopes_as_the_cli_does.test.ts",
+      "kind": "behavioural",
+      "drives": "grantCovers — src/grant_scope.ts (vs the CLI oracle, tests/support/cli_scope_oracle.ts)",
+      "plant": "a grantCovers change that disagrees with the CLI on this pair (none of OWN-A/B/C/D/E/F touches it)"
+    },
+    {
+      "invariant_id": "CLI-SCOPE",
+      "test_name": "the engine's scope matcher agrees with the CLI's (ignore 7.0.5 + the CLI's Gn preprocessing) > Write(**/.git) on \"sub/.git/config\": engine and CLI agree",
+      "test_file": "tests/the_engine_matches_scopes_as_the_cli_does.test.ts",
+      "kind": "behavioural",
+      "drives": "grantCovers — src/grant_scope.ts (vs the CLI oracle, tests/support/cli_scope_oracle.ts)",
+      "plant": "OWN-A: grantCovers returns posix.matchesGlob(path, scope) (node glob semantics: ** skips dot-dirs, no any-depth basenames, no directory coverage) OR OWN-E: a matched directory no longer covers its contents (grantCovers tests only the full path)",
+      "plant_observed": "OWN-A applied to src/grant_scope.ts at 5776395 → FAIL: Write(**/.git) on \"sub/.git/config\": engine and CLI agree"
+    },
+    {
+      "invariant_id": "CLI-SCOPE",
+      "test_name": "the engine's scope matcher agrees with the CLI's (ignore 7.0.5 + the CLI's Gn preprocessing) > Write(*.json) on \"a.json\": engine and CLI agree",
+      "test_file": "tests/the_engine_matches_scopes_as_the_cli_does.test.ts",
+      "kind": "behavioural",
+      "drives": "grantCovers — src/grant_scope.ts (vs the CLI oracle, tests/support/cli_scope_oracle.ts)",
+      "plant": "a grantCovers change that disagrees with the CLI on this pair (none of OWN-A/B/C/D/E/F touches it)"
+    },
+    {
+      "invariant_id": "CLI-SCOPE",
+      "test_name": "the engine's scope matcher agrees with the CLI's (ignore 7.0.5 + the CLI's Gn preprocessing) > Write(*.json) on \"sub/x.json\": engine and CLI agree",
+      "test_file": "tests/the_engine_matches_scopes_as_the_cli_does.test.ts",
+      "kind": "behavioural",
+      "drives": "grantCovers — src/grant_scope.ts (vs the CLI oracle, tests/support/cli_scope_oracle.ts)",
+      "plant": "OWN-A: grantCovers returns posix.matchesGlob(path, scope) (node glob semantics: ** skips dot-dirs, no any-depth basenames, no directory coverage) OR OWN-F: slashless patterns anchored at the root (anchored = true)",
+      "plant_observed": "OWN-A applied to src/grant_scope.ts at 5776395 → FAIL: Write(*.json) on \"sub/x.json\": engine and CLI agree"
+    },
+    {
+      "invariant_id": "CLI-SCOPE",
+      "test_name": "the engine's scope matcher agrees with the CLI's (ignore 7.0.5 + the CLI's Gn preprocessing) > Write(*.json) on \".coltrane/a.json\": engine and CLI agree",
+      "test_file": "tests/the_engine_matches_scopes_as_the_cli_does.test.ts",
+      "kind": "behavioural",
+      "drives": "grantCovers — src/grant_scope.ts (vs the CLI oracle, tests/support/cli_scope_oracle.ts)",
+      "plant": "OWN-A: grantCovers returns posix.matchesGlob(path, scope) (node glob semantics: ** skips dot-dirs, no any-depth basenames, no directory coverage) OR OWN-F: slashless patterns anchored at the root (anchored = true)",
+      "plant_observed": "OWN-A applied to src/grant_scope.ts at 5776395 → FAIL: Write(*.json) on \".coltrane/a.json\": engine and CLI agree"
+    },
+    {
+      "invariant_id": "CLI-SCOPE",
+      "test_name": "the engine's scope matcher agrees with the CLI's (ignore 7.0.5 + the CLI's Gn preprocessing) > Write(*.ts) on \"deep/src/a.ts\": engine and CLI agree",
+      "test_file": "tests/the_engine_matches_scopes_as_the_cli_does.test.ts",
+      "kind": "behavioural",
+      "drives": "grantCovers — src/grant_scope.ts (vs the CLI oracle, tests/support/cli_scope_oracle.ts)",
+      "plant": "OWN-A: grantCovers returns posix.matchesGlob(path, scope) (node glob semantics: ** skips dot-dirs, no any-depth basenames, no directory coverage) OR OWN-F: slashless patterns anchored at the root (anchored = true)",
+      "plant_observed": "OWN-A applied to src/grant_scope.ts at 5776395 → FAIL: Write(*.ts) on \"deep/src/a.ts\": engine and CLI agree"
+    },
+    {
+      "invariant_id": "CLI-SCOPE",
+      "test_name": "the engine's scope matcher agrees with the CLI's (ignore 7.0.5 + the CLI's Gn preprocessing) > Write(config) on \"config\": engine and CLI agree",
+      "test_file": "tests/the_engine_matches_scopes_as_the_cli_does.test.ts",
+      "kind": "behavioural",
+      "drives": "grantCovers — src/grant_scope.ts (vs the CLI oracle, tests/support/cli_scope_oracle.ts)",
+      "plant": "a grantCovers change that disagrees with the CLI on this pair (none of OWN-A/B/C/D/E/F touches it)"
+    },
+    {
+      "invariant_id": "CLI-SCOPE",
+      "test_name": "the engine's scope matcher agrees with the CLI's (ignore 7.0.5 + the CLI's Gn preprocessing) > Write(config) on \"sub/config\": engine and CLI agree",
+      "test_file": "tests/the_engine_matches_scopes_as_the_cli_does.test.ts",
+      "kind": "behavioural",
+      "drives": "grantCovers — src/grant_scope.ts (vs the CLI oracle, tests/support/cli_scope_oracle.ts)",
+      "plant": "OWN-F: slashless patterns anchored at the root (anchored = true)",
+      "plant_observed": "OWN-F applied to src/grant_scope.ts at 5776395 → FAIL: Write(config) on \"sub/config\": engine and CLI agree"
+    },
+    {
+      "invariant_id": "CLI-SCOPE",
+      "test_name": "the engine's scope matcher agrees with the CLI's (ignore 7.0.5 + the CLI's Gn preprocessing) > Write(config) on \".git/config\": engine and CLI agree",
+      "test_file": "tests/the_engine_matches_scopes_as_the_cli_does.test.ts",
+      "kind": "behavioural",
+      "drives": "grantCovers — src/grant_scope.ts (vs the CLI oracle, tests/support/cli_scope_oracle.ts)",
+      "plant": "OWN-F: slashless patterns anchored at the root (anchored = true)",
+      "plant_observed": "OWN-F applied to src/grant_scope.ts at 5776395 → FAIL: Write(config) on \".git/config\": engine and CLI agree"
+    },
+    {
+      "invariant_id": "CLI-SCOPE",
+      "test_name": "the engine's scope matcher agrees with the CLI's (ignore 7.0.5 + the CLI's Gn preprocessing) > Write(config) on \"config/x\": engine and CLI agree",
+      "test_file": "tests/the_engine_matches_scopes_as_the_cli_does.test.ts",
+      "kind": "behavioural",
+      "drives": "grantCovers — src/grant_scope.ts (vs the CLI oracle, tests/support/cli_scope_oracle.ts)",
+      "plant": "OWN-E: a matched directory no longer covers its contents (grantCovers tests only the full path)",
+      "plant_observed": "OWN-E applied to src/grant_scope.ts at 5776395 → AssertionError: grantCovers(\"config\", \"config/x\") disagrees with the CLI (true): expected false to be true // Object.is equality"
+    },
+    {
+      "invariant_id": "CLI-SCOPE",
+      "test_name": "the engine's scope matcher agrees with the CLI's (ignore 7.0.5 + the CLI's Gn preprocessing) > Write(/config) on \"sub/config\": engine and CLI agree",
+      "test_file": "tests/the_engine_matches_scopes_as_the_cli_does.test.ts",
+      "kind": "behavioural",
+      "drives": "grantCovers — src/grant_scope.ts (vs the CLI oracle, tests/support/cli_scope_oracle.ts)",
+      "plant": "a grantCovers change that disagrees with the CLI on this pair (none of OWN-A/B/C/D/E/F touches it)"
+    },
+    {
+      "invariant_id": "CLI-SCOPE",
+      "test_name": "the engine's scope matcher agrees with the CLI's (ignore 7.0.5 + the CLI's Gn preprocessing) > Write(/config) on \"config\": engine and CLI agree",
+      "test_file": "tests/the_engine_matches_scopes_as_the_cli_does.test.ts",
+      "kind": "behavioural",
+      "drives": "grantCovers — src/grant_scope.ts (vs the CLI oracle, tests/support/cli_scope_oracle.ts)",
+      "plant": "a grantCovers change that disagrees with the CLI on this pair (none of OWN-A/B/C/D/E/F touches it)"
+    },
+    {
+      "invariant_id": "CLI-SCOPE",
+      "test_name": "the engine's scope matcher agrees with the CLI's (ignore 7.0.5 + the CLI's Gn preprocessing) > Write(src/*.ts) on \"deep/src/a.ts\": engine and CLI agree",
+      "test_file": "tests/the_engine_matches_scopes_as_the_cli_does.test.ts",
+      "kind": "behavioural",
+      "drives": "grantCovers — src/grant_scope.ts (vs the CLI oracle, tests/support/cli_scope_oracle.ts)",
+      "plant": "a grantCovers change that disagrees with the CLI on this pair (none of OWN-A/B/C/D/E/F touches it)"
+    },
+    {
+      "invariant_id": "CLI-SCOPE",
+      "test_name": "the engine's scope matcher agrees with the CLI's (ignore 7.0.5 + the CLI's Gn preprocessing) > Write(src/*.ts) on \"src/a.ts\": engine and CLI agree",
+      "test_file": "tests/the_engine_matches_scopes_as_the_cli_does.test.ts",
+      "kind": "behavioural",
+      "drives": "grantCovers — src/grant_scope.ts (vs the CLI oracle, tests/support/cli_scope_oracle.ts)",
+      "plant": "a grantCovers change that disagrees with the CLI on this pair (none of OWN-A/B/C/D/E/F touches it)"
+    },
+    {
+      "invariant_id": "CLI-SCOPE",
+      "test_name": "the engine's scope matcher agrees with the CLI's (ignore 7.0.5 + the CLI's Gn preprocessing) > Write(**/config) on \"a/b/config\": engine and CLI agree",
+      "test_file": "tests/the_engine_matches_scopes_as_the_cli_does.test.ts",
+      "kind": "behavioural",
+      "drives": "grantCovers — src/grant_scope.ts (vs the CLI oracle, tests/support/cli_scope_oracle.ts)",
+      "plant": "a grantCovers change that disagrees with the CLI on this pair (none of OWN-A/B/C/D/E/F touches it)"
+    },
+    {
+      "invariant_id": "CLI-SCOPE",
+      "test_name": "the engine's scope matcher agrees with the CLI's (ignore 7.0.5 + the CLI's Gn preprocessing) > Write(a/**/b) on \"a/x/y/b\": engine and CLI agree",
+      "test_file": "tests/the_engine_matches_scopes_as_the_cli_does.test.ts",
+      "kind": "behavioural",
+      "drives": "grantCovers — src/grant_scope.ts (vs the CLI oracle, tests/support/cli_scope_oracle.ts)",
+      "plant": "a grantCovers change that disagrees with the CLI on this pair (none of OWN-A/B/C/D/E/F touches it)"
+    },
+    {
+      "invariant_id": "CLI-SCOPE",
+      "test_name": "the engine's scope matcher agrees with the CLI's (ignore 7.0.5 + the CLI's Gn preprocessing) > Write(a/**/b) on \"a/b\": engine and CLI agree",
+      "test_file": "tests/the_engine_matches_scopes_as_the_cli_does.test.ts",
+      "kind": "behavioural",
+      "drives": "grantCovers — src/grant_scope.ts (vs the CLI oracle, tests/support/cli_scope_oracle.ts)",
+      "plant": "a grantCovers change that disagrees with the CLI on this pair (none of OWN-A/B/C/D/E/F touches it)"
+    },
+    {
+      "invariant_id": "CLI-SCOPE",
+      "test_name": "the engine's scope matcher agrees with the CLI's (ignore 7.0.5 + the CLI's Gn preprocessing) > Write(src/*) on \"src/a/b\": engine and CLI agree",
+      "test_file": "tests/the_engine_matches_scopes_as_the_cli_does.test.ts",
+      "kind": "behavioural",
+      "drives": "grantCovers — src/grant_scope.ts (vs the CLI oracle, tests/support/cli_scope_oracle.ts)",
+      "plant": "OWN-E: a matched directory no longer covers its contents (grantCovers tests only the full path)",
+      "plant_observed": "OWN-E applied to src/grant_scope.ts at 5776395 → FAIL: Write(src/*) on \"src/a/b\": engine and CLI agree"
+    },
+    {
+      "invariant_id": "CLI-SCOPE",
+      "test_name": "the engine's scope matcher agrees with the CLI's (ignore 7.0.5 + the CLI's Gn preprocessing) > Write(src) on \"src/a/b.ts\": engine and CLI agree",
+      "test_file": "tests/the_engine_matches_scopes_as_the_cli_does.test.ts",
+      "kind": "behavioural",
+      "drives": "grantCovers — src/grant_scope.ts (vs the CLI oracle, tests/support/cli_scope_oracle.ts)",
+      "plant": "OWN-E: a matched directory no longer covers its contents (grantCovers tests only the full path)",
+      "plant_observed": "OWN-E applied to src/grant_scope.ts at 5776395 → FAIL: Write(src) on \"src/a/b.ts\": engine and CLI agree"
+    },
+    {
+      "invariant_id": "CLI-SCOPE",
+      "test_name": "the engine's scope matcher agrees with the CLI's (ignore 7.0.5 + the CLI's Gn preprocessing) > Write(src/) on \"src/a\": engine and CLI agree",
+      "test_file": "tests/the_engine_matches_scopes_as_the_cli_does.test.ts",
+      "kind": "behavioural",
+      "drives": "grantCovers — src/grant_scope.ts (vs the CLI oracle, tests/support/cli_scope_oracle.ts)",
+      "plant": "OWN-E: a matched directory no longer covers its contents (grantCovers tests only the full path)",
+      "plant_observed": "OWN-E applied to src/grant_scope.ts at 5776395 → FAIL: Write(src/) on \"src/a\": engine and CLI agree"
+    },
+    {
+      "invariant_id": "CLI-SCOPE",
+      "test_name": "the engine's scope matcher agrees with the CLI's (ignore 7.0.5 + the CLI's Gn preprocessing) > Write(src/) on \"src\": engine and CLI agree",
+      "test_file": "tests/the_engine_matches_scopes_as_the_cli_does.test.ts",
+      "kind": "behavioural",
+      "drives": "grantCovers — src/grant_scope.ts (vs the CLI oracle, tests/support/cli_scope_oracle.ts)",
+      "plant": "a grantCovers change that disagrees with the CLI on this pair (none of OWN-A/B/C/D/E/F touches it)"
+    },
+    {
+      "invariant_id": "CLI-SCOPE",
+      "test_name": "the engine's scope matcher agrees with the CLI's (ignore 7.0.5 + the CLI's Gn preprocessing) > Write(.claude/) on \".claude/x\": engine and CLI agree",
+      "test_file": "tests/the_engine_matches_scopes_as_the_cli_does.test.ts",
+      "kind": "behavioural",
+      "drives": "grantCovers — src/grant_scope.ts (vs the CLI oracle, tests/support/cli_scope_oracle.ts)",
+      "plant": "OWN-A: grantCovers returns posix.matchesGlob(path, scope) (node glob semantics: ** skips dot-dirs, no any-depth basenames, no directory coverage) OR OWN-E: a matched directory no longer covers its contents (grantCovers tests only the full path)",
+      "plant_observed": "OWN-A applied to src/grant_scope.ts at 5776395 → FAIL: Write(.claude/) on \".claude/x\": engine and CLI agree"
+    },
+    {
+      "invariant_id": "CLI-SCOPE",
+      "test_name": "the engine's scope matcher agrees with the CLI's (ignore 7.0.5 + the CLI's Gn preprocessing) > Write(src/**) on \"src/a/b.ts\": engine and CLI agree",
+      "test_file": "tests/the_engine_matches_scopes_as_the_cli_does.test.ts",
+      "kind": "behavioural",
+      "drives": "grantCovers — src/grant_scope.ts (vs the CLI oracle, tests/support/cli_scope_oracle.ts)",
+      "plant": "a grantCovers change that disagrees with the CLI on this pair (none of OWN-A/B/C/D/E/F touches it)"
+    },
+    {
+      "invariant_id": "CLI-SCOPE",
+      "test_name": "the engine's scope matcher agrees with the CLI's (ignore 7.0.5 + the CLI's Gn preprocessing) > Write(/src/**) on \"src/a\": engine and CLI agree",
+      "test_file": "tests/the_engine_matches_scopes_as_the_cli_does.test.ts",
+      "kind": "behavioural",
+      "drives": "grantCovers — src/grant_scope.ts (vs the CLI oracle, tests/support/cli_scope_oracle.ts)",
+      "plant": "a grantCovers change that disagrees with the CLI on this pair (none of OWN-A/B/C/D/E/F touches it)"
+    },
+    {
+      "invariant_id": "CLI-SCOPE",
+      "test_name": "the engine's scope matcher agrees with the CLI's (ignore 7.0.5 + the CLI's Gn preprocessing) > Write(a/b/**) on \"a/b/c/d\": engine and CLI agree",
+      "test_file": "tests/the_engine_matches_scopes_as_the_cli_does.test.ts",
+      "kind": "behavioural",
+      "drives": "grantCovers — src/grant_scope.ts (vs the CLI oracle, tests/support/cli_scope_oracle.ts)",
+      "plant": "a grantCovers change that disagrees with the CLI on this pair (none of OWN-A/B/C/D/E/F touches it)"
+    },
+    {
+      "invariant_id": "CLI-SCOPE",
+      "test_name": "the engine's scope matcher agrees with the CLI's (ignore 7.0.5 + the CLI's Gn preprocessing) > Write(x/**/) on \"x/y\": engine and CLI agree",
+      "test_file": "tests/the_engine_matches_scopes_as_the_cli_does.test.ts",
+      "kind": "behavioural",
+      "drives": "grantCovers — src/grant_scope.ts (vs the CLI oracle, tests/support/cli_scope_oracle.ts)",
+      "plant": "OWN-E: a matched directory no longer covers its contents (grantCovers tests only the full path)",
+      "plant_observed": "OWN-E applied to src/grant_scope.ts at 5776395 → FAIL: Write(x/**/) on \"x/y\": engine and CLI agree"
+    },
+    {
+      "invariant_id": "CLI-SCOPE",
+      "test_name": "the engine's scope matcher agrees with the CLI's (ignore 7.0.5 + the CLI's Gn preprocessing) > Write([a-c]*) on \"b\": engine and CLI agree",
+      "test_file": "tests/the_engine_matches_scopes_as_the_cli_does.test.ts",
+      "kind": "behavioural",
+      "drives": "grantCovers — src/grant_scope.ts (vs the CLI oracle, tests/support/cli_scope_oracle.ts)",
+      "plant": "a grantCovers change that disagrees with the CLI on this pair (none of OWN-A/B/C/D/E/F touches it)"
+    },
+    {
+      "invariant_id": "CLI-SCOPE",
+      "test_name": "the engine's scope matcher agrees with the CLI's (ignore 7.0.5 + the CLI's Gn preprocessing) > Write(docs/?.md) on \"docs/a.md\": engine and CLI agree",
+      "test_file": "tests/the_engine_matches_scopes_as_the_cli_does.test.ts",
+      "kind": "behavioural",
+      "drives": "grantCovers — src/grant_scope.ts (vs the CLI oracle, tests/support/cli_scope_oracle.ts)",
+      "plant": "a grantCovers change that disagrees with the CLI on this pair (none of OWN-A/B/C/D/E/F touches it)"
+    },
+    {
+      "invariant_id": "CLI-SCOPE",
+      "test_name": "the engine's scope matcher agrees with the CLI's (ignore 7.0.5 + the CLI's Gn preprocessing) > Write(docs/?.md) on \"docs/ab.md\": engine and CLI agree",
+      "test_file": "tests/the_engine_matches_scopes_as_the_cli_does.test.ts",
+      "kind": "behavioural",
+      "drives": "grantCovers — src/grant_scope.ts (vs the CLI oracle, tests/support/cli_scope_oracle.ts)",
+      "plant": "a grantCovers change that disagrees with the CLI on this pair (none of OWN-A/B/C/D/E/F touches it)"
+    },
+    {
+      "invariant_id": "CLI-SCOPE",
+      "test_name": "the engine's scope matcher agrees with the CLI's (ignore 7.0.5 + the CLI's Gn preprocessing) > Write(coltrane.layout.json) on \"coltrane.layout.json\": engine and CLI agree",
+      "test_file": "tests/the_engine_matches_scopes_as_the_cli_does.test.ts",
+      "kind": "behavioural",
+      "drives": "grantCovers — src/grant_scope.ts (vs the CLI oracle, tests/support/cli_scope_oracle.ts)",
+      "plant": "a grantCovers change that disagrees with the CLI on this pair (none of OWN-A/B/C/D/E/F touches it)"
+    },
+    {
+      "invariant_id": "CLI-SCOPE",
+      "test_name": "the engine's scope matcher agrees with the CLI's (ignore 7.0.5 + the CLI's Gn preprocessing) > Write(*.layout.json) on \"coltrane.layout.json\": engine and CLI agree",
+      "test_file": "tests/the_engine_matches_scopes_as_the_cli_does.test.ts",
+      "kind": "behavioural",
+      "drives": "grantCovers — src/grant_scope.ts (vs the CLI oracle, tests/support/cli_scope_oracle.ts)",
+      "plant": "a grantCovers change that disagrees with the CLI on this pair (none of OWN-A/B/C/D/E/F touches it)"
+    },
+    {
+      "invariant_id": "CLI-SCOPE",
+      "test_name": "the engine's scope matcher agrees with the CLI's (ignore 7.0.5 + the CLI's Gn preprocessing) > Write(!src) on \"src\": engine and CLI agree",
+      "test_file": "tests/the_engine_matches_scopes_as_the_cli_does.test.ts",
+      "kind": "behavioural",
+      "drives": "grantCovers — src/grant_scope.ts (vs the CLI oracle, tests/support/cli_scope_oracle.ts)",
+      "plant": "a grantCovers change that disagrees with the CLI on this pair (none of OWN-A/B/C/D/E/F touches it)"
+    },
+    {
+      "invariant_id": "CLI-SCOPE",
+      "test_name": "the engine's scope matcher agrees with the CLI's (ignore 7.0.5 + the CLI's Gn preprocessing) > Write(!src/**) on \"src/a.ts\": engine and CLI agree",
+      "test_file": "tests/the_engine_matches_scopes_as_the_cli_does.test.ts",
+      "kind": "behavioural",
+      "drives": "grantCovers — src/grant_scope.ts (vs the CLI oracle, tests/support/cli_scope_oracle.ts)",
+      "plant": "a grantCovers change that disagrees with the CLI on this pair (none of OWN-A/B/C/D/E/F touches it)"
+    },
+    {
+      "invariant_id": "CLI-SCOPE",
+      "test_name": "the engine's scope matcher agrees with the CLI's (ignore 7.0.5 + the CLI's Gn preprocessing) > Write(!*.json) on \"a.json\": engine and CLI agree",
+      "test_file": "tests/the_engine_matches_scopes_as_the_cli_does.test.ts",
+      "kind": "behavioural",
+      "drives": "grantCovers — src/grant_scope.ts (vs the CLI oracle, tests/support/cli_scope_oracle.ts)",
+      "plant": "a grantCovers change that disagrees with the CLI on this pair (none of OWN-A/B/C/D/E/F touches it)"
+    },
+    {
+      "invariant_id": "CLI-SCOPE",
+      "test_name": "the engine's scope matcher agrees with the CLI's (ignore 7.0.5 + the CLI's Gn preprocessing) > a generated corpus of patterns × paths (dot-dirs, **, *.ext at depth, anchored/unanchored, trailing /) agrees",
+      "test_file": "tests/the_engine_matches_scopes_as_the_cli_does.test.ts",
+      "kind": "behavioural",
+      "drives": "grantCovers — src/grant_scope.ts (vs the CLI oracle, tests/support/cli_scope_oracle.ts)",
+      "plant": "OWN-A: grantCovers returns posix.matchesGlob(path, scope) (node glob semantics: ** skips dot-dirs, no any-depth basenames, no directory coverage) OR OWN-C: a leading * in a segment does not match a leading dot ((?!\\.)[^/]*) OR OWN-E: a matched directory no longer covers its contents (grantCovers tests only the full path) OR OWN-F: slashless patterns anchored at the root (anchored = true)",
+      "plant_observed": "OWN-A applied to src/grant_scope.ts at 5776395 → FAIL: a generated corpus of patterns × paths (dot-dirs, **, *.ext at depth, anchored/unanchored, trailing /) agrees"
+    },
+    {
+      "invariant_id": "CLI-SCOPE-FINDING",
+      "test_name": "the engine's scope matcher agrees with the CLI's (ignore 7.0.5 + the CLI's Gn preprocessing) > the CLI's own preprocessing is honoured: `./x`, `a//b`, and a run of `**` segments mean what the CLI makes them mean",
+      "test_file": "tests/the_engine_matches_scopes_as_the_cli_does.test.ts",
+      "kind": "behavioural",
+      "drives": "grantCovers — src/grant_scope.ts (vs the CLI oracle, tests/support/cli_scope_oracle.ts)",
+      "plant": "(RED at 5776395) grantCovers applies none of the CLI's rule preprocessing: `./**` covers nothing, `src//a` and `**/**` disagree"
+    },
+    {
+      "invariant_id": "CLI-SCOPE-FINDING",
+      "test_name": "the engine's scope matcher agrees with the CLI's (ignore 7.0.5 + the CLI's Gn preprocessing) > `x/**` covers `x` itself, as the CLI's Gn rewrite (`x/**` → `/x`) makes it",
+      "test_file": "tests/the_engine_matches_scopes_as_the_cli_does.test.ts",
+      "kind": "behavioural",
+      "drives": "grantCovers — src/grant_scope.ts (vs the CLI oracle, tests/support/cli_scope_oracle.ts)",
+      "plant": "(RED at 5776395) grantCovers does not apply the CLI's Gn rewrite, so `x/**` does not cover `x`"
+    },
+    {
+      "invariant_id": "CLI-SCOPE-FINDING",
+      "test_name": "the engine's scope matcher agrees with the CLI's (ignore 7.0.5 + the CLI's Gn preprocessing) > `[!…]` is a literal-`!` class in ignore 7.0.5 (negated ranges arrived in 7.0.6), exactly as the CLI reads it",
+      "test_file": "tests/the_engine_matches_scopes_as_the_cli_does.test.ts",
+      "kind": "behavioural",
+      "drives": "grantCovers — src/grant_scope.ts (vs the CLI oracle, tests/support/cli_scope_oracle.ts)",
+      "plant": "(RED at 5776395) grantCovers reads `[!…]` as a negated class; the CLI's ignore 7.0.5 reads a literal `!`"
+    },
+    {
+      "invariant_id": "SPELLING-CASE",
+      "test_name": "1 — a literal Write/Edit spelled `./` or `//` is refused, never seated > Write(./**): refused at dispatch, naming the grant — the seat is never invoked",
+      "test_file": "tests/a_spelling_or_case_never_widens_a_grant.test.ts",
+      "kind": "behavioural",
+      "drives": "runGig preflight → resolveSeatGrants — src/runtime.ts, src/layout_grants.ts",
+      "plant": "drop the literal-scope refusal (isAmbiguousSpelling) in resolveSeatGrants — src/layout_grants.ts",
+      "plant_observed": "P1-literal-refusal-removed applied at 0a8d1be → AssertionError: a seat holding Write(./**) — which the CLI reads wider than it is written — was invoked: expected 1 to be +0 // Object.is equality"
+    },
+    {
+      "invariant_id": "SPELLING-CASE",
+      "test_name": "1 — a literal Write/Edit spelled `./` or `//` is refused, never seated > Write(src//a): refused at dispatch, naming the grant — the seat is never invoked",
+      "test_file": "tests/a_spelling_or_case_never_widens_a_grant.test.ts",
+      "kind": "behavioural",
+      "drives": "runGig preflight → resolveSeatGrants — src/runtime.ts, src/layout_grants.ts",
+      "plant": "drop the literal-scope refusal (isAmbiguousSpelling) in resolveSeatGrants — src/layout_grants.ts",
+      "plant_observed": "P1-literal-refusal-removed applied at 0a8d1be → AssertionError: a seat holding Write(src//a) — which the CLI reads wider than it is written — was invoked: expected 1 to be +0 // Object.is equality"
+    },
+    {
+      "invariant_id": "SPELLING-CASE",
+      "test_name": "1 — a literal Write/Edit spelled `./` or `//` is refused, never seated > Edit(./src/**): refused at dispatch, naming the grant — the seat is never invoked",
+      "test_file": "tests/a_spelling_or_case_never_widens_a_grant.test.ts",
+      "kind": "behavioural",
+      "drives": "runGig preflight → resolveSeatGrants — src/runtime.ts, src/layout_grants.ts",
+      "plant": "drop the literal-scope refusal (isAmbiguousSpelling) in resolveSeatGrants — src/layout_grants.ts",
+      "plant_observed": "P1-literal-refusal-removed applied at 0a8d1be → AssertionError: a seat holding Edit(./src/**) — which the CLI reads wider than it is written — was invoked: expected 1 to be +0 // Object.is equality"
+    },
+    {
+      "invariant_id": "SPELLING-CASE",
+      "test_name": "1 — a literal Write/Edit spelled `./` or `//` is refused, never seated > the Claude invoker refuses Write(./**) before the spawn",
+      "test_file": "tests/a_spelling_or_case_never_widens_a_grant.test.ts",
+      "kind": "behavioural",
+      "drives": "makeClaudeInvoker(...) — src/claude_invoker.ts (resolveSeatGrants refusals)",
+      "plant": "drop the literal-scope refusal (isAmbiguousSpelling) in resolveSeatGrants — src/layout_grants.ts",
+      "plant_observed": "P1-literal-refusal-removed applied at 0a8d1be → AssertionError: a seat holding Write(./**) — `**` to the CLI — was spawned: expected true to be false // Object.is equality"
+    },
+    {
+      "invariant_id": "SPELLING-CASE",
+      "test_name": "1 — a literal Write/Edit spelled `./` or `//` is refused, never seated > control — the same scopes spelled plainly are seated",
+      "test_file": "tests/a_spelling_or_case_never_widens_a_grant.test.ts",
+      "kind": "behavioural",
+      "drives": "runGig preflight → resolveSeatGrants — src/runtime.ts, src/layout_grants.ts",
+      "plant": "refuse every literal Write/Edit (or every layout glob) — a control, green at 0a8d1be"
+    },
+    {
+      "invariant_id": "SPELLING-CASE",
+      "test_name": "2 — a layout glob spelled `./` or `//` is a load_error naming it > source: [\"./src/**\"] → load_error naming \"./src/**\", and no layout",
+      "test_file": "tests/a_spelling_or_case_never_widens_a_grant.test.ts",
+      "kind": "behavioural",
+      "drives": "loadGenome → LayoutSchema — src/loader.ts, src/genome_schema.ts",
+      "plant": "admit `./` and `//` in LayoutGlobsSchema's refine — src/genome_schema.ts",
+      "plant_observed": "P2-schema-admits applied at 0a8d1be → FAIL (vitest): source: [\"./src/**\"] → load_error naming \"./src/**\", and no layout"
+    },
+    {
+      "invariant_id": "SPELLING-CASE",
+      "test_name": "2 — a layout glob spelled `./` or `//` is a load_error naming it > source: [\"src//**\"] → load_error naming \"src//**\", and no layout",
+      "test_file": "tests/a_spelling_or_case_never_widens_a_grant.test.ts",
+      "kind": "behavioural",
+      "drives": "loadGenome → LayoutSchema — src/loader.ts, src/genome_schema.ts",
+      "plant": "admit `./` and `//` in LayoutGlobsSchema's refine — src/genome_schema.ts",
+      "plant_observed": "P2-schema-admits applied at 0a8d1be → FAIL (vitest): source: [\"src//**\"] → load_error naming \"src//**\", and no layout"
+    },
+    {
+      "invariant_id": "SPELLING-CASE",
+      "test_name": "2 — a layout glob spelled `./` or `//` is a load_error naming it > source: [\"./**\"] → load_error naming \"./**\", and no layout",
+      "test_file": "tests/a_spelling_or_case_never_widens_a_grant.test.ts",
+      "kind": "behavioural",
+      "drives": "loadGenome → LayoutSchema — src/loader.ts, src/genome_schema.ts",
+      "plant": "admit `./` and `//` in LayoutGlobsSchema's refine — src/genome_schema.ts",
+      "plant_observed": "P2-schema-admits applied at 0a8d1be → FAIL (vitest): source: [\"./**\"] → load_error naming \"./**\", and no layout"
+    },
+    {
+      "invariant_id": "SPELLING-CASE",
+      "test_name": "2 — a layout glob spelled `./` or `//` is a load_error naming it > control — `src/**` loads",
+      "test_file": "tests/a_spelling_or_case_never_widens_a_grant.test.ts",
+      "kind": "behavioural",
+      "drives": "loadGenome → LayoutSchema — src/loader.ts, src/genome_schema.ts",
+      "plant": "refuse every literal Write/Edit (or every layout glob) — a control, green at 0a8d1be"
+    },
+    {
+      "invariant_id": "SPELLING-CASE",
+      "test_name": "4 — case never hides a protected path > upper-cased protected targets are never granted — not even to a bare Write",
+      "test_file": "tests/a_spelling_or_case_never_widens_a_grant.test.ts",
+      "kind": "behavioural",
+      "drives": "resolveSeatGrants — src/layout_grants.ts (isProtectedPath / grantMayReach, src/grant_scope.ts)",
+      "plant": "isProtectedPath compares case-sensitively (drop toLowerCase) — src/grant_scope.ts",
+      "plant_observed": "P4-case-sensitive-protected applied at 0a8d1be → AssertionError: an upper-cased spelling of a protected path became a grant: expected [ 'Write(.GIT/config)', …(3) ] to deeply equal []"
+    },
+    {
+      "invariant_id": "SPELLING-CASE",
+      "test_name": "4 — case never hides a protected path > an upper-cased grant reaching a protected path is denied it (Write(.GIT/**), Write(.Claude/*), Write(COLTRANE.LAYOUT.JSON))",
+      "test_file": "tests/a_spelling_or_case_never_widens_a_grant.test.ts",
+      "kind": "behavioural",
+      "drives": "resolveSeatGrants — src/layout_grants.ts (isProtectedPath / grantMayReach, src/grant_scope.ts)",
+      "plant": "ignore({ ignorecase: false }) in grant_scope's matcherFor — src/grant_scope.ts",
+      "plant_observed": "P3-case-sensitive-matcher applied at 0a8d1be → FAIL (vitest): an upper-cased grant reaching a protected path is denied it (Write(.GIT/**), Write(.Claude/*), Write(COLTRANE.LAYOUT.JSON))"
+    },
+    {
+      "invariant_id": "SPELLING-CASE",
+      "test_name": "4 — case never hides a protected path > the diff gate never excuses an upper-cased protected path > a Write(**) seat that writes .GIT/config is refused, and nothing it made is sealed",
+      "test_file": "tests/a_spelling_or_case_never_widens_a_grant.test.ts",
+      "kind": "behavioural",
+      "drives": "runGig — src/runtime.ts (diff gate → inWriteScope → isProtectedPath, src/grant_scope.ts)",
+      "plant": "isProtectedPath compares case-sensitively (drop toLowerCase) — src/grant_scope.ts",
+      "plant_observed": "P4-case-sensitive-protected applied at 0a8d1be → AssertionError: .GIT/config was excused by the gate — a case spelling hid a protected path: expected [ { …(23) } ] to have a length of +0 but got 1"
+    },
+    {
+      "invariant_id": "SPELLING-CASE",
+      "test_name": "4 — case never hides a protected path > the diff gate never excuses an upper-cased protected path > a Write(**) seat that writes .Claude/settings.json is refused, and nothing it made is sealed",
+      "test_file": "tests/a_spelling_or_case_never_widens_a_grant.test.ts",
+      "kind": "behavioural",
+      "drives": "runGig — src/runtime.ts (diff gate → inWriteScope → isProtectedPath, src/grant_scope.ts)",
+      "plant": "isProtectedPath compares case-sensitively (drop toLowerCase) — src/grant_scope.ts",
+      "plant_observed": "P4-case-sensitive-protected applied at 0a8d1be → AssertionError: .Claude/settings.json was excused by the gate — a case spelling hid a protected path: expected [ { …(23) } ] to have a length of +0 but got 1"
+    },
+    {
+      "invariant_id": "SPELLING-CASE",
+      "test_name": "4 — case never hides a protected path > the diff gate never excuses an upper-cased protected path > a Write(**) seat that writes .COLTRANE/x is refused, and nothing it made is sealed",
+      "test_file": "tests/a_spelling_or_case_never_widens_a_grant.test.ts",
+      "kind": "behavioural",
+      "drives": "runGig — src/runtime.ts (diff gate → inWriteScope → isProtectedPath, src/grant_scope.ts)",
+      "plant": "isProtectedPath compares case-sensitively (drop toLowerCase) — src/grant_scope.ts",
+      "plant_observed": "P4-case-sensitive-protected applied at 0a8d1be → AssertionError: .COLTRANE/x was excused by the gate — a case spelling hid a protected path: expected [ { …(23) } ] to have a length of +0 but got 1"
+    },
+    {
+      "invariant_id": "SPELLING-CASE",
+      "test_name": "4 — case never hides a protected path > the diff gate never excuses an upper-cased protected path > a Write(**) seat that writes COLTRANE.LAYOUT.JSON is refused, and nothing it made is sealed",
+      "test_file": "tests/a_spelling_or_case_never_widens_a_grant.test.ts",
+      "kind": "behavioural",
+      "drives": "runGig — src/runtime.ts (diff gate → inWriteScope → isProtectedPath, src/grant_scope.ts)",
+      "plant": "isProtectedPath compares case-sensitively (drop toLowerCase) — src/grant_scope.ts",
+      "plant_observed": "P4-case-sensitive-protected applied at 0a8d1be → AssertionError: COLTRANE.LAYOUT.JSON was excused by the gate — a case spelling hid a protected path: expected [ { …(23) } ] to have a length of +0 but got 1"
+    },
+    {
+      "invariant_id": "SPELLING-CASE",
+      "test_name": "the engine's scope matcher agrees with the CLI's (ignore 7.0.5 + the CLI's Gn preprocessing) > Write(SRC/**) on \"src/a\": engine and CLI agree",
+      "test_file": "tests/the_engine_matches_scopes_as_the_cli_does.test.ts",
+      "kind": "behavioural",
+      "drives": "grantCovers — src/grant_scope.ts (vs the CLI oracle, tests/support/cli_scope_oracle.ts)",
+      "plant": "ignore({ ignorecase: false }) in grant_scope's matcherFor — src/grant_scope.ts",
+      "plant_observed": "P3-case-sensitive-matcher applied at 0a8d1be → FAIL (vitest): Write(SRC/**) on \"src/a\": engine and CLI agree"
+    },
+    {
+      "invariant_id": "SPELLING-CASE",
+      "test_name": "the engine's scope matcher agrees with the CLI's (ignore 7.0.5 + the CLI's Gn preprocessing) > Write(src/**) on \"SRC/A.ts\": engine and CLI agree",
+      "test_file": "tests/the_engine_matches_scopes_as_the_cli_does.test.ts",
+      "kind": "behavioural",
+      "drives": "grantCovers — src/grant_scope.ts (vs the CLI oracle, tests/support/cli_scope_oracle.ts)",
+      "plant": "ignore({ ignorecase: false }) in grant_scope's matcherFor — src/grant_scope.ts",
+      "plant_observed": "P3-case-sensitive-matcher applied at 0a8d1be → FAIL (vitest): Write(src/**) on \"SRC/A.ts\": engine and CLI agree"
+    },
+    {
+      "invariant_id": "SPELLING-CASE",
+      "test_name": "the engine's scope matcher agrees with the CLI's (ignore 7.0.5 + the CLI's Gn preprocessing) > Write(**) on \".GIT/config\": engine and CLI agree",
+      "test_file": "tests/the_engine_matches_scopes_as_the_cli_does.test.ts",
+      "kind": "behavioural",
+      "drives": "grantCovers — src/grant_scope.ts (vs the CLI oracle, tests/support/cli_scope_oracle.ts)",
+      "plant": "(no round-6 plant touches it) a case-sensitive or rewrite-free change to grant_scope that disagrees with the CLI on this pair"
+    },
+    {
+      "invariant_id": "SPELLING-CASE",
+      "test_name": "the engine's scope matcher agrees with the CLI's (ignore 7.0.5 + the CLI's Gn preprocessing) > Write(*.JSON) on \"a.json\": engine and CLI agree",
+      "test_file": "tests/the_engine_matches_scopes_as_the_cli_does.test.ts",
+      "kind": "behavioural",
+      "drives": "grantCovers — src/grant_scope.ts (vs the CLI oracle, tests/support/cli_scope_oracle.ts)",
+      "plant": "ignore({ ignorecase: false }) in grant_scope's matcherFor — src/grant_scope.ts",
+      "plant_observed": "P3-case-sensitive-matcher applied at 0a8d1be → AssertionError: grantCovers(\"*.JSON\", \"a.json\") disagrees with the CLI (true): expected false to be true // Object.is equality"
+    },
+    {
+      "invariant_id": "SPELLING-CASE",
+      "test_name": "the engine's scope matcher agrees with the CLI's (ignore 7.0.5 + the CLI's Gn preprocessing) > Write(*.json) on \"A.JSON\": engine and CLI agree",
+      "test_file": "tests/the_engine_matches_scopes_as_the_cli_does.test.ts",
+      "kind": "behavioural",
+      "drives": "grantCovers — src/grant_scope.ts (vs the CLI oracle, tests/support/cli_scope_oracle.ts)",
+      "plant": "ignore({ ignorecase: false }) in grant_scope's matcherFor — src/grant_scope.ts",
+      "plant_observed": "P3-case-sensitive-matcher applied at 0a8d1be → AssertionError: grantCovers(\"*.json\", \"A.JSON\") disagrees with the CLI (true): expected false to be true // Object.is equality"
+    },
+    {
+      "invariant_id": "SPELLING-CASE",
+      "test_name": "the engine's scope matcher agrees with the CLI's (ignore 7.0.5 + the CLI's Gn preprocessing) > Write(.Claude/) on \".claude/settings.json\": engine and CLI agree",
+      "test_file": "tests/the_engine_matches_scopes_as_the_cli_does.test.ts",
+      "kind": "behavioural",
+      "drives": "grantCovers — src/grant_scope.ts (vs the CLI oracle, tests/support/cli_scope_oracle.ts)",
+      "plant": "ignore({ ignorecase: false }) in grant_scope's matcherFor — src/grant_scope.ts",
+      "plant_observed": "P3-case-sensitive-matcher applied at 0a8d1be → AssertionError: grantCovers(\".Claude/\", \".claude/settings.json\") disagrees with the CLI (true): expected false to be true // Object.is equality"
+    },
+    {
+      "invariant_id": "SPELLING-CASE",
+      "test_name": "the engine's scope matcher agrees with the CLI's (ignore 7.0.5 + the CLI's Gn preprocessing) > Write(Config) on \".git/config\": engine and CLI agree",
+      "test_file": "tests/the_engine_matches_scopes_as_the_cli_does.test.ts",
+      "kind": "behavioural",
+      "drives": "grantCovers — src/grant_scope.ts (vs the CLI oracle, tests/support/cli_scope_oracle.ts)",
+      "plant": "ignore({ ignorecase: false }) in grant_scope's matcherFor — src/grant_scope.ts",
+      "plant_observed": "P3-case-sensitive-matcher applied at 0a8d1be → FAIL (vitest): Write(Config) on \".git/config\": engine and CLI agree"
+    },
+    {
+      "invariant_id": "SPELLING-CASE",
+      "test_name": "the engine's scope matcher agrees with the CLI's (ignore 7.0.5 + the CLI's Gn preprocessing) > Write(src/*) on \"SRC/A/B\": engine and CLI agree",
+      "test_file": "tests/the_engine_matches_scopes_as_the_cli_does.test.ts",
+      "kind": "behavioural",
+      "drives": "grantCovers — src/grant_scope.ts (vs the CLI oracle, tests/support/cli_scope_oracle.ts)",
+      "plant": "ignore({ ignorecase: false }) in grant_scope's matcherFor — src/grant_scope.ts",
+      "plant_observed": "P3-case-sensitive-matcher applied at 0a8d1be → FAIL (vitest): Write(src/*) on \"SRC/A/B\": engine and CLI agree"
+    },
+    {
+      "invariant_id": "SPELLING-CASE",
+      "test_name": "the engine's scope matcher agrees with the CLI's (ignore 7.0.5 + the CLI's Gn preprocessing) > Write(COLTRANE.LAYOUT.JSON) on \"coltrane.layout.json\": engine and CLI agree",
+      "test_file": "tests/the_engine_matches_scopes_as_the_cli_does.test.ts",
+      "kind": "behavioural",
+      "drives": "grantCovers — src/grant_scope.ts (vs the CLI oracle, tests/support/cli_scope_oracle.ts)",
+      "plant": "ignore({ ignorecase: false }) in grant_scope's matcherFor — src/grant_scope.ts",
+      "plant_observed": "P3-case-sensitive-matcher applied at 0a8d1be → FAIL (vitest): Write(COLTRANE.LAYOUT.JSON) on \"coltrane.layout.json\": engine and CLI agree"
+    },
+    {
+      "invariant_id": "ROOM-IMAGE-DEPS",
+      "test_name": "the room images carry every runtime dependency of the engine (skipped as UNVERIFIED without Docker or the image) > coltrane/room:ephemeral: declares this tree's runtime dependencies, installs each (exact pins exact), and the grant matcher loads",
+      "test_file": "tests/spec_room_image_carries_runtime_deps.test.ts",
+      "kind": "behavioural",
+      "drives": "the built image coltrane/room:ephemeral (Dockerfile.room / Dockerfile.floor), run with its own node",
+      "plant": "build the image from a manifest that predates a runtime dependency (or with `ignore` in devDependencies under npm ci --omit=dev)",
+      "plant_observed": "observed 27 Sep on the drafter's host with the images built before round 5 (coltrane/room:ephemeral): AssertionError: coltrane/room:ephemeral was built from a manifest whose runtime dependencies differ from this tree's — rebuild it: expected { …(6) } to deeply equal { …(7) }. Green after rebuilding both images at 0a8d1be."
+    },
+    {
+      "invariant_id": "ROOM-IMAGE-DEPS",
+      "test_name": "the room images carry every runtime dependency of the engine (skipped as UNVERIFIED without Docker or the image) > coltrane/floor:seat: declares this tree's runtime dependencies, installs each (exact pins exact), and the grant matcher loads",
+      "test_file": "tests/spec_room_image_carries_runtime_deps.test.ts",
+      "kind": "behavioural",
+      "drives": "the built image coltrane/floor:seat (Dockerfile.room / Dockerfile.floor), run with its own node",
+      "plant": "build the image from a manifest that predates a runtime dependency (or with `ignore` in devDependencies under npm ci --omit=dev)",
+      "plant_observed": "observed 27 Sep on the drafter's host with the images built before round 5 (coltrane/floor:seat): AssertionError: coltrane/floor:seat was built from a manifest whose runtime dependencies differ from this tree's — rebuild it: expected { …(6) } to deeply equal { …(7) }. Green after rebuilding both images at 0a8d1be."
+    }
+  ],
+  "testing_method": "vitest, example-based laws plus fast-check properties (RED-DEF-15: expansion draws only on declared tokens + the layout; the target and venue steps never add). Every law drives the production symbol named in `drives`; symbols that do not exist yet are reached through a runtime import (tests/layout_grants_fixtures.ts) so the shared tsc gate stays green and each law fails where it asserts. The invokers are observed through the seams the suite already uses: the Claude invoker's injected `run` (the exact argv), and the completions invoker's model request body and typed refusals. The chair record is observed on chair_complete through RunDeps.onProgress; the dispatch door by bootstrapServerDeps over a genome tree on disk with the invoke seam replaced. The resolver-level plants were rehearsed by the drafter against a throwaway reference resolver, deleted before commit; each turned its law red. plant_observed is omitted (the v5 type refuses null) and is filled by the grader once production exists. Round 3: the laws for the implementer's surviving plants (NO-SELF-WIDENING-2 isolation, DOOR-CHART, DOOR-RELOAD, TARGET-ESCAPE, LAYERED, RECORD-VENUE, PREFLIGHT-EXPANDED) are green against the implementation at cef6f97, and each plant was applied, observed red and reverted by the drafter. The target-escape laws for README/backslash/drive-letter entries and the dispatch refusals are red, because the ruling (refuse, never normalise) is new. The completions any-scope laws for Read/Bash, and every D1/D2/D3/D5 law, are red (the behaviour is new). D4 runs a REAL sandboxed process through @anthropic-ai/sandbox-runtime (srt), because `claude -p` cannot run a Bash command without a model; it is SKIPPED and printed as UNVERIFIED when srt or an OS sandbox is absent, and was observed red (no sandbox config on the argv) with srt present on macOS. The drafter's manual srt probe confirmed the target config shape (absolute allowWrite tree + absolute denyWrite) is enforced: inside src/ written, outside refused, the layout file refused. plant_observed is omitted; the grader fills it. Round 4: every law for the implementer's surviving plants (items 2–10) is green against 9ff943c, and each plant was applied to that production code, observed red, and reverted; plant_observed records the failing assertion. The laws for the conductor's two new rulings (.coltrane denial; ignored path never sealed) are red today because the behaviour does not exist yet; their plant_observed is left for the grader. Round 5: each of the implementer's six dot-path plants (OWN-A…F) was applied to src/grant_scope.ts at 5776395 and the new laws observed red (OWN-A 22 laws beyond the 4 findings, OWN-C 2, OWN-E 9, OWN-F 12, OWN-B 6, OWN-D 5); plant_observed records one failing assertion per law. Controls and laws no plant touched carry no plant_observed. Round 6: the four surviving plants (literal-spelling refusal removed, schema admitting ./ and //, case-sensitive matcher, case-sensitive isProtectedPath) were each applied at 0a8d1be and observed red (4 / 3 / 10 / 5 laws). The room-image law was observed red against the stale pre-round-5 images on the drafter's host, then green after rebuilding both images.",
+  "uncovered": []
+}

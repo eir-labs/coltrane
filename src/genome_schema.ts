@@ -1522,3 +1522,54 @@ export type DrawOutput = z.output<typeof DrawSchema>;
 export type ResourceOutput = z.output<typeof ResourceSchema>;
 export type BookingOutput = z.output<typeof BookingSchema>;
 export type TourOutput = z.output<typeof TourSchema>;
+
+// ── Layout — what a repository calls its source, its tests, its laws command ────────────────────
+//
+// `coltrane.layout.json` at the root of the genome tree a gig runs against. An agent grants a ROLE
+// TOKEN (`Write(@source)`, `Edit(@tests)`, `Bash(@laws)`) and the repository's layout answers what
+// that role means HERE — so a new repository shape is a layout file, never an agent amendment
+// (src/layout_grants.ts resolves the tokens). The role names are a closed set and every object is
+// strict: a misspelt role (`sources`) would otherwise load clean and silently answer nothing. A
+// role declared as an EMPTY list is refused (min 1) — an answer of "nothing" must be an absence the
+// resolver refuses by name, never a declared role that passes review and grants nothing.
+const LayoutEntriesSchema = z.array(z.string().min(1)).min(1);
+// A PATH role's globs are tree-relative and plainly spelled. The CLI reads `Write(//x)` as an absolute
+// path and `Write(~/x)` as the home directory; it silently rewrites a leading `./` and an inner `//`
+// (`./**` is `**` to it); a `..` segment or a backslash names a path by a spelling nothing judges. Each
+// is REFUSED here, as the resolver refuses the same spellings in a literal grant (layout_grants.ts
+// isAmbiguousSpelling) — one rule, refuse, in both places.
+const LayoutGlobsSchema = z
+  .array(
+    z.string().min(1).refine(
+      (g) => !g.startsWith("~") && !g.includes("//") && !g.startsWith("./") && !g.includes("\\") && !g.split("/").includes(".."),
+      { message: "a layout path glob must be tree-relative and plainly spelled: no leading ~ or ./, no //, no .. segment, no backslash" },
+    ),
+  )
+  .min(1);
+
+export const LayoutSchema = z
+  .object({
+    /** Path roles: each a list of globs, expanded to one `<Tool>(<glob>)` grant per glob. */
+    paths: z
+      .object({
+        source: LayoutGlobsSchema.optional(),
+        tests: LayoutGlobsSchema.optional(),
+        migrations: LayoutGlobsSchema.optional(),
+        scripts: LayoutGlobsSchema.optional(),
+        docs: LayoutGlobsSchema.optional(),
+      })
+      .strict()
+      .optional(),
+    /** Command roles: each a list of exact command prefixes, expanded to `Bash(<prefix>:*)`. */
+    commands: z
+      .object({
+        build: LayoutEntriesSchema.optional(),
+        test: LayoutEntriesSchema.optional(),
+        laws: LayoutEntriesSchema.optional(),
+        ship_dry: LayoutEntriesSchema.optional(),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
+export type Layout = z.output<typeof LayoutSchema>;

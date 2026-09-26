@@ -46,6 +46,12 @@ RUN npm run build
 FROM node:26-alpine AS room
 WORKDIR /app
 
+# THE BASH SANDBOX'S LINUX RUNTIME (bubblewrap, socat — and bash, which the runtime execs). Carried by
+# the founder's ruling so a seat is never run unsandboxed in any room image: a Bash seat spawns with
+# failIfUnavailable, so an image without them refuses the seat. The seat-bearing image is
+# Dockerfile.floor; this keeps the production-only room able to host one without widening it.
+RUN apk add --no-cache bubblewrap socat bash
+
 # PRODUCTION DEPENDENCIES ONLY. A room holding a test runner and a compiler is a larger surface than
 # the contract describes, and `equipment.tools` is a ceiling on what a seat may reach — an image that
 # quietly carries more than the room needs is the same leniency one layer down.

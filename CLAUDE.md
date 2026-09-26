@@ -340,6 +340,99 @@ to exactly those origins (`--allowed-origins`, server-enforced; isolated + headl
 `browser_grant`, no browser — the grant is unresolvable and the chair fails closed. Author
 capability deliberately: the grant string IS the policy, and the cage is the blast-radius bound.
 
+### Role tokens: the repository's layout decides what a path grant reaches
+
+An agent may grant a **role token** instead of a path: `Write(@source)`, `Edit(@tests)`,
+`Bash(@laws)`. The repository answers what the role means, in `coltrane.layout.json` at the root
+of the genome tree the gig runs against (`paths`: `source`/`tests`/`migrations`/`scripts`/`docs`,
+each a list of globs; `commands`: `build`/`test`/`laws`/`ship_dry`, each a list of command
+prefixes). Its shape is `LayoutSchema` in `src/genome_schema.ts`; a malformed file is a load
+error and is treated as absent. The drain never reads its clone's file: it takes the org store's
+layout row for the gig's repository (`resolveWorkingRepo(claim)`). A new repository shape is a
+layout file, never an agent amendment.
+
+`resolveSeatGrants` (`src/layout_grants.ts`) is the one resolution both invokers and `runGig` use,
+in this order: (1) expand role tokens through the layout (path role → `<Tool>(<glob>)` per glob,
+command role → `Bash(<prefix>:*)`), literals untouched; (2) narrow Write/Edit to the change's
+`target_paths` (absent → no narrowing, recorded `target_paths_applied: false`; `[]` → no writes);
+(3) narrow by the venue's equipment. Only step 1 may produce a string the agent did not write;
+every later step only removes or narrows. `chair_complete` records `resolved_grants` and
+`target_paths_applied`.
+
+**Fail closed.** A role the layout does not declare, or any role token with no layout, grants
+nothing and the chair is refused at dispatch naming the role — never a `**` default. A
+`target_paths` entry is refused, naming it, if it has glob metacharacters, or if it escapes the tree:
+a `..` segment, an absolute path (`/…` or a drive letter), a leading `~`, or a backslash. Such an
+entry is never normalised into a grant. The completions invoker refuses any scoped grant
+(`Write(…)`, `Read(…)`, `Bash(…)`, `WebFetch(…)`), because it offers tools by base name and cannot
+carry a scope to the model.
+
+**No self-widening, no reach into protected paths.** The protected paths are
+`coltrane.layout.json`, `.git/`, `.claude/` and the engine's own `.coltrane/`. Whenever a seat's
+Write/Edit *could* reach one of them under the CLI's own matching, the spawn is denied it:
+`Write(coltrane.layout.json)`, `Write(.coltrane/**)`, and the same for `.git/**` and `.claude/**`,
+each with its Edit twin. A bare Write or `code_tool_access` write/full counts. No target path, and no
+exact grant, ever names a protected path.
+
+**Scope matching IS the CLI's matcher.** The installed CLI (2.1.283) matches a Write/Edit allow
+rule in two steps, both read from its bundle:
+1. It preprocesses the rule:
+   - a leading `./` is dropped;
+   - `//` collapses to `/`;
+   - `x/**` becomes `/x`, and `a/b/**` becomes `a/b`.
+2. It tests the result with the bundled `ignore` package, **7.0.5 exactly**. That means gitignore
+   semantics:
+   - `**` reaches dot-directories;
+   - a pattern with no slash matches at any depth;
+   - a matched directory covers its contents;
+   - matching is case-insensitive;
+   - `[!a]` is a literal `!` class, not a negation.
+
+`src/grant_scope.ts` uses the same `ignore@7.0.5`, pinned exactly as a production dependency. It
+applies the same preprocessing in one place (`cliAllowPattern`) before both `grantCovers` and
+`grantMayReach`. The resolver, the denials and the diff gate all use it.
+`tests/support/cli_scope_oracle.ts` checks it against the CLI's matcher. Where the CLI's answer
+cannot be computed (a rule rooted at `//` or `~`), the matcher denies.
+
+**Spellings the CLI rewrites are refused, not normalised.** A path glob with a leading `./` or any
+`//` is refused wherever it appears, because the CLI silently rewrites it and `./**` is `**` to it:
+- in a layout (`LayoutSchema`), at load;
+- in a literal Write/Edit grant, where the chair is refused naming the grant. Its protected-path
+  denials are still computed.
+
+**Bash is path-scoped by two mechanisms.**
+- **Outside the tree and the protected files: the sandbox.** Every seat that can run Bash (granted,
+  or kept by `code_tool_access: "full"`) spawns under the CLI's OS sandbox, set in its single
+  `--settings` JSON (`bashSandboxFor`, `src/claude_invoker.ts`):
+  - `enabled`, `failIfUnavailable`, `allowUnsandboxedCommands: false`, and no `excludedCommands`;
+  - writes are allowed in the tree and denied for `<tree>/coltrane.layout.json`, `<tree>/.git`,
+    `<tree>/.claude` and `<tree>/.coltrane`;
+  - `--setting-sources user`, so a repository's project/local settings cannot merge in an escape.
+
+  `<tree>` is the room's workspace for a room seat, otherwise the run's `tree_root`.
+- **Inside the tree: the diff gate.** After each seat that can write returns, `runGig`
+  (`src/diff_gate.ts`) compares the tree with its state before the seat ran. A change outside the
+  seat's resolved Write/Edit scope refuses the chair, naming the paths, and nothing from that chair
+  is sealed or shipped. This covers modified, added, untracked and deleted files, and both sides of
+  a rename.
+
+  The gate does not see paths git ignores, nor the engine's own `.coltrane/`. `.coltrane/` is denied
+  to Bash by the sandbox and to Write/Edit by the denials. An ignored path never leaves the tree
+  through the engine: `stampChangeAddresses` refuses a change-set that names one, and the engine has
+  no `git add`/`commit`/`push` of its own.
+
+**The relative-path trap.** The CLI silently IGNORES a relative sandbox path: a relative deny is a
+deny that is not there. Every sandbox path is built absolute (and realpath-resolved on the host),
+and a non-absolute tree is refused rather than emitted.
+
+**Where no sandbox is available, the seat is refused.** That is intended (`failIfUnavailable`).
+Examples: a host with no `sandbox-exec` or bubblewrap, or a room whose container cannot create a
+user namespace. Room images carry bubblewrap, socat, bash (and ripgrep on the floor). A seat-bearing
+room runs under Docker's default seccomp profile plus the six calls bubblewrap needs
+(`src/room_seat_seccomp.ts`), with `systempaths=unconfined`. It is never privileged and adds no
+capability. This was verified on Docker Desktop (linuxkit); it is not verified on AppArmor hosts,
+where a seat may be refused until the host allows it.
+
 ---
 
 ## Tool routing — the most common gotcha

@@ -24,14 +24,20 @@
 //      hosted branch cannot honour is REFUSED at the door, by name, and never forwarded to be
 //      ignored.
 //
-// Out of scope here, per the conductor: budget carriage (a store column) and the adapter's own
-// mapping. Those are the coltrane-ui follow-up. Until then `budget` is refused, not dropped.
+// Round 6c: the host contract now carries a budget (coltrane-ui #253, `budget_micro_usd`, a bigint
+// of integer micro-dollars ≥ 0, aligned with coltrane #555). `budget` is therefore no longer refused.
+// The hosted door CONVERTS gig_dispatch's `budget.max_usd` (USD) into integer `budget_micro_usd`
+// EXACTLY, as a decimal, never through float multiplication (1.005 * 1e6 = 1004999.9999…). It refuses
+// by name, and does not round, any max_usd with more than 6 decimal places, a negative one, or a
+// non-finite one (H5).
 import { describe, it, expect, afterEach, vi } from "vitest";
 import { createRegistry, createOutputStore, MemoryLedger } from "../src/index.js";
 import { createToolSurface, type ServerDeps, type ToolSurfaceDeps } from "../src/server.js";
 
 const OLD = "abababab-1111-2222-3333-cdcdcdcdcdcd";
-const HOST_CONTRACT = new Set(["standard_slug", "mode", "input", "org_slug", "acting_for", "venue", "resumes"]);
+// + budget_micro_usd (round 6c): the host contract grew. coltrane-ui #253 carries the run's budget as
+// coltrane_gigs.budget_micro_usd (integer micro-dollars, aligned with coltrane #555).
+const HOST_CONTRACT = new Set(["standard_slug", "mode", "input", "org_slug", "acting_for", "venue", "resumes", "budget_micro_usd"]);
 
 function hosted(gigStatus?: ServerDeps["gigStatus"]): { d: ToolSurfaceDeps; queued: Array<Record<string, unknown>> } {
   const registry = createRegistry();
@@ -128,7 +134,6 @@ describe("H4 — no silent drop: only host-contract arguments reach queueGig; th
     ["depth", 2],
     ["effort", "high"],
     ["max_context_tokens", 100_000],
-    ["budget", { max_usd: 5 }],
     ["reuse", true],
     ["approvals", { approve: { verdict: "ok" } }],
     ["approved_by", "eugene"],
@@ -143,4 +148,60 @@ describe("H4 — no silent drop: only host-contract arguments reach queueGig; th
       expect(String(r.error ?? ""), `the refusal must name \`${key}\``).toContain(key);
     });
   }
+});
+
+describe("H5 — the hosted door carries the budget as integer micro-dollars (coltrane-ui #253)", () => {
+  const CARRIED: Array<[unknown, number]> = [
+    [12, 12_000_000],
+    [0.5, 500_000],
+    [1.005, 1_005_000], // float multiplication gives 1004999.9999999999 — the conversion must be exact
+    [0.000001, 1],
+    [0, 0],
+  ];
+  for (const [usd, micro] of CARRIED) {
+    it(`H5 budget {max_usd: ${String(usd)}} is queued as budget_micro_usd ${micro}, and \`budget\` itself is not forwarded`, async () => {
+      const { d, queued } = hosted();
+      const r = await dispatch(d, { standard_slug: "scan-v1", input: {}, budget: { max_usd: usd } });
+      expect(r.ok, `a representable budget was refused: ${JSON.stringify(r)}`).toBe(true);
+      expect(queued.length).toBe(1);
+      expect(queued[0]!["budget_micro_usd"], "the budget did not reach the host as integer micro-dollars").toBe(micro);
+      expect(Number.isSafeInteger(queued[0]!["budget_micro_usd"])).toBe(true);
+      expect(queued[0]!["budget"], "the USD `budget` object was forwarded as well; the host carries only budget_micro_usd").toBeUndefined();
+    });
+  }
+
+  /** Non-vacuity: before a refusal can mean anything, the door must CARRY a representable budget.
+   *  Otherwise "refused" is simply the old refuse-every-budget door, passing for the wrong reason. */
+  async function carriesABudget(): Promise<void> {
+    const { d, queued } = hosted();
+    const ok = await dispatch(d, { standard_slug: "scan-v1", input: {}, budget: { max_usd: 1 } });
+    expect(ok.ok && queued[0]?.["budget_micro_usd"],
+      "precondition: the hosted door carries a representable budget ({max_usd: 1} → 1000000); a door that refuses EVERY budget passes the refusals vacuously").toBe(1_000_000);
+  }
+
+  const REFUSED: Array<[string, unknown]> = [
+    ["more than 6 decimal places (0.1234567)", 0.1234567],
+    ["negative (-1)", -1],
+    ["non-finite (Infinity)", Number.POSITIVE_INFINITY],
+    ["not a number (\"12\")", "12"],
+  ];
+  for (const [label, usd] of REFUSED) {
+    it(`H5 budget {max_usd} ${label} is REFUSED by name, never rounded or dropped; nothing queued`, async () => {
+      await carriesABudget();
+      const { d, queued } = hosted();
+      const r = await dispatch(d, { standard_slug: "scan-v1", input: {}, budget: { max_usd: usd } });
+      expect(queued.map((q) => q["budget_micro_usd"]), `a budget of ${label} was queued`).toEqual([]);
+      expect(r.ok).toBe(false);
+      expect(String(r.error ?? ""), "the refusal must name the budget").toMatch(/budget|max_usd/);
+    });
+  }
+
+  it("H5 no budget → no budget_micro_usd key at all (absent is not zero)", async () => {
+    await carriesABudget();
+    const { d, queued } = hosted();
+    const r = await dispatch(d, { standard_slug: "scan-v1", input: {} });
+    expect(r.ok).toBe(true);
+    expect(queued.length).toBe(1);
+    expect("budget_micro_usd" in queued[0]!, "an absent budget was queued as a key; zero would mean a zero-dollar ceiling").toBe(false);
+  });
 });

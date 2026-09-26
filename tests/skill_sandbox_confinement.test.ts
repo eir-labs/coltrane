@@ -184,17 +184,6 @@ import { MIN_NODE_FOR_SANDBOX } from "../src/skill_subprocess.js";
 import { readFileSync as readPkg } from "node:fs";
 
 describe("the sandbox states the runtime it needs", () => {
-  it("declares an engines floor matching the flag it actually spawns with", () => {
-    const pkg = JSON.parse(readPkg(new URL("../package.json", import.meta.url), "utf-8")) as
-      { engines?: { node?: string } };
-    const declared = pkg.engines?.node ?? "";
-    const floor = Number(declared.replace(/[^\d]/g, "").slice(0, 2));
-    expect(
-      floor,
-      "engines must not promise a Node the sandbox cannot run on — --permission is 22+",
-    ).toBeGreaterThanOrEqual(MIN_NODE_FOR_SANDBOX);
-  });
-
   it("refuses on an older runtime instead of running skills unsandboxed", () => {
     // The failure mode being prevented is not the error message. It is the alternative: a
     // runtime with no permission model executing skill code with none, silently.
@@ -213,14 +202,9 @@ import { NODE_WITH_ALLOW_NET } from "../src/skill_subprocess.js";
 import { readdirSync as readDirPins } from "node:fs";
 
 describe("the declared Node floor backs every grant, and every runtime we pin meets it", () => {
-  const engines = (JSON.parse(readPkg(new URL("../package.json", import.meta.url), "utf-8")) as
-    { engines?: { node?: string } }).engines?.node ?? "";
-  const floor = Number((engines.match(/\d+/) ?? ["0"])[0]);
-
-  it("engines.node is at least the runtime that can back a network grant", () => {
-    expect(floor, `engines says ${engines}; a network grant needs Node ${NODE_WITH_ALLOW_NET}+`)
-      .toBeGreaterThanOrEqual(NODE_WITH_ALLOW_NET);
-  });
+  // The floor is where skills RUN (founder ruling, 26 Sep 2026): `engines` now states the library's
+  // install floor (24), so CI and the images — which execute skills — are held to the SANDBOX floor.
+  const floor = MIN_NODE_FOR_SANDBOX;
 
   it("every CI workflow and container image pins a Node at or above the floor", () => {
     const root = new URL("..", import.meta.url);

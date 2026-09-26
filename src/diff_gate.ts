@@ -15,7 +15,8 @@
 // addition), so a move out of scope is judged by its SOURCE as well as its destination.
 //
 // KNOWN LIMIT: paths git ignores (.gitignore) are not in `git status`, so a write into an ignored path
-// is not seen by this gate. The sandbox still confines it to the tree.
+// is not seen by this gate. The sandbox still confines it to the tree, and it never leaves the tree
+// through the engine: stampChangeAddresses (runtime.ts) refuses a change-set naming an ignored path.
 //
 // CONCURRENT CHAIRS share one tree. A change inside the scope of another chair whose seat overlapped
 // this one's window is not blamed on this chair — that chair's own gate judges it. A change inside NO
@@ -80,8 +81,9 @@ export function snapshotDirectory(root: string): TreeState {
 /**
  * The engine's OWN state directory at a tree's root (the gig ledger, repo locks, checkpoints, gig
  * logs). The engine writes it while seats run — including this chair's own spend row — so a change
- * there is not evidence of what the seat did, and is not judged. The seat's Bash is denied it by the
- * sandbox (bashSandboxFor); a Write/Edit grant that covers it is the one remaining way in.
+ * there is not evidence of what the seat did, and is not judged. The seat cannot write it either way:
+ * its Bash is denied it by the sandbox (bashSandboxFor), and every Write/Edit grant that could reach it
+ * carries a `Write/Edit(.coltrane/**)` denial (layout_grants.ts, src/grant_scope.ts PROTECTED_PATHS).
  */
 export const ENGINE_STATE_DIR = ".coltrane";
 

@@ -35,11 +35,12 @@ import { venueEffectiveTools, type Venue } from "./chart.js";
 import type { Agent } from "./composition.js";
 import type { Layout } from "./genome_schema.js";
 import { toolBaseName } from "./tool_providers.js";
+import { grantCovers, grantMayReach, isProtectedPath, PROTECTED_PATHS, LAYOUT_FILE } from "./grant_scope.js";
+
+export { LAYOUT_FILE } from "./grant_scope.js";
 
 export type { Layout } from "./genome_schema.js";
 
-/** The layout file's name, at the root of the tree a gig runs against. */
-export const LAYOUT_FILE = "coltrane.layout.json";
 
 /** The path-scoped write tools target_paths narrow and the layout-file deny covers. */
 const WRITE_TOOLS: ReadonlySet<string> = new Set(["Write", "Edit"]);
@@ -89,10 +90,10 @@ function scopeOf(grant: string): string | undefined {
   return grant.slice(open + 1, -1);
 }
 
-/** Does the grant's glob cover this repository-relative path? A bare grant covers everything. */
+/** Does the grant's glob cover this repository-relative path, as the CLI reads it (src/grant_scope.ts,
+ *  the one matcher)? A bare grant covers everything. */
 function covers(scope: string | undefined, path: string): boolean {
-  if (scope === undefined) return true;
-  return scope === path || posix.matchesGlob(path, scope);
+  return scope === undefined || grantCovers(scope, path);
 }
 
 /**
@@ -184,29 +185,42 @@ export function resolveSeatGrants(args: ResolveSeatGrantsArgs): SeatGrants {
     for (const glob of globs) pushGenerated(`${tool}(${glob})`);
   }
 
-  // ── no self-widening: deny the layout file to every Write/Edit that covers it ────────────────
-  // `code_tool_access` "write"/"full" keeps bare Write/Edit in the Claude cage whether or not they are
-  // granted (claude_invoker.ts codeToolsKept), so the seat holds them and the file is denied for them too.
+  // ── no self-widening: deny every PROTECTED path (the layout file, .git, .claude, .coltrane) to
+  // every Write/Edit that could reach it under the CLI's own matching (grantMayReach — gitignore
+  // semantics, where `**` DOES reach dot-directories). `code_tool_access` "write"/"full" keeps bare
+  // Write/Edit in the Claude cage whether or not they are granted (claude_invoker.ts codeToolsKept), so
+  // the seat holds them and every protected path is denied for them too. A file is denied by its path,
+  // a directory by `<dir>/**`.
   const implicitWrite = agent.code_tool_access === "write" || agent.code_tool_access === "full";
   const denials: string[] = [];
-  for (const tool of WRITE_TOOLS) {
-    if (implicitWrite || expanded.some((g) => toolBaseName(g) === tool && covers(scopeOf(g), LAYOUT_FILE))) {
-      denials.push(`${tool}(${LAYOUT_FILE})`);
+  for (const target of PROTECTED_PATHS) {
+    for (const tool of WRITE_TOOLS) {
+      if (implicitWrite || expanded.some((g) => toolBaseName(g) === tool && grantMayReach(scopeOf(g), target))) {
+        denials.push(`${tool}(${target.kind === "file" ? target.path : `${target.path}/**`})`);
+      }
     }
   }
-  const isExactLayoutGrant = (g: string) => WRITE_TOOLS.has(toolBaseName(g)) && scopeOf(g) !== undefined && posix.normalize(scopeOf(g)!).replace(/^\.\//, "") === LAYOUT_FILE;
+  // A grant whose scope NAMES a protected path is never returned: the Claude invoker's NO OVER-DENIAL
+  // filter deletes a scoped deny when an exact grant of the same string is present.
+  const isProtectedGrant = (g: string) => {
+    if (!WRITE_TOOLS.has(toolBaseName(g))) return false;
+    const sc = scopeOf(g);
+    if (sc === undefined) return false;
+    const n = posix.normalize(sc).replace(/^\.\//, "").replace(/\/\*\*$/, "").replace(/\/+$/, "");
+    return denials.includes(g) || isProtectedPath(n);
+  };
 
   // ── 2 · narrow Write/Edit to the change's target_paths ───────────────────────────────────────
   const target_paths_applied = target_paths !== undefined;
   let narrowed: string[];
   if (!target_paths_applied) {
-    narrowed = expanded.filter((g) => !isExactLayoutGrant(g));
+    narrowed = expanded.filter((g) => !isProtectedGrant(g));
   } else {
     const targets = target_paths
       .map(normaliseTarget)
-      .filter((t): t is string => t !== undefined && t !== LAYOUT_FILE);
+      .filter((t): t is string => t !== undefined && !isProtectedPath(t));
     narrowed = [];
-    for (const g of expanded) {
+    for (const g of expanded.filter((x) => !isProtectedGrant(x))) {
       const tool = toolBaseName(g);
       if (!WRITE_TOOLS.has(tool)) {
         narrowed.push(g);
@@ -257,11 +271,6 @@ export function writeScopeOf(agent: Agent, grants: readonly string[]): WriteScop
     else if (!globs.includes(s)) globs.push(s);
   }
   return { everywhere, globs };
-}
-
-/** Paths no grant ever covers: the layout (no self-widening), the CLI's settings dir, git's own. */
-export function isProtectedPath(path: string): boolean {
-  return path === LAYOUT_FILE || path === ".claude" || path.startsWith(".claude/") || path === ".git" || path.startsWith(".git/");
 }
 
 /** Is this repository-relative path one the scope may change? Protected paths never are. */

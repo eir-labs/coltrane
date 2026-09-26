@@ -58,7 +58,20 @@ export function engineToolProviders(): ToolProviderRegistry {
  * Returns a { max_usd } when a ceiling applies, or {} (no enforcement) when none does — never
  * undefined, so a caller reading `.max_usd` off the result never trips on undefined.
  */
-export function drainBudget(input: Record<string, unknown> | undefined): BudgetInput {
+export function drainBudget(
+  input: Record<string, unknown> | undefined,
+  /** The claim's own ceiling in integer micro-dollars (coltrane_gigs.budget_micro_usd, #555). The
+   *  hosted door strips `budget` from what it queues and the store hands this back on the claim, so it
+   *  WINS: it is the gig's own ceiling. Not an integer ≥ 0 → refused rather than guessed at. */
+  claimMicroUsd?: unknown,
+): BudgetInput {
+  if (claimMicroUsd !== undefined && claimMicroUsd !== null) {
+    if (typeof claimMicroUsd !== "number" || !Number.isSafeInteger(claimMicroUsd) || claimMicroUsd < 0) {
+      throw new Error(`the claim's budget_micro_usd must be a non-negative integer of micro-dollars; got ${JSON.stringify(claimMicroUsd)}`);
+    }
+    // Dollars only for reporting; the gate compares max_micro_usd (see BudgetInput).
+    return { max_usd: claimMicroUsd / 1_000_000, max_micro_usd: claimMicroUsd };
+  }
   const named = (input?.["budget"] as { max_usd?: unknown } | undefined)?.["max_usd"];
   if (typeof named === "number" && Number.isFinite(named) && named > 0) return { max_usd: named };
 

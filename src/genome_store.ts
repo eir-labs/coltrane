@@ -720,6 +720,24 @@ export function postgrestOrgUse(ctx: PostgrestContext): (org_slug: string) => Pr
   };
 }
 
+/**
+ * NO SILENT DROP at the engine's own queue clients. The hosted dispatch door may hand a queue seam
+ * `resumes` (a closed gig's link) or `budget_micro_usd` (the run's ceiling). The store RPCs these
+ * clients call accept neither parameter today, and PostgREST resolves a function by its exact
+ * argument names — sending p_resumes / p_budget_micro_usd would fail EVERY call ("function not
+ * found": the 0.24.12 p_venue outage). Dropping them would queue a fresh, unlinked, unbounded gig. So
+ * a client handed either one refuses by name, before anything is sent. Absent fields send no key.
+ */
+function refuseUncarriedQueueFields(client: string, rpc: string, args: Record<string, unknown>): void {
+  const uncarried = ["resumes", "budget_micro_usd"].filter((k) => args[k] !== undefined && args[k] !== null);
+  if (uncarried.length > 0) {
+    throw new Error(
+      `${client}: ${rpc} cannot carry ${uncarried.map((k) => `\`${k}\``).join(" or ")} — refused before sending, ` +
+        `rather than queued without it. Queue through a host that carries it (coltrane-ui's dispatchGig).`,
+    );
+  }
+}
+
 /** The agent-token gig-queue seam: queue one run through coltrane_mcp_dispatch, where the
  *  chair contract authorizes (the seat grants the standard; the token may only narrow).
  *  Same return shape as postgrestQueueGig so a host can swap them by bearer class. */
@@ -727,6 +745,7 @@ export function rpcQueueGig(
   ctx: { baseUrl: string; anonKey: string; agentToken: string },
 ): (args: Record<string, unknown>) => Promise<Record<string, unknown>> {
   return async (args) => {
+    refuseUncarriedQueueFields("rpcQueueGig", "coltrane_mcp_dispatch", args);
     const res = await fetch(`${ctx.baseUrl}/rest/v1/rpc/coltrane_mcp_dispatch`, {
       method: "POST",
       headers: {
@@ -759,6 +778,27 @@ export function rpcQueueGig(
   };
 }
 
+/** The store's answer to "what status is this gig in?" — the ServerDeps.gigStatus seam
+ *  (src/server.ts), through coltrane_mcp_gig_status as the agent token. Null when the store holds no
+ *  such gig. The RPC may answer with the row or a single-row array; both are the same fact. */
+export function rpcGigStatus(
+  ctx: { baseUrl: string; anonKey: string; agentToken: string },
+): (gig_id: string) => Promise<string | null> {
+  return async (gig_id) => {
+    const res = await fetch(`${ctx.baseUrl}/rest/v1/rpc/coltrane_mcp_gig_status`, {
+      method: "POST",
+      headers: { apikey: ctx.anonKey, Authorization: `Bearer ${ctx.anonKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ p_bearer: ctx.agentToken, p_gig: gig_id }),
+    });
+    const text = await res.text();
+    if (!res.ok) throw new Error(`coltrane_mcp_gig_status ${res.status}: ${text.slice(0, 200)}`);
+    const out = text ? (JSON.parse(text) as unknown) : null;
+    const row = Array.isArray(out) ? out[0] : out;
+    const status = row && typeof row === "object" ? (row as Record<string, unknown>)["status"] : undefined;
+    return typeof status === "string" ? status : null;
+  };
+}
+
 /** The hosted gig-queue seam for createToolSurface: queue one run through the governor-gated
  *  dispatch RPC AS THE CALLER (member JWT — RLS + the governor gate decide). Queuing only;
  *  a drain worker claims and runs it. Shape mirrors hosted_tools' member dispatch path. */
@@ -766,6 +806,7 @@ export function postgrestQueueGig(
   ctx: PostgrestContext,
 ): (args: Record<string, unknown>) => Promise<Record<string, unknown>> {
   return async (args) => {
+    refuseUncarriedQueueFields("postgrestQueueGig", "coltrane_gig_dispatch", args);
     const res = await fetch(`${ctx.baseUrl}/rest/v1/rpc/coltrane_gig_dispatch`, {
       method: "POST",
       headers: {

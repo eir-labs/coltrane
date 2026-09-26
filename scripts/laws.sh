@@ -29,7 +29,52 @@ cd "$(dirname "$0")/.."
 # stopped being true at Node 24), and two pure flag-string laws replaced it in this band. The nine
 # laws that need a real request moved to tests/security — a band may reach out, the root suite may
 # not — so they are counted there, by file, not here.
-EXPECTED_LAWS="${EXPECTED_LAWS:-4193}"
+EXPECTED_LAWS="${EXPECTED_LAWS:-4285}"
+#   +2 gig-runs-once round 6d, on efd10a1: real_store A2 (workOnce and `coltrane work`) — a drain key with no
+#      COLTRANE_DRAIN_URL makes NO claim; it refuses at startup naming the variable. RED at efd10a1.
+#  +16 gig-runs-once round 6c, on 2597854: hosted_dispatch H4 loses `budget` (-1: coltrane-ui #253 carries it now)
+#      and gains H5 (+10: budget.max_usd -> integer budget_micro_usd, exact; >6 decimals / negative / non-finite /
+#      non-number refused by name; absent -> no key); queue_clients (new file, +6: postgrestQueueGig/rpcQueueGig
+#      send or refuse resumes/budget_micro_usd, never drop them; absent -> no key); real_store A1 (+1: a drain key
+#      with no COLTRANE_DRAIN_URL refuses the run). room_workspace_populated now sets COLTRANE_DRAIN_URL.
+#   +8 gig-runs-once round 6b, from review 5326196799 at 2d4e7ab: real_store (new file) — D1 a resuming gig never
+#      re-pays for the closed gig's seals under the REAL scope rules; D2 player mode stops under its 30-minute lease;
+#      D3 (x3) any refusal of the start header, in the drain service's real shape (400 {error}, no code), stops the
+#      run; S2-S4 the review's surviving plants. The fixture enforces the store's gig-token scope as the coltrane-ui
+#      follow-up defines it (status + outputs readable for exactly the resumed gig; writes own-gig only).
+#  +21 gig-runs-once round 6, RED at 2d4e7ab: hosted_dispatch (new file) — the HOSTED gig_dispatch branch
+#      (createToolSurface, deps.queueGig): H1 a closed gig's resume queues resumes:<old id>, never resume_gig_id
+#      (x4); H2 an open gig's resume is refused (x3); H3 a store that throws / never answers / is not wired
+#      refuses (x3); H4 only host-contract arguments reach queueGig and every other advertised one is refused
+#      by name (1 + x10).
+#   +9 gig-runs-once round 5, on 30183e1: resumed_reclaim (1, new file — a resumed gig re-claimed on a
+#      fresh box rebuilds from the closed gig's seals AND its own; RED at head), store_decides (8, new file —
+#      R5.2 a store that throws/never answers refuses the resume (the never-answers half RED at head), R5.3 the
+#      closed set is complete (completed/cancelled closed; running/queued/awaiting_approval open), R5.4 the
+#      real rpcGigStatus drives the decision).
+#   +4 gig-runs-once round 4, on the implementation (16b00dc): late_answer (1, new file — an answer arriving
+#      after a lost lease is never sealed; the chair ignores the abort), local_complete +1 (a stale holder of
+#      a REQUEUED row is refused), timeout_aborted +1 (Q6r — the aborted header carries manifest.abort_reason
+#      "timeout" as a field), closed_by_store (1, new file — with a store present, the store's status decides
+#      whether a gig is closed for G4, never only the checkpoint). Q6r and L4 are RED until implemented.
+#   +2 gig-runs-once G4, RED: terminal_resume gains the ABORTED case of the gig_dispatch resume law (+1), and
+#      claim_resumes (1, new file) — a hosted claim carrying resumes:<old id> runs under its own id, takes the
+#      closed gig's drained seals as inputs by reference, pays for no sealed chair, writes nothing under the old id.
+#   +7 gig-runs-once round 3, RED: heartbeat_window (2, G1 — armed until the terminal header is
+#      acknowledged; a renew refused in that window suppresses the terminal write), release_after_outcome
+#      (3, G2 — no release once the outcome is decided; REFUND — after the first chair every release is
+#      terminal), timeout_aborted (1, Q6 — the drain deadline ends a gig aborted/timeout, acknowledged),
+#      terminal_resume (1, G4 — gig_dispatch resume of a FAILED gig is a NEW gig with resumes:<old id>,
+#      the old seals entering as inputs by reference; nothing written under the old id — founder ruling).
+#   +5 gig-runs-once round 2, RED: gig_runs_once_outputs_first (3, E9 — outputs acknowledged before the
+#      completed header) and gig_runs_once_refused_header (2, E10 — a start header refused with 23514 or
+#      403/42501 stops the worker). E3/E5 reconciled with the store route (coltrane-ui #250): the body is
+#      {p_gig_id[, p_reason, p_terminal]} and the instance rides X-Coltrane-Instance only.
+#  +18 gig-runs-once battery, committed RED (docs/specs/gig-runs-once.red-spec.json): seven new files,
+#      tests/gig_runs_once_*.test.ts — E1 start header (1), E2 terminal writes acknowledged (5), E3/E4
+#      heartbeat + lost lease (3), E5 release never hold (3), E6 re-claim finishes without re-running (2),
+#      E7 local complete() holder check (2), E8 one lease constant (2). All 18 fail until the engine half
+#      lands; this script refuses a red suite, so it goes green with the implementation, not before.
 #  +51 #545 rebuilt on main after #552 (the Node 26 floor made its Node 22 special-casing moot): +30 the
 #      landscape genome, +21 every_skill_runs_its_fixtures (discovered skills, three booked). Read from the run.
 #   +1 node_floor_refuses: THIS runtime accepts --allow-net, probed (the constant said 24; it is 25). Floor → 26.
@@ -166,7 +211,7 @@ EXPECTED_LAWS="${EXPECTED_LAWS:-4193}"
 #       with the handler, the description does not. Its first draft could not fail — it forgave any
 #       token no tool anywhere declared, which is exactly what a renamed argument leaves behind.
 #       Sabotage said so (`current` -> `slug_current` stayed green); the exemption is gone.
-EXPECTED_FILES="${EXPECTED_FILES:-434}"   # + tests/every_skill_runs_its_fixtures.test.ts, + tests/node_floor_refuses.test.ts, + tests/spec_reside_drive.test.ts (#537), + tests/a_red_law_names_its_plant.test.ts (#551), + tests/sealed_inputs.test.ts, tests/fan_out.test.ts, tests/completions_seal.test.ts, tests/tier_ladder.test.ts, tests/amend_ladder.test.ts, tests/completions_reasoning_effort.test.ts, tests/bus.test.ts, tests/bus_chair.test.ts, tests/bus_terminal.test.ts, tests/bus_verbs.test.ts, tests/bus_commit.test.ts, tests/code_tools.test.ts, tests/gig_input_validated.test.ts, tests/seat_reads_recorded.test.ts, tests/claude_seat_reads.test.ts, tests/optional_declared_input.test.ts, tests/simulate_names_seats.test.ts
+EXPECTED_FILES="${EXPECTED_FILES:-455}"   # + gig_runs_once_queue_clients (round 6c)   # + gig_runs_once_real_store (round 6b)   # + gig_runs_once_hosted_dispatch (round 6)   # + gig_runs_once_resumed_reclaim, gig_runs_once_store_decides (round 5)   # + the fifteen tests/gig_runs_once_*.test.ts (RED battery), + tests/every_skill_runs_its_fixtures.test.ts, + tests/node_floor_refuses.test.ts, + tests/spec_reside_drive.test.ts (#537), + tests/a_red_law_names_its_plant.test.ts (#551), + tests/sealed_inputs.test.ts, tests/fan_out.test.ts, tests/completions_seal.test.ts, tests/tier_ladder.test.ts, tests/amend_ladder.test.ts, tests/completions_reasoning_effort.test.ts, tests/bus.test.ts, tests/bus_chair.test.ts, tests/bus_terminal.test.ts, tests/bus_verbs.test.ts, tests/bus_commit.test.ts, tests/code_tools.test.ts, tests/gig_input_validated.test.ts, tests/seat_reads_recorded.test.ts, tests/claude_seat_reads.test.ts, tests/optional_declared_input.test.ts, tests/simulate_names_seats.test.ts
 
 # THE OTHER BANDS. `vitest run` is ROOT-CONFIG ONLY — this repo's own workflow comments
 # record that four configs went unexecuted once for exactly that reason. So pinning only the

@@ -326,45 +326,63 @@ export async function runCli(argv: readonly string[], io: CliIO): Promise<number
       }
       return 2;
     }
-    const res = await workOnce(
-      {
-        baseUrl,
-        anonKey,
-        // Empty in venue mode, and deliberately so: the credential arrives with the work.
-        agentToken: mode.mode === "player" ? mode.agentToken : "",
-        ...(mode.mode === "venue" ? { drainKey: mode.drainKey, instance: mode.instance } : {}),
-        ...(typeof flags["worker"] === "string" ? { worker: flags["worker"] } : {}),
-      },
-      {
-        // WHICH PORT RUNS THE CHAIRS is selected from environment PRESENCE, the same policy shape
-        // selectQueueBacking and selectResidencyBacking already use: a completions URL means the
-        // cheap model port, its absence means the host-tool invoker, and nothing is guessed. The one
-        // selector (src/invoker_selection.ts) is shared with the dispatch door so the drain and
-        // dispatch cannot drift on the choice. The tier→model map is deployment-defined — the engine
-        // names no model, because a standard says what the work IS and the executor is fungible; a
-        // tier the deployment did not map is a typed refusal at the chair, not a silent default. On
-        // the host-tool path the drain passes ITS OWN options (registry, model and timeout only),
-        // unchanged.
-        makeInvoke: (registry) => drainChairInvoker(process.env, registry),
-        // The SAME realizer the interactive path constructs at src/server.ts:3486 — one bootstrap,
-        // so the drain and the server cannot drift on which substrate a venue-named room is stood up
-        // on. A box's claim gate (venueMayClaim) already promised it can stand this room up; without
-        // this line workOnce would then refuse EVERY such gig with "…need a realizer this worker was
-        // not given — refusing rather than running the room unbuilt" (worker.ts:1023-1028), because
-        // nothing here supplied one. dockerComposeRealizer() is real docker by default and must not
-        // throw on construction (venue_realizer.ts:808); runGig only realizes when the venue declares
-        // mcp_servers, so a server-less venue's behaviour is unchanged.
-        venueRealizer: dockerComposeRealizer(),
-        log: (l) => line(io, l),
-      },
-    );
+    // workOnce refuses before it claims (a blind drain, a credential the store will not honour); that
+    // refusal is the worker's answer, printed and exited on, not a stack trace.
+    let res: Awaited<ReturnType<typeof workOnce>>;
+    try {
+      res = await workOnce(
+        {
+          baseUrl,
+          anonKey,
+          // Empty in venue mode, and deliberately so: the credential arrives with the work.
+          agentToken: mode.mode === "player" ? mode.agentToken : "",
+          ...(mode.mode === "venue" ? { drainKey: mode.drainKey, instance: mode.instance } : {}),
+          ...(typeof flags["worker"] === "string" ? { worker: flags["worker"] } : {}),
+        },
+        {
+          // WHICH PORT RUNS THE CHAIRS is selected from environment PRESENCE, the same policy shape
+          // selectQueueBacking and selectResidencyBacking already use: a completions URL means the
+          // cheap model port, its absence means the host-tool invoker, and nothing is guessed. The one
+          // selector (src/invoker_selection.ts) is shared with the dispatch door so the drain and
+          // dispatch cannot drift on the choice. The tier→model map is deployment-defined — the engine
+          // names no model, because a standard says what the work IS and the executor is fungible; a
+          // tier the deployment did not map is a typed refusal at the chair, not a silent default. On
+          // the host-tool path the drain passes ITS OWN options (registry, model and timeout only),
+          // unchanged.
+          makeInvoke: (registry) => drainChairInvoker(process.env, registry),
+          // The SAME realizer the interactive path constructs at src/server.ts:3486 — one bootstrap,
+          // so the drain and the server cannot drift on which substrate a venue-named room is stood up
+          // on. A box's claim gate (venueMayClaim) already promised it can stand this room up; without
+          // this line workOnce would then refuse EVERY such gig with "…need a realizer this worker was
+          // not given — refusing rather than running the room unbuilt" (worker.ts:1023-1028), because
+          // nothing here supplied one. dockerComposeRealizer() is real docker by default and must not
+          // throw on construction (venue_realizer.ts:808); runGig only realizes when the venue declares
+          // mcp_servers, so a server-less venue's behaviour is unchanged.
+          venueRealizer: dockerComposeRealizer(),
+          log: (l) => line(io, l),
+        },
+      );
+    } catch (e) {
+      line(io, `work refused: ${e instanceof Error ? e.message : String(e)}`);
+      return 1;
+    }
     if (!res.claimed) {
       line(io, "queue empty — nothing this seat's chair contract may claim");
       return 3;
     }
     // A claim that PARKED at a human chair exits 0: the row was run correctly and now waits on
     // a person. Exiting 1 would make every supervisor restart a worker that did its job.
-    const code = res.status === "failed" ? 1 : 0;
+    //
+    // UNACKNOWLEDGED IS NOT DONE. A run whose terminal state the store never recorded (an output that
+    // never landed, a completed header that was never acknowledged, a gig abandoned to its lease)
+    // exits non-zero, so a supervisor sees a worker that did not finish its job instead of a clean 0
+    // over a row that still reads `running`.
+    //
+    // `=== false`, not falsy: the field is required on every result workOnce builds, and a stand-in
+    // workOnce (the laws that pin this door's wiring) that predates it is not a report of a loss.
+    const unacknowledged = res.acknowledged === false;
+    const code = res.status === "failed" || res.status === "aborted" || unacknowledged ? 1 : 0;
+    if (unacknowledged) line(io, `the store did NOT acknowledge this gig's ${res.status} state`);
     if (emitJson(io, json, res)) return code;
     io.out(res.gig_id + "\n");
     line(io, `${res.status}` +

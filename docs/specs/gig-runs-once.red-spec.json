@@ -1,0 +1,864 @@
+{
+  "spec_doc": "docs/specs/gig-runs-once.red-spec.json \u2014 engine half of the two-repo fix; the store half (coltrane_drain_renew / coltrane_drain_release, attempts/max_attempts, terminal-status guard on the header upsert, lease clearing on terminal writes, manifest merge) lands in eir-labs/coltrane-ui branch work/gig-runs-once and deploys first. CONTRACT SURFACE the laws pin \u2014 src/lease.ts: export const HOSTED_LEASE_MS = 60 * 60 * 1000; export const DRAIN_LEASE_ROUTES = { renew: '/rest/v1/rpc/coltrane_drain_renew', release: '/rest/v1/rpc/coltrane_drain_release' }; renew: POST ${COLTRANE_DRAIN_URL}${DRAIN_LEASE_ROUTES.renew} body {p_gig_id} ONLY, Bearer drain key (the route fills p_token), X-Coltrane-Instance (the route fills p_instance); 200 -> new lease_until; 403 / 42501 -> lease lost; release: POST ${COLTRANE_DRAIN_URL}${DRAIN_LEASE_ROUTES.release} body {p_gig_id, p_reason, p_terminal} ONLY, instance in X-Coltrane-Instance -> boolean; WorkOnceDeps.scheduleHeartbeat: (intervalMs: number, beat: () => Promise<unknown>) => () => void; default arms an unref'd setInterval; interval = HOSTED_LEASE_MS / 3; WorkOnceResult.acknowledged: boolean on a claimed result: true iff the store acknowledged the terminal header; terminal header attempts: 3; header status: 'running' is a new GigHeaderRecord status, sent awaited before the first chair with the run's genome_hash; manifest.cold_run_reason: string on a header written by a run that went cold because a resume was refused. ROUND 2: output drains are acknowledged (3 attempts) before the completed header; a 'running' header refused with 23514 or 403/42501 aborts the run with no terminal write. ROUND 3 (branch work/gig-runs-once-r3): G1 the heartbeat stays armed until the terminal header is acknowledged or exhausted; G2 no release after the outcome is decided when the terminal header is unacknowledged; REFUND a non-terminal release only before the first chair invocation; Q6 the drain deadline ends a gig aborted/timeout (WorkOnceResult status 'aborted', aborted:{reason:'timeout'}, header status 'aborted', no gig_fail); G4 (terminal rows only; founder ruling, Eugene: \"what's closed is closed. can refer to the sealed outputs on input if needed but reopening doesn't smell right.\"): the successful resume path at gig_dispatch(resume_gig_id) / `coltrane dispatch --resume` runs today under the OLD id (gigId = resumeArg ?? randomUUID()), which the store's terminal guard answers with 23514; a resume of a failed/aborted gig must dispatch a NEW gig carrying resumes:<old id>, take the old seals as inputs by reference (content_sha in input_shas, never re-sealed), and write nothing under the old id. The refused-resume case is covered by tests/resume_reuse_dispatch.test.ts:164. A parked \u2192 approved \u2192 re-claimed gig is not terminal and keeps its id (E6b records a cold run there). G4 hosted: the store's claim carries resumes:<old id|null>; workOnce runs under the claim's own id, takes the closed gig's drained seals (coltrane_mcp_gig_outputs for the old id) as inputs by reference, invokes no chair already sealed there, and writes nothing under the old id. The gig_dispatch resume law covers both terminal endings, failed and aborted. ROUND 4 (branch work/gig-runs-once-r4, on the implementation at 16b00dc): WorkOnceResult.status vocabulary is complete | failed | awaiting_approval | aborted | abandoned \u2014 `abandoned` = the lease was lost (a refused renew, or a start header refused with 23514 / 403-42501): the worker writes nothing terminal, no gig_fail, no release, and acknowledged:false; it is NOT a failure of the gig and NOT an outcome the store should record from this worker. L1 a late answer after a lost lease is never sealed; E7c a stale holder of a requeued local row is refused; Q6r the aborted header carries manifest.abort_reason = \"timeout\" as a field; L4 with a store present (ServerDeps.gigStatus \u2192 coltrane_mcp_gig_status) the store decides whether a gig is closed for G4. (G4b/G4h cite their laws at 5993cff on work/gig-runs-once-r3; they arrive on this line with the implementer's merge of 4ed5ef4.) ROUND 5 (on 30183e1): R5.1 a resumed gig re-claimed on a fresh box rebuilds from the closed gig's seals AND its own; R5.2 a store that throws or never answers (30 s) refuses the resume \u2014 never a checkpoint fallback; R5.3 the closed set is failed|aborted|completed|cancelled, the open set running|queued|awaiting_approval; R5.4 rpcGigStatus (coltrane_mcp_gig_status \u2192 status) drives the decision. OBLIGATION OUTSIDE THIS REPO: the HOST (eir-labs/coltrane-ui) must wire ServerDeps.gigStatus = rpcGigStatus(...) the way it wires queueGig \u2014 until it does, no hosted door has a store to ask and the checkpoint decides. This is a coltrane-ui follow-up after #554 publishes. ROUND 6 (RED at 2d4e7ab): the HOSTED gig_dispatch branch (createToolSurface \u2192 callSurfaceTool, deps.queueGig) must make the same closed-gig decision as the local door: H1 a closed gig's resume queues resumes:<old id> (never resume_gig_id); H2 an open gig's resume is refused (in-place resume is gig_approve's job); H3 a store that throws, never answers (30 s) or is not wired refuses, nothing queued; H4 queueGig receives ONLY the host contract (standard_slug, mode, input, org_slug, acting_for, venue, resumes \u2014 what postgrestQueueGig/rpcQueueGig read, plus resumes) and every other advertised gig_dispatch argument (chart_slug, repo_url, depth, effort, max_context_tokens, budget, reuse, approvals, approved_by, wait:true) is refused BY NAME. Budget carriage (a store column) and the coltrane-ui adapter's mapping of `resumes` are the coltrane-ui follow-up. ROUND 6b (review 5326196799 at 2d4e7ab): the fixture now enforces the live store's gig-token scope (status: own gig; outputs: own + the gig the row resumes; else 403/42501) and the drain service's real refusal shape ({error}, no code; 401/403/400 by message) \u2014 G4h and R5.1 are therefore RED AT HEAD, as found live. D1 a resuming gig never re-pays for the closed gig's seals under the real scope (fix: the store widens the resume exception to gig_status, or the engine reads the closed gig's genome hash from somewhere its token may read, e.g. the claim); D2 player mode's run timeout stays under its 30-minute lease (the player path has no renew RPC, so it is the timeout, not a heartbeat); D3 ANY non-2xx on the start header (400 without a code, 403, a persistent 503) stops the run before the first chair; S2\u2013S4 book the review's surviving plants. Not booked (review finding 5, low): output-drain state is per process; the CLI is one gig per process. D1 RESOLVED BY THE STORE (conductor): the fixture now mirrors the coltrane-ui follow-up scope (status + outputs readable for exactly the resumed gig), under which G4h, R5.1 and D1 pass at 2d4e7ab; they stay dependent on that follow-up deploying before #554's hosted resume is live. D3-503 requires E2's retries (3 attempts) on the start header before the run stops. ROUND 6c (on 2597854): coltrane-ui #253 adds budget_micro_usd (bigint micro-dollars \u2265 0, aligned with coltrane #555) to the host contract, so H4 no longer refuses `budget`; H5: the hosted door converts budget.max_usd EXACTLY (decimal, not float) to integer budget_micro_usd and forwards only that, refusing by name >6 decimals, negative, non-finite or non-number; absent \u2192 no key. Q1/Q2: the engine's queue clients (postgrestQueueGig, rpcQueueGig) never drop resumes/budget_micro_usd \u2014 send (p_resumes, p_budget_micro_usd) or refuse by name; absent \u2192 no key. FINDING: at coltrane-ui work/host-carries-the-gig neither coltrane_gig_dispatch nor coltrane_mcp_dispatch accepts those parameters (no migration touches their signatures; the host's dispatch is app-side, src/lib/dispatch.ts, taking resumes / budget_micro_usd verbatim), so today only the REFUSE branch of Q1 is deployable; sending the p_ keys needs a store migration first (PostgREST resolves by exact argument names \u2014 the 0.24.12 p_venue outage). A1: a drain key without COLTRANE_DRAIN_URL refuses the run before the first chair, naming the variable (conductor: no blind drain); tests/venue_dispatch/room_workspace_populated.test.ts now sets COLTRANE_DRAIN_URL to a fake drain service. ROUND 6d (on efd10a1): A2 \u2014 a drain key with no COLTRANE_DRAIN_URL makes NO claim; workOnce and `coltrane work` refuse at startup naming the variable (a post-claim refusal leases the row, spends an attempt, and cannot release it).",
+  "validation_criteria": [
+    "every contract invariant E1-E8 has a red law that drives production code and names its plant",
+    "the drain-service lease RPC routes live in ONE constant (DRAIN_LEASE_ROUTES, src/lease.ts)",
+    "no law sleeps on a real clock for the heartbeat: WorkOnceDeps.scheduleHeartbeat is the injected clock",
+    "the rest of the suite stays green and tsc --noEmit is clean",
+    "implementer obligation: retire the stale 'thirty minutes' lease comments in src/worker.ts (no-mint refusal) and src/run_deps.ts (above the drain timeout), and the 'lease ... is thirty minutes' remark in workOnce's finally",
+    "implementer obligation: tests/gig_header_drain.test.ts 'a chair failure produces one failed-header POST' picks the FIRST coltrane_gigs POST; if the 'running' header is written from runGig, that law must select by status",
+    "implementer obligation: tests/drain_worker.test.ts 'refuses a gig the store leased without minting' matches /minted no credential/; the release-first path may keep that wording but should drop 'the row stays leased'",
+    "implementer obligation: the local queue's I14/O4 laws re-complete a DONE gig by its holder; the new holder check must keep admitting the holder on a row already in done/",
+    "the instance travels once: X-Coltrane-Instance, never also in a lease RPC body (two sources for one fact)",
+    "obligation outside this repo: eir-labs/coltrane-ui wires ServerDeps.gigStatus (rpcGigStatus) exactly as it wires queueGig; follow-up after #554 publishes",
+    "obligation outside this repo: the coltrane-ui queue adapter carries `resumes` into coltrane_gig_dispatch (and later budget, as a store column)",
+    "obligation outside this repo: eir-labs/coltrane-ui widens coltrane_mcp_gig_status's read-only resume exception to exactly the gig the token's row resumes (mirroring coltrane_mcp_gig_outputs); writes stay own-gig only"
+  ],
+  "input_refs": [
+    "SPEC-worker-contract.md",
+    "docs/specs/SPEC-local-queue-contract.md",
+    "src/worker.ts",
+    "src/runtime.ts",
+    "src/output_mirror.ts",
+    "src/local_queue.ts",
+    "src/run_deps.ts"
+  ],
+  "coverage_map": [
+    {
+      "invariant_id": "E1",
+      "test_name": "E1 \u2014 the start header is written, and acknowledged, before the first chair runs > E1 an awaited 'running' header carrying the 64-hex genome_hash precedes the first chair invocation",
+      "test_file": "tests/gig_runs_once_start_header.test.ts",
+      "kind": "behavioural",
+      "drives": "workOnce(ctx, deps) \u2014 src/worker.ts (over runGig \u2014 src/runtime.ts, drainGigHeader \u2014 src/output_mirror.ts)",
+      "plant": "write the 'running' header with `void drainGigHeader(...)` instead of awaiting it (or send it after the first chair's invocation) in src/runtime.ts / src/worker.ts"
+    },
+    {
+      "invariant_id": "E2a",
+      "test_name": "E2 \u2014 the terminal header is awaited, retried, and its loss is reported > E2a workOnce does not return 'complete' until the store has ACKNOWLEDGED the completed header",
+      "test_file": "tests/gig_runs_once_terminal_ack.test.ts",
+      "kind": "behavioural",
+      "drives": "workOnce(ctx, deps) \u2014 src/worker.ts (the completed-header drain in runGig \u2014 src/runtime.ts)",
+      "plant": "restore `void drainGigHeader({ ... status: \"complete\" ... })` on the success path of runGig in src/runtime.ts"
+    },
+    {
+      "invariant_id": "E2b",
+      "test_name": "E2 \u2014 the terminal header is awaited, retried, and its loss is reported > E2b a transient refusal of the completed header is RETRIED until acknowledged (within the bound)",
+      "test_file": "tests/gig_runs_once_terminal_ack.test.ts",
+      "kind": "behavioural",
+      "drives": "workOnce(ctx, deps) \u2014 src/worker.ts (terminal header write, src/runtime.ts / src/output_mirror.ts)",
+      "plant": "remove the retry loop around the terminal header write (one attempt only)"
+    },
+    {
+      "invariant_id": "E2c",
+      "test_name": "E2 \u2014 the terminal header is awaited, retried, and its loss is reported > E2c a completed header the store NEVER acknowledges is reported (acknowledged:false) and LOGGED without COLTRANE_DRAIN_DEBUG",
+      "test_file": "tests/gig_runs_once_terminal_ack.test.ts",
+      "kind": "behavioural",
+      "drives": "workOnce(ctx, deps) \u2014 src/worker.ts \u2014 WorkOnceResult.acknowledged",
+      "plant": "gate the unacknowledged-terminal-header log line behind `if (process.env[\"COLTRANE_DRAIN_DEBUG\"])` (or drop acknowledged:false from the WorkOnceResult)"
+    },
+    {
+      "invariant_id": "E2d",
+      "test_name": "E2 \u2014 the terminal header is awaited, retried, and its loss is reported > E2d the FAILED header is awaited and retried too \u2014 a failed run's truth reaches the store before workOnce returns",
+      "test_file": "tests/gig_runs_once_terminal_ack.test.ts",
+      "kind": "behavioural",
+      "drives": "workOnce(ctx, deps) \u2014 src/worker.ts (the failed-header drain in runGig's catch \u2014 src/runtime.ts)",
+      "plant": "restore `void drainGigHeader({ ... status: \"failed\" ... })` in runGig's catch in src/runtime.ts"
+    },
+    {
+      "invariant_id": "E2e",
+      "test_name": "E2 \u2014 the terminal header is awaited, retried, and its loss is reported > E2e `coltrane work` exits NON-ZERO when the completion was never acknowledged",
+      "test_file": "tests/gig_runs_once_terminal_ack.test.ts",
+      "kind": "behavioural",
+      "drives": "runCli([\"work\"], io) \u2014 src/cli.ts (over workOnce \u2014 src/worker.ts)",
+      "plant": "compute the `work` exit code in src/cli.ts as `res.status === \"failed\" ? 1 : 0`, ignoring res.acknowledged"
+    },
+    {
+      "invariant_id": "E3",
+      "test_name": "E3 \u2014 the heartbeat renews the lease while the gig runs > E3 a heartbeat is armed before the first chair, every HOSTED_LEASE_MS/3, and renews with body {p_gig_id} and the instance only in its header",
+      "test_file": "tests/gig_runs_once_heartbeat.test.ts",
+      "kind": "behavioural",
+      "drives": "workOnce(ctx, deps) \u2014 src/worker.ts \u2014 WorkOnceDeps.scheduleHeartbeat + the coltrane_drain_renew call through the drain service (src/output_mirror.ts drainPost)",
+      "plant": "delete the scheduleHeartbeat(...) arming in workOnce (no heartbeat) \u2014 or add p_instance to the renew body"
+    },
+    {
+      "invariant_id": "E3r",
+      "test_name": "E3 \u2014 the heartbeat renews the lease while the gig runs > E3 the route constant names the store's RPCs \u2014 the one place a store-side rename is changed",
+      "test_file": "tests/gig_runs_once_heartbeat.test.ts",
+      "kind": "behavioural",
+      "drives": "DRAIN_LEASE_ROUTES \u2014 src/lease.ts",
+      "plant": "change DRAIN_LEASE_ROUTES.renew in src/lease.ts to a path not ending in coltrane_drain_renew"
+    },
+    {
+      "invariant_id": "E4",
+      "test_name": "E4 \u2014 a lost lease stops the run > E4 a renew answered 403/42501 aborts the gig: no further chair, nothing further sealed or drained, no terminal write",
+      "test_file": "tests/gig_runs_once_heartbeat.test.ts",
+      "kind": "behavioural",
+      "drives": "workOnce(ctx, deps) \u2014 src/worker.ts \u2014 the heartbeat's renew result wired to the run's AbortController, and the terminal-write suppression on lease loss",
+      "plant": "ignore a failed renew in the heartbeat beat (do not abort the run's AbortController)"
+    },
+    {
+      "invariant_id": "E5a",
+      "test_name": "E5 \u2014 release, never hold > E5a a claim the store leased WITHOUT minting a credential is released (non-terminal), not held for the lease window",
+      "test_file": "tests/gig_runs_once_release.test.ts",
+      "kind": "behavioural",
+      "drives": "workOnce(ctx, deps) \u2014 src/worker.ts \u2192 claimNextGig \u2014 src/worker.ts; coltrane_drain_release via the drain service",
+      "plant": "throw the 'minted no credential' error in claimNextGig without first calling release (or send p_instance in the release body \u2014 the instance rides X-Coltrane-Instance only)"
+    },
+    {
+      "invariant_id": "E5b",
+      "test_name": "E5 \u2014 release, never hold > E5b a claim naming a venue this box cannot realize is released (non-terminal) naming the venue",
+      "test_file": "tests/gig_runs_once_release.test.ts",
+      "kind": "behavioural",
+      "drives": "workOnce(ctx, deps) \u2014 src/worker.ts \u2192 claimNextGig venue-mode venueMayClaim refusal \u2014 src/worker.ts",
+      "plant": "throw the unrealizable-venue error in claimNextGig without first calling release (or send p_instance in the release body \u2014 the instance rides X-Coltrane-Instance only)"
+    },
+    {
+      "invariant_id": "E5c",
+      "test_name": "E5 \u2014 release, never hold > E5c a failGig that THROWS falls back to a TERMINAL release carrying the run's error",
+      "test_file": "tests/gig_runs_once_release.test.ts",
+      "kind": "behavioural",
+      "drives": "workOnce(ctx, deps) \u2014 src/worker.ts (the catch around failGig)",
+      "plant": "in workOnce's catch, only log when failGig throws (drop the release(terminal=true) fallback) (or send p_instance in the release body \u2014 the instance rides X-Coltrane-Instance only)"
+    },
+    {
+      "invariant_id": "E6a",
+      "test_name": "E6 \u2014 a re-claim finishes without re-running > E6a a fresh worker re-claiming a gig whose completion was lost completes it with ZERO model calls and writes the terminal header",
+      "test_file": "tests/gig_runs_once_reclaim.test.ts",
+      "kind": "behavioural",
+      "drives": "workOnce(ctx, deps) \u2014 src/worker.ts twice over one stateful store (rebuildFromDrain / resumeStateFromDrain \u2014 src/worker.ts; runGig resume \u2014 src/runtime.ts)",
+      "plant": "make rebuildFromDrain return { ok: false } unconditionally (cold run on every re-claim), or drop genome_hash from the start header"
+    },
+    {
+      "invariant_id": "E6b",
+      "test_name": "E6 \u2014 a re-claim finishes without re-running > E6b a resume REFUSED for a real reason (the genome moved) runs cold AND records why, in the gig's header manifest",
+      "test_file": "tests/gig_runs_once_reclaim.test.ts",
+      "kind": "behavioural",
+      "drives": "workOnce(ctx, deps) \u2014 src/worker.ts \u2014 coldReason / ResumeRefused fallback into the header manifest (gigHeaderBody \u2014 src/output_mirror.ts)",
+      "plant": "drop cold_run_reason from the header manifest (gigHeaderBody / the record workOnce hands the runtime)"
+    },
+    {
+      "invariant_id": "E7a",
+      "test_name": "E7 \u2014 the local queue refuses a completion from a worker that does not hold the lease > E7 a stale worker (lease lapsed, gig reaped and re-claimed) cannot complete it; the new holder still can",
+      "test_file": "tests/gig_runs_once_local_complete.test.ts",
+      "kind": "behavioural",
+      "drives": "openLocalQueue(root).complete \u2014 src/local_queue.ts",
+      "plant": "remove the lease-holder check from complete() in src/local_queue.ts"
+    },
+    {
+      "invariant_id": "E7b",
+      "test_name": "E7 \u2014 the local queue refuses a completion from a worker that does not hold the lease > E7 a worker that never held the gig cannot complete it",
+      "test_file": "tests/gig_runs_once_local_complete.test.ts",
+      "kind": "behavioural",
+      "drives": "openLocalQueue(root).complete \u2014 src/local_queue.ts",
+      "plant": "remove the lease-holder check from complete() in src/local_queue.ts"
+    },
+    {
+      "invariant_id": "E8a",
+      "test_name": "E8 \u2014 the lease length is one constant > E8 HOSTED_LEASE_MS is sixty minutes, and the drain's default run timeout sits under it",
+      "test_file": "tests/gig_runs_once_lease_constant.test.ts",
+      "kind": "behavioural",
+      "drives": "HOSTED_LEASE_MS \u2014 src/lease.ts; drainTimeoutMs() \u2014 src/run_deps.ts",
+      "plant": "set HOSTED_LEASE_MS = 30 * 60 * 1000 in src/lease.ts"
+    },
+    {
+      "invariant_id": "E8b",
+      "test_name": "E8 \u2014 the lease length is one constant > E8 move the constant and the heartbeat interval AND the run timeout follow it \u2014 neither is a second copy",
+      "test_file": "tests/gig_runs_once_lease_constant.test.ts",
+      "kind": "behavioural",
+      "drives": "workOnce (heartbeat interval) \u2014 src/worker.ts; drainTimeoutMs() \u2014 src/run_deps.ts; both under a module mock of src/lease.ts",
+      "plant": "hard-code the heartbeat interval in workOnce as 20 * 60 * 1000 (or keep DEFAULT_DRAIN_TIMEOUT_MS = 25 * 60 * 1000 in src/run_deps.ts)"
+    },
+    {
+      "invariant_id": "E9a",
+      "test_name": "E9 \u2014 outputs are acknowledged before the gig is reported complete > E9a the 'completed' header is sent only AFTER the store acknowledged every output row of the gig",
+      "test_file": "tests/gig_runs_once_outputs_first.test.ts",
+      "kind": "behavioural",
+      "drives": "workOnce(ctx, deps) \u2014 src/worker.ts (mirror.persist \u2192 drainRemote \u2014 src/output_mirror.ts; the completed-header write in runGig \u2014 src/runtime.ts)",
+      "plant": "restore `void drainRemote(rec)` in createOutputMirror().persist in src/output_mirror.ts, or write the completed header before awaiting the gig's pending output drains"
+    },
+    {
+      "invariant_id": "E9b",
+      "test_name": "E9 \u2014 outputs are acknowledged before the gig is reported complete > E9b an output row the drain service NEVER acknowledges: retried to the bound, NO completed header, acknowledged:false, logged without debug",
+      "test_file": "tests/gig_runs_once_outputs_first.test.ts",
+      "kind": "behavioural",
+      "drives": "workOnce(ctx, deps) \u2014 src/worker.ts \u2014 WorkOnceResult.acknowledged over the output drains",
+      "plant": "remove the retry around drainViaPostgrest's row POST, or write the completed header even when an output drain failed"
+    },
+    {
+      "invariant_id": "E9c",
+      "test_name": "E9 \u2014 outputs are acknowledged before the gig is reported complete > E9c `coltrane work` exits NON-ZERO when a sealed output never reached the store",
+      "test_file": "tests/gig_runs_once_outputs_first.test.ts",
+      "kind": "behavioural",
+      "drives": "runCli([\"work\"], io) \u2014 src/cli.ts (over workOnce \u2014 src/worker.ts)",
+      "plant": "report acknowledged:true from workOnce when only the header (not the outputs) was acknowledged"
+    },
+    {
+      "invariant_id": "E10a",
+      "test_name": "E10 \u2014 a refused start header stops the worker before it spends > E10 the store refuses the 'running' header with 23514 \u2014 the terminal guard: the row is already finished: no chair, no seal, no terminal write",
+      "test_file": "tests/gig_runs_once_refused_header.test.ts",
+      "kind": "behavioural",
+      "drives": "workOnce(ctx, deps) \u2014 src/worker.ts \u2014 the awaited start header's refusal wired to the run's abort and the terminal-write suppression",
+      "plant": "log and ignore a refused 'running' header (continue into the first chair)"
+    },
+    {
+      "invariant_id": "E10b",
+      "test_name": "E10 \u2014 a refused start header stops the worker before it spends > E10 the store refuses the 'running' header with 403 / 42501 \u2014 the lease is not this worker's: no chair, no seal, no terminal write",
+      "test_file": "tests/gig_runs_once_refused_header.test.ts",
+      "kind": "behavioural",
+      "drives": "workOnce(ctx, deps) \u2014 src/worker.ts \u2014 same",
+      "plant": "log and ignore a refused 'running' header (continue into the first chair)"
+    },
+    {
+      "invariant_id": "G1a",
+      "test_name": "G1 \u2014 the heartbeat stays armed through sealing, output acks and the terminal header > G1a the heartbeat's stop is called only AFTER the terminal header was acknowledged",
+      "test_file": "tests/gig_runs_once_heartbeat_window.test.ts",
+      "kind": "behavioural",
+      "drives": "workOnce(ctx, deps) \u2014 src/worker.ts \u2014 the scheduleHeartbeat stop relative to the acknowledged terminal header",
+      "plant": "call the heartbeat's stop when runGig returns (outcome decided), before the terminal header is awaited"
+    },
+    {
+      "invariant_id": "G1b",
+      "test_name": "G1 \u2014 the heartbeat stays armed through sealing, output acks and the terminal header > G1b a renew refused AFTER the last chair but before the completion is acknowledged suppresses the terminal write",
+      "test_file": "tests/gig_runs_once_heartbeat_window.test.ts",
+      "kind": "behavioural",
+      "drives": "workOnce(ctx, deps) \u2014 src/worker.ts \u2014 a lease loss during the output-ack / terminal-header window gating the terminal write",
+      "plant": "disarm the heartbeat when the outcome is decided, or write the completed header regardless of a lease lost after the last chair"
+    },
+    {
+      "invariant_id": "G2a",
+      "test_name": "G2 \u2014 once the outcome is decided, an unacknowledged terminal header sends no release > G2a completed but never acknowledged: acknowledged:false and NO release of any kind",
+      "test_file": "tests/gig_runs_once_release_after_outcome.test.ts",
+      "kind": "behavioural",
+      "drives": "workOnce(ctx, deps) \u2014 src/worker.ts \u2014 the unacknowledged-completion path",
+      "plant": "send release(p_terminal=false) when the completed header exhausts its retries"
+    },
+    {
+      "invariant_id": "G2b",
+      "test_name": "G2 \u2014 once the outcome is decided, an unacknowledged terminal header sends no release > G2b failed but the failed header never acknowledged (gig_fail recorded): acknowledged:false and NO release of any kind",
+      "test_file": "tests/gig_runs_once_release_after_outcome.test.ts",
+      "kind": "behavioural",
+      "drives": "workOnce(ctx, deps) \u2014 src/worker.ts \u2014 the unacknowledged-failure path",
+      "plant": "send a (non-terminal or terminal) release when the failed header exhausts its retries although gig_fail recorded the failure"
+    },
+    {
+      "invariant_id": "REFUND",
+      "test_name": "ATTEMPT REFUND \u2014 after the first chair is invoked, every release is terminal > REFUND a chair ran, the run failed, and failGig threw: the release this worker sends is TERMINAL, never a refund",
+      "test_file": "tests/gig_runs_once_release_after_outcome.test.ts",
+      "kind": "behavioural",
+      "drives": "workOnce(ctx, deps) \u2014 src/worker.ts \u2014 the failGig-throws release fallback after a chair was invoked",
+      "plant": "send release(p_terminal=false) from workOnce's catch after the first chair invocation"
+    },
+    {
+      "invariant_id": "Q6",
+      "test_name": "Q6 \u2014 the drain deadline ends a gig as aborted/timeout, acknowledged > Q6 the run timeout fires: WorkOnceResult is aborted/timeout, the terminal header says `aborted` (retried to acknowledgement), and nothing reports it failed",
+      "test_file": "tests/gig_runs_once_timeout_aborted.test.ts",
+      "kind": "behavioural",
+      "drives": "workOnce(ctx, deps) \u2014 src/worker.ts \u2014 the drainTimeoutMs() deadline (src/run_deps.ts) through runGig's abort, WorkOnceResult.aborted, the aborted header",
+      "plant": "let the deadline's abort fall into workOnce's generic catch (status failed, failGig, failed header)"
+    },
+    {
+      "invariant_id": "G4a",
+      "test_name": "G4 \u2014 a resume of a TERMINAL gig is a new gig linked to the old one > G4 gig_dispatch({resume_gig_id}) of a FAILED gig runs under a NEW id carrying `resumes: <old id>`, takes the old seals as inputs by reference, and writes nothing under the old id",
+      "test_file": "tests/gig_runs_once_terminal_resume.test.ts",
+      "kind": "behavioural",
+      "drives": "dispatchTool(\"gig_dispatch\", { resume_gig_id }, deps) \u2014 src/server.ts (`const gigId = resumeArg ?? randomUUID()`, the successful resume path) over runGig resume \u2014 src/runtime.ts and drainGigHeader \u2014 src/output_mirror.ts. FOUNDER RULING (Eugene), verbatim: \"what's closed is closed. can refer to the sealed outputs on input if needed but reopening doesn't smell right.\" The refused-resume case is covered by tests/resume_reuse_dispatch.test.ts:164 (a refused resume is a refusal, never a cold run).",
+      "plant": "keep `const gigId = resumeArg ?? randomUUID()` for a failed/aborted gig (resuming under the old id) \u2014 or re-seal the old gig's sealed note under the new id as the new gig's own work (a new seal / the new gate's input_shas not naming the old content_sha)"
+    },
+    {
+      "invariant_id": "G4b",
+      "test_name": "G4 \u2014 a resume of a TERMINAL gig is a new gig linked to the old one > G4 gig_dispatch({resume_gig_id}) of an ABORTED gig runs under a NEW id carrying `resumes: <old id>`, takes the old seals as inputs by reference, and writes nothing under the old id",
+      "test_file": "tests/gig_runs_once_terminal_resume.test.ts",
+      "kind": "behavioural",
+      "drives": "dispatchTool(\"gig_dispatch\") then dispatchTool(\"gig_abort\") then dispatchTool(\"gig_dispatch\", { resume_gig_id }) \u2014 src/server.ts. FOUNDER RULING (Eugene), verbatim: \"what's closed is closed. can refer to the sealed outputs on input if needed but reopening doesn't smell right.\"",
+      "plant": "keep `const gigId = resumeArg ?? randomUUID()` for an aborted gig \u2014 or re-seal the old gig's sealed note under the new id"
+    },
+    {
+      "invariant_id": "G4h",
+      "test_name": "G4 hosted: a claim carrying `resumes` runs under its own id, the closed gig's seals as inputs > G4h a claim with `resumes: <old id>` invokes only the unsealed chair, cites the old seal in input_shas, never re-seals it, and writes nothing under the old id",
+      "test_file": "tests/gig_runs_once_claim_resumes.test.ts",
+      "kind": "behavioural",
+      "drives": "workOnce(ctx, deps) \u2014 src/worker.ts, over a claim carrying `resumes` (ClaimedGig; the store pins the field in eir-labs/coltrane-ui #250), fetching the closed gig's seals via coltrane_mcp_gig_outputs. FOUNDER RULING (Eugene), verbatim: \"what's closed is closed. can refer to the sealed outputs on input if needed but reopening doesn't smell right.\"",
+      "plant": "ignore claim.resumes in workOnce (a cold run) \u2014 or write any header/output/gig_fail/release under the old id"
+    },
+    {
+      "invariant_id": "L1",
+      "test_name": "L1 \u2014 an answer that arrives after the lease was lost is not sealed > L1 a chair that ignores the abort and answers after renew is refused: nothing sealed, nothing drained, no next chair, the run is `abandoned`",
+      "test_file": "tests/gig_runs_once_late_answer.test.ts",
+      "kind": "behavioural",
+      "drives": "workOnce(ctx, deps) \u2014 src/worker.ts \u2014 the invoker wrapper that refuses an answer once leaseLost() is set, and the `abandoned` result",
+      "plant": "delete `if (lost) throw lost;` from the invoker wrapper in workOnce (src/worker.ts)",
+      "plant_observed": "\u00d7 L1 \u2026 \u2192 the late answer was SEALED after the lease was lost: expected [ { \u2026(15) } ] to deeply equal []"
+    },
+    {
+      "invariant_id": "E7c",
+      "test_name": "E7 \u2014 the local queue refuses a completion from a worker that does not hold the lease > E7 a stale holder cannot complete a row that was REQUEUED (lease lapsed and reaped, not yet re-claimed)",
+      "test_file": "tests/gig_runs_once_local_complete.test.ts",
+      "kind": "behavioural",
+      "drives": "openLocalQueue(root).complete \u2014 src/local_queue.ts (the state-directory half of holdsIt)",
+      "plant": "replace `const holdsIt = (loc.dir === claimedDir || loc.dir === doneDir) && record.lease?.holder === worker;` with `const holdsIt = record.lease?.holder === worker;` in src/local_queue.ts",
+      "plant_observed": "\u00d7 E7 \u2026 REQUEUED \u2026 \u2192 complete() accepted a seal from the lapsed holder of a REQUEUED row: expected 'accepted' to be 'refused' // Object.is equality"
+    },
+    {
+      "invariant_id": "Q6r",
+      "test_name": "Q6 \u2014 the drain deadline ends a gig as aborted/timeout, acknowledged > Q6r the aborted header carries the reason `timeout` ITSELF, as manifest.abort_reason, even when the chair's own error never mentions it",
+      "test_file": "tests/gig_runs_once_timeout_aborted.test.ts",
+      "kind": "behavioural",
+      "drives": "workOnce(ctx, deps) \u2014 src/worker.ts \u2192 runGig's aborted terminal header (drainTerminalHeader / gigHeaderBody \u2014 src/runtime.ts, src/output_mirror.ts)",
+      "plant": "omit manifest.abort_reason from the aborted header (today's code: the reason exists only as prose in manifest.error). The free-text `aborted: <reason>` prefix is an EQUIVALENT mutant: with it dropped, the header still says \"GigAborted: \u2026 was aborted \u2014 timeout: \u2026\" through the exception's own message, so a /timeout/ text match cannot fail. Hence the field."
+    },
+    {
+      "invariant_id": "L4",
+      "test_name": "L4 \u2014 with a store present, the STORE decides whether a gig is closed > L4 the same checkpoint (no `ended`): no store \u2192 old id; store says awaiting_approval \u2192 old id; store says FAILED \u2192 a NEW gig carrying `resumes`",
+      "test_file": "tests/gig_runs_once_closed_by_store.test.ts",
+      "kind": "behavioural",
+      "drives": "dispatchTool(\"gig_dispatch\", { resume_gig_id }, deps) \u2014 src/server.ts, with ServerDeps.gigStatus (the store seam, parallel to queueGig; the host wires coltrane_mcp_gig_status). CONDUCTOR RULING: with a store present, whether a gig is closed (failed/aborted/completed/cancelled) for G4 is decided by the STORE's status, never only by the local checkpoint; without a store the checkpoint decides.",
+      "plant": "decide `resumesEnded` from `deps.checkpoints.read(resumeArg)?.ended` alone (today's src/server.ts), ignoring deps.gigStatus"
+    },
+    {
+      "invariant_id": "R5.1",
+      "test_name": "R5.1 \u2014 a resumed gig re-claimed on a fresh box pays only for what neither gig sealed > R5.1 N resumes closed O, seals its own chair, loses its box; the fresh re-claim invokes only the chair sealed in neither, and writes nothing under O",
+      "test_file": "tests/gig_runs_once_resumed_reclaim.test.ts",
+      "kind": "behavioural",
+      "drives": "workOnce(ctx, deps) \u2014 src/worker.ts, on a claim carrying resumes, three boxes over one stateful store (rebuildFromDrain / resumeStateFromDrain)",
+      "plant": "rebuild from `resumes ?? claim.gig_id` only (today's src/worker.ts): the claim's own drained seals are never read \u2014 RED AT HEAD 30183e1"
+    },
+    {
+      "invariant_id": "R5.2a",
+      "test_name": "R5.2 \u2014 a store that cannot answer refuses the resume; it never falls back to the checkpoint > R5.2a gigStatus THROWS: the resume is refused, the reason names the store, nothing runs under either id, and it holds even when the checkpoint says the gig ended",
+      "test_file": "tests/gig_runs_once_store_decides.test.ts",
+      "kind": "behavioural",
+      "drives": "dispatchTool(\"gig_dispatch\", { resume_gig_id }, deps) \u2014 src/server.ts, with ServerDeps.gigStatus throwing",
+      "plant": "on a gigStatus throw, fall back to `deps.checkpoints.read(resumeArg)?.ended` instead of refusing",
+      "plant_observed": "\u00d7 R5.2a \u2026 \u2192 the store could not answer and the door resumed anyway (checkpoint ended=true); it fell back to the checkpoint: expected true to be false"
+    },
+    {
+      "invariant_id": "R5.2b",
+      "test_name": "R5.2 \u2014 a store that cannot answer refuses the resume; it never falls back to the checkpoint > R5.2b gigStatus NEVER ANSWERS: within 30 s the resume is refused, naming the store, and not decided from the checkpoint",
+      "test_file": "tests/gig_runs_once_store_decides.test.ts",
+      "kind": "behavioural",
+      "drives": "dispatchTool(\"gig_dispatch\", { resume_gig_id }, deps) \u2014 src/server.ts, with ServerDeps.gigStatus never settling (fake timers, 30 s)",
+      "plant": "await deps.gigStatus with no timeout (today's src/server.ts) \u2014 RED AT HEAD 30183e1"
+    },
+    {
+      "invariant_id": "R5.3-completed",
+      "test_name": "R5.3 \u2014 the closed set is complete > R5.3 a store answering `completed` makes the resume a NEW gig carrying resumes (as failed/aborted do)",
+      "test_file": "tests/gig_runs_once_store_decides.test.ts",
+      "kind": "behavioural",
+      "drives": "dispatchTool(\"gig_dispatch\", { resume_gig_id }, deps) \u2014 src/server.ts, with ServerDeps.gigStatus",
+      "plant": "drop \"completed\" from CLOSED_GIG_STATUSES in src/server.ts",
+      "plant_observed": "\u00d7 R5.3 a store answering `completed` \u2026 \u2192 the store says `completed` and the door reopened the closed gig under its old id: expected '<id>' not to be '<id>'"
+    },
+    {
+      "invariant_id": "R5.3-cancelled",
+      "test_name": "R5.3 \u2014 the closed set is complete > R5.3 a store answering `cancelled` makes the resume a NEW gig carrying resumes (as failed/aborted do)",
+      "test_file": "tests/gig_runs_once_store_decides.test.ts",
+      "kind": "behavioural",
+      "drives": "dispatchTool(\"gig_dispatch\", { resume_gig_id }, deps) \u2014 src/server.ts, with ServerDeps.gigStatus",
+      "plant": "drop \"cancelled\" from CLOSED_GIG_STATUSES in src/server.ts",
+      "plant_observed": "\u00d7 R5.3 a store answering `cancelled` \u2026 \u2192 the store says `cancelled` and the door reopened the closed gig under its old id: expected '<id>' not to be '<id>'"
+    },
+    {
+      "invariant_id": "R5.3-running",
+      "test_name": "R5.3 \u2014 the closed set is complete > R5.3 a store answering `running` is OPEN: the resume keeps the gig's own id, even with a checkpoint that says it ended",
+      "test_file": "tests/gig_runs_once_store_decides.test.ts",
+      "kind": "behavioural",
+      "drives": "dispatchTool(\"gig_dispatch\", { resume_gig_id }, deps) \u2014 src/server.ts, with ServerDeps.gigStatus",
+      "plant": "add \"running\" to CLOSED_GIG_STATUSES (or let checkpoint.ended decide while a store is present)"
+    },
+    {
+      "invariant_id": "R5.3-queued",
+      "test_name": "R5.3 \u2014 the closed set is complete > R5.3 a store answering `queued` is OPEN: the resume keeps the gig's own id, even with a checkpoint that says it ended",
+      "test_file": "tests/gig_runs_once_store_decides.test.ts",
+      "kind": "behavioural",
+      "drives": "dispatchTool(\"gig_dispatch\", { resume_gig_id }, deps) \u2014 src/server.ts, with ServerDeps.gigStatus",
+      "plant": "add \"queued\" to CLOSED_GIG_STATUSES (or let checkpoint.ended decide while a store is present)"
+    },
+    {
+      "invariant_id": "R5.3-awaiting_approval",
+      "test_name": "R5.3 \u2014 the closed set is complete > R5.3 a store answering `awaiting_approval` is OPEN: the resume keeps the gig's own id, even with a checkpoint that says it ended",
+      "test_file": "tests/gig_runs_once_store_decides.test.ts",
+      "kind": "behavioural",
+      "drives": "dispatchTool(\"gig_dispatch\", { resume_gig_id }, deps) \u2014 src/server.ts, with ServerDeps.gigStatus",
+      "plant": "add \"awaiting_approval\" to CLOSED_GIG_STATUSES (or let checkpoint.ended decide while a store is present)"
+    },
+    {
+      "invariant_id": "R5.4",
+      "test_name": "R5.4 \u2014 rpcGigStatus is the reader, and its answer reaches the decision > R5.4 the real rpcGigStatus against a fake coltrane_mcp_gig_status: `failed` (row or one-row array) \u2192 a new gig; `awaiting_approval` \u2192 the old id; the bearer and gig ride the body",
+      "test_file": "tests/gig_runs_once_store_decides.test.ts",
+      "kind": "behavioural",
+      "drives": "rpcGigStatus(ctx) \u2014 src/genome_store.ts, as ServerDeps.gigStatus behind dispatchTool(\"gig_dispatch\", { resume_gig_id }, deps) \u2014 src/server.ts, with ServerDeps.gigStatus",
+      "plant": "read `(row as Record<string, unknown>)[\"state\"]` instead of [\"status\"] in rpcGigStatus",
+      "plant_observed": "\u00d7 R5.4 \u2026 \u2192 the store answered a header row saying failed through rpcGigStatus and the door did not treat it as closed: expected '<id>' not to be '<id>'"
+    },
+    {
+      "invariant_id": "H1-failed",
+      "test_name": "H1 \u2014 a hosted resume of a CLOSED gig queues a new gig linked by `resumes` > H1 store says `failed`: queueGig gets resumes:<old id> and NO resume_gig_id; it is never a fresh unlinked gig",
+      "test_file": "tests/gig_runs_once_hosted_dispatch.test.ts",
+      "kind": "behavioural",
+      "drives": "createToolSurface(deps).find(gig_dispatch).call(args) \u2192 callSurfaceTool hosted branch \u2014 src/server.ts (deps.hosted + deps.queueGig + deps.gigStatus)",
+      "plant": "forward args whole to deps.queueGig (today's hosted branch) \u2014 RED AT HEAD 2d4e7ab"
+    },
+    {
+      "invariant_id": "H1-aborted",
+      "test_name": "H1 \u2014 a hosted resume of a CLOSED gig queues a new gig linked by `resumes` > H1 store says `aborted`: queueGig gets resumes:<old id> and NO resume_gig_id; it is never a fresh unlinked gig",
+      "test_file": "tests/gig_runs_once_hosted_dispatch.test.ts",
+      "kind": "behavioural",
+      "drives": "createToolSurface(deps).find(gig_dispatch).call(args) \u2192 callSurfaceTool hosted branch \u2014 src/server.ts (deps.hosted + deps.queueGig + deps.gigStatus)",
+      "plant": "forward args whole to deps.queueGig (today's hosted branch) \u2014 RED AT HEAD 2d4e7ab"
+    },
+    {
+      "invariant_id": "H1-completed",
+      "test_name": "H1 \u2014 a hosted resume of a CLOSED gig queues a new gig linked by `resumes` > H1 store says `completed`: queueGig gets resumes:<old id> and NO resume_gig_id; it is never a fresh unlinked gig",
+      "test_file": "tests/gig_runs_once_hosted_dispatch.test.ts",
+      "kind": "behavioural",
+      "drives": "createToolSurface(deps).find(gig_dispatch).call(args) \u2192 callSurfaceTool hosted branch \u2014 src/server.ts (deps.hosted + deps.queueGig + deps.gigStatus)",
+      "plant": "forward args whole to deps.queueGig (today's hosted branch) \u2014 RED AT HEAD 2d4e7ab"
+    },
+    {
+      "invariant_id": "H1-cancelled",
+      "test_name": "H1 \u2014 a hosted resume of a CLOSED gig queues a new gig linked by `resumes` > H1 store says `cancelled`: queueGig gets resumes:<old id> and NO resume_gig_id; it is never a fresh unlinked gig",
+      "test_file": "tests/gig_runs_once_hosted_dispatch.test.ts",
+      "kind": "behavioural",
+      "drives": "createToolSurface(deps).find(gig_dispatch).call(args) \u2192 callSurfaceTool hosted branch \u2014 src/server.ts (deps.hosted + deps.queueGig + deps.gigStatus)",
+      "plant": "forward args whole to deps.queueGig (today's hosted branch) \u2014 RED AT HEAD 2d4e7ab"
+    },
+    {
+      "invariant_id": "H2-running",
+      "test_name": "H2 \u2014 a hosted resume of an OPEN gig is refused; in-place resume is the approval door's job > H2 store says `running`: refused with a reason naming the status, nothing queued",
+      "test_file": "tests/gig_runs_once_hosted_dispatch.test.ts",
+      "kind": "behavioural",
+      "drives": "createToolSurface(deps).find(gig_dispatch).call(args) \u2192 callSurfaceTool hosted branch \u2014 src/server.ts (deps.hosted + deps.queueGig + deps.gigStatus)",
+      "plant": "queue an open gig's hosted resume (today's forward-whole) \u2014 RED AT HEAD 2d4e7ab"
+    },
+    {
+      "invariant_id": "H2-queued",
+      "test_name": "H2 \u2014 a hosted resume of an OPEN gig is refused; in-place resume is the approval door's job > H2 store says `queued`: refused with a reason naming the status, nothing queued",
+      "test_file": "tests/gig_runs_once_hosted_dispatch.test.ts",
+      "kind": "behavioural",
+      "drives": "createToolSurface(deps).find(gig_dispatch).call(args) \u2192 callSurfaceTool hosted branch \u2014 src/server.ts (deps.hosted + deps.queueGig + deps.gigStatus)",
+      "plant": "queue an open gig's hosted resume (today's forward-whole) \u2014 RED AT HEAD 2d4e7ab"
+    },
+    {
+      "invariant_id": "H2-awaiting_approval",
+      "test_name": "H2 \u2014 a hosted resume of an OPEN gig is refused; in-place resume is the approval door's job > H2 store says `awaiting_approval`: refused with a reason naming the status, nothing queued",
+      "test_file": "tests/gig_runs_once_hosted_dispatch.test.ts",
+      "kind": "behavioural",
+      "drives": "createToolSurface(deps).find(gig_dispatch).call(args) \u2192 callSurfaceTool hosted branch \u2014 src/server.ts (deps.hosted + deps.queueGig + deps.gigStatus)",
+      "plant": "queue an open gig's hosted resume (today's forward-whole) \u2014 RED AT HEAD 2d4e7ab"
+    },
+    {
+      "invariant_id": "H3a",
+      "test_name": "H3 \u2014 a store that cannot answer refuses the hosted resume; nothing is queued > H3a gigStatus THROWS: refused naming the store's error, nothing queued",
+      "test_file": "tests/gig_runs_once_hosted_dispatch.test.ts",
+      "kind": "behavioural",
+      "drives": "createToolSurface(deps).find(gig_dispatch).call(args) \u2192 callSurfaceTool hosted branch \u2014 src/server.ts (deps.hosted + deps.queueGig + deps.gigStatus)",
+      "plant": "queue when gigStatus throws \u2014 RED AT HEAD 2d4e7ab"
+    },
+    {
+      "invariant_id": "H3b",
+      "test_name": "H3 \u2014 a store that cannot answer refuses the hosted resume; nothing is queued > H3b gigStatus NEVER ANSWERS: refused within 30 s, nothing queued",
+      "test_file": "tests/gig_runs_once_hosted_dispatch.test.ts",
+      "kind": "behavioural",
+      "drives": "createToolSurface(deps).find(gig_dispatch).call(args) \u2192 callSurfaceTool hosted branch \u2014 src/server.ts (deps.hosted + deps.queueGig + deps.gigStatus)",
+      "plant": "await gigStatus without a timeout, or queue without asking \u2014 RED AT HEAD 2d4e7ab"
+    },
+    {
+      "invariant_id": "H3c",
+      "test_name": "H3 \u2014 a store that cannot answer refuses the hosted resume; nothing is queued > H3c NO gigStatus wired: a hosted resume is refused (there is nothing to decide closed/open from), nothing queued",
+      "test_file": "tests/gig_runs_once_hosted_dispatch.test.ts",
+      "kind": "behavioural",
+      "drives": "createToolSurface(deps).find(gig_dispatch).call(args) \u2192 callSurfaceTool hosted branch \u2014 src/server.ts (deps.hosted + deps.queueGig + deps.gigStatus)",
+      "plant": "queue a hosted resume when no gigStatus is wired \u2014 RED AT HEAD 2d4e7ab"
+    },
+    {
+      "invariant_id": "H4",
+      "test_name": "H4 \u2014 no silent drop: only host-contract arguments reach queueGig; the rest are refused by name > H4 a clean hosted dispatch forwards ONLY host-contract arguments",
+      "test_file": "tests/gig_runs_once_hosted_dispatch.test.ts",
+      "kind": "behavioural",
+      "drives": "createToolSurface(deps).find(gig_dispatch).call(args) \u2192 callSurfaceTool hosted branch \u2014 src/server.ts (deps.hosted + deps.queueGig + deps.gigStatus)",
+      "plant": "forward args whole to deps.queueGig \u2014 RED AT HEAD 2d4e7ab (wait:false reaches queueGig)"
+    },
+    {
+      "invariant_id": "H4-chart_slug",
+      "test_name": "H4 \u2014 no silent drop: only host-contract arguments reach queueGig; the rest are refused by name > H4 `chart_slug` cannot be carried by the host: refused BY NAME, nothing queued",
+      "test_file": "tests/gig_runs_once_hosted_dispatch.test.ts",
+      "kind": "behavioural",
+      "drives": "createToolSurface(deps).find(gig_dispatch).call(args) \u2192 callSurfaceTool hosted branch \u2014 src/server.ts (deps.hosted + deps.queueGig + deps.gigStatus)",
+      "plant": "forward `chart_slug` to deps.queueGig (today's forward-whole) \u2014 RED AT HEAD 2d4e7ab"
+    },
+    {
+      "invariant_id": "H4-repo_url",
+      "test_name": "H4 \u2014 no silent drop: only host-contract arguments reach queueGig; the rest are refused by name > H4 `repo_url` cannot be carried by the host: refused BY NAME, nothing queued",
+      "test_file": "tests/gig_runs_once_hosted_dispatch.test.ts",
+      "kind": "behavioural",
+      "drives": "createToolSurface(deps).find(gig_dispatch).call(args) \u2192 callSurfaceTool hosted branch \u2014 src/server.ts (deps.hosted + deps.queueGig + deps.gigStatus)",
+      "plant": "forward `repo_url` to deps.queueGig (today's forward-whole) \u2014 RED AT HEAD 2d4e7ab"
+    },
+    {
+      "invariant_id": "H4-depth",
+      "test_name": "H4 \u2014 no silent drop: only host-contract arguments reach queueGig; the rest are refused by name > H4 `depth` cannot be carried by the host: refused BY NAME, nothing queued",
+      "test_file": "tests/gig_runs_once_hosted_dispatch.test.ts",
+      "kind": "behavioural",
+      "drives": "createToolSurface(deps).find(gig_dispatch).call(args) \u2192 callSurfaceTool hosted branch \u2014 src/server.ts (deps.hosted + deps.queueGig + deps.gigStatus)",
+      "plant": "forward `depth` to deps.queueGig (today's forward-whole) \u2014 RED AT HEAD 2d4e7ab"
+    },
+    {
+      "invariant_id": "H4-effort",
+      "test_name": "H4 \u2014 no silent drop: only host-contract arguments reach queueGig; the rest are refused by name > H4 `effort` cannot be carried by the host: refused BY NAME, nothing queued",
+      "test_file": "tests/gig_runs_once_hosted_dispatch.test.ts",
+      "kind": "behavioural",
+      "drives": "createToolSurface(deps).find(gig_dispatch).call(args) \u2192 callSurfaceTool hosted branch \u2014 src/server.ts (deps.hosted + deps.queueGig + deps.gigStatus)",
+      "plant": "forward `effort` to deps.queueGig (today's forward-whole) \u2014 RED AT HEAD 2d4e7ab"
+    },
+    {
+      "invariant_id": "H4-max_context_tokens",
+      "test_name": "H4 \u2014 no silent drop: only host-contract arguments reach queueGig; the rest are refused by name > H4 `max_context_tokens` cannot be carried by the host: refused BY NAME, nothing queued",
+      "test_file": "tests/gig_runs_once_hosted_dispatch.test.ts",
+      "kind": "behavioural",
+      "drives": "createToolSurface(deps).find(gig_dispatch).call(args) \u2192 callSurfaceTool hosted branch \u2014 src/server.ts (deps.hosted + deps.queueGig + deps.gigStatus)",
+      "plant": "forward `max_context_tokens` to deps.queueGig (today's forward-whole) \u2014 RED AT HEAD 2d4e7ab"
+    },
+    {
+      "invariant_id": "H4-reuse",
+      "test_name": "H4 \u2014 no silent drop: only host-contract arguments reach queueGig; the rest are refused by name > H4 `reuse` cannot be carried by the host: refused BY NAME, nothing queued",
+      "test_file": "tests/gig_runs_once_hosted_dispatch.test.ts",
+      "kind": "behavioural",
+      "drives": "createToolSurface(deps).find(gig_dispatch).call(args) \u2192 callSurfaceTool hosted branch \u2014 src/server.ts (deps.hosted + deps.queueGig + deps.gigStatus)",
+      "plant": "forward `reuse` to deps.queueGig (today's forward-whole) \u2014 RED AT HEAD 2d4e7ab"
+    },
+    {
+      "invariant_id": "H4-approvals",
+      "test_name": "H4 \u2014 no silent drop: only host-contract arguments reach queueGig; the rest are refused by name > H4 `approvals` cannot be carried by the host: refused BY NAME, nothing queued",
+      "test_file": "tests/gig_runs_once_hosted_dispatch.test.ts",
+      "kind": "behavioural",
+      "drives": "createToolSurface(deps).find(gig_dispatch).call(args) \u2192 callSurfaceTool hosted branch \u2014 src/server.ts (deps.hosted + deps.queueGig + deps.gigStatus)",
+      "plant": "forward `approvals` to deps.queueGig (today's forward-whole) \u2014 RED AT HEAD 2d4e7ab"
+    },
+    {
+      "invariant_id": "H4-approved_by",
+      "test_name": "H4 \u2014 no silent drop: only host-contract arguments reach queueGig; the rest are refused by name > H4 `approved_by` cannot be carried by the host: refused BY NAME, nothing queued",
+      "test_file": "tests/gig_runs_once_hosted_dispatch.test.ts",
+      "kind": "behavioural",
+      "drives": "createToolSurface(deps).find(gig_dispatch).call(args) \u2192 callSurfaceTool hosted branch \u2014 src/server.ts (deps.hosted + deps.queueGig + deps.gigStatus)",
+      "plant": "forward `approved_by` to deps.queueGig (today's forward-whole) \u2014 RED AT HEAD 2d4e7ab"
+    },
+    {
+      "invariant_id": "H4-wait",
+      "test_name": "H4 \u2014 no silent drop: only host-contract arguments reach queueGig; the rest are refused by name > H4 `wait` cannot be carried by the host: refused BY NAME, nothing queued",
+      "test_file": "tests/gig_runs_once_hosted_dispatch.test.ts",
+      "kind": "behavioural",
+      "drives": "createToolSurface(deps).find(gig_dispatch).call(args) \u2192 callSurfaceTool hosted branch \u2014 src/server.ts (deps.hosted + deps.queueGig + deps.gigStatus)",
+      "plant": "forward `wait` to deps.queueGig (today's forward-whole) \u2014 RED AT HEAD 2d4e7ab"
+    },
+    {
+      "invariant_id": "D1",
+      "test_name": "D1 \u2014 under the REAL scope rules, a resuming gig never re-pays for the closed gig's seals > D1 N (resumes O) on a fresh box, then re-claimed on another fresh box after losing it: neither box invokes the chair O sealed",
+      "test_file": "tests/gig_runs_once_real_store.test.ts",
+      "kind": "behavioural",
+      "drives": "workOnce(ctx, deps) \u2014 src/worker.ts against a fake store enforcing the gig-token scope of the coltrane-ui FOLLOW-UP (reads \u2014 status and outputs \u2014 for the own gig plus exactly the gig the row resumes; writes own-gig only). STORE DEPENDENCY (conductor's D1 decision): eir-labs/coltrane-ui widens its read-only resume exception to coltrane_mcp_gig_status, mirroring coltrane_mcp_gig_outputs, in a coltrane-ui law + migration. #250 as merged refuses that read (42501), and against it this law is red (review 5326196799 finding 1); with the follow-up's scope the engine at 2d4e7ab already holds (green).",
+      "plant": "read the closed gig's status through a refused (unwidened) scope \u2014 i.e. drop the resumed-gig clause from the fixture's read rule, or make the engine rebuild the closed gig without its genome_hash \u2014 red"
+    },
+    {
+      "invariant_id": "D2",
+      "test_name": "D2 \u2014 PLAYER mode runs under its 30-minute lease > D2 a player-mode run (coltrane_mcp_claim: a 30-minute lease, no heartbeat) is stopped by its run timeout BEFORE the player lease expires",
+      "test_file": "tests/gig_runs_once_real_store.test.ts",
+      "kind": "behavioural",
+      "drives": "workOnce(ctx, deps) \u2014 src/worker.ts in player mode (agentToken, no drain key) with fake timers \u2014 drainTimeoutMs() per mode (src/run_deps.ts)",
+      "plant": "apply the 50-minute HOSTED_LEASE_MS*5/6 default in player mode (today's drainTimeoutMs) \u2014 RED AT HEAD 2d4e7ab (finding 2). Choice pinned: the player run TIMEOUT stays under the 30-minute player lease; the player path is not heartbeated (coltrane_mcp_claim has no renew RPC)."
+    },
+    {
+      "invariant_id": "D3-400",
+      "test_name": "D3 \u2014 ANY refusal of the start header stops the run before the first chair (the service's real shape) > D3 the 'running' header is refused with the terminal guard, as the service answers it: 400 {error}, no code: no chair, nothing sealed, nothing terminal, not complete",
+      "test_file": "tests/gig_runs_once_real_store.test.ts",
+      "kind": "behavioural",
+      "drives": "workOnce(ctx, deps) \u2014 src/worker.ts \u2014 the start-header refusal check (isNotOursRefusal) against drainServiceRefusal (coltrane-ui drainErrorStatus)",
+      "plant": "recognise only 409/403 or a code (today's isNotOursRefusal) \u2014 RED AT HEAD 2d4e7ab (finding 3; the review's surviving 23514 plant)"
+    },
+    {
+      "invariant_id": "D3-403",
+      "test_name": "D3 \u2014 ANY refusal of the start header stops the run before the first chair (the service's real shape) > D3 the 'running' header is refused with a lost lease, as the service answers it: 403 {error}, no code: no chair, nothing sealed, nothing terminal, not complete",
+      "test_file": "tests/gig_runs_once_real_store.test.ts",
+      "kind": "behavioural",
+      "drives": "workOnce(ctx, deps) \u2014 src/worker.ts \u2014 same",
+      "plant": "drop `e.status === 403` from isNotOursRefusal",
+      "plant_observed": "\u00d7 D3 \u2026 403 {error}, no code \u2026 \u2192 the start header was refused (\u2026) and the chair ran anyway: expected \"spy\" to not be called at all, but actually been called 2 times"
+    },
+    {
+      "invariant_id": "D3-503",
+      "test_name": "D3 \u2014 ANY refusal of the start header stops the run before the first chair (the service's real shape) > D3 the 'running' header is refused with a service that keeps answering 503: no chair, nothing sealed, nothing terminal, not complete",
+      "test_file": "tests/gig_runs_once_real_store.test.ts",
+      "kind": "behavioural",
+      "drives": "workOnce(ctx, deps) \u2014 src/worker.ts \u2014 same (after the bounded retries)",
+      "plant": "run anyway after the start header's retries are exhausted (today's `running anyway` branch), or skip E2's retries \u2014 RED AT HEAD 2d4e7ab"
+    },
+    {
+      "invariant_id": "S2",
+      "test_name": "S2\u2013S4 \u2014 the review's surviving plants, booked > S2 an ordinary FAILED run whose failed header the store acknowledged reports acknowledged:true (and `coltrane work` need not exit 1 for an unlost failure)",
+      "test_file": "tests/gig_runs_once_real_store.test.ts",
+      "kind": "behavioural",
+      "drives": "workOnce(ctx, deps) \u2014 src/worker.ts \u2014 the failure path's `recorded`",
+      "plant": "report acknowledged:false for a failed run whose header was acknowledged (`let recorded = false`)",
+      "plant_observed": "\u00d7 S2 \u2026 \u2192 an acknowledged failure was reported as UNacknowledged: expected false to be true // Object.is equality"
+    },
+    {
+      "invariant_id": "S3",
+      "test_name": "S2\u2013S4 \u2014 the review's surviving plants, booked > S3 when the closed gig's seals cannot be used (its genome moved), a re-claim of the resuming gig still rebuilds from ITS OWN drained seals",
+      "test_file": "tests/gig_runs_once_real_store.test.ts",
+      "kind": "behavioural",
+      "drives": "workOnce(ctx, deps) \u2014 src/worker.ts \u2014 the `else if (own.ok) rebuilt = own` fallback",
+      "plant": "delete the `else if (own.ok) { rebuilt = own; }` fallback",
+      "plant_observed": "\u00d7 S3 \u2026 \u2192 the closed gig's rebuild failed and the re-claim did not fall back to N's OWN drained seals, so it paid for them again: expected [ 'scan', 'rescan', 'final' ] to deeply equal [ 'final' ]"
+    },
+    {
+      "invariant_id": "S4",
+      "test_name": "S2\u2013S4 \u2014 the review's surviving plants, booked > S4 the 'running' header of a gig that resumes a closed one carries manifest.resumes",
+      "test_file": "tests/gig_runs_once_real_store.test.ts",
+      "kind": "behavioural",
+      "drives": "workOnce(ctx, deps) \u2014 src/worker.ts \u2014 the start header record",
+      "plant": "drop `...(resumes !== undefined ? { resumes } : {})` from the running header",
+      "plant_observed": "\u00d7 S4 \u2026 \u2192 the start header does not say which gig this one resumes, so the store cannot link them: expected undefined to be '<O>'"
+    },
+    {
+      "invariant_id": "H5-carry-12",
+      "test_name": "H5 \u2014 the hosted door carries the budget as integer micro-dollars (coltrane-ui #253) > H5 budget {max_usd: 12} is queued as budget_micro_usd 12000000, and `budget` itself is not forwarded",
+      "test_file": "tests/gig_runs_once_hosted_dispatch.test.ts",
+      "kind": "behavioural",
+      "drives": "createToolSurface(deps).find(gig_dispatch).call(args) \u2192 callSurfaceTool hosted branch \u2014 src/server.ts",
+      "plant": "refuse `budget` in the hosted door (today's 2597854) \u2014 RED AT HEAD; or convert by float `Math.floor(max_usd*1e6)` (1.005 \u2192 1004999)"
+    },
+    {
+      "invariant_id": "H5-carry-0.5",
+      "test_name": "H5 \u2014 the hosted door carries the budget as integer micro-dollars (coltrane-ui #253) > H5 budget {max_usd: 0.5} is queued as budget_micro_usd 500000, and `budget` itself is not forwarded",
+      "test_file": "tests/gig_runs_once_hosted_dispatch.test.ts",
+      "kind": "behavioural",
+      "drives": "createToolSurface(deps).find(gig_dispatch).call(args) \u2192 callSurfaceTool hosted branch \u2014 src/server.ts",
+      "plant": "refuse `budget` in the hosted door (today's 2597854) \u2014 RED AT HEAD; or convert by float `Math.floor(max_usd*1e6)` (1.005 \u2192 1004999)"
+    },
+    {
+      "invariant_id": "H5-carry-1.005",
+      "test_name": "H5 \u2014 the hosted door carries the budget as integer micro-dollars (coltrane-ui #253) > H5 budget {max_usd: 1.005} is queued as budget_micro_usd 1005000, and `budget` itself is not forwarded",
+      "test_file": "tests/gig_runs_once_hosted_dispatch.test.ts",
+      "kind": "behavioural",
+      "drives": "createToolSurface(deps).find(gig_dispatch).call(args) \u2192 callSurfaceTool hosted branch \u2014 src/server.ts",
+      "plant": "refuse `budget` in the hosted door (today's 2597854) \u2014 RED AT HEAD; or convert by float `Math.floor(max_usd*1e6)` (1.005 \u2192 1004999)"
+    },
+    {
+      "invariant_id": "H5-carry-0.000001",
+      "test_name": "H5 \u2014 the hosted door carries the budget as integer micro-dollars (coltrane-ui #253) > H5 budget {max_usd: 0.000001} is queued as budget_micro_usd 1, and `budget` itself is not forwarded",
+      "test_file": "tests/gig_runs_once_hosted_dispatch.test.ts",
+      "kind": "behavioural",
+      "drives": "createToolSurface(deps).find(gig_dispatch).call(args) \u2192 callSurfaceTool hosted branch \u2014 src/server.ts",
+      "plant": "refuse `budget` in the hosted door (today's 2597854) \u2014 RED AT HEAD; or convert by float `Math.floor(max_usd*1e6)` (1.005 \u2192 1004999)"
+    },
+    {
+      "invariant_id": "H5-carry-0",
+      "test_name": "H5 \u2014 the hosted door carries the budget as integer micro-dollars (coltrane-ui #253) > H5 budget {max_usd: 0} is queued as budget_micro_usd 0, and `budget` itself is not forwarded",
+      "test_file": "tests/gig_runs_once_hosted_dispatch.test.ts",
+      "kind": "behavioural",
+      "drives": "createToolSurface(deps).find(gig_dispatch).call(args) \u2192 callSurfaceTool hosted branch \u2014 src/server.ts",
+      "plant": "refuse `budget` in the hosted door (today's 2597854) \u2014 RED AT HEAD; or convert by float `Math.floor(max_usd*1e6)` (1.005 \u2192 1004999)"
+    },
+    {
+      "invariant_id": "H5-refuse-more",
+      "test_name": "H5 \u2014 the hosted door carries the budget as integer micro-dollars (coltrane-ui #253) > H5 budget {max_usd} more than 6 decimal places (0.1234567) is REFUSED by name, never rounded or dropped; nothing queued",
+      "test_file": "tests/gig_runs_once_hosted_dispatch.test.ts",
+      "kind": "behavioural",
+      "drives": "createToolSurface(deps).find(gig_dispatch).call(args) \u2192 callSurfaceTool hosted branch \u2014 src/server.ts",
+      "plant": "RED AT HEAD on the carries-a-budget precondition (2597854 refuses every budget); once carried: round instead of refusing (Math.round(max_usd*1e6)), or accept a negative/non-finite/non-number"
+    },
+    {
+      "invariant_id": "H5-refuse-negative",
+      "test_name": "H5 \u2014 the hosted door carries the budget as integer micro-dollars (coltrane-ui #253) > H5 budget {max_usd} negative (-1) is REFUSED by name, never rounded or dropped; nothing queued",
+      "test_file": "tests/gig_runs_once_hosted_dispatch.test.ts",
+      "kind": "behavioural",
+      "drives": "createToolSurface(deps).find(gig_dispatch).call(args) \u2192 callSurfaceTool hosted branch \u2014 src/server.ts",
+      "plant": "RED AT HEAD on the carries-a-budget precondition (2597854 refuses every budget); once carried: round instead of refusing (Math.round(max_usd*1e6)), or accept a negative/non-finite/non-number"
+    },
+    {
+      "invariant_id": "H5-refuse-non-finite",
+      "test_name": "H5 \u2014 the hosted door carries the budget as integer micro-dollars (coltrane-ui #253) > H5 budget {max_usd} non-finite (Infinity) is REFUSED by name, never rounded or dropped; nothing queued",
+      "test_file": "tests/gig_runs_once_hosted_dispatch.test.ts",
+      "kind": "behavioural",
+      "drives": "createToolSurface(deps).find(gig_dispatch).call(args) \u2192 callSurfaceTool hosted branch \u2014 src/server.ts",
+      "plant": "RED AT HEAD on the carries-a-budget precondition (2597854 refuses every budget); once carried: round instead of refusing (Math.round(max_usd*1e6)), or accept a negative/non-finite/non-number"
+    },
+    {
+      "invariant_id": "H5-refuse-not",
+      "test_name": "H5 \u2014 the hosted door carries the budget as integer micro-dollars (coltrane-ui #253) > H5 budget {max_usd} not a number (\"12\") is REFUSED by name, never rounded or dropped; nothing queued",
+      "test_file": "tests/gig_runs_once_hosted_dispatch.test.ts",
+      "kind": "behavioural",
+      "drives": "createToolSurface(deps).find(gig_dispatch).call(args) \u2192 callSurfaceTool hosted branch \u2014 src/server.ts",
+      "plant": "RED AT HEAD on the carries-a-budget precondition (2597854 refuses every budget); once carried: round instead of refusing (Math.round(max_usd*1e6)), or accept a negative/non-finite/non-number"
+    },
+    {
+      "invariant_id": "H5-absent",
+      "test_name": "H5 \u2014 the hosted door carries the budget as integer micro-dollars (coltrane-ui #253) > H5 no budget \u2192 no budget_micro_usd key at all (absent is not zero)",
+      "test_file": "tests/gig_runs_once_hosted_dispatch.test.ts",
+      "kind": "behavioural",
+      "drives": "createToolSurface(deps).find(gig_dispatch).call(args) \u2192 callSurfaceTool hosted branch \u2014 src/server.ts",
+      "plant": "RED AT HEAD on the carries-a-budget precondition; once carried: forward budget_micro_usd: 0 (or null) when no budget was given"
+    },
+    {
+      "invariant_id": "Q1-postgrestQueueGig-resumes",
+      "test_name": "Q1 \u2014 a queue client handed `resumes` / `budget_micro_usd` sends it or refuses it by name; it never drops it > Q1 postgrestQueueGig (member JWT \u2192 coltrane_gig_dispatch): `resumes` reaches the store as p_resumes, or the client refuses by name before sending",
+      "test_file": "tests/gig_runs_once_queue_clients.test.ts",
+      "kind": "behavioural",
+      "drives": "postgrestQueueGig(ctx)(args) \u2014 src/genome_store.ts",
+      "plant": "post the fixed p_* body without p_resumes (today's 2597854) \u2014 RED AT HEAD"
+    },
+    {
+      "invariant_id": "Q1-postgrestQueueGig-budget_micro_usd",
+      "test_name": "Q1 \u2014 a queue client handed `resumes` / `budget_micro_usd` sends it or refuses it by name; it never drops it > Q1 postgrestQueueGig (member JWT \u2192 coltrane_gig_dispatch): `budget_micro_usd` reaches the store as p_budget_micro_usd, or the client refuses by name before sending",
+      "test_file": "tests/gig_runs_once_queue_clients.test.ts",
+      "kind": "behavioural",
+      "drives": "postgrestQueueGig(ctx)(args) \u2014 src/genome_store.ts",
+      "plant": "post the fixed p_* body without p_budget_micro_usd (today's 2597854) \u2014 RED AT HEAD"
+    },
+    {
+      "invariant_id": "Q2-postgrestQueueGig",
+      "test_name": "Q2 \u2014 absent means no key: a plain dispatch keeps the argument set the deployed RPCs resolve > Q2 postgrestQueueGig (member JWT \u2192 coltrane_gig_dispatch): no resumes and no budget \u2192 neither p_resumes nor p_budget_micro_usd is sent",
+      "test_file": "tests/gig_runs_once_queue_clients.test.ts",
+      "kind": "behavioural",
+      "drives": "postgrestQueueGig(ctx)(args) \u2014 src/genome_store.ts",
+      "plant": "send `p_resumes: args.resumes ?? null` unconditionally",
+      "plant_observed": "\u00d7 Q2 \u2026 \u2192 an absent field was sent as a key; PostgREST would then look for a signature the store does not have: expected [ 'p_resumes' ] to deeply equal []"
+    },
+    {
+      "invariant_id": "Q1-rpcQueueGig-resumes",
+      "test_name": "Q1 \u2014 a queue client handed `resumes` / `budget_micro_usd` sends it or refuses it by name; it never drops it > Q1 rpcQueueGig (agent token \u2192 coltrane_mcp_dispatch): `resumes` reaches the store as p_resumes, or the client refuses by name before sending",
+      "test_file": "tests/gig_runs_once_queue_clients.test.ts",
+      "kind": "behavioural",
+      "drives": "rpcQueueGig(ctx)(args) \u2014 src/genome_store.ts",
+      "plant": "post the fixed p_* body without p_resumes (today's 2597854) \u2014 RED AT HEAD"
+    },
+    {
+      "invariant_id": "Q1-rpcQueueGig-budget_micro_usd",
+      "test_name": "Q1 \u2014 a queue client handed `resumes` / `budget_micro_usd` sends it or refuses it by name; it never drops it > Q1 rpcQueueGig (agent token \u2192 coltrane_mcp_dispatch): `budget_micro_usd` reaches the store as p_budget_micro_usd, or the client refuses by name before sending",
+      "test_file": "tests/gig_runs_once_queue_clients.test.ts",
+      "kind": "behavioural",
+      "drives": "rpcQueueGig(ctx)(args) \u2014 src/genome_store.ts",
+      "plant": "post the fixed p_* body without p_budget_micro_usd (today's 2597854) \u2014 RED AT HEAD"
+    },
+    {
+      "invariant_id": "Q2-rpcQueueGig",
+      "test_name": "Q2 \u2014 absent means no key: a plain dispatch keeps the argument set the deployed RPCs resolve > Q2 rpcQueueGig (agent token \u2192 coltrane_mcp_dispatch): no resumes and no budget \u2192 neither p_resumes nor p_budget_micro_usd is sent",
+      "test_file": "tests/gig_runs_once_queue_clients.test.ts",
+      "kind": "behavioural",
+      "drives": "rpcQueueGig(ctx)(args) \u2014 src/genome_store.ts",
+      "plant": "send `p_resumes: args.resumes ?? null` unconditionally",
+      "plant_observed": "\u00d7 Q2 \u2026 \u2192 an absent field was sent as a key; PostgREST would then look for a signature the store does not have: expected [ 'p_resumes' ] to deeply equal []"
+    },
+    {
+      "invariant_id": "A1",
+      "test_name": "A1 \u2014 NO BLIND DRAIN: a drain key without a drain URL refuses the run > A1 COLTRANE_DRAIN_KEY set, COLTRANE_DRAIN_URL unset: no chair is invoked, and the refusal names COLTRANE_DRAIN_URL",
+      "test_file": "tests/gig_runs_once_real_store.test.ts",
+      "kind": "behavioural",
+      "drives": "workOnce(ctx, deps) \u2014 src/worker.ts (the DrainConfigError branch of the start header)",
+      "plant": "log the DrainConfigError and run anyway (today's 2597854) \u2014 RED AT HEAD"
+    },
+    {
+      "invariant_id": "A2-workOnce",
+      "test_name": "A2 \u2014 a blind drain makes NO claim: it refuses at startup, before the store is asked for work > A2 workOnce with COLTRANE_DRAIN_KEY set and COLTRANE_DRAIN_URL unset: zero claim calls, no chair, and the refusal names COLTRANE_DRAIN_URL",
+      "test_file": "tests/gig_runs_once_real_store.test.ts",
+      "kind": "behavioural",
+      "drives": "workOnce(ctx, deps) \u2014 src/worker.ts (the startup check, before claimNextGig)",
+      "plant": "place the COLTRANE_DRAIN_URL refusal after claimNextGig (today's efd10a1) \u2014 RED AT HEAD: coltrane_drain_claim is called"
+    },
+    {
+      "invariant_id": "A2-cli",
+      "test_name": "A2 \u2014 a blind drain makes NO claim: it refuses at startup, before the store is asked for work > A2 `coltrane work` with a drain key and no COLTRANE_DRAIN_URL exits non-zero naming it, and the store sees zero claim calls",
+      "test_file": "tests/gig_runs_once_real_store.test.ts",
+      "kind": "behavioural",
+      "drives": "runCli([\"work\"], io) \u2014 src/cli.ts (over workOnce)",
+      "plant": "place the COLTRANE_DRAIN_URL refusal after the claim (today's efd10a1) \u2014 RED AT HEAD"
+    }
+  ],
+  "testing_method": "vitest, example-based and behavioural: every engine law drives workOnce (or runCli / openLocalQueue) through a stubbed global fetch that plays both hosts \u2014 the org store (ctx.baseUrl RPCs) and the drain service (COLTRANE_DRAIN_URL: header, outputs, storage, renew, release) \u2014 statefully, so a re-claim reads what the first worker's acknowledged writes left behind. The heartbeat's clock is injected (WorkOnceDeps.scheduleHeartbeat) and fired from inside the chair invocation; acknowledgement is observed by holding the store's answer back (a delayed Response) and asserting what had resolved when workOnce returned. E8 moves the lease constant with vi.doMock over src/lease.ts and asserts both derived numbers follow. New symbols are reached by variable specifiers and casts so tsc over tests/ stays clean.",
+  "uncovered": [],
+  "laws": [
+    {
+      "path": "tests/gig_runs_once_claim_resumes.test.ts",
+      "commit": "5993cff56c1b6bf55e96d06a741552e464330019"
+    },
+    {
+      "path": "tests/gig_runs_once_closed_by_store.test.ts",
+      "commit": "947f491bc685edd86dd8e4567b0411c71c08b9ea"
+    },
+    {
+      "path": "tests/gig_runs_once_heartbeat.test.ts",
+      "commit": "947f491bc685edd86dd8e4567b0411c71c08b9ea"
+    },
+    {
+      "path": "tests/gig_runs_once_heartbeat_window.test.ts",
+      "commit": "947f491bc685edd86dd8e4567b0411c71c08b9ea"
+    },
+    {
+      "path": "tests/gig_runs_once_hosted_dispatch.test.ts",
+      "commit": "a054a9c705fb64c159c4bb0a848a5301deefde5f"
+    },
+    {
+      "path": "tests/gig_runs_once_late_answer.test.ts",
+      "commit": "947f491bc685edd86dd8e4567b0411c71c08b9ea"
+    },
+    {
+      "path": "tests/gig_runs_once_lease_constant.test.ts",
+      "commit": "947f491bc685edd86dd8e4567b0411c71c08b9ea"
+    },
+    {
+      "path": "tests/gig_runs_once_local_complete.test.ts",
+      "commit": "947f491bc685edd86dd8e4567b0411c71c08b9ea"
+    },
+    {
+      "path": "tests/gig_runs_once_outputs_first.test.ts",
+      "commit": "947f491bc685edd86dd8e4567b0411c71c08b9ea"
+    },
+    {
+      "path": "tests/gig_runs_once_queue_clients.test.ts",
+      "commit": "a054a9c705fb64c159c4bb0a848a5301deefde5f"
+    },
+    {
+      "path": "tests/gig_runs_once_real_store.test.ts",
+      "commit": "20414e1628ce0b9215c51af0a98f1d67fb5cdce0"
+    },
+    {
+      "path": "tests/gig_runs_once_reclaim.test.ts",
+      "commit": "947f491bc685edd86dd8e4567b0411c71c08b9ea"
+    },
+    {
+      "path": "tests/gig_runs_once_refused_header.test.ts",
+      "commit": "947f491bc685edd86dd8e4567b0411c71c08b9ea"
+    },
+    {
+      "path": "tests/gig_runs_once_release.test.ts",
+      "commit": "947f491bc685edd86dd8e4567b0411c71c08b9ea"
+    },
+    {
+      "path": "tests/gig_runs_once_release_after_outcome.test.ts",
+      "commit": "947f491bc685edd86dd8e4567b0411c71c08b9ea"
+    },
+    {
+      "path": "tests/gig_runs_once_resumed_reclaim.test.ts",
+      "commit": "b4503b7944f4367e79c1bfd6d8f4a78c13fef12c"
+    },
+    {
+      "path": "tests/gig_runs_once_start_header.test.ts",
+      "commit": "947f491bc685edd86dd8e4567b0411c71c08b9ea"
+    },
+    {
+      "path": "tests/gig_runs_once_store_decides.test.ts",
+      "commit": "b4503b7944f4367e79c1bfd6d8f4a78c13fef12c"
+    },
+    {
+      "path": "tests/gig_runs_once_terminal_ack.test.ts",
+      "commit": "947f491bc685edd86dd8e4567b0411c71c08b9ea"
+    },
+    {
+      "path": "tests/gig_runs_once_terminal_resume.test.ts",
+      "commit": "5993cff56c1b6bf55e96d06a741552e464330019"
+    },
+    {
+      "path": "tests/gig_runs_once_timeout_aborted.test.ts",
+      "commit": "947f491bc685edd86dd8e4567b0411c71c08b9ea"
+    }
+  ]
+}

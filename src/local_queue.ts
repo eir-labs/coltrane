@@ -439,6 +439,20 @@ export function openLocalQueue(root: string, opts?: LocalQueueOptions): LocalQue
     if (loc === null) throw new Error(`cannot complete unknown gig ${gig_id}`);
     const record = await readGig(loc.path);
     if (record === null) throw new Error(`cannot complete unreadable gig ${gig_id}`);
+    // ONLY THE LEASE HOLDER COMPLETES — the check heartbeat, park and fail already make. Without it a
+    // worker whose lease lapsed, and whose gig the reaper handed to someone else, could still seal it:
+    // its output became THE gig's and the row moved to done/ under a live holder still running it.
+    // Admitted: the holder of a claimed row, and the holder re-completing a row it already moved to
+    // done/ (the I14 re-seal and the F9 refusal-to-fork both need that). A queued row keeps its
+    // lapsed lease in the file, inert — so the state dir is part of the check, not only the name.
+    const holdsIt = (loc.dir === claimedDir || loc.dir === doneDir) && record.lease?.holder === worker;
+    if (!holdsIt) {
+      throw new Error(
+        `worker "${worker}" does not hold the lease on gig ${gig_id}` +
+          (record.lease?.holder !== undefined && loc.dir === claimedDir ? ` ("${record.lease.holder}" does)` : "") +
+          ` — only the lease holder may complete it`,
+      );
+    }
     // content_sha is a pure function of the output via the codebase's own canonical hash, so two
     // separate completions of identical output hash identically by construction (I14).
     const content_sha = sha256Hex(canonJson(output));

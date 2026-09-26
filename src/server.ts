@@ -114,7 +114,144 @@ export function parseWindow(raw: unknown, now: number): { after?: string; error?
   return { after: new Date(now - n * ms).toISOString() };
 }
 
+/** Store statuses that mean a gig is CLOSED: what's closed is closed, so a resume of it is a new gig. */
+/** How long the resume door waits on the store's gigStatus before refusing. */
+const GIG_STATUS_TIMEOUT_MS = 10_000;
+
+/**
+ * Ask the store for a gig's status, BOUNDED. A store that never answers is not an answer: this rejects
+ * after GIG_STATUS_TIMEOUT_MS rather than hanging the door forever, and the caller refuses the resume
+ * rather than guessing which id to write under. Shared by the local and the hosted dispatch doors.
+ */
+async function askStoreGigStatus(
+  gigStatus: (gig_id: string) => Promise<string | null | undefined>,
+  gig_id: string,
+): Promise<string | null | undefined> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      gigStatus(gig_id),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`the store did not answer within ${GIG_STATUS_TIMEOUT_MS} ms`)), GIG_STATUS_TIMEOUT_MS);
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
+/**
+ * THE HOST CONTRACT: the only gig_dispatch arguments a hosted queue can carry — what the queue seams
+ * read (postgrestQueueGig / rpcQueueGig, src/genome_store.ts) plus `resumes`, which the store hands
+ * back on the claim. queueGig receives these and nothing else.
+ */
+const HOSTED_DISPATCH_CONTRACT = new Set(["standard_slug", "mode", "input", "org_slug", "acting_for", "venue", "resumes", "budget_micro_usd"]);
+
+/**
+ * `budget.max_usd` (USD) → integer micro-dollars, EXACTLY. The number's own shortest decimal
+ * spelling is read digit by digit, never multiplied as a float (1.005 * 1e6 = 1004999.9999…). More
+ * than 6 decimal places, a negative, a non-finite value or a non-number is refused by name, never
+ * rounded; so is a result past Number.MAX_SAFE_INTEGER.
+ */
+export function usdToMicroUsd(maxUsd: unknown): { ok: true; micro: number } | { ok: false; why: string } {
+  if (typeof maxUsd !== "number") return { ok: false, why: `budget.max_usd must be a number of USD; got ${JSON.stringify(maxUsd)}` };
+  if (!Number.isFinite(maxUsd)) return { ok: false, why: `budget.max_usd must be finite; got ${String(maxUsd)}` };
+  if (maxUsd < 0) return { ok: false, why: `budget.max_usd must not be negative; got ${String(maxUsd)}` };
+  let digits = String(maxUsd);
+  const exp = /^(\d+)(?:\.(\d+))?e([+-]\d+)$/i.exec(digits);
+  if (exp) {
+    // Expand scientific notation into plain decimal digits, still without arithmetic.
+    const [, whole = "", frac = "", e = "0"] = exp;
+    const all = whole + frac;
+    const point = whole.length + Number(e);
+    digits = point <= 0 ? `0.${"0".repeat(-point)}${all}` : point >= all.length ? all + "0".repeat(point - all.length) : `${all.slice(0, point)}.${all.slice(point)}`;
+  }
+  const m = /^(\d+)(?:\.(\d+))?$/.exec(digits);
+  if (!m) return { ok: false, why: `budget.max_usd ${String(maxUsd)} is not a decimal amount` };
+  const whole = m[1] ?? "0";
+  const frac = (m[2] ?? "").replace(/0+$/, "");
+  if (frac.length > 6) return { ok: false, why: `budget.max_usd ${String(maxUsd)} has more than 6 decimal places — refused, never rounded` };
+  const micro = BigInt(whole) * 1_000_000n + BigInt(frac.padEnd(6, "0") || "0");
+  if (micro > BigInt(Number.MAX_SAFE_INTEGER)) return { ok: false, why: `budget.max_usd ${String(maxUsd)} is too large to carry as integer micro-dollars` };
+  return { ok: true, micro: Number(micro) };
+}
+
+/**
+ * Shape a hosted gig_dispatch for the queue, or refuse it. NO SILENT DROP: every argument outside
+ * the host contract is refused BY NAME, never forwarded to a host that would ignore it (a dropped
+ * `budget` is an unbounded run; a dropped `resume_gig_id` is a fresh full-cost gig). Two arguments are
+ * the door's own business and never forwarded: `wait` (accepted only as false — hosted dispatch never
+ * blocks) and `resume_gig_id`, which the STORE decides: closed → queued with `resumes`; open →
+ * refused (resuming in place is gig_approve's door); unanswerable or unwired → refused.
+ */
+async function hostedDispatchArgs(
+  args: Record<string, unknown>,
+  gigStatus: ((gig_id: string) => Promise<string | null | undefined>) | undefined,
+): Promise<{ ok: true; forward: Record<string, unknown> } | { ok: false; error: string }> {
+  const refused: string[] = [];
+  const forward: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(args)) {
+    if (key === "resume_gig_id") continue;
+    if (key === "budget") {
+      // The host carries the ceiling as integer micro-dollars (budget_micro_usd), never the USD
+      // object: converted exactly here, or refused by name.
+      const b = value;
+      if (b === undefined || b === null) continue;
+      if (typeof b !== "object" || Array.isArray(b)) { refused.push("budget (must be {max_usd})"); continue; }
+      const extra = Object.keys(b).filter((k) => k !== "max_usd");
+      if (extra.length > 0) { refused.push(...extra.map((k) => `budget.${k}`)); continue; }
+      const conv = usdToMicroUsd((b as { max_usd?: unknown }).max_usd);
+      if (!conv.ok) { refused.push(`budget (${conv.why})`); continue; }
+      forward.budget_micro_usd = conv.micro;
+      continue;
+    }
+    if (key === "wait") {
+      if (value === true) refused.push("wait (hosted dispatch queues and never blocks; poll gig_monitor)");
+      continue;
+    }
+    if (HOSTED_DISPATCH_CONTRACT.has(key) && key !== "resumes" && key !== "budget_micro_usd") forward[key] = value;
+    else refused.push(key);
+  }
+  if (refused.length > 0) {
+    return {
+      ok: false,
+      error: `gig_dispatch: the hosted queue cannot carry ${refused.map((r) => `\`${r}\``).join(", ")} — refused rather than dropped silently. ` +
+        `A hosted dispatch carries only ${[...HOSTED_DISPATCH_CONTRACT].join(", ")}.`,
+    };
+  }
+  const resumeArg = args.resume_gig_id;
+  if (resumeArg === undefined || resumeArg === null) return { ok: true, forward };
+  const oldId = String(resumeArg);
+  if (!gigStatus) {
+    return { ok: false, error: `gig_dispatch: a hosted resume of "${oldId}" needs the store's status of that gig, and no gigStatus seam is wired — refused rather than queued as a fresh, unlinked gig` };
+  }
+  let status: string | null | undefined;
+  try {
+    status = await askStoreGigStatus(gigStatus, oldId);
+  } catch (e) {
+    return { ok: false, error: `gig_dispatch: the store could not say whether gig "${oldId}" is closed, so the hosted resume is refused — ${e instanceof Error ? e.message : String(e)}` };
+  }
+  if (typeof status !== "string") {
+    return { ok: false, error: `gig_dispatch: the store holds no gig "${oldId}" to resume` };
+  }
+  if (!CLOSED_GIG_STATUSES.has(status)) {
+    return { ok: false, error: `gig_dispatch: gig "${oldId}" is ${status}, not closed — a hosted resume only links a closed gig; resuming an open gig in place is gig_approve's door` };
+  }
+  return { ok: true, forward: { ...forward, resumes: oldId } };
+}
+const CLOSED_GIG_STATUSES = new Set(["failed", "aborted", "completed", "complete", "cancelled", "canceled"]);
+
 export interface ServerDeps {
+  /**
+   * THE STORE'S ANSWER TO "IS THIS GIG CLOSED?" — the gig's status as the store holds it (the host
+   * wires coltrane_mcp_gig_status, e.g. rpcGigStatus(ctx) from ./genome_store). When present, it and
+   * not the local checkpoint decides whether a `resume_gig_id` names a CLOSED gig (failed, aborted,
+   * completed, cancelled), which is then resumed as a NEW gig. The checkpoint cannot know: a lost
+   * lease writes no `ended`, and a gig that ended on another box left nothing here. Absent = no
+   * store, and the checkpoint decides. A store that cannot answer REFUSES the resume rather than
+   * guessing which id to write under.
+   */
+  gigStatus?: ((gig_id: string) => Promise<string | null | undefined>) | undefined;
   registry: Registry;
   outputs: OutputStore;
   ledger: Ledger;
@@ -1164,6 +1301,26 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         if (resumeArg !== undefined && deps.gig_runs?.get(resumeArg)?.status === "running") {
           return { ok: false, requires_approval: approval, error: `gig_dispatch: gig "${resumeArg}" is still running — abort it before resuming` };
         }
+        // WHAT'S CLOSED IS CLOSED (founder ruling, G4). A resume of a gig that ENDED — failed or
+        // aborted, as its checkpoint records — does not reopen it: the store's terminal guard refuses
+        // every write under that id, and its lease is gone. It dispatches a NEW gig, carrying
+        // `resumes: <old id>`, that takes the old seals as inputs by reference. A PARKED gig is not
+        // ended, and its approval-resume keeps its own id.
+        let resumesEnded: string | undefined;
+        if (resumeArg !== undefined && deps.gigStatus) {
+          let status: string | null | undefined;
+          try {
+            status = await askStoreGigStatus(deps.gigStatus, resumeArg);
+          } catch (e) {
+            return { ok: false, requires_approval: approval,
+              error: `gig_dispatch: the store could not say whether gig "${resumeArg}" is closed, so the resume is refused rather than guessing which id to write under — ${e instanceof Error ? e.message : String(e)}` };
+          }
+          if (typeof status === "string" && CLOSED_GIG_STATUSES.has(status)) resumesEnded = resumeArg;
+        } else if (resumeArg !== undefined && deps.checkpoints) {
+          try {
+            if (deps.checkpoints.read(resumeArg)?.ended) resumesEnded = resumeArg;
+          } catch { /* unreadable: the resume gate refuses it with the reason */ }
+        }
         const reuseOn = args["reuse"] === true;
         if (reuseOn && !deps.reuse) {
           return { ok: false, requires_approval: approval, error: `gig_dispatch: reuse was requested but this server has no reuse store wired` };
@@ -1178,6 +1335,7 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         const reuseWiring = {
           ...(deps.checkpoints ? { checkpoints: deps.checkpoints } : {}),
           ...(resumeArg !== undefined ? { resume_from: resumeArg } : {}),
+          ...(resumesEnded !== undefined ? { resume_as_new_gig: true } : {}),
           ...(reuseOn && deps.reuse ? { reuse: deps.reuse } : {}),
           ...(gigInputOmitted ? { gig_input_omitted: true } : {}),
         };
@@ -1458,7 +1616,8 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
 
         // The gig id this run seals under — minted ONCE for both doors so the single-flight lock
         // names the same holder whether the caller blocked (wait:true) or polled (async default).
-        const gigId = resumeArg ?? randomUUID();
+        // A resume of an ENDED gig is a new gig (see resumesEnded); every other resume continues its own.
+        const gigId = resumesEnded !== undefined ? randomUUID() : resumeArg ?? randomUUID();
         // ── single-flight: claim the working tree BEFORE any chair runs ─────────────────────────
         // Every LOCAL dispatch entry point funnels here (the in-process gig_dispatch tool AND the
         // CLI, which calls dispatchTool). The lock is per genome ROOT (deps.genome_dir): two gigs
@@ -1501,6 +1660,7 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
               ok: true, requires_approval: approval,
               data: {
                 gig_id: res.gig_id,
+                ...(resumesEnded !== undefined ? { resumes: resumesEnded } : {}),
                 // The run's own verdict on itself. A parked gig reported as nothing at all read
                 // as a completed one to every caller of the synchronous path.
                 status: res.status,
@@ -1664,6 +1824,7 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
             // Echo the opt-ins back. A caller who typo'd `reuse` and paid full price for a run
             // they believed was cached has no other way to find out.
             ...(resumeArg !== undefined ? { resumed_from: resumeArg } : {}),
+            ...(resumesEnded !== undefined ? { resumes: resumesEnded } : {}),
             ...(reuseOn ? { reuse: true } : {}),
           },
         };
@@ -3932,6 +4093,9 @@ async function callSurfaceTool(
       // Hosted dispatch NEVER spawns. With a queue seam it queues (the gig table is the
       // queue; a drain worker claims and runs); without one it says so, typed.
       if (deps.queueGig) {
+        const shaped = await hostedDispatchArgs(args, deps.gigStatus);
+        if (!shaped.ok) return { ok: false, error: shaped.error };
+        const queued = shaped.forward;
         // contract-post-time-gig-input-v1 — validate the payload BEFORE it is queued, in the SAME
         // words as runGig's preflight, so the caller who can still fix the key is the one who is told
         // (not the worker, later). Everything below the guard queues exactly as today; a throw on this
@@ -3966,7 +4130,7 @@ async function callSurfaceTool(
             // queue as today and SAY the payload was not validated, so the reply never implies a check
             // it could not run. The preflight remains the backstop when the worker runs the gig.
             try {
-              const data = await deps.queueGig(args);
+              const data = await deps.queueGig(queued);
               return {
                 ok: true,
                 data,
@@ -3990,11 +4154,11 @@ async function callSurfaceTool(
               error: unknownGigInputMessage(part.nearMiss.key, part.nearMiss.declaredKey, standard_slug),
             };
           }
-          // (O3/I2) no near miss: queue the UNCHANGED args, and name the harmless undeclared keys (sorted)
+          // (O3/I2) no near miss: queue the args (host contract only, shaped above), and name the harmless undeclared keys (sorted)
           // on the reply so the caller learns at post time what the engine will ignore. A clean payload
           // adds nothing — `undeclared_input_keys` is present only when there is at least one extra.
           try {
-            const data = await deps.queueGig(args);
+            const data = await deps.queueGig(queued);
             return part.extras.length > 0
               ? { ok: true, data, undeclared_input_keys: part.extras }
               : { ok: true, data };
@@ -4005,7 +4169,7 @@ async function callSurfaceTool(
         // (F2) an absent or non-object payload is a shape the door already handles — no new refusal,
         // queued exactly as today.
         try {
-          const data = await deps.queueGig(args);
+          const data = await deps.queueGig(queued);
           return { ok: true, data };
         } catch (e) {
           return { ok: false, error: e instanceof Error ? e.message : String(e) };

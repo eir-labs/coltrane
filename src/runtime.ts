@@ -41,7 +41,8 @@ import type { OutputStore, OutputRecord, InputResolution, ShardStamp } from "./o
 import { resolveSealedInputs } from "./sealed_inputs.js";
 import { expandFanOut, type FanOutInstance } from "./fan_out.js";
 import { checkGigConformance, type GigConformanceResult } from "./gig_conformance.js";
-import { drainGigHeader } from "./output_mirror.js";
+import { drainGigHeader, awaitOutputDrains, remoteConfigured, type GigHeaderRecord } from "./output_mirror.js";
+import { LeaseLost } from "./lease.js";
 import { LEDGER_SCHEMA_VERSION, type Ledger, type GigUsage } from "./ledger.js";
 import { PlacementRefused, type PlacementResolver } from "./placement.js";
 import type { Depth } from "./pricing.js";
@@ -380,6 +381,49 @@ export type ChairSelector = (
   view: ChairSelectionView,
 ) => readonly Chair[] | Promise<readonly Chair[]>;
 
+/** What became of one terminal header (see RunDeps.onTerminalHeader). */
+export interface TerminalHeaderOutcome {
+  status: GigHeaderRecord["status"];
+  /** False when no drain is configured: there is no store to tell, so nothing is owed. */
+  owed: boolean;
+  acknowledged: boolean;
+  /** Why it was not acknowledged (or not written). */
+  error?: string;
+}
+
+/**
+ * Write a terminal header, AWAITED and retried (drainGigHeader → drainServicePost), and report its
+ * fate. Never throws: a header the store would not take is a reported fact, not a new failure of the
+ * run. Logged whatever COLTRANE_DRAIN_DEBUG says — a lost terminal header is the double run.
+ *
+ * A run whose signal was aborted because the LEASE WAS LOST writes nothing: the gig is another
+ * worker's now, and a terminal write from this one would overwrite the holder's truth.
+ */
+async function drainTerminalHeader(deps: RunDeps, rec: GigHeaderRecord): Promise<void> {
+  const report = (o: Omit<TerminalHeaderOutcome, "status">): void => deps.onTerminalHeader?.({ status: rec.status, ...o });
+  if (deps.signal?.aborted && deps.signal.reason instanceof LeaseLost) {
+    report({ owed: false, acknowledged: false, error: deps.signal.reason.message });
+    return;
+  }
+  if (!remoteConfigured()) {
+    report({ owed: false, acknowledged: true });
+    return;
+  }
+  const withReason: GigHeaderRecord = {
+    ...rec,
+    ...(deps.cold_run_reason !== undefined ? { cold_run_reason: deps.cold_run_reason } : {}),
+    ...(deps.resume_as_new_gig === true && deps.resume_from !== undefined ? { resumes: deps.resume_from } : {}),
+  };
+  try {
+    await drainGigHeader(withReason);
+    report({ owed: true, acknowledged: true });
+  } catch (e) {
+    const why = e instanceof Error ? e.message : String(e);
+    console.error(`[drain] the ${rec.status} header for gig ${rec.gig_id} was NOT acknowledged by the store: ${why}`);
+    report({ owed: true, acknowledged: false, error: why });
+  }
+}
+
 export interface RunDeps {
   /**
    * THE AMEND LADDER — COLTRANE_TIER_LADDER's rungs (cheapest first, already narrowed to rungs this
@@ -462,6 +506,29 @@ export interface RunDeps {
    * `executeSkillAsync` spawns without blocking and SIGKILLs on the signal.
    */
   signal?: AbortSignal | undefined;
+  /**
+   * Why this run is COLD when a resume was possible in principle (the caller refused it, e.g. the
+   * genome moved). Carried onto the gig's terminal header manifest as `cold_run_reason`, so a second
+   * payment is recorded where the operator paying for it can see it. Absent = nothing to explain.
+   */
+  cold_run_reason?: string | undefined;
+  /**
+   * RESUME INTO A NEW GIG. With `resume_from` set to an ENDED (failed/aborted) gig, this run seals
+   * under its own `gig_id` and takes the old gig's checkpointed seals as inputs BY REFERENCE: they
+   * are restored as they are (the old rows, the old gig_id, the old content_sha — never re-sealed),
+   * so the new gig's outputs name them in input_shas and nothing is written under the old id. Its
+   * headers carry `manifest.resumes: <old id>`. Absent = the classic resume, which CONTINUES the
+   * same gig (a parked gig's approval).
+   */
+  resume_as_new_gig?: boolean | undefined;
+  /**
+   * Told the fate of every terminal header this run owes the store (complete / failed /
+   * awaiting_approval): whether it was OWED at all (a drain is configured), and whether the store
+   * ACKNOWLEDGED it. A 'complete' header is only written after every output drain of the gig was
+   * acknowledged; when one was not, the header is withheld and this reports it. The drain worker
+   * turns it into `WorkOnceResult.acknowledged`. Absent = nobody is asking; the writes still happen.
+   */
+  onTerminalHeader?: ((outcome: TerminalHeaderOutcome) => void) | undefined;
   /**
    * #237 — the depth this gig was dispatched at, threaded to every invocation so it reaches
    * the thing that actually spends. Absent = each agent's own `depth_profile` stands.
@@ -1004,6 +1071,16 @@ export class GigAborted extends Error {
 }
 
 /** The human-readable cause behind an AbortSignal, whatever shape the aborter used. */
+/**
+ * WHY a run was stopped, as a TOKEN for the header manifest. An abort reason that names itself
+ * (`{ code: "timeout" }`, e.g. the drain's deadline) is used as given; otherwise the free-text reason.
+ */
+export function abortReasonCode(signal: AbortSignal): string {
+  const r = signal.reason as unknown;
+  if (r && typeof r === "object" && typeof (r as { code?: unknown }).code === "string") return (r as { code: string }).code;
+  return abortReasonText(signal);
+}
+
 export function abortReasonText(signal: AbortSignal): string {
   const r = signal.reason as unknown;
   if (typeof r === "string" && r.trim().length > 0) return r;
@@ -1351,13 +1428,16 @@ export async function runGig(
   // A resumed run CONTINUES the gig it resumes: same id, so the restored outputs stay in-gig
   // and `OutputStore.trace` (which scopes its walk to one gig_id) still reaches them. Two ids
   // for one gig would make the provenance chain end at the resume boundary.
-  if (deps.resume_from !== undefined && deps.gig_id !== undefined && deps.gig_id !== deps.resume_from) {
+  const linkedResume = deps.resume_from !== undefined && deps.resume_as_new_gig === true;
+  if (!linkedResume && deps.resume_from !== undefined && deps.gig_id !== undefined && deps.gig_id !== deps.resume_from) {
     throw new ResumeRefused(
       deps.resume_from,
       `the caller supplied a different gig_id ("${deps.gig_id}") — a resumed run continues the gig it resumes, it does not fork one`,
     );
   }
-  const gig_id = deps.resume_from ?? deps.gig_id ?? randomUUID();
+  const gig_id = linkedResume ? (deps.gig_id ?? randomUUID()) : (deps.resume_from ?? deps.gig_id ?? randomUUID());
+  // The gig whose checkpoint a resume reads: this one, or — for a resume into a new gig — the old.
+  const resumeSource = deps.resume_from ?? gig_id;
   const started_at = new Date().toISOString();
   const produced: OutputRecord[] = [];
 
@@ -2004,17 +2084,17 @@ export async function runGig(
 
   if (deps.resume_from !== undefined) {
     if (!deps.checkpoints) {
-      throw new ResumeRefused(gig_id, "no checkpoint store is wired, so there is nothing to resume from");
+      throw new ResumeRefused(resumeSource, "no checkpoint store is wired, so there is nothing to resume from");
     }
     let cp: GigCheckpoint | undefined;
     try {
-      cp = deps.checkpoints.read(gig_id);
+      cp = deps.checkpoints.read(resumeSource);
     } catch (e) {
-      throw new ResumeRefused(gig_id, `its checkpoint could not be read — ${e instanceof Error ? e.message : String(e)}`);
+      throw new ResumeRefused(resumeSource, `its checkpoint could not be read — ${e instanceof Error ? e.message : String(e)}`);
     }
-    if (!cp) throw new ResumeRefused(gig_id, "no checkpoint exists for it (nothing was ever recorded as complete)");
+    if (!cp) throw new ResumeRefused(resumeSource, "no checkpoint exists for it (nothing was ever recorded as complete)");
     if (cp.schema_version !== CHECKPOINT_SCHEMA_VERSION) {
-      throw new ResumeRefused(gig_id, `its checkpoint is schema v${cp.schema_version} and this engine reads v${CHECKPOINT_SCHEMA_VERSION}`);
+      throw new ResumeRefused(resumeSource, `its checkpoint is schema v${cp.schema_version} and this engine reads v${CHECKPOINT_SCHEMA_VERSION}`);
     }
     // THE GATE. A resume into a moved genome would have chairs from genome B consuming sealed
     // outputs from genome A, and nothing in input_shas / genome_hash / run_fingerprint would
@@ -2105,7 +2185,7 @@ export async function runGig(
           `(genome_hash ${cp.identity.genome_hash}); the current build is coltrane ${COLTRANE_VERSION} ` +
           `(genome_hash ${cur.genome_hash}). Resume from the matching build, or re-dispatch cold`;
       }
-      throw new ResumeRefused(gig_id, why, drift);
+      throw new ResumeRefused(resumeSource, why, drift);
     }
 
     const rolesInStandard = new Set(standard.phases.flatMap((p) => p.chairs.map((c) => c.role)));
@@ -2113,7 +2193,7 @@ export async function runGig(
       // Unreachable past the genome gate (roles live in `standard.phases`, which genomeHash
       // folds) — but "provably impossible" is not a reason to inject silently if it happens.
       if (!rolesInStandard.has(r.role)) {
-        throw new ResumeRefused(gig_id, `its checkpoint names role "${r.role}", which this standard does not define`);
+        throw new ResumeRefused(resumeSource, `its checkpoint names role "${r.role}", which this standard does not define`);
       }
       // THE SEAT'S FULL IDENTITY: (chart_slug, movement_id, role). Two movements of one chart may
       // each declare a chair named "reviewer", and restoring one movement's sealed output into the
@@ -2122,17 +2202,17 @@ export async function runGig(
       const seatNow = checkpointRoleKey(deps.chart?.chart_slug ?? standard.slug, deps.chart?.movement_id, r.role);
       const seatThen = checkpointRoleKey(deps.chart?.chart_slug ?? standard.slug, r.movement_id, r.role);
       if (seatNow !== seatThen) {
-        throw new ResumeRefused(gig_id, `its checkpoint names seat "${seatThen}" and this run is seat "${seatNow}" — a movement does not restore another movement's chair`);
+        throw new ResumeRefused(resumeSource, `its checkpoint names seat "${seatThen}" and this run is seat "${seatNow}" — a movement does not restore another movement's chair`);
       }
       const records: OutputRecord[] = [];
       for (let i = 0; i < r.output_ids.length; i++) {
         const id = r.output_ids[i]!;
         const rec = deps.outputs.get(id);
         if (!rec) {
-          throw new ResumeRefused(gig_id, `its checkpoint names output "${id}" for role "${r.role}", which the output store no longer holds`);
+          throw new ResumeRefused(resumeSource, `its checkpoint names output "${id}" for role "${r.role}", which the output store no longer holds`);
         }
         if (rec.content_sha !== r.content_shas[i]) {
-          throw new ResumeRefused(gig_id, `output "${id}" (role "${r.role}") has a different content_sha than the checkpoint recorded — the store moved under it`);
+          throw new ResumeRefused(resumeSource, `output "${id}" (role "${r.role}") has a different content_sha than the checkpoint recorded — the store moved under it`);
         }
         // genomeHash folds the standard and its agents; it does NOT fold the domain-type
         // registry. So a type that changed shape between attempts is invisible to the gate
@@ -2140,10 +2220,10 @@ export async function runGig(
         // no longer agrees with them. Same fingerprint tool the chair-level cache uses.
         const fp = deps.outputs.typeFingerprint(rec.domain_type);
         if (fp === "") {
-          throw new ResumeRefused(gig_id, `the registry can no longer describe type "${rec.domain_type}" (role "${r.role}"), so its sealed output cannot be checked`);
+          throw new ResumeRefused(resumeSource, `the registry can no longer describe type "${rec.domain_type}" (role "${r.role}"), so its sealed output cannot be checked`);
         }
         if (fp !== r.type_fingerprints[i]) {
-          throw new ResumeRefused(gig_id, `type "${rec.domain_type}" (role "${r.role}") has changed shape since that output was sealed`);
+          throw new ResumeRefused(resumeSource, `type "${rec.domain_type}" (role "${r.role}") has changed shape since that output was sealed`);
         }
         records.push(rec);
       }
@@ -2152,14 +2232,14 @@ export async function runGig(
     }
     checkpointStartedAt = cp.started_at;
     resumedFrom = {
-      from_gig_id: gig_id,
+      from_gig_id: resumeSource,
       checkpoint_at: cp.updated_at,
       roles: cp.roles.map((r) => ({ phase: r.phase, role: r.role, output_types: [...r.domain_types] })),
       outputs_restored: [...restoredRoles.values()].reduce((n, v) => n + v.records.length, 0),
       ...(cp.prior_usage !== undefined ? { prior_usage: cp.prior_usage } : {}),
     };
     emit({
-      type: "gig_resumed", from_gig_id: gig_id,
+      type: "gig_resumed", from_gig_id: resumeSource,
       roles: [...restoredRoles.keys()], outputs: resumedFrom.outputs_restored,
     });
   }
@@ -2188,7 +2268,7 @@ export async function runGig(
    * fine (the money is already spent), but it must not be invisible either — a caller who
    * believes the run is resumable and is wrong finds out at the worst possible moment.
    */
-  function saveCheckpoint(): void {
+  function saveCheckpoint(ended?: GigCheckpoint["ended"]): void {
     if (!deps.checkpoints || checkpointRoles.size === 0) return;
     try {
       const prior = finalizeUsage();
@@ -2206,6 +2286,7 @@ export async function runGig(
         // The chart's cumulative spend AT THIS MOVEMENT'S BOUNDARY, so a resumed performance can
         // compare it to the envelope before spawning anything (src/chart.ts, edge case B).
         ...(deps.chart?.prior_budget_state ? { prior_budget_state: deps.chart.prior_budget_state } : {}),
+        ...(ended ? { ended } : {}),
       });
     } catch (e) {
       checkpointError ??= e instanceof Error ? e.message : String(e);
@@ -2237,14 +2318,14 @@ export async function runGig(
       producedByRole.set(ch.role, restored.records);
       produced.push(...restored.records);
       const row: SkippedChair = {
-        phase: phase.name, role: ch.role, reason: "resume", source_gig_id: gig_id,
+        phase: phase.name, role: ch.role, reason: "resume", source_gig_id: resumeSource,
         output_types: restored.records.map((r) => r.domain_type),
         content_shas: restored.records.map((r) => r.content_sha),
       };
       skipped.push(row);
       emit({
         type: "chair_skipped", phase: phase.name, role: ch.role, reason: "resume",
-        source_gig_id: gig_id, output_types: row.output_types,
+        source_gig_id: resumeSource, output_types: row.output_types,
       });
     }
     if (remaining.size === 0) continue; // wholly restored phase — nothing to dispatch
@@ -2278,11 +2359,11 @@ export async function runGig(
         if (!approval) {
           checkpoint();
           emit({ type: "gig_awaiting_approval", phase: phase.name, role: hc.role });
-          // AWAITED, unlike the fire-and-forget completion drain: parking is the runtime's
-          // last act before the caller (often a CLI) exits, and an in-flight fetch dies with
-          // the process — which left the sink's row saying "running" about a gig that was
-          // waiting on a person. Parking is not latency-critical; the truth is.
-          await drainGigHeader({
+          // AWAITED, like every terminal header: parking is the runtime's last act before the
+          // caller (often a CLI) exits, and an in-flight fetch dies with the process — which left
+          // the sink's row saying "running" about a gig that was waiting on a person.
+          await awaitOutputDrains(gig_id);
+          await drainTerminalHeader(deps, {
             gig_id,
             standard_slug: standard.slug,
             status: "awaiting_approval",
@@ -2291,8 +2372,6 @@ export async function runGig(
             finished_at: new Date().toISOString(),
             outputs_count: produced.length,
             error: `awaiting approval at human chair "${hc.role}" (phase "${phase.name}")`,
-          }).catch((de) => {
-            if (process.env["COLTRANE_DRAIN_DEBUG"]) console.error(`[drain] awaiting header ${gig_id}: ${String(de)}`);
           });
           return {
             gig_id,
@@ -4298,21 +4377,37 @@ export async function runGig(
     ...(resumedFrom?.prior_usage !== undefined ? { prior_usage: resumedFrom.prior_usage } : {}),
   });
 
-  // Drain the gig HEADER to the sink (fire-and-forget, like every output before it) — the
-  // stub row the drain service fabricated for FK integrity is replaced by the run's own record.
-  void drainGigHeader({
-    gig_id,
-    standard_slug: standard.slug,
-    status: "complete",
-    genome_hash,
-    run_fingerprint,
-    started_at,
-    finished_at: gig_finished_at,
-    outputs_count: produced.length,
-    ...(settledUsage ? { usage: { total_cost_usd: settledUsage.total_cost_usd, input_tokens: settledUsage.input_tokens, output_tokens: settledUsage.output_tokens } } : {}),
-  }).catch((e) => {
-    if (process.env["COLTRANE_DRAIN_DEBUG"]) console.error(`[drain] gig header ${gig_id}: ${String(e)}`);
-  });
+  // Drain the gig HEADER to the sink — the row the drain service fabricated for FK integrity is
+  // replaced by the run's own record.
+  //
+  // OUTPUTS FIRST. 'completed' is written only after the store acknowledged every output row this
+  // gig sealed: once the store says 'completed' its terminal guard means nothing ever re-runs the
+  // gig, so a completion over a missing output is a finished gig with no work product. When an
+  // output never landed the header is WITHHELD — the row stays running, its lease lapses, and a
+  // re-claim finishes it from whatever did land — and the caller is told.
+  let completionAcknowledged = true;
+  const outputsLanded = remoteConfigured() ? await awaitOutputDrains(gig_id) : { acknowledged: true, failures: [] };
+  if (!outputsLanded.acknowledged) {
+    const why = `${outputsLanded.failures.length} output(s) never landed in the store, so the gig was NOT reported complete — ${outputsLanded.failures.join("; ")}`;
+    console.error(`[drain] gig ${gig_id}: ${why}`);
+    completionAcknowledged = false;
+    deps.onTerminalHeader?.({ status: "complete", owed: true, acknowledged: false, error: why });
+  } else {
+    await drainTerminalHeader({
+      ...deps,
+      onTerminalHeader: (o) => { completionAcknowledged = o.acknowledged || !o.owed; deps.onTerminalHeader?.(o); },
+    }, {
+      gig_id,
+      standard_slug: standard.slug,
+      status: "complete",
+      genome_hash,
+      run_fingerprint,
+      started_at,
+      finished_at: gig_finished_at,
+      outputs_count: produced.length,
+      ...(settledUsage ? { usage: { total_cost_usd: settledUsage.total_cost_usd, input_tokens: settledUsage.input_tokens, output_tokens: settledUsage.output_tokens } } : {}),
+    });
+  }
 
   // Cycle complete — when a snapshot exists (a ceiling OR a pool), mark it `settled` and surface
   // the final state in the manifest. Under a ceiling, the settled dollars are reconciled one last
@@ -4326,7 +4421,12 @@ export async function runGig(
   // every gig a deployment ever runs leaves a file behind forever. Only the SUCCESS path clears
   // it: a failed or aborted run's checkpoint is exactly what a later resume reads, and this line
   // is not reached on either.
-  try { deps.checkpoints?.remove(gig_id); } catch { /* reclaiming disk must not fail a run that succeeded */ }
+  //
+  // Kept when the store never learned of the completion: the row is still running and will be
+  // re-claimed, and on this box the local checkpoint is the cheapest way to finish it without paying.
+  if (completionAcknowledged) {
+    try { deps.checkpoints?.remove(gig_id); } catch { /* reclaiming disk must not fail a run that succeeded */ }
+  }
 
   const result: GigResult = {
     gig_id, standard_slug: standard.slug,
@@ -4374,21 +4474,34 @@ export async function runGig(
       if (partial) (e as Record<string, unknown>)["usage"] = partial;
       if (budget) (e as Record<string, unknown>)["budget_state"] = budget;
     }
-    // The sink learns the truth either way: a failed run drains a FAILED header (same
-    // fire-and-forget seam as the success path), so the queue row never sits stale on a
-    // local failure. Found live: the worker's first day exposed the success-only drain.
-    void drainGigHeader({
+    // The sink learns the truth either way: a failed run drains a FAILED header (awaited and
+    // retried, like the success path), so the queue row never sits stale on a local failure.
+    // Found live: the worker's first day exposed the success-only drain. The outputs the run DID
+    // seal are waited for first, so what the failed row points at has landed.
+    const leaseLost = deps.signal?.aborted === true && deps.signal.reason instanceof LeaseLost;
+    // A run stopped by its signal (a gig_abort, the drain's deadline) ENDED ABORTED: that is how
+    // long the work was allowed to take, not a defect in the work, and once the store's terminal
+    // guard holds a row at `failed` it can never be corrected to what actually happened.
+    const endedAs: "failed" | "aborted" = e instanceof GigAborted || deps.signal?.aborted === true ? "aborted" : "failed";
+    // The checkpoint records that this gig ENDED, so a later resume of it is dispatched as a new
+    // gig rather than reopening a closed one. Not on a lost lease: the gig is not ours to end.
+    if (!leaseLost) saveCheckpoint({ status: endedAs, at: new Date().toISOString() });
+    if (remoteConfigured() && !leaseLost) {
+      await awaitOutputDrains(gig_id);
+    }
+    await drainTerminalHeader(deps, {
       gig_id,
       standard_slug: standard.slug,
-      status: "failed",
+      status: endedAs,
       genome_hash,
       started_at,
       finished_at: new Date().toISOString(),
       outputs_count: produced.length,
-      error: e instanceof Error ? e.message : String(e),
+      error: endedAs === "aborted" && deps.signal?.aborted === true
+        ? `aborted: ${abortReasonText(deps.signal)}`
+        : e instanceof Error ? e.message : String(e),
+      ...(endedAs === "aborted" && deps.signal?.aborted === true ? { abort_reason: abortReasonCode(deps.signal) } : {}),
       ...(partial ? { usage: { total_cost_usd: partial.total_cost_usd, input_tokens: partial.input_tokens, output_tokens: partial.output_tokens } } : {}),
-    }).catch((de) => {
-      if (process.env["COLTRANE_DRAIN_DEBUG"]) console.error(`[drain] failed-gig header ${gig_id}: ${String(de)}`);
     });
     throw e;
   } finally {

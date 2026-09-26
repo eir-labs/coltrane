@@ -34,7 +34,8 @@
 import * as fs from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { runGig, ResumeRefused, genomeHash, CORE_TO_PRIMITIVE, type AgentInvoker } from "./runtime.js";
+import { runGig, ResumeRefused, genomeHash, CORE_TO_PRIMITIVE, type AgentInvoker, type TerminalHeaderOutcome } from "./runtime.js";
+import { HOSTED_LEASE_MS, LeaseLost, renewLease, releaseLease, type LeaseCredential } from "./lease.js";
 import { makeGigLogTee, gigLogBaseFromEnv } from "./gig_log_tee.js";
 import { defaultOutputsPersistDir } from "./outputs.js";
 import { loadRegistry, type Registry } from "./registry.js";
@@ -47,7 +48,7 @@ import { engineToolProviders, drainBudget, drainTimeoutMs, resolveWorkingRepo, a
 // The repository resolver's ONE home is run_deps.ts (shared by both doors). Re-exported here so
 // worker.ts's own consumers — and tests/the_repo_is_typed_input — keep importing it from this path.
 export { resolveWorkingRepo } from "./run_deps.js";
-import { createOutputMirror } from "./output_mirror.js";
+import { createOutputMirror, drainGigHeader, remoteConfigured, DrainWriteError, DrainConfigError } from "./output_mirror.js";
 import { PRIMITIVE_OUTPUT_TYPE } from "./core_types.js";
 import { sha256Hex, canonJson, outputContentHash, CANONICAL_FORM_VERSION } from "./canonical_form.js";
 import {
@@ -125,6 +126,13 @@ export interface ClaimedGig {
    * approval seals under the approving principal's name rather than the worker's.
    */
   approvals?: Record<string, { verdict: Record<string, unknown>; approved_by?: string }> | null;
+  /**
+   * The CLOSED gig this one resumes (eir-labs/coltrane-ui #250). What's closed is closed: this gig
+   * runs under its OWN id, and the closed gig's sealed outputs enter it as inputs BY REFERENCE —
+   * restored as they are, never re-sealed, and nothing is written under the closed gig's id.
+   * Null/absent on an ordinary claim.
+   */
+  resumes?: string | null;
 }
 
 /**
@@ -276,8 +284,23 @@ export type WorkOnceResult =
       claimed: true;
       gig_id: string;
       /** `awaiting_approval` is its own outcome: a run that reached a human chair is neither
-       *  finished nor broken, and calling it either would be a lie the operator acts on. */
-      status: "complete" | "failed" | "awaiting_approval";
+       *  finished nor broken, and calling it either would be a lie the operator acts on.
+       *  `abandoned` is the store saying this gig is NOT this worker's to run — its lease was lost,
+       *  or the store refused the 'running' header (the row is finished, or someone else holds it).
+       *  The worker stopped and wrote nothing terminal; `error` says which. */
+      status: "complete" | "failed" | "awaiting_approval" | "abandoned" | "aborted";
+      /** Present iff `aborted`: why the run was stopped. `timeout` = the drain's run deadline
+       *  (drainTimeoutMs) fired. A deadline is how long the work was allowed to take, not a defect in
+       *  it, so the gig ends aborted (header `aborted`), never failed through gig_fail. */
+      aborted?: { reason: "timeout" };
+      /**
+       * Did the store ACKNOWLEDGE this run's terminal state? For a completion: every output row landed
+       * and then the 'completed' header did. For a failure: the failed header, the failGig RPC or a
+       * terminal release was recorded. False means the store may still think the gig is running — it
+       * will be re-claimed — and `coltrane work` exits non-zero so a supervisor sees it. True, too,
+       * when no drain is configured: then there is no store header to owe.
+       */
+      acknowledged: boolean;
       outputs_count?: number;
       error?: string;
       /** Present iff awaiting_approval: the human chair the run parked at. */
@@ -299,6 +322,41 @@ export interface WorkOnceDeps {
    * factory inside `workOnce` would pull substrate the drain does not own into the claim path.
    */
   venueRealizer?: VenueRealizer;
+  /**
+   * THE HEARTBEAT'S CLOCK, injected. Arms `beat` every `intervalMs` and returns the function that
+   * stops it. `workOnce` arms it once per claimed gig (venue mode), at HOSTED_LEASE_MS / 3, before the
+   * first chair, and stops it before it returns. The default is an unref'd setInterval; a law passes
+   * its own and fires `beat` from inside a chair, which is "time passed while the model worked"
+   * without sleeping.
+   */
+  scheduleHeartbeat?: (intervalMs: number, beat: () => Promise<unknown>) => () => void;
+}
+
+function defaultScheduleHeartbeat(intervalMs: number, beat: () => Promise<unknown>): () => void {
+  const timer = setInterval(() => { void beat().catch(() => undefined); }, intervalMs);
+  // A heartbeat must never be the thing keeping a finished worker alive.
+  if (typeof timer === "object" && "unref" in timer) timer.unref();
+  return () => clearInterval(timer);
+}
+
+/**
+ * The venue credential the lease doors speak through, or undefined when this box holds no lease it can
+ * renew or release: PLAYER mode (the lease is on coltrane_mcp_claim, labelled by the worker, and the
+ * drain's doors would refuse it) or no drain service configured.
+ */
+function leaseCredential(ctx: WorkerContext): LeaseCredential | undefined {
+  if (!ctx.drainKey || !ctx.instance || !process.env["COLTRANE_DRAIN_URL"]) return undefined;
+  return { drainKey: ctx.drainKey, instance: ctx.instance };
+}
+
+/** Give a claim back to the queue (non-terminal) before refusing it. Returns what to tell the operator. */
+async function releaseRefusedClaim(ctx: WorkerContext, gig_id: string, reason: string): Promise<string> {
+  const cred = leaseCredential(ctx);
+  if (!cred) return "no venue credential to release it with — the row is held until its lease lapses";
+  const rel = await releaseLease(gig_id, reason, false, cred);
+  return rel.ok
+    ? "released it back to the queue"
+    : `the release was not recorded either (${rel.detail}) — the row is held until its lease lapses`;
 }
 
 async function workerRpc(ctx: WorkerContext, fn: string, body: Record<string, unknown>): Promise<unknown> {
@@ -467,26 +525,25 @@ export async function claimNextGig(ctx: WorkerContext): Promise<ClaimedGig | nul
       // Fail loudly. Continuing with a stale or empty bearer would fail later, deeper, and as
       // something that reads like an authorization bug rather than a store that did not mint.
       //
-      // KNOWN CONSEQUENCE, accepted: the store has already leased the row, so it sits `running`
-      // until the lease expires (30 minutes) before anything can reclaim it. Releasing it here is
-      // not possible — every release RPC speaks through the credential that was not minted. A store
-      // that claims without minting is broken in a way a worker cannot repair, and stalling one row
-      // for one lease window is the correct price for not proceeding unauthenticated.
-      throw new Error(
-        `coltrane_drain_claim leased ${claim.gig_id} but minted no credential; the row stays leased ` +
-          `until its lease expires`,
-      );
+      // RELEASE FIRST, never hold. The store has already leased the row; held, it would sit
+      // `running` for a whole lease window (HOSTED_LEASE_MS) with nobody running it. The drain
+      // service's release door speaks through the VENUE credential — the one this box always holds —
+      // so the missing per-gig credential is no obstacle. Non-terminal: the gig is not at fault.
+      const why = `coltrane_drain_claim leased ${claim.gig_id} but minted no credential`;
+      const released = await releaseRefusedClaim(ctx, claim.gig_id, why);
+      throw new Error(`${why}; ${released}`);
     }
     // ADDITIVE to the single credential-mode derivation above — it reads the claim the store already
     // handed back, never a second derivation of anything. Placed BEFORE the credential is replaced,
     // so a refused claim never updates the worker's token. The refusal names BOTH the gig's room and
-    // this worker's realizable set so the operator learns which is misconfigured; the leased row
-    // stays running until its lease expires, the same accepted price as the no-mint case above.
+    // this worker's realizable set so the operator learns which is misconfigured, and the row is
+    // RELEASED (non-terminally, naming the room) so a box that can stand the room up takes it now.
     if (!venueMayClaim(claim.venue, ctx.realizableVenues)) {
-      throw new Error(
+      const why =
         `claimed gig ${claim.gig_id} names venue "${claim.venue}", which this worker cannot realize ` +
-          `(realizable: ${JSON.stringify(ctx.realizableVenues ?? [])}); the row stays leased until its lease expires`,
-      );
+        `(realizable: ${JSON.stringify(ctx.realizableVenues ?? [])})`;
+      const released = await releaseRefusedClaim(ctx, claim.gig_id, why);
+      throw new Error(`${why}; ${released}`);
     }
     ctx.agentToken = claim.token;
     return claim;
@@ -872,6 +929,8 @@ export function resumeStateFromDrain(args: {
         data: p.row.data,
         input_refs: remapped ?? [],
         input_shas: inputShas,
+        // A local copy of a sink row: never drained back (a duplicate, or a write under a closed gig).
+        already_in_sink: true,
       });
     } catch (e) {
       // Unreachable: `validateWrite` above is the same gate `write` runs, from one implementation.
@@ -900,18 +959,22 @@ export function resumeStateFromDrain(args: {
   };
 }
 
-/** Read the sink and rebuild this claim's resume state, or say why it cannot be rebuilt. */
+/** Read the sink and rebuild this claim's resume state, or say why it cannot be rebuilt.
+ *  `nothing` marks the one refusal that is not a refusal: the sink holds nothing to resume from, so
+ *  the cold run is the gig's FIRST run and there is no second payment to explain. */
 async function rebuildFromDrain(
   ctx: WorkerContext,
   claim: ClaimedGig,
   standard: Standard,
   outputs: OutputStore,
-): Promise<DrainResumeState> {
-  const drained = await fetchDrainedOutputs(ctx, claim.gig_id);
+  /** The gig whose seals to rebuild from: the claim's own, or the closed gig it `resumes`. */
+  source: string = claim.gig_id,
+): Promise<DrainResumeState | { ok: false; reason: string; nothing: true }> {
+  const drained = await fetchDrainedOutputs(ctx, source);
   if (drained.error !== undefined) return { ok: false, reason: `the sink's outputs could not be read — ${drained.error}` };
-  if (drained.rows.length === 0) return { ok: false, reason: "the sink holds no sealed outputs for this gig" };
+  if (drained.rows.length === 0) return { ok: false, reason: "the sink holds no sealed outputs for this gig", nothing: true };
 
-  const header = await fetchDrainedGenomeHash(ctx, claim.gig_id);
+  const header = await fetchDrainedGenomeHash(ctx, source);
   const current = genomeHash(standard);
   if (header.genome_hash === undefined) {
     // A miss is free; a wrong hit is not. An identity that cannot be checked resolves to doing
@@ -928,7 +991,7 @@ async function rebuildFromDrain(
     };
   }
   return resumeStateFromDrain({
-    gig_id: claim.gig_id,
+    gig_id: source,
     standard,
     identity: coldRunIdentity(standard, claim.input),
     rows: drained.rows,
@@ -966,6 +1029,33 @@ export function approvalWiring(
   };
 }
 
+/** The drain's own run deadline, as the abort reason — so the run ends `aborted`/timeout. */
+class DrainDeadline extends Error {
+  /** The token the aborted header's manifest.abort_reason carries (abortReasonCode, src/runtime.ts). */
+  readonly code = "timeout";
+  constructor(readonly ms: number) {
+    super(`timeout: the drain's run deadline (${ms} ms) passed before the gig finished`);
+    this.name = "DrainDeadline";
+  }
+}
+
+/** Throw, naming the variable, when a drain key is set but the drain service's URL is not. */
+export function refuseBlindDrain(env: NodeJS.ProcessEnv = process.env): void {
+  const key = env["COLTRANE_DRAIN_KEY"];
+  const url = env["COLTRANE_DRAIN_URL"];
+  if (key && key.trim() !== "" && (!url || url.trim() === "")) {
+    throw new Error(
+      "COLTRANE_DRAIN_KEY is set but COLTRANE_DRAIN_URL is not: this drain cannot reach the service its " +
+        "outputs, headers and lease go through, so it claims nothing. Set COLTRANE_DRAIN_URL to the Coltrane service origin.",
+    );
+  }
+}
+
+/** 23514: the row is terminal (the store's terminal guard). 403 / 42501: the lease is not ours. */
+function isNotOursRefusal(e: DrainWriteError): boolean {
+  return e.code === "23514" || e.code === "42501" || e.status === 403 || e.status === 409;
+}
+
 /** One unit of work: claim → load the org genome (as the agent) → run under the claimed
  *  gig's id → results drain via the org drain key (engine drain layer, env-configured), or
  *  the failure is recorded. Never throws for a run failure — a thrown claim/store error
@@ -985,9 +1075,45 @@ export async function workOnce(ctx: WorkerContext, deps: WorkOnceDeps): Promise<
   } catch (e) {
     log(`worker-state reap skipped: ${e instanceof Error ? e.message : String(e)}`);
   }
+  // NO BLIND DRAIN, and no blind CLAIM. A drain key with no COLTRANE_DRAIN_URL can reach none of the
+  // doors a run writes through (outputs, headers, renew, release). Refused HERE, before the store is
+  // asked for work: a claim would lease the row and spend one of its attempts, and this worker could
+  // not even release it — the release goes through the service it cannot reach.
+  refuseBlindDrain();
   const claim = await claimNextGig(ctx);
   if (!claim) return { claimed: false };
   log(`claimed ${claim.gig_id} (${claim.standard_slug}, ${claim.mode}) as ${claim.acting_for}`);
+
+  // ── THE LEASE IS HELD BY RENEWING IT, and the run stops the moment it is lost. ─────────────────
+  // The store re-claims a row whose lease lapsed, so a gig that runs past one lease without renewing
+  // is handed to a second worker WHILE IT IS STILL RUNNING: two runs, two payments. The heartbeat is
+  // armed here, before anything that could spend, at a third of the ONE lease constant; it stops in
+  // the finally. A renewal the store REFUSES (403 / 42501) aborts this run's signal with LeaseLost:
+  // the in-flight chair is told, no further chair runs, nothing further seals, and nothing terminal
+  // is written — the new holder owns the gig's truth. A renewal that merely failed to arrive is
+  // logged and tried again next beat; the lease still has two beats of slack.
+  const aborter = new AbortController();
+  const leaseCred = leaseCredential(ctx);
+  const stopHeartbeat = leaseCred
+    ? (deps.scheduleHeartbeat ?? defaultScheduleHeartbeat)(HOSTED_LEASE_MS / 3, async () => {
+        if (aborter.signal.aborted) return;
+        const r = await renewLease(claim.gig_id, leaseCred);
+        if (r.ok) return;
+        if (r.lost) {
+          const lost = new LeaseLost(claim.gig_id, r.detail);
+          log(lost.message);
+          aborter.abort(lost);
+        } else {
+          log(`lease renewal for ${claim.gig_id} did not land (the next beat tries again): ${r.detail}`);
+        }
+      })
+    : undefined;
+  const leaseLost = (): LeaseLost | undefined =>
+    aborter.signal.aborted && aborter.signal.reason instanceof LeaseLost ? aborter.signal.reason : undefined;
+  // What the store was told about this run's end — reported by runGig for every terminal header.
+  let terminal: TerminalHeaderOutcome | undefined;
+  const terminalAcknowledged = (): boolean =>
+    terminal === undefined ? !remoteConfigured() : !terminal.owed || terminal.acknowledged;
 
   // THE WORKING TREE IS OBTAINED AFTER THE CLAIM, and that ordering is the point. The shell used to
   // clone first, from a REPO_URL fixed at provisioning, which made a per-gig fact a per-box one and
@@ -1057,7 +1183,15 @@ export async function workOnce(ctx: WorkerContext, deps: WorkOnceDeps): Promise<
       mirror: createOutputMirror(join(tmpdir(), "coltrane-worker-mirror")),
     });
     const ledger = new MemoryLedger();
-    const invoke = deps.makeInvoke(registry, genome);
+    const baseInvoke = deps.makeInvoke(registry, genome);
+    // An answer that arrives AFTER the lease was lost is not sealed: the gig is another worker's, and
+    // an invoker that did not honour the signal must not get its late result into the record.
+    const invoke: AgentInvoker = async (ictx) => {
+      const out = await baseInvoke(ictx);
+      const lost = leaseLost();
+      if (lost) throw lost;
+      return out;
+    };
     const checkpoints = createCheckpointStore(stateRoot);
     // ORDER OF PREFERENCE: the local checkpoint (fast path — same box, nothing to fetch), then
     // the DRAIN reconstruction (a different box, or a state root that was cleared), then cold.
@@ -1065,16 +1199,56 @@ export async function workOnce(ctx: WorkerContext, deps: WorkOnceDeps): Promise<
     let checkpoint: GigCheckpoint | undefined;
     let resumeSource: "local" | "drain" = "local";
     let coldReason = "no local checkpoint and no drain to rebuild one from";
-    try {
-      checkpoint = checkpoints.read(claim.gig_id);
-    } catch (e) {
-      // A damaged checkpoint is not a reason to fail a runnable row — it is a reason to pay for
-      // a cold run, and to say so.
-      log(`checkpoint for ${claim.gig_id} unreadable, running cold: ${e instanceof Error ? e.message : String(e)}`);
+    // Set only when a resume was POSSIBLE and refused — the second payment worth explaining. A gig
+    // whose sink holds nothing is on its first run, and that is not a cold run to account for.
+    let coldRunReason: string | undefined;
+    // A claim that RESUMES A CLOSED GIG (claim.resumes) runs under its own id and resumes from the
+    // closed gig's seals as inputs by reference (RunDeps.resume_as_new_gig). Its own checkpoint, if
+    // this box holds one, still comes first: that is this gig being re-claimed, not resumed.
+    const resumes = typeof claim.resumes === "string" && claim.resumes !== "" && claim.resumes !== claim.gig_id
+      ? claim.resumes
+      : undefined;
+    let resumeFrom = claim.gig_id;
+    const readLocal = (id: string): GigCheckpoint | undefined => {
+      try {
+        return checkpoints.read(id);
+      } catch (e) {
+        // A damaged checkpoint is not a reason to fail a runnable row — it is a reason to pay for
+        // a cold run, and to say so.
+        log(`checkpoint for ${id} unreadable, running cold: ${e instanceof Error ? e.message : String(e)}`);
+        return undefined;
+      }
+    };
+    checkpoint = readLocal(claim.gig_id);
+    if (!checkpoint && resumes !== undefined) {
+      checkpoint = readLocal(resumes);
+      if (checkpoint) resumeFrom = resumes;
     }
     if (!checkpoint) {
-      const rebuilt = await rebuildFromDrain(ctx, claim, standard, outputs);
+      let rebuilt = await rebuildFromDrain(ctx, claim, standard, outputs, resumes ?? claim.gig_id);
+      // A RESUMING gig re-claimed on a fresh box has TWO sets of seals: the closed gig's (taken by
+      // reference) and its OWN, sealed and drained under its id before its box was lost. Rebuilding
+      // from the closed gig alone would pay again for every chair this gig already sealed. So its own
+      // drained seals are rebuilt too — as local copies under its own id, never drained back — and
+      // their roles join the closed gig's in the one checkpoint the resume reads.
+      if (resumes !== undefined) {
+        const own = await rebuildFromDrain(ctx, claim, standard, outputs, claim.gig_id);
+        if (own.ok && rebuilt.ok) {
+          const ownRoles = new Map(own.checkpoint.roles.map((r) => [r.role, r]));
+          rebuilt = {
+            ok: true,
+            checkpoint: {
+              ...rebuilt.checkpoint,
+              roles: [...rebuilt.checkpoint.roles.filter((r) => !ownRoles.has(r.role)), ...ownRoles.values()],
+              updated_at: own.checkpoint.updated_at > rebuilt.checkpoint.updated_at ? own.checkpoint.updated_at : rebuilt.checkpoint.updated_at,
+            },
+          };
+        } else if (own.ok) {
+          rebuilt = own;
+        }
+      }
       if (rebuilt.ok) {
+        resumeFrom = rebuilt.checkpoint.gig_id;
         // Written to the LOCAL store because that is where the runtime's resume gate reads a
         // checkpoint from. The reconstruction seeds that gate; the gate remains the authority —
         // it re-resolves every output id, re-checks every content_sha and type fingerprint, and
@@ -1085,6 +1259,7 @@ export async function workOnce(ctx: WorkerContext, deps: WorkOnceDeps): Promise<
         resumeSource = "drain";
       } else {
         coldReason = rebuilt.reason;
+        if (!("nothing" in rebuilt)) coldRunReason = rebuilt.reason;
       }
     }
     const human = approvalWiring(claim.approvals, standard, checkpoint?.roles.map((r) => r.role) ?? []);
@@ -1098,8 +1273,10 @@ export async function workOnce(ctx: WorkerContext, deps: WorkOnceDeps): Promise<
     // cwd is a freshly cloned repository, so honouring a `.mcp.json` there would let a repo declare
     // servers for the seat reading it. Present enables resolution; empty makes any grant naming a
     // server other than the engine's own fail closed.
-    const aborter = new AbortController();
-    deadline = setTimeout(() => aborter.abort(), drainTimeoutMs());
+    // The lease this run is under decides its ceiling: a venue drain renews the hosted lease; a
+    // player holds coltrane_mcp_claim's thirty minutes with no renew (drainTimeoutMs per mode).
+    const timeoutMs = drainTimeoutMs(ctx.drainKey && ctx.instance ? "venue" : "player");
+    deadline = setTimeout(() => aborter.abort(new DrainDeadline(timeoutMs)), timeoutMs);
     // unref so a finished gig exits promptly instead of waiting out its own timeout.
     if (typeof deadline === "object" && "unref" in deadline) deadline.unref();
 
@@ -1140,7 +1317,58 @@ export async function workOnce(ctx: WorkerContext, deps: WorkOnceDeps): Promise<
     // this and the drain did not, so every production gig's thread went
     // unrecorded at every engine version — found live, box configured, no files.
     const tee = makeGigLogTee(gigLogBaseFromEnv(defaultOutputsPersistDir), claim.gig_id);
-    const run = (resume: boolean): ReturnType<typeof runGig> => runGig(standard, claim.input, {
+    // ── THE START HEADER: written, AWAITED, before the first chair. ──────────────────────────────
+    // It carries the run's genome_hash, so a re-claim of this gig after a lost completion has an
+    // identity to resume against — before this, the only header carrying one was the terminal header,
+    // i.e. exactly the one that was lost. Written AFTER the sink was read for resume state (a re-claim
+    // must see the previous run's identity, not this one's), and carrying the cold-run reason when
+    // this run is paying again.
+    //
+    // A REFUSAL STOPS THE WORKER. 23514 is the store's terminal guard (the row is already finished);
+    // 403 / 42501 is a lease that is not this worker's. Either way the gig is not this worker's to run:
+    // no chair, no seal, and nothing terminal — a finished gig must not be failed after the fact, and a
+    // gig someone else holds is theirs to finish. Any other failure to land is logged and the run
+    // proceeds: the claim itself proved the store is there, and the terminal writes are retried.
+    if (remoteConfigured()) {
+      try {
+        await drainGigHeader({
+          gig_id: claim.gig_id,
+          standard_slug: standard.slug,
+          status: "running",
+          genome_hash: genomeHash(standard),
+          started_at: new Date().toISOString(),
+          ...(resumes !== undefined ? { resumes } : {}),
+          ...(coldRunReason !== undefined ? { cold_run_reason: coldRunReason } : {}),
+        });
+      } catch (e) {
+        // ANY failure to land the start header stops the run before the first chair. A refusal
+        // (any 4xx: the drain service answers the terminal guard as 400 {error} with no code, a lost
+        // lease as 403) means the gig is not this worker's to run. A transient failure has already
+        // been retried under E2's policy (drainServicePost), and a run whose identity never reached
+        // the store is a run nobody can resume — so it is given back, not run blind.
+        const why = e instanceof Error ? e.message : String(e);
+        // NO BLIND DRAIN: a drain configured so that no request can reach its service (a key with no
+        // COLTRANE_DRAIN_URL) refuses too. It would pay for chairs whose outputs, headers and renewals
+        // reach nobody, then report a completion no store will ever hear of.
+        const misconfigured = e instanceof DrainConfigError;
+        const refusedOutright = misconfigured || (e instanceof DrainWriteError && (e.refused || isNotOursRefusal(e)));
+        const error = misconfigured
+          ? `this drain cannot reach its service, so it runs nothing — ${why}`
+          : refusedOutright
+          ? `the store refused this gig's 'running' header, so it is not this worker's to run — ${why}`
+          : `the store never acknowledged this gig's 'running' header, so it is given back before any chair runs — ${why}`;
+        log(`gig ${claim.gig_id} abandoned: ${error}`);
+        console.error(`[drain] gig ${claim.gig_id}: ${error}`);
+        // Not a refusal: nothing has been spent, so the row goes back to the queue (non-terminal).
+        if (!refusedOutright && leaseCred) {
+          const rel = await releaseLease(claim.gig_id, error, false, leaseCred);
+          if (!rel.ok) log(`the release of ${claim.gig_id} was not recorded either (${rel.detail}) — the row is held until its lease lapses`);
+        }
+        return { claimed: true, gig_id: claim.gig_id, status: "abandoned", error, acknowledged: false };
+      }
+    }
+
+    const run = (resume: boolean, cold_run_reason?: string): ReturnType<typeof runGig> => runGig(standard, claim.input, {
       onProgress: tee,
       ...assembleRunDeps({
         outputs,
@@ -1179,7 +1407,9 @@ export async function workOnce(ctx: WorkerContext, deps: WorkOnceDeps): Promise<
       gig_id: claim.gig_id, // ← the run IS the queue row; the drained header completes it
       signal: aborter.signal,
       checkpoints,
-      ...(resume ? { resume_from: claim.gig_id } : {}),
+      ...(resume ? { resume_from: resumeFrom, ...(resumeFrom !== claim.gig_id ? { resume_as_new_gig: true } : {}) } : {}),
+      ...(cold_run_reason !== undefined ? { cold_run_reason } : {}),
+      onTerminalHeader: (o) => { terminal = o; },
       ...human,
     });
     let res;
@@ -1198,11 +1428,23 @@ export async function workOnce(ctx: WorkerContext, deps: WorkOnceDeps): Promise<
         // payload or a type moved). The queue row is still work that must happen, so it is run
         // COLD and the second payment is stated rather than hidden.
         log(`resume refused for ${claim.gig_id} — running it COLD: ${e.message}`);
-        res = await run(false);
+        res = await run(false, e.message);
       }
     } else {
       log(`running ${claim.gig_id} COLD — ${coldReason}`);
-      res = await run(false);
+      res = await run(false, coldRunReason);
+    }
+    const lostAfterRun = leaseLost();
+    if (lostAfterRun) {
+      return { claimed: true, gig_id: claim.gig_id, status: "abandoned", error: lostAfterRun.message, acknowledged: false };
+    }
+    const acknowledged = terminalAcknowledged();
+    if (!acknowledged) {
+      log(
+        `gig ${claim.gig_id}: the store did NOT acknowledge its ${res.status} state` +
+        (terminal?.error ? ` — ${terminal.error}` : "") +
+        ` — the row may still read running and will be re-claimed`,
+      );
     }
 
     if (res.status === "awaiting_approval") {
@@ -1225,21 +1467,59 @@ export async function workOnce(ctx: WorkerContext, deps: WorkOnceDeps): Promise<
         claimed: true, gig_id: claim.gig_id, status: "awaiting_approval",
         outputs_count: res.outputs.length,
         ...(awaiting ? { awaiting } : {}),
+        acknowledged,
       };
     }
     log(`gig ${claim.gig_id} ${res.status} — ${res.outputs.length} sealed output(s)`);
-    return { claimed: true, gig_id: claim.gig_id, status: "complete", outputs_count: res.outputs.length };
+    return { claimed: true, gig_id: claim.gig_id, status: "complete", outputs_count: res.outputs.length, acknowledged };
   } catch (e) {
+    // A LOST LEASE IS NOT A FAILURE OF THE GIG, and this worker may not say it is one: no failGig, no
+    // terminal release, no failed header (runGig withheld it on the same signal). The gig is another
+    // worker's now.
+    const lost = leaseLost();
+    if (lost) {
+      log(`gig ${claim.gig_id} abandoned: ${lost.message}`);
+      return { claimed: true, gig_id: claim.gig_id, status: "abandoned", error: lost.message, acknowledged: false };
+    }
+    // THE DEADLINE ENDS A GIG ABORTED. runGig already wrote the `aborted` header (awaited, retried);
+    // gig_fail would be a second, contradictory terminal write, which the store's guard refuses.
+    if (aborter.signal.aborted && aborter.signal.reason instanceof DrainDeadline) {
+      const error = aborter.signal.reason.message;
+      const acknowledged = terminalAcknowledged();
+      log(`gig ${claim.gig_id} aborted: ${error}${acknowledged ? "" : " — and the store did NOT acknowledge the aborted header"}`);
+      return { claimed: true, gig_id: claim.gig_id, status: "aborted", aborted: { reason: "timeout" }, error, acknowledged };
+    }
     const message = e instanceof Error ? e.message : String(e);
     log(`gig ${claim.gig_id} failed: ${message}`);
+    // `acknowledged` answers for the TERMINAL HEADER when runGig owed one. When the failure came
+    // before any header was owed (the genome, the venue guard), the store learns it through gig_fail
+    // or the terminal release, and that is what answers.
+    const headerOwed = terminal !== undefined && terminal.owed;
+    let recorded = headerOwed ? terminal!.acknowledged : false;
+    const headerless = !headerOwed;
     try {
-      await failGig(ctx, claim.gig_id, message);
+      if ((await failGig(ctx, claim.gig_id, message)) && headerless) recorded = true;
     } catch (fe) {
-      // The failure could not even be recorded — surface both; the lease will expire.
-      log(`could not record failure (lease will expire): ${fe instanceof Error ? fe.message : String(fe)}`);
+      // The failure could not be recorded through the per-gig credential. Fall back to a TERMINAL
+      // release through the venue credential, carrying the run's error — holding the row instead would
+      // leave a dead gig leased for a whole lease window, then re-run it.
+      const why = fe instanceof Error ? fe.message : String(fe);
+      if (leaseCred) {
+        const rel = await releaseLease(claim.gig_id, message, true, leaseCred);
+        if (rel.ok) {
+          if (headerless) recorded = true;
+          log(`could not record failure through failGig (${why}); released ${claim.gig_id} terminally instead`);
+        } else {
+          log(`could not record failure (${why}), and the terminal release was refused too (${rel.detail}) — the row is held until its lease lapses`);
+        }
+      } else {
+        log(`could not record failure (${why}) and this box holds no venue credential to release it with — the row is held until its lease lapses`);
+      }
     }
-    return { claimed: true, gig_id: claim.gig_id, status: "failed", error: message };
+    if (!recorded) console.error(`[drain] gig ${claim.gig_id} failed and the store did NOT acknowledge the failure: ${message}`);
+    return { claimed: true, gig_id: claim.gig_id, status: "failed", error: message, acknowledged: recorded };
   } finally {
+    stopHeartbeat?.();
     // Restored BEFORE the temp directory is removed: deleting the directory a process is standing
     // in leaves it with an invalid cwd, and every later relative path resolves from nowhere.
     try {
@@ -1247,10 +1527,10 @@ export async function workOnce(ctx: WorkerContext, deps: WorkOnceDeps): Promise<
     } catch { /* the original cwd is gone; nothing useful left to do about it here */ }
     if (deadline) clearTimeout(deadline);
     workspace?.cleanup();
-    // Hand the git credential back. GitHub fixes installation tokens at an hour and the lease that
-    // justified this one is thirty minutes, so a finished gig otherwise leaves a live credential
-    // behind for the remainder. Not a security control — a compromised drain declines to call it —
-    // but in the ordinary case a four-minute run stops holding one fifty-six minutes early.
+    // Hand the git credential back. GitHub fixes installation tokens at an hour, so a finished gig
+    // otherwise leaves a live credential behind for the remainder of it. Not a security control — a
+    // compromised drain declines to call it — but in the ordinary case a four-minute run stops
+    // holding one fifty-six minutes early.
     // Deliberately not awaited: the gig is drained and its result must not wait on GitHub.
     void workspace?.revoke();
 

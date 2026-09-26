@@ -1,0 +1,40 @@
+{
+  "_provenance": {
+    "kind": "documented",
+    "label": "documented example, NOT a recorded live response",
+    "fetched": "2026-09-27",
+    "sources": [
+      {
+        "url": "https://api-docs.deepseek.com/api/create-chat-completion",
+        "fetched": "2026-09-27",
+        "what": "usage fields: 'prompt_tokens: Number of tokens in the prompt. It equals prompt_cache_hit_tokens + prompt_cache_miss_tokens.'; 'prompt_cache_hit_tokens: Number of tokens in the prompt that hits the context cache.'; 'prompt_cache_miss_tokens: Number of tokens in the prompt that misses the context cache.' The example usage is copied verbatim into documented_usage_example."
+      }
+    ],
+    "how_usage_was_built": "`usage` is built by the drafter to the documented fields with a non-zero cache hit (the documented example has 0 hits): 1000 = 800 hit + 200 miss.",
+    "how_usage_discriminating_was_built": "`usage_discriminating` is DELIBERATELY INCONSISTENT and is NOT a documented or plausible response: prompt_tokens (1000) != hit (700) + miss (200). It exists only so that a law can tell the hit branch and the miss branch apart. With a consistent fixture, dropping only the miss branch (input = prompt - hit) gives the same number. The engine takes the miss count as the input and the hit count as the cache reads, and never derives one from prompt_tokens."
+  },
+  "documented_usage_example": {
+    "completion_tokens": 9,
+    "prompt_tokens": 17,
+    "total_tokens": 26,
+    "prompt_tokens_details": {
+      "cached_tokens": 0
+    },
+    "prompt_cache_hit_tokens": 0,
+    "prompt_cache_miss_tokens": 17
+  },
+  "usage": {
+    "prompt_tokens": 1000,
+    "prompt_cache_hit_tokens": 800,
+    "prompt_cache_miss_tokens": 200,
+    "completion_tokens": 50,
+    "total_tokens": 1050
+  },
+  "usage_discriminating": {
+    "prompt_tokens": 1000,
+    "prompt_cache_hit_tokens": 700,
+    "prompt_cache_miss_tokens": 200,
+    "completion_tokens": 50,
+    "total_tokens": 1050
+  }
+}

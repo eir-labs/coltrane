@@ -1,0 +1,327 @@
+{
+  "_provenance": "Vendored by the red-battery drafter on 27 Sep 2026 via `gh api repos/<repo>/contents/coltrane.layout.json?ref=<head>`, verbatim, from the four draft PRs; agents' allowed_tools verbatim from eir-labs/chancery#112 agents/*.json at its head.",
+  "layouts": {
+    "chancery": {
+      "repo": "eir-labs/chancery",
+      "pr": 112,
+      "head": "fbd7205f83c40105001b5c7cb210e5f6801e13a9",
+      "layout": {
+        "paths": {
+          "source": [
+            "src/**",
+            "service/**"
+          ],
+          "tests": [
+            "tests/**"
+          ],
+          "scripts": [
+            "scripts/**",
+            "Makefile",
+            ".github/workflows/**"
+          ],
+          "docs": [
+            "docs/**"
+          ]
+        },
+        "commands": {
+          "build": [
+            "make validate",
+            "npx coltrane validate"
+          ],
+          "test": [
+            "make test"
+          ],
+          "laws": [
+            "make check",
+            "bash scripts/run_laws.sh"
+          ],
+          "publish": [
+            "gh pr create"
+          ]
+        },
+        "git": {
+          "stage": [
+            "git add",
+            "git mv",
+            "git rm"
+          ],
+          "commit": [
+            "git commit"
+          ],
+          "push": [
+            "git push"
+          ]
+        },
+        "egress": {
+          "git_push": [
+            "github.com"
+          ],
+          "publish": [
+            "api.github.com"
+          ]
+        }
+      }
+    },
+    "lighthouse-classic": {
+      "repo": "eir-labs/lighthouse-classic",
+      "pr": 17,
+      "head": "d5123dcb460c29377a98c4e3bdf509d18bf21daa",
+      "layout": {
+        "paths": {
+          "source": [
+            "ios/Sources/**",
+            "ios/WatchApp/**",
+            "ios/Package.swift",
+            "ios/Package.resolved",
+            "ios/project.yml",
+            "ios/EirApp.xcodeproj/**"
+          ],
+          "tests": [
+            "ios/Tests/**",
+            "ios/UITests/**",
+            "ios/Package.swift"
+          ],
+          "scripts": [
+            "ios/scripts/**",
+            "scripts/**"
+          ],
+          "docs": [
+            "docs/**",
+            "*.md",
+            "ios/*.md"
+          ]
+        },
+        "commands": {
+          "build": [
+            "swift build --package-path ios --disable-keychain"
+          ],
+          "test": [
+            "swift test --package-path ios --disable-keychain",
+            "swift test --disable-keychain"
+          ],
+          "ship_dry": [
+            "ios/ship.sh --dry-run"
+          ],
+          "publish": [
+            "gh pr create"
+          ]
+        },
+        "git": {
+          "stage": [
+            "git add",
+            "git mv",
+            "git rm"
+          ],
+          "commit": [
+            "git commit"
+          ],
+          "push": [
+            "git push"
+          ]
+        },
+        "egress": {
+          "git_push": [
+            "github.com"
+          ],
+          "publish": [
+            "api.github.com"
+          ]
+        }
+      }
+    },
+    "coltrane-ui": {
+      "repo": "eir-labs/coltrane-ui",
+      "pr": 256,
+      "head": "c96ecc991c81faee6918feb20e3c221a26ee4155",
+      "layout": {
+        "paths": {
+          "source": [
+            "src/**"
+          ],
+          "tests": [
+            "tests/**",
+            "supabase/tests/**"
+          ],
+          "migrations": [
+            "supabase/migrations/**",
+            "supabase/seed.sql"
+          ],
+          "scripts": [
+            "scripts/**",
+            ".github/workflows/**"
+          ],
+          "docs": [
+            "docs/**",
+            "*.md"
+          ]
+        },
+        "commands": {
+          "build": [
+            "npm run build"
+          ],
+          "test": [
+            "npm test",
+            "npx vitest run",
+            "./supabase/tests/run.sh"
+          ],
+          "laws": [
+            "bash scripts/unit-laws.sh",
+            "./supabase/tests/run.sh"
+          ],
+          "publish": [
+            "gh pr create"
+          ]
+        },
+        "git": {
+          "stage": [
+            "git add",
+            "git mv",
+            "git rm"
+          ],
+          "commit": [
+            "git commit"
+          ],
+          "push": [
+            "git push"
+          ]
+        },
+        "egress": {
+          "git_push": [
+            "github.com"
+          ],
+          "publish": [
+            "api.github.com"
+          ]
+        }
+      }
+    },
+    "cognition": {
+      "repo": "eir-dev/cognition",
+      "pr": 18,
+      "head": "19f8f2f20ca52cabce7d66b270cb6ab0f5d7adb8",
+      "layout": {
+        "paths": {
+          "source": [
+            "cognition/**",
+            "bench/**"
+          ],
+          "tests": [
+            "tests/**"
+          ],
+          "docs": [
+            "docs/**"
+          ]
+        },
+        "commands": {
+          "test": [
+            "python3 -m pytest"
+          ],
+          "laws": [
+            "python3 -m pytest tests/"
+          ],
+          "publish": [
+            "gh pr create"
+          ]
+        },
+        "git": {
+          "stage": [
+            "git add",
+            "git mv",
+            "git rm"
+          ],
+          "commit": [
+            "git commit"
+          ],
+          "push": [
+            "git push"
+          ]
+        },
+        "egress": {
+          "git_push": [
+            "github.com"
+          ],
+          "publish": [
+            "api.github.com"
+          ]
+        }
+      }
+    }
+  },
+  "chancery_agents": {
+    "source": "eir-labs/chancery#112 @ fbd7205f83c40105001b5c7cb210e5f6801e13a9",
+    "allowed_tools": {
+      "code-implementer": [
+        "Read",
+        "Glob",
+        "Grep",
+        "Write(@source)",
+        "Edit(@source)",
+        "Write(@docs)",
+        "Edit(@docs)",
+        "Write(@tests)",
+        "Edit(@tests)",
+        "Write(@scripts)",
+        "Edit(@scripts)",
+        "Write(@migrations)",
+        "Edit(@migrations)",
+        "Bash(@git_stage)",
+        "Bash(git diff:*)",
+        "Bash(git status:*)",
+        "Bash(wc:*)",
+        "Bash(sed:*)",
+        "Bash(head:*)",
+        "Bash(tail:*)",
+        "Bash(cat:*)",
+        "Bash(ls:*)",
+        "Bash(@build)",
+        "Edit(vercel.json)",
+        "Write(eir-verb-manifest.json)",
+        "Edit(eir-verb-manifest.json)",
+        "Write(eir-verb-adoption-DRAFT.sql)",
+        "Edit(eir-verb-adoption-DRAFT.sql)",
+        "Bash(GEN=1 npx vitest run:*)"
+      ],
+      "pr-publisher": [
+        "Bash(git switch:*)",
+        "Bash(@git_stage)",
+        "Bash(@git_commit)",
+        "Bash(@git_push)",
+        "Bash(git rev-parse:*)",
+        "Bash(git rev-list:*)",
+        "Bash(@publish)"
+      ],
+      "red-spec-drafter": [
+        "Read",
+        "Glob",
+        "Grep",
+        "Write(@tests)",
+        "Edit(@tests)",
+        "Write(@docs)",
+        "Edit(@docs)",
+        "Bash(@git_stage)",
+        "Bash(git diff:*)",
+        "Bash(git status:*)",
+        "Bash(npx vitest:*)",
+        "Bash(npx tsc:*)",
+        "Bash(wc:*)",
+        "Bash(sed:*)",
+        "Bash(head:*)",
+        "Bash(tail:*)",
+        "Bash(cat:*)",
+        "Bash(ls:*)",
+        "Bash(@test)"
+      ],
+      "change-verifier": [
+        "Read",
+        "Glob",
+        "Grep",
+        "Bash(npm run verify:*)",
+        "Bash(npx vitest run:*)",
+        "Bash(make test:*)",
+        "Bash(@test)",
+        "Bash(@build)",
+        "Bash(@ship_dry)"
+      ]
+    }
+  }
+}

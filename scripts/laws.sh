@@ -29,7 +29,10 @@ cd "$(dirname "$0")/.."
 # stopped being true at Node 24), and two pure flag-string laws replaced it in this band. The nine
 # laws that need a real request moved to tests/security — a band may reach out, the root suite may
 # not — so they are counted there, by file, not here.
-EXPECTED_LAWS="${EXPECTED_LAWS:-4207}"
+EXPECTED_LAWS="${EXPECTED_LAWS:-4212}"
+#   +5 one_output_gate round 2 — G2 an is_error result whose body is non-JSON or ok:true is refused by the
+#      flag alone (1); G5 the drain refuses a run-registry type the loader drops on reload, before any
+#      spawn (1); G6 the server door's engine child judges by the run's genome whatever the cwd (3).
 #  +14 one_output_gate (new file, RED) — a chair's write is judged once: G1 the drain's Claude seat gets an
 #      in-turn gate built from the RUN's genome (2), G2 a {ok:false} write is never captured (4), G3 null on
 #      an optional field is absence in checkWritable (5), G4 the brief says so (2), R the live replay (1).

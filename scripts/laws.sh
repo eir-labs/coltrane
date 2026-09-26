@@ -29,7 +29,10 @@ cd "$(dirname "$0")/.."
 # stopped being true at Node 24), and two pure flag-string laws replaced it in this band. The nine
 # laws that need a real request moved to tests/security — a band may reach out, the root suite may
 # not — so they are counted there, by file, not here.
-EXPECTED_LAWS="${EXPECTED_LAWS:-4392}"
+EXPECTED_LAWS="${EXPECTED_LAWS:-4416}"
+#  +24 layout grants, round 6: a_spelling_or_case_never_widens_a_grant (15, new) and nine mixed-case rows in
+#      the_engine_matches_scopes_as_the_cli_does. (spec_room_image_carries_runtime_deps is DELEGATED to the room band
+#      — see EXPECTED_DELEGATED.) Read from the run.
 #  +71 layout grants, round 5 (scope matching agrees with the CLI's own matcher, verified from the 2.1.283 binary):
 #      the_engine_matches_scopes_as_the_cli_does (48: a 43-row table, a generated corpus, 4 findings),
 #      every_protected_path_is_denied_where_the_cli_could_reach_it (23). Read from the run.
@@ -187,7 +190,7 @@ EXPECTED_LAWS="${EXPECTED_LAWS:-4392}"
 #       with the handler, the description does not. Its first draft could not fail — it forgave any
 #       token no tool anywhere declared, which is exactly what a renamed argument leaves behind.
 #       Sabotage said so (`current` -> `slug_current` stayed green); the exemption is gone.
-EXPECTED_FILES="${EXPECTED_FILES:-458}"   # + the twenty-four layout-grants law files (docs/specs/layout-grants.red-spec.json), + tests/every_skill_runs_its_fixtures.test.ts, + tests/node_floor_refuses.test.ts, + tests/spec_reside_drive.test.ts (#537), + tests/a_red_law_names_its_plant.test.ts (#551), + tests/sealed_inputs.test.ts, tests/fan_out.test.ts, tests/completions_seal.test.ts, tests/tier_ladder.test.ts, tests/amend_ladder.test.ts, tests/completions_reasoning_effort.test.ts, tests/bus.test.ts, tests/bus_chair.test.ts, tests/bus_terminal.test.ts, tests/bus_verbs.test.ts, tests/bus_commit.test.ts, tests/code_tools.test.ts, tests/gig_input_validated.test.ts, tests/seat_reads_recorded.test.ts, tests/claude_seat_reads.test.ts, tests/optional_declared_input.test.ts, tests/simulate_names_seats.test.ts
+EXPECTED_FILES="${EXPECTED_FILES:-459}"   # + the twenty-five layout-grants law files (docs/specs/layout-grants.red-spec.json), + tests/every_skill_runs_its_fixtures.test.ts, + tests/node_floor_refuses.test.ts, + tests/spec_reside_drive.test.ts (#537), + tests/a_red_law_names_its_plant.test.ts (#551), + tests/sealed_inputs.test.ts, tests/fan_out.test.ts, tests/completions_seal.test.ts, tests/tier_ladder.test.ts, tests/amend_ladder.test.ts, tests/completions_reasoning_effort.test.ts, tests/bus.test.ts, tests/bus_chair.test.ts, tests/bus_terminal.test.ts, tests/bus_verbs.test.ts, tests/bus_commit.test.ts, tests/code_tools.test.ts, tests/gig_input_validated.test.ts, tests/seat_reads_recorded.test.ts, tests/claude_seat_reads.test.ts, tests/optional_declared_input.test.ts, tests/simulate_names_seats.test.ts
 
 # THE OTHER BANDS. `vitest run` is ROOT-CONFIG ONLY — this repo's own workflow comments
 # record that four configs went unexecuted once for exactly that reason. So pinning only the
@@ -215,6 +218,7 @@ EXPECTED_SECURITY_FILES="${EXPECTED_SECURITY_FILES:-3}"   # + completions_long_w
 # script exists to end, one level further out.
 EXPECTED_DELEGATED="tests/honest_broker/gig_dispatch.test.ts
 tests/honest_broker/recorder_append.test.ts
+tests/spec_room_image_carries_runtime_deps.test.ts
 tests/spec_venue_room_live.test.ts"
 
 # ONE run, not two: this suite is large enough that running it twice to count it is a real

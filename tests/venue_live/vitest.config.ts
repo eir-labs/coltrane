@@ -18,7 +18,7 @@ import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   test: {
-    include: ["tests/spec_venue_room_live.test.ts"],
+    include: ["tests/spec_venue_room_live.test.ts", "tests/spec_room_image_carries_runtime_deps.test.ts"],
     // A single law realizes two rooms, execs into both, and tears both down; 240s is the wall the
     // slowest observed run (99.5s on CI) sits well inside, with room for a cold image cache.
     testTimeout: 240_000,

@@ -26,7 +26,9 @@
 //   the fixed table of tricky cases agrees                   behavioural  grantCovers — src/grant_scope.ts    OWN-A matchesGlob / OWN-C `*` skips dots /
 //                                                                                                               OWN-E no directory coverage / OWN-F slashless
 //                                                                                                               patterns anchored
-//   a generated corpus agrees (fast-check)                   behavioural  same                                same four plants
+//   a generated corpus agrees (fast-check, mixed case)       behavioural  same                                same four plants; round 6: a case-SENSITIVE
+//                                                                                                               matcher (ignore({ ignorecase: false }))
+//   uppercase rows (SRC/**, .GIT/config, *.JSON …)           behavioural  same                                a case-sensitive matcher
 //   the CLI's preprocessing (`./`, `//`, `**/**`) honoured   behavioural  same                                (RED today — `./**` covers nothing in the engine)
 //   `x/**` covers `x` itself (the CLI's Gn rewrite)          behavioural  same                                (RED today — the engine does not apply Gn)
 //   `[!…]` is NOT a negated class in ignore 7.0.5             behavioural  same                                (RED today — the engine negates it)
@@ -61,6 +63,10 @@ const TABLE: Array<[string, string]> = [
   ["*.layout.json", "coltrane.layout.json"],
   // negation: a single-rule `!x` ignore never ignores anything — a negated grant grants nothing
   ["!src", "src"], ["!src/**", "src/a.ts"], ["!*.json", "a.json"],
+  // CASE (round 6): the CLI builds its matcher with `ignore()` defaults — ignorecase: true — so a
+  // grant's case never narrows or widens what it reaches (and macOS/Windows file systems fold case too).
+  ["SRC/**", "src/a"], ["src/**", "SRC/A.ts"], ["**", ".GIT/config"], ["*.JSON", "a.json"], ["*.json", "A.JSON"],
+  [".Claude/", ".claude/settings.json"], ["Config", ".git/config"], ["src/*", "SRC/A/B"], ["COLTRANE.LAYOUT.JSON", "coltrane.layout.json"],
 ];
 
 describe("the engine's scope matcher agrees with the CLI's (ignore 7.0.5 + the CLI's Gn preprocessing)", () => {
@@ -78,9 +84,9 @@ describe("the engine's scope matcher agrees with the CLI's (ignore 7.0.5 + the C
   }
 
   it("a generated corpus of patterns × paths (dot-dirs, **, *.ext at depth, anchored/unanchored, trailing /) agrees", () => {
-    const seg = fc.constantFrom("src", "a", "b", "config", ".git", ".claude", ".coltrane", ".env", "x.json", "y.ts", "hooks", "coltrane.layout.json");
+    const seg = fc.constantFrom("src", "a", "b", "config", ".git", ".claude", ".coltrane", ".env", "x.json", "y.ts", "hooks", "coltrane.layout.json", "SRC", ".GIT", ".Claude", "X.JSON", "Config");
     const pathArb = fc.array(seg, { minLength: 1, maxLength: 4 }).map((s) => s.join("/"));
-    const pseg = fc.constantFrom("*", "**", "*.json", "*.ts", ".*", "src", "a", "config", "?", "[ab]*", ".git", ".claude", "x.*");
+    const pseg = fc.constantFrom("*", "**", "*.json", "*.ts", ".*", "src", "a", "config", "?", "[ab]*", ".git", ".claude", "x.*", "SRC", "*.JSON", ".GIT", "Config", "[AB]*");
     const patArb = fc.tuple(fc.boolean(), fc.array(pseg, { minLength: 1, maxLength: 3 }), fc.constantFrom("", "/", "/**"))
       .map(([lead, segs, tail]) => `${lead ? "/" : ""}${segs.join("/")}${tail}`)
       .filter((p) => p !== "/" && !/\*\*\*/.test(p));

@@ -133,6 +133,9 @@ export interface HostedOpts {
   /** The header route. Default: 201 and the row is merged into `gigs`. `attempt` counts POSTs of the
    *  same status for the gig, 1-based, so a law can fail the first N tries. */
   header?: ((body: Record<string, unknown>, attempt: number) => Answer | undefined) | undefined;
+  /** The output-row route. Default: 201 and the row lands in `outputs`. `attempt` counts POSTs of the
+   *  same output id, 1-based. Only an ACKNOWLEDGED row lands. */
+  outputs?: ((body: Record<string, unknown>, attempt: number) => Answer | undefined) | undefined;
   renew?: (body: Record<string, unknown>) => Answer;
   release?: (body: Record<string, unknown>) => Answer;
   gigFail?: () => Answer;
@@ -149,6 +152,8 @@ export interface HostedStore {
   /** Calls to the drain service's header route. */
   headers(): Call[];
   renews(): Call[];
+  /** Calls to the drain service's output-row route. */
+  outputRows(): Call[];
   releases(): Call[];
 }
 
@@ -214,12 +219,18 @@ export function hostedStore(initial: HostedOpts): HostedStore {
         return res;
       }
       if (u.pathname === "/rest/v1/coltrane_outputs") {
+        const okey = `output:${String(body["id"])}`;
+        const on = (attempts.get(okey) ?? 0) + 1;
+        attempts.set(okey, on);
+        const custom = opts.outputs?.(body, on);
+        const res = custom ? await custom : ok(null, 201);
+        if (!res.ok) return res;
         outputs.push({
           id: body["id"], gig_id: body["gig_id"], domain_type: body["domain_type"], agent_slug: body["agent_slug"],
           phase: body["phase"], content_sha: body["content_sha"], input_shas: body["input_shas"],
           created_at: body["created_at"], data: body["data"],
         });
-        return ok(null, 201);
+        return res;
       }
       if (u.pathname.startsWith("/storage/v1/object/")) return ok(null, 200);
       if (u.pathname.endsWith("/coltrane_drain_renew")) {
@@ -242,6 +253,7 @@ export function hostedStore(initial: HostedOpts): HostedStore {
     set(next) { opts = { ...opts, ...next }; },
     headers: onDrain((c) => c.path === "/rest/v1/coltrane_gigs"),
     renews: onDrain((c) => c.path.endsWith("/coltrane_drain_renew")),
+    outputRows: onDrain((c) => c.path === "/rest/v1/coltrane_outputs"),
     releases: onDrain((c) => c.path.endsWith("/coltrane_drain_release")),
   };
 }

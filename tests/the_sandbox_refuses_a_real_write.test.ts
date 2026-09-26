@@ -47,6 +47,10 @@ const UNAVAILABLE = !SRT ? "no srt (sandbox-runtime) on PATH and COLTRANE_SRT un
 if (UNAVAILABLE) console.warn(`[UNVERIFIED] the_sandbox_refuses_a_real_write: SKIPPED — ${UNAVAILABLE}. The sandbox's enforcement is not verified on this host.`);
 
 describe("D4 — the sandbox the invoker builds refuses a real write (skipped as UNVERIFIED without srt + an OS sandbox)", () => {
+  it("required: when COLTRANE_REQUIRE_REAL=1 (the CI sandbox job), srt and an OS sandbox are present", () => {
+    if (process.env["COLTRANE_REQUIRE_REAL"] === "1") expect(UNAVAILABLE, "this job requires the real-process laws to RUN, and they would skip").toBe("");
+  });
+
   it.skipIf(Boolean(UNAVAILABLE))("a write outside the tree and a write to the layout file are refused; a write inside src/ succeeds", async () => {
     const tree = realpathSync(mkdtempSync(join(tmpdir(), "sbx-tree-")));
     const outside = realpathSync(mkdtempSync(join(tmpdir(), "sbx-outside-")));

@@ -29,7 +29,11 @@ cd "$(dirname "$0")/.."
 # stopped being true at Node 24), and two pure flag-string laws replaced it in this band. The nine
 # laws that need a real request moved to tests/security — a band may reach out, the root suite may
 # not — so they are counted there, by file, not here.
-EXPECTED_LAWS="${EXPECTED_LAWS:-4650}"
+EXPECTED_LAWS="${EXPECTED_LAWS:-4672}"
+#  +22 layout grants, round 9 (the r7+r8 grade): an_open_git_never_blinds_the_diff_gate (8, new: N1 — skip-worktree,
+#      assume-unchanged, info/exclude, a committed change; the snapshot design), the_real_process_laws_run_in_ci (3, new,
+#      structural), a required-real law in each of 4 srt/binary files (+4), wiki #33 in the real layouts (+8), the
+#      oracle-binding timeout. Read from the run.
 #  merge of main (#559 containment: 4310 in 440) into #553 (4589 in 470): resolved to the COLLECTED counts: 4650 laws in 471 files, read from the run (4589 + 61, 470 + 1).
 #  merge of main (#557 + #556 + #558: 4249 in 439) into #553 (layout grants: 4533 in 465), both from 4193 in 434:
 #  4249 + 340 = 4589 laws, 439 + 31 = 470 files, read from the run.
@@ -241,7 +245,7 @@ EXPECTED_LAWS="${EXPECTED_LAWS:-4650}"
 #       with the handler, the description does not. Its first draft could not fail — it forgave any
 #       token no tool anywhere declared, which is exactly what a renamed argument leaves behind.
 #       Sabotage said so (`current` -> `slug_current` stayed green); the exemption is gone.
-EXPECTED_FILES="${EXPECTED_FILES:-471}"   # merge: #553 layout-grants files + #559 tests/genome_writes_stay_in_root.test.ts (collected). + the thirty-one layout-grants law files (docs/specs/layout-grants.red-spec.json), + tests/every_skill_runs_its_fixtures.test.ts, + tests/node_floor_refuses.test.ts, + tests/spec_reside_drive.test.ts (#537), + tests/a_red_law_names_its_plant.test.ts (#551), + tests/sealed_inputs.test.ts, tests/fan_out.test.ts, tests/completions_seal.test.ts, tests/tier_ladder.test.ts, tests/amend_ladder.test.ts, tests/completions_reasoning_effort.test.ts, tests/bus.test.ts, tests/bus_chair.test.ts, tests/bus_terminal.test.ts, tests/bus_verbs.test.ts, tests/bus_commit.test.ts, tests/code_tools.test.ts, tests/gig_input_validated.test.ts, tests/seat_reads_recorded.test.ts, tests/claude_seat_reads.test.ts, tests/optional_declared_input.test.ts, tests/simulate_names_seats.test.ts
+EXPECTED_FILES="${EXPECTED_FILES:-473}"   # merge: #553 layout-grants files + #559 tests/genome_writes_stay_in_root.test.ts (collected). + the thirty-one layout-grants law files (docs/specs/layout-grants.red-spec.json), + tests/every_skill_runs_its_fixtures.test.ts, + tests/node_floor_refuses.test.ts, + tests/spec_reside_drive.test.ts (#537), + tests/a_red_law_names_its_plant.test.ts (#551), + tests/sealed_inputs.test.ts, tests/fan_out.test.ts, tests/completions_seal.test.ts, tests/tier_ladder.test.ts, tests/amend_ladder.test.ts, tests/completions_reasoning_effort.test.ts, tests/bus.test.ts, tests/bus_chair.test.ts, tests/bus_terminal.test.ts, tests/bus_verbs.test.ts, tests/bus_commit.test.ts, tests/code_tools.test.ts, tests/gig_input_validated.test.ts, tests/seat_reads_recorded.test.ts, tests/claude_seat_reads.test.ts, tests/optional_declared_input.test.ts, tests/simulate_names_seats.test.ts
 
 # THE OTHER BANDS. `vitest run` is ROOT-CONFIG ONLY — this repo's own workflow comments
 # record that four configs went unexecuted once for exactly that reason. So pinning only the

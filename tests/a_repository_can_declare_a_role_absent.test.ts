@@ -28,6 +28,8 @@
 //   each real layout (4 draft PRs), with its declared            behavioural  LayoutSchema + resolveSeatGrants over the      null refuses / missing == null
 //   absences, validates and seats chancery's agents                          vendored drafts and chancery #112's agents
 //   …and as published (no null), the same agents fail closed    behavioural  same                                          missing == null
+//   wiki #33 AS PUBLISHED (it declares its own nulls) validates  behavioural  same                                          null refuses the chair / schema refuses null
+//   and seats every agent
 import { describe, it, expect } from "vitest";
 import fc from "fast-check";
 import { readFileSync } from "node:fs";
@@ -182,7 +184,11 @@ describe("each real repository's layout, with its declared absences, validates a
     "lighthouse-classic": ["migrations"],
     "coltrane-ui": ["ship_dry"],
     cognition: ["build", "migrations", "scripts", "ship_dry"],
+    wiki: [], // wiki #33 already declares its absences (migrations, ship_dry: null) — nothing to synthesize
   };
+  /** Roles a layout declares absent (null), whether the draft wrote them or they were synthesized. */
+  const declaredNull = (l: Record<string, Record<string, unknown>>) =>
+    Object.entries(l).flatMap(([sec, roles]) => Object.entries(roles ?? {}).filter(([, v]) => v === null).map(([k]) => (sec === "git" ? `git_${k}` : k))).sort();
   for (const [name, real] of Object.entries(REAL.layouts)) {
     const { layout, absent } = withDeclaredAbsences(real.layout);
     it(`${name} (${real.repo}#${real.pr}): the absences it must declare are exactly the ones the conductor named`, () => {
@@ -197,8 +203,18 @@ describe("each real repository's layout, with its declared absences, validates a
         const L = await L8();
         const r = L.resolveSeatGrants({ agent: agentOf(tools, slug), layout: layout as unknown as Layout });
         expect(r.refusals, `${slug} is refused in ${name}: ${JSON.stringify(r.refusals)}`).toEqual([]);
-        const heldAbsent = rolesHeld(tools).filter((x) => absent.includes(x)).sort();
+        const heldAbsent = rolesHeld(tools).filter((x) => declaredNull(layout).includes(x)).sort();
         expect((r.absent_by_declaration ?? []).map((x) => x.role).sort()).toEqual(heldAbsent);
+      });
+    }
+    if (EXPECTED_ABSENT[name]!.length === 0) {
+      it(`${name} AS PUBLISHED — it declares its own absences — validates and seats every agent, with no null synthesized`, async () => {
+        expect(layoutSchema().safeParse(real.layout).success, `${name} as published is refused`).toBe(true);
+        const L = await L8();
+        for (const [slug, tools] of Object.entries(REAL.chancery_agents.allowed_tools)) {
+          const r = L.resolveSeatGrants({ agent: agentOf(tools, slug), layout: real.layout as unknown as Layout });
+          expect(r.refusals, `${slug} is refused by ${name} as published: ${JSON.stringify(r.refusals)}`).toEqual([]);
+        }
       });
     }
     it(`${name} AS PUBLISHED (no null): code-implementer still fails closed on the roles the draft lacks`, async () => {

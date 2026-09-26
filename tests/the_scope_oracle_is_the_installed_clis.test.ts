@@ -34,6 +34,10 @@ describe("the engine's `ignore` is exactly the one the installed CLI bundles", (
 
   const bin = installedClaudeBinary();
   if (!bin) console.warn("[UNVERIFIED] the_scope_oracle_is_the_installed_clis: no claude binary (CLAUDE_BIN unset, none on PATH) — the dependency was not compared with the CLI");
+  it("required: when COLTRANE_REQUIRE_REAL=1 (the CI sandbox job), a claude binary is present to compare with", () => {
+    if (process.env["COLTRANE_REQUIRE_REAL"] === "1") expect(bin, "this job requires the binary-bound law to RUN, and it would skip").toBeDefined();
+  });
+
   it.skipIf(!bin)("the installed claude binary bundles exactly node_modules/ignore — every regex source present, every release marker agreeing", () => {
     const c = compareBundledIgnore(dep.source, readFileSync(bin!));
     expect(c.regexCount, "non-vacuity: the fingerprint has regexes to compare").toBeGreaterThan(15);

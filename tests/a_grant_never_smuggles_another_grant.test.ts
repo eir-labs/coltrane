@@ -51,7 +51,10 @@ describe("the CLI's grant grammar, as the engine must respect it", () => {
   it("the vendored splitter is byte-for-byte the installed CLI's (skipped as UNVERIFIED when no claude binary is installed)", () => {
     let bin: string | undefined = process.env["CLAUDE_BIN"];
     if (!bin) { try { bin = realpathSync(execFileSync("which", ["claude"], { encoding: "utf8" }).trim()); } catch { bin = undefined; } }
-    if (!bin || !existsSync(bin)) { console.warn("[UNVERIFIED] the installed CLI's splitter was not compared: no claude binary"); return; }
+    if (!bin || !existsSync(bin)) {
+      if (process.env["COLTRANE_REQUIRE_REAL"] === "1") throw new Error("this job (COLTRANE_REQUIRE_REAL=1) requires the installed CLI's splitter to be compared, and no claude binary was found");
+      console.warn("[UNVERIFIED] the installed CLI's splitter was not compared: no claude binary"); return;
+    }
     const bytes = readFileSync(bin);
     expect(bytes.includes(Buffer.from(HP_SOURCE)), `the installed CLI (${bin}) no longer contains the vendored splitter — its --allowedTools grammar changed; re-derive the structure characters`).toBe(true);
   });

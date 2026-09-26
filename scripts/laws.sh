@@ -29,7 +29,13 @@ cd "$(dirname "$0")/.."
 # stopped being true at Node 24), and two pure flag-string laws replaced it in this band. The nine
 # laws that need a real request moved to tests/security — a band may reach out, the root suite may
 # not — so they are counted there, by file, not here.
-EXPECTED_LAWS="${EXPECTED_LAWS:-4208}"
+EXPECTED_LAWS="${EXPECTED_LAWS:-4232}"
+#   +5 one_output_gate round 3 — G7 the reload proof compares CONTENT; G8 a declared .mcp.json env cannot move
+#      the COLTRANE_GENOME pin; G9 SLUGS ARE NOT IDENTIFIERS (founder ruling): a slug never reaches the
+#      filesystem; G10 a 75-type org-shaped registry seats cleanly; G11 the refusal names the type(s) and why,
+#      in the chair's error and the gig's terminal record.
+#  merge of origin/main (#557) into #556: main's 4208 + this branch's 19 one_output_gate laws = 4227, as the
+#      merged suite collects (read from the run, not added up).
 #   +5 skill_runs_on_exec_path (new file, #557 round 2): a skill runs on process.execPath, never `node` from
 #      PATH. The floor checked the parent's Node while the skill ran on PATH's (grade issuecomment-5847532054:
 #      an ungranted skill on PATH node 24 fetched a listener and got 200). P1a-c executeSkill /
@@ -40,6 +46,12 @@ EXPECTED_LAWS="${EXPECTED_LAWS:-4208}"
 #      +4 bus_not_hosted (new file: B1-B3 hosted bus_* refused with no write, B4 local control); -3
 #      node_floor_refuses' install laws and -2 skill_sandbox_confinement's engines laws, retired with the
 #      install floor they pinned.
+#   +5 one_output_gate round 2 — G2 an is_error result whose body is non-JSON or ok:true is refused by the
+#      flag alone (1); G5 the drain refuses a run-registry type the loader drops on reload, before any
+#      spawn (1); G6 the server door's engine child judges by the run's genome whatever the cwd (3).
+#  +14 one_output_gate (new file, RED) — a chair's write is judged once: G1 the drain's Claude seat gets an
+#      in-turn gate built from the RUN's genome (2), G2 a {ok:false} write is never captured (4), G3 null on
+#      an optional field is absence in checkWritable (5), G4 the brief says so (2), R the live replay (1).
 #  +51 #545 rebuilt on main after #552 (the Node 26 floor made its Node 22 special-casing moot): +30 the
 #      landscape genome, +21 every_skill_runs_its_fixtures (discovered skills, three booked). Read from the run.
 #   +1 node_floor_refuses: THIS runtime accepts --allow-net, probed (the constant said 24; it is 25). Floor → 26.
@@ -176,7 +188,7 @@ EXPECTED_LAWS="${EXPECTED_LAWS:-4208}"
 #       with the handler, the description does not. Its first draft could not fail — it forgave any
 #       token no tool anywhere declared, which is exactly what a renamed argument leaves behind.
 #       Sabotage said so (`current` -> `slug_current` stayed green); the exemption is gone.
-EXPECTED_FILES="${EXPECTED_FILES:-437}"   # + tests/skill_runs_on_exec_path.test.ts, + tests/node_floor_where_skills_run.test.ts, + tests/bus_not_hosted.test.ts, + tests/every_skill_runs_its_fixtures.test.ts, + tests/node_floor_refuses.test.ts, + tests/spec_reside_drive.test.ts (#537), + tests/a_red_law_names_its_plant.test.ts (#551), + tests/sealed_inputs.test.ts, tests/fan_out.test.ts, tests/completions_seal.test.ts, tests/tier_ladder.test.ts, tests/amend_ladder.test.ts, tests/completions_reasoning_effort.test.ts, tests/bus.test.ts, tests/bus_chair.test.ts, tests/bus_terminal.test.ts, tests/bus_verbs.test.ts, tests/bus_commit.test.ts, tests/code_tools.test.ts, tests/gig_input_validated.test.ts, tests/seat_reads_recorded.test.ts, tests/claude_seat_reads.test.ts, tests/optional_declared_input.test.ts, tests/simulate_names_seats.test.ts
+EXPECTED_FILES="${EXPECTED_FILES:-438}"   # + tests/one_output_gate.test.ts, + tests/skill_runs_on_exec_path.test.ts, + tests/node_floor_where_skills_run.test.ts, + tests/bus_not_hosted.test.ts, + tests/every_skill_runs_its_fixtures.test.ts, + tests/node_floor_refuses.test.ts, + tests/spec_reside_drive.test.ts (#537), + tests/a_red_law_names_its_plant.test.ts (#551), + tests/sealed_inputs.test.ts, tests/fan_out.test.ts, tests/completions_seal.test.ts, tests/tier_ladder.test.ts, tests/amend_ladder.test.ts, tests/completions_reasoning_effort.test.ts, tests/bus.test.ts, tests/bus_chair.test.ts, tests/bus_terminal.test.ts, tests/bus_verbs.test.ts, tests/bus_commit.test.ts, tests/code_tools.test.ts, tests/gig_input_validated.test.ts, tests/seat_reads_recorded.test.ts, tests/claude_seat_reads.test.ts, tests/optional_declared_input.test.ts, tests/simulate_names_seats.test.ts
 
 # THE OTHER BANDS. `vitest run` is ROOT-CONFIG ONLY — this repo's own workflow comments
 # record that four configs went unexecuted once for exactly that reason. So pinning only the

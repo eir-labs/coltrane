@@ -94,6 +94,14 @@ export const DEPTH_GUIDANCE: Record<Depth, string> = {
 // with no entry leave the agent's cap exactly as declared.
 export const DEPTH_MAX_TOOL_CALLS: Partial<Record<Depth, number>> = { skim: 8, quick: 16 };
 
+/**
+ * How a chair says "I have no value". The engine treats null on an optional field as absence (the
+ * seal strips it — src/outputs.ts), but a chair that is TOLD the rule does not spend a turn learning
+ * it from a refusal, and a required field sent as null is still refused. Every Task layer carries it.
+ */
+export const ABSENCE_RULE =
+  "If an optional field has no value, omit the key entirely — never send null for it; a required field must always carry a real value.";
+
 // The 5-layer prompt hierarchy: Disposition → Identity → Skills → Context → Task.
 // Pure: same context in, same prompt out. Hashable, reviewable, testable.
 // Layer 3 (Skills) is emitted when the AgentInvocationContext carries resolved
@@ -299,7 +307,8 @@ export function buildPrompt(
         `The tool validates your \`data\` against the complete output contract and returns ` +
         `\`{ ok: false, error }\` if it does not pass. When that happens, read the error, correct the ` +
         `\`data\`, and call \`output_write\` again — repeat until it returns \`ok: true\`. The successful ` +
-        `call IS the seal; do NOT print the output as text, and do not stop until every type is sealed.`,
+        `call IS the seal; do NOT print the output as text, and do not stop until every type is sealed.\n` +
+        ABSENCE_RULE,
     );
   } else if (sealTypes.length > 1) {
     // multi-output: one JSON object keyed by each output-type slug; each value is that
@@ -313,14 +322,16 @@ export function buildPrompt(
       .join(",\n");
     layers.push(
       `# Task\nProduce one object for EACH of your output types: ${sealTypes.map((t) => `"${t}"`).join(", ")}.\n` +
-        `Respond with ONLY a single JSON object keyed by output-type name — no prose, no code fence:\n{\n${perType}\n}`,
+        `Respond with ONLY a single JSON object keyed by output-type name — no prose, no code fence:\n{\n${perType}\n}\n` +
+        ABSENCE_RULE,
     );
   } else {
     const outType = sealTypes[0] ?? "output";
     const schemaHint = outputSchema ? `\nIt must match this JSON schema:\n${JSON.stringify(outputSchema)}` : "";
     layers.push(
       `# Task\nProduce exactly one "${outType}".${schemaHint}\n` +
-        `Respond with ONLY a single JSON object (the output's data) — no prose, no code fence.`,
+        `Respond with ONLY a single JSON object (the output's data) — no prose, no code fence.\n` +
+        ABSENCE_RULE,
     );
   }
 
@@ -904,6 +915,24 @@ export function captureSeatDenials(stdout: string): SeatDenial[] {
   return out;
 }
 
+/** Does a tool_result's content carry the engine's refusal — a JSON body whose `ok` is `false`?
+ *  Content arrives as a string or as text blocks; anything that is not a JSON object with
+ *  `ok: false` is not a refusal by this test (the `is_error` flag still is). */
+function toolResultSaysNotOk(content: unknown): boolean {
+  const text = typeof content === "string"
+    ? content
+    : Array.isArray(content)
+      ? content.map((c) => (c && typeof c === "object" && typeof (c as { text?: unknown }).text === "string" ? (c as { text: string }).text : "")).join("")
+      : "";
+  if (!text) return false;
+  try {
+    const body = JSON.parse(text) as unknown;
+    return body !== null && typeof body === "object" && (body as { ok?: unknown }).ok === false;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * THE SEALED RECORDS THIS SEAT'S TOOLS RETURNED (spec.coltrane-sealed-inputs law 9, Claude door).
  *
@@ -966,7 +995,10 @@ export function captureOutputWrites(
         if (bt === "tool_use" && isOutputWriteToolName(String(b["name"] ?? ""))) {
           const input = (b["input"] && typeof b["input"] === "object" ? b["input"] : {}) as Record<string, unknown>;
           writes.push({ id: String(b["id"] ?? ""), domain_type: String(input["domain_type"] ?? ""), data: input["data"] });
-        } else if (bt === "tool_result" && b["is_error"] === true) {
+        } else if (bt === "tool_result" && (b["is_error"] === true || toolResultSaysNotOk(b["content"]))) {
+          // Refused if the CLI flagged it OR the engine's own body says {ok:false}. The body is the
+          // engine's verdict; the flag is a transport's report of it, and a CLI build or relay that
+          // drops the flag must not turn a refused write into a sealed one.
           errored.add(String(b["tool_use_id"] ?? ""));
         }
       }
@@ -1277,6 +1309,13 @@ export interface ClaudeInvokerOptions {
    *    behaviour, so a bare/test invoker is unaffected.
    */
   sealVia?: "text" | "output_write" | undefined;
+  /**
+   * The engine MCP server the in-band seal bridges into the spawn, stated on its own — for a door that
+   * wires no grant resolution (the drain: `mcpServerConfigs` would switch resolution on) but must still
+   * give its chair the write boundary. It must judge by the genome the RUN seals against, or the two
+   * gates disagree (src/run_genome_engine.ts). Wins over `mcpServerConfigs[coltrane]` for the seal.
+   */
+  engineServer?: Record<string, unknown> | undefined;
 }
 
 // The blast-radius cage, PURE. Given the agent's tool grant + a per-gig mcp-config path,
@@ -1680,7 +1719,7 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
     // output_write grant so the child can reach it. Gated on the engine server config being wired
     // (bootstrapServerDeps always supplies it); a bare/test invoker without it captures from the
     // injected stream instead of a real spawn, so it needs no grant.
-    const engineServerCfg = (opts.mcpServerConfigs ?? {})[ENGINE_MCP_SERVER];
+    const engineServerCfg = opts.engineServer ?? (opts.mcpServerConfigs ?? {})[ENGINE_MCP_SERVER];
     // ABSENT MUST MEAN DECLINE — and this is the one place the rule was never applied.
     //
     // On the seal path the prompt INSTRUCTS the chair to call output_write. If the engine server

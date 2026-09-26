@@ -1,8 +1,9 @@
 {
   "_provenance": {
-    "kind": "documented",
-    "label": "documented example, NOT a recorded live response; to be replaced by the live smoke's recorded response",
-    "fetched": "2026-09-27",
+    "kind": "recorded",
+    "label": "RECORDED live response from https://openrouter.ai/api/v1 on 2026-09-26; replaces the documented example",
+    "recorded_at": "2026-09-26T16:49:07.365Z",
+    "requested_model": "deepseek/deepseek-v4.1-flash",
     "sources": [
       {
         "url": "https://openrouter.ai/docs/use-cases/usage-accounting",
@@ -24,42 +25,80 @@
         "fetched": "2026-09-27",
         "what": "qwen/qwen3.8-flash lists tools + tool_choice, and prices prompt 0.00000015, completion 0.00000047, input_cache_read 0.000000016, input_cache_write 0.0000002 (USD per token)"
       }
-    ],
-    "how_response_was_built": "The `response` below is NOT a capture. It is built by the drafter to the documented ResponseUsage type, with non-zero cached_tokens AND cache_write_tokens so both mappings are exercised (the documented example has cached_tokens 0). Its `cost` is what the listed qwen/qwen3.8-flash prices give for these counts, assuming — as the documented example does (prompt_tokens 194 ⊇ cache_write_tokens 100) — that cache reads and cache writes are both PARTS of prompt_tokens: 2000 uncached x 0.15 + 9000 read x 0.016 + 1000 written x 0.2 + 800 output x 0.47, per million = 0.00102. That subset assumption is OPEN until the live smoke records a real response."
+    ]
   },
   "documented_usage_example": {
     "object": "chat.completion.chunk",
     "usage": {
       "completion_tokens": 2,
-      "completion_tokens_details": { "reasoning_tokens": 0 },
+      "completion_tokens_details": {
+        "reasoning_tokens": 0
+      },
       "cost": 0.95,
-      "cost_details": { "upstream_inference_cost": 19 },
+      "cost_details": {
+        "upstream_inference_cost": 19
+      },
       "prompt_tokens": 194,
-      "prompt_tokens_details": { "cached_tokens": 0, "cache_write_tokens": 100, "audio_tokens": 0 },
+      "prompt_tokens_details": {
+        "cached_tokens": 0,
+        "cache_write_tokens": 100,
+        "audio_tokens": 0
+      },
       "total_tokens": 196
     }
   },
   "response": {
-    "id": "gen-documented-example",
+    "id": "gen-1790441346-cpHWsHGcKAh7JVE9lcS6",
     "object": "chat.completion",
-    "created": 1790467200,
-    "model": "qwen/qwen3.8-flash",
+    "created": 1790441346,
+    "model": "deepseek/deepseek-v4.1-flash",
+    "provider": "Together",
+    "system_fingerprint": "default",
+    "service_tier": null,
     "choices": [
       {
+        "index": 0,
+        "logprobs": null,
         "finish_reason": "stop",
         "native_finish_reason": "stop",
-        "message": { "role": "assistant", "content": "{\"claim\":\"c\"}" }
+        "message": {
+          "role": "assistant",
+          "content": "Sealed. The Verdict passed on the maker's line:\n\n- **target_ref:** `line-red-is-a-colour`\n- **pass:** true\n- **check:** non-empty-sentence — method: read the line text and confirm it is a non-empty sentence → the line \"Red is a colour because it is a spectral hue occupying the long-wavelength region of visible light, categorised alongside blue, green, and yellow as a basic colour term in language and perception.\" is a well-formed non-empty sentence.\n- **reason:** the maker's line is a non-empty sentence, so the floor rule is satisfied.",
+          "refusal": null,
+          "reasoning": "Sealed. Done.",
+          "reasoning_details": [
+            {
+              "type": "reasoning.text",
+              "text": "Sealed. Done.",
+              "format": "unknown",
+              "index": 0
+            }
+          ]
+        }
       }
     ],
     "usage": {
-      "prompt_tokens": 12000,
-      "completion_tokens": 800,
-      "total_tokens": 12800,
-      "prompt_tokens_details": { "cached_tokens": 9000, "cache_write_tokens": 1000 },
-      "completion_tokens_details": { "reasoning_tokens": 0 },
-      "cost": 0.00102,
+      "prompt_tokens": 1920,
+      "completion_tokens": 134,
+      "total_tokens": 2054,
+      "cost": 0.000322848,
       "is_byok": false,
-      "cost_details": { "upstream_inference_cost": null }
+      "prompt_tokens_details": {
+        "cached_tokens": 1408,
+        "cache_write_tokens": 0,
+        "audio_tokens": 0,
+        "video_tokens": 0
+      },
+      "cost_details": {
+        "upstream_inference_cost": 0.000322848,
+        "upstream_inference_prompt_cost": 0.000162048,
+        "upstream_inference_completions_cost": 0.0001608
+      },
+      "completion_tokens_details": {
+        "reasoning_tokens": 5,
+        "image_tokens": 0,
+        "audio_tokens": 0
+      }
     }
   }
 }

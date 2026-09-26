@@ -361,14 +361,45 @@ every later step only removes or narrows. `chair_complete` records `resolved_gra
 
 **Fail closed.** A role the layout does not declare, or any role token with no layout, grants
 nothing and the chair is refused at dispatch naming the role — never a `**` default. A
-`target_paths` entry with glob metacharacters refuses the chair, naming the entry. The completions
-invoker refuses any path-scoped Write/Edit, because it cannot carry the scope to the model.
+`target_paths` entry is refused, naming it, if it has glob metacharacters, or if it escapes the tree:
+a `..` segment, an absolute path (`/…` or a drive letter), a leading `~`, or a backslash. Such an
+entry is never normalised into a grant. The completions invoker refuses any scoped grant
+(`Write(…)`, `Read(…)`, `Bash(…)`, `WebFetch(…)`), because it offers tools by base name and cannot
+carry a scope to the model.
 
-**No self-widening, and its known limit.** Whenever a seat's Write/Edit covers
-`coltrane.layout.json`, the spawn is denied `Write(coltrane.layout.json)`/`Edit(coltrane.layout.json)`.
-**Bash grants are not path-scoped**: a seat holding a Bash prefix that writes files (`sed -i`, `cp`,
-`tee`) can still write any path, the layout file included. That is a known limit, not an enforced
-boundary.
+**No self-widening.** Whenever a seat's Write/Edit covers `coltrane.layout.json`, the spawn is
+denied `Write(coltrane.layout.json)`/`Edit(coltrane.layout.json)`.
+
+**Bash is path-scoped by two mechanisms.**
+- **Outside the tree and the protected files: the sandbox.** Every seat that can run Bash (granted,
+  or kept by `code_tool_access: "full"`) spawns under the CLI's OS sandbox, set in its single
+  `--settings` JSON (`bashSandboxFor`, `src/claude_invoker.ts`):
+  - `enabled`, `failIfUnavailable`, `allowUnsandboxedCommands: false`, and no `excludedCommands`;
+  - writes are allowed in the tree and denied for `<tree>/coltrane.layout.json`, `<tree>/.git`,
+    `<tree>/.claude` and `<tree>/.coltrane`;
+  - `--setting-sources user`, so a repository's project/local settings cannot merge in an escape.
+
+  `<tree>` is the room's workspace for a room seat, otherwise the run's `tree_root`.
+- **Inside the tree: the diff gate.** After each seat that can write returns, `runGig`
+  (`src/diff_gate.ts`) compares the tree with its state before the seat ran. A change outside the
+  seat's resolved Write/Edit scope refuses the chair, naming the paths, and nothing from that chair
+  is sealed or shipped. This covers modified, added, untracked and deleted files, and both sides of
+  a rename.
+
+  The gate does not see paths git ignores, nor the engine's own `.coltrane/` (which the sandbox
+  denies to Bash).
+
+**The relative-path trap.** The CLI silently IGNORES a relative sandbox path: a relative deny is a
+deny that is not there. Every sandbox path is built absolute (and realpath-resolved on the host),
+and a non-absolute tree is refused rather than emitted.
+
+**Where no sandbox is available, the seat is refused.** That is intended (`failIfUnavailable`).
+Examples: a host with no `sandbox-exec` or bubblewrap, or a room whose container cannot create a
+user namespace. Room images carry bubblewrap, socat, bash (and ripgrep on the floor). A seat-bearing
+room runs under Docker's default seccomp profile plus the six calls bubblewrap needs
+(`src/room_seat_seccomp.ts`), with `systempaths=unconfined`. It is never privileged and adds no
+capability. This was verified on Docker Desktop (linuxkit); it is not verified on AppArmor hosts,
+where a seat may be refused until the host allows it.
 
 ---
 

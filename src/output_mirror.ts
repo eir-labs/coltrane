@@ -581,6 +581,14 @@ export interface GigHeaderRecord {
   cold_run_reason?: string;
   /** The ENDED gig this one resumes as a new gig (what's closed stays closed). */
   resumes?: string;
+  /**
+   * How many times a worker has failed TRANSIENTLY to read the closed gig this one `resumes`.
+   *
+   * The worker's own retry counter, kept here because the claim carries none and the store refunds
+   * the attempt on every non-terminal release — so without it a resume nobody can read is re-claimed
+   * and refunded forever at the head of the queue (src/worker.ts, countResumeReadFailure).
+   */
+  resume_read_failures?: number;
   /** Why an `aborted` run was stopped, as a token a consumer can read (`timeout` for the drain's
    *  deadline) — not only as prose inside `error`. */
   abort_reason?: string;
@@ -600,6 +608,7 @@ export function gigHeaderBody(rec: GigHeaderRecord): Record<string, unknown> {
   if (rec.error !== undefined) manifest["error"] = rec.error;
   if (rec.cold_run_reason !== undefined) manifest["cold_run_reason"] = rec.cold_run_reason;
   if (rec.resumes !== undefined) manifest["resumes"] = rec.resumes;
+  if (rec.resume_read_failures !== undefined) manifest["resume_read_failures"] = rec.resume_read_failures;
   if (rec.abort_reason !== undefined) manifest["abort_reason"] = rec.abort_reason;
   return {
     id: rec.gig_id,

@@ -29,7 +29,10 @@ cd "$(dirname "$0")/.."
 # stopped being true at Node 24), and two pure flag-string laws replaced it in this band. The nine
 # laws that need a real request moved to tests/security — a band may reach out, the root suite may
 # not — so they are counted there, by file, not here.
-EXPECTED_LAWS="${EXPECTED_LAWS:-4293}"
+EXPECTED_LAWS="${EXPECTED_LAWS:-4295}"
+#   +2 gig-runs-once round 6f, on 7b554e6: drain_budget B1c (the ceiling gates each chair INSIDE a phase, not just
+#      the phase start) and B1f (integer micro-dollars: 0.3+0.3+0.3 USD reaches a 900000 ceiling; a float compare
+#      lets a fourth chair run). Both green at head, red under their plants.
 #   +8 gig-runs-once round 6e, on 0fdc905 (review 5326586074): drain_budget (new file, 6) — B1 the claim's
 #      budget_micro_usd is the drain's ceiling (batch-boundary, settled spend), no budget = unbounded; B2 a
 #      `resumes` claim whose closed gig cannot be read (42501 / 500 / no answer / outputs 42501) is refused and

@@ -92,6 +92,16 @@ export const GENOME_ROWS = {
       ],
       output_types: ["Signal"],
     },
+    // four chairs chained INSIDE ONE PHASE (c1 → c2 → c3 → c4): the runtime runs them as four successive
+    // dispatch batches of the same phase, so a gate at the start of the phase sees only the first
+    {
+      slug: "chain-one-phase-v0", domain: "demo", status: "active",
+      phases: [{
+        name: "work",
+        chairs: [chair("c1", [], []), chair("c2", ["c1"], ["Signal"]), chair("c3", ["c2"], ["Signal"]), chair("c4", ["c3"], ["Signal"])],
+      }],
+      output_types: ["Signal"],
+    },
     // a human chair only — completes with ZERO model invocations when the claim carries its approval,
     // which is what lets the CLI law run `coltrane work` end to end with the real chair invoker
     {

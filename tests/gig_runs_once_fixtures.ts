@@ -162,6 +162,8 @@ export interface Call {
 
 type Answer = Response | Promise<Response>;
 
+export type ResumedReadMode = "ok" | "refuse" | "error" | "hang";
+
 export interface HostedOpts {
   /** What coltrane_drain_claim answers. A function lets a law change the answer between claims. */
   claim: unknown | (() => unknown);
@@ -174,6 +176,12 @@ export interface HostedOpts {
   renew?: (body: Record<string, unknown>) => Answer;
   release?: (body: Record<string, unknown>) => Answer;
   gigFail?: () => Answer;
+  /**
+   * How the store answers a gig token reading the gig its row RESUMES. The default is the coltrane-ui
+   * follow-up (#253): allowed. "refuse" is #250 as merged (403/42501 on the read). "error" is a 500.
+   * "hang" never answers. Set per read so a law can break status and outputs independently.
+   */
+  resumedRead?: { status?: ResumedReadMode; outputs?: ResumedReadMode } | undefined;
 }
 
 export interface HostedStore {
@@ -214,6 +222,16 @@ export function hostedStore(initial: HostedOpts): HostedStore {
   // A token this store never minted for a gig, such as a player's own token, is not gig-scoped and
   // passes.
   const gigTokens = new Map<string, { gig: string; resumes: string | null }>();
+  /** A read of the gig the token's row RESUMES, answered per opts.resumedRead (default: allowed). */
+  const resumedReadAnswer = async (body: Record<string, unknown>, what: "status" | "outputs"): Promise<Response | undefined> => {
+    const scope = gigTokens.get(String(body["p_bearer"] ?? ""));
+    if (!scope || scope.resumes === null || String(body["p_gig"]) !== scope.resumes) return undefined;
+    const mode = opts.resumedRead?.[what] ?? "ok";
+    if (mode === "ok") return undefined;
+    if (mode === "refuse") return new Response(JSON.stringify({ code: "42501", message: "gig token is scoped to a single gig" }), { status: 403 });
+    if (mode === "error") return new Response(JSON.stringify({ message: "internal error" }), { status: 500 });
+    return new Promise<Response>(() => { /* the store never answers */ });
+  };
   const scopeRefusal = (body: Record<string, unknown>, what: "read" | "own"): Response | undefined => {
     const scope = gigTokens.get(String(body["p_bearer"] ?? ""));
     if (!scope) return undefined;
@@ -250,13 +268,13 @@ export function hostedStore(initial: HostedOpts): HostedStore {
       }
       if (fn === "coltrane_mcp_genome") return ok(GENOME_ROWS);
       if (fn === "coltrane_mcp_gig_status") {
-        const refused = scopeRefusal(body, "read");
+        const refused = scopeRefusal(body, "read") ?? await resumedReadAnswer(body, "status");
         if (refused) return refused;
         const row = gigs.get(String(body["p_gig"]));
         return ok(row ?? null);
       }
       if (fn === "coltrane_mcp_gig_outputs") {
-        const refused = scopeRefusal(body, "read");
+        const refused = scopeRefusal(body, "read") ?? await resumedReadAnswer(body, "outputs");
         if (refused) return refused;
         return ok(outputs.filter((o) => o["gig_id"] === body["p_gig"]));
       }

@@ -205,3 +205,29 @@ describe("H5 — the hosted door carries the budget as integer micro-dollars (co
     expect("budget_micro_usd" in queued[0]!, "an absent budget was queued as a key; zero would mean a zero-dollar ceiling").toBe(false);
   });
 });
+
+describe("H6 — the two real gaps review 5326586074's plants left open", () => {
+  it("H6a an unknown key INSIDE budget (e.g. currency) is refused by name, never silently ignored; nothing queued", async () => {
+    // budget.max_usd is dollars and the host carries micro-dollars. A `currency: "EUR"` the door ignores
+    // is a ceiling read in the wrong unit and still answered ok.
+    const pre = hosted();
+    const ok = await dispatch(pre.d, { standard_slug: "scan-v1", input: {}, budget: { max_usd: 1 } });
+    expect(ok.ok && pre.queued[0]?.["budget_micro_usd"], "precondition: a plain budget is carried").toBe(1_000_000);
+
+    const { d, queued } = hosted();
+    const r = await dispatch(d, { standard_slug: "scan-v1", input: {}, budget: { max_usd: 5, currency: "EUR" } });
+    expect(queued.map((q) => q["budget_micro_usd"]), "a budget with an unknown key was queued, its extra key silently ignored").toEqual([]);
+    expect(r.ok).toBe(false);
+    expect(String(r.error ?? ""), "the refusal must name the unknown budget key").toContain("currency");
+  });
+
+  it("H6b a raw `resumes` argument (not resume_gig_id) is refused by name. It can never skip the closed-gig decision (H1/H2)", async () => {
+    const asked: string[] = [];
+    const { d, queued } = hosted(async (id) => { asked.push(id); return "running"; });
+    const r = await dispatch(d, { standard_slug: "scan-v1", input: {}, resumes: "abababab-1111-2222-3333-cdcdcdcdcdcd" });
+    expect(queued.map((q) => q["resumes"]), "a raw `resumes` went straight to the host, skipping the store's open/closed decision").toEqual([]);
+    expect(r.ok).toBe(false);
+    expect(String(r.error ?? ""), "the refusal must name `resumes`").toContain("resumes");
+  });
+});
+

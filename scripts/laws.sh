@@ -29,7 +29,12 @@ cd "$(dirname "$0")/.."
 # stopped being true at Node 24), and two pure flag-string laws replaced it in this band. The nine
 # laws that need a real request moved to tests/security — a band may reach out, the root suite may
 # not — so they are counted there, by file, not here.
-EXPECTED_LAWS="${EXPECTED_LAWS:-4285}"
+EXPECTED_LAWS="${EXPECTED_LAWS:-4293}"
+#   +8 gig-runs-once round 6e, on 0fdc905 (review 5326586074): drain_budget (new file, 6) — B1 the claim's
+#      budget_micro_usd is the drain's ceiling (batch-boundary, settled spend), no budget = unbounded; B2 a
+#      `resumes` claim whose closed gig cannot be read (42501 / 500 / no answer / outputs 42501) is refused and
+#      released non-terminally, never run cold. hosted_dispatch H6 (2) — unknown budget.* keys and a raw
+#      `resumes` argument are refused by name (the review's two non-equivalent surviving plants).
 #   +2 gig-runs-once round 6d, on efd10a1: real_store A2 (workOnce and `coltrane work`) — a drain key with no
 #      COLTRANE_DRAIN_URL makes NO claim; it refuses at startup naming the variable. RED at efd10a1.
 #  +16 gig-runs-once round 6c, on 2597854: hosted_dispatch H4 loses `budget` (-1: coltrane-ui #253 carries it now)
@@ -211,7 +216,7 @@ EXPECTED_LAWS="${EXPECTED_LAWS:-4285}"
 #       with the handler, the description does not. Its first draft could not fail — it forgave any
 #       token no tool anywhere declared, which is exactly what a renamed argument leaves behind.
 #       Sabotage said so (`current` -> `slug_current` stayed green); the exemption is gone.
-EXPECTED_FILES="${EXPECTED_FILES:-455}"   # + gig_runs_once_queue_clients (round 6c)   # + gig_runs_once_real_store (round 6b)   # + gig_runs_once_hosted_dispatch (round 6)   # + gig_runs_once_resumed_reclaim, gig_runs_once_store_decides (round 5)   # + the fifteen tests/gig_runs_once_*.test.ts (RED battery), + tests/every_skill_runs_its_fixtures.test.ts, + tests/node_floor_refuses.test.ts, + tests/spec_reside_drive.test.ts (#537), + tests/a_red_law_names_its_plant.test.ts (#551), + tests/sealed_inputs.test.ts, tests/fan_out.test.ts, tests/completions_seal.test.ts, tests/tier_ladder.test.ts, tests/amend_ladder.test.ts, tests/completions_reasoning_effort.test.ts, tests/bus.test.ts, tests/bus_chair.test.ts, tests/bus_terminal.test.ts, tests/bus_verbs.test.ts, tests/bus_commit.test.ts, tests/code_tools.test.ts, tests/gig_input_validated.test.ts, tests/seat_reads_recorded.test.ts, tests/claude_seat_reads.test.ts, tests/optional_declared_input.test.ts, tests/simulate_names_seats.test.ts
+EXPECTED_FILES="${EXPECTED_FILES:-456}"   # + gig_runs_once_drain_budget (round 6e)   # + gig_runs_once_queue_clients (round 6c)   # + gig_runs_once_real_store (round 6b)   # + gig_runs_once_hosted_dispatch (round 6)   # + gig_runs_once_resumed_reclaim, gig_runs_once_store_decides (round 5)   # + the fifteen tests/gig_runs_once_*.test.ts (RED battery), + tests/every_skill_runs_its_fixtures.test.ts, + tests/node_floor_refuses.test.ts, + tests/spec_reside_drive.test.ts (#537), + tests/a_red_law_names_its_plant.test.ts (#551), + tests/sealed_inputs.test.ts, tests/fan_out.test.ts, tests/completions_seal.test.ts, tests/tier_ladder.test.ts, tests/amend_ladder.test.ts, tests/completions_reasoning_effort.test.ts, tests/bus.test.ts, tests/bus_chair.test.ts, tests/bus_terminal.test.ts, tests/bus_verbs.test.ts, tests/bus_commit.test.ts, tests/code_tools.test.ts, tests/gig_input_validated.test.ts, tests/seat_reads_recorded.test.ts, tests/claude_seat_reads.test.ts, tests/optional_declared_input.test.ts, tests/simulate_names_seats.test.ts
 
 # THE OTHER BANDS. `vitest run` is ROOT-CONFIG ONLY — this repo's own workflow comments
 # record that four configs went unexecuted once for exactly that reason. So pinning only the

@@ -34,7 +34,8 @@ EXPECTED_LAWS="${EXPECTED_LAWS:-4223}"
 #      acknowledged; a renew refused in that window suppresses the terminal write), release_after_outcome
 #      (3, G2 — no release once the outcome is decided; REFUND — after the first chair every release is
 #      terminal), timeout_aborted (1, Q6 — the drain deadline ends a gig aborted/timeout, acknowledged),
-#      refused_resume (1, G4 — a cold run after a refused approved re-claim is a new gig with resumes).
+#      terminal_resume (1, G4 — gig_dispatch resume of a FAILED gig is a NEW gig with resumes:<old id>,
+#      the old seals entering as inputs by reference; nothing written under the old id — founder ruling).
 #   +5 gig-runs-once round 2, RED: gig_runs_once_outputs_first (3, E9 — outputs acknowledged before the
 #      completed header) and gig_runs_once_refused_header (2, E10 — a start header refused with 23514 or
 #      403/42501 stops the worker). E3/E5 reconciled with the store route (coltrane-ui #250): the body is

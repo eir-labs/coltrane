@@ -3761,6 +3761,15 @@ const HOSTED_BLOCKED: Readonly<Record<string, string>> = {
     "gig_logs tails per-chair log files under the local outputs dir; hosted runs are executed by the drain worker and their record lives in the store",
   genome_reload:
     "genome_reload re-reads genome files from disk; a hosted surface loads its genome from the store per-request, so there is nothing to reload",
+  // The bus is a JSONL file under the SERVER's home (COLTRANE_BUS_DIR, default ~/.eir/bus). On a hosted
+  // route that is the host's home, shared by every org it serves, with no org scope — so the bus is a
+  // local-process tool, refused here before openNamedBus can create a directory.
+  bus_post:
+    "bus_post appends to the local bus file under the server's own home directory; a hosted surface has no per-org bus, so posting would write into the host's home, shared by every org it serves",
+  bus_read:
+    "bus_read reads (and advances a cursor in) the local bus file under the server's own home directory; a hosted surface has no per-org bus to read",
+  bus_owed:
+    "bus_owed reads the local bus file under the server's own home directory; a hosted surface has no per-org bus to answer from",
 };
 
 // The genome-mutation tools whose success must ALSO land in the hosted store, and the class
@@ -4234,7 +4243,9 @@ function readMcpServerConfigs(root: string): Record<string, unknown> {
       if (parsed.mcpServers && typeof parsed.mcpServers === "object") return parsed.mcpServers;
     } catch { /* fall through to the default */ }
   }
-  return { [ENGINE_MCP_SERVER]: { command: "node", args: ["dist/src/server_entry.js"] } };
+  // process.execPath, not `node` on PATH: the engine server a seat reaches runs skills, so it runs on
+  // the runtime that passed the floor, not whichever node a spawn's PATH finds first.
+  return { [ENGINE_MCP_SERVER]: { command: process.execPath, args: ["dist/src/server_entry.js"] } };
 }
 
 export function bootstrapServerDeps(genomeRoot?: string): ServerDeps {

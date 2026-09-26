@@ -25,6 +25,7 @@
 //   D1 project/local settings never load                behavioural  same                                     --setting-sources user,project
 //   D2 every sandbox path is ABSOLUTE                    behavioural  same                                     write "./coltrane.layout.json" (relative) into denyWrite
 //   D2 denyWrite covers layout, .git, .claude            behavioural  same                                     drop <tree>/.git from denyWrite
+//   D2 denyWrite covers .coltrane (round 7)               behavioural  same                                     drop <tree>/.coltrane from denyWrite
 //   D5 a room seat gets the same sandbox, over the       behavioural  same, with ctx.seatExec (docker exec)    build the sandbox only on the host path (skip it
 //      ROOM's workspace                                                                                        when seatExec is set) / deny the host tree_root
 import { describe, it, expect } from "vitest";
@@ -106,6 +107,13 @@ describe("D2 — the sandbox denies the layout, .git and .claude by ABSOLUTE pat
     expect(deny, "the sandbox lets Bash rewrite the layout that grants the seat").toContain(`${TREE}/${LAYOUT_FILE}`);
     expect(deny, "the sandbox lets Bash rewrite .git (hooks, config, refs)").toContain(`${TREE}/.git`);
     expect(deny, "the sandbox lets Bash rewrite the tree's .claude settings").toContain(`${TREE}/.claude`);
+  });
+
+  it("denyWrite holds <tree>/.coltrane — the engine's own ledger, locks and checkpoints (round 7: a surviving plant)", async () => {
+    const { args } = await spawn(seat(["Read", "Bash(@laws)"]));
+    const deny = (sandboxOf(args)?.filesystem?.["denyWrite"] ?? []) as string[];
+    expect(deny, "non-vacuity: the sandbox denies the layout file").toContain(`${TREE}/${LAYOUT_FILE}`);
+    expect(deny, "the sandbox lets Bash rewrite the engine's .coltrane state, which the diff gate exempts by design").toContain(`${TREE}/.coltrane`);
   });
 
   it("every path anywhere in the sandbox's filesystem config is absolute — a relative one is silently ignored by the CLI", async () => {

@@ -29,13 +29,18 @@ cd "$(dirname "$0")/.."
 # stopped being true at Node 24), and two pure flag-string laws replaced it in this band. The nine
 # laws that need a real request moved to tests/security — a band may reach out, the root suite may
 # not — so they are counted there, by file, not here.
-EXPECTED_LAWS="${EXPECTED_LAWS:-3973}"   # includes 22 todo
+EXPECTED_LAWS="${EXPECTED_LAWS:-3980}"   # includes 22 todo
+#   +7  a_red_law_names_its_plant — red-spec v5: every coverage_map entry names what the law DRIVES
+#       and the PLANT (the production edit that must turn it red). Each of its seven laws was planted
+#       against before sealing: the v4 type turned all six type laws red; `plant` dropped from
+#       required, the kind enum dropped, the structural allOf deleted and the drafter's PLANT sentence
+#       deleted each turned only its own law red.
 #   +1  mcp_tools_describe law 7 (#535) — a description that backticks an argument names one the
 #       verb's own input_schema declares. The prose sits beside a GENERATED schema: the schema moves
 #       with the handler, the description does not. Its first draft could not fail — it forgave any
 #       token no tool anywhere declared, which is exactly what a renamed argument leaves behind.
 #       Sabotage said so (`current` -> `slug_current` stayed green); the exemption is gone.
-EXPECTED_FILES="${EXPECTED_FILES:-414}"
+EXPECTED_FILES="${EXPECTED_FILES:-415}"
 
 # THE OTHER BANDS. `vitest run` is ROOT-CONFIG ONLY — this repo's own workflow comments
 # record that four configs went unexecuted once for exactly that reason. So pinning only the

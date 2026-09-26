@@ -1,6 +1,6 @@
 {
   "slug": "red-spec",
-  "version": 4,
+  "version": 5,
   "extends": "Artifact",
   "domain": "spec-drafting",
   "status": "active",
@@ -13,7 +13,7 @@
       },
       "coverage_map": {
         "type": "array",
-        "description": "EVERY subsystem-contract invariant mapped to the red test that verifies it: each {invariant_id, test_name, test_file}.",
+        "description": "EVERY subsystem-contract invariant mapped to the red law that verifies it: each {invariant_id, test_name, test_file, kind, drives, plant}. Each entry names what the law DRIVES and the PLANT: the production defect that must turn it red. Behavioural by default; structural only with a reason.",
         "items": {
           "type": "object",
           "properties": {
@@ -25,12 +25,58 @@
             },
             "test_file": {
               "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "behavioural",
+                "structural"
+              ],
+              "description": "behavioural: the law CALLS the production code named in `drives` and asserts on what it does. structural: the law reads source or configuration (a manifest, a link map, a grant list) because the invariant IS a property of the text. A law about behaviour sealed as structural is the defect this field exists to stop: laws that read source for a token, called a stand-in, or built their own copy of the thing they guarded passed their seal and stayed green under planted defects in the call sites they claimed to guard."
+            },
+            "drives": {
+              "type": "string",
+              "minLength": 3,
+              "description": "The production symbol the law invokes, with its file (e.g. 'createRegistry(...).validate — src/registry.ts'). For kind=structural, the file or artefact read."
+            },
+            "plant": {
+              "type": "string",
+              "minLength": 10,
+              "description": "The one smallest edit to PRODUCTION code (not to the test) that must turn this law RED (e.g. 'drop the ...conditional spread from effective() in src/registry.ts'). If no production edit can turn the law red, it is not guarding production."
+            },
+            "plant_observed": {
+              "type": "string",
+              "minLength": 10,
+              "description": "What the drafter SAW when it applied the plant and ran the law: the failing assertion, verbatim. Planted, observed, reverted before sealing. The drafter's claim: the engine validates its shape, not its truth."
+            },
+            "structural_reason": {
+              "type": "string",
+              "description": "Required when kind=structural: why no behavioural law can express this invariant."
             }
           },
           "required": [
             "invariant_id",
             "test_name",
-            "test_file"
+            "test_file",
+            "kind",
+            "drives",
+            "plant"
+          ],
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "kind": {
+                    "const": "structural"
+                  }
+                }
+              },
+              "then": {
+                "required": [
+                  "structural_reason"
+                ]
+              }
+            }
           ]
         }
       },

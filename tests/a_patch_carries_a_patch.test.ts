@@ -77,7 +77,7 @@ describe("a law is carried by address, and the address resolves to the exact law
     const prose = {
       validation_criteria: ["x"], input_refs: ["y"],
       diffs: [{ path: "tests/law.test.ts", patch: "full unified diff captured from `git diff --cached`; content present verbatim in the tree" }],
-      coverage_map: [{ invariant_id: "I1", test_name: "t", test_file: "f" }],
+      coverage_map: [{ invariant_id: "I1", test_name: "t", test_file: "f", kind: "behavioural", drives: "f — src/f.ts", plant: "make f return the wrong value" }],
       testing_method: "m",
     };
     const v = registry.validate({ core_type: "Artifact", domain_type: "red-spec", data: prose } as never);

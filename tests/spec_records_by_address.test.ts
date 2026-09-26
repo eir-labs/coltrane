@@ -83,7 +83,7 @@ describe("records by address — the type shape (O1, O2, F4)", () => {
       laws: [{ path: "tests/x.test.ts", commit: "a".repeat(40), blob_sha: "0".repeat(40), tests: ["a law holds"] }],
       // Kept: the review seat's COMPLETENESS check reads coverage_map, and this contract retires
       // `diffs` only. A fixture without it would let the build drop a required field nobody decided to drop.
-      coverage_map: [{ invariant_id: "I1", test_name: "a law holds", test_file: "tests/x.test.ts" }],
+      coverage_map: [{ invariant_id: "I1", test_name: "a law holds", test_file: "tests/x.test.ts", kind: "behavioural", drives: "f — src/f.ts", plant: "make f return the wrong value" }],
       testing_method: "property-based where universal",
     };
     const v = registry.validate({ core_type: "Artifact", domain_type: "red-spec", data } as never);
@@ -105,7 +105,7 @@ describe("records by address — the type shape (O1, O2, F4)", () => {
     const data = {
       validation_criteria: ["x"], input_refs: ["y"],
       diffs: [{ path: "tests/x.test.ts", patch: "+a" }],
-      coverage_map: [{ invariant_id: "I1", test_name: "t", test_file: "f" }],
+      coverage_map: [{ invariant_id: "I1", test_name: "t", test_file: "f", kind: "behavioural", drives: "f — src/f.ts", plant: "make f return the wrong value" }],
       testing_method: "m",
     };
     const v = registry.validate({ core_type: "Artifact", domain_type: "red-spec", data } as never);

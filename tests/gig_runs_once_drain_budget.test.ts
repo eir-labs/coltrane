@@ -20,7 +20,8 @@
 //   Chair 1 runs at settled 0; chair 2 at settled 5; chair 3 would start at settled 10 ≥ 8, so it
 //   does not. Settled 10 ≤ 8 + 5.
 //
-// B2 · A RESUME REFUSES WHEN THE CLOSED GIG CANNOT BE READ. Without coltrane-ui #253's status
+// B2 · A RESUME REFUSES WHEN THE CLOSED GIG CANNOT BE READ (TRANSIENTLY: round 6g narrowed B2 to
+// transient failures; permanent ones terminate, tests/gig_runs_once_resume_unreadable.test.ts). Without coltrane-ui #253's status
 // exception, the store answers the resumed gig's status read with 42501. The worker then runs a
 // `resumes` claim COLD: it re-runs chairs the closed gig already paid for (the double spend), and it
 // contradicts H3 on the hosted door. The law: when the worker cannot read the resumed gig's status or
@@ -106,10 +107,13 @@ describe("B1 — the claim's budget_micro_usd is the run's ceiling on the drain"
 });
 
 describe("B2 — a `resumes` claim whose closed gig cannot be read is REFUSED, never run cold", () => {
+  // TRANSIENT failures only (round 6g). A PERMANENT one (42501 scope or seat, a closed gig that no
+  // longer exists) terminates the gig instead; see tests/gig_runs_once_resume_unreadable.test.ts. The two
+  // 42501 cases that stood here until 6g asserted a refund, and a refunded permanent failure re-queues
+  // the same dead row at the head of the org's queue on every poll (review 5327331488).
   const CASES: Array<[string, { status?: ResumedReadMode; outputs?: ResumedReadMode }]> = [
-    ["status refused 42501 (#250 as merged)", { status: "refuse" }],
     ["status errors (500)", { status: "error" }],
-    ["outputs refused 42501", { outputs: "refuse" }],
+    ["status read fails at the network (fetch rejects)", { status: "network" }],
     ["status never answers", { status: "hang" }],
   ];
   for (const [label, resumedRead] of CASES) {

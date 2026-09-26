@@ -172,7 +172,13 @@ export interface Call {
 
 type Answer = Response | Promise<Response>;
 
-export type ResumedReadMode = "ok" | "refuse" | "error" | "hang";
+/**
+ * ok: allowed. refuse: 403/42501 scope refusal (#250 as merged). unseated: 403/42501 "agent … holds no
+ * seat" (the resumed gig's acting agent was unseated or retired; the answer the store gives even with
+ * #253). missing: the closed gig no longer exists (status answers no row, outputs []). error: 500.
+ * network: fetch itself rejects. hang: no answer.
+ */
+export type ResumedReadMode = "ok" | "refuse" | "unseated" | "missing" | "error" | "network" | "hang";
 
 export interface HostedOpts {
   /** What coltrane_drain_claim answers. A function lets a law change the answer between claims. */
@@ -192,6 +198,17 @@ export interface HostedOpts {
    * "hang" never answers. Set per read so a law can break status and outputs independently.
    */
   resumedRead?: { status?: ResumedReadMode; outputs?: ResumedReadMode } | undefined;
+  /**
+   * THE QUEUE, modelled on the store's claim/release semantics (coltrane-ui #250 + 20260926040000):
+   * rows are claimed in order, oldest first. Every claim counts an attempt. A row at max_attempts is
+   * failed `attempts_exhausted` and passed over. A NON-terminal release re-queues the row and REFUNDS
+   * the attempt (floored at 0). A terminal release or gig_fail fails it. An acknowledged completed
+   * header completes it. When set, it replaces `claim`. `lapse()` models time passing between polls:
+   * a row still `running` whose worker has returned has let its lease lapse, and is queued again
+   * WITHOUT a refund.
+   */
+  queue?: Array<Record<string, unknown>> | undefined;
+  maxAttempts?: number | undefined;
 }
 
 export interface HostedStore {
@@ -202,6 +219,10 @@ export interface HostedStore {
   outputs: Array<Record<string, unknown>>;
   /** Replace the options between two workOnce calls (a re-claim by a second worker). */
   set(next: Partial<HostedOpts>): void;
+  /** The modelled queue's rows (when `queue` is set): status, attempts, claims, reason. */
+  queueRow(gig_id: string): { status: string; attempts: number; claims: number; reason?: string } | undefined;
+  /** Time passes between polls: a row still running (its worker returned) lets its lease lapse. */
+  lapse(): void;
   /** Calls to the drain service's header route. */
   headers(): Call[];
   renews(): Call[];
@@ -219,6 +240,28 @@ export function hostedStore(initial: HostedOpts): HostedStore {
   const outputs: Array<Record<string, unknown>> = [];
   const attempts = new Map<string, number>();
   let seq = 0;
+  interface QueueRow { claim: Record<string, unknown>; status: string; attempts: number; claims: number; reason?: string }
+  const rows = new Map<string, QueueRow>();
+  const syncQueue = () => {
+    for (const c of opts.queue ?? []) {
+      const id = String(c["gig_id"]);
+      if (!rows.has(id)) rows.set(id, { claim: c, status: "queued", attempts: 0, claims: 0 });
+    }
+  };
+  const claimFromQueue = (): unknown => {
+    syncQueue();
+    const max = opts.maxAttempts ?? 3;
+    for (const c of opts.queue ?? []) {
+      const row = rows.get(String(c["gig_id"]))!;
+      if (row.status !== "queued") continue;
+      if (row.attempts >= max) { row.status = "failed"; row.reason = "attempts_exhausted"; continue; }
+      row.status = "running";
+      row.attempts += 1;
+      row.claims += 1;
+      return row.claim;
+    }
+    return null;
+  };
   // THE STORE'S SCOPE RULES for a gig-scoped token, enforced here because the first fixture
   // answered for ANY gig and was blind to review 5326196799 finding 1.
   //
@@ -239,7 +282,10 @@ export function hostedStore(initial: HostedOpts): HostedStore {
     const mode = opts.resumedRead?.[what] ?? "ok";
     if (mode === "ok") return undefined;
     if (mode === "refuse") return new Response(JSON.stringify({ code: "42501", message: "gig token is scoped to a single gig" }), { status: 403 });
+    if (mode === "unseated") return new Response(JSON.stringify({ code: "42501", message: "agent steve-1 holds no seat in this organization" }), { status: 403 });
+    if (mode === "missing") return what === "status" ? ok(null) : ok([]);
     if (mode === "error") return new Response(JSON.stringify({ message: "internal error" }), { status: 500 });
+    if (mode === "network") throw new TypeError("fetch failed: ECONNRESET");
     return new Promise<Response>(() => { /* the store never answers */ });
   };
   const scopeRefusal = (body: Record<string, unknown>, what: "read" | "own"): Response | undefined => {
@@ -267,7 +313,7 @@ export function hostedStore(initial: HostedOpts): HostedStore {
     if (host === "store") {
       const fn = u.pathname.replace(/^\/rest\/v1\/rpc\//, "");
       if (fn === "coltrane_drain_claim" || fn === "coltrane_mcp_claim") {
-        const c = typeof opts.claim === "function" ? (opts.claim as () => unknown)() : opts.claim;
+        const c = opts.queue ? claimFromQueue() : typeof opts.claim === "function" ? (opts.claim as () => unknown)() : opts.claim;
         if (fn === "coltrane_drain_claim" && c && typeof c === "object") {
           const cc = c as Record<string, unknown>;
           if (typeof cc["token"] === "string") {
@@ -291,6 +337,8 @@ export function hostedStore(initial: HostedOpts): HostedStore {
       if (fn === "coltrane_mcp_gig_fail") {
         const refused = scopeRefusal(body, "own");
         if (refused) return refused;
+        const row = rows.get(String(body["p_gig"]));
+        if (row) { row.status = "failed"; row.reason = String(body["p_error"] ?? ""); }
         return opts.gigFail ? await opts.gigFail() : ok(true);
       }
       if (fn === "coltrane_mcp_gig_park") {
@@ -310,6 +358,8 @@ export function hostedStore(initial: HostedOpts): HostedStore {
         const res = custom ? await custom : ok(null, 201);
         if (res.ok) {
           const id = String(body["id"]);
+          const qrow = rows.get(id);
+          if (qrow && TERMINAL.has(String(body["status"]))) { qrow.status = body["status"] === "complete" ? "completed" : String(body["status"]); }
           const prior = gigs.get(id) ?? {};
           // merge semantics, manifest merged too — what the store seat is adding
           const manifest = { ...((prior["manifest"] as Record<string, unknown>) ?? {}), ...((body["manifest"] as Record<string, unknown>) ?? {}) };
@@ -339,6 +389,11 @@ export function hostedStore(initial: HostedOpts): HostedStore {
         return opts.renew ? await opts.renew(body) : ok(new Date(Date.now() + 3_600_000).toISOString());
       }
       if (u.pathname.endsWith("/coltrane_drain_release")) {
+        const row = rows.get(String(body["p_gig_id"]));
+        if (row && row.status === "running") {
+          if (body["p_terminal"] === true) { row.status = "failed"; row.reason = String(body["p_reason"] ?? ""); }
+          else { row.status = "queued"; row.attempts = Math.max(row.attempts - 1, 0); }
+        }
         return opts.release ? await opts.release(body) : ok(true);
       }
       return new Response(`unexpected drain path ${u.pathname}`, { status: 404 });
@@ -353,6 +408,8 @@ export function hostedStore(initial: HostedOpts): HostedStore {
     gigs,
     outputs,
     set(next) { opts = { ...opts, ...next }; },
+    queueRow: (id) => { syncQueue(); return rows.get(id); },
+    lapse: () => { for (const r of rows.values()) if (r.status === "running") r.status = "queued"; },
     headers: onDrain((c) => c.path === "/rest/v1/coltrane_gigs"),
     renews: onDrain((c) => c.path.endsWith("/coltrane_drain_renew")),
     outputRows: onDrain((c) => c.path === "/rest/v1/coltrane_outputs"),

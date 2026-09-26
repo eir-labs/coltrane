@@ -1533,17 +1533,28 @@ export type TourOutput = z.output<typeof TourSchema>;
 // role declared as an EMPTY list is refused (min 1) — an answer of "nothing" must be an absence the
 // resolver refuses by name, never a declared role that passes review and grants nothing.
 const LayoutEntriesSchema = z.array(z.string().min(1)).min(1);
+// A PATH role's globs are tree-relative. The CLI reads `Write(//x)` as an absolute path and `Write(~/x)`
+// as the home directory, and a `..` segment or a backslash names a path by a spelling the engine's
+// matcher (src/grant_scope.ts) does not judge — so a layout cannot hand a seat a grant outside its tree.
+const LayoutGlobsSchema = z
+  .array(
+    z.string().min(1).refine(
+      (g) => !g.startsWith("//") && !g.startsWith("~") && !g.includes("\\") && !g.split("/").includes(".."),
+      { message: "a layout path glob must be tree-relative: no leading // or ~, no .. segment, no backslash" },
+    ),
+  )
+  .min(1);
 
 export const LayoutSchema = z
   .object({
     /** Path roles: each a list of globs, expanded to one `<Tool>(<glob>)` grant per glob. */
     paths: z
       .object({
-        source: LayoutEntriesSchema.optional(),
-        tests: LayoutEntriesSchema.optional(),
-        migrations: LayoutEntriesSchema.optional(),
-        scripts: LayoutEntriesSchema.optional(),
-        docs: LayoutEntriesSchema.optional(),
+        source: LayoutGlobsSchema.optional(),
+        tests: LayoutGlobsSchema.optional(),
+        migrations: LayoutGlobsSchema.optional(),
+        scripts: LayoutGlobsSchema.optional(),
+        docs: LayoutGlobsSchema.optional(),
       })
       .strict()
       .optional(),

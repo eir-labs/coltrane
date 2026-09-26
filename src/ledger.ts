@@ -27,6 +27,10 @@ export interface GigUsage {
   unattributed_invocations?: number;
   /** Set ONLY when unattributed_invocations > 0: the scalars above are a LOWER BOUND. */
   partial?: true;
+  /** Invocations that reported tokens but NO cost — neither the transport nor the deployment's
+   *  price table priced them. Set ONLY when > 0: `total_cost_usd` is then a LOWER BOUND (their
+   *  tokens are counted; their spend is unknown, never $0). */
+  unpriced_invocations?: number;
   /** Set ONLY when ≥1 attributed invocation carried no `modelUsage` breakdown: `by_model` does
    *  not account for the whole of `total_cost_usd` and is itself a LOWER BOUND. */
   by_model_partial?: true;

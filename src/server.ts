@@ -117,6 +117,86 @@ export function parseWindow(raw: unknown, now: number): { after?: string; error?
 /** Store statuses that mean a gig is CLOSED: what's closed is closed, so a resume of it is a new gig. */
 /** How long the resume door waits on the store's gigStatus before refusing. */
 const GIG_STATUS_TIMEOUT_MS = 10_000;
+
+/**
+ * Ask the store for a gig's status, BOUNDED. A store that never answers is not an answer: this rejects
+ * after GIG_STATUS_TIMEOUT_MS rather than hanging the door forever, and the caller refuses the resume
+ * rather than guessing which id to write under. Shared by the local and the hosted dispatch doors.
+ */
+async function askStoreGigStatus(
+  gigStatus: (gig_id: string) => Promise<string | null | undefined>,
+  gig_id: string,
+): Promise<string | null | undefined> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      gigStatus(gig_id),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`the store did not answer within ${GIG_STATUS_TIMEOUT_MS} ms`)), GIG_STATUS_TIMEOUT_MS);
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
+/**
+ * THE HOST CONTRACT: the only gig_dispatch arguments a hosted queue can carry — what the queue seams
+ * read (postgrestQueueGig / rpcQueueGig, src/genome_store.ts) plus `resumes`, which the store hands
+ * back on the claim. queueGig receives these and nothing else.
+ */
+const HOSTED_DISPATCH_CONTRACT = new Set(["standard_slug", "mode", "input", "org_slug", "acting_for", "venue", "resumes"]);
+
+/**
+ * Shape a hosted gig_dispatch for the queue, or refuse it. NO SILENT DROP: every argument outside
+ * the host contract is refused BY NAME, never forwarded to a host that would ignore it (a dropped
+ * `budget` is an unbounded run; a dropped `resume_gig_id` is a fresh full-cost gig). Two arguments are
+ * the door's own business and never forwarded: `wait` (accepted only as false — hosted dispatch never
+ * blocks) and `resume_gig_id`, which the STORE decides: closed → queued with `resumes`; open →
+ * refused (resuming in place is gig_approve's door); unanswerable or unwired → refused.
+ */
+async function hostedDispatchArgs(
+  args: Record<string, unknown>,
+  gigStatus: ((gig_id: string) => Promise<string | null | undefined>) | undefined,
+): Promise<{ ok: true; forward: Record<string, unknown> } | { ok: false; error: string }> {
+  const refused: string[] = [];
+  const forward: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(args)) {
+    if (key === "resume_gig_id") continue;
+    if (key === "wait") {
+      if (value === true) refused.push("wait (hosted dispatch queues and never blocks; poll gig_monitor)");
+      continue;
+    }
+    if (HOSTED_DISPATCH_CONTRACT.has(key) && key !== "resumes") forward[key] = value;
+    else refused.push(key);
+  }
+  if (refused.length > 0) {
+    return {
+      ok: false,
+      error: `gig_dispatch: the hosted queue cannot carry ${refused.map((r) => `\`${r}\``).join(", ")} — refused rather than dropped silently. ` +
+        `A hosted dispatch carries only ${[...HOSTED_DISPATCH_CONTRACT].join(", ")}.`,
+    };
+  }
+  const resumeArg = args.resume_gig_id;
+  if (resumeArg === undefined || resumeArg === null) return { ok: true, forward };
+  const oldId = String(resumeArg);
+  if (!gigStatus) {
+    return { ok: false, error: `gig_dispatch: a hosted resume of "${oldId}" needs the store's status of that gig, and no gigStatus seam is wired — refused rather than queued as a fresh, unlinked gig` };
+  }
+  let status: string | null | undefined;
+  try {
+    status = await askStoreGigStatus(gigStatus, oldId);
+  } catch (e) {
+    return { ok: false, error: `gig_dispatch: the store could not say whether gig "${oldId}" is closed, so the hosted resume is refused — ${e instanceof Error ? e.message : String(e)}` };
+  }
+  if (typeof status !== "string") {
+    return { ok: false, error: `gig_dispatch: the store holds no gig "${oldId}" to resume` };
+  }
+  if (!CLOSED_GIG_STATUSES.has(status)) {
+    return { ok: false, error: `gig_dispatch: gig "${oldId}" is ${status}, not closed — a hosted resume only links a closed gig; resuming an open gig in place is gig_approve's door` };
+  }
+  return { ok: true, forward: { ...forward, resumes: oldId } };
+}
 const CLOSED_GIG_STATUSES = new Set(["failed", "aborted", "completed", "complete", "cancelled", "canceled"]);
 
 export interface ServerDeps {
@@ -1188,19 +1268,7 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         if (resumeArg !== undefined && deps.gigStatus) {
           let status: string | null | undefined;
           try {
-            // BOUNDED. A store that never answers is not an answer: the resume is refused after
-            // GIG_STATUS_TIMEOUT_MS rather than hanging the door forever or guessing from the checkpoint.
-            let timer: ReturnType<typeof setTimeout> | undefined;
-            try {
-              status = await Promise.race([
-                deps.gigStatus(resumeArg),
-                new Promise<never>((_, reject) => {
-                  timer = setTimeout(() => reject(new Error(`the store did not answer within ${GIG_STATUS_TIMEOUT_MS} ms`)), GIG_STATUS_TIMEOUT_MS);
-                }),
-              ]);
-            } finally {
-              if (timer !== undefined) clearTimeout(timer);
-            }
+            status = await askStoreGigStatus(deps.gigStatus, resumeArg);
           } catch (e) {
             return { ok: false, requires_approval: approval,
               error: `gig_dispatch: the store could not say whether gig "${resumeArg}" is closed, so the resume is refused rather than guessing which id to write under — ${e instanceof Error ? e.message : String(e)}` };
@@ -3983,6 +4051,9 @@ async function callSurfaceTool(
       // Hosted dispatch NEVER spawns. With a queue seam it queues (the gig table is the
       // queue; a drain worker claims and runs); without one it says so, typed.
       if (deps.queueGig) {
+        const shaped = await hostedDispatchArgs(args, deps.gigStatus);
+        if (!shaped.ok) return { ok: false, error: shaped.error };
+        const queued = shaped.forward;
         // contract-post-time-gig-input-v1 — validate the payload BEFORE it is queued, in the SAME
         // words as runGig's preflight, so the caller who can still fix the key is the one who is told
         // (not the worker, later). Everything below the guard queues exactly as today; a throw on this
@@ -4017,7 +4088,7 @@ async function callSurfaceTool(
             // queue as today and SAY the payload was not validated, so the reply never implies a check
             // it could not run. The preflight remains the backstop when the worker runs the gig.
             try {
-              const data = await deps.queueGig(args);
+              const data = await deps.queueGig(queued);
               return {
                 ok: true,
                 data,
@@ -4041,11 +4112,11 @@ async function callSurfaceTool(
               error: unknownGigInputMessage(part.nearMiss.key, part.nearMiss.declaredKey, standard_slug),
             };
           }
-          // (O3/I2) no near miss: queue the UNCHANGED args, and name the harmless undeclared keys (sorted)
+          // (O3/I2) no near miss: queue the args (host contract only, shaped above), and name the harmless undeclared keys (sorted)
           // on the reply so the caller learns at post time what the engine will ignore. A clean payload
           // adds nothing — `undeclared_input_keys` is present only when there is at least one extra.
           try {
-            const data = await deps.queueGig(args);
+            const data = await deps.queueGig(queued);
             return part.extras.length > 0
               ? { ok: true, data, undeclared_input_keys: part.extras }
               : { ok: true, data };
@@ -4056,7 +4127,7 @@ async function callSurfaceTool(
         // (F2) an absent or non-object payload is a shape the door already handles — no new refusal,
         // queued exactly as today.
         try {
-          const data = await deps.queueGig(args);
+          const data = await deps.queueGig(queued);
           return { ok: true, data };
         } catch (e) {
           return { ok: false, error: e instanceof Error ? e.message : String(e) };

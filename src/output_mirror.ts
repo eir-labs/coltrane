@@ -256,6 +256,15 @@ export const DRAIN_WRITE_ATTEMPTS = 3;
 /** Backoff before the 2nd and 3rd attempts. Short: the lease is the budget these come out of. */
 const DRAIN_BACKOFF_MS = [250, 750] as const;
 
+/** The drain is not configured to reach its service (a key with no COLTRANE_DRAIN_URL, or a URL that
+ *  names the database). No request was sent: this is configuration, not an answer from the store. */
+export class DrainConfigError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "DrainConfigError";
+  }
+}
+
 /** A drain-service write the store did not acknowledge. `refused` = the store said no (not "later"). */
 export class DrainWriteError extends Error {
   constructor(
@@ -397,7 +406,7 @@ async function drainRemote(rec: OutputRecord): Promise<void> {
 function serviceOrigin(): string {
   const raw = (process.env["COLTRANE_DRAIN_URL"] ?? "").replace(/\/+$/, "");
   if (!raw) {
-    throw new Error(
+    throw new DrainConfigError(
       "COLTRANE_DRAIN_KEY is set but COLTRANE_DRAIN_URL is missing — it names the Coltrane service " +
         "that brokers this drain's writes",
     );
@@ -414,10 +423,10 @@ function serviceOrigin(): string {
   try {
     host = new URL(origin).host;
   } catch {
-    throw new Error(`COLTRANE_DRAIN_URL is not a URL: ${origin}`);
+    throw new DrainConfigError(`COLTRANE_DRAIN_URL is not a URL: ${origin}`);
   }
   if (/(^|\.)supabase\.(co|in|net)$/i.test(host)) {
-    throw new Error(
+    throw new DrainConfigError(
       `COLTRANE_DRAIN_URL points at the Supabase project (${origin}). It must name the Coltrane ` +
         "service, which brokers both halves of a write: a drain key is not a project credential, " +
         "and Storage will refuse it.",

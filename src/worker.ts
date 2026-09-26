@@ -48,7 +48,7 @@ import { engineToolProviders, drainBudget, drainTimeoutMs, resolveWorkingRepo, a
 // The repository resolver's ONE home is run_deps.ts (shared by both doors). Re-exported here so
 // worker.ts's own consumers — and tests/the_repo_is_typed_input — keep importing it from this path.
 export { resolveWorkingRepo } from "./run_deps.js";
-import { createOutputMirror, drainGigHeader, remoteConfigured, DrainWriteError } from "./output_mirror.js";
+import { createOutputMirror, drainGigHeader, remoteConfigured, DrainWriteError, DrainConfigError } from "./output_mirror.js";
 import { PRIMITIVE_OUTPUT_TYPE } from "./core_types.js";
 import { sha256Hex, canonJson, outputContentHash, CANONICAL_FORM_VERSION } from "./canonical_form.js";
 import {
@@ -1256,7 +1256,9 @@ export async function workOnce(ctx: WorkerContext, deps: WorkOnceDeps): Promise<
     // cwd is a freshly cloned repository, so honouring a `.mcp.json` there would let a repo declare
     // servers for the seat reading it. Present enables resolution; empty makes any grant naming a
     // server other than the engine's own fail closed.
-    const timeoutMs = drainTimeoutMs();
+    // The lease this run is under decides its ceiling: a venue drain renews the hosted lease; a
+    // player holds coltrane_mcp_claim's thirty minutes with no renew (drainTimeoutMs per mode).
+    const timeoutMs = drainTimeoutMs(ctx.drainKey && ctx.instance ? "venue" : "player");
     deadline = setTimeout(() => aborter.abort(new DrainDeadline(timeoutMs)), timeoutMs);
     // unref so a finished gig exits promptly instead of waiting out its own timeout.
     if (typeof deadline === "object" && "unref" in deadline) deadline.unref();
@@ -1322,13 +1324,32 @@ export async function workOnce(ctx: WorkerContext, deps: WorkOnceDeps): Promise<
           ...(coldRunReason !== undefined ? { cold_run_reason: coldRunReason } : {}),
         });
       } catch (e) {
+        // ANY failure to land the start header stops the run before the first chair. A refusal
+        // (any 4xx: the drain service answers the terminal guard as 400 {error} with no code, a lost
+        // lease as 403) means the gig is not this worker's to run. A transient failure has already
+        // been retried under E2's policy (drainServicePost), and a run whose identity never reached
+        // the store is a run nobody can resume — so it is given back, not run blind.
         const why = e instanceof Error ? e.message : String(e);
-        if (e instanceof DrainWriteError && isNotOursRefusal(e)) {
-          const error = `the store refused this gig's 'running' header, so it is not this worker's to run — ${why}`;
+        // The one exception: a drain CONFIGURED so that nothing reaches the service (a key with no
+        // COLTRANE_DRAIN_URL) sent no request and got no answer. That is the operator's to fix, and it
+        // is said loudly; the run proceeds as a box with no reachable store did before this header
+        // existed, and its unacknowledged terminal state is reported (acknowledged:false).
+        if (e instanceof DrainConfigError) {
+          console.error(`[drain] gig ${claim.gig_id}: the 'running' header could not be sent — the drain is misconfigured: ${why}`);
+        } else {
+          const refusedOutright = e instanceof DrainWriteError && (e.refused || isNotOursRefusal(e));
+          const error = refusedOutright
+            ? `the store refused this gig's 'running' header, so it is not this worker's to run — ${why}`
+            : `the store never acknowledged this gig's 'running' header, so it is given back before any chair runs — ${why}`;
           log(`gig ${claim.gig_id} abandoned: ${error}`);
+          console.error(`[drain] gig ${claim.gig_id}: ${error}`);
+          // Not a refusal: nothing has been spent, so the row goes back to the queue (non-terminal).
+          if (!refusedOutright && leaseCred) {
+            const rel = await releaseLease(claim.gig_id, error, false, leaseCred);
+            if (!rel.ok) log(`the release of ${claim.gig_id} was not recorded either (${rel.detail}) — the row is held until its lease lapses`);
+          }
           return { claimed: true, gig_id: claim.gig_id, status: "abandoned", error, acknowledged: false };
         }
-        console.error(`[drain] the 'running' header for gig ${claim.gig_id} was not acknowledged (running anyway; a re-claim will have no genome_hash to resume against): ${why}`);
       }
     }
 

@@ -143,6 +143,19 @@ export interface ResideOptions {
   now?: () => number;
 }
 
+/** What the DRIVE takes. Every member is a seam a law can hold: the engine owns the loop's shape —
+ *  arm a heartbeat, hand the seat back on a signal — and the deployment owns the cadence, the timer
+ *  and where a signal comes from. A wall clock and `process.on` are the defaults, never the
+ *  contract, so these laws run identically on any machine and touch no global. */
+export interface DriveOptions {
+  /** Cadence for the lease renewal. The lease is the store's; how often to prove life is the box's. */
+  heartbeat_ms?: number;
+  /** The timer seam. Defaults to setInterval/clearInterval when a deployment supplies none. */
+  timer?: { set(fn: () => void, ms: number): unknown; clear(h: unknown): void };
+  /** Signal registration. Defaults to process.on for SIGTERM and SIGINT. */
+  onSignal?: (fn: (s: "SIGTERM" | "SIGINT") => void) => void;
+}
+
 export type ResideResult<T = Record<string, unknown>> =
   | ({ ok: true } & T)
   | { ok: false; refusal: ResideRefusal; seam?: string; message: string; law_ref?: string };
@@ -181,6 +194,10 @@ export interface ResideModule {
   fileSeatSeed(root: string, seed: SeatSeed): Promise<string>;
   storeRefusalName(message: string): string | null;
   runReside(argv: readonly string[], io: unknown): Promise<number>;
+  /** THE DRIVE — the loop that makes the moves. Boots, subscribes, pumps the channel, wakes on
+   *  inbox growth, arms a heartbeat, and hands the seat back on a signal. Every move it makes is
+   *  law-covered on its own; this is the caller none of those laws could see. */
+  driveResidency(r: Residency, deps: ResideDeps, opts?: DriveOptions): Promise<number>;
   /** The SAME symbol as workOnce — reside does not fork the gig path (I12, one level out). */
   resideGigPath: unknown;
 }

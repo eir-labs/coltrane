@@ -133,6 +133,9 @@ export interface ClaimedGig {
    * Null/absent on an ordinary claim.
    */
   resumes?: string | null;
+  /** The run's ceiling in integer micro-dollars (coltrane_gigs.budget_micro_usd, coltrane-ui #253).
+   *  Absent/null = no ceiling from the claim. It becomes the run's budget (drainBudget). */
+  budget_micro_usd?: number | null;
 }
 
 /**
@@ -357,6 +360,24 @@ async function releaseRefusedClaim(ctx: WorkerContext, gig_id: string, reason: s
   return rel.ok
     ? "released it back to the queue"
     : `the release was not recorded either (${rel.detail}) — the row is held until its lease lapses`;
+}
+
+/** How long a resume-state READ (a gig's status or outputs) may take before it counts as unanswered. */
+export const RESUME_READ_TIMEOUT_MS = 10_000;
+
+/** workerRpc, BOUNDED: a store that never answers rejects after `ms` instead of hanging the worker. */
+async function boundedWorkerRpc(ctx: WorkerContext, fn: string, body: Record<string, unknown>, ms = RESUME_READ_TIMEOUT_MS): Promise<unknown> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      workerRpc(ctx, fn, body),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`${fn}: the store did not answer within ${ms} ms`)), ms);
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
 }
 
 async function workerRpc(ctx: WorkerContext, fn: string, body: Record<string, unknown>): Promise<unknown> {
@@ -637,7 +658,7 @@ export async function fetchDrainedOutputs(
 ): Promise<{ rows: DrainedOutput[]; error?: string }> {
   let out: unknown;
   try {
-    out = await workerRpc(ctx, "coltrane_mcp_gig_outputs", { p_bearer: ctx.agentToken, p_gig: gig_id });
+    out = await boundedWorkerRpc(ctx, "coltrane_mcp_gig_outputs", { p_bearer: ctx.agentToken, p_gig: gig_id });
   } catch (e) {
     // Every failure here is the same kind of event: resume state could not be read. The queue
     // row is still runnable work, so this never fails the claim — it costs a cold run, which is
@@ -670,7 +691,7 @@ export async function fetchDrainedGenomeHash(
 ): Promise<{ genome_hash?: string; error?: string }> {
   let out: unknown;
   try {
-    out = await workerRpc(ctx, "coltrane_mcp_gig_status", { p_bearer: ctx.agentToken, p_gig: gig_id });
+    out = await boundedWorkerRpc(ctx, "coltrane_mcp_gig_status", { p_bearer: ctx.agentToken, p_gig: gig_id });
   } catch (e) {
     return { error: e instanceof Error ? e.message : String(e) };
   }
@@ -969,13 +990,18 @@ async function rebuildFromDrain(
   outputs: OutputStore,
   /** The gig whose seals to rebuild from: the claim's own, or the closed gig it `resumes`. */
   source: string = claim.gig_id,
-): Promise<DrainResumeState | { ok: false; reason: string; nothing: true }> {
+): Promise<DrainResumeState | { ok: false; reason: string; nothing: true } | { ok: false; reason: string; unreadable: true }> {
   const drained = await fetchDrainedOutputs(ctx, source);
-  if (drained.error !== undefined) return { ok: false, reason: `the sink's outputs could not be read — ${drained.error}` };
+  if (drained.error !== undefined) return { ok: false, reason: `the sink's outputs could not be read — ${drained.error}`, unreadable: true };
   if (drained.rows.length === 0) return { ok: false, reason: "the sink holds no sealed outputs for this gig", nothing: true };
 
   const header = await fetchDrainedGenomeHash(ctx, source);
   const current = genomeHash(standard);
+  if (header.error !== undefined) {
+    // The status could not be READ (refused, errored, unanswered) — a different fact from a header
+    // that carries no genome_hash. A caller that must not run cold (a `resumes` claim) refuses on it.
+    return { ok: false, reason: `the sink's status for gig ${source} could not be read — ${header.error}`, unreadable: true };
+  }
   if (header.genome_hash === undefined) {
     // A miss is free; a wrong hit is not. An identity that cannot be checked resolves to doing
     // the work — the same asymmetry every other substitution gate in this engine resolves on.
@@ -1226,6 +1252,20 @@ export async function workOnce(ctx: WorkerContext, deps: WorkOnceDeps): Promise<
     }
     if (!checkpoint) {
       let rebuilt = await rebuildFromDrain(ctx, claim, standard, outputs, resumes ?? claim.gig_id);
+      // A `resumes` claim whose CLOSED gig cannot be read (its status or outputs refused, errored or
+      // unanswered) is REFUSED, never run cold: a cold run re-pays for every chair the closed gig
+      // already sealed. Nothing has been spent, so the row goes back non-terminally (the attempt
+      // refunds) for a box — or a store — that can read it.
+      if (resumes !== undefined && !rebuilt.ok && "unreadable" in rebuilt) {
+        const error = `cannot resume closed gig ${resumes}: its seals could not be read, and a resume is never run cold — ${rebuilt.reason}`;
+        log(`gig ${claim.gig_id} refused: ${error}`);
+        console.error(`[drain] gig ${claim.gig_id}: ${error}`);
+        if (leaseCred) {
+          const rel = await releaseLease(claim.gig_id, error, false, leaseCred);
+          if (!rel.ok) log(`the release of ${claim.gig_id} was not recorded either (${rel.detail}) — the row is held until its lease lapses`);
+        }
+        return { claimed: true, gig_id: claim.gig_id, status: "abandoned", error, acknowledged: false };
+      }
       // A RESUMING gig re-claimed on a fresh box has TWO sets of seals: the closed gig's (taken by
       // reference) and its OWN, sealed and drained under its id before its box was lost. Rebuilding
       // from the closed gig alone would pay again for every chair this gig already sealed. So its own
@@ -1384,7 +1424,7 @@ export async function workOnce(ctx: WorkerContext, deps: WorkOnceDeps): Promise<
         // HAS no local dirs, instead of leaving a reader to infer whether the wire was considered.
         skill_dirs: new Map<string, string>(),
         evals: genome.evals,
-        budget: drainBudget(claim.input),
+        budget: drainBudget(claim.input, claim.budget_micro_usd),
         toolProviders: engineToolProviders(),
         mcpServerConfigs: {},
         // The venue trio and the repository, passed UNCONDITIONALLY at the top level. assembleRunDeps

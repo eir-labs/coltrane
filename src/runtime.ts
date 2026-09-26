@@ -748,6 +748,19 @@ export interface RunDeps {
 export interface BudgetInput {
   /** The per-gig ceiling, in US dollars. Absent → no dollar enforcement. */
   max_usd?: number;
+  /**
+   * The same ceiling as INTEGER micro-dollars (1 USD = 1_000_000), when that is how it arrived (the
+   * store's budget_micro_usd, #555). When present, the batch-boundary gate compares in integers: the
+   * ceiling is never converted, and settled spend (float USD as the invokers report it) is converted
+   * ONCE, at the gate, rounded to the nearest micro-dollar (settledMicroUsd). `max_usd` then only
+   * reports the ceiling in dollars.
+   */
+  max_micro_usd?: number;
+}
+
+/** Settled spend in integer micro-dollars: the ONE float → integer boundary, rounded to nearest. */
+export function settledMicroUsd(spentUsd: number): number {
+  return Math.round(spentUsd * 1_000_000);
 }
 
 /**
@@ -2502,7 +2515,11 @@ export async function runGig(
           budget.depleted_at = new Date().toISOString();
           throw new BudgetUnverifiable([...unverifiedChairs], budget);
         }
-        if ((budget.spent_usd ?? 0) >= (maxUsd as number)) {
+        const maxMicro = deps.budget?.max_micro_usd;
+        const reached = typeof maxMicro === "number"
+          ? settledMicroUsd(budget.spent_usd ?? 0) >= maxMicro
+          : (budget.spent_usd ?? 0) >= (maxUsd as number);
+        if (reached) {
           budget.agent_state = "depleted";
           budget.depleted_agent = ready[0]?.agent_slug ?? null;
           budget.depleted_at = new Date().toISOString();

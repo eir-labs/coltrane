@@ -8,7 +8,7 @@
 // assembly through the seams the existing suite already observes them by:
 //   · Claude: the injected `run` seam, which receives the exact argv the CLI would be spawned with
 //     (same instrument as tests/spec_scoped_deny_beside_scoped_grant.test.ts).
-//   · Completions: its typed refusal, which names the grants it refused, before any network call
+//   · Completions: the model request's `tools` and its typed refusals, before any network call
 //     (same instrument as tests/spec_completions_invoker.test.ts LAW 2).
 // The layout reaches the invocation as ctx.layout (threaded by runGig from RunDeps.layout); the
 // change-request's target_paths reach it where the payload already does — ctx.gig_input.target_paths.
@@ -19,8 +19,11 @@
 //   Claude: no role token reaches either flag (venue)     behavioural  same (the venueExcluded / disallow computation)  compute venueExcluded from agent.allowed_tools
 //                                                                                                                     (raw tokens) instead of the expanded grants
 //   Claude: a missing role refuses before the spawn       behavioural  same                                             ignore resolveSeatGrants().refusals in the invoker
-//   Completions: the refusal names the resolved grants    behavioural  makeCompletionsInvoker(...) — src/completions_  check host builtins over ctx.agent.allowed_tools
-//                                                                      invoker.ts                                       instead of the resolved grants
+//   Completions: a Write narrowed away is not offered     behavioural  makeCompletionsInvoker(...) — src/completions_  compute chairGrants from ctx.agent.allowed_tools
+//                                                                      invoker.ts                                       instead of resolveSeatGrants(...).grants
+//   Completions: a scoped Write/Edit refuses (expanded)   behavioural  same                                             drop the scoped-write refusal (let mapGrant strip
+//                                                                                                                     the scope and offer bare Write)
+//   Completions: a scoped Write/Edit refuses (literal)    behavioural  same                                             same
 //   Completions: a missing role refuses, no model call    behavioural  same                                             ignore resolveSeatGrants().refusals in the invoker
 import { describe, it, expect } from "vitest";
 import { makeClaudeInvoker, createRegistry, type Agent } from "../src/index.js";
@@ -105,16 +108,18 @@ describe("the Claude invoker grants through resolveSeatGrants", () => {
   });
 });
 
-describe("the completions invoker grants through resolveSeatGrants", () => {
+describe("the completions invoker grants through resolveSeatGrants — and fails closed on a scoped write", () => {
   // The completions invoker offers the model `listed ∩ allow`, where allow is its chair grants mapped to
-  // tool names (mapGrant keeps only a grant's BASE: `Write(src/a.ts)` offers `Write`). So what resolution
-  // changes on this invoker is WHETHER a tool is offered at all: a Write whose every glob misses the
-  // change's target_paths is no grant, and must not be offered. The source here lists every tool the
-  // agent could name, so nothing is refused for being unprovided — the only thing that can remove Write
-  // from the offer is the resolver.
+  // tool names — and mapGrant keeps only a grant's BASE: `Write(src/a.ts)` would be offered as `Write`,
+  // the whole tree. The scope cannot survive this invoker, so (the founder's ruling) a chair whose
+  // EFFECTIVE grants hold any path-scoped Write/Edit, literal or expanded, is refused before any model
+  // call, naming the grant. A bare unscoped Write is untouched here (it is refused as a host builtin, as
+  // today). A chair whose scoped writes all resolve away runs, and is not offered Write.
+  // The source lists every tool the agent could name, so nothing is refused for being unprovided.
   const TOOL_DEFS = [
     { name: "mcp__s__read", inputSchema: { type: "object" } },
     { name: "mcp__coltrane__Write", inputSchema: { type: "object" } },
+    { name: "mcp__coltrane__Edit", inputSchema: { type: "object" } },
   ];
   const registry = createRegistry();
   registry.registerType({ slug: "built-thing", extends: "Artifact", domain: "demo", schema: { properties: {} }, required_fields: [] } as never);
@@ -127,22 +132,39 @@ describe("the completions invoker grants through resolveSeatGrants", () => {
     testAgent({ slug: "reader", primitives: ["CREATE"], input_types: [], output_types: ["built-thing"], domain: "demo", model_tier: "economy", allowed_tools } as never);
   const offered = (calls: { body: Record<string, unknown> }[]): string => JSON.stringify(calls[0]?.body["tools"] ?? []);
 
-  it("control — a target the source glob covers: Write is offered", async () => {
+  it("control — a chair holding no scoped write still runs under a layout and target_paths, offered its MCP tools", async () => {
     const C = await loadCompletions();
     const { fn, calls } = fakeCompletions([saysJson({})]);
-    await C.makeCompletionsInvoker(opts(fn))(ctx(reader(["mcp__s__read", "Write(@source)"]), { gig_input: { target_paths: ["src/a.ts"] } }));
-    expect(calls.length, "the chair made no model call").toBeGreaterThan(0);
-    expect(offered(calls)).toMatch(/Write/);
+    const res = (await C.makeCompletionsInvoker(opts(fn))(ctx(reader(["mcp__s__read"])))) as Record<string, unknown>;
+    expect(calls.length, `a chair with no scoped write was refused: ${JSON.stringify(res)}`).toBeGreaterThan(0);
     expect(offered(calls)).toMatch(/read/);
   });
 
-  it("a target_paths set the source glob never covers: Write(@source) resolves to nothing, and the model is NOT offered Write", async () => {
+  it("a target_paths set the source glob never covers: Write(@source) resolves to nothing — the chair runs, and is NOT offered Write", async () => {
     const C = await loadCompletions();
     const { fn, calls } = fakeCompletions([saysJson({})]);
     const res = (await C.makeCompletionsInvoker(opts(fn))(ctx(reader(["mcp__s__read", "Write(@source)"]), { gig_input: { target_paths: ["docs/x.md"] } }))) as Record<string, unknown>;
     expect(calls.length, `the chair made no model call: ${JSON.stringify(res)}`).toBeGreaterThan(0);
     expect(offered(calls), "the completions invoker offered the model a Write the change's target_paths never reached").not.toMatch(/Write/);
     expect(offered(calls), "non-vacuity: the MCP read tool is still offered").toMatch(/read/);
+  });
+
+  it("an EXPANDED scoped write (Write(@source) → Write(src/a.ts)) refuses the chair naming the grant, before any model call", async () => {
+    const C = await loadCompletions();
+    const { fn, calls } = fakeCompletions([saysJson({})]);
+    const res = (await C.makeCompletionsInvoker(opts(fn))(ctx(reader(["mcp__s__read", "Write(@source)"]), { gig_input: { target_paths: ["src/a.ts"] } }))) as Record<string, unknown>;
+    expect(calls, "a scoped write reached the model as a bare, tree-wide Write").toHaveLength(0);
+    expect(res["ok"]).toBe(false);
+    expect(String(res["message"]), "the refusal does not name the effective scoped grant").toContain("Write(src/a.ts)");
+  });
+
+  it("a LITERAL scoped write (Edit(src/**)) refuses the chair naming the grant, before any model call", async () => {
+    const C = await loadCompletions();
+    const { fn, calls } = fakeCompletions([saysJson({})]);
+    const res = (await C.makeCompletionsInvoker(opts(fn))(ctx(reader(["mcp__s__read", "Edit(src/**)"]), { layout: undefined, gig_input: { request_text: "x" } }))) as Record<string, unknown>;
+    expect(calls, "a literal scoped Edit reached the model as a bare, tree-wide Edit").toHaveLength(0);
+    expect(res["ok"]).toBe(false);
+    expect(String(res["message"]), "the refusal does not name the scoped grant").toContain("Edit(src/**)");
   });
 
   it("a role the layout does not declare is refused naming it, before any model call", async () => {

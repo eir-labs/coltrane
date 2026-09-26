@@ -54,6 +54,7 @@ import { institutionPlacementResolver } from "./placement_institutions.js";
 import type { PlacementResolver } from "./placement.js";
 import { isDepth, DEPTHS, type Depth } from "./pricing.js";
 import type { ToolProvider } from "./tool_providers.js";
+import { withEngineServerAt } from "./run_genome_engine.js";
 import { ENGINE_MCP_SERVER, isHostBuiltin, toolBaseName, mcpServerOf, toolSlugOf } from "./tool_providers.js";
 import type { ToolHook, ToolCallContext, PreOutcome } from "./hooks.js";
 import {
@@ -4250,7 +4251,10 @@ export function bootstrapServerDeps(genomeRoot?: string): ServerDeps {
     (gigLedgerOverride && gigLedgerOverride.length > 0 ? dirname(gigLedgerOverride) : process.cwd());
   const genome = resolveGenome(root); // manifest-aware: honors a consumer's `extends` base
   const registry = loadRegistry(genome);
-  const mcpServerConfigs = readMcpServerConfigs(root);
+  // The seat's engine child must judge by THIS door's genome, from wherever claude runs: the declared
+  // entry (relative, resolved against the seat's cwd, loading COLTRANE_GENOME ?? cwd) is re-pinned to
+  // an absolute entry with COLTRANE_GENOME = root — the same mechanism the drain uses.
+  const mcpServerConfigs = withEngineServerAt(readMcpServerConfigs(root), root, ENGINE_MCP_SERVER);
   // #185 — the genome→provider bridge the resolver needs to be reachable in production. Each
   // registered engine tool slug (the coltrane MCP surface + anything tool_register added) becomes an
   // in_house provider, so an agent that grants a real engine tool resolves instead of failing closed.

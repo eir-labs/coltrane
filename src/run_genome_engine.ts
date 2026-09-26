@@ -118,16 +118,37 @@ export function materializeRunGenome(registry: Registry): string {
 }
 
 /**
- * The engine MCP server config for a seat that seals against `registry`: the compiled entry, run
- * directly (no hot-reload relay — a seat's child lives one turn), with COLTRANE_GENOME pointed at the
- * run registry's materialized root. Undefined when there is no build (see engineServerEntry).
+ * THE ONE ENGINE-CHILD CONFIG BOTH DOORS HAND A CLAUDE SEAT. The compiled entry by ABSOLUTE path (so it
+ * starts whatever the `claude` CLI's cwd is — a relative `dist/src/server_entry.js` resolves against
+ * the seat's cwd, which is a clone or a worktree, not the engine), run directly (no hot-reload relay —
+ * a seat's child lives one turn), with COLTRANE_GENOME pinned to the genome root the RUN seals against
+ * (never left to fall back to the cwd's genome). `extraEnv` carries a deployment's own additions; the
+ * two pins win over it. Undefined when there is no build (see engineServerEntry).
  */
-export function engineServerForRegistry(registry: Registry): Record<string, unknown> | undefined {
+export function engineServerAt(genomeRoot: string, extraEnv: Record<string, unknown> = {}): Record<string, unknown> | undefined {
   const entry = engineServerEntry();
   if (!entry) return undefined;
   return {
     command: process.execPath,
     args: [entry],
-    env: { COLTRANE_GENOME: materializeRunGenome(registry), COLTRANE_SERVER_DIRECT: "1" },
+    env: { ...extraEnv, COLTRANE_GENOME: resolve(genomeRoot), COLTRANE_SERVER_DIRECT: "1" },
   };
+}
+
+/** The drain's door: the run registry has no genome root of its own (it is the org store's), so it is
+ *  materialized as one first and proved to reload identically. */
+export function engineServerForRegistry(registry: Registry): Record<string, unknown> | undefined {
+  if (!engineServerEntry()) return undefined;
+  return engineServerAt(materializeRunGenome(registry));
+}
+
+/** The server door's: the engine entry of the deployment's server map (.mcp.json) re-pinned to the
+ *  door's own bootstrap genome root. Any other server, and the declared entry's own env, pass through. */
+export function withEngineServerAt(configs: Record<string, unknown>, genomeRoot: string, engineSlug: string): Record<string, unknown> {
+  const declared = configs[engineSlug];
+  const declaredEnv = declared && typeof declared === "object" && (declared as { env?: unknown }).env && typeof (declared as { env?: unknown }).env === "object"
+    ? ((declared as { env: Record<string, unknown> }).env)
+    : {};
+  const pinned = engineServerAt(genomeRoot, declaredEnv);
+  return pinned ? { ...configs, [engineSlug]: pinned } : configs;
 }

@@ -14,7 +14,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import type { Registry } from "./registry.js";
 import { CORE_TYPES, type CoreType } from "./core_types.js";
-import { validateOutput } from "./output_validation.js";
+import { validateOutput, CORE_SUBSTANCE } from "./output_validation.js";
 import { outputContentHash } from "./canonical_form.js";
 import { typeShapeFingerprint } from "./reuse.js";
 import type { OutputMirror } from "./output_mirror.js";
@@ -625,11 +625,47 @@ export function createOutputStore(registry: Registry, options?: OutputStoreOptio
   }
 
   /**
+   * NULL ON AN OPTIONAL FIELD IS ABSENCE. A model says "I have no value" as `null` far more often
+   * than by leaving the key out; for a property the type declares but does not require, the two mean
+   * the same thing — so the one predicate both gates share treats them the same, by REMOVING the key
+   * (never by validating around it: a sealed record still carrying `null` against a string schema,
+   * or hashing differently from its omitted form, would lie about its own shape).
+   *
+   * Deliberately narrow — each exclusion is a place where stripping would change the ANSWER, not
+   * just the spelling:
+   *   · top-level only: a null inside an array member is data the member is judged on;
+   *   · declared properties only: an undeclared key sent as null is a wrong key, and the closed
+   *     schema's refusal is what tells the chair so;
+   *   · never a required field, nor the core's substance floor: stripping those turns "you sent
+   *     null" into "you omitted it", a refusal that names the wrong mistake;
+   *   · only where a domain schema applies: a bare core / freeform record declares nothing optional.
+   * Returns the caller's object untouched when nothing is stripped, and a COPY when something is —
+   * the caller's payload is never mutated.
+   */
+  function withoutOptionalNulls(o: { core_type: string; domain_type: string; data: Record<string, unknown> }): Record<string, unknown> {
+    const schema = o.domain_type ? registry.effectiveSchema(o.domain_type) : undefined;
+    if (!schema || !o.data || typeof o.data !== "object") return o.data;
+    const declared = (schema["properties"] ?? {}) as Record<string, unknown>;
+    const required = new Set<string>(Array.isArray(schema["required"]) ? (schema["required"] as string[]) : []);
+    for (const core of [o.core_type, resolveCoreType(o.domain_type)]) {
+      const floor = core ? CORE_SUBSTANCE[core as CoreType]?.field : undefined;
+      if (floor) required.add(floor);
+    }
+    let out: Record<string, unknown> | undefined;
+    for (const [k, v] of Object.entries(o.data)) {
+      if (v !== null || required.has(k) || !Object.prototype.hasOwnProperty.call(declared, k)) continue;
+      out ??= { ...o.data };
+      delete out[k];
+    }
+    return out ?? o.data;
+  }
+
+  /**
    * The one owner of "would a seal accept this". `write` calls it for effect;
    * `validateWrite` exposes it as a question. Returns the full rejection message so the two
    * paths cannot diverge in what they tell an operator, only in whether they throw.
    */
-  function checkWritable(o: {
+  function checkWritable(sent: {
     core_type: string;
     domain_type: string;
     data: Record<string, unknown>;
@@ -643,6 +679,9 @@ export function createOutputStore(registry: Registry, options?: OutputStoreOptio
     valid: boolean;
     reason?: string;
   } {
+    // Null on an optional field is absence — judged as the omitted form, which is also what write()
+    // hashes and seals (it strips before calling here, so this is a no-op on that path).
+    const o = { ...sent, data: withoutOptionalNulls(sent) };
     // #263 — the asserted core must agree with the registry's answer.
     //
     // #227/#228 made `core_type` load-bearing: it selects which substance floor is
@@ -844,7 +883,10 @@ export function createOutputStore(registry: Registry, options?: OutputStoreOptio
       // Every gate lives in checkWritable — one owner, so `validateWrite` (which the reuse
       // path uses to decide before it injects anything) cannot answer a different question
       // than the one this boundary actually asks.
-      const gate = checkWritable({ core_type: o.core_type, domain_type: o.domain_type, data: o.data, input_refs: o.input_refs });
+      // Null on an optional field is absence: strip it ONCE, before the gate, the hash and the row,
+      // so what was judged, what was hashed and what was sealed are the same object.
+      const data = withoutOptionalNulls(o);
+      const gate = checkWritable({ core_type: o.core_type, domain_type: o.domain_type, data, input_refs: o.input_refs });
       if (!gate.valid) throw new OutputStoreError(gate.reason ?? "output rejected");
       const domain_type_version = o.domain_type_version ?? 1;
       const rec: OutputRecord = {
@@ -858,7 +900,7 @@ export function createOutputStore(registry: Registry, options?: OutputStoreOptio
         from_role: o.from_role,
         phase: o.phase,
         primitive: o.primitive,
-        data: o.data,
+        data,
         content_sha: outputContentHash({
           core_type: o.core_type,
           domain_type: o.domain_type,
@@ -867,7 +909,7 @@ export function createOutputStore(registry: Registry, options?: OutputStoreOptio
           primitive: o.primitive,
           phase: o.phase,
           agent_slug: o.agent_slug,
-          data: o.data,
+          data,
         }),
         input_refs: o.input_refs ?? [],
         // Real predecessor hashes (#196): prefer caller-supplied, else resolve each input_ref's

@@ -170,7 +170,8 @@ function toWireMessage(m: TurnMessage): Record<string, unknown> {
  *  Cache WRITES (`prompt_tokens_details.cache_write_tokens`) are a third part of the same
  *  prompt: taken out of the uncached input and reported as their own class, so a price table charges
  *  them at the cache-write rate. That they are a SUBSET of prompt_tokens is what the provider's documented
- *  example implies (prompt_tokens 194 with 100 written); a recorded live response settles it. */
+ *  example implies (prompt_tokens 194 with 100 written); a recorded live response settles it. Reads plus
+ *  writes exceeding prompt_tokens contradicts that reading, and THROWS rather than being clamped. */
 function mapUsage(u: WireUsage | undefined): TurnUsage | undefined {
   if (!u) return undefined;
   const cached = typeof u.prompt_cache_hit_tokens === "number"
@@ -181,7 +182,20 @@ function mapUsage(u: WireUsage | undefined): TurnUsage | undefined {
   const written = u.prompt_tokens_details?.cache_write_tokens;
   const usage: TurnUsage = {};
   if (typeof u.prompt_cache_miss_tokens === "number") usage.input_tokens = u.prompt_cache_miss_tokens;
-  else if (typeof u.prompt_tokens === "number") usage.input_tokens = u.prompt_tokens - cached - (typeof written === "number" ? written : 0);
+  else if (typeof u.prompt_tokens === "number") {
+    const writes = typeof written === "number" ? written : 0;
+    // NEGATIVE-INPUT GUARD. Reads and writes are read as PARTS of prompt_tokens; if they exceed it,
+    // that reading is wrong for this provider and every number derived from it would be too. Refuse
+    // loudly (the loop types the throw as transport_failed) — never clamp to 0, never a negative input.
+    if (cached + writes > u.prompt_tokens) {
+      throw new Error(
+        `chat completions usage is inconsistent: cached_tokens (${cached}) + cache_write_tokens (${writes}) ` +
+          `exceed prompt_tokens (${u.prompt_tokens}) — cache reads and writes are read as parts of the prompt, ` +
+          `so the uncached input would be negative. Refusing rather than clamping.`,
+      );
+    }
+    usage.input_tokens = u.prompt_tokens - cached - writes;
+  }
   if (cached > 0) usage.cache_read_tokens = cached;
   // A reported write count is a class of its own, even when 0: it is priced at the cache-write rate,
   // never as uncached input.

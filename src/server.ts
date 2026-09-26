@@ -145,7 +145,36 @@ async function askStoreGigStatus(
  * read (postgrestQueueGig / rpcQueueGig, src/genome_store.ts) plus `resumes`, which the store hands
  * back on the claim. queueGig receives these and nothing else.
  */
-const HOSTED_DISPATCH_CONTRACT = new Set(["standard_slug", "mode", "input", "org_slug", "acting_for", "venue", "resumes"]);
+const HOSTED_DISPATCH_CONTRACT = new Set(["standard_slug", "mode", "input", "org_slug", "acting_for", "venue", "resumes", "budget_micro_usd"]);
+
+/**
+ * `budget.max_usd` (USD) → integer micro-dollars, EXACTLY. The number's own shortest decimal
+ * spelling is read digit by digit, never multiplied as a float (1.005 * 1e6 = 1004999.9999…). More
+ * than 6 decimal places, a negative, a non-finite value or a non-number is refused by name, never
+ * rounded; so is a result past Number.MAX_SAFE_INTEGER.
+ */
+export function usdToMicroUsd(maxUsd: unknown): { ok: true; micro: number } | { ok: false; why: string } {
+  if (typeof maxUsd !== "number") return { ok: false, why: `budget.max_usd must be a number of USD; got ${JSON.stringify(maxUsd)}` };
+  if (!Number.isFinite(maxUsd)) return { ok: false, why: `budget.max_usd must be finite; got ${String(maxUsd)}` };
+  if (maxUsd < 0) return { ok: false, why: `budget.max_usd must not be negative; got ${String(maxUsd)}` };
+  let digits = String(maxUsd);
+  const exp = /^(\d+)(?:\.(\d+))?e([+-]\d+)$/i.exec(digits);
+  if (exp) {
+    // Expand scientific notation into plain decimal digits, still without arithmetic.
+    const [, whole = "", frac = "", e = "0"] = exp;
+    const all = whole + frac;
+    const point = whole.length + Number(e);
+    digits = point <= 0 ? `0.${"0".repeat(-point)}${all}` : point >= all.length ? all + "0".repeat(point - all.length) : `${all.slice(0, point)}.${all.slice(point)}`;
+  }
+  const m = /^(\d+)(?:\.(\d+))?$/.exec(digits);
+  if (!m) return { ok: false, why: `budget.max_usd ${String(maxUsd)} is not a decimal amount` };
+  const whole = m[1] ?? "0";
+  const frac = (m[2] ?? "").replace(/0+$/, "");
+  if (frac.length > 6) return { ok: false, why: `budget.max_usd ${String(maxUsd)} has more than 6 decimal places — refused, never rounded` };
+  const micro = BigInt(whole) * 1_000_000n + BigInt(frac.padEnd(6, "0") || "0");
+  if (micro > BigInt(Number.MAX_SAFE_INTEGER)) return { ok: false, why: `budget.max_usd ${String(maxUsd)} is too large to carry as integer micro-dollars` };
+  return { ok: true, micro: Number(micro) };
+}
 
 /**
  * Shape a hosted gig_dispatch for the queue, or refuse it. NO SILENT DROP: every argument outside
@@ -163,11 +192,24 @@ async function hostedDispatchArgs(
   const forward: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(args)) {
     if (key === "resume_gig_id") continue;
+    if (key === "budget") {
+      // The host carries the ceiling as integer micro-dollars (budget_micro_usd), never the USD
+      // object: converted exactly here, or refused by name.
+      const b = value;
+      if (b === undefined || b === null) continue;
+      if (typeof b !== "object" || Array.isArray(b)) { refused.push("budget (must be {max_usd})"); continue; }
+      const extra = Object.keys(b).filter((k) => k !== "max_usd");
+      if (extra.length > 0) { refused.push(...extra.map((k) => `budget.${k}`)); continue; }
+      const conv = usdToMicroUsd((b as { max_usd?: unknown }).max_usd);
+      if (!conv.ok) { refused.push(`budget (${conv.why})`); continue; }
+      forward.budget_micro_usd = conv.micro;
+      continue;
+    }
     if (key === "wait") {
       if (value === true) refused.push("wait (hosted dispatch queues and never blocks; poll gig_monitor)");
       continue;
     }
-    if (HOSTED_DISPATCH_CONTRACT.has(key) && key !== "resumes") forward[key] = value;
+    if (HOSTED_DISPATCH_CONTRACT.has(key) && key !== "resumes" && key !== "budget_micro_usd") forward[key] = value;
     else refused.push(key);
   }
   if (refused.length > 0) {

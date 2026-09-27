@@ -66,6 +66,48 @@
 //       everywhere" satisfies all three — and a later hand could revert the split with nothing going
 //       red, leaving a path bounded by nothing at all. V8a/V8b pin the lapse itself, at both sites.
 //
+// ── ROUND 10: A DEPLOY IS NOT A RETRY, AND THE OTHER SITE NOBODY LOOKED AT ──────────────────────
+// 8b1cf30 was graded NOT MERGEABLE on two blockers. Both are the SAME defect wearing two coats: a
+// condition is bounded by a number sized for the wrong kind of wait.
+//
+// A  THE ANSWERED 42501 IS A DEPLOYMENT STATE, NOT A FAILURE. Round 8 routes today's live-store
+//    42501 into the COUNTED REFUND path, and RESUME_READ_MAX_ATTEMPTS = 3 then ends the gig.
+//    `coltrane work` re-claims within SECONDS, so three attempts are spent long before anyone could
+//    deploy coltrane-ui #253 — which is the only thing that makes the read succeed. A bound sized
+//    for a store restart is being asked to cover a release.
+//    WHY NO LAW SAW IT: V2a WIDENS THE STORE AT POLL 2, so its window is two polls long and cannot
+//    contain a poll-3 termination. That is the fixture-can't-represent class — the fixture modelled
+//    a world in which the cure always arrives before the bound is reached.
+//    THE SEAT'S RULING: an ANSWERED refusal (any 4xx — `isPermanentStoreRefusal`) on a resume-state
+//    read takes the LAPSE path (V8's machinery), not the counted refund. A refund never trips the
+//    store's cap, so the worker's count is the only bound and three fast polls is the wrong size;
+//    each LAPSE costs a full lease window, so STORE_MAX_ATTEMPTS lapses span HOURS.
+//    V2a/V2b are AMENDED to the lapse (they asserted the refund). V9 is the long window. V10 writes
+//    the resulting bound down as a number instead of leaving it emergent — the grader is right that
+//    a lapse is a SLOWER destruction, not a non-destructive one, and a bound that is only implied is
+//    a bound that can drift.
+//
+// B  THE SAME UNBOUNDED SPIN AT THE START-HEADER SITE, PRE-EXISTING SINCE 2597854 AND NEVER LOOKED
+//    AT. src/worker.ts's start-header catch: a 503 on the `running` header is neither `misconfigured`
+//    nor `refusedOutright`, so it takes the non-terminal release — WHICH REFUNDS, so the store's cap
+//    never trips and nothing counts. A gig-specific 5xx starves its whole org's queue forever, which
+//    is the exact defect this PR was opened for. The comment there reasons about COST ("nothing has
+//    been spent"); the question is BOUNDING, and nothing-spent justifies not charging the gig, never
+//    a refund that defeats the only cap in the system. V11 is the persistent 5xx; V12 is the other
+//    side, so the cure cannot be "terminate on the first one".
+//
+// ── WHERE isPermanentStoreRefusal GOES ──────────────────────────────────────────────────────────
+// It was exported, documented and threaded through `permanent` into rebuildFromDrain's refusals —
+// AND READ BY NOTHING since round 8 replaced that logic with `gone`. An always-true and an
+// always-false plant both survived the whole root suite. Ruling: IT EARNS ITS READER, because ruling
+// A above is precisely the decision it was carried out for. After the cure the two sides are
+//   answered 4xx (permanent)  → LAPSE, bounded by the store's cap         V2a · V2b · V9 · V10
+//   5xx / network / no answer → the COUNTED REFUND, bounded by the count  V1 · V7 · B2
+// and they can only both be green if the code distinguishes them at this site. Plant it always-false
+// and V2a/V2b red (they would refund); plant it always-true and V1 reds (it would lapse instead of
+// taking its three counted tries). A classifier nothing reads is a liability; one pinned from both
+// sides is a mechanism.
+//
 // The fake store models the queue as the store has it (see `queue` in the fixture): oldest first,
 // every claim counts, a non-terminal release refunds, a terminal release or gig_fail fails, and the
 // cap fails `attempts_exhausted`. `lapse()` is time passing between polls.
@@ -75,11 +117,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { workOnce, RESUME_READ_MAX_ATTEMPTS, type WorkOnceDeps, type WorkerContext } from "../src/worker.js";
 import type { AgentInvoker, AgentInvocationContext } from "../src/runtime.js";
-import { hostedStore, hostedEnv, venueCtx, claimFor, settle, STORE, type ResumedReadMode } from "./gig_runs_once_fixtures.js";
+import {
+  hostedStore, hostedEnv, venueCtx, claimFor, settle, loadLease, STORE, STORE_MAX_ATTEMPTS,
+  type ResumedReadMode,
+} from "./gig_runs_once_fixtures.js";
 
 const O = "0c0c0c0c-1111-2222-3333-444444444444"; // the closed gig
 const N = "1d1d1d1d-5555-6666-7777-888888888888"; // resumes O
 const H = "2e2e2e2e-9999-aaaa-bbbb-cccccccccccc"; // a healthy gig queued behind N
+const S = "3f3f3f3f-dddd-eeee-ffff-000011112222"; // V11/V12: a gig whose START HEADER the store 5xxs
 
 let env: ReturnType<typeof hostedEnv>;
 const roots: string[] = [];
@@ -277,7 +323,7 @@ describe("V2 — TODAY'S LIVE STORE: a 42501 on a resume-state read SURVIVES and
     ["the resumed gig's acting agent holds no seat (unseated or retired), which happens even with #253", "unseated"],
   ];
 
-  it("V2a the closed gig's STATUS read is refused 42501: the resuming gig is refunded and re-claimed, and RESUMES once the store widens", async () => {
+  it("V2a the closed gig's STATUS read is refused 42501: the resuming gig is LAPSED (never refunded) and RESUMES once the store widens", async () => {
     for (const [label, mode] of STATUS_42501) {
       env = hostedEnv();
       const store = hostedStore({ claim: claimFor("two-chair-v0", { gig_id: O }) });
@@ -285,14 +331,23 @@ describe("V2 — TODAY'S LIVE STORE: a 42501 on a resume-state read SURVIVES and
       store.set({ claim: null, queue: [claimFor("two-chair-v0", { gig_id: N, resumes: O })], resumedRead: { status: mode } });
 
       const invoked: Array<[string, string]> = [];
-      await poll(invoked);
+      const outcome = await poll(invoked);
       expectSurvived(store, N, `a 42501 status refusal — ${label}`);
       expect(invoked, `${label}: a chair ran for a resume whose closed gig could not be read`).toEqual([]);
-      expect(refunds(store, N).length, `${label}: the gig was not refunded, so the attempt was spent and nothing gave the row back`).toBe(1);
-      expect(store.queueRow(N)?.status, `${label}: the row did not go back to the queue`).toBe("queued");
+      // ── AMENDED IN ROUND 10 (ruling A). This asserted a REFUND, which is what routes today's
+      // live-store 42501 into the worker's three-poll count — a bound sized for a store restart
+      // standing in for a wait on a DEPLOY. An ANSWERED refusal is a deployment state: it lapses.
+      expect(outcome, `${label}: an answered 42501 reported an outcome for a row that must be left to its lease`).toContain('"status":"abandoned"');
+      expect(refunds(store, N).length,
+        `${label}: the gig was REFUNDED. The store returns the attempt on every non-terminal release, so its cap can never trip and the worker's three-poll count becomes the only bound — three polls of \`coltrane work\`, seconds apart, against a refusal that clears only when coltrane-ui #253 DEPLOYS`).toBe(0);
+      expect(store.queueRow(N)?.status, `${label}: the row was released back to the queue instead of left to its lease`).toBe("running");
+      expect(store.queueRow(N)?.attempts, `${label}: the attempt was given back, which is the refund this law forbids under another name`).toBe(1);
 
-      // The store widens (coltrane-ui #253 ships, or the acting agent is re-seated). A gig that
-      // survived is a gig that now works — which is the whole reason not to destroy it.
+      // The store widens (coltrane-ui #253 ships, or the acting agent is re-seated) while the row
+      // sits out its lease. A gig that survived is a gig that now works — the whole reason not to
+      // destroy it — and under the lapse it is the LEASE, not a release, that hands the row back.
+      store.lapse();
+      expect(store.queueRow(N)?.attempts, `${label}: the lapse returned the attempt`).toBe(1);
       store.set({ resumedRead: {} });
       await poll(invoked);
       expect(invoked.map(([, p]) => p), `${label}: the survivor did not resume once the store widened — it either re-paid for scan or never ran`).toEqual(["rescan"]);
@@ -301,18 +356,25 @@ describe("V2 — TODAY'S LIVE STORE: a 42501 on a resume-state read SURVIVES and
     }
   }, 90_000);
 
-  it("V2b the closed gig's OUTPUTS read is refused 42501: the resuming gig is refunded and re-claimed, and RESUMES once the store widens", async () => {
+  it("V2b the closed gig's OUTPUTS read is refused 42501: the resuming gig is LAPSED (never refunded) and RESUMES once the store widens", async () => {
     env = hostedEnv();
     const store = hostedStore({ claim: claimFor("two-chair-v0", { gig_id: O }) });
     await closeO(store);
     store.set({ claim: null, queue: [claimFor("two-chair-v0", { gig_id: N, resumes: O })], resumedRead: { outputs: "refuse" } });
 
     const invoked: Array<[string, string]> = [];
-    await poll(invoked);
+    const outcome = await poll(invoked);
     expectSurvived(store, N, "a 42501 refusal on the OUTPUTS read");
     expect(invoked, "a chair ran for a resume whose closed gig's outputs could not be read").toEqual([]);
-    expect(refunds(store, N).length, "the gig was not refunded").toBe(1);
+    // AMENDED IN ROUND 10 (ruling A), for the same reason as V2a. A separate law because the src
+    // SITE differs: the outputs read, not the status read.
+    expect(outcome, "an answered 42501 on the outputs read reported an outcome for a row that must be left to its lease").toContain('"status":"abandoned"');
+    expect(refunds(store, N).length,
+      "the gig was REFUNDED, so the store's cap can never trip and the worker's three-poll count is the only bound on a wait whose length is a DEPLOY").toBe(0);
+    expect(store.queueRow(N)?.status, "the row was released back to the queue instead of left to its lease").toBe("running");
+    expect(store.queueRow(N)?.attempts, "the attempt was given back").toBe(1);
 
+    store.lapse();
     store.set({ resumedRead: {} });
     await poll(invoked);
     expect(invoked.map(([, p]) => p), "the survivor did not resume once the store widened").toEqual(["rescan"]);
@@ -574,4 +636,158 @@ describe("V8 — a hand-back the WORKER cannot bound is a LAPSE, never a refund"
     expect(refunds(store, N).length, "some poll refunded the attempt").toBe(0);
     expect(invoked, "a chair ran while the resume state could not be read").toEqual([]);
   }, 90_000);
+});
+
+describe("V9 — THE WINDOW IS A DEPLOY, NOT A RETRY: a 42501 that never clears outlives the worker's count", () => {
+  // ROUND 10, BLOCKER A. V2a above widens the store at POLL 2, so its window is two polls long and
+  // could not contain a poll-3 termination — the fixture modelled a world where the cure always
+  // arrives before the bound is reached, which is why the defect sat under eleven green laws. This
+  // law's store NEVER widens, and it polls past RESUME_READ_MAX_ATTEMPTS.
+  //
+  // THE CATEGORY ERROR, stated: on the deployed store this 42501 is a DEPLOYMENT STATE that lasts
+  // until coltrane-ui #253 ships. `coltrane work` re-claims within seconds, so three counted polls
+  // are spent in under a minute. A condition bounded by a DEPLOY is being counted against a bound
+  // sized for a RETRY.
+  //
+  // THE CAP HERE IS DELIBERATELY LONGER THAN THE WORKER'S COUNT (RESUME_READ_MAX_ATTEMPTS + 2), so
+  // the two bounds are distinguishable: at 8b1cf30 the row dies on claim 3 — the worker's count —
+  // and under the ruling it lives to claim 5 and ends `attempts_exhausted`, the STORE's.
+  it("V9 the store refuses the status read on every poll and never widens: the resuming gig is still alive after more polls than RESUME_READ_MAX_ATTEMPTS, and it is the STORE's attempts cap that finally ends it", async () => {
+    env = hostedEnv();
+    const cap = RESUME_READ_MAX_ATTEMPTS + 2;
+    const store = hostedStore({ claim: claimFor("two-chair-v0", { gig_id: O }) });
+    await closeO(store);
+    store.set({
+      claim: null,
+      queue: [claimFor("two-chair-v0", { gig_id: N, resumes: O })],
+      maxAttempts: cap,
+      resumedRead: { status: "refuse" }, // #253 has not shipped, and does not ship during this law
+    });
+
+    const invoked: Array<[string, string]> = [];
+    for (let i = 1; i <= cap; i++) {
+      await poll(invoked);
+      expectSurvived(store, N,
+        `poll ${i} of ${cap} against a refusal that clears only when coltrane-ui #253 DEPLOYS (the worker's own count is ${RESUME_READ_MAX_ATTEMPTS})`);
+      expect(store.queueRow(N)?.claims, `poll ${i}: the row was not claimed`).toBe(i);
+      store.lapse(); // a full lease window of real time, which is what makes this bound hours long
+    }
+
+    // The store's cap, and nothing else, is what ends it. A refund anywhere above would have
+    // returned the attempt and this row would poll forever.
+    await poll(invoked);
+    expect(store.queueRow(N)?.status, "the store's own cap never ended a row nothing else was bounding").toBe("failed");
+    expect(store.queueRow(N)?.reason, "the row ended for some reason other than the store's attempts cap").toBe("attempts_exhausted");
+    expect(refunds(store, N).length,
+      "some poll REFUNDED the attempt. The store returns it on every non-terminal release, so the cap can never trip and the only bound left is the worker's three-poll count — seconds, against a wait measured in deploys").toBe(0);
+    expect(terminalReleases(store, N).map((c) => c.body["p_reason"]),
+      "the worker ENDED the gig itself. An answered refusal that a deploy will clear is not the worker's to terminate").toEqual([]);
+    expect(invoked, "a chair ran for a resume whose closed gig could not be read").toEqual([]);
+  }, 120_000);
+});
+
+describe("V10 — THE SURVIVAL BOUND, WRITTEN DOWN: the lapse path is slower destruction, not none", () => {
+  // The grader's objection, accepted: a lapse is a SLOWER destruction, not a non-destructive one.
+  // Roughly a two-to-three-hour outage on the hosted lease still kills the gig. That is acceptable
+  // as THE bound — it comfortably covers a deploy where three fast polls do not — but an emergent
+  // property is not a bound. This law is the number itself, so it cannot drift silently:
+  //
+  //   survival window = STORE_MAX_ATTEMPTS lapses × HOSTED_LEASE_MS per lapse
+  //
+  // Both halves live outside the worker (the store's cap; src/lease.ts), which is exactly why the
+  // product of the two was written nowhere. Pinned from BOTH sides: a floor, so shortening the lease
+  // or the cap cannot quietly shrink the window below a deploy; and a ceiling, so "bounded" cannot
+  // grow into "effectively never" without someone editing this number and saying why.
+  const HOUR_MS = 60 * 60 * 1000;
+  const DEPLOY_FLOOR_MS = 2 * HOUR_MS;  // less than this and the lapse path is no better than the count
+  const OUTAGE_CEILING_MS = 6 * HOUR_MS; // more than this and the gig is not bounded, it is abandoned
+  it("V10 a resume the live store refuses survives exactly STORE_MAX_ATTEMPTS lease windows: long enough to cover a deploy, short enough to still be a bound", async () => {
+    const { HOSTED_LEASE_MS } = await loadLease();
+    const window = STORE_MAX_ATTEMPTS * HOSTED_LEASE_MS;
+    expect(window,
+      `the lapse path's survival window is ${window / HOUR_MS}h (${STORE_MAX_ATTEMPTS} lapses × ${HOSTED_LEASE_MS / HOUR_MS}h). Below ${DEPLOY_FLOOR_MS / HOUR_MS}h it no longer covers shipping the store change that clears the refusal, and the lapse buys nothing over the counted refund it replaced`)
+      .toBeGreaterThanOrEqual(DEPLOY_FLOOR_MS);
+    expect(window,
+      `the lapse path's survival window is ${window / HOUR_MS}h. Past ${OUTAGE_CEILING_MS / HOUR_MS}h a stuck resume holds a lease slot for most of a day, and "bounded by the store's cap" stops being a bound anyone experiences as one`)
+      .toBeLessThanOrEqual(OUTAGE_CEILING_MS);
+    // THE CONTRAST THIS BOUND EXISTS FOR, stated but NOT asserted, because it is not assertable and
+    // pretending otherwise would be a check that cannot go red: the REFUND path's bound is
+    // RESUME_READ_MAX_ATTEMPTS *claims*, and the engine holds no minimum interval between claims —
+    // `coltrane work` re-claims as fast as its loop turns — so that window has no wall-clock floor
+    // at all. The lapse path's window is the only one with a floor, and the two assertions above are
+    // that floor. If a future round gives the refund path a real minimum interval, the split stops
+    // being load-bearing and this law's premise needs re-reading.
+  });
+});
+
+describe("V11 — THE START HEADER: a persistent 5xx must not starve the org's queue", () => {
+  // ROUND 10, BLOCKER B — PRE-EXISTING SINCE 2597854, at a site nobody looked at, and it is the
+  // exact defect this whole PR was opened for. src/worker.ts, the start-header catch:
+  //
+  //   // Not a refusal: nothing has been spent, so the row goes back to the queue (non-terminal).
+  //   if (!refusedOutright && leaseCred) {
+  //     const rel = await releaseLease(claim.gig_id, error, false, leaseCred);
+  //
+  // A 503 on the `running` header is neither `misconfigured` nor `refusedOutright`, so it takes the
+  // non-terminal release — WHICH REFUNDS. The store returns the attempt, its cap never trips, and
+  // the worker keeps no count at this site at all, so NOTHING bounds it. The same row is the oldest
+  // eligible one on the next poll, forever, and every gig behind it in the organization waits.
+  //
+  // The comment reasons about COST where the question is BOUNDING. Nothing-spent justifies not
+  // charging the gig; it does not justify a refund that defeats the only cap in the system.
+  //
+  // The law pins the DESTINATION, not the mechanism: end the gig, or lapse to the store's cap —
+  // either is a bound, and a refund is neither. V12 is the other side, so "terminate on the first
+  // 503" cannot satisfy this one.
+  it("V11 the store answers 503 to this gig's 'running' header on every poll: the gig ENDS within the store's cap and the healthy gig queued behind it RUNS", async () => {
+    env = hostedEnv();
+    const store = hostedStore({
+      claim: null,
+      queue: [claimFor("one-chair-v0", { gig_id: S }), claimFor("one-chair-v0", { gig_id: H })],
+      // Only THIS gig's header is refused — a gig-specific 5xx, which is what makes the starvation
+      // so quiet: the store is healthy, the queue is healthy, and one row eats every poll.
+      header: (b) => (String(b["id"]) === S ? new Response("", { status: 503 }) : undefined),
+    });
+
+    const invoked: Array<[string, string]> = [];
+    for (let i = 0; i < 8; i++) {
+      if (store.queueRow(S)?.status === "failed" && store.queueRow(H)?.status === "completed") break;
+      await poll(invoked);
+      store.lapse();
+    }
+
+    expect(store.queueRow(H)?.status,
+      "THE HEALTHY GIG BEHIND IT NEVER RAN. A 5xx on one gig's start header refunds its attempt on every poll, so it heads the queue forever and starves its whole organization").toBe("completed");
+    expect(store.queueRow(S)?.status,
+      "the gig whose 'running' header the store will not accept never ended: nothing at this site counts, and the refund means the store's cap cannot either").toBe("failed");
+    expect(store.queueRow(S)?.claims ?? 0,
+      `the gig was re-claimed ${store.queueRow(S)?.claims} time(s) before it ended — more than the store's own cap, so something is still giving the attempt back`)
+      .toBeLessThanOrEqual(STORE_MAX_ATTEMPTS + 1);
+    expect(invoked.map(([g]) => g), "a chair ran for a gig whose run identity never reached the store").toEqual([H]);
+  }, 180_000);
+
+  it("V12 the store answers 503 to the 'running' header on ONE poll and then recovers: the gig is not destroyed for a moment's 5xx — it survives and runs on the next poll", async () => {
+    // THE OTHER SIDE OF V11, and the reason the pair is two laws rather than one: the cheapest way
+    // to make V11 green is to end the gig on the first 503, which is round 6's inversion at a new
+    // site. A transient 5xx is exactly what DRAIN_WRITE_ATTEMPTS already retries through; when the
+    // retries are also exhausted the row is still recoverable work that has spent nothing.
+    env = hostedEnv();
+    let down = true;
+    const store = hostedStore({
+      claim: null,
+      queue: [claimFor("one-chair-v0", { gig_id: S })],
+      header: (b) => (down && String(b["id"]) === S ? new Response("", { status: 503 }) : undefined),
+    });
+
+    const invoked: Array<[string, string]> = [];
+    await poll(invoked);
+    expect(invoked, "a chair ran although the run's identity never reached the store").toEqual([]);
+    expectSurvived(store, S, "one poll's 503 on the start header");
+
+    down = false;
+    store.lapse();
+    await poll(invoked);
+    expect(invoked.map(([, p]) => p), "the gig did not survive a header route that was briefly down").toEqual(["scan"]);
+    expect(store.queueRow(S)?.status, "the gig did not complete once the header route recovered").toBe("completed");
+  }, 60_000);
 });

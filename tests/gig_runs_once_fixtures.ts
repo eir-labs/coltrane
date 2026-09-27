@@ -29,6 +29,17 @@ export const DRAIN_KEY = "cdk_venue_gig_runs_once";
 export const INSTANCE = "coltrane-drain-gig-runs-once";
 export const GIG_ID = "99999999-8888-7777-6666-555555555555";
 
+/**
+ * THE STORE'S OWN ATTEMPTS CAP on a queued row (eir-labs/coltrane-ui, coltrane_drain_claim +
+ * migration 20260926040000: a row whose `attempts` has reached `max_attempts` is failed
+ * `attempts_exhausted` and passed over).
+ *
+ * It lives here as a NAMED constant rather than as a `?? 3` buried in the queue model because it is
+ * one half of the LAPSE path's survival bound — the other half is HOSTED_LEASE_MS — and a bound
+ * computed from a literal nobody can find is a bound nobody can check. V10 reads it.
+ */
+export const STORE_MAX_ATTEMPTS = 3;
+
 /** The lease module the contract names. Loaded by a variable specifier (see header). */
 export const LEASE_MODULE = "../src/lease.js";
 export interface LeaseModule {
@@ -250,7 +261,7 @@ export function hostedStore(initial: HostedOpts): HostedStore {
   };
   const claimFromQueue = (): unknown => {
     syncQueue();
-    const max = opts.maxAttempts ?? 3;
+    const max = opts.maxAttempts ?? STORE_MAX_ATTEMPTS;
     for (const c of opts.queue ?? []) {
       const row = rows.get(String(c["gig_id"]))!;
       if (row.status !== "queued") continue;

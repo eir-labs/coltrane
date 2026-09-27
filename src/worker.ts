@@ -1464,14 +1464,34 @@ export async function workOnce(ctx: WorkerContext, deps: WorkOnceDeps): Promise<
         //             answer when the worker's count cannot be established or cannot be kept: it
         //             survives (R1) and is still bounded, by machinery that already exists.
         let handBack: "refund" | "lapse" = "refund";
-        let unbounded: string | undefined;
+        let lapseWhy: string | undefined;
         // A retry is bounded by a count the worker keeps on this gig's own header.
         let failures: number | undefined;
-        if (terminal === undefined) {
+        // ── A DEPLOY IS NOT A RETRY, AND THIS IS WHERE isPermanentStoreRefusal IS READ. ─────────
+        // `permanent` is the one fact that distinguishes the two waits, and the two waits want
+        // different bounds:
+        //   ANSWERED 4xx    the store UNDERSTOOD and DECLINED. Today that is the live 42501 on a
+        //                   resume-state read (coltrane-ui #250 as merged), and it clears when
+        //                   #253 DEPLOYS — nothing a worker does changes it. `coltrane work`
+        //                   re-claims within seconds, so RESUME_READ_MAX_ATTEMPTS counted refunds
+        //                   are spent in under a minute, and a refund never trips the store's cap,
+        //                   so the count would be the ONLY bound. A bound sized for a store
+        //                   restart cannot cover a release.
+        //   5xx / network / no answer    a failure a second poll can legitimately win. That is
+        //                   what the counted refund is for, and it keeps it (V1, V7, B2).
+        // So an answered refusal takes the LAPSE instead: no release, the lease runs out, the
+        // store re-queues WITHOUT refunding, and its own max_attempts bounds it — a window of
+        // STORE_MAX_ATTEMPTS full lease periods, which is hours rather than seconds (V10 pins the
+        // number from both sides). The lapse is still a bound; it is the right SIZE of bound.
+        const answeredRefusal = "unreadable" in rebuilt && rebuilt.permanent;
+        if (terminal === undefined && answeredRefusal) {
+          handBack = "lapse";
+          lapseWhy = "the store ANSWERED this refusal, so it lasts until the store itself changes and no count of fast polls can wait it out";
+        } else if (terminal === undefined) {
           const counted = await nextResumeReadFailureCount(ctx, claim.gig_id);
           if ("detail" in counted) {
             handBack = "lapse";
-            unbounded = counted.detail;
+            lapseWhy = `the worker's retry count cannot be kept (${counted.detail})`;
           } else if (counted.count >= RESUME_READ_MAX_ATTEMPTS) {
             terminal = `${error}. This is attempt ${counted.count} of ${RESUME_READ_MAX_ATTEMPTS} to read it, so the gig is ended here.`;
           } else {
@@ -1484,13 +1504,13 @@ export async function workOnce(ctx: WorkerContext, deps: WorkOnceDeps): Promise<
         // moves to the lease, where the store's cap can still see the attempts.
         if (terminal === undefined && failures !== undefined && !landed) {
           handBack = "lapse";
-          unbounded = "the retry count did not reach this gig's header";
+          lapseWhy = "the worker's retry count cannot be kept (the retry count did not reach this gig's header)";
         }
         const how = terminal !== undefined
           ? terminal
           : handBack === "refund"
           ? `${error}. Handed back to the queue (attempt ${failures} of ${RESUME_READ_MAX_ATTEMPTS}).`
-          : `${error}. The worker's retry count cannot be kept (${unbounded}), so the row is left to its lease: the store re-queues it without refunding the attempt and its own attempts cap bounds the retry.`;
+          : `${error}. ${lapseWhy}, so the row is left to its lease: the store re-queues it without refunding the attempt and its own attempts cap bounds the retry.`;
         log(`gig ${claim.gig_id} refused: ${how}`);
         console.error(`[drain] gig ${claim.gig_id}: ${how}`);
         if (terminal !== undefined) {
@@ -1638,11 +1658,22 @@ export async function workOnce(ctx: WorkerContext, deps: WorkOnceDeps): Promise<
           : `the store never acknowledged this gig's 'running' header, so it is given back before any chair runs — ${why}`;
         log(`gig ${claim.gig_id} abandoned: ${error}`);
         console.error(`[drain] gig ${claim.gig_id}: ${error}`);
-        // Not a refusal: nothing has been spent, so the row goes back to the queue (non-terminal).
-        if (!refusedOutright && leaseCred) {
-          const rel = await releaseLease(claim.gig_id, error, false, leaseCred);
-          if (!rel.ok) log(`the release of ${claim.gig_id} was not recorded either (${rel.detail}) — the row is held until its lease lapses`);
-        }
+        // ── THE ROW IS LEFT TO ITS LEASE. NO RELEASE, TERMINAL OR OTHERWISE. ───────────────────
+        // This line used to read "Not a refusal: nothing has been spent, so the row goes back to
+        // the queue (non-terminal)" — reasoning about COST where the question is BOUNDING.
+        // Nothing-spent justifies not CHARGING the gig; it does not justify a refund. The store
+        // RETURNS the attempt on every non-terminal release, and this site keeps no count of its
+        // own, so a gig-specific 5xx on the `running` header was bounded by NOTHING: the same row
+        // was the oldest eligible one on the next poll, forever, and every gig behind it in the
+        // organization waited (measured: 10 polls, 10 claims, 10 refunds, the healthy gig behind
+        // it never ran).
+        //
+        // A lapse is the hand-back that is still bounded. The row stays leased; when the lease
+        // runs out the store re-queues it WITHOUT refunding, and the store's own max_attempts
+        // ends it. So a moment's 5xx costs one lease window and the gig survives to run, while a
+        // 5xx that never clears ends within the store's cap and the queue moves on. Terminating
+        // here instead would be the round-6 inversion at a new site: destroying recoverable work
+        // that has spent nothing, on a failure a later poll can legitimately win.
         return { claimed: true, gig_id: claim.gig_id, status: "abandoned", error, acknowledged: false };
       }
     }

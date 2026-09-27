@@ -722,11 +722,16 @@ export async function fetchDrainedOutputs(
  * `RunIdentity.producers_sha` exists to close for a LOCAL checkpoint. A drain-reconstructed
  * resume is therefore a weaker gate than a local one by exactly that much, and the strongest
  * available check is the one applied: the sink's structural hash plus a per-row re-seal.
+ *
+ * `exists` IS A SEPARATE FACT FROM `genome_hash`, and conflating the two is what made a gig that
+ * merely got nothing done indistinguishable from a gig that is not there. A row with no usable hash
+ * answers `{exists: true}`; no row at all answers `{exists: false}`; a read that did not answer
+ * reports neither, because an unread store knows nothing about what exists.
  */
 export async function fetchDrainedGenomeHash(
   ctx: WorkerContext,
   gig_id: string,
-): Promise<{ genome_hash?: string; error?: string; permanent?: boolean }> {
+): Promise<{ genome_hash?: string; exists?: boolean; error?: string; permanent?: boolean }> {
   let out: unknown;
   try {
     out = await boundedWorkerRpc(ctx, "coltrane_mcp_gig_status", { p_bearer: ctx.agentToken, p_gig: gig_id });
@@ -735,11 +740,11 @@ export async function fetchDrainedGenomeHash(
   }
   // The RPC may answer with the header row or a single-row array; both are the same fact.
   const row = Array.isArray(out) ? out[0] : out;
-  if (!row || typeof row !== "object") return {};
+  if (!row || typeof row !== "object") return { exists: false };
   const gh = (row as Record<string, unknown>)["genome_hash"];
   // 64 hex or nothing: the header stores `null` for a run with no hash, and the ledger writes
   // "n/a" in places. Neither is a genome identity, and treating one as if it were is the bug.
-  return typeof gh === "string" && /^[0-9a-f]{64}$/.test(gh) ? { genome_hash: gh } : {};
+  return typeof gh === "string" && /^[0-9a-f]{64}$/.test(gh) ? { genome_hash: gh, exists: true } : { exists: true };
 }
 
 /** What a chair would seal, and under whose name — one entry per domain_type it promises. */
@@ -1028,16 +1033,33 @@ async function rebuildFromDrain(
   outputs: OutputStore,
   /** The gig whose seals to rebuild from: the claim's own, or the closed gig it `resumes`. */
   source: string = claim.gig_id,
+  /**
+   * ASK WHETHER THE SOURCE GIG STILL EXISTS when it holds no seals. Only a caller that would decide
+   * something on the answer pays for the read: "sealed nothing" and "is not there" are one shape to
+   * the outputs RPC and two entirely different facts to a `resumes` claim (R2), while a gig's FIRST
+   * run learns nothing from asking the sink whether it has heard of itself.
+   */
+  existenceMatters = false,
 ): Promise<
   | DrainResumeState
-  | { ok: false; reason: string; nothing: true }
+  | { ok: false; reason: string; nothing: true; exists?: boolean }
   | { ok: false; reason: string; unreadable: true; permanent: boolean }
 > {
   const drained = await fetchDrainedOutputs(ctx, source);
   if (drained.error !== undefined) {
     return { ok: false, reason: `the sink's outputs could not be read — ${drained.error}`, unreadable: true, permanent: drained.permanent === true };
   }
-  if (drained.rows.length === 0) return { ok: false, reason: "the sink holds no sealed outputs for this gig", nothing: true };
+  if (drained.rows.length === 0) {
+    const nothing = { ok: false as const, reason: "the sink holds no sealed outputs for this gig", nothing: true as const };
+    if (!existenceMatters) return nothing;
+    // The row itself is the fact now, not its hash: a status the store REFUSED or never answered is
+    // not evidence of absence, so it comes back as unreadable and is handed back, never ended.
+    const header = await fetchDrainedGenomeHash(ctx, source);
+    if (header.error !== undefined) {
+      return { ok: false, reason: `the sink's status for gig ${source} could not be read — ${header.error}`, unreadable: true, permanent: header.permanent === true };
+    }
+    return { ...nothing, exists: header.exists === true };
+  }
 
   const header = await fetchDrainedGenomeHash(ctx, source);
   const current = genomeHash(standard);
@@ -1405,37 +1427,51 @@ export async function workOnce(ctx: WorkerContext, deps: WorkOnceDeps): Promise<
       if (checkpoint) resumeFrom = resumes;
     }
     if (!checkpoint) {
-      let rebuilt = await rebuildFromDrain(ctx, claim, standard, outputs, resumes ?? claim.gig_id);
+      let rebuilt = await rebuildFromDrain(ctx, claim, standard, outputs, resumes ?? claim.gig_id, resumes !== undefined);
+      // ── R2: THE `nothing` BRANCH SPLITS ON WHETHER THE CLOSED GIG IS THERE AT ALL. ──────────────
+      // "The sink holds no seals for it" used to mean "end the gig", which ended a gig whose only
+      // offence was getting nothing done. A closed gig whose STATUS ROW IS PRESENT and whose output
+      // set is empty sealed no chairs, so there is nothing for a cold run to re-pay for: it runs
+      // cold, and falls through this branch entirely. Only an ABSENT row — no status, no outputs —
+      // is a gig that is not there to resume.
+      const gone = "nothing" in rebuilt && rebuilt.exists === false;
       // A `resumes` claim whose CLOSED gig cannot be read (its status or outputs refused, errored or
       // unanswered) is REFUSED, never run cold: a cold run re-pays for every chair the closed gig
-      // already sealed. Nothing has been spent, so the row goes back non-terminally (the attempt
-      // refunds) for a box — or a store — that can read it.
-      if (resumes !== undefined && !rebuilt.ok && ("unreadable" in rebuilt || "nothing" in rebuilt)) {
-        // WHICH FAILURE IS THIS?
-        //   PERMANENT — an answered 4xx (42501 for a token scoped elsewhere, 42501 again for an
-        //   acting agent who holds no seat), or a closed gig the sink holds NOTHING for. The next
-        //   poll gets the same answer, so there is nothing to wait for.
-        //   TRANSIENT — a 5xx, a network error, a store that never answered. A later poll may win,
-        //   but only a BOUNDED number of them: see countResumeReadFailure.
-        const permanent = "nothing" in rebuilt || rebuilt.permanent;
+      // already sealed. Nothing has been spent, so the row is handed back for a box — or a store —
+      // that can read it.
+      if (resumes !== undefined && !rebuilt.ok && ("unreadable" in rebuilt || gone)) {
+        // ── R1: FAIL CLOSED ONLY WHERE THE REFUSAL IS REVERSIBLE. ───────────────────────────────
+        // Round 6 (19a4812) classified ANY answered 4xx here as permanent and ended the gig on poll
+        // one. On the live store that is every resuming gig there is: coltrane-ui #250 as merged
+        // lets a gig token read the OUTPUTS of the gig its row resumes and REFUSES the STATUS read
+        // (403/42501), and the widening is #253, unshipped. Ending destroys the gig AND the money
+        // already spent on the closed gig's chairs, and no later poll undoes it; the spin it
+        // replaced is recoverable by definition. So a refusal that CANNOT be re-read — for any
+        // reason, 4xx or 5xx — hands the work back. The ONE thing ended here is a closed gig that
+        // is not there, because nothing a later poll learns can conjure it.
         const why = "nothing" in rebuilt
-          ? `the sink holds no sealed outputs for gig ${resumes}`
+          ? `the store holds no status row and no sealed outputs for gig ${resumes} — it is not there to resume`
           : rebuilt.reason;
         const error = `cannot resume closed gig ${resumes}: its seals could not be read, and a resume is never run cold — ${why}`;
-        // A permanent refusal TERMINATES the gig. Refunding it would put the same unrunnable row
-        // back at the head of the organization's oldest-first queue on every poll — it would be
-        // re-claimed, refused and refunded forever, the store's attempts cap would never trip, and
-        // every gig behind it would never run (review 5327331488, seen twice on a real store).
-        let terminal = permanent
+        let terminal = gone
           ? `${error}. This refusal will not change on a retry, so the gig is ended here.`
           : undefined;
-        // A transient one may be retried, but only a BOUNDED number of times, and the bound is a
-        // count the worker keeps on this gig's own header.
+        // HOW THE WORK IS HANDED BACK, and the difference is the whole bound:
+        //   "refund"  a non-terminal release — the store returns the attempt, so the WORKER's own
+        //             count (kept on this gig's header) is the only thing that can end the retry.
+        //   "lapse"   no release at all — the lease runs out, the store re-queues the row WITHOUT
+        //             refunding, and the store's own max_attempts does the bounding. This is the
+        //             answer when the worker's count cannot be established or cannot be kept: it
+        //             survives (R1) and is still bounded, by machinery that already exists.
+        let handBack: "refund" | "lapse" = "refund";
+        let unbounded: string | undefined;
+        // A retry is bounded by a count the worker keeps on this gig's own header.
         let failures: number | undefined;
         if (terminal === undefined) {
           const counted = await nextResumeReadFailureCount(ctx, claim.gig_id);
           if ("detail" in counted) {
-            terminal = `${error}. The retry could not be bounded (${counted.detail}), so the gig is ended here rather than left to re-claim forever.`;
+            handBack = "lapse";
+            unbounded = counted.detail;
           } else if (counted.count >= RESUME_READ_MAX_ATTEMPTS) {
             terminal = `${error}. This is attempt ${counted.count} of ${RESUME_READ_MAX_ATTEMPTS} to read it, so the gig is ended here.`;
           } else {
@@ -1443,18 +1479,27 @@ export async function workOnce(ctx: WorkerContext, deps: WorkOnceDeps): Promise<
           }
         }
         const landed = await drainRefusedResumeHeader(claim, standard, resumes, failures, log);
-        if (terminal === undefined && !landed) {
-          terminal = `${error}. The retry count did not reach this gig's header, so the retry cannot be bounded and the gig is ended here.`;
+        // A count that did not LAND is no count: the next poll reads the same prior and the row
+        // would refund from that number for as long as the store stays unwell. So the hand-back
+        // moves to the lease, where the store's cap can still see the attempts.
+        if (terminal === undefined && failures !== undefined && !landed) {
+          handBack = "lapse";
+          unbounded = "the retry count did not reach this gig's header";
         }
-        log(`gig ${claim.gig_id} refused: ${terminal ?? error}`);
-        console.error(`[drain] gig ${claim.gig_id}: ${terminal ?? error}`);
+        const how = terminal !== undefined
+          ? terminal
+          : handBack === "refund"
+          ? `${error}. Handed back to the queue (attempt ${failures} of ${RESUME_READ_MAX_ATTEMPTS}).`
+          : `${error}. The worker's retry count cannot be kept (${unbounded}), so the row is left to its lease: the store re-queues it without refunding the attempt and its own attempts cap bounds the retry.`;
+        log(`gig ${claim.gig_id} refused: ${how}`);
+        console.error(`[drain] gig ${claim.gig_id}: ${how}`);
         if (terminal !== undefined) {
           const ended = await endClaimedGig(ctx, claim.gig_id, terminal, leaseCred, log);
           return { claimed: true, gig_id: claim.gig_id, status: "failed", error: terminal, acknowledged: ended };
         }
-        // Transient and still inside the bound: nothing has been spent, so the row goes back
-        // non-terminally (the attempt refunds) for a box — or a store — that can read it.
-        if (leaseCred) {
+        // Inside the bound: nothing has been spent, so the row goes back non-terminally (the attempt
+        // refunds) for a box — or a store — that can read it.
+        if (handBack === "refund" && leaseCred) {
           const rel = await releaseLease(claim.gig_id, error, false, leaseCred);
           if (!rel.ok) log(`the release of ${claim.gig_id} was not recorded either (${rel.detail}) — the row is held until its lease lapses`);
         }

@@ -129,19 +129,62 @@ describe("a blob sha is computed in process, and equals the one git computes", (
     expect(() => blobShaOfFile(repo, "no-such-file.txt")).toThrow();
     expect(() => execFileSync("git", ["-C", repo, "hash-object", "--no-filters", "no-such-file.txt"], { stdio: "pipe" })).toThrow();
 
+    // THE HELPER'S OWN refusal, not an alternation. `/blob_sha_unhashable|EISDIR/` stood here and
+    // was satisfied either way: `openSync` on a directory SUCCEEDS on linux and darwin, and
+    // `readSync` on the resulting fd raises EISDIR by itself — so this law passed with the
+    // `!stat.isFile()` guard deleted, which a grade of this change measured. A directory must be
+    // refused by the guard, before any read. The non-regular file that has no EISDIR to hide
+    // behind is R3, in tests/blob_sha_refuses_rather_than_seals.test.ts.
     mkdirSync(join(repo, "a-directory"), { recursive: true });
-    expect(() => blobShaOfFile(repo, "a-directory")).toThrow(/blob_sha_unhashable|EISDIR/);
+    expect(() => blobShaOfFile(repo, "a-directory")).toThrow(/blob_sha_unhashable: .* is not a regular file/);
     expect(() => execFileSync("git", ["-C", repo, "hash-object", "--no-filters", "a-directory"], { stdio: "pipe" })).toThrow();
   });
 
-  it("B8 — for a repository with no attributes and no filters configured, this is ALSO bare `git hash-object`", () => {
+  it("B8 — for a SHA-1 repository with no attributes and no filters configured, this is ALSO bare `git hash-object`", () => {
     // THE BASIS FOR CALLING THIS A REFACTOR. `--no-filters` is what the arithmetic computes by
     // construction (B1). What makes the swap invisible to every caller is that on a plain
-    // repository — no .gitattributes, nothing configured — bare `git hash-object` returns the
-    // same string. This law drives the bare form over the WHOLE corpus, CRLF included, in a
-    // repository this file created and never configured.
+    // repository — sha1 object format, no .gitattributes, nothing configured — bare
+    // `git hash-object` returns the same string. This law drives the bare form over the WHOLE
+    // corpus, CRLF included, in a repository this file created and never configured. The object
+    // format is part of the precondition, not decoration: B9 is the counterexample.
     for (const [name] of CORPUS) {
       expect(blobShaOfFile(repo, name)).toBe(gitBlobSha(name));
     }
+  });
+
+  it("B9 — the equivalence is conditional on the SHA-1 object format, and a sha256 repository is the counterexample", () => {
+    // B8's precondition was first written as "no attributes and no filters", which is FALSE as
+    // stated: a repository created with `--object-format=sha256` has neither, and still
+    // disagrees. The arithmetic is SHA-1 by construction, so it can only ever produce the object
+    // id of a sha1 repository. Stating that as a law instead of as a sentence means the day the
+    // engine is asked to serve a sha256 checkout, something goes red instead of something
+    // sealing a 40-hex address into a store whose objects are 64-hex.
+    const sha256repo = mkdtempSync(join(tmpdir(), "coltrane-blob-sha256-"));
+    try {
+      execFileSync("git", ["-C", sha256repo, "init", "-q", "--object-format=sha256"]);
+      writeFileSync(join(sha256repo, "subject.txt"), Buffer.from("hello\n"));
+      const fromGit = execFileSync("git", ["-C", sha256repo, "hash-object", "subject.txt"]).toString().trim();
+      const fromArithmetic = blobShaOfFile(sha256repo, "subject.txt");
+      expect(fromGit).toMatch(/^[0-9a-f]{64}$/);
+      expect(fromArithmetic).toMatch(/^[0-9a-f]{40}$/);
+      expect(fromArithmetic).not.toBe(fromGit);
+      // ...and it is still exactly the sha1 answer, which is the one every caller means today.
+      expect(fromArithmetic).toBe("ce013625030ba8dba906f756967f9e9ca394464a");
+    } finally {
+      rmSync(sha256repo, { recursive: true, force: true });
+    }
+  });
+
+  it("B10 — a path that begins with a dash is a PATH, never an option", () => {
+    // What the subprocess spelling left open, kept closed. `execFileSync("git", [..., "hash-object",
+    // change.path])` carried no `--` separator, so a seat-supplied path beginning with `-` was
+    // handed to git as an option: `--help` prints and exits 0, `-w` WRITES the object into the
+    // seat's object database. The arithmetic has no option grammar at all — a path is a path. This
+    // law reds if anyone puts a subprocess back without the separator.
+    const dashy = "-not-an-option.txt";
+    writeFileSync(join(repo, dashy), Buffer.from("a path, not a flag\n"));
+    expect(blobShaOfFile(repo, dashy)).toBe(
+      execFileSync("git", ["-C", repo, "hash-object", "--no-filters", "--", dashy]).toString().trim(),
+    );
   });
 });

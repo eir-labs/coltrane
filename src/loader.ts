@@ -5,7 +5,7 @@ import { createRequire } from "node:module";
 import { defineAgent, composeStandard, CompositionError, GenomeIncompleteError, type Agent, type AgentDef, type Standard, type PhaseDef } from "./composition.js";
 import { loadSkillPackage, SkillLoadError } from "./skills.js";
 import { NODE_WITH_ALLOW_NET } from "./skill_subprocess.js";
-import { SkillSchema, EvalSchema, DomainTypeSchema, VenueSchema, ChartSchema, BearingLawSchema, venueDefect, type SkillOutput, type EvalOutput, type DomainTypeOutput, type ChartInput, type VenueInput, type BearingLawOutput } from "./genome_schema.js";
+import { SkillSchema, EvalSchema, DomainTypeSchema, VenueSchema, ChartSchema, BearingLawSchema, LayoutSchema, venueDefect, type Layout, type SkillOutput, type EvalOutput, type DomainTypeOutput, type ChartInput, type VenueInput, type BearingLawOutput } from "./genome_schema.js";
 import { composeChart, chartEntrySeedTypes, type Chart, type Venue } from "./chart.js";
 import type { Primitive } from "./core_types.js";
 import { CANONICAL_CORE_TYPES } from "./canonical_core_types.js";
@@ -87,7 +87,7 @@ export type EvalRecord = EvalOutput;
 // gate around core_types still hard-throws — that's the minimum the system
 // needs to function. Anything past that softens.
 export interface LoadError {
-  readonly kind: "domain_type" | "agent" | "standard" | "skill" | "eval" | "chart" | "venue" | "institution" | "tour" | "manifest";
+  readonly kind: "domain_type" | "agent" | "standard" | "skill" | "eval" | "chart" | "venue" | "institution" | "tour" | "manifest" | "layout";
   readonly path: string;
   readonly slug: string | null;
   readonly error: string;
@@ -142,6 +142,21 @@ export interface LoadedGenome {
   // construction. OPTIONAL for the same store-backing reason as institutions/tours; loadGenome
   // and loadLayeredGenome always populate it.
   bearing_laws?: ReadonlyMap<string, BearingLawOutput>;
+  /**
+   * THIS TREE'S LAYOUT — `<root>/coltrane.layout.json`, validated by LayoutSchema: what the repository
+   * the gig runs against calls its source, tests, laws command (src/layout_grants.ts answers role
+   * tokens through it). Absent file → undefined (legal; role tokens then fail closed). Malformed → a
+   * "layout" load_error naming the file, and undefined — never half-read. The files backing and the
+   * local/server doors take a run's layout from here.
+   */
+  layout?: Layout | undefined;
+  /**
+   * THE ORG STORE'S LAYOUTS, keyed by repository (exactly what resolveWorkingRepo returns for a
+   * claim). Carried by the store reconstruction only (reconstructGenome, GenomeRows.layouts). The
+   * DRAIN takes a gig's layout from here and NEVER from its clone's file: a layout read from the
+   * repository being edited would let that repository author its own seat's authority.
+   */
+  layouts?: ReadonlyMap<string, Layout>;
   // Rob #129 — per-definition load failures recorded here instead of throwing.
   load_errors: LoadError[];
   // Genome extension (docs/genome-extension.md): when this genome was resolved from
@@ -657,7 +672,40 @@ export function loadGenome(
   load_errors.push(...tourRead.load_errors);
   const tours: ReadonlyMap<string, LoadedTour> = tourRead.tours;
 
-  return { core_types, domain_types, agents, standards, draft_standards: new Map(), skills, evals, charts, venues, institutions, tours, bearing_laws, load_errors };
+  // coltrane.layout.json — the repository's answer to role tokens. Read from THIS root only.
+  const layoutRead = readLayoutFile(root);
+  if (layoutRead.error) load_errors.push(layoutRead.error);
+
+  return {
+    core_types, domain_types, agents, standards, draft_standards: new Map(), skills, evals, charts, venues, institutions, tours, bearing_laws,
+    ...(layoutRead.layout !== undefined ? { layout: layoutRead.layout } : {}),
+    load_errors,
+  };
+}
+
+/** The layout file's name at a genome root (mirrors LAYOUT_FILE in src/layout_grants.ts). */
+const LAYOUT_FILE_NAME = "coltrane.layout.json";
+
+/**
+ * Read `<root>/coltrane.layout.json` through the ONE schema. Absent → neither layout nor error.
+ * Unparseable or refused by LayoutSchema → a "layout" load_error naming the file, and NO layout: a
+ * malformed layout is treated as absent (so role tokens fail closed), never half-read.
+ */
+export function readLayoutFile(root: string): { layout?: Layout; error?: LoadError } {
+  const path = join(root, LAYOUT_FILE_NAME);
+  if (!existsSync(path)) return {};
+  let raw: unknown;
+  try {
+    raw = JSON.parse(readFileSync(path, "utf8"));
+  } catch (e) {
+    return { error: { kind: "layout", path, slug: null, error: `layout is not valid JSON — ${e instanceof Error ? e.message : String(e)}` } };
+  }
+  const parsed = LayoutSchema.safeParse(raw);
+  if (!parsed.success) {
+    const why = parsed.error.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`).join("; ");
+    return { error: { kind: "layout", path, slug: null, error: `layout failed schema validation — ${why}` } };
+  }
+  return { layout: parsed.data };
 }
 
 /**
@@ -727,9 +775,19 @@ export function loadLayeredGenome(roots: readonly string[]): LoadedGenome {
     }),
   );
 
+  // THE LAYOUT IS THE TOP LAYER'S — the tree the gig runs against. A layout describes one
+  // repository's shape; a base genome's layout is not the consumer repository's, so it is never
+  // inherited through the fold. The top layer's own load already validated it (and recorded any
+  // load_error, folded above).
+  const topLayout = readLayoutFile(roots[roots.length - 1]!).layout;
+
   // The file backing has no `status` column, so a genome directory has no drafts to
   // separate — empty, which is the same shape a store genome with no drafts returns.
-  return { core_types, domain_types, agents, standards, draft_standards: new Map(), skills, evals, charts, venues, bearing_laws, load_errors, provenance };
+  return {
+    core_types, domain_types, agents, standards, draft_standards: new Map(), skills, evals, charts, venues, bearing_laws,
+    ...(topLayout !== undefined ? { layout: topLayout } : {}),
+    load_errors, provenance,
+  };
 }
 
 /**

@@ -48,6 +48,11 @@ jobs:
       - run: npm ci
       - name: build the room image
         run: docker build -f Dockerfile.room -t coltrane/room:ephemeral .
+      # The SEAT-BEARING floor image, built beside the room image for the same reason: it is published
+      # nowhere, and the laws that need it (the floor-room laws in spec_venue_room_live, and the floor
+      # half of spec_room_image_carries_runtime_deps) SKIP without it — a law that can never fail in CI.
+      - name: build the floor image
+        run: docker build -f Dockerfile.floor -t coltrane/floor:seat .
       - name: the emitted transport reaches a standing room
         run: npm run test:room
       - name: nothing survives the run
@@ -55,3 +60,42 @@ jobs:
           left=$(docker ps -aq --filter 'label=coltrane.managed=true' | wc -l)
           echo "coltrane containers left behind: $left"
           test "$left" -eq 0
+
+  # THE SANDBOX AND THE CLI, FOR REAL. The real-process laws (the Bash sandbox refusing writes, git and
+  # egress only as declared, the diff gate not blinded by an open .git) need @anthropic-ai/sandbox-runtime
+  # (`srt`, the runtime the CLI embeds) and an OS sandbox; the binary-bound laws (the scope oracle and the
+  # --allowedTools splitter are the INSTALLED CLI's) need the claude binary. Without them those laws SKIP
+  # as UNVERIFIED — so this job installs both and sets COLTRANE_REQUIRE_REAL=1, under which each of those
+  # files has a law that goes RED if it would skip. The file list and the pinned versions are checked by
+  # tests/the_real_process_laws_run_in_ci.test.ts.
+  sandbox:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "26"
+          cache: "npm"
+      - run: npm ci
+      - name: install bubblewrap, socat, the sandbox runtime, and the CLI the oracle is pinned to
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bubblewrap socat ripgrep
+          # Ubuntu 24.04 restricts unprivileged user namespaces through AppArmor; bubblewrap needs them.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+          npm i -g @anthropic-ai/sandbox-runtime@0.0.77
+          echo "COLTRANE_SRT=$(command -v srt)" >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/claude" && cd "$RUNNER_TEMP/claude"
+          npm pack @anthropic-ai/claude-code-linux-x64@2.1.283 >/dev/null
+          tar xzf anthropic-ai-claude-code-linux-x64-2.1.283.tgz
+          echo "CLAUDE_BIN=$RUNNER_TEMP/claude/package/claude" >> "$GITHUB_ENV"
+      - name: the real-process and binary-bound laws RUN (a skip is red here)
+        env:
+          COLTRANE_REQUIRE_REAL: "1"
+        run: >-
+          npx vitest run
+          tests/a_grant_never_smuggles_another_grant.test.ts
+          tests/a_seat_reaches_git_and_the_network_only_as_declared.test.ts
+          tests/an_open_git_never_blinds_the_diff_gate.test.ts
+          tests/the_sandbox_refuses_a_real_write.test.ts
+          tests/the_scope_oracle_is_the_installed_clis.test.ts

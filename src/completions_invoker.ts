@@ -29,7 +29,7 @@ import type { AgentInvocationContext, AgentInvoker } from "./runtime.js";
 import type { Registry } from "./registry.js";
 import type { ModelTier } from "./pricing.js";
 import { ENGINE_MCP_SERVER, isHostBuiltin, mcpServerOf, toolBaseName, toolSlugOf } from "./tool_providers.js";
-import { venueEffectiveTools } from "./chart.js";
+import { resolveSeatGrants, targetPathsOf, describeRoleRefusals } from "./layout_grants.js";
 import {
   buildPrompt,
   extractJson,
@@ -132,7 +132,14 @@ export type CompletionsRefusal =
   | "tool_name_collision"
   // The output_write seal path: the seat ended — after its one repair turn, when it never knocked —
   // with no write accepted by the boundary. Its text is not sealed in the write's place.
-  | "no_seal";
+  | "no_seal"
+  // LAYOUT GRANTS — a role token (`Write(@source)`) the repository's layout does not answer, or any
+  // role token with no layout: it grants nothing and the chair is refused naming the role.
+  | "layout_role_unresolved"
+  // LAYOUT GRANTS — the chair's effective grants hold a SCOPED grant (`Write(src/a.ts)`,
+  // `Bash(npm test:*)`, `Read(src/**)`, `WebFetch(https://…)`). This invoker offers a grant by its BASE
+  // name, so the scope cannot survive here: the chair is refused rather than widened.
+  | "scoped_grant_unenforceable";
 
 export const COMPLETIONS_REFUSALS: readonly CompletionsRefusal[] = [
   "host_tool_denied",
@@ -145,6 +152,8 @@ export const COMPLETIONS_REFUSALS: readonly CompletionsRefusal[] = [
   "context_limit",
   "tool_name_collision",
   "no_seal",
+  "layout_role_unresolved",
+  "scoped_grant_unenforceable",
 ];
 
 /** The engine's own seal verb, as the tool source lists it. */
@@ -197,7 +206,21 @@ export function makeCompletionsInvoker(opts: CompletionsInvokerOptions): AgentIn
   const timeoutMs = opts.timeoutMs ?? DEFAULT_COMPLETIONS_TIMEOUT_MS;
 
   return async (ctx: AgentInvocationContext): Promise<Record<string, unknown>> => {
-    const grants = ctx.agent.allowed_tools ?? [];
+    // LAYOUT GRANTS — the seat's grants come from the layout of the repository it runs against
+    // (src/layout_grants.ts): role tokens expand through ctx.layout, Write/Edit narrow to the change's
+    // target_paths, and the room (when the chair sits in one) narrows through the SAME
+    // venueEffectiveTools oracle claude_invoker uses. The host-builtin and tool-source checks read the
+    // resolved grants BEFORE the room (as they read the declared grants before it always did); the
+    // scoped-write refusal and the offered set read the EFFECTIVE grants, after it. Never a raw token.
+    const targets = targetPathsOf(ctx.gig_input);
+    const seat = resolveSeatGrants({ agent: ctx.agent, layout: ctx.layout, target_paths: targets });
+    if (seat.refusals.length > 0) {
+      return refuse("layout_role_unresolved", describeRoleRefusals(ctx.agent.slug, seat.refusals));
+    }
+    const grants = seat.grants;
+    const effective = ctx.venue
+      ? resolveSeatGrants({ agent: ctx.agent, layout: ctx.layout, target_paths: targets, venue: ctx.venue }).grants
+      : grants;
 
     // (1) HOST BUILTINS ARE REFUSED BY NAME, before anything is spent. Naming the tool is the
     // difference between a usable refusal and a shrug — and refusing before the wire means a
@@ -209,6 +232,24 @@ export function makeCompletionsInvoker(opts: CompletionsInvokerOptions): AgentIn
         `agent "${ctx.agent.slug}" grants host builtin(s) [${host.join(", ")}], which this invoker ` +
           `does not carry — its hands are MCP tools only, which arrive governed by the server that ` +
           `serves them. Run this chair on the host-tool invoker, or narrow its grants.`,
+      );
+    }
+
+    // (1b) A SCOPED GRANT CANNOT SURVIVE THIS INVOKER. mapGrant keeps only a grant's base, so ANY
+    // scope is dropped on the way to the model: `Write(src/a.ts)` would be offered as the whole tree,
+    // `Bash(npm test:*)` as the whole of Bash, `Read(src/**)` as every file, `WebFetch(https://x/*)` as
+    // every URL. Refused before any model call, naming the grant — literal or expanded from a role:
+    // fail closed, never widened. A bare host builtin is refused above, as it always was.
+    const scopedGrants = effective.filter((g) => {
+      const open = g.indexOf("(");
+      return open > 0 && g.trim().endsWith(")");
+    });
+    if (scopedGrants.length > 0) {
+      return refuse(
+        "scoped_grant_unenforceable",
+        `agent "${ctx.agent.slug}" holds scoped grant(s) [${scopedGrants.join(", ")}], which this ` +
+          `invoker cannot enforce — it offers a tool by its base name, so the scope would be widened to the ` +
+          `whole tool. Run this chair on the host-tool invoker, which carries the scope to the cage.`,
       );
     }
 
@@ -256,7 +297,7 @@ export function makeCompletionsInvoker(opts: CompletionsInvokerOptions): AgentIn
     // lists but the chair never named is not authorization to offer it. The loop offers exactly
     // `listed ∩ allow`, re-sent byte-identical every round, and refuses any call outside it before it
     // reaches source.
-    const chairGrants = ctx.venue ? venueEffectiveTools(ctx.agent, ctx.venue) : grants;
+    const chairGrants = effective; // narrowed by the room inside resolveSeatGrants
     const allow = [...new Set([...chairGrants.map(mapGrant), ...(sealViaWrite ? [OUTPUT_WRITE_TOOL] : [])])];
 
     // A grant the source does not LIST would be silently not offered — the seat would run without a

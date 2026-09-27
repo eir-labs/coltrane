@@ -53,7 +53,12 @@ WORKDIR /app
 # FULL dependency tree (dev deps included, NOT --omit=dev) because a seat compiles and runs tests
 # in-room; the `claude` agent binary because the seat IS the agent. This is exactly the surface
 # Dockerfile.room refuses to carry — the opposite justification, stated at the top of this file.
-RUN apk add --no-cache git
+# bubblewrap + socat are the Linux runtime of the CLI's Bash sandbox, which every seat holding Bash
+# spawns under with failIfUnavailable (src/claude_invoker.ts bashSandboxFor): without them the seat
+# is REFUSED, never run unsandboxed. bash and ripgrep are what that runtime needs besides (measured:
+# @anthropic-ai/sandbox-runtime refuses "Shell 'bash' not found" on bare alpine). The container is
+# started with the seccomp profile and /proc unmasking bubblewrap needs (src/room_seat_seccomp.ts).
+RUN apk add --no-cache git bubblewrap socat bash ripgrep
 
 # Full install — dev dependencies included. Unlike the room, a seat-bearing floor needs the compiler
 # and the test runner. --ignore-scripts still, for the same prepare-runs-tsc-before-sources reason.

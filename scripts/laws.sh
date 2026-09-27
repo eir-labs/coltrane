@@ -29,7 +29,55 @@ cd "$(dirname "$0")/.."
 # stopped being true at Node 24), and two pure flag-string laws replaced it in this band. The nine
 # laws that need a real request moved to tests/security — a band may reach out, the root suite may
 # not — so they are counted there, by file, not here.
-EXPECTED_LAWS="${EXPECTED_LAWS:-4310}"
+EXPECTED_LAWS="${EXPECTED_LAWS:-4686}"
+#  +14 layout grants, round 10 (the non-author grade of bbc11ea) — the defects the round-9 set could not
+#      see. a_sibling_chair_never_flakes_the_diff_gate (3: the unguarded lstat in snapshotWorktree's walk and
+#      snapshotDirectory's, plus the control showing the twin collectIgnoreRules already has that guard),
+#      the_diff_gate_refuses_a_tree_it_cannot_vouch_for (5: the post-seat gateRead()'s refusal SHAPE and its
+#      pre-seat control, a removed .git, a .git replaced by a plain file, and the non-git-tree control),
+#      the_diff_gate_baseline_is_the_runs_not_the_chairs (6: the cross-chair .gitignore exploit and the
+#      within-chair control, the tracked-path rescue, the nested `<dir>/.git/` blind spot, and the two-law
+#      git-call census). SEVEN of the fourteen are RED at bbc11ea by design — this is a law-author round and
+#      the implementer's round makes them green. Resolved by running, not derived:
+#      "laws collected: 4686 (expected: 4672) in 476 files (expected: 473)".
+#  +22 layout grants, round 9 (the r7+r8 grade): an_open_git_never_blinds_the_diff_gate (8, new: N1 — skip-worktree,
+#      assume-unchanged, info/exclude, a committed change; the snapshot design), the_real_process_laws_run_in_ci (3, new,
+#      structural), a required-real law in each of 4 srt/binary files (+4), wiki #33 in the real layouts (+8), the
+#      oracle-binding timeout. Read from the run.
+#  merge of main (#559 containment: 4310 in 440) into #553 (4589 in 470): resolved to the COLLECTED counts: 4650 laws in 471 files, read from the run (4589 + 61, 470 + 1).
+#  merge of main (#557 + #556 + #558: 4249 in 439) into #553 (layout grants: 4533 in 465), both from 4193 in 434:
+#  4249 + 340 = 4589 laws, 439 + 31 = 470 files, read from the run.
+#  +40 layout grants, round 8: a_repository_can_declare_a_role_absent (40) — a role set to null is a DECLARED ABSENCE
+#      (grants nothing, refuses nothing, recorded); a missing role still refuses; the four real draft layouts
+#      (tests/support/real_layouts.json) with their absences seat chancery #112's agents. Read from the run.
+#  +77 layout grants, round 7 (the non-author grade's six blockers): a_grant_never_smuggles_another_grant (22),
+#      a_protected_path_has_no_other_spelling (33), a_seat_reaches_git_and_the_network_only_as_declared (15; the 7 real-
+#      process laws SKIP as UNVERIFIED without srt), a_room_never_runs_as_root (2; its live half is delegated to the
+#      room band), the_scope_oracle_is_the_installed_clis (4), a_seats_bash_runs_in_a_sandbox +1. Read from the run.
+#  +24 layout grants, round 6: a_spelling_or_case_never_widens_a_grant (15, new) and nine mixed-case rows in
+#      the_engine_matches_scopes_as_the_cli_does. (spec_room_image_carries_runtime_deps is DELEGATED to the room band
+#      — see EXPECTED_DELEGATED.) Read from the run.
+#  +71 layout grants, round 5 (scope matching agrees with the CLI's own matcher, verified from the 2.1.283 binary):
+#      the_engine_matches_scopes_as_the_cli_does (48: a 43-row table, a generated corpus, 4 findings),
+#      every_protected_path_is_denied_where_the_cli_could_reach_it (23). Read from the run.
+#  +32 layout grants, round 4 (surviving plants + the conductor's .coltrane / ignored-path rulings):
+#      the_room_can_start_the_sandbox_and_nothing_more (6), the_sandbox_tree_is_always_absolute (4),
+#      the_diff_gate_never_fails_open (9), a_seat_cannot_write_the_engines_state (6),
+#      the_engine_never_publishes_an_ignored_path (3), a_target_path_never_escapes_the_tree +4 (~). Read from the run.
+#  +41 layout grants, round 3: a_target_path_never_escapes_the_tree (13, new), every_door_carries_the_current_layout
+#      (6, new), a_seats_bash_runs_in_a_sandbox (6, new), a_seat_that_writes_outside_its_grant_is_refused (9, new),
+#      the_sandbox_refuses_a_real_write (1, new; SKIPPED as unverified without srt + an OS sandbox — counted, never a
+#      pass), a_seat_cannot_rewrite_its_own_layout +1, a_missing_role_or_layout_grants_nothing +1,
+#      the_chair_records_its_resolved_grants +1, both_invokers_grant_through_the_layout +3. Read from the run.
+#  +20 layout grants, round 2 (the conductor's and founder's rulings): a_seat_cannot_rewrite_its_own_layout (5,
+#      new), an_empty_or_globbed_scope_fails_closed (8, new), the_drain_takes_its_layout_from_the_store (5, new),
+#      both_invokers_grant_through_the_layout 7 -> 9 (completions fails closed on a scoped write). Read from the run.
+#  +35 grants come from the repository's layout (RED-DEF-10..15 + wiring): nine new files, 32 red laws and
+#      3 green controls — a_grant_never_crosses_repositories (2), a_seat_cannot_write_outside_its_target_paths (4),
+#      a_new_repository_shape_needs_no_agent_amendment (2), a_missing_role_or_layout_grants_nothing (3),
+#      literal_grants_resolve_unchanged (3), seat_grant_resolution_only_narrows (5),
+#      the_layout_is_read_from_the_genome_tree (5), both_invokers_grant_through_the_layout (7),
+#      the_chair_records_its_resolved_grants (4). Read from the run.
 #  merge of main (#556 + #558: 4249 in 439) into #559 (containment: 4269 in 438), both from 4208 in 437:
 #  4249 + 61 = 4310 laws, 439 + 1 = 440 files, read from the run.
 #  +21 genome_writes_stay_in_root, the two survivors of #559's first grade: 12 laws give every site a value that
@@ -207,7 +255,7 @@ EXPECTED_LAWS="${EXPECTED_LAWS:-4310}"
 #       with the handler, the description does not. Its first draft could not fail — it forgave any
 #       token no tool anywhere declared, which is exactly what a renamed argument leaves behind.
 #       Sabotage said so (`current` -> `slug_current` stayed green); the exemption is gone.
-EXPECTED_FILES="${EXPECTED_FILES:-440}"   # + tests/genome_writes_stay_in_root.test.ts, + tests/skill_runs_on_exec_path.test.ts, + tests/node_floor_where_skills_run.test.ts, + tests/bus_not_hosted.test.ts, + tests/every_skill_runs_its_fixtures.test.ts, + tests/node_floor_refuses.test.ts, + tests/spec_reside_drive.test.ts (#537), + tests/a_red_law_names_its_plant.test.ts (#551), + tests/sealed_inputs.test.ts, tests/fan_out.test.ts, tests/completions_seal.test.ts, tests/tier_ladder.test.ts, tests/amend_ladder.test.ts, tests/completions_reasoning_effort.test.ts, tests/bus.test.ts, tests/bus_chair.test.ts, tests/bus_terminal.test.ts, tests/bus_verbs.test.ts, tests/bus_commit.test.ts, tests/code_tools.test.ts, tests/gig_input_validated.test.ts, tests/seat_reads_recorded.test.ts, tests/claude_seat_reads.test.ts, tests/optional_declared_input.test.ts, tests/simulate_names_seats.test.ts
+EXPECTED_FILES="${EXPECTED_FILES:-476}"   # + the three layout-grants round-10 law files (a_sibling_chair_never_flakes_the_diff_gate, the_diff_gate_refuses_a_tree_it_cannot_vouch_for, the_diff_gate_baseline_is_the_runs_not_the_chairs). merge: #553 layout-grants files + #559 tests/genome_writes_stay_in_root.test.ts (collected). + the thirty-one layout-grants law files (docs/specs/layout-grants.red-spec.json), + tests/every_skill_runs_its_fixtures.test.ts, + tests/node_floor_refuses.test.ts, + tests/spec_reside_drive.test.ts (#537), + tests/a_red_law_names_its_plant.test.ts (#551), + tests/sealed_inputs.test.ts, tests/fan_out.test.ts, tests/completions_seal.test.ts, tests/tier_ladder.test.ts, tests/amend_ladder.test.ts, tests/completions_reasoning_effort.test.ts, tests/bus.test.ts, tests/bus_chair.test.ts, tests/bus_terminal.test.ts, tests/bus_verbs.test.ts, tests/bus_commit.test.ts, tests/code_tools.test.ts, tests/gig_input_validated.test.ts, tests/seat_reads_recorded.test.ts, tests/claude_seat_reads.test.ts, tests/optional_declared_input.test.ts, tests/simulate_names_seats.test.ts
 
 # THE OTHER BANDS. `vitest run` is ROOT-CONFIG ONLY — this repo's own workflow comments
 # record that four configs went unexecuted once for exactly that reason. So pinning only the
@@ -235,6 +283,8 @@ EXPECTED_SECURITY_FILES="${EXPECTED_SECURITY_FILES:-5}"   # + openrouter_live_sm
 # script exists to end, one level further out.
 EXPECTED_DELEGATED="tests/honest_broker/gig_dispatch.test.ts
 tests/honest_broker/recorder_append.test.ts
+tests/spec_room_image_carries_runtime_deps.test.ts
+tests/spec_room_runs_non_root_live.test.ts
 tests/spec_venue_room_live.test.ts"
 
 # ONE run, not two: this suite is large enough that running it twice to count it is a real

@@ -46,7 +46,7 @@ import { LEDGER_SCHEMA_VERSION, type Ledger, type GigUsage } from "./ledger.js";
 import { PlacementRefused, type PlacementResolver } from "./placement.js";
 import type { Depth } from "./pricing.js";
 import type { Effort, Layout } from "./genome_schema.js";
-import { snapshotTree, snapshotDirectory, changedPaths, outOfScope, DiffGateWindows, type TreeGit, type TreeState, type GateWindow } from "./diff_gate.js";
+import { readGitBaseline, snapshotWorktree, snapshotDirectory, changedPaths, outOfScope, DiffGateWindows, type GitBaseline, type TreeGit, type TreeState, type GateWindow } from "./diff_gate.js";
 import { resolveSeatGrants, targetPathsOf, globbedTargetPaths, escapingTargetPaths, linkedTargetRefusal, describeRoleRefusals, writeScopeOf, seatCanWrite } from "./layout_grants.js";
 import type { SkillRecord, EvalRecord } from "./loader.js";
 import { COLTRANE_VERSION } from "./version.js";
@@ -1935,20 +1935,32 @@ export async function runGig(
   // THE DIFF GATE's view of the tree the seats run in (src/diff_gate.ts), always read from the HOST:
   // the room's workspace when the seats run inside a room (the realizer bind-mounts it at the SAME
   // absolute path, so the host reads exactly what the seat wrote — and never trusts a `git` binary
-  // inside a room a seat could have replaced), else the run's tree_root. Through git when it is a git
-  // work tree, through the filesystem itself when it is not. No tree named → no gate (a research run
-  // that touches no tree). One window registry per run, so concurrent chairs on the shared tree are
+  // inside a room a seat could have replaced), else the run's tree_root. A git work tree is read
+  // against a PRE-SEAT BASELINE (diff_gate.readGitBaseline) and then by walking the worktree; a tree
+  // that is not a git work tree is read from the filesystem itself. No tree named → no gate (a research
+  // run that touches no tree). One window registry per run, so concurrent chairs on the shared tree are
   // judged against each other's scopes.
   const diffWindows = new DiffGateWindows();
   const gitOpts = { stdio: ["ignore", "pipe", "pipe"] as ["ignore", "pipe", "pipe"], maxBuffer: 256 * 1024 * 1024 };
+  // ONE READER PER CHAIR (below), and its FIRST call is that chair's pre-seat read. The baseline git
+  // answers for — what HEAD tracks, what the tree's own `.gitignore` files cover — is taken on that
+  // first call and then frozen: every one of them is something the seat can rewrite while it works
+  // (the index, a commit, `.git/info/exclude`, a planted `.gitignore`), so the after-read reuses the
+  // pre-seat answer and never asks git again.
   const diffGateReader = (): (() => TreeState) | undefined => {
     const tree = gigSubstrate?.seat?.workspace ?? deps.tree_root;
     if (tree === undefined) return undefined;
     const git: TreeGit = (args) => execFileSync("git", ["-C", tree, ...args], gitOpts);
+    let baseline: GitBaseline | undefined;
+    let notGit = false;
     return () => {
-      let isGit = false;
-      try { isGit = git(["rev-parse", "--is-inside-work-tree"]).toString("utf8").trim() === "true"; } catch { isGit = false; }
-      return isGit ? snapshotTree(git) : snapshotDirectory(tree);
+      if (baseline === undefined && !notGit) {
+        let isGit = false;
+        try { isGit = git(["rev-parse", "--is-inside-work-tree"]).toString("utf8").trim() === "true"; } catch { isGit = false; }
+        if (isGit) baseline = readGitBaseline(tree, git);
+        else notGit = true;
+      }
+      return baseline !== undefined ? snapshotWorktree(tree, baseline) : snapshotDirectory(tree);
     };
   };
 

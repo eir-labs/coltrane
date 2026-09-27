@@ -1942,12 +1942,19 @@ export async function runGig(
   // judged against each other's scopes.
   const diffWindows = new DiffGateWindows();
   const gitOpts = { stdio: ["ignore", "pipe", "pipe"] as ["ignore", "pipe", "pipe"], maxBuffer: 256 * 1024 * 1024 };
-  // ONE READER PER CHAIR (below), and its FIRST call is that chair's pre-seat read. The baseline git
-  // answers for — what HEAD tracks, what the tree's own `.gitignore` files cover — is taken on that
-  // first call and then frozen: every one of them is something the seat can rewrite while it works
-  // (the index, a commit, `.git/info/exclude`, a planted `.gitignore`), so the after-read reuses the
-  // pre-seat answer and never asks git again.
-  const diffGateReader = (): (() => TreeState) | undefined => {
+  // ONE READER PER RUN, not per chair, and its FIRST call is the run's first gated pre-seat read. The
+  // baseline git answers for — what HEAD tracks, what the tree's own `.gitignore` files cover — is
+  // taken on that first call and then frozen: every one of them is something a seat can rewrite while
+  // it works (the index, a commit, `.git/info/exclude`, a planted `.gitignore`), so every later read,
+  // for this chair and for every chair after it, reuses that answer and never asks git again.
+  //
+  // PER CHAIR WAS NOT ENOUGH, and that is the whole reason this is hoisted. Chairs share one tree.
+  // Under a per-chair reader each chair compiled its "pre-seat" ignore rules AFTER every earlier chair
+  // had already run, so chair A — legitimately, inside its own scope — writes `src/.gitignore`
+  // containing `*`, and chair B's rules are then compiled FROM A'S PLANT: B writes `src/evil.ts` with
+  // no @source grant at all and the walk never sees it. Frozen once per run, A's plant is a file the
+  // gate judges and never a rule the gate honours, for A and for everyone after A.
+  const diffGateRead: (() => TreeState) | undefined = ((): (() => TreeState) | undefined => {
     const tree = gigSubstrate?.seat?.workspace ?? deps.tree_root;
     if (tree === undefined) return undefined;
     const git: TreeGit = (args) => execFileSync("git", ["-C", tree, ...args], gitOpts);
@@ -1962,7 +1969,7 @@ export async function runGig(
       }
       return baseline !== undefined ? snapshotWorktree(tree, baseline) : snapshotDirectory(tree);
     };
-  };
+  })();
 
   // ── dispatch preflight: the UNIFIED t=0 dead-reference sweep ────────────────
   // Four defect classes are ALL knowable at t=0 from the standard alone, yet three of them were, until
@@ -3446,7 +3453,8 @@ export async function runGig(
     // LAYOUT GRANTS — what the seat ran with, resolved at the invoke ctx site for chair_complete.
     let seatRecord: { grants: string[]; target_paths_applied: boolean; absent_by_declaration: Array<{ token: string; role: string }> } | undefined;
     // THE DIFF GATE (src/diff_gate.ts) — the tree's state before this seat ran, and its open window.
-    const gateRead = diffGateReader();
+    // The reader is the RUN's (above): its frozen baseline predates every chair, not just this one.
+    const gateRead = diffGateRead;
     let gateBefore: TreeState | undefined;
     let gateWindow: GateWindow | undefined;
     // contract-amend-resume-prompt-v1 (F1) — set when the invoker reports a resume whose session was
@@ -3875,7 +3883,20 @@ export async function runGig(
       // Write/Edit scope (or an overlapping seat's). One that does not refuses the chair, naming the
       // paths — BEFORE anything it made is sealed, so nothing from it is sealed or shipped.
       if (gateRead !== undefined && gateWindow !== undefined && gateBefore !== undefined) {
-        const outside = outOfScope(changedPaths(gateBefore, gateRead()), gateWindow);
+        // THE SAME REFUSAL THE PRE-SEAT READ RAISES (above). Bare, this read escaped as whatever node
+        // threw ("EACCES: permission denied, scandir …"), which is indistinguishable from a crash and
+        // names neither the chair nor the reason — and a seat that leaves the tree unreadable is
+        // exactly the case the gate must fail closed on, in a shape a reader can act on.
+        let gateAfter: TreeState;
+        try {
+          gateAfter = gateRead();
+        } catch (e) {
+          throw new RuntimeError(
+            `chair "${chair.role}" (agent "${agent.slug}") refused: the diff gate cannot read the tree it runs in ` +
+              `(${e instanceof Error ? e.message.split("\n")[0] : String(e)}) — a seat whose changes cannot be judged is not run`,
+          );
+        }
+        const outside = outOfScope(changedPaths(gateBefore, gateAfter), gateWindow);
         if (outside.length > 0) {
           throw new RuntimeError(
             `chair "${chair.role}" (agent "${agent.slug}") refused by the diff gate: it changed ${outside.length} path(s) ` +

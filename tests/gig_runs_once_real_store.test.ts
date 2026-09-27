@@ -206,13 +206,26 @@ describe("S2–S4 — the review's surviving plants, booked", () => {
 
   it("S4 the 'running' header of a gig that resumes a closed one carries manifest.resumes", async () => {
     env = hostedEnv();
-    const store = hostedStore({ claim: claimFor("one-chair-v0", { gig_id: N, resumes: O }) });
-    await onFreshBox({ makeInvoke: () => (async () => sealableSignal) as unknown as AgentInvoker } as WorkOnceDeps);
+    const store = hostedStore({ claim: claimFor("three-chair-v0") });
+    // THE CLOSED GIG MUST REALLY BE CLOSED, or this law tests nothing it names. Without `closeO` the
+    // sink holds no seals for O, so the resume is REFUSED before the real start header at
+    // src/worker.ts:1574 is ever reached, and the header this law reads is instead
+    // `drainRefusedResumeHeader`'s — which carries `resumes` unconditionally. The law therefore
+    // passed over a gig that TERMINATED rather than ran, and cutting the wire at :1574 left it
+    // green: the round-6 grader's plant P-A reds this law at a1d6925 and passes at 19a4812 with all
+    // 4418 collected.
+    await closeO(store);
+    store.set({ claim: claimFor("three-chair-v0", { gig_id: N, resumes: O }) });
+    const res = await onFreshBox({
+      makeInvoke: () => (async (ctx: AgentInvocationContext) => answer(ctx.phase)) as unknown as AgentInvoker,
+    } as WorkOnceDeps);
+    expect(res.claimed && res.status,
+      "precondition: the resuming gig RAN, so the header under test is the REAL start header and not the refusal's").toBe("complete");
     const running = store.headers().filter((c) => c.body["id"] === N && c.body["status"] === "running");
     expect(running.length, "precondition: the start header was written").toBeGreaterThan(0);
     expect((running[0]!.body["manifest"] as Record<string, unknown> | undefined)?.["resumes"],
       "the start header does not say which gig this one resumes, so the store cannot link them").toBe(O);
-  });
+  }, 30_000);
 });
 
 describe("A1 — NO BLIND DRAIN: a drain key without a drain URL refuses the run", () => {

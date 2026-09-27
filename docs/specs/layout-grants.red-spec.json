@@ -39,7 +39,14 @@
     "ROUND 7 FINDING: deploy-agent holds only WebFetch(https://api.vercel.com/*) with code_tool_access \"none\" — no Bash, so no sandbox; its fetch is an in-process CLI tool which the CLI 2.1.283 schema says the sandbox network setting does not gate. The grade's `fly` is not in its grants.",
     "ROUND 8 (chancery #112 blocker): a role set to null in paths, commands, git.* or egress is a DECLARED ABSENCE — its token grants nothing, does not refuse the chair, and is recorded as absent_by_declaration (resolver result and chair_complete); a missing key still fails closed; [] stays refused. The four real draft layouts validate with their declared absences (chancery: migrations, ship_dry; lighthouse-classic: migrations; coltrane-ui: ship_dry; cognition: build, migrations, scripts, ship_dry) and seat chancery #112's agents.",
     "ROUND 9, N1 (the r7+r8 grade): an open .git never blinds the diff gate. DESIGN PINNED: the SNAPSHOT — the gate judges against a baseline taken before the seat that the seat cannot write (every file's content, HEAD's tree from an object-store copy plus a full worktree walk), and reads the after-state by walking the worktree, ignoring the room's index flags (skip-worktree, assume-unchanged), .git/info/exclude / core.excludesFile, and whatever HEAD the seat leaves. Git roles legitimately write the index, so denying index-altering commands was not chosen.",
-    "ROUND 9 (a): the real-process and binary-bound laws run in CI — the `sandbox` job installs bubblewrap, socat, @anthropic-ai/sandbox-runtime@0.0.77 and @anthropic-ai/claude-code-linux-x64@2.1.283, sets COLTRANE_SRT / CLAUDE_BIN and COLTRANE_REQUIRE_REAL=1 (a skip is red there). It is new and its first run is the evidence that the Linux binary and bwrap behave as the macOS measurements did."
+    "ROUND 9 (a): the real-process and binary-bound laws run in CI — the `sandbox` job installs bubblewrap, socat, @anthropic-ai/sandbox-runtime@0.0.77 and @anthropic-ai/claude-code-linux-x64@2.1.283, sets COLTRANE_SRT / CLAUDE_BIN and COLTRANE_REQUIRE_REAL=1 (a skip is red there). It is new and its first run is the evidence that the Linux binary and bwrap behave as the macOS measurements did.",
+    "ROUND 10, THE BLOCKER (the non-author grade of bbc11ea): a sibling chair churning temp files in its own scope does not refuse this chair. snapshotWorktree's `walk` and snapshotDirectory's `walk` both lstat, unguarded, every name a prior readdirSync listed; the twin in the same file (collectIgnoreRules) has exactly that guard. Concurrent chairs on one tree are a pinned FEATURE (GATE-CONCURRENT, DiffGateWindows), and exposure grew three orders of magnitude with this commit (1314 paths lstat'd twice per writing chair, against 1). It presents as a FLAKE, so the law DRIVES the vanish — the unlink is landed into the walk's own lstat — rather than racing a background writer.",
+    "ROUND 10 (b): a post-seat diff-gate read that fails refuses the chair in the SAME shape the pre-seat read does — a RuntimeError naming the chair and saying the gate cannot read the tree it runs in. The existing N1 laws assert only sealed.length === 0, which a proper refusal and a raw EACCES satisfy identically; a check that cannot tell a refusal from a crash is not coverage.",
+    "ROUND 10 (c): the `.git` probe fails closed. A seat that removes `.git`, or replaces it with a plain file, leaves a tree whose git state is gone; requireReadableGitDir's `catch { return; }` cannot tell that from a subdirectory tree that never had one, and the chair SEALS. The old `git status` design refused both, so this is a REGRESSION and the stated invariant does not hold. A tree that never had a `.git` must still seal in-scope work.",
+    "ROUND 10 (d) — THE SEAT'S RULING: the ignore-rule freeze is once per RUN, not once per chair. At bbc11ea, diffGateReader() is constructed per chair (runtime.ts:3449), so chair B's frozen rules are compiled AFTER chair A ran: A writes src/.gitignore containing `*` (in scope, correctly sealed), B holds only Write(@docs), writes src/evil.ts, and is SEALED. Reachable at head. Not a regression — but src/diff_gate.ts's header and this commit's message both claim the opposite (\"What is NO LONGER a limit is hiding a path by making it ignored DURING the seat\"), which is true only within one chair, and ROUND 4 RULING (b) named gitignore blindness a deliberate non-goal. The fix must correct the file's own claim and the commit message alongside the code.",
+    "ROUND 10 (e): the tracked-path rescue is load-bearing and now has a law — a repo that TRACKS a file its own `.gitignore` covers (a checked-in dist/) must still have that file judged. And only the ROOT `.git` is git's: `.git` is skipped by BASENAME at any depth while `.coltrane` two lines below is skipped by FULL PATH, so `docs/.git/evil.ts` is invisible to the gate, is not a PROTECTED_PATH (those are root-scoped too) and is not denied by bashSandboxFor (which denies only `<tree>/.git`). A fourth defect of the rewrite shape, found while reading.",
+    "ROUND 10 (f) — THE COUNT, CORRECTED. Instrumenting TreeGit shows the gate makes FOUR git calls (rev-parse --is-inside-work-tree in diffGateReader; rev-parse --show-prefix, rev-parse --verify HEAD and ls-tree in readGitBaseline), ALL before the seat and NONE reading .git/index. So skip-worktree and assume-unchanged cannot reach any code path, and N1's L1 (skip-worktree), L2 (assume-unchanged) and L4 (committed HEAD) are three PRESENTATIONS of one falsifier — 'a tracked file's bytes changed out of scope' — not three independent ones. They are kept as documentation of the three attacks and MERGED honestly here under one invariant, and the census law (R10-GIT-CALL-CENSUS) is what makes the merge itself falsifiable: it reds if any index/status/diff read is reintroduced, or if a git reaches the after-read. The suite's collected-law count is a count of laws, never of independent falsifiers, and is not read as one.",
+    "ROUND 10 (g) — THE `-deleted-` BACK-FILL IS INERT AND MUST BE DELETED, NOT LAWED. `for (const p of baseline.tracked) if (!state.has(p)) state.set(p, \"-deleted-\")` changes no verdict: changedPaths already flags both directions (an after-miss via `!after.has(p)`, a before-miss via `before.get(p) !== v`), so with or without the back-fill a deletion during the seat is flagged, a pre-seat absence is not, and a re-creation is. No law is written for it. A law pinning inert code is worse than no law: it is a control that cannot fail, dressed as coverage. Recommendation to the implementer: delete the two lines."
   ],
   "laws": [
     {
@@ -181,6 +188,18 @@
     {
       "path": "tests/the_scope_oracle_is_the_installed_clis.test.ts",
       "commit": "807e4a01165bd5d035b7372fd34a7dcdd535fe05"
+    },
+    {
+      "path": "tests/a_sibling_chair_never_flakes_the_diff_gate.test.ts",
+      "commit": "1634cf5cc16ee675b39bdefe1469418516c7208d"
+    },
+    {
+      "path": "tests/the_diff_gate_refuses_a_tree_it_cannot_vouch_for.test.ts",
+      "commit": "1634cf5cc16ee675b39bdefe1469418516c7208d"
+    },
+    {
+      "path": "tests/the_diff_gate_baseline_is_the_runs_not_the_chairs.test.ts",
+      "commit": "1634cf5cc16ee675b39bdefe1469418516c7208d"
     }
   ],
   "coverage_map": [
@@ -3220,8 +3239,135 @@
       "drives": "tests/the_scope_oracle_is_the_installed_clis.test.ts under COLTRANE_REQUIRE_REAL=1",
       "plant": "run the CI sandbox job without srt / the claude binary",
       "plant_observed": "COLTRANE_REQUIRE_REAL=1 without srt and CLAUDE_BIN=/nonexistent → AssertionError: this job requires the … law(s) to RUN, and they would skip"
+    },
+    {
+      "test_name": "a sibling chair's temp file, unlinked mid-walk, does not refuse this chair > snapshotWorktree: the vanished path is skipped and the rest of the tree is still read",
+      "test_file": "tests/a_sibling_chair_never_flakes_the_diff_gate.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "R10-SIBLING-CHAIR-NO-FLAKE",
+      "drives": "snapshotWorktree (its `walk`) — src/diff_gate.ts",
+      "plant": "(RED at bbc11ea) `walk`'s bare lstatSync — the guard its twin collectIgnoreRules has in the same file",
+      "plant_observed": "Error: ENOENT: no such file or directory, lstat '…/src/tmp-1.tmp' ❯ walk src/diff_gate.ts:145:18 ❯ snapshotWorktree src/diff_gate.ts:157:3"
+    },
+    {
+      "test_name": "a sibling chair's temp file, unlinked mid-walk, does not refuse this chair > snapshotDirectory (a non-git tree): the same vanished path is skipped, not thrown on",
+      "test_file": "tests/a_sibling_chair_never_flakes_the_diff_gate.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "R10-SIBLING-CHAIR-NO-FLAKE",
+      "drives": "snapshotDirectory (its `walk`) — src/diff_gate.ts",
+      "plant": "(RED at bbc11ea) the same bare lstatSync in the second walk — the non-git tree is read by the same unguarded pattern",
+      "plant_observed": "Error: ENOENT … ❯ walk src/diff_gate.ts:207:18 ❯ snapshotDirectory src/diff_gate.ts:215:3"
+    },
+    {
+      "test_name": "a sibling chair's temp file, unlinked mid-walk, does not refuse this chair > control — the twin in the same file (collectIgnoreRules) ALREADY survives it: that guard is the shape the other two lack",
+      "test_file": "tests/a_sibling_chair_never_flakes_the_diff_gate.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "R10-SIBLING-CHAIR-NO-FLAKE",
+      "drives": "readGitBaseline → collectIgnoreRules — src/diff_gate.ts",
+      "plant": "drop `try { … } catch { continue; }` from collectIgnoreRules' lstat, so all three walks are bare",
+      "plant_observed": "AssertionError: collectIgnoreRules guards the lstat its twin leaves bare: expected [Function] to not throw an error but 'Error: ENOENT …' was thrown"
+    },
+    {
+      "test_name": "F2 — a post-seat read that fails refuses the chair in the SAME shape the pre-seat read does > the post-seat read fails: the refusal names the chair and says the gate cannot read the tree — not a bare EACCES",
+      "test_file": "tests/the_diff_gate_refuses_a_tree_it_cannot_vouch_for.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "R10-F2-POST-SEAT-REFUSAL",
+      "drives": "runGig — src/runtime.ts:3878 (the post-seat gateRead())",
+      "plant": "(RED at bbc11ea) the post-seat gateRead() is unwrapped, where its pre-seat twin at ~3690 raises a RuntimeError naming the chair",
+      "plant_observed": "AssertionError: the post-seat failure escaped raw instead of refusing the chair: received 'phase \"p\" aborted — chair(s) failed: impl (impl: EACCES: permission denied, scandir '…/src/fixtures')'"
+    },
+    {
+      "test_name": "F2 — a post-seat read that fails refuses the chair in the SAME shape the pre-seat read does > control — the PRE-seat twin already refuses in exactly that shape",
+      "test_file": "tests/the_diff_gate_refuses_a_tree_it_cannot_vouch_for.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "R10-F2-POST-SEAT-REFUSAL",
+      "drives": "runGig — src/runtime.ts:3690 (the pre-seat gateRead())",
+      "plant": "unwrap the pre-seat gateRead() too, so neither side of the pair refuses in its own words"
+    },
+    {
+      "test_name": "the gate's `.git` probe fails closed — a seat cannot seal by destroying the git state it is judged against > a seat that removes .git entirely is refused, and nothing it made is sealed",
+      "test_file": "tests/the_diff_gate_refuses_a_tree_it_cannot_vouch_for.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "R10-GIT-PROBE-FAILS-CLOSED",
+      "drives": "requireReadableGitDir — src/diff_gate.ts (called by snapshotWorktree)",
+      "plant": "(RED at bbc11ea) `try { st = lstatSync(p); } catch { return; }` — the silent return cannot tell \"this tree never had a .git\" from \"the seat just deleted it\". A REGRESSION: the old `git status` design refused, and the file's stated invariant (\"it MUST BE READABLE … the gate fails closed rather than walk on\") does not hold.",
+      "plant_observed": "AssertionError: the git state the baseline was taken from is GONE and the chair sealed anyway: expected [ { …(23) } ] to have a length of +0 but got 1"
+    },
+    {
+      "test_name": "the gate's `.git` probe fails closed — a seat cannot seal by destroying the git state it is judged against > a seat that replaces .git with a plain file is refused, and nothing it made is sealed",
+      "test_file": "tests/the_diff_gate_refuses_a_tree_it_cannot_vouch_for.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "R10-GIT-PROBE-FAILS-CLOSED",
+      "drives": "requireReadableGitDir — src/diff_gate.ts",
+      "plant": "(RED at bbc11ea) the probe accepts ANY readable non-directory at `.git` as a gitfile, so a plain file passes it",
+      "plant_observed": "AssertionError: `.git` is no longer a git state directory and the chair sealed anyway: expected [ { …(23) } ] to have a length of +0 but got 1"
+    },
+    {
+      "test_name": "the gate's `.git` probe fails closed — a seat cannot seal by destroying the git state it is judged against > control — a tree that never had a `.git` is still judged and in-scope work still seals",
+      "test_file": "tests/the_diff_gate_refuses_a_tree_it_cannot_vouch_for.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "R10-GIT-PROBE-FAILS-CLOSED",
+      "drives": "diffGateReader → snapshotDirectory — src/runtime.ts:1949 + src/diff_gate.ts",
+      "plant": "refuse every tree with no readable `.git` — which would refuse every non-git tree (a genome directory, a scratch tree) the gate is meant to judge from the filesystem"
+    },
+    {
+      "test_name": "the frozen baseline is the RUN's, not each chair's > an earlier chair's in-scope `.gitignore` does not blind the gate for a later chair",
+      "test_file": "tests/the_diff_gate_baseline_is_the_runs_not_the_chairs.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "R10-FREEZE-PER-RUN",
+      "drives": "diffGateReader — src/runtime.ts:3449 (one reader, and one memoised baseline, PER CHAIR) + readGitBaseline — src/diff_gate.ts",
+      "plant": "(RED at bbc11ea) the reader is constructed inside the per-chair scope, so chair B's \"pre-seat\" frozen rules are read AFTER chair A ran. A REACHABLE EXPLOIT at head, not a regression — but src/diff_gate.ts and its commit message both CLAIM the opposite (\"What is NO LONGER a limit is hiding a path by making it ignored DURING the seat\"), which holds only within one chair. THE SEAT'S RULING: the freeze is once per RUN. The file's claim and the commit message need correcting with the fix — a document making a false claim about itself is the defect class this repo's north stars name.",
+      "plant_observed": "AssertionError: chair B wrote src/evil.ts with only Write(@docs) and was SEALED: expected [ { …(23) } ] to have a length of +0 but got 1 ([A sealed] 1 [B sealed] 1, no refusal)"
+    },
+    {
+      "test_name": "the frozen baseline is the RUN's, not each chair's > control — within ONE chair, a `.gitignore` planted in scope hides nothing from that chair's own gate",
+      "test_file": "tests/the_diff_gate_baseline_is_the_runs_not_the_chairs.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "R10-FREEZE-PER-RUN",
+      "drives": "snapshotWorktree (it reads `baseline.rules`, never the tree's live `.gitignore` files) — src/diff_gate.ts",
+      "plant": "recompute the ignore rules live in the after-read (`collectIgnoreRules(root, \"\", live, baseline.tracked)` in snapshotWorktree, used in place of baseline.rules) — which is also EXACTLY what dropping the per-reader memoisation does, so F3's \"recompute the rules live\" and \"drop the memoisation\" are ONE falsifier, not two",
+      "plant_observed": "AssertionError: the seat made its own out-of-scope write invisible and sealed: expected [ { …(23) } ] to have a length of +0 but got 1"
+    },
+    {
+      "test_name": "what the walk must NOT skip > a TRACKED file under an ignored directory is still judged (a checked-in dist/)",
+      "test_file": "tests/the_diff_gate_baseline_is_the_runs_not_the_chairs.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "R10-TRACKED-RESCUE",
+      "drives": "snapshotWorktree — src/diff_gate.ts (`!baseline.tracked.has(r)` and `!hasTrackedUnder(baseline.tracked, r)`)",
+      "plant": "drop the tracked-path rescue: `if (ig && !baseline.tracked.has(r)) continue;` → `if (ig) continue;` (and the directory arm likewise)",
+      "plant_observed": "AssertionError: a tracked file its own .gitignore covers was edited out of scope, unseen: expected [ { …(23) } ] to have a length of +0 but got 1"
+    },
+    {
+      "test_name": "what the walk must NOT skip > only the ROOT `.git` is git's — a seat cannot hide a write under a nested `docs/.git/`",
+      "test_file": "tests/the_diff_gate_baseline_is_the_runs_not_the_chairs.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "R10-NESTED-GIT-NOT-SKIPPED",
+      "drives": "snapshotWorktree and collectIgnoreRules — src/diff_gate.ts (`if (name === GIT_DIR) continue;`)",
+      "plant": "(RED at bbc11ea) `.git` is skipped by BASENAME at any depth, while the engine's own state dir two lines below it is skipped by FULL PATH (`r === ENGINE_STATE_DIR`, i.e. at the root only). A FOURTH defect of the rewrite shape, found while reading and REACHABLE: grant_scope PROTECTED_PATHS scopes `.git` to the tree root too (`p === \".git\" || p.startsWith(\".git/\")`), and bashSandboxFor denies only `<tree>/.git` under `allowWrite: [<tree>]` — so nothing else stops the write, and a seat can hide an arbitrary subtree under any `<dir>/.git/`.",
+      "plant_observed": "AssertionError: the walk skips any directory NAMED .git, at any depth — so this write was never seen: expected [ { …(23) } ] to have a length of +0 but got 1"
+    },
+    {
+      "test_name": "the git-call census — why L1, L2 and L4 are ONE falsifier and not three > readGitBaseline asks git exactly three times, and never for the index, the status or a diff",
+      "test_file": "tests/the_diff_gate_baseline_is_the_runs_not_the_chairs.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "R10-GIT-CALL-CENSUS",
+      "drives": "readGitBaseline — src/diff_gate.ts, driven through a recording TreeGit",
+      "plant": "add any index/status/diff read to the baseline (e.g. `git([\"status\", \"--porcelain\"])` before the rules pass)",
+      "plant_observed": "AssertionError: the pre-seat facts: the tree's prefix, HEAD, HEAD's tree: expected [ 'rev-parse --show-prefix', …(3) ] to deeply equal [ 'rev-parse --show-prefix', …(2) ]"
+    },
+    {
+      "test_name": "the git-call census — why L1, L2 and L4 are ONE falsifier and not three > the after-read takes no git at all: snapshotWorktree's only inputs are the root and the frozen baseline",
+      "test_file": "tests/the_diff_gate_baseline_is_the_runs_not_the_chairs.test.ts",
+      "kind": "behavioural",
+      "invariant_id": "R10-GIT-CALL-CENSUS",
+      "drives": "snapshotWorktree — src/diff_gate.ts (arity, and the walk's indifference to an index flag)",
+      "plant": "pass a TreeGit into the after-read and consult it (a third parameter here is a git the seat can answer for)"
     }
   ],
-  "testing_method": "vitest, example-based laws plus fast-check properties (RED-DEF-15: expansion draws only on declared tokens + the layout; the target and venue steps never add). Every law drives the production symbol named in `drives`; symbols that do not exist yet are reached through a runtime import (tests/layout_grants_fixtures.ts) so the shared tsc gate stays green and each law fails where it asserts. The invokers are observed through the seams the suite already uses: the Claude invoker's injected `run` (the exact argv), and the completions invoker's model request body and typed refusals. The chair record is observed on chair_complete through RunDeps.onProgress; the dispatch door by bootstrapServerDeps over a genome tree on disk with the invoke seam replaced. The resolver-level plants were rehearsed by the drafter against a throwaway reference resolver, deleted before commit; each turned its law red. plant_observed is omitted (the v5 type refuses null) and is filled by the grader once production exists. Round 3: the laws for the implementer's surviving plants (NO-SELF-WIDENING-2 isolation, DOOR-CHART, DOOR-RELOAD, TARGET-ESCAPE, LAYERED, RECORD-VENUE, PREFLIGHT-EXPANDED) are green against the implementation at cef6f97, and each plant was applied, observed red and reverted by the drafter. The target-escape laws for README/backslash/drive-letter entries and the dispatch refusals are red, because the ruling (refuse, never normalise) is new. The completions any-scope laws for Read/Bash, and every D1/D2/D3/D5 law, are red (the behaviour is new). D4 runs a REAL sandboxed process through @anthropic-ai/sandbox-runtime (srt), because `claude -p` cannot run a Bash command without a model; it is SKIPPED and printed as UNVERIFIED when srt or an OS sandbox is absent, and was observed red (no sandbox config on the argv) with srt present on macOS. The drafter's manual srt probe confirmed the target config shape (absolute allowWrite tree + absolute denyWrite) is enforced: inside src/ written, outside refused, the layout file refused. plant_observed is omitted; the grader fills it. Round 4: every law for the implementer's surviving plants (items 2–10) is green against 9ff943c, and each plant was applied to that production code, observed red, and reverted; plant_observed records the failing assertion. The laws for the conductor's two new rulings (.coltrane denial; ignored path never sealed) are red today because the behaviour does not exist yet; their plant_observed is left for the grader. Round 5: each of the implementer's six dot-path plants (OWN-A…F) was applied to src/grant_scope.ts at 5776395 and the new laws observed red (OWN-A 22 laws beyond the 4 findings, OWN-C 2, OWN-E 9, OWN-F 12, OWN-B 6, OWN-D 5); plant_observed records one failing assertion per law. Controls and laws no plant touched carry no plant_observed. Round 6: the four surviving plants (literal-spelling refusal removed, schema admitting ./ and //, case-sensitive matcher, case-sensitive isProtectedPath) were each applied at 0a8d1be and observed red (4 / 3 / 10 / 5 laws). The room-image law was observed red against the stale pre-round-5 images on the drafter's host, then green after rebuilding both images. Round 7: laws for the six blockers are red at 24a26de where the behaviour does not exist (smuggling, Unicode spellings, git/egress, the root drain); the laws for surviving or tie-in plants were shown red by applying the plant at 24a26de (.coltrane deny dropped; the room rendered as root, live; the ignore dependency bumped to 7.0.7; CLAUDE_BIN pointed at a fixture binary bundling ignore 7.0.6 and lacking the splitter). The real-process git/network laws were run with srt 0.0.77 on macOS; they SKIP as UNVERIFIED without it. Round 8: 18 laws red at 2b59552 (the null contract does not exist — 'null refuses the chair' is today's behaviour); the plant missing==null (the undeclared-role refusal dropped) was applied at 2b59552 and turned the missing-role laws red. The vendored drafts are verbatim from the PR heads (recorded in tests/support/real_layouts.json). Round 9: the N1 laws are red at 3dccce8 (the gate trusts git status); the srt variants first show the sandbox PERMITS each attack. Plants applied at 3dccce8: null refuses the chair (wiki laws red), a required-real file dropped from the CI job (structural law red), COLTRANE_REQUIRE_REAL=1 without srt/claude (the required laws red).",
-  "uncovered": []
+  "testing_method": "vitest, example-based laws plus fast-check properties (RED-DEF-15: expansion draws only on declared tokens + the layout; the target and venue steps never add). Every law drives the production symbol named in `drives`; symbols that do not exist yet are reached through a runtime import (tests/layout_grants_fixtures.ts) so the shared tsc gate stays green and each law fails where it asserts. The invokers are observed through the seams the suite already uses: the Claude invoker's injected `run` (the exact argv), and the completions invoker's model request body and typed refusals. The chair record is observed on chair_complete through RunDeps.onProgress; the dispatch door by bootstrapServerDeps over a genome tree on disk with the invoke seam replaced. The resolver-level plants were rehearsed by the drafter against a throwaway reference resolver, deleted before commit; each turned its law red. plant_observed is omitted (the v5 type refuses null) and is filled by the grader once production exists. Round 3: the laws for the implementer's surviving plants (NO-SELF-WIDENING-2 isolation, DOOR-CHART, DOOR-RELOAD, TARGET-ESCAPE, LAYERED, RECORD-VENUE, PREFLIGHT-EXPANDED) are green against the implementation at cef6f97, and each plant was applied, observed red and reverted by the drafter. The target-escape laws for README/backslash/drive-letter entries and the dispatch refusals are red, because the ruling (refuse, never normalise) is new. The completions any-scope laws for Read/Bash, and every D1/D2/D3/D5 law, are red (the behaviour is new). D4 runs a REAL sandboxed process through @anthropic-ai/sandbox-runtime (srt), because `claude -p` cannot run a Bash command without a model; it is SKIPPED and printed as UNVERIFIED when srt or an OS sandbox is absent, and was observed red (no sandbox config on the argv) with srt present on macOS. The drafter's manual srt probe confirmed the target config shape (absolute allowWrite tree + absolute denyWrite) is enforced: inside src/ written, outside refused, the layout file refused. plant_observed is omitted; the grader fills it. Round 4: every law for the implementer's surviving plants (items 2–10) is green against 9ff943c, and each plant was applied to that production code, observed red, and reverted; plant_observed records the failing assertion. The laws for the conductor's two new rulings (.coltrane denial; ignored path never sealed) are red today because the behaviour does not exist yet; their plant_observed is left for the grader. Round 5: each of the implementer's six dot-path plants (OWN-A…F) was applied to src/grant_scope.ts at 5776395 and the new laws observed red (OWN-A 22 laws beyond the 4 findings, OWN-C 2, OWN-E 9, OWN-F 12, OWN-B 6, OWN-D 5); plant_observed records one failing assertion per law. Controls and laws no plant touched carry no plant_observed. Round 6: the four surviving plants (literal-spelling refusal removed, schema admitting ./ and //, case-sensitive matcher, case-sensitive isProtectedPath) were each applied at 0a8d1be and observed red (4 / 3 / 10 / 5 laws). The room-image law was observed red against the stale pre-round-5 images on the drafter's host, then green after rebuilding both images. Round 7: laws for the six blockers are red at 24a26de where the behaviour does not exist (smuggling, Unicode spellings, git/egress, the root drain); the laws for surviving or tie-in plants were shown red by applying the plant at 24a26de (.coltrane deny dropped; the room rendered as root, live; the ignore dependency bumped to 7.0.7; CLAUDE_BIN pointed at a fixture binary bundling ignore 7.0.6 and lacking the splitter). The real-process git/network laws were run with srt 0.0.77 on macOS; they SKIP as UNVERIFIED without it. Round 8: 18 laws red at 2b59552 (the null contract does not exist — 'null refuses the chair' is today's behaviour); the plant missing==null (the undeclared-role refusal dropped) was applied at 2b59552 and turned the missing-role laws red. The vendored drafts are verbatim from the PR heads (recorded in tests/support/real_layouts.json). Round 9: the N1 laws are red at 3dccce8 (the gate trusts git status); the srt variants first show the sandbox PERMITS each attack. Plants applied at 3dccce8: null refuses the chair (wiki laws red), a required-real file dropped from the CI job (structural law red), COLTRANE_REQUIRE_REAL=1 without srt/claude (the required laws red). ROUND 10 adds three law files for defects the round-9 set could not see, all driving production: the sibling-chair flake is made deterministic by landing the sibling's unlink into the walk's own lstatSync (the ENOENT is the real filesystem's; only its timing is driven), the refusal-shape laws assert the RuntimeError's wording rather than only sealed.length, and the cross-chair .gitignore exploit runs two phases with two differently-scoped chairs. Plants applied at bbc11ea and reverted: recompute the ignore rules live in snapshotWorktree (the within-chair freeze law red), drop the tracked-path rescue (the dist/ law red), add `git status --porcelain` to readGitBaseline (the census law red), drop collectIgnoreRules' lstat guard (the twin control red). src/diff_gate.ts was restored byte-clean after each.",
+  "uncovered": [
+    "The `-deleted-` back-fill in snapshotWorktree (src/diff_gate.ts) is DELIBERATELY uncovered: it is inert (see ROUND 10 (g)) and the recommendation is deletion, not a law.",
+    "isIgnoredBy ORs every frozen rule at or above a path and returns on the first match, so a child `.gitignore`'s negation (`!important.log`) cannot un-ignore what a parent ignored — git's semantics are that the deepest match wins. That errs toward NOT SEEING a file, the opposite direction from the ignoreCase guard's stated bias, and lets an UNTRACKED path under such a negation be written out of scope unseen. Found while reading at bbc11ea; not in this round's scope and no law written.",
+    "Realizing a room from its venue contract and verifying it by behavioural probe (unchanged from earlier rounds)."
+  ]
 }

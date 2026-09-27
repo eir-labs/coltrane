@@ -49,6 +49,23 @@
 //       first transient failure is terminal every time, forever.
 //   V6  R2's cold run: a status row present with zero outputs runs cold and completes.
 //
+// ── ROUND 9: THE TWO PLANTS THAT SURVIVED ROUND 8 ───────────────────────────────────────────────
+// Round 8's implementer mutation-tested nine anchor-verified plants against the eleven laws above
+// and killed seven. Two survived, and per this repo's discipline a surviving plant becomes a law.
+//   V7  THE CORNER NO LAW REACHED: outputs EMPTY **and** the status UNREADABLE, both at once. U2 has
+//       the status readable-and-absent; V3, V4 and V5 all have outputs PRESENT. So deleting the
+//       `header.error` check in rebuildFromDrain's empty-outputs branch — which makes an UNREADABLE
+//       status read as `exists: false`, i.e. "the gig is not there" — left all eleven GREEN while
+//       re-introducing the round-6 inversion for "the store was unwell while the closed gig happened
+//       to hold no seals". An unread store is not evidence of absence.
+//   V8  THE RESIDUAL DESIGN DECISION, UNPINNED. Round 8 split the hand-back in two: where a transient
+//       bound CAN be established and kept → a non-terminal release (the attempt refunds, the worker's
+//       header count bounds it); where it CANNOT be established (V3/V5) or CANNOT be kept (V4) → NO
+//       release at all, status `abandoned`, the lease lapses, and the store re-queues WITHOUT
+//       refunding so its own max_attempts is the bound. V3/V4/V5 assert only SURVIVAL, so "refund
+//       everywhere" satisfies all three — and a later hand could revert the split with nothing going
+//       red, leaving a path bounded by nothing at all. V8a/V8b pin the lapse itself, at both sites.
+//
 // The fake store models the queue as the store has it (see `queue` in the fixture): oldest first,
 // every claim counts, a non-terminal release refunds, a terminal release or gig_fail fails, and the
 // cap fails `attempts_exhausted`. `lapse()` is time passing between polls.
@@ -421,4 +438,140 @@ describe("V6 — R2: a closed gig with a status row PRESENT and zero outputs run
     expect(store.queueRow(N)?.status, "the cold run did not complete").toBe("completed");
     expect(terminalReleases(store, N).map((c) => c.body["p_reason"]), "the gig was ended instead of run").toEqual([]);
   }, 30_000);
+});
+
+describe("V7 — the closed gig holds no seals AND its status cannot be read: an unread store is not absence", () => {
+  // THE PLANT THAT SURVIVED ROUND 8. rebuildFromDrain's empty-outputs branch (src/worker.ts) reads:
+  //
+  //   const header = await fetchDrainedGenomeHash(ctx, source);
+  //   if (header.error !== undefined) return { ok: false, reason: ..., unreadable: true, permanent: ... };
+  //   return { ...nothing, exists: header.exists === true };
+  //
+  // Delete the `header.error` line and an UNREADABLE status collapses into `exists: false` — "no
+  // status row and no sealed outputs, it is not there to resume" — which is `gone`, which is the ONE
+  // terminal case. So a store that is merely unwell, on a resume whose closed gig happens to hold no
+  // seals YET readable, is destroyed on poll one. That is round 6's inversion again, in the one
+  // corner nothing reached: U2 has the status readable-and-absent, and V3/V4/V5 all have outputs
+  // present, so no existing law puts both failures on the same poll.
+  //
+  // O here REALLY RAN and its seals REALLY EXIST (closeO) — the outputs read is simply answering
+  // empty while the store is unwell. That is what makes the recovery half sayable: the gig that
+  // survived goes on to resume from the seals the store denied it had.
+  it("V7 the outputs read answers EMPTY while the status read is 500: the resuming gig is handed back, not ended, and resumes from the seals the unwell store denied", async () => {
+    env = hostedEnv();
+    const store = hostedStore({ claim: claimFor("two-chair-v0", { gig_id: O }) });
+    await closeO(store);
+    store.set({
+      claim: null,
+      queue: [claimFor("two-chair-v0", { gig_id: N, resumes: O })],
+      resumedRead: { status: "error", outputs: "missing" },
+    });
+
+    const invoked: Array<[string, string]> = [];
+    const outcome = await poll(invoked);
+    expectSurvived(store, N, "an empty outputs answer while the status read was unwell");
+    expect(outcome,
+      "the gig was ENDED for a store that could not be read. `exists: false` is a fact only a READ can establish; an unread status is not one").not.toMatch(/"status":"failed"/);
+    expect(outcome, "the refusal did not name the closed gig it could not read").toContain(O);
+    expect(invoked, "a chair ran for a resume whose closed gig could not be read").toEqual([]);
+    expect(refunds(store, N).length,
+      "the unreadable status was treated as a readable absence, so the row was ended instead of refunded").toBe(1);
+    expect(store.queueRow(N)?.status, "the row did not go back to the queue").toBe("queued");
+    expect(store.queueRow(N)?.attempts, "the refunded attempt was not returned").toBe(0);
+
+    // The store comes back. O's seals were there the whole time, which is exactly why "no answer"
+    // must never have been read as "no gig".
+    store.set({ resumedRead: {} });
+    await poll(invoked);
+    expect(invoked.map(([, p]) => p),
+      "the survivor did not resume once the store recovered — it either re-paid for scan or never ran").toEqual(["rescan"]);
+    expect(store.queueRow(N)?.status, "the resumed gig did not complete").toBe("completed");
+  }, 90_000);
+});
+
+describe("V8 — a hand-back the WORKER cannot bound is a LAPSE, never a refund", () => {
+  // THE SECOND PLANT THAT SURVIVED ROUND 8: make the lapse path release non-terminally too — i.e.
+  // refund everywhere — and all eleven laws stay green, because V3, V4 and V5 assert only that the
+  // gig SURVIVES, and a refund is a survival.
+  //
+  // But the two hand-backs are not interchangeable, and the difference IS the bound:
+  //   refund  a non-terminal release. The store RETURNS the attempt (coltrane-ui 20260926040000), so
+  //           the store's own max_attempts can never trip and the WORKER's header count is the only
+  //           thing that can end the retry.
+  //   lapse   no release at all. The row is left leased, the lease runs out, the store re-queues it
+  //           WITHOUT refunding, and the store's max_attempts does the bounding.
+  //
+  // So where the worker's count cannot be ESTABLISHED (V8a: the same RPC on the same token as the
+  // read that just failed) or cannot be KEPT (V8b: the header write did not land, so every later
+  // poll would refund from the same stale prior forever), a refund is a survival bounded by NOTHING.
+  // Round 8 chose the lapse for exactly that reason; these laws are what stops the choice being
+  // reverted silently. They assert the absence of a refund and then walk the store's cap to the end,
+  // because "no refund" is only half the ruling — the other half is that something still bounds it.
+  it("V8a the bound cannot be ESTABLISHED (a 500 on coltrane_mcp_gig_status for BOTH reads): no release at all, the attempt stays spent, and the STORE's max_attempts ends it", async () => {
+    env = hostedEnv();
+    const store = hostedStore({ claim: claimFor("two-chair-v0", { gig_id: O }) });
+    await closeO(store);
+    store.set({
+      claim: null,
+      queue: [claimFor("two-chair-v0", { gig_id: N, resumes: O })],
+      maxAttempts: 2, // the STORE's cap is what is being measured here: it is the only bound left
+    });
+
+    breakStatusRpc([O, N], "error"); // never healed: the store stays unwell for every poll below
+    const invoked: Array<[string, string]> = [];
+    const outcome = await poll(invoked);
+    expectSurvived(store, N, "the worker's bound could not be established");
+    expect(outcome, "an unestablishable bound must leave the row to its lease, not report an outcome for it").toContain('"status":"abandoned"');
+    expect(refunds(store, N).length,
+      "the row was REFUNDED although the worker's retry count could not be established. The store returns the attempt on every non-terminal release, so its cap can never trip, and the worker has no count either: nothing bounds this retry at all").toBe(0);
+    expect(store.queueRow(N)?.status,
+      "the row was released back to the queue; a lapse releases nothing and the lease is what returns it").toBe("running");
+    expect(store.queueRow(N)?.attempts,
+      "the attempt was given back, which is the refund this law forbids under another name").toBe(1);
+
+    // Time passes. The lease lapses, the store re-queues the row WITHOUT refunding, and the attempt
+    // it already spent is still counted — which is the whole reason the lapse is bounded.
+    store.lapse();
+    expect(store.queueRow(N)?.attempts, "the lapse returned the attempt").toBe(1);
+    await poll(invoked);
+    store.lapse();
+    await poll(invoked);
+
+    expect(store.queueRow(N)?.status, "the store's own cap never ended a row nothing else was bounding").toBe("failed");
+    expect(store.queueRow(N)?.reason, "the row ended for some reason other than the store's attempts cap").toBe("attempts_exhausted");
+    expect(refunds(store, N).length, "some poll refunded the attempt, which would hold the cap off forever").toBe(0);
+    expect(invoked, "a chair ran while the store could not be read").toEqual([]);
+  }, 90_000);
+
+  it("V8b the bound cannot be KEPT (the header carrying the retry count is refused 503): no release either, and the STORE's max_attempts ends it", async () => {
+    env = hostedEnv();
+    const store = hostedStore({ claim: claimFor("two-chair-v0", { gig_id: O }) });
+    await closeO(store);
+    store.set({
+      claim: null,
+      queue: [claimFor("two-chair-v0", { gig_id: N, resumes: O })],
+      maxAttempts: 2,
+      resumedRead: { status: "error" },
+      header: () => new Response("", { status: 503 }), // the count never reaches this gig's header
+    });
+
+    const invoked: Array<[string, string]> = [];
+    const outcome = await poll(invoked);
+    expectSurvived(store, N, "the worker's retry count could not be kept");
+    expect(outcome, "a count that cannot be kept must leave the row to its lease").toContain('"status":"abandoned"');
+    expect(refunds(store, N).length,
+      "the row was REFUNDED although the count that would bound the retry never landed. The next poll reads the same stale prior, refunds from it again, and does so for as long as the header route stays down").toBe(0);
+    expect(store.queueRow(N)?.status, "the row was released back to the queue instead of left to its lease").toBe("running");
+    expect(store.queueRow(N)?.attempts, "the attempt was given back, so the store's cap can never see it").toBe(1);
+
+    store.lapse();
+    await poll(invoked);
+    store.lapse();
+    await poll(invoked);
+
+    expect(store.queueRow(N)?.status, "the store's own cap never ended a row the worker could not bound").toBe("failed");
+    expect(store.queueRow(N)?.reason, "the row ended for some reason other than the store's attempts cap").toBe("attempts_exhausted");
+    expect(refunds(store, N).length, "some poll refunded the attempt").toBe(0);
+    expect(invoked, "a chair ran while the resume state could not be read").toEqual([]);
+  }, 90_000);
 });

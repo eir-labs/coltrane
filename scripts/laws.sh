@@ -29,7 +29,7 @@ cd "$(dirname "$0")/.."
 # stopped being true at Node 24), and two pure flag-string laws replaced it in this band. The nine
 # laws that need a real request moved to tests/security — a band may reach out, the root suite may
 # not — so they are counted there, by file, not here.
-EXPECTED_LAWS="${EXPECTED_LAWS:-4422}"   # 4418 → 4422: round 7 re-points the resume-unreadable band (7 laws → 11). Round 6's 4×U2 + 2×U3 + U4 collapsed (isPermanentStoreRefusal reads only e.status, so no src mutation could red `refuse` without `unseated`); they are replaced by U2-gone, U3, V1, V2a, V2b, V3×3, V4, V5, V6, each falsifiable on its own.
+EXPECTED_LAWS="${EXPECTED_LAWS:-4425}"   # 4422 → 4425: round 9 writes the two plants that SURVIVED round 8's mutation test — V7 (outputs-empty AND status-unreadable on one poll: the corner U2/V3/V4/V5 all miss) and V8a/V8b (the LAPSE hand-back, pinned at both sites, where V3/V4/V5 asserted only survival). # 4418 → 4422: round 7 re-points the resume-unreadable band (7 laws → 11). Round 6's 4×U2 + 2×U3 + U4 collapsed (isPermanentStoreRefusal reads only e.status, so no src mutation could red `refuse` without `unseated`); they are replaced by U2-gone, U3, V1, V2a, V2b, V3×3, V4, V5, V6, each falsifiable on its own.
 #   +6 gig-runs-once round 6g (review 5327331488), on fe5ffb3: drain_budget B2 narrowed to TRANSIENT read failures
 #      (-2 42501 cases, +1 network error); resume_unreadable (new file, +7) — U2 a PERMANENTLY unreadable resume
 #      (scope 42501, unseated agent 42501, outputs 42501, closed gig gone) terminates the gig: failed, named, no

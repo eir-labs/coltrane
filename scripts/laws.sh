@@ -29,7 +29,17 @@ cd "$(dirname "$0")/.."
 # stopped being true at Node 24), and two pure flag-string laws replaced it in this band. The nine
 # laws that need a real request moved to tests/security — a band may reach out, the root suite may
 # not — so they are counted there, by file, not here.
-EXPECTED_LAWS="${EXPECTED_LAWS:-4672}"
+EXPECTED_LAWS="${EXPECTED_LAWS:-4686}"
+#  +14 layout grants, round 10 (the non-author grade of bbc11ea) — the defects the round-9 set could not
+#      see. a_sibling_chair_never_flakes_the_diff_gate (3: the unguarded lstat in snapshotWorktree's walk and
+#      snapshotDirectory's, plus the control showing the twin collectIgnoreRules already has that guard),
+#      the_diff_gate_refuses_a_tree_it_cannot_vouch_for (5: the post-seat gateRead()'s refusal SHAPE and its
+#      pre-seat control, a removed .git, a .git replaced by a plain file, and the non-git-tree control),
+#      the_diff_gate_baseline_is_the_runs_not_the_chairs (6: the cross-chair .gitignore exploit and the
+#      within-chair control, the tracked-path rescue, the nested `<dir>/.git/` blind spot, and the two-law
+#      git-call census). SEVEN of the fourteen are RED at bbc11ea by design — this is a law-author round and
+#      the implementer's round makes them green. Resolved by running, not derived:
+#      "laws collected: 4686 (expected: 4672) in 476 files (expected: 473)".
 #  +22 layout grants, round 9 (the r7+r8 grade): an_open_git_never_blinds_the_diff_gate (8, new: N1 — skip-worktree,
 #      assume-unchanged, info/exclude, a committed change; the snapshot design), the_real_process_laws_run_in_ci (3, new,
 #      structural), a required-real law in each of 4 srt/binary files (+4), wiki #33 in the real layouts (+8), the
@@ -245,7 +255,7 @@ EXPECTED_LAWS="${EXPECTED_LAWS:-4672}"
 #       with the handler, the description does not. Its first draft could not fail — it forgave any
 #       token no tool anywhere declared, which is exactly what a renamed argument leaves behind.
 #       Sabotage said so (`current` -> `slug_current` stayed green); the exemption is gone.
-EXPECTED_FILES="${EXPECTED_FILES:-473}"   # merge: #553 layout-grants files + #559 tests/genome_writes_stay_in_root.test.ts (collected). + the thirty-one layout-grants law files (docs/specs/layout-grants.red-spec.json), + tests/every_skill_runs_its_fixtures.test.ts, + tests/node_floor_refuses.test.ts, + tests/spec_reside_drive.test.ts (#537), + tests/a_red_law_names_its_plant.test.ts (#551), + tests/sealed_inputs.test.ts, tests/fan_out.test.ts, tests/completions_seal.test.ts, tests/tier_ladder.test.ts, tests/amend_ladder.test.ts, tests/completions_reasoning_effort.test.ts, tests/bus.test.ts, tests/bus_chair.test.ts, tests/bus_terminal.test.ts, tests/bus_verbs.test.ts, tests/bus_commit.test.ts, tests/code_tools.test.ts, tests/gig_input_validated.test.ts, tests/seat_reads_recorded.test.ts, tests/claude_seat_reads.test.ts, tests/optional_declared_input.test.ts, tests/simulate_names_seats.test.ts
+EXPECTED_FILES="${EXPECTED_FILES:-476}"   # + the three layout-grants round-10 law files (a_sibling_chair_never_flakes_the_diff_gate, the_diff_gate_refuses_a_tree_it_cannot_vouch_for, the_diff_gate_baseline_is_the_runs_not_the_chairs). merge: #553 layout-grants files + #559 tests/genome_writes_stay_in_root.test.ts (collected). + the thirty-one layout-grants law files (docs/specs/layout-grants.red-spec.json), + tests/every_skill_runs_its_fixtures.test.ts, + tests/node_floor_refuses.test.ts, + tests/spec_reside_drive.test.ts (#537), + tests/a_red_law_names_its_plant.test.ts (#551), + tests/sealed_inputs.test.ts, tests/fan_out.test.ts, tests/completions_seal.test.ts, tests/tier_ladder.test.ts, tests/amend_ladder.test.ts, tests/completions_reasoning_effort.test.ts, tests/bus.test.ts, tests/bus_chair.test.ts, tests/bus_terminal.test.ts, tests/bus_verbs.test.ts, tests/bus_commit.test.ts, tests/code_tools.test.ts, tests/gig_input_validated.test.ts, tests/seat_reads_recorded.test.ts, tests/claude_seat_reads.test.ts, tests/optional_declared_input.test.ts, tests/simulate_names_seats.test.ts
 
 # THE OTHER BANDS. `vitest run` is ROOT-CONFIG ONLY — this repo's own workflow comments
 # record that four configs went unexecuted once for exactly that reason. So pinning only the

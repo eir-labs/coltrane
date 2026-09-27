@@ -4,10 +4,10 @@
 // and records one ledger entry with a deterministic genome_hash + a run_fingerprint
 // that carries model_version + (empty, v0) eval_scores — honestly un-tempered.
 import { lineageAdoption } from "./lineage_adoption.js";
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHash } from "node:crypto";
 import { performance } from "node:perf_hooks";
 import { execFileSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, openSync, closeSync, readSync, fstatSync } from "node:fs";
 import { join as joinPath, relative as relPath, isAbsolute as isAbsPath, sep as pathSep } from "node:path";
 import type { Standard, Agent, Chair } from "./composition.js";
 import { PRIMITIVE_OUTPUT_TYPE, CORE_TYPES } from "./core_types.js";
@@ -1094,6 +1094,65 @@ function gitInTree(tree_root: string, args: readonly string[]): string {
   return execFileSync("git", ["-C", tree_root, ...args]).toString();
 }
 
+/** How much of a file is held in memory at once while its blob sha is folded. */
+const BLOB_SHA_CHUNK_BYTES = 64 * 1024;
+
+/**
+ * A file's git blob sha, computed IN PROCESS from the file's own bytes.
+ *
+ * A blob sha is a pure function of those bytes — `SHA-1("blob " + <byte length> + "\0" + <contents>)`
+ * — so the engine, which already has the bytes, computes it itself instead of spawning
+ * `git hash-object` inside a tree it does not own. Same answer, one fewer subprocess, and the
+ * value no longer depends on anything outside the file being hashed.
+ *
+ * The answer this returns is `git hash-object --no-filters`: the bytes AS THEY ARE ON DISK. For a
+ * repository with no attributes and no filters configured that is also bare `git hash-object`'s
+ * answer — the equivalence is pinned over a corpus (empty, single byte, embedded NULs, CRLF,
+ * multi-chunk, no trailing newline, UTF-8 multibyte) in `tests/blob_sha_in_process.test.ts`,
+ * against real `git hash-object --no-filters` in a throwaway repo.
+ *
+ * `path` is resolved against `tree_root` when relative — the same resolution `git -C <tree_root>
+ * hash-object <path>` performs, which is relative to the named directory, not to the repository
+ * root. Symlinks are followed, as git follows them.
+ *
+ * THROWS, exactly where the subprocess used to fail, so every caller keeps its own handling: a
+ * file that is absent, unreadable, or not a regular file has no blob sha and never gets a
+ * plausible stand-in. A file whose length changes UNDER the read is refused for the same reason —
+ * a sha folded over a torn read is a wrong answer wearing a right answer's shape.
+ */
+export function blobShaOfFile(tree_root: string, path: string): string {
+  const abs = isAbsPath(path) ? path : joinPath(tree_root, path);
+  const fd = openSync(abs, "r");
+  try {
+    const stat = fstatSync(fd);
+    if (!stat.isFile()) {
+      throw new Error(`blob_sha_unhashable: ${abs} is not a regular file — it has no blob sha.`);
+    }
+    const size = stat.size;
+    const hash = createHash("sha1");
+    hash.update(Buffer.from(`blob ${size}\0`, "latin1"));
+    const chunk = Buffer.allocUnsafe(BLOB_SHA_CHUNK_BYTES);
+    let read = 0;
+    for (;;) {
+      const n = readSync(fd, chunk, 0, chunk.length, null);
+      if (n === 0) break;
+      read += n;
+      if (read > size) {
+        throw new Error(`blob_sha_unhashable: ${abs} grew while it was being hashed — nothing is stamped.`);
+      }
+      hash.update(chunk.subarray(0, n));
+    }
+    if (read !== size) {
+      throw new Error(
+        `blob_sha_unhashable: ${abs} is ${size} bytes by its own stat but only ${read} could be read — nothing is stamped.`,
+      );
+    }
+    return hash.digest("hex");
+  } finally {
+    closeSync(fd);
+  }
+}
+
 // The it/test titles a law blob declares, in file order — the `tests` the reviewer is handed instead
 // of a sentence about the law. Matches `it(...)`/`test(...)` (with any `.only`/`.skip`/… chain) taking
 // a string literal as its first argument; the leading \b keeps `it`/`test` from matching inside a
@@ -1150,8 +1209,9 @@ export function stampLawAddresses(
 }
 
 /**
- * Stamp each change's `blob_sha` (`git hash-object` of the file in `tree_root`, or the literal
- * `"deleted"` when the file is absent from the tree), `patch_sha256` (sha256 of `git diff <base> --
+ * Stamp each change's `blob_sha` (the git blob sha of the file's bytes in `tree_root`, computed
+ * in process by `blobShaOfFile`, or the literal `"deleted"` when the file is absent from the
+ * tree), `patch_sha256` (sha256 of `git diff <base> --
  * <path>` in `tree_root`) and `bytes` (that diff's length) from a supplied `{path, base}`.
  * REFUSALS: no `tree_root` → `tree_root_unknown`; a seat-supplied `blob_sha`/`patch_sha256`/`bytes`
  * that disagrees with git → `law_bytes_mismatch` naming the path and field.
@@ -1167,7 +1227,7 @@ export function stampChangeAddresses(
   }
   return changes.map((change) => {
     const blob_sha = existsSync(joinPath(tree_root, change.path))
-      ? gitInTree(tree_root, ["hash-object", change.path]).trim()
+      ? blobShaOfFile(tree_root, change.path)
       : "deleted";
     const diff = gitInTree(tree_root, ["diff", change.base, "--", change.path]);
     const patch_sha256 = sha256Hex(diff);
@@ -3177,14 +3237,14 @@ export async function runGig(
         if (ceiling !== undefined && primer_context > ceiling) {
           fork_fallback = "primer_too_large";
         } else {
-          // O4 — staleness is decided by BLOBS against the working tree, through the SAME gitInTree seam
-          // the law/change stampers use. A file git can no longer hash (removed since priming) is stale.
+          // O4 — staleness is decided by BLOBS against the working tree, through the SAME blob seam
+          // the change stamper uses. A file that can no longer be hashed (removed since priming) is stale.
           const files = Array.isArray(pd["files"]) ? (pd["files"] as Array<{ path: string; blob_sha: string }>) : [];
           const stale_paths = files
             .filter((f) => {
               if (deps.tree_root === undefined) return false;
               let current: string;
-              try { current = gitInTree(deps.tree_root, ["hash-object", f.path]).trim(); } catch { return true; }
+              try { current = blobShaOfFile(deps.tree_root, f.path); } catch { return true; }
               return current !== f.blob_sha;
             })
             .map((f) => f.path);
@@ -3507,7 +3567,7 @@ export async function runGig(
         // tree, so HEAD is the snapshot). A file the seat reads then edits is sealed at this pre-edit blob
         // (git rev-parse <snapshot>:<path>), and a carried file the seat never re-reads keeps its forked
         // blob — so a fork remembers exactly what the primer READ, not what it then DID. Best-effort: a
-        // tree that cannot be snapshotted leaves this undefined and the seal falls back to hash-object.
+        // tree that cannot be snapshotted leaves this undefined and the seal falls back to the at-seal blob.
         if (chair.prime && deps.tree_root !== undefined) {
           try {
             const created = gitInTree(deps.tree_root, ["stash", "create"]).trim();
@@ -4088,7 +4148,7 @@ export async function runGig(
     }
     // contract-seat-primer-v1 (O1/I2) — a PRIME chair seals a `seat-primer` record DERIVED by the
     // engine (never typed by the model): its own (gig, role) session, HEAD at seal, and the files its
-    // seat Read, each with the `git hash-object` blob in the tree at seal. The reads arrive through the
+    // seat Read, each with the file's blob sha in the tree at seal. The reads arrive through the
     // invoker's `seat_reads` event (captured above); the record is sealed HERE, through the same write
     // boundary a derived output crosses, so it enters this gig's store and any later fork can find it.
     if (chair.prime) {
@@ -4110,7 +4170,7 @@ export async function runGig(
       // so both spellings of the same file collapse to one key — I1), and DROP any path that resolves
       // OUTSIDE tree_root — it is not part of the area and must never be stored, above all not as an
       // absolute path escaping it (F1). With paths stored relative, the fork-time staleness hash
-      // (gitInTree hash-object) resolves them in the FORKING run's own checkout, so a primer sealed
+      // (blobShaOfFile) resolves them in the FORKING run's own checkout, so a primer sealed
       // under one checkout is fresh in another of the same content (O2). Without a tree_root there is no
       // anchor (and no git resolution downstream), so the raw path is kept unchanged.
       const toTreeRelative = (raw: string): string | undefined => {
@@ -4161,7 +4221,7 @@ export async function runGig(
             try { return gitInTree(deps.tree_root, ["rev-parse", `${primerStartSnapshot}:${path}`]).trim(); }
             catch { /* untracked at chair start — hash at seal below */ }
           }
-          try { return gitInTree(deps.tree_root, ["hash-object", path]).trim(); } catch { return ""; }
+          try { return blobShaOfFile(deps.tree_root, path); } catch { return ""; }
         }
         return forkedBlob.get(path) ?? "";
       };

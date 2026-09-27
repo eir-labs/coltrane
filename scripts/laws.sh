@@ -29,7 +29,66 @@ cd "$(dirname "$0")/.."
 # stopped being true at Node 24), and two pure flag-string laws replaced it in this band. The nine
 # laws that need a real request moved to tests/security — a band may reach out, the root suite may
 # not — so they are counted there, by file, not here.
-EXPECTED_LAWS="${EXPECTED_LAWS:-4310}"
+EXPECTED_LAWS="${EXPECTED_LAWS:-4336}"
+#   +3 blob_sha_refuses_rather_than_seals (new file) — the three refusals of `blobShaOfFile`, which
+#      had no law that could red them. Measured on the grade: with BOTH mid-read length refusals
+#      deleted, all 21 blob laws stayed green; with the `!stat.isFile()` refusal deleted, all 21
+#      stayed green — B7's only non-regular file was a DIRECTORY and its `/blob_sha_unhashable|EISDIR/`
+#      alternation was satisfied by the EISDIR `readSync` raises on a directory fd whether the guard
+#      existed or not. R1/R2 inject the size (`fstatSync` mocked to under- or over-report ONE call,
+#      passthrough otherwise) rather than racing a growing file: the grade's race returned 9 clean /
+#      5 refusals / 0 torn over 14 attempts, which proves the guard fires and would make a flaky law.
+#      R3 drives /dev/null — a FIFO blocks in `open` and a unix socket cannot be opened at all, while
+#      a character device opens, and with the guard deleted returns git's EMPTY BLOB: a plausible
+#      stand-in sealed as an address. Plants, each observed red then reverted: delete the `read > size`
+#      throw reds R1; delete the `read !== size` throw reds R2; delete both reds R1+R2 and nothing
+#      else; delete the `!stat.isFile()` throw reds R3 — and now B7 too, which was tightened to the
+#      helper's own refusal in the same commit.
+#   +2 blob_sha_in_process, closing the same grade — B9: the B8 equivalence is conditional on the
+#      SHA-1 OBJECT FORMAT, not just on "no attributes and no filters"; a repository created with
+#      `--object-format=sha256` has neither and still disagrees (git 64 hex, the arithmetic 40), so
+#      the precondition is a law and not a sentence. B10: a path beginning with `-` is a path, never
+#      an option — the subprocess this replaced passed `change.path` with no `--` separator. Plants:
+#      `createHash("sha1")` -> `"sha256"` reds 14 of 16 (B9 among them); putting the old
+#      `execFileSync(... "hash-object", path)` back at the top of the helper reds 3 — B7, B9, B10.
+#   +7 blob_sha_is_the_git_stored_blob (new file) — what the sealed `blob_sha` MEANS, settled from the
+#      record rather than adjudicated: the content GIT STORES for a path, not the bytes that happen to
+#      be on disk. The two coincide on a plain checkout and part on a converting one, so something had
+#      to say which is sealed. Four witnesses already in the tree say git-stored: the siblings on the
+#      same record (`base` a commit; `patch_sha256`/`bytes` from `git diff`, which speaks git's terms);
+#      the same field name on a LawAddress, stamped from `git rev-parse <commit>:<path>`; the two
+#      shipped readers (change-verifier step 2b recomputes it with bare `git hash-object <path>` and
+#      FAILS the verdict on a difference, red-law-reviewer step 4 with `git rev-parse <commit>:<path>`);
+#      and `law_bytes_mismatch`, calibrated against exactly what those recipes tell a seat to compute.
+#      S1 pins the change-verifier's join; S2 that the change stamper and the law stamper name one
+#      object for one content; S3 that the value RESOLVES (`git cat-file blob`) — O5 in address form;
+#      S4 that an honest seat is accepted and a liar still refused; S5 that blob_sha and patch_sha256
+#      do not speak different vocabularies (an empty diff from base means base's own blob); S6 that the
+#      primer's two blob producers agree, so a fork cannot read a false stale; S7 (structural) that the
+#      two reader methods keep naming a git-stored comparand, so the engine's half and the seats' half
+#      cannot drift apart in silence. Plants, each observed red then reverted: `rev-parse <commit>`
+#      without `:<path>` reds 2; dropping the header word, dropping the header NUL, or an off-by-one
+#      length reds 5 each; deleting `git hash-object <path>` from the change-verifier's method reds S7.
+#      A chunk-loop plant leaves all 7 GREEN — every file here is under one chunk, and that plant is
+#      blob_sha_in_process's job. Said in the file too, so the coverage is not overread.
+#  +14 blob_sha_in_process (new file; 16 with the +2 above) — the engine computes a git blob sha from the file's own bytes
+#      instead of spawning `git hash-object` inside a seat's working tree. An EQUIVALENCE PROOF, not a
+#      feature: B1 drives real `git hash-object --no-filters` over a seven-entry corpus (empty, one
+#      byte, embedded NULs, CRLF, 5 MiB across ~80 chunks, no trailing newline, multibyte UTF-8) in a
+#      throwaway repo the law creates; B8 drives the BARE form over the same corpus, which is what
+#      makes the swap invisible to every caller on a plain SHA-1 repository. Plus B2 (the corpus covers what
+#      it claims), B3 (the well-known empty blob), B4/B5 (a relative path resolves against tree_root,
+#      the way `git -C` resolves it; two same-named files one level apart disagree), B6 (a symlink is
+#      followed, as git follows it) and B7 (absent / not-a-regular-file THROWS where git failed —
+#      never a plausible stand-in). Sabotage, RE-MEASURED over this file (the first numbers here said
+#      9 and 9; they predated B4/B5/B6, which also compare against real git and also red, and a wrong
+#      count in the script whose whole job is counts is the defect it exists to prevent): dropping the
+#      header NUL reds 12 of the 14 this entry adds — every B1, plus B3, B4, B5, B6, B8, leaving only
+#      B2 and B7; an off-by-one length reds the same 12; stopping after the first chunk reds 2 (B1
+#      large.bin and B8, and nothing else — which is what a multi-chunk corpus entry is for). At HEAD
+#      the same NUL plant reds 14 of 16 here (B9 and B10 compare against git too) and 22 suite-wide:
+#      +5 in blob_sha_is_the_git_stored_blob, +1 each in spec_records_stamping, spec_seat_primer and
+#      spec_seat_primer_paths_relative — the three call sites, which is the reach being claimed.
 #  merge of main (#556 + #558: 4249 in 439) into #559 (containment: 4269 in 438), both from 4208 in 437:
 #  4249 + 61 = 4310 laws, 439 + 1 = 440 files, read from the run.
 #  +21 genome_writes_stay_in_root, the two survivors of #559's first grade: 12 laws give every site a value that
@@ -207,7 +266,7 @@ EXPECTED_LAWS="${EXPECTED_LAWS:-4310}"
 #       with the handler, the description does not. Its first draft could not fail — it forgave any
 #       token no tool anywhere declared, which is exactly what a renamed argument leaves behind.
 #       Sabotage said so (`current` -> `slug_current` stayed green); the exemption is gone.
-EXPECTED_FILES="${EXPECTED_FILES:-440}"   # + tests/genome_writes_stay_in_root.test.ts, + tests/skill_runs_on_exec_path.test.ts, + tests/node_floor_where_skills_run.test.ts, + tests/bus_not_hosted.test.ts, + tests/every_skill_runs_its_fixtures.test.ts, + tests/node_floor_refuses.test.ts, + tests/spec_reside_drive.test.ts (#537), + tests/a_red_law_names_its_plant.test.ts (#551), + tests/sealed_inputs.test.ts, tests/fan_out.test.ts, tests/completions_seal.test.ts, tests/tier_ladder.test.ts, tests/amend_ladder.test.ts, tests/completions_reasoning_effort.test.ts, tests/bus.test.ts, tests/bus_chair.test.ts, tests/bus_terminal.test.ts, tests/bus_verbs.test.ts, tests/bus_commit.test.ts, tests/code_tools.test.ts, tests/gig_input_validated.test.ts, tests/seat_reads_recorded.test.ts, tests/claude_seat_reads.test.ts, tests/optional_declared_input.test.ts, tests/simulate_names_seats.test.ts
+EXPECTED_FILES="${EXPECTED_FILES:-443}"   # + tests/blob_sha_refuses_rather_than_seals.test.ts, + tests/blob_sha_is_the_git_stored_blob.test.ts, + tests/blob_sha_in_process.test.ts, + tests/genome_writes_stay_in_root.test.ts, + tests/skill_runs_on_exec_path.test.ts, + tests/node_floor_where_skills_run.test.ts, + tests/bus_not_hosted.test.ts, + tests/every_skill_runs_its_fixtures.test.ts, + tests/node_floor_refuses.test.ts, + tests/spec_reside_drive.test.ts (#537), + tests/a_red_law_names_its_plant.test.ts (#551), + tests/sealed_inputs.test.ts, tests/fan_out.test.ts, tests/completions_seal.test.ts, tests/tier_ladder.test.ts, tests/amend_ladder.test.ts, tests/completions_reasoning_effort.test.ts, tests/bus.test.ts, tests/bus_chair.test.ts, tests/bus_terminal.test.ts, tests/bus_verbs.test.ts, tests/bus_commit.test.ts, tests/code_tools.test.ts, tests/gig_input_validated.test.ts, tests/seat_reads_recorded.test.ts, tests/claude_seat_reads.test.ts, tests/optional_declared_input.test.ts, tests/simulate_names_seats.test.ts
 
 # THE OTHER BANDS. `vitest run` is ROOT-CONFIG ONLY — this repo's own workflow comments
 # record that four configs went unexecuted once for exactly that reason. So pinning only the

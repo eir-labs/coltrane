@@ -1090,8 +1090,79 @@ export function workingModel(outputByModel: ReadonlyMap<string, number>): string
 type LawAddress = { path: string; commit: string; blob_sha?: string; tests?: string[] };
 type ChangeAddress = { path: string; base: string; blob_sha?: string; patch_sha256?: string; bytes?: number };
 
+// ── ONE CONSTRUCTION SITE FOR EVERY GIT READ ────────────────────────────────────────────────────
+// `tree_root` is a directory the engine reads but does not own: a seat's checkout, a drained
+// workspace, a contributor's laptop. When git answers a read there it consults, besides the objects
+// the question is about, settings that live OUTSIDE the question — some belonging to the machine
+// and the account the engine happens to be running under, some belonging to the directory being
+// read. So the same objects can produce two answers on two hosts, and the same host can produce a
+// different answer tomorrow because something under it changed. A sealed record must not depend on
+// any of that: `blob_sha`, `patch_sha256` and `bytes` are claims about git's objects, and a claim
+// that moves with its surroundings is not a claim.
+//
+// `gitInvocation` is where the engine's ONE invocation shape is built — the environment pinned so
+// the answer cannot vary by host, and the per-invocation settings pinned so it cannot vary by
+// directory. `gitInTree` is its only caller and the only place in this file that spawns git, so a
+// read added here later is pinned by existing rather than by remembering. Held by
+// `tests/git_invocation_pinned.test.ts`.
+//
+// Every pin names git's own default, so on an ordinary checkout not one value moves: what a read
+// returns is what plain `git` returns, which is what keeps `blob_sha` naming the content git stores
+// (spec.coltrane.blob-sha-contract) rather than something this seam invented.
+
+/** Pinned environment: the host and the account contribute nothing to a read's answer. */
+const GIT_PINNED_ENV: Readonly<Record<string, string>> = {
+  GIT_CONFIG_GLOBAL: "/dev/null",
+  GIT_CONFIG_SYSTEM: "/dev/null",
+  GIT_CONFIG_NOSYSTEM: "1",
+  GIT_ATTR_NOSYSTEM: "1",
+  // A snapshot is a commit object, and a commit object needs an identity. With the account's own
+  // settings pinned away, git would otherwise guess one from the host's user database — which
+  // differs per machine and is absent entirely in a bare container. Stated, so the snapshot is
+  // written the same way everywhere and never fails for want of a name.
+  GIT_AUTHOR_NAME: "coltrane",
+  GIT_AUTHOR_EMAIL: "coltrane@invalid",
+  GIT_COMMITTER_NAME: "coltrane",
+  GIT_COMMITTER_EMAIL: "coltrane@invalid",
+};
+
+/** Pinned on EVERY invocation, ahead of the subcommand. */
+const GIT_PINNED_SETTINGS: readonly string[] = [
+  "-c", "core.fsmonitor=",
+  "-c", "core.hooksPath=/dev/null",
+  "-c", "core.attributesFile=/dev/null",
+];
+
+/**
+ * Pinned on ONE subcommand, where the general pins above have no equivalent: `diff` is asked for
+ * git's own rendering of the objects, not for some other rendering of them, because the bytes it
+ * emits are folded straight into a sealed `patch_sha256`.
+ */
+const GIT_SUBCOMMAND_PINS: ReadonlyMap<string, readonly string[]> = new Map([
+  ["diff", ["--no-textconv", "--no-ext-diff"] as readonly string[]],
+]);
+
+/** The exact spawn a git read in `tree_root` is made of — argv and environment together. */
+export type GitInvocation = { readonly file: "git"; readonly argv: readonly string[]; readonly env: NodeJS.ProcessEnv };
+
+/** Build the pinned invocation for `git <args>` in `tree_root`. The caller's `args` survive in order. */
+export function gitInvocation(tree_root: string, args: readonly string[]): GitInvocation {
+  const [subcommand, ...rest] = args;
+  return {
+    file: "git",
+    argv: [
+      "-C", tree_root,
+      ...GIT_PINNED_SETTINGS,
+      ...(subcommand === undefined ? [] : [subcommand, ...(GIT_SUBCOMMAND_PINS.get(subcommand) ?? [])]),
+      ...rest,
+    ],
+    env: { ...process.env, ...GIT_PINNED_ENV },
+  };
+}
+
 function gitInTree(tree_root: string, args: readonly string[]): string {
-  return execFileSync("git", ["-C", tree_root, ...args]).toString();
+  const { file, argv, env } = gitInvocation(tree_root, args);
+  return execFileSync(file, [...argv], { env }).toString();
 }
 
 /** How much of a file is held in memory at once while its blob sha is folded. */

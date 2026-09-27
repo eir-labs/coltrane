@@ -29,7 +29,18 @@ cd "$(dirname "$0")/.."
 # stopped being true at Node 24), and two pure flag-string laws replaced it in this band. The nine
 # laws that need a real request moved to tests/security — a band may reach out, the root suite may
 # not — so they are counted there, by file, not here.
-EXPECTED_LAWS="${EXPECTED_LAWS:-4310}"
+EXPECTED_LAWS="${EXPECTED_LAWS:-4324}"
+#  +14 blob_sha_in_process (new file) — the engine computes a git blob sha from the file's own bytes
+#      instead of spawning `git hash-object` inside a seat's working tree. An EQUIVALENCE PROOF, not a
+#      feature: B1 drives real `git hash-object --no-filters` over a seven-entry corpus (empty, one
+#      byte, embedded NULs, CRLF, 5 MiB across ~80 chunks, no trailing newline, multibyte UTF-8) in a
+#      throwaway repo the law creates; B8 drives the BARE form over the same corpus, which is what
+#      makes the swap invisible to every caller on a plain repository. Plus B2 (the corpus covers what
+#      it claims), B3 (the well-known empty blob), B4/B5 (a relative path resolves against tree_root,
+#      the way `git -C` resolves it; two same-named files one level apart disagree), B6 (a symlink is
+#      followed, as git follows it) and B7 (absent / not-a-regular-file THROWS where git failed —
+#      never a plausible stand-in). Sabotage: dropping the header NUL reds 9, stopping after the first
+#      chunk reds 2 (large.bin and B8), an off-by-one length reds 9.
 #  merge of main (#556 + #558: 4249 in 439) into #559 (containment: 4269 in 438), both from 4208 in 437:
 #  4249 + 61 = 4310 laws, 439 + 1 = 440 files, read from the run.
 #  +21 genome_writes_stay_in_root, the two survivors of #559's first grade: 12 laws give every site a value that
@@ -207,7 +218,7 @@ EXPECTED_LAWS="${EXPECTED_LAWS:-4310}"
 #       with the handler, the description does not. Its first draft could not fail — it forgave any
 #       token no tool anywhere declared, which is exactly what a renamed argument leaves behind.
 #       Sabotage said so (`current` -> `slug_current` stayed green); the exemption is gone.
-EXPECTED_FILES="${EXPECTED_FILES:-440}"   # + tests/genome_writes_stay_in_root.test.ts, + tests/skill_runs_on_exec_path.test.ts, + tests/node_floor_where_skills_run.test.ts, + tests/bus_not_hosted.test.ts, + tests/every_skill_runs_its_fixtures.test.ts, + tests/node_floor_refuses.test.ts, + tests/spec_reside_drive.test.ts (#537), + tests/a_red_law_names_its_plant.test.ts (#551), + tests/sealed_inputs.test.ts, tests/fan_out.test.ts, tests/completions_seal.test.ts, tests/tier_ladder.test.ts, tests/amend_ladder.test.ts, tests/completions_reasoning_effort.test.ts, tests/bus.test.ts, tests/bus_chair.test.ts, tests/bus_terminal.test.ts, tests/bus_verbs.test.ts, tests/bus_commit.test.ts, tests/code_tools.test.ts, tests/gig_input_validated.test.ts, tests/seat_reads_recorded.test.ts, tests/claude_seat_reads.test.ts, tests/optional_declared_input.test.ts, tests/simulate_names_seats.test.ts
+EXPECTED_FILES="${EXPECTED_FILES:-441}"   # + tests/blob_sha_in_process.test.ts, + tests/genome_writes_stay_in_root.test.ts, + tests/skill_runs_on_exec_path.test.ts, + tests/node_floor_where_skills_run.test.ts, + tests/bus_not_hosted.test.ts, + tests/every_skill_runs_its_fixtures.test.ts, + tests/node_floor_refuses.test.ts, + tests/spec_reside_drive.test.ts (#537), + tests/a_red_law_names_its_plant.test.ts (#551), + tests/sealed_inputs.test.ts, tests/fan_out.test.ts, tests/completions_seal.test.ts, tests/tier_ladder.test.ts, tests/amend_ladder.test.ts, tests/completions_reasoning_effort.test.ts, tests/bus.test.ts, tests/bus_chair.test.ts, tests/bus_terminal.test.ts, tests/bus_verbs.test.ts, tests/bus_commit.test.ts, tests/code_tools.test.ts, tests/gig_input_validated.test.ts, tests/seat_reads_recorded.test.ts, tests/claude_seat_reads.test.ts, tests/optional_declared_input.test.ts, tests/simulate_names_seats.test.ts
 
 # THE OTHER BANDS. `vitest run` is ROOT-CONFIG ONLY — this repo's own workflow comments
 # record that four configs went unexecuted once for exactly that reason. So pinning only the

@@ -51,7 +51,11 @@ cd "$(dirname "$0")/.."
 #       branch read ten times the headroom it needs. All five are now pinned.
 #       A DECREASE is the honest direction here: the laws that went away were laws about definitions
 #       that no longer exist, not coverage that was dropped.
-EXPECTED_LAWS="${EXPECTED_LAWS:-4365}"
+#   +21 the pr-review trio (pr-review-v1): the genome behavioral floor is data-driven over agents/,
+#       so pr-surveyor, pr-dimension-reviewer and review-adjudicator each add the 7 floor laws every
+#       genome agent answers (method shape, identity, owed constraint families, a real grant, a turn
+#       cap, grant/code_tool_access agreement). No new test FILE, so EXPECTED_FILES is unchanged.
+EXPECTED_LAWS="${EXPECTED_LAWS:-4386}"
 #   +3 blob_sha_refuses_rather_than_seals (new file) — the three refusals of `blobShaOfFile`, which
 #      had no law that could red them. Measured on the grade: with BOTH mid-read length refusals
 #      deleted, all 21 blob laws stayed green; with the `!stat.isFile()` refusal deleted, all 21

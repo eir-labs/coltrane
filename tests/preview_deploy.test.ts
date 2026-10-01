@@ -42,7 +42,7 @@ describe("preview-deploy: the arrangement loads without error", () => {
     for (const t of ["preview-deployment", "deploy-verdict", "branch-state"]) {
       expect(typeSlugs.has(t), `domain type ${t} missing`).toBe(true);
     }
-    for (const a of ["deploy-scout", "deploy-agent"]) {
+    for (const a of ["john", "deploy-agent"]) {
       expect(genome.agents.has(a), `agent ${a} missing`).toBe(true);
     }
     for (const s of ["preview-deploy-v1", "promote-v1"]) {
@@ -52,10 +52,22 @@ describe("preview-deploy: the arrangement loads without error", () => {
     expect(genome.venues.has("ci-deploy-room-v1"), "venue missing").toBe(true);
   });
 
+  // The sensing seat is john, the shared exhaustive-read seat, and the 24-turn cap deploy-scout used
+  // to carry on itself now rides the CHAIR (turn_budget, chair > agent). This has to be ASSERTED, not
+  // assumed: john's own max_tool_calls is 260, so a chair that silently failed to carry the cap would
+  // not fail loudly — it would quietly hand a narrow branch read ten times the headroom it needs.
+  it("sense-branch seats john under deploy-scout's own 24-turn cap, declared on the chair", () => {
+    const std = genome.standards.get("preview-deploy-v1")!;
+    const chair = std.phases.flatMap((p) => p.chairs).find((c) => c.role === "sense-branch")!;
+    expect(chair, "sense-branch chair missing").toBeDefined();
+    expect(chair.agent_slug, "the sensing seat is john").toBe("john");
+    expect(chair.turn_budget, "the cap rides the chair, not the player").toBe(24);
+  });
+
   it("no load error touches any preview-deploy artifact", () => {
     const mine = new Set([
       "preview-deployment", "deploy-verdict", "branch-state",
-      "deploy-scout", "deploy-agent", "vercel-api",
+      "john", "deploy-agent", "vercel-api",
       "preview-deploy-v1", "promote-v1", "software-delivery-v2", "ci-deploy-room-v1",
     ]);
     const touching = genome.load_errors.filter(
@@ -150,13 +162,13 @@ describe("preview-deploy: the sealed types validate and enforce their contract",
     const store = createOutputStore(reg);
     const ok = store.write({
       core_type: "Signal", domain_type: "branch-state", domain: "preview-deploy",
-      gig_id: "g-bs", agent_slug: "deploy-scout", primitive: "SENSE",
+      gig_id: "g-bs", agent_slug: "john", primitive: "SENSE",
       data: { source: "git://HEAD", branch: "feat/x", commit_sha: "9fceb02", project_id: "prj_1" },
     });
     expect(ok.domain_type).toBe("branch-state");
     expect(() => store.write({
       core_type: "Signal", domain_type: "branch-state", domain: "preview-deploy",
-      gig_id: "g-bs2", agent_slug: "deploy-scout", primitive: "SENSE",
+      gig_id: "g-bs2", agent_slug: "john", primitive: "SENSE",
       data: { source: "git://HEAD", branch: "feat/x" }, // commit_sha dropped
     })).toThrow(OutputStoreError);
   });

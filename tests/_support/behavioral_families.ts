@@ -69,7 +69,6 @@ export const EXTERNAL_SUBSTRATE: Record<string, string> = {
   // than the agent files carrying those constraints voluntarily. Their grants are disjoint by design
   // — neither can reach the other's substrate.
   "lineage-scout-external": "web (formal-lineage corpora: papers, precedent, canonical texts)",
-  "lineage-scout-internal": "filesystem (the genome and working tree)",
   // The default genome's reading seat: the only one of the three named seats that holds a
   // grant at all, and the reason it holds one is that its substrate is outside the run.
   // Declared here so the floor test ENFORCES retrieval discipline + a real grant on it,
@@ -80,7 +79,6 @@ export const EXTERNAL_SUBSTRATE: Record<string, string> = {
   // working tree's git refs; the deploy seat's substrate is the Vercel REST API. Declaring
   // both here makes the floor ENFORCE retrieval discipline + a real grant on each, rather
   // than the agent files carrying those constraints voluntarily.
-  "deploy-scout": "filesystem (the working tree's git refs)",
   "deploy-agent": "Vercel REST API (api.vercel.com)",
   // The software-change-pr publish seat: its substrate is git and GitHub — the branch it
   // pushes and the PR it opens, every fact it seals (branch, commit sha, PR url and number)

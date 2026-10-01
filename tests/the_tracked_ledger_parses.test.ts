@@ -24,17 +24,28 @@
 // rows without leaving a parse error". A clean report means no line was unreadable. It does not mean
 // no row is missing, and no law here claims otherwise.
 //
-// ASSERTION DIRECTION DECIDES THE SUBJECT'S WIDTH, and this file gets it wrong twice before it gets it
+// MATCH THE MEASUREMENT'S SCOPE TO THE CLAIM'S SCOPE. This file gets it wrong twice before it gets it
 // right, so the rule is written here rather than learned again:
 //
-//   a POSITIVE assertion must be as NARROW as the claim  — "it says X" over a whole payload passes if
-//                                                           ANY field anywhere happens to say X
-//   a NEGATIVE assertion may be as WIDE as you can reach — "it never says X" over a whole payload is
-//                                                           STRICTER than over one field, not looser
+//   a POSITIVE claim needs an EXACT SUBJECT         — "it says X" measured over a whole payload passes if
+//                                                     ANY field anywhere happens to say X
+//   a UNIVERSAL NEGATIVE needs EXHAUSTIVE COVERAGE  — "it never says X" measured over a whole payload is
+//                                                     STRICTER than over one field, not looser
+//
+// Stated as direction ("positives narrow, negatives wide") it reads as a rule about assertions. It is
+// really one rule about scope, and that is why direction matters at all: "does" and "can never" make
+// different demands on WHERE YOU LOOK. The symmetric failure is real and was measured — a universal
+// negative ("this query can never match anything") asserted from ONE backing is the same error with the
+// width on the wrong side.
 //
 // So the positives below read `counts_complete_basis`, the one field that carries the claim, and the
 // negatives deliberately stringify the ENTIRE response. The width of the negatives is not an oversight
 // and must not be "tidied" to the field reader — that would weaken them.
+//
+// Six measurement errors produced this rule, across two sessions reviewing each other, and every one was
+// a claim whose scope did not match its measurement: a loader read and "dispatchable" claimed, in-memory
+// validation read and "the ledger is checked" claimed, a payload read and "the field says" claimed, a
+// comment read and "the behaviour" claimed, one backing read and "the verb" claimed.
 import { describe, it, expect } from "vitest";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";

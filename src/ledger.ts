@@ -179,8 +179,19 @@ export interface ChairSpendLedgerEntry extends LedgerEntryBase {
   kind: "chair_spend";
   /** The gig this chair ran under. Shared with the gig row so `query({gig_id})` reaches both. */
   gig_id: string;
-  /** WHICH seat spent — the chair's role. */
+  /** WHICH seat spent — the chair's role. A position in a STANDARD, which is editable. */
   role: string;
+  /**
+   * WHO spent — the slug of the agent actually seated in that chair.
+   *
+   * Recorded because `role` alone is not an attribution: a role is a position in a standard, and a
+   * standard can be re-seated, renamed or deleted, at which point every row naming only that role
+   * becomes unattributable and the spend can no longer be joined to an agent. The engine has the
+   * answer at the write site (src/runtime.ts uses `agent.slug` nine lines below the append), so not
+   * recording it was a loss of information the run already held. Held by
+   * tests/chair_spend_names_its_agent.test.ts.
+   */
+  agent_slug: string;
   /** The phase the seat sat in. */
   phase: string;
   /** 1 on a first run; the amend re-invocation's round otherwise. Distinguishes a seat's repeated
@@ -371,6 +382,14 @@ export function validateEntry(entry: LedgerEntry): void {
     // reproducibility identity, so the gig-identity rejection below applies to it too.
     if (!isNonEmptyString(row["gig_id"])) throw new LedgerError("chair_spend entry requires gig_id");
     if (!isNonEmptyString(row["role"])) throw new LedgerError("chair_spend entry requires role");
+    // A role without an agent is spend nobody can be charged for once the standard moves. Demanded
+    // as NON-EMPTY so "absent" cannot be spelled as "present but blank".
+    if (!isNonEmptyString(row["agent_slug"])) {
+      throw new LedgerError(
+        "chair_spend entry requires agent_slug — a role is a position in an editable standard, so a " +
+          "row naming only a role cannot be attributed to an agent once that standard changes.",
+      );
+    }
     if (!isNonEmptyString(row["phase"])) throw new LedgerError("chair_spend entry requires phase");
     if (typeof row["round"] !== "number") throw new LedgerError("chair_spend entry requires round (a number)");
     if (typeof row["captured"] !== "boolean") {

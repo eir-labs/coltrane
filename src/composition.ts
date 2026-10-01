@@ -1,5 +1,8 @@
 import type { Primitive } from "./core_types.js";
 import { PRIMITIVE_OUTPUT_TYPE, CORE_TYPES } from "./core_types.js";
+// The ONE oracle for what a seat may reach. chart.ts imports this module TYPE-only, so there is no
+// runtime cycle, and the compose refusal below cannot drift from the set the spawn advertises.
+import { seatEffectiveTools } from "./chart.js";
 import type { ModelTier, Depth } from "./pricing.js";
 import { AgentSchema, type AgentInput, type AgentOutput, type StandardInput, type StandardOutput } from "./genome_schema.js";
 
@@ -29,6 +32,14 @@ export type Agent = AgentOutput;
 export interface Chair {
   role: string;
   agent_slug: string;
+  /**
+   * A CEILING on what the agent seated here may reach — never a grant. The effective set is
+   * `agent.allowed_tools ∩ chair.allowed_tools ∩ venue.equipment.tools`, resolved by the one shared
+   * oracle `seatEffectiveTools` (src/chart.ts). Sibling of `output_contract`: #174 narrows what a
+   * chair SEALS, this narrows what it may TOUCH, so one agent seated in two chairs can hold two
+   * authorities. Absent = no narrowing. Mirrors ChairSchema.allowed_tools (src/genome_schema.ts).
+   */
+  allowed_tools?: readonly string[] | undefined;
   depends_on: readonly string[];
   input_contract: readonly string[];
   output_contract: readonly string[];
@@ -465,6 +476,28 @@ export function composeStandard(def: {
                 `may not feed an agent a type it never declared it consumes (the agent would be invoked on ` +
                 `an input outside its envelope and confabulate). Add "${fed}" to agent "${ag.slug}".input_types, ` +
                 `or remove it from this chair's input_contract.`,
+            );
+          }
+        }
+
+        // A CEILING THAT CAN REACH NOTHING IS A DEAD CHAIR — the same defect class as a venue whose
+        // equipment excludes a seated player's entire grant (composeChart R10), and as a tool grant
+        // with no provider: the standard would seat a player and hand it an empty hand, which reads
+        // as "confined" and behaves as "cannot work". Refused here, by name, rather than at minute
+        // nine of a run. Resolved through the ONE shared oracle, so this refusal and the spawn's
+        // advertised set cannot disagree.
+        //
+        // Only fires when the chair ACTUALLY names a ceiling AND the agent actually holds grants: a
+        // grant-less agent narrowed to nothing is not the chair's doing, and an absent ceiling is not
+        // a narrowing at all.
+        if (ch.allowed_tools !== undefined && (ag.allowed_tools ?? []).length > 0) {
+          if (seatEffectiveTools(ag, ch).length === 0) {
+            throw new CompositionError(
+              `standard ${def.slug}: chair "${ch.role}" narrows agent "${ag.slug}" to ` +
+                `[${ch.allowed_tools.join(", ")}], and none of those reach the agent's own grants ` +
+                `[${(ag.allowed_tools ?? []).join(", ")}] — a chair is a CEILING, never a grant, so this ` +
+                `seat could reach nothing at all. Name a tool the agent actually holds, or drop the ` +
+                `chair's allowed_tools to seat it with its full grant.`,
             );
           }
         }

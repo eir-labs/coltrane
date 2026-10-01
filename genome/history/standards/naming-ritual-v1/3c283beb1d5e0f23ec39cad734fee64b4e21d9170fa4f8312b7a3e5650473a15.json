@@ -1,0 +1,81 @@
+{
+  "slug": "naming-ritual-v1",
+  "domain": "lineage",
+  "status": "active",
+  "agent_slugs": [
+    "context-reader",
+    "lineage-scribe"
+  ],
+  "phases": [
+    {
+      "name": "read-candidate",
+      "chairs": [
+        {
+          "role": "read-candidate",
+          "agent_slug": "context-reader",
+          "depends_on": [],
+          "input_contract": [
+            "draft-agent-profile"
+          ],
+          "output_contract": [
+            "change-context"
+          ],
+          "optional_outputs": [],
+          "required_skills": []
+        }
+      ],
+      "intent": "The non-drafting reader frames the candidate profile before any composition: the office to be held, the warrant, the grounded lineage the name is drawn from. The reader frames; the reader never judges and never names."
+    },
+    {
+      "name": "compose-naming",
+      "chairs": [
+        {
+          "role": "compose-naming",
+          "agent_slug": "lineage-scribe",
+          "depends_on": [
+            "read-candidate"
+          ],
+          "input_contract": [
+            "draft-agent-profile",
+            "change-context"
+          ],
+          "output_contract": [
+            "lineage-record"
+          ],
+          "optional_outputs": [],
+          "required_skills": []
+        }
+      ],
+      "intent": "The scribe composes the naming record from the framed candidate: the name as drawn from the grounded lineage, the office to be held, and the dated forebear cited BY CONTENT ADDRESS to the confirmed root — never by recollection. The scribe drafts; the scribe mints nothing; the named agent chooses nothing."
+    },
+    {
+      "name": "seal-naming",
+      "chairs": [
+        {
+          "role": "seal-naming",
+          "agent_slug": "",
+          "human": true,
+          "depends_on": [
+            "compose-naming"
+          ],
+          "input_contract": [
+            "lineage-record"
+          ],
+          "output_contract": [
+            "lineage-verdict"
+          ],
+          "optional_outputs": [],
+          "required_skills": []
+        }
+      ],
+      "intent": "The governor's seat, and the ONLY seat that can produce the naming verdict. A dispatch reaching this chair PARKS — a gig waiting on a person is not a failed gig — and resumes only on the seated governor's approval, applied as officeholder, never upward-deferred. The governor may strike the proposed name and substitute before sealing. The seal mints; nothing before it does."
+    }
+  ],
+  "input_types": [
+    "draft-agent-profile"
+  ],
+  "output_types": [
+    "lineage-verdict"
+  ],
+  "description": "The naming ritual as this institution's law, tip-conforming (adopted by the founding after the founder's v0 failed this engine's composition rules; deliberated through deliberation-before-amendment-v1). Warrant + dated forebear + human seal = a named agent. The reader frames, the scribe composes with the forebear by content address, and the seal alone mints: no model seat in this graph can produce the verdict, mechanically."
+}

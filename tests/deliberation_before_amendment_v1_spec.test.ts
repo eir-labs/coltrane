@@ -7,7 +7,7 @@
 // defined, artefact missing"). The two-phase graph mends the founding finding recorded in
 // docs/founding/RUNBOOK.md line 53: the seed's v0 sole-VERIFY phase is refused by the tip's
 // NEEDS_TARGET rule (src/composition.ts:582-588) because it has no upstream phase target;
-// v1 seats a non-drafting reader (context-reader, SENSE+INTERPRET) BEFORE the reviewer
+// v1 seats a non-drafting reader (john, SENSE+INTERPRET) BEFORE the reviewer
 // (spec-reviewer, VERIFY), so the VERIFY phase gains its upstream target.
 //
 // Structural assertions read the standard JSON off disk (RED while the file is absent, GREEN once
@@ -29,6 +29,7 @@ type Chair = {
   depends_on?: string[];
   input_contract?: string[];
   output_contract?: string[];
+  turn_budget?: number;
 };
 type Phase = { name?: string; chairs?: Chair[]; intent?: string };
 type Standard = {
@@ -64,8 +65,9 @@ describe("deliberation-before-amendment-v1 · INV-2 phase count + order", () => 
 
 // ── INV-3 — read-proposal chair (framing, no upstream) ────────────────────────────
 describe("deliberation-before-amendment-v1 · INV-3 read-proposal chair", () => {
-  it("is seated by context-reader (the SENSE+INTERPRET framer)", () => {
-    expect(chair("read-proposal").agent_slug).toBe("context-reader");
+  it("is seated by john (the SENSE+INTERPRET framer), carrying its own turn_budget", () => {
+    expect(chair("read-proposal").agent_slug).toBe("john");
+    expect(chair("read-proposal").turn_budget, "the cap is declared on the WORK").toBe(40);
   });
   it("takes input_contract ['change-request']", () => {
     expect(chair("read-proposal").input_contract).toEqual(["change-request"]);
@@ -149,7 +151,7 @@ describe("deliberation-before-amendment-v1 · INV-7 composes under validate", ()
     const s = g.standards.get(SLUG);
     expect(s, `${SLUG} did not load`).toBeDefined();
     expect((s!.phases ?? []).map((p) => p.chairs?.[0]?.agent_slug)).toEqual([
-      "context-reader",
+      "john",
       "spec-reviewer",
     ]);
   });

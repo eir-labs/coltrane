@@ -40,7 +40,18 @@ cd "$(dirname "$0")/.."
 #       compose and venueEffectiveTools IS the same oracle with no chair, C4 a ceiling that reaches
 #       nothing is a dead chair refused at COMPOSE time, C5 the narrowed set reaches the INVOCATION.
 #       Two plants: cut the ctx wire -> 2 red; invert the ceiling into a grant -> 8 red.
-EXPECTED_LAWS="${EXPECTED_LAWS:-4381}"
+#   -17 one seat, many chairs: context-reader, deploy-scout and lineage-scout-internal are RETIRED into
+#       john, which they were capability-identical to (SENSE+INTERPRET, tier standard, code read, the
+#       identical [Read, Glob, Grep] grant). The genome behavioral floor is data-driven over agents/, so
+#       three fewer agents is 21 fewer floor laws; +4 new assertions on the five re-seated chairs pin
+#       that each carries the turn_budget the retired agent used to hold (chair > agent resolution).
+#       +1 (found in a non-author review): the FIFTH re-seated chair, preview-deploy-v1/sense-branch, was the
+#       one left unasserted. It matters because john carries max_tool_calls 260, so a chair that
+#       silently failed to carry deploy-scout's 24 would not fail loudly — it would hand a narrow
+#       branch read ten times the headroom it needs. All five are now pinned.
+#       A DECREASE is the honest direction here: the laws that went away were laws about definitions
+#       that no longer exist, not coverage that was dropped.
+EXPECTED_LAWS="${EXPECTED_LAWS:-4365}"
 #   +3 blob_sha_refuses_rather_than_seals (new file) — the three refusals of `blobShaOfFile`, which
 #      had no law that could red them. Measured on the grade: with BOTH mid-read length refusals
 #      deleted, all 21 blob laws stayed green; with the `!stat.isFile()` refusal deleted, all 21

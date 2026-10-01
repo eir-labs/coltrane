@@ -128,6 +128,16 @@ export const EXTERNAL_SUBSTRATE: Record<string, string> = {
   // design; the gate on publishing is the spec-review verdict, not the test run. Declared external
   // so the floor ENFORCES retrieval discipline + a real grant on it, exactly as for pr-publisher.
   "spec-publisher": "git + GitHub (gh CLI) — the branch it pushes and the RED-spec PR it opens",
+  // The pr-review-v1 seats. All three read a change that is NOT in the run's inputs — the working
+  // tree and its git refs — so every mechanism, caller, law name and line number any of them seals
+  // must come from a file read or a git call in the run, never from a recollection of the codebase.
+  // The adjudicator's substrate is wider still: it RUNS the sabotage a finding names (vitest, tsc),
+  // so its verdict is executed rather than argued. Declared here so the floor ENFORCES retrieval
+  // discipline + a real grant on each, rather than the agent files carrying those constraints
+  // voluntarily — the same reason defect-investigator and change-verifier are declared.
+  "pr-surveyor": "filesystem + git (the working tree and the refs the change is measured between)",
+  "pr-dimension-reviewer": "filesystem + git (the slice of the working tree its dimension points at)",
+  "review-adjudicator": "filesystem + subprocess (the working tree, and the laws it runs to settle a finding)",
 };
 
 /** Agents that act through tools (grants required) even where retrieval isn't the job. */

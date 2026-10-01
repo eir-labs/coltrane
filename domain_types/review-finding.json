@@ -1,0 +1,72 @@
+{
+  "slug": "review-finding",
+  "version": 1,
+  "extends": "Judgment",
+  "domain": "software-change",
+  "status": "active",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "dimension": {
+        "type": "string",
+        "description": "Which defect class this seat was hunting. Carried so a finding can be traced to the seat that made it."
+      },
+      "findings": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "file": {
+              "type": "string"
+            },
+            "line": {
+              "type": "number"
+            },
+            "claim": {
+              "type": "string",
+              "description": "The defect in one sentence, stated as something that could be false."
+            },
+            "failure_scenario": {
+              "type": "string",
+              "description": "Concrete inputs or state, and the wrong output or silent pass that follows. Not a category."
+            },
+            "sabotage": {
+              "type": "string",
+              "description": "The exact cut that would prove it: what to delete or change, and which law should go red. 'None — nothing would go red' is itself the finding."
+            },
+            "severity": {
+              "type": "string",
+              "enum": [
+                "blocking",
+                "should-fix",
+                "question"
+              ]
+            }
+          }
+        }
+      },
+      "read": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Files this seat actually OPENED. What was pushed to it and never read is not evidence."
+      },
+      "not_checked": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "What this dimension could not check under its granted tools. An empty list is a claim that everything was checked."
+      }
+    }
+  },
+  "required_fields": [
+    "criteria",
+    "verdicts",
+    "reasoning_chain",
+    "dimension",
+    "findings",
+    "not_checked"
+  ]
+}

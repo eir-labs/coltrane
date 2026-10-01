@@ -70,7 +70,12 @@ cd "$(dirname "$0")/.."
 #       path that does not exist, so integrity() answers ok:true with a REAL path — which took the
 #       clean branch and claimed a line was looked for in a file never created. A drain that has never
 #       written a row then reads identically to a healthy one. P5 pins all three apart.
-EXPECTED_LAWS="${EXPECTED_LAWS:-4400}"
+#   +42 spec_coltrane_1_0 (new file) — the 1.0 RED spec. SIX executable, red today on absence of the
+#       mechanism; THIRTY-SIX it.todo, each a law without a seam yet (seat, gig-plan, planner office,
+#       residency, player store, lineage-keyed floor). RED BY DESIGN: the gate on this file landing is the
+#       spec-review verdict, not the suite. Counted here so the only red the suite reports is the laws
+#       themselves. docs/specs/coltrane-1.0.red-spec.md.
+EXPECTED_LAWS="${EXPECTED_LAWS:-4442}"
 #   +3 blob_sha_refuses_rather_than_seals (new file) — the three refusals of `blobShaOfFile`, which
 #      had no law that could red them. Measured on the grade: with BOTH mid-read length refusals
 #      deleted, all 21 blob laws stayed green; with the `!stat.isFile()` refusal deleted, all 21
@@ -314,7 +319,7 @@ EXPECTED_LAWS="${EXPECTED_LAWS:-4400}"
 #       behavioural and holds the other direction, that every pin names git's own default so nothing
 #       a seal records moves. Seven plants, each observed red and reverted; a no-op control stayed
 #       green first, and each plant's anchor was asserted to land before its run was believed.
-EXPECTED_FILES="${EXPECTED_FILES:-447}"   # + tests/the_tracked_ledger_parses.test.ts, + tests/chair_narrows_what_it_may_reach.test.ts, + tests/git_invocation_pinned.test.ts, + tests/chair_spend_names_its_agent.test.ts, + tests/blob_sha_refuses_rather_than_seals.test.ts, + tests/blob_sha_is_the_git_stored_blob.test.ts, + tests/blob_sha_in_process.test.ts, + tests/genome_writes_stay_in_root.test.ts, + tests/skill_runs_on_exec_path.test.ts, + tests/node_floor_where_skills_run.test.ts, + tests/bus_not_hosted.test.ts, + tests/every_skill_runs_its_fixtures.test.ts, + tests/node_floor_refuses.test.ts, + tests/spec_reside_drive.test.ts (#537), + tests/a_red_law_names_its_plant.test.ts (#551), + tests/sealed_inputs.test.ts, tests/fan_out.test.ts, tests/completions_seal.test.ts, tests/tier_ladder.test.ts, tests/amend_ladder.test.ts, tests/completions_reasoning_effort.test.ts, tests/bus.test.ts, tests/bus_chair.test.ts, tests/bus_terminal.test.ts, tests/bus_verbs.test.ts, tests/bus_commit.test.ts, tests/code_tools.test.ts, tests/gig_input_validated.test.ts, tests/seat_reads_recorded.test.ts, tests/claude_seat_reads.test.ts, tests/optional_declared_input.test.ts, tests/simulate_names_seats.test.ts
+EXPECTED_FILES="${EXPECTED_FILES:-448}"   # + tests/spec_coltrane_1_0.test.ts, + tests/the_tracked_ledger_parses.test.ts, + tests/chair_narrows_what_it_may_reach.test.ts, + tests/git_invocation_pinned.test.ts, + tests/chair_spend_names_its_agent.test.ts, + tests/blob_sha_refuses_rather_than_seals.test.ts, + tests/blob_sha_is_the_git_stored_blob.test.ts, + tests/blob_sha_in_process.test.ts, + tests/genome_writes_stay_in_root.test.ts, + tests/skill_runs_on_exec_path.test.ts, + tests/node_floor_where_skills_run.test.ts, + tests/bus_not_hosted.test.ts, + tests/every_skill_runs_its_fixtures.test.ts, + tests/node_floor_refuses.test.ts, + tests/spec_reside_drive.test.ts (#537), + tests/a_red_law_names_its_plant.test.ts (#551), + tests/sealed_inputs.test.ts, tests/fan_out.test.ts, tests/completions_seal.test.ts, tests/tier_ladder.test.ts, tests/amend_ladder.test.ts, tests/completions_reasoning_effort.test.ts, tests/bus.test.ts, tests/bus_chair.test.ts, tests/bus_terminal.test.ts, tests/bus_verbs.test.ts, tests/bus_commit.test.ts, tests/code_tools.test.ts, tests/gig_input_validated.test.ts, tests/seat_reads_recorded.test.ts, tests/claude_seat_reads.test.ts, tests/optional_declared_input.test.ts, tests/simulate_names_seats.test.ts
 
 # THE OTHER BANDS. `vitest run` is ROOT-CONFIG ONLY — this repo's own workflow comments
 # record that four configs went unexecuted once for exactly that reason. So pinning only the

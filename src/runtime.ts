@@ -38,6 +38,8 @@ import { producersSha,
   type ReuseStore, type ReuseEntry, type ReuseOutput, type RunIdentity, type PriorBudgetState,
 } from "./reuse.js";
 import type { OutputStore, OutputRecord, InputResolution, ShardStamp } from "./outputs.js";
+// The ONE oracle for what a seat may reach (agent ∩ chair ∩ venue) — never a re-inlined intersection.
+import { seatEffectiveTools } from "./chart.js";
 import { resolveSealedInputs } from "./sealed_inputs.js";
 import { expandFanOut, type FanOutInstance } from "./fan_out.js";
 import { checkGigConformance, type GigConformanceResult } from "./gig_conformance.js";
@@ -123,6 +125,16 @@ export interface AgentInvocationContext {
   // Task layer on this so the model is asked for exactly these types. Absent/empty (legacy
   // hand-rolled ctx) → the invoker falls back to the agent's full output_types.
   output_types?: readonly string[];
+  /**
+   * What THIS seat may reach: the agent's grants narrowed by its chair's ceiling and the room's
+   * equipment, computed by the one shared oracle `seatEffectiveTools` (src/chart.ts). The sibling of
+   * `output_types` above — #174 narrowed what a chair SEALS, this narrows what it may TOUCH, so one
+   * agent seated in two chairs can hold two different authorities in a single run.
+   *
+   * Absent (legacy hand-rolled ctx, or a seat whose chair declares no ceiling and sits in no room)
+   * → the invoker falls back to the agent's own `allowed_tools`, exactly as before.
+   */
+  allowed_tools?: readonly string[];
   skills?: readonly SkillRecord[];
   // #241 — the skill slugs this agent DECLARES that resolved to no package at all. Present
   // (possibly empty) whenever the runtime actually attempted resolution; ABSENT means no
@@ -3657,6 +3669,9 @@ export async function runGig(
             ? { hydration: { ...(p.chair.supplies ?? {}), ...(placedHydration ?? {}) } }
             : {}),
           output_types: output_specs.map((s) => s.domain_type), // #174 — the chair's promised subset
+          // The sibling of the line above: what this SEAT may reach, from the one shared oracle, so
+          // two chairs seating one agent carry two authorities. Ceiling only — never a grant.
+          allowed_tools: seatEffectiveTools(agent, chair, gigVenue),
           // #250 level 2 + #237 — the cancellation signal and the run's depth reach the invocation
           // itself, so an invoker can kill its child and shape what it asks the model for.
           ...(deps.signal ? { signal: deps.signal } : {}),

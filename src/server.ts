@@ -2203,7 +2203,33 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
           ? `counts are SHORT: ${damaged.join(" and ")} — every total below is computed over the rows that parsed. ` +
             `Note the output store's report also covers the refs graph, which feeds only \`refs\`; if the damage is ` +
             `confined there the other totals may in fact be whole.`
-          : `no unreadable line was found (ledger: ${ledger_integrity.entries} entries; output store: ` +
+          : // A CHECK NOT PERFORMED IS NOT A CHECK THAT PASSED. `ok` is true both when an artifact was read
+            // and found whole AND when there was no artifact to read: MemoryLedger returns ok:true with an
+            // EMPTY PATH by construction (src/ledger.ts) — honest about itself, and indistinguishable here.
+            // Saying "no unreadable line was found" on a memory-backed surface states a finding nobody
+            // looked for, which is a green that cannot go red. The empty path is the signal, so it is what
+            // this branches on. Held by tests/the_tracked_ledger_parses.test.ts (P4).
+            ledger_integrity.path === ""
+            ? `this ledger holds no artifact to check (in-memory; ${ledger_integrity.entries} entries this ` +
+              `process), so nothing is claimed about unreadable lines. Output store: ` +
+              `${outputs_integrity.scanned} jsonl file(s) scanned${outputs_integrity.ok ? "" : " — see its corruption report"}.`
+            // THIRD STATE, and the one that matters operationally. FileLedger.read() returns empty when the
+            // path does not exist, so integrity() answers ok:true with a REAL path and zero entries — which
+            // took the branch below and claimed a line had been looked for in a file that was never created.
+            // A drain that has never written a row then reports IDENTICALLY to a healthy one: a box that looks
+            // fine and has done nothing. Measured against a .coltrane/ledger.jsonl whose directory did not exist.
+            //
+            // NOTE, owed: this is the SECOND inference drawn off `path` as a sentinel (empty ⇒ no backing; set
+            // but missing ⇒ never written). LedgerIntegrityReport has no way to say "not applicable", so every
+            // consumer must re-derive applicability the way this one does, and the next consumer reproduces the
+            // bug with nothing to warn it. The type should carry an explicit state; that is a surface change and
+            // is recorded as owed rather than done here. The absent-file case IS the evidence it is a defect and
+            // not a preference — under an enumerated state it would have fallen out for free.
+            : !existsSync(ledger_integrity.path)
+              ? `the ledger artifact at ${ledger_integrity.path} DOES NOT EXIST — nothing has been written to it, ` +
+                `so no line was looked for and none is reported. This is not a clean ledger; it is an absent one. ` +
+                `Output store: ${outputs_integrity.scanned} jsonl file(s) scanned.`
+              : `no unreadable line was found (ledger: ${ledger_integrity.entries} entries; output store: ` +
             `${outputs_integrity.scanned} file(s) scanned). That is NOT proof the counts are complete — a jsonl ` +
             `truncated at a line boundary loses whole rows without leaving a parse error, and an in-memory ledger ` +
             `or a store with no persistDir has nothing to scan at all.`;

@@ -55,7 +55,22 @@ cd "$(dirname "$0")/.."
 #       so pr-surveyor, pr-dimension-reviewer and review-adjudicator each add the 7 floor laws every
 #       genome agent answers (method shape, identity, owed constraint families, a real grant, a turn
 #       cap, grant/code_tool_access agreement). No new test FILE, so EXPECTED_FILES is unchanged.
-EXPECTED_LAWS="${EXPECTED_LAWS:-4386}"
+#   +10 the_tracked_ledger_parses (new file) — the COMMITTED genome/ledger.jsonl becomes the SUBJECT of
+#       a law, not just the capability that reads it. The engine could already detect a torn ledger
+#       (FileLedger.read collects a LedgerCorruption per bad line, integrity() returns them, #255 wired
+#       system_health to surface it) and all of that is tested — against tmpdir FIXTURES. Nothing was
+#       pointed at the artifact that ships. P1 calls the engine's own integrity() on this repo's ledger
+#       and names any unreadable line; P2 states the scope (parse-validity, NOT completeness — a jsonl
+#       truncated at a line boundary is clean and short, as system_health itself says); P3 keeps a
+#       memory ledger's report distinguishable from a file one; P4 is the fix — system_health no longer
+#       says "no unreadable line was found" when it read NO artifact. Plants: a conflict marker -> 3 red
+#       with the line named, a bare `42` -> 3 red, a row with an undeclared kind -> 1 red (shape law
+#       only, correctly), removing the empty-path branch -> 2 red.
+#       +4 (found in a non-author review): THREE states, not two. FileLedger.read() returns empty for a
+#       path that does not exist, so integrity() answers ok:true with a REAL path — which took the
+#       clean branch and claimed a line was looked for in a file never created. A drain that has never
+#       written a row then reads identically to a healthy one. P5 pins all three apart.
+EXPECTED_LAWS="${EXPECTED_LAWS:-4400}"
 #   +3 blob_sha_refuses_rather_than_seals (new file) — the three refusals of `blobShaOfFile`, which
 #      had no law that could red them. Measured on the grade: with BOTH mid-read length refusals
 #      deleted, all 21 blob laws stayed green; with the `!stat.isFile()` refusal deleted, all 21
@@ -299,7 +314,7 @@ EXPECTED_LAWS="${EXPECTED_LAWS:-4386}"
 #       behavioural and holds the other direction, that every pin names git's own default so nothing
 #       a seal records moves. Seven plants, each observed red and reverted; a no-op control stayed
 #       green first, and each plant's anchor was asserted to land before its run was believed.
-EXPECTED_FILES="${EXPECTED_FILES:-446}"   # + tests/chair_narrows_what_it_may_reach.test.ts, + tests/git_invocation_pinned.test.ts, + tests/chair_spend_names_its_agent.test.ts, + tests/blob_sha_refuses_rather_than_seals.test.ts, + tests/blob_sha_is_the_git_stored_blob.test.ts, + tests/blob_sha_in_process.test.ts, + tests/genome_writes_stay_in_root.test.ts, + tests/skill_runs_on_exec_path.test.ts, + tests/node_floor_where_skills_run.test.ts, + tests/bus_not_hosted.test.ts, + tests/every_skill_runs_its_fixtures.test.ts, + tests/node_floor_refuses.test.ts, + tests/spec_reside_drive.test.ts (#537), + tests/a_red_law_names_its_plant.test.ts (#551), + tests/sealed_inputs.test.ts, tests/fan_out.test.ts, tests/completions_seal.test.ts, tests/tier_ladder.test.ts, tests/amend_ladder.test.ts, tests/completions_reasoning_effort.test.ts, tests/bus.test.ts, tests/bus_chair.test.ts, tests/bus_terminal.test.ts, tests/bus_verbs.test.ts, tests/bus_commit.test.ts, tests/code_tools.test.ts, tests/gig_input_validated.test.ts, tests/seat_reads_recorded.test.ts, tests/claude_seat_reads.test.ts, tests/optional_declared_input.test.ts, tests/simulate_names_seats.test.ts
+EXPECTED_FILES="${EXPECTED_FILES:-447}"   # + tests/the_tracked_ledger_parses.test.ts, + tests/chair_narrows_what_it_may_reach.test.ts, + tests/git_invocation_pinned.test.ts, + tests/chair_spend_names_its_agent.test.ts, + tests/blob_sha_refuses_rather_than_seals.test.ts, + tests/blob_sha_is_the_git_stored_blob.test.ts, + tests/blob_sha_in_process.test.ts, + tests/genome_writes_stay_in_root.test.ts, + tests/skill_runs_on_exec_path.test.ts, + tests/node_floor_where_skills_run.test.ts, + tests/bus_not_hosted.test.ts, + tests/every_skill_runs_its_fixtures.test.ts, + tests/node_floor_refuses.test.ts, + tests/spec_reside_drive.test.ts (#537), + tests/a_red_law_names_its_plant.test.ts (#551), + tests/sealed_inputs.test.ts, tests/fan_out.test.ts, tests/completions_seal.test.ts, tests/tier_ladder.test.ts, tests/amend_ladder.test.ts, tests/completions_reasoning_effort.test.ts, tests/bus.test.ts, tests/bus_chair.test.ts, tests/bus_terminal.test.ts, tests/bus_verbs.test.ts, tests/bus_commit.test.ts, tests/code_tools.test.ts, tests/gig_input_validated.test.ts, tests/seat_reads_recorded.test.ts, tests/claude_seat_reads.test.ts, tests/optional_declared_input.test.ts, tests/simulate_names_seats.test.ts
 
 # THE OTHER BANDS. `vitest run` is ROOT-CONFIG ONLY — this repo's own workflow comments
 # record that four configs went unexecuted once for exactly that reason. So pinning only the

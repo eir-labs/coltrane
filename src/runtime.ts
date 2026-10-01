@@ -3742,6 +3742,8 @@ export async function runGig(
         entry_id: `chair_spend:${gig_id}:${chair.role}:${p.round ?? 1}:${randomUUID()}`,
         gig_id,
         role: chair.role,
+        // WHO spent, not just which seat: the row must stay attributable after the standard moves.
+        agent_slug: agent.slug,
         phase: phaseName,
         round: p.round ?? 1,
         captured: sink.attributed(),

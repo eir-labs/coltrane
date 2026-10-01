@@ -1,0 +1,58 @@
+{
+  "slug": "deliberation-before-amendment-v1",
+  "domain": "spec-drafting",
+  "agent_slugs": [
+    "context-reader",
+    "spec-reviewer"
+  ],
+  "phases": [
+    {
+      "name": "read-proposal",
+      "chairs": [
+        {
+          "role": "read-proposal",
+          "agent_slug": "context-reader",
+          "depends_on": [],
+          "input_contract": [
+            "change-request"
+          ],
+          "output_contract": [
+            "change-context"
+          ],
+          "required_skills": []
+        }
+      ],
+      "intent": "A non-drafting seat frames the proposed amendment before any judgment falls on it. The reader opens the tree the change-request names — the law it would mend, the callsites and tests that bind it — and restates the proposal against that real surface as a change-context, each claim citing a file opened in this run. The reader frames and never judges: it does not decide whether the amendment is sound, does not rule it in or out, and writes no line of the standard. The wall between framing and judgment is the whole point of the two-phase shape; this seat holds the framing side of it."
+    },
+    {
+      "name": "deliberate",
+      "chairs": [
+        {
+          "role": "render-verdict",
+          "agent_slug": "spec-reviewer",
+          "depends_on": [
+            "read-proposal"
+          ],
+          "input_contract": [
+            "red-spec",
+            "change-context"
+          ],
+          "output_contract": [
+            "change-verdict"
+          ],
+          "required_skills": []
+        }
+      ],
+      "intent": "A non-drafting seat deliberates BEFORE the amendment proceeds. Reading the framed change-context and the red-spec, the reviewer judges the proposal on soundness (does it hold and validate on this engine tip), non-vacuity (does it change something real, not restate what already holds), and buildability (can the fix land against the laws as written). The reviewer judges and never drafts: it authors no standard and edits no law — it renders a change-verdict, passing only when all three hold and refusing with the specific hole named otherwise. Judgment lives downstream of framing so a proposal is read before it is ruled on, and the seat that rules never wrote the thing it rules."
+    }
+  ],
+  "input_types": [
+    "change-request",
+    "red-spec"
+  ],
+  "output_types": [
+    "change-verdict"
+  ],
+  "status": "active",
+  "description": "Deliberation before amendment: a proposed change to the institution's own law is framed by a non-drafting reader, then judged by a non-drafting reviewer, before the amendment proceeds. Two seams-separated seats. The read-proposal chair (context-reader, SENSE+INTERPRET) frames the change-request into a change-context grounded in the real tree — it frames and never judges. The deliberate chair (spec-reviewer, VERIFY) then judges soundness, non-vacuity, and buildability from that framing and the red-spec, sealing a change-verdict — it judges and never drafts. This is the thin-canon doctrine made structural: the reader frames, the reviewer judges, and neither drafts the amendment it deliberates on. The two-phase graph also mends the founding finding recorded in docs/founding/RUNBOOK.md: the seed's deliberation-before-amendment-v0 was a sole-VERIFY first phase, refused by the engine's NEEDS_TARGET rule (src/composition.ts) because a VERIFY seat with no upstream phase target cannot compose. Seating the SENSE+INTERPRET reader ahead of the VERIFY reviewer gives that reviewer its upstream target, so the standard loads green under `npx coltrane validate`."
+}

@@ -201,6 +201,24 @@ export type AgentOutput = z.output<typeof AgentSchema>;
 export const ChairSchema = z.object({
   role: z.string(),
   agent_slug: z.string().optional(),
+  /**
+   * A CEILING on what the agent seated here may reach — never a grant.
+   *
+   * Without this, `allowed_tools` lives only on the agent, so two chairs seating one agent get the
+   * identical authority and the only way to give two seats different reach is to author two agents.
+   * That is what grows a repertoire: the default genome's 68 agents collapse to 49 distinct
+   * capability signatures, most differing from a sibling only by their grant.
+   *
+   * The precedent is #174, one field over: a chair already narrows the agent's OUTPUT types, so a
+   * multi-capability agent in a single-purpose chair seals only the promised subset. This is the
+   * same move for what the seat may REACH.
+   *
+   * Direction is the whole point, exactly as for a venue: the effective set is
+   * `agent.allowed_tools ∩ chair.allowed_tools ∩ venue.equipment.tools`, so a standard can only ever
+   * narrow a player, never hand it authority its charter never claimed. Absent = no narrowing.
+   * Resolved by the one shared oracle `seatEffectiveTools` (src/chart.ts).
+   */
+  allowed_tools: z.array(z.string()).optional(),
   skill_slug: z.string().optional(),
   /** The human seat: the chair is an approval office held by a person. No agent, no skill —
    *  the incumbent's sealed verdict is the chair's output, and a gig that reaches this chair

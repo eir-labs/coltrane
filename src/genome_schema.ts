@@ -847,7 +847,13 @@ export const DispatchCapGrantSchema = z.object({
 });
 
 /** A chair cap is a lineage-edge grant or a dispatch grant. One union, one Zod source. */
-export const CapGrantSchema = z.union([EdgeCapGrantSchema, DispatchCapGrantSchema]);
+/** A store verb grant — the mutation authority a chair carries in the store ("org-lift", "force-work-order", …).
+ *  The store has served these since 20260827300000; the engine had no shape for them. */
+export const VerbCapGrantSchema = z.object({
+  grant: z.string().refine((g) => g !== "dispatch", { message: "a dispatch grant names its standards" }),
+  expires: z.string().nullable().default(null),
+}).strict();
+export const CapGrantSchema = z.union([EdgeCapGrantSchema, DispatchCapGrantSchema, VerbCapGrantSchema]);
 
 /** The chair is the thing: the seat's configuration, not a person. */
 export const InstitutionalChairSchema = z.object({

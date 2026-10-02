@@ -1,0 +1,52 @@
+{
+  "slug": "pr-review-request",
+  "version": 1,
+  "extends": "Signal",
+  "domain": "software-change",
+  "status": "active",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "repository": {
+        "type": "string",
+        "description": "Absolute path to the working tree the review is run in."
+      },
+      "pr_number": {
+        "type": "number",
+        "description": "The pull request number, where there is one."
+      },
+      "base_ref": {
+        "type": "string",
+        "description": "The ref the change is measured against."
+      },
+      "head_ref": {
+        "type": "string",
+        "description": "The ref carrying the change."
+      },
+      "claims": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "What the change says it does, in the author's words, unparaphrased. A review checks these; it does not restate them."
+      },
+      "diff_stat": {
+        "type": "string",
+        "description": "Size as git reports it. A fact about the review's cost, not about its quality."
+      },
+      "out_of_scope": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "What this review is explicitly NOT about."
+      }
+    }
+  },
+  "required_fields": [
+    "source",
+    "repository",
+    "head_ref",
+    "base_ref"
+  ]
+}

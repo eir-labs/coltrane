@@ -1,0 +1,138 @@
+{
+  "slug": "pr-review-v1",
+  "domain": "software-change",
+  "agent_slugs": [
+    "pr-surveyor",
+    "pr-dimension-reviewer",
+    "review-adjudicator"
+  ],
+  "phases": [
+    {
+      "name": "survey",
+      "chairs": [
+        {
+          "role": "survey",
+          "agent_slug": "pr-surveyor",
+          "depends_on": [],
+          "input_contract": [
+            "pr-review-request"
+          ],
+          "output_contract": [
+            "pr-review-surface"
+          ],
+          "required_skills": []
+        }
+      ]
+    },
+    {
+      "name": "review",
+      "chairs": [
+        {
+          "role": "review-reached",
+          "agent_slug": "pr-dimension-reviewer",
+          "depends_on": [
+            "survey"
+          ],
+          "input_contract": [
+            "pr-review-surface"
+          ],
+          "output_contract": [
+            "review-finding"
+          ],
+          "required_skills": []
+        },
+        {
+          "role": "review-absence",
+          "agent_slug": "pr-dimension-reviewer",
+          "depends_on": [
+            "survey"
+          ],
+          "input_contract": [
+            "pr-review-surface"
+          ],
+          "output_contract": [
+            "review-finding"
+          ],
+          "required_skills": []
+        },
+        {
+          "role": "review-cannot-fail",
+          "agent_slug": "pr-dimension-reviewer",
+          "depends_on": [
+            "survey"
+          ],
+          "input_contract": [
+            "pr-review-surface"
+          ],
+          "output_contract": [
+            "review-finding"
+          ],
+          "required_skills": []
+        },
+        {
+          "role": "review-edge",
+          "agent_slug": "pr-dimension-reviewer",
+          "depends_on": [
+            "survey"
+          ],
+          "input_contract": [
+            "pr-review-surface"
+          ],
+          "output_contract": [
+            "review-finding"
+          ],
+          "required_skills": []
+        },
+        {
+          "role": "review-chain",
+          "agent_slug": "pr-dimension-reviewer",
+          "depends_on": [
+            "survey"
+          ],
+          "input_contract": [
+            "pr-review-surface"
+          ],
+          "output_contract": [
+            "review-finding"
+          ],
+          "required_skills": []
+        }
+      ]
+    },
+    {
+      "name": "adjudicate",
+      "chairs": [
+        {
+          "role": "adjudicate",
+          "agent_slug": "review-adjudicator",
+          "depends_on": [
+            "review-reached",
+            "review-absence",
+            "review-cannot-fail",
+            "review-edge",
+            "review-chain",
+            "survey"
+          ],
+          "input_contract": [
+            "review-finding",
+            "pr-review-surface"
+          ],
+          "output_contract": [
+            "change-verdict"
+          ],
+          "required_skills": []
+        }
+      ]
+    }
+  ],
+  "status": "active",
+  "input_types": [
+    "pr-review-request"
+  ],
+  "output_types": [
+    "pr-review-surface",
+    "review-finding",
+    "change-verdict"
+  ],
+  "description": "Review a pull request against the defect classes this repo actually produces. One seat reads the whole diff and maps it; five seats each hunt ONE defect class over the slice they are pointed at; one seat attacks every finding, runs what can be run, and issues the verdict. The dimensions are CLAUDE.md's North Stars made into seats: reached, absence, cannot-fail, edge, chain. A finding must name the sabotage that would turn a law red, or it is filed as a question."
+}

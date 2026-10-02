@@ -848,9 +848,13 @@ export const DispatchCapGrantSchema = z.object({
 
 /** A chair cap is a lineage-edge grant or a dispatch grant. One union, one Zod source. */
 /** A store verb grant — the mutation authority a chair carries in the store ("org-lift", "force-work-order", …).
- *  The store has served these since 20260827300000; the engine had no shape for them. */
+ *  The store has served these since 20260827300000; the engine had no shape for them. The slug's validity is
+ *  the STORE's (its registry is the wall that refuses a dead name); the engine reads what the store sealed and
+ *  resolves nothing at load — it has no verb registry to resolve against, so a load-time check would be a dead
+ *  name one level up. `expires` defaults null because the store's own rows carry `{grant: X}` with no key. */
 export const VerbCapGrantSchema = z.object({
-  grant: z.string().refine((g) => g !== "dispatch", { message: "a dispatch grant names its standards" }),
+  grant: z.string().min(1, { message: "a verb grant names its verb" })
+    .refine((g) => g !== "dispatch", { message: "a dispatch grant names its standards" }),
   expires: z.string().nullable().default(null),
 }).strict();
 export const CapGrantSchema = z.union([EdgeCapGrantSchema, DispatchCapGrantSchema, VerbCapGrantSchema]);

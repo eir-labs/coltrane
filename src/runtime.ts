@@ -5,11 +5,13 @@
 // that carries model_version + (empty, v0) eval_scores — honestly un-tempered.
 import { lineageAdoption } from "./lineage_adoption.js";
 import { isSafeGitRev } from "./run_deps.js";
+import type { TreePublisher, CommitAttribution } from "./publisher.js";
+export type { TreePublisher, CommitAttribution } from "./publisher.js";
 import { randomUUID, createHash } from "node:crypto";
 import { performance } from "node:perf_hooks";
 import { execFileSync } from "node:child_process";
 import { existsSync, openSync, closeSync, readSync, fstatSync } from "node:fs";
-import { join as joinPath, relative as relPath, isAbsolute as isAbsPath, sep as pathSep } from "node:path";
+import { join as joinPath, relative as relPath, isAbsolute as isAbsPath, sep as pathSep, resolve } from "node:path";
 import type { Standard, Agent, Chair } from "./composition.js";
 import { PRIMITIVE_OUTPUT_TYPE, CORE_TYPES } from "./core_types.js";
 import { executeSkillAsync } from "./skill_subprocess.js";
@@ -754,6 +756,15 @@ export interface RunDeps {
    * there is one. Absent = the single-tree or tree-less run, byte-identical to before this field.
    */
   mounts?: readonly { repoUrl: string; dir: string; cwd: boolean }[] | undefined;
+  /**
+   * THE ENGINE'S HANDS (item 43, c60 Q4): the publisher of the tree a change lands in — push a
+   * branch, open a pull request — holding the credential the drain minted for that tree under the
+   * gig's lease. Supplied by the drain from its workspace; absent on a tree-less run, where a
+   * pull-request seal refuses `publisher_unavailable`. A seat never holds it.
+   */
+  publisher?: TreePublisher | undefined;
+  /** How a commit the engine performs is signed: author = the player, committer = the engine. */
+  attribution?: CommitAttribution | undefined;
 }
 
 /**
@@ -1280,8 +1291,11 @@ export function gitInvocation(tree_root: string, args: readonly string[]): GitIn
   };
 }
 
-function gitInTree(tree_root: string, args: readonly string[]): string {
-  const { file, argv, env } = gitInvocation(tree_root, args);
+function gitInTree(tree_root: string, args: readonly string[], extra: NodeJS.ProcessEnv = {}): string {
+  // `extra` is the one addition the seam admits: the signing identity of a commit the ENGINE performs
+  // (item 43 — GIT_AUTHOR_*/GIT_COMMITTER_*), laid over the pinned environment, never replacing it.
+  const built = gitInvocation(tree_root, args);
+  const file = built.file, argv = built.argv, env = { ...built.env, ...extra };
   return execFileSync(file, [...argv], { env }).toString();
 }
 
@@ -1458,6 +1472,110 @@ export function stampChangeAddresses(
     }
     return { path: change.path, base: change.base, blob_sha, patch_sha256, bytes };
   });
+}
+
+/** The branches the engine will never push to on a seat's word. */
+const PROTECTED_BRANCHES = new Set(["main", "master"]);
+
+/** The canonical form of a pull-request intent — the six fields the seat states, keys sorted. */
+export function canonicalPullRequestIntent(i: { base: string; branch: string; body: string; commit_message: string; paths: readonly string[]; title: string }): string {
+  return JSON.stringify({ base: i.base, branch: i.branch, body: i.body, commit_message: i.commit_message, paths: [...i.paths], title: i.title });
+}
+
+/**
+ * THE PLAYER AUTHORS, THE ENGINE COMMITS (plan.one-write-path item 43; finding 37; c60 Q4).
+ *
+ * A `pull-request` record reaches the write boundary as an INTENT — base, branch, title, body,
+ * commit_message, paths — and leaves it stamped: the engine commits exactly the named paths (author
+ * = the player, committer = the engine under the lease, trailers naming the gig, the actor, the
+ * lease and the intent's sha), pushes the branch with the credential it minted for this tree, opens
+ * the pull request by API, and fills `commit_sha`, `pr_url`, `pr_number`, `intent_sha` from git and
+ * the API's own answers. The seat holds no credential and no git identity; the measured alternative
+ * (gig acbdb1d0, 3 Oct 2026) was a publish seat spending 22 of 30 tool calls hunting for a token.
+ *
+ * REFUSALS, each by name and before anything is pushed: `tree_root_unknown`, `publisher_unavailable`,
+ * `bad_branch` (option-shaped or unsafe), `protected_branch` (main/master, or equal to the base),
+ * `base_unknown` (the origin holds no such branch), `branch_exists` (one fresh branch per run),
+ * `path_outside_tree`, `path_missing`, `nothing_to_commit`, `push_failed` (git's own words),
+ * `pull_request_refused` (the API's own words). A failed push opens no PR.
+ */
+export async function stampPullRequest(
+  slice: Record<string, unknown>,
+  deps: { tree_root?: string | undefined; publisher?: TreePublisher | undefined; attribution?: CommitAttribution | undefined },
+  gig_id: string,
+): Promise<Record<string, unknown>> {
+  const str = (k: string, fallback?: string): string => {
+    const v = slice[k];
+    if (typeof v === "string" && v.length > 0) return v;
+    if (fallback !== undefined) return fallback;
+    throw new RuntimeError(`intent_incomplete: a pull-request intent names ${k}; this record does not`);
+  };
+  const base = str("base", "main");
+  const branch = str("branch");
+  const title = str("title");
+  const body = typeof slice["body"] === "string" ? (slice["body"] as string) : "";
+  const commit_message = str("commit_message", title);
+  const paths = Array.isArray(slice["paths"]) ? (slice["paths"] as unknown[]).filter((p): p is string => typeof p === "string" && p.length > 0) : [];
+  if (paths.length === 0) throw new RuntimeError("intent_incomplete: a pull-request intent names the paths it commits (the union of the change-set's and the red-spec's); this record names none");
+  if (!isSafeGitRev(branch) || !isSafeGitRev(base)) {
+    throw new RuntimeError(`bad_branch: ${JSON.stringify(!isSafeGitRev(branch) ? branch : base)} is not a branch name the engine will hand to git — nothing beginning with a dash, no whitespace, no '..'`);
+  }
+  if (PROTECTED_BRANCHES.has(branch) || branch === base) {
+    throw new RuntimeError(`protected_branch: the engine never pushes to ${JSON.stringify(branch)} on a seat's word — a pull request is opened from a fresh non-main branch against its base`);
+  }
+  const tree_root = deps.tree_root;
+  if (tree_root === undefined) {
+    throw new RuntimeError("tree_root_unknown: a pull-request cannot be committed without a RunDeps.tree_root — the engine commits in a named tree and never process.cwd().");
+  }
+  const publisher = deps.publisher;
+  if (!publisher) {
+    throw new RuntimeError("publisher_unavailable: this run holds no credential for its tree (no workspace was minted for it), so the engine cannot push or open a pull request. A pull-request is sealed only on a run whose tree the drain furnished.");
+  }
+  const rootAbs = resolve(tree_root);
+  for (const p of paths) {
+    const abs = resolve(rootAbs, p);
+    if (isAbsPath(p) || !(abs === rootAbs || abs.startsWith(rootAbs + pathSep)) || abs === rootAbs) {
+      throw new RuntimeError(`path_outside_tree: ${JSON.stringify(p)} does not name a file inside the tree; the engine commits only what the tree holds`);
+    }
+    if (!existsSync(abs)) throw new RuntimeError(`path_missing: ${JSON.stringify(p)} is not in the tree; a pull-request names files the seats wrote, by path`);
+  }
+  const heads = (ref: string) => gitInTree(tree_root, ["ls-remote", "--heads", "origin", ref]).trim();
+  if (heads(base) === "") throw new RuntimeError(`base_unknown: the origin holds no branch ${JSON.stringify(base)}; a pull request against it would merge into nothing`);
+  if (heads(branch) !== "") throw new RuntimeError(`branch_exists: the origin already holds ${JSON.stringify(branch)}; a run opens one fresh branch and one pull request`);
+  const intent_sha = sha256Hex(canonicalPullRequestIntent({ base, branch, body, commit_message, paths, title }));
+  const attribution: CommitAttribution = deps.attribution ?? {
+    author: { name: "coltrane-engine", email: "engine@coltrane" },
+    committer: { name: "coltrane-engine", email: "engine@coltrane" },
+    trailers: {},
+  };
+  const trailers = { ...attribution.trailers, "Coltrane-Gig": attribution.trailers["Coltrane-Gig"] ?? gig_id, "Coltrane-Intent-Sha": intent_sha };
+  const message = `${commit_message}\n\n${Object.entries(trailers).map(([k, v]) => `${k}: ${v}`).join("\n")}\n`;
+  const signing: NodeJS.ProcessEnv = {
+    GIT_AUTHOR_NAME: attribution.author.name, GIT_AUTHOR_EMAIL: attribution.author.email,
+    GIT_COMMITTER_NAME: attribution.committer.name, GIT_COMMITTER_EMAIL: attribution.committer.email,
+  };
+  try {
+    gitInTree(tree_root, ["switch", "--quiet", "-c", branch], signing);
+    gitInTree(tree_root, ["add", "--", ...paths], signing);
+    gitInTree(tree_root, ["commit", "--quiet", "-m", message], signing);
+  } catch (e) {
+    const stderr = (e as { stderr?: Buffer }).stderr?.toString().trim();
+    throw new RuntimeError(`commit_failed: ${stderr || (e instanceof Error ? e.message : String(e))}`);
+  }
+  try {
+    publisher.push(tree_root, branch);
+  } catch (e) {
+    const stderr = (e as { stderr?: Buffer }).stderr?.toString().trim();
+    throw new RuntimeError(`push_failed: ${stderr || (e instanceof Error ? e.message : String(e))}`);
+  }
+  const commit_sha = gitInTree(tree_root, ["rev-parse", "HEAD"]).trim();
+  let pr: { url: string; number: number };
+  try {
+    pr = await publisher.openPullRequest({ base, head: branch, title, body });
+  } catch (e) {
+    throw new RuntimeError(e instanceof Error ? e.message : String(e));
+  }
+  return { ...slice, base, branch, title, body, commit_message, paths, intent_sha, commit_sha, pr_url: pr.url, pr_number: pr.number };
 }
 
 // Deterministic hash over the definitions a gig touches: the standard + its agents,
@@ -4186,6 +4304,13 @@ export async function runGig(
         slice["laws"] = stampLawAddresses(slice["laws"] as unknown as LawAddress[], deps.tree_root);
       } else if (spec.domain_type === "change-set" && Array.isArray(slice["changes"])) {
         slice["changes"] = stampChangeAddresses(slice["changes"] as unknown as ChangeAddress[], deps.tree_root);
+      } else if (spec.domain_type === "pull-request") {
+        // THE PLAYER AUTHORS, THE ENGINE COMMITS (item 43): the intent the seat sealed becomes a
+        // commit, a push and an opened pull request here, under the lease, with the drain's own
+        // credential — and the record leaves stamped with commit_sha / pr_url / pr_number from git
+        // and the API, or the chair is told by name why nothing was pushed.
+        const stamped = await stampPullRequest(slice, deps, gig_id);
+        for (const k of Object.keys(stamped)) slice[k] = stamped[k];
       }
     }
 

@@ -134,6 +134,8 @@ describe("the base is in the tree", () => {
     const runtime = readFileSync(new URL("../src/runtime.ts", import.meta.url), "utf8");
     expect(runDeps).toMatch(/changeSetBase: args\.changeSetBase/);
     expect(runtime).toMatch(/changeSetBase: deps\.changeSetBase/);
+    const server = readFileSync(new URL("../src/server.ts", import.meta.url), "utf8");
+    expect(server, "the server door threads the base beside the repository, as the drain does (F2b)").toMatch(/changeSetBase: resolveChangeSetBase\(\{ input: gigInput \}\)/);
     expect(worker).toMatch(/base: resolveChangeSetBase\(claim\),/);
   });
 

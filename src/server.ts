@@ -46,7 +46,7 @@ import { standardSimulate } from "./simulate.js";
 import { planSeats } from "./seat_plan.js";
 import { resolveSealedInputs } from "./sealed_inputs.js";
 import { runGig, outputSatisfiesType, BudgetExhausted, GigAborted, ResumeRefused, partialGigUsage, partialBudgetState, partitionGigInputKeys, unknownGigInputMessage, type AgentInvoker } from "./runtime.js";
-import { assembleRunDeps, resolveWorkingRepo } from "./run_deps.js";
+import { assembleRunDeps, resolveWorkingRepo, resolveChangeSetBase } from "./run_deps.js";
 import { createCheckpointStore, createReuseStore, type CheckpointStore, type ReuseStore } from "./reuse.js";
 import { killLiveChairChildren, type SeatAsker } from "./claude_invoker.js";
 import { selectChairInvoker } from "./invoker_selection.js";
@@ -1452,6 +1452,8 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
           toolProviders: deps.toolProviders, mcpServerConfigs: deps.mcpServerConfigs, // dispatch preflight resolves against the invoker's environment
           venue, venues: deps.venues, venueRealizer: deps.venueRealizer,
           repoUrl: dispatchRepoUrl,
+          // the base beside the repository, as on the drain (the base is in the tree; the grade's F2b)
+          changeSetBase: resolveChangeSetBase({ input: gigInput }) ?? undefined,
           // The address-stamping tree (records-by-address): the repository root this server was
           // bootstrapped with. The CLI reaches this same door through `dispatchTool`, so its stamps
           // resolve against the bootstrapped root too. Never process.cwd(): absent genome_dir → no

@@ -70,11 +70,15 @@ export async function fetchGitCredential(
   drainKey: string,
   instance: string,
   gigId: string,
+  /** WHICH of the gig's trees this credential is for (R38: a room furnishes several; the broker mints
+   *  one credential per repository, scoped to that repository alone). Absent = the broker's own
+   *  answer for a one-repository gig, and the body is byte-for-byte what it was before. */
+  repository?: string,
 ): Promise<GitCredential> {
   const res = await fetch(endpoint, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ drain_key: drainKey, instance, gig_id: gigId }),
+    body: JSON.stringify({ drain_key: drainKey, instance, gig_id: gigId, ...(repository ? { repository } : {}) }),
   });
   const text = await res.text();
   if (!res.ok) {
@@ -217,4 +221,101 @@ export async function prepareWorkspace(opts: {
   }
   const cred = await fetchGitCredential(opts.endpoint, opts.drainKey, opts.instance, opts.gigId);
   return cloneInto(opts.repoUrl, cred.token, opts.target, opts.base ?? null);
+}
+
+/**
+ * A folder name for a tree under the workspace root: the repository's last path segment, with .git
+ * dropped — `coltrane-ui` for https://github.com/eir-labs/coltrane-ui, and the basename for a local
+ * origin. Collisions (two owners, one name) are made unique by suffixing the owner.
+ */
+function mountName(repoUrl: string, taken: Set<string>): string {
+  const parts = repoUrl.replace(/\/+$/, "").replace(/\.git$/, "").split(/[\/:]/).filter(Boolean);
+  const base = parts[parts.length - 1] ?? "tree";
+  let name = base;
+  if (taken.has(name) && parts.length >= 2) name = `${parts[parts.length - 2]}__${base}`;
+  let n = 2;
+  while (taken.has(name)) name = `${base}-${n++}`;
+  taken.add(name);
+  return name;
+}
+
+/** One mounted tree of a furnished workspace. */
+export interface MountedTree { repoUrl: string; dir: string }
+
+/** A workspace of several trees: ONE root, a folder per tree, the cwd the change lands in (or the root). */
+export interface PreparedWorkspaces {
+  /** The directory every tree sits under; removed whole by cleanup. */
+  root: string;
+  /** The seat's cwd: the change-request's tree when it is among the mounts, otherwise the root. */
+  dir: string;
+  mounts: MountedTree[];
+  cleanup: () => void;
+  revoke: () => Promise<void>;
+}
+
+/**
+ * A ROOM FURNISHES ITS TREES (R38). Every granted repository is cloned under one root, each in its own
+ * folder, each with its OWN credential — the broker is asked once per tree, naming it, and mints a token
+ * scoped to that repository alone. The engine re-derives no grant: what it asks for is what the room
+ * furnished (githubGrant) plus the change-request's own tree, and the broker is the one surface that
+ * refuses a tree the room does not grant. `cwdRepo` names the tree a change lands in; when it is among
+ * the trees, its folder is the cwd and the tree a change-set is stamped from. Absent, the cwd is the root
+ * and the mounts sit beside each other — a reading gig has no working tree, it has mounted trees.
+ * `base` fetches a change-set base into ONE named tree (the change-request's), as prepareWorkspace does.
+ * No trees → null, the normal answer.
+ */
+export async function prepareWorkspaces(opts: {
+  trees: readonly string[];
+  cwdRepo?: string | null | undefined;
+  gigId: string;
+  drainKey: string | undefined;
+  instance: string | undefined;
+  endpoint: string | undefined;
+  base?: { repoUrl: string; rev: string } | null | undefined;
+  /** Where the root lands; omitted → a throwaway tmpdir. */
+  root?: string | undefined;
+}): Promise<PreparedWorkspaces | null> {
+  const trees = opts.trees.map((t) => t.trim()).filter((t) => t.length > 0);
+  if (trees.length === 0) return null;
+  if (!opts.drainKey || !opts.instance) {
+    throw new Error(
+      `the room furnishes ${trees.length} repositor${trees.length === 1 ? "y" : "ies"} but this worker holds no venue credential, so it cannot ` +
+        `obtain a git credential for any of them — set COLTRANE_DRAIN_KEY and COLTRANE_INSTANCE`,
+    );
+  }
+  if (!opts.endpoint) {
+    throw new Error(
+      `the room furnishes ${trees.length} repositor${trees.length === 1 ? "y" : "ies"} but COLTRANE_GIT_CREDENTIALS_URL is unset, so there is ` +
+        `nowhere to obtain a credential scoped to this gig`,
+    );
+  }
+  const root = opts.root ?? mkdtempSync(join(tmpdir(), "coltrane-gig-"));
+  const prepared: PreparedWorkspace[] = [];
+  const mounts: MountedTree[] = [];
+  const taken = new Set<string>();
+  const cleanupAll = () => {
+    for (const p of prepared) p.cleanup();
+    try { rmSync(root, { recursive: true, force: true }); } catch { /* best effort */ }
+  };
+  try {
+    for (const repoUrl of trees) {
+      const cred = await fetchGitCredential(opts.endpoint, opts.drainKey, opts.instance, opts.gigId, repoUrl);
+      const target = join(root, mountName(repoUrl, taken));
+      const base = opts.base && opts.base.repoUrl === repoUrl ? opts.base.rev : null;
+      const ws = cloneInto(repoUrl, cred.token, target, base);
+      prepared.push(ws);
+      mounts.push({ repoUrl, dir: ws.dir });
+    }
+  } catch (e) {
+    cleanupAll();
+    throw e;
+  }
+  const cwd = opts.cwdRepo ? mounts.find((m) => m.repoUrl === opts.cwdRepo) : undefined;
+  return {
+    root,
+    dir: cwd?.dir ?? root,
+    mounts,
+    cleanup: cleanupAll,
+    revoke: async () => { await Promise.all(prepared.map((p) => p.revoke())); },
+  };
 }

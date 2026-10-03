@@ -70,7 +70,18 @@ cd "$(dirname "$0")/.."
 #       path that does not exist, so integrity() answers ok:true with a REAL path — which took the
 #       clean branch and claimed a line was looked for in a file never created. A drain that has never
 #       written a row then reads identically to a healthy one. P5 pins all three apart.
-EXPECTED_LAWS="${EXPECTED_LAWS:-4403}"
+#   +9 agent_token_issue_is_governed (new file) — the verb that issues a STANDING agent token, the
+#       credential a reconciler holds between sittings (spec.order-lifecycle.transition-law R23;
+#       measured 3 Oct: every token the reconciler ever held was a one-sitting gig-token and no verb
+#       issued a standing one). On the surface; schema = the store's mint and nothing a capability
+#       could travel on; refusals closed; an agent token may not issue one (before any backend); no
+#       backend named (hosted too, ahead of the hosted check); a TTL the store cannot express refused
+#       by name, never rounded; the store's codes survive the seam; returned ONCE, sealed nowhere;
+#       may_dispatch passes through as slugs only. 4403 + 9 = 4412.
+#   +1  after the non-author grade (D3, D5): a malformed may_dispatch is refused by name (bad_may_dispatch),
+#       never narrowed to []; a success the backend answers must BE a credential (a ctk_ token and its key)
+#       or it is answered as a failure, never forwarded as ok:true with nothing in it. 4412 + 1 = 4413.
+EXPECTED_LAWS="${EXPECTED_LAWS:-4413}"
 #   +3 blob_sha_refuses_rather_than_seals (new file) — the three refusals of `blobShaOfFile`, which
 #      had no law that could red them. Measured on the grade: with BOTH mid-read length refusals
 #      deleted, all 21 blob laws stayed green; with the `!stat.isFile()` refusal deleted, all 21
@@ -314,7 +325,7 @@ EXPECTED_LAWS="${EXPECTED_LAWS:-4403}"
 #       behavioural and holds the other direction, that every pin names git's own default so nothing
 #       a seal records moves. Seven plants, each observed red and reverted; a no-op control stayed
 #       green first, and each plant's anchor was asserted to land before its run was believed.
-EXPECTED_FILES="${EXPECTED_FILES:-448}"   # + tests/verb_cap_grant.test.ts (#573), + tests/the_tracked_ledger_parses.test.ts, + tests/chair_narrows_what_it_may_reach.test.ts, + tests/git_invocation_pinned.test.ts, + tests/chair_spend_names_its_agent.test.ts, + tests/blob_sha_refuses_rather_than_seals.test.ts, + tests/blob_sha_is_the_git_stored_blob.test.ts, + tests/blob_sha_in_process.test.ts, + tests/genome_writes_stay_in_root.test.ts, + tests/skill_runs_on_exec_path.test.ts, + tests/node_floor_where_skills_run.test.ts, + tests/bus_not_hosted.test.ts, + tests/every_skill_runs_its_fixtures.test.ts, + tests/node_floor_refuses.test.ts, + tests/spec_reside_drive.test.ts (#537), + tests/a_red_law_names_its_plant.test.ts (#551), + tests/sealed_inputs.test.ts, tests/fan_out.test.ts, tests/completions_seal.test.ts, tests/tier_ladder.test.ts, tests/amend_ladder.test.ts, tests/completions_reasoning_effort.test.ts, tests/bus.test.ts, tests/bus_chair.test.ts, tests/bus_terminal.test.ts, tests/bus_verbs.test.ts, tests/bus_commit.test.ts, tests/code_tools.test.ts, tests/gig_input_validated.test.ts, tests/seat_reads_recorded.test.ts, tests/claude_seat_reads.test.ts, tests/optional_declared_input.test.ts, tests/simulate_names_seats.test.ts
+EXPECTED_FILES="${EXPECTED_FILES:-449}"   # + tests/agent_token_issue_is_governed.test.ts, + tests/verb_cap_grant.test.ts (#573), + tests/the_tracked_ledger_parses.test.ts, + tests/chair_narrows_what_it_may_reach.test.ts, + tests/git_invocation_pinned.test.ts, + tests/chair_spend_names_its_agent.test.ts, + tests/blob_sha_refuses_rather_than_seals.test.ts, + tests/blob_sha_is_the_git_stored_blob.test.ts, + tests/blob_sha_in_process.test.ts, + tests/genome_writes_stay_in_root.test.ts, + tests/skill_runs_on_exec_path.test.ts, + tests/node_floor_where_skills_run.test.ts, + tests/bus_not_hosted.test.ts, + tests/every_skill_runs_its_fixtures.test.ts, + tests/node_floor_refuses.test.ts, + tests/spec_reside_drive.test.ts (#537), + tests/a_red_law_names_its_plant.test.ts (#551), + tests/sealed_inputs.test.ts, tests/fan_out.test.ts, tests/completions_seal.test.ts, tests/tier_ladder.test.ts, tests/amend_ladder.test.ts, tests/completions_reasoning_effort.test.ts, tests/bus.test.ts, tests/bus_chair.test.ts, tests/bus_terminal.test.ts, tests/bus_verbs.test.ts, tests/bus_commit.test.ts, tests/code_tools.test.ts, tests/gig_input_validated.test.ts, tests/seat_reads_recorded.test.ts, tests/claude_seat_reads.test.ts, tests/optional_declared_input.test.ts, tests/simulate_names_seats.test.ts
 
 # THE OTHER BANDS. `vitest run` is ROOT-CONFIG ONLY — this repo's own workflow comments
 # record that four configs went unexecuted once for exactly that reason. So pinning only the

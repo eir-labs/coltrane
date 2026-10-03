@@ -13,23 +13,42 @@
       },
       "branch": {
         "type": "string",
-        "description": "The non-main feature branch the change was applied and pushed to."
+        "description": "The fresh non-main branch the engine commits to and pushes: changeset/<originating-gig-uuid> for a change gig. Never main/master, never the base."
       },
       "commit_sha": {
         "type": "string",
-        "description": "The HEAD commit pushed to the branch, taken from the actual push output in this run — never fabricated."
+        "description": "ENGINE-STAMPED: the HEAD commit the engine pushed to the branch, read from git after the push — never written by a seat."
       },
       "pr_url": {
         "type": "string",
-        "description": "The opened pull request URL, taken from the gh/API response in this run."
+        "description": "ENGINE-STAMPED: the opened pull request URL, read from the API's answer — never written by a seat."
       },
       "pr_number": {
         "type": "number",
-        "description": "The opened pull request number, from the same response."
+        "description": "ENGINE-STAMPED: the opened pull request number, from the same answer."
       },
       "title": {
         "type": "string",
         "description": "The PR title, stating what changed."
+      },
+      "body": {
+        "type": "string",
+        "description": "The PR body the seat composed: the rationale and the verifier's verdict verbatim, and any dead-end or unnamed-change the seat must state. The engine sends it to the API as given."
+      },
+      "commit_message": {
+        "type": "string",
+        "description": "The commit message the engine commits the named paths under. The engine appends its trailers (Coltrane-Gig, Coltrane-Acting-For, Coltrane-Lease, Coltrane-Engine, Coltrane-Intent-Sha)."
+      },
+      "paths": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "The files the engine commits, by path relative to the tree: the UNION of the change-set's paths and the red-spec's paths when one was sealed. Nothing else is staged — never a blanket add."
+      },
+      "intent_sha": {
+        "type": "string",
+        "description": "ENGINE-STAMPED: sha256 of the canonical intent (base, branch, body, commit_message, paths, title) the seat sealed; also carried as the commit's Coltrane-Intent-Sha trailer, so the commit traces to the intent that authorized it."
       }
     }
   },
@@ -37,7 +56,8 @@
     "validation_criteria",
     "input_refs",
     "branch",
-    "commit_sha",
-    "pr_url"
+    "title",
+    "commit_message",
+    "paths"
   ]
 }

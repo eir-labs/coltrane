@@ -224,6 +224,8 @@ export type AssembleRunDepsArgs = Pick<
   | "placementResolver"
   | "tree_root"
   | "mounts"
+  | "publisher"
+  | "attribution"
 > & {
   /**
    * The enforcement environment, supplied per door: {} on the drain, the bootstrap map on the server
@@ -269,6 +271,11 @@ export function assembleRunDeps(args: AssembleRunDepsArgs): RunDeps {
     // R38 — the trees the room furnished (prepareWorkspaces): threaded only when present, so a
     // single-tree or tree-less run is byte-identical; the runtime names them to every seat.
     ...(args.mounts && args.mounts.length > 0 ? { mounts: args.mounts } : {}),
+    // ITEM 43 — the engine's hands and its signature: the publisher of the tree a change lands in and
+    // the attribution a commit carries, threaded only when the drain furnished a tree; a tree-less or
+    // server run is byte-identical, and a pull-request seal there refuses `publisher_unavailable`.
+    ...(args.publisher ? { publisher: args.publisher } : {}),
+    ...(args.attribution ? { attribution: args.attribution } : {}),
     // THE AMEND LADDER, from the deployment's environment — here, in the one assembler, so the dispatch
     // door and the drain cannot disagree about it. Absent → no key → the loop is what it was.
     ...(() => { const l = amendLadderFromEnv(process.env); return l ? { tier_ladder: l } : {}; })(),

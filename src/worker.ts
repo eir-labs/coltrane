@@ -44,6 +44,8 @@ import { MemoryLedger } from "./ledger.js";
 import { rpcGenomeStore } from "./genome_store.js";
 import { workerCredentialMode } from "./worker_env.js";
 import { prepareWorkspace, prepareWorkspaces, type PreparedWorkspaces } from "./workspace.js";
+import type { CommitAttribution } from "./publisher.js";
+import { COLTRANE_VERSION } from "./version.js";
 import { engineToolProviders, drainBudget, drainTimeoutMs, resolveWorkingRepo, resolveChangeSetBase, assembleRunDeps } from "./run_deps.js";
 import { githubGrant, normalizeRepoUrl } from "./genome_schema.js";
 // The repository resolver's ONE home is run_deps.ts (shared by both doors). Re-exported here so
@@ -1845,6 +1847,10 @@ export async function workOnce(ctx: WorkerContext, deps: WorkOnceDeps): Promise<
         // R38 — the trees the room furnished, so every seat is told where they sit (the prompt's
         // "# Trees" layer); the change-request's tree, when there is one, is marked as the cwd.
         mounts: workspaces ? workspaces.mounts.map((m) => ({ ...m, cwd: m.dir === workspaces!.dir && Boolean(workingRepoNorm) })) : undefined,
+        // ITEM 43 — the engine's hands on the tree a change lands in, and how its commits are signed:
+        // author = the player (acting_for), committer = this drain under its lease.
+        publisher: workspaces?.publisher ?? workspace?.publisher,
+        attribution: commitAttribution(claim, ctx.instance),
       }),
       gig_id: claim.gig_id, // ← the run IS the queue row; the drained header completes it
       signal: aborter.signal,
@@ -1989,4 +1995,27 @@ export async function workOnce(ctx: WorkerContext, deps: WorkOnceDeps): Promise<
     // AFTER the catch, deliberately: failGig still speaks through this token.
     if (ctx.drainKey) ctx.agentToken = "";
   }
+}
+
+
+/**
+ * HOW THE ENGINE SIGNS A COMMIT IT PERFORMS (item 43, c60 Q4). Git's own author/committer split is
+ * exactly the player/engine distinction: the AUTHOR is the seat the gig runs under (`acting_for`),
+ * with an address that carries the gig it acted in; the COMMITTER is this drain under its lease.
+ * The trailers name the gig, the actor, the lease and the engine, so a commit traces to the sealed
+ * intent that authorized it (the stamp adds `Coltrane-Intent-Sha`). Owed: the player's own id on
+ * the claim, so the address carries the agent's uuid rather than the gig's.
+ */
+export function commitAttribution(claim: { gig_id: string; acting_for: string }, instance: string | undefined): CommitAttribution {
+  const lease = instance ?? "unleased";
+  return {
+    author: { name: claim.acting_for, email: `${claim.acting_for}+gig-${claim.gig_id}@seats.coltrane` },
+    committer: { name: "coltrane-engine", email: `engine+${lease}@coltrane` },
+    trailers: {
+      "Coltrane-Gig": claim.gig_id,
+      "Coltrane-Acting-For": claim.acting_for,
+      "Coltrane-Lease": lease,
+      "Coltrane-Engine": COLTRANE_VERSION,
+    },
+  };
 }

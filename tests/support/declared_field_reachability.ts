@@ -308,7 +308,7 @@ export const CALIBRATION_TRAIL = {
 // reviewer names failure_scenario/sabotage/not_checked), and NONE of them is unread in the contract
 // corpus — the number below it went DOWN, not up. src/ reads none of them, exactly as the landscape
 // and release payload fields above. A renderer would bring both numbers down together.
-export const PINNED_UNREAD_FIELDS = 249;
+export const PINNED_UNREAD_FIELDS = 245;   // 249 → 245: item 43 wired body, commit_message, paths, intent_sha readers (stampPullRequest)
 
 /* ─────────────────────────────────────────────────────────────────────────────────────────────────
  * TWO CORPORA — engine (src/) vs contract (broad).
@@ -565,4 +565,4 @@ export const PINNED_UNREAD_ENGINE_FIELDS = 20;
 // asserted — and in wiring them the trio also gave readers to names that had been unread before it:
 // a reviewer that must state a failure_scenario and the base_ref it measured against is a reader of
 // both. Lowered to the measured count, per this law's own instruction when the number shrinks.
-export const PINNED_UNREAD_CONTRACT_FIELDS = 122;
+export const PINNED_UNREAD_CONTRACT_FIELDS = 121;   // 122 → 121: item 43

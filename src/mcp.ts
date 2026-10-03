@@ -104,7 +104,7 @@ const TOOL_DEFS: readonly Omit<MCPToolDef, "description">[] = [
   // #239 — `basis`/`sample_size` say WHERE the estimate came from (a measured mean of real runs,
   // the standard's real structure, or a per-slug guess). estimated_duration_ms is the key the
   // handler actually returns; the old `estimated_duration` was never present on a response.
-  { slug: "standard_simulate",             category: "build", input_schema: obj({ standard_slug: "string", mock_input: "object", depth: "string" }), output_schema: obj({ phases: "array", estimated_cost: "number", estimated_duration_ms: "number", basis: "string", sample_size: "number", seat_plan: "object", seal_drill: "object" }) },
+  { slug: "standard_simulate",             category: "build", input_schema: obj({ standard_slug: "string", mock_input: "object", depth: "string", venue: "string" }), output_schema: obj({ phases: "array", estimated_cost: "number", estimated_duration_ms: "number", basis: "string", sample_size: "number", seat_plan: "object", seal_drill: "object", furnishings: "object" }) },
   // #237 — `depth` is read now (and rejected when unrecognized); the response echoes the depth
   // the run actually took, so "I ran a cheap iteration" is verifiable rather than assumed.
   // #234 — every argument this tool reads is advertised, and every argument advertised is read.

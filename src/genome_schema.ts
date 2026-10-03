@@ -1177,6 +1177,75 @@ export const VenueMcpServerSchema = z.object({
   credential_names: z.array(z.string()).default([]),
 });
 
+/**
+ * A ROOM FURNISHES ITS REACH (founder's ruling R38, 3 Oct 2026; wiki
+ * spec.one-write-path.a-room-furnishes-its-reach). What a gig may reach — repositories, the wiki,
+ * Notion — is what its room furnishes, segmented by GRANT PROFILE per connector. GitHub is one
+ * connector kind among many; its grant is a flat list of repository URLs and a permission level.
+ * Typed input carries only what is genuinely input (a change-request's `repository` names the tree
+ * the change lands in); no domain type carries a `repositories` list, and there is no "primary".
+ *
+ * The set of kinds is NAMED and grows by a one-line edit here plus a broker that honours the kind —
+ * the KNOWN_TRANSPORTS discipline: openness to the future kept, silent acceptance of nonsense refused.
+ * `mcp_servers` stays its own field for now; folding it in as `kind: "mcp"` is the founder's call.
+ */
+export const KNOWN_CONNECTOR_KINDS = ["github"] as const;
+
+/** `https://github.com/<owner>/<repo>` with a trailing slash and `.git` dropped; null when it is not that. */
+export function normalizeRepoUrl(url: string): string | null {
+  // Trailing slashes are dropped by a scan, not `/\/+$/`: CodeQL (js/polynomial-redos) flags that
+  // regex on input it cannot bound, and a loop over a URL costs nothing to make it unarguable.
+  let t = url.trim();
+  const dropTrailingSlashes = (): void => {
+    let end = t.length;
+    while (end > 0 && t.charCodeAt(end - 1) === 47 /* "/" */) end--;
+    t = t.slice(0, end);
+  };
+  dropTrailingSlashes();
+  if (t.endsWith(".git")) t = t.slice(0, -4);
+  dropTrailingSlashes();
+  // A segment never begins with a dot: "." and ".." are paths, not names, and a grant of
+  // https://github.com/<owner>/.. would have let a failed clone reap the workspace root's PARENT
+  // (the grade at a3db254, B2). GitHub names cannot begin with a dot either.
+  const m = /^https:\/\/github\.com\/([A-Za-z0-9_-][A-Za-z0-9_.-]*)\/([A-Za-z0-9_-][A-Za-z0-9_.-]*)$/.exec(t);
+  return m ? `https://github.com/${m[1]}/${m[2]}` : null;
+}
+
+export const GithubGrantSchema = z.object({
+  /** The repositories this room grants, each `https://github.com/<owner>/<repo>`; read back normalized. */
+  repositories: z.array(z.string()).min(1),
+  /** What the per-repository credential may do. The broker mints exactly this and nothing wider. */
+  permissions: z.enum(["contents:read", "contents:write"]).default("contents:read"),
+});
+
+export const VenueConnectorSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("github"),
+    slug: z.string().default("github"),
+    grant: GithubGrantSchema,
+    /** Credential classes this connector consumes from the room's surface. The GitHub credential is
+     *  minted per gig and per repository by the broker under a live lease, so this is usually empty. */
+    credential_names: z.array(z.string()).default([]),
+  }),
+]);
+export type VenueConnector = z.output<typeof VenueConnectorSchema>;
+
+/** THE ONE READER of a room's GitHub grant: the normalized repository list and permission, or
+ *  undefined when the room has no github connector. The workspace (which trees to clone), the
+ *  credential request (which repository to mint for) and the simulate report (furnishings) all read
+ *  this; none re-derives the grant from the raw definition. */
+export function githubGrant(venue: { connectors?: readonly VenueConnector[] | undefined }):
+  { repositories: string[]; permissions: "contents:read" | "contents:write" } | undefined {
+  const c = (venue.connectors ?? []).find((x) => x.kind === "github");
+  if (!c) return undefined;
+  const repositories: string[] = [];
+  for (const r of c.grant.repositories) {
+    const n = normalizeRepoUrl(r);
+    if (n && !repositories.includes(n)) repositories.push(n);
+  }
+  return { repositories, permissions: c.grant.permissions };
+}
+
 export const VenueObjectSchema = z
   .object({
     slug: z.string(),
@@ -1215,6 +1284,9 @@ export const VenueObjectSchema = z
     /** The MCP servers the room stands up. Each names credential CLASSES, never material — the same
      *  discipline `credential_surface` takes, restated at the server that consumes them. */
     mcp_servers: z.array(VenueMcpServerSchema).default([]),
+    /** What the room furnishes a gig to reach, per connector (R38). Absent = nothing granted here;
+     *  a venue-less or connector-less gig keeps the typed-input repository path. */
+    connectors: z.array(VenueConnectorSchema).default([]),
     /** The device CLASSES the room needs — a kind (`serial`, `gpio`…), never a path. The machine
      *  maps a class to concrete nodes and the owning group; a contract that could name a node could
      *  name the raw memory device, so the value is pinned to the closed enumeration. */
@@ -1320,6 +1392,58 @@ export const VenueSchema = VenueObjectSchema.superRefine((venue, ctx) => {
           message:
             `mcp server "${server.slug}" needs credential "${cred}", which venue "${venue.slug}" does not admit ` +
             `in credential_surface — an unlisted credential is a breach, not a default. Add "${cred}" to credential_surface.`,
+        });
+      }
+    }
+  });
+
+  // ── Connectors (R38): a grant that cannot be understood is a breach, not a default. ──────────
+  let githubSeen = -1;
+  venue.connectors.forEach((c, i) => {
+    // Rule 4 — one github connector per room: a second is two versions of the same grant (the
+    // "primary" antipattern at the connector level).
+    if (c.kind === "github") {
+      if (githubSeen >= 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["connectors", i],
+          message: `venue "${venue.slug}" declares more than one github connector (also at connectors.${githubSeen}) — a room grants GitHub once; put every repository in that one grant`,
+        });
+      }
+      githubSeen = i;
+      // Rule 5 — every repository is https://github.com/<owner>/<repo>, and names one tree once.
+      const seen = new Map<string, number>();
+      c.grant.repositories.forEach((raw, j) => {
+        const n = normalizeRepoUrl(raw);
+        if (!n) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["connectors", i, "grant", "repositories", j],
+            message: `github connector grants ${JSON.stringify(raw)}, which is not https://github.com/<owner>/<repo> — the broker mints only for GitHub repositories, so a room cannot grant what no broker can honour`,
+          });
+          return;
+        }
+        const first = seen.get(n);
+        if (first !== undefined) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["connectors", i, "grant", "repositories", j],
+            message: `github connector names ${n} twice (also at repositories.${first}) — two spellings of one repository are one grant; keep one`,
+          });
+          return;
+        }
+        seen.set(n, j);
+      });
+    }
+    // Rule 3, generalized — a connector's credentials must sit inside the room's surface.
+    for (const cred of c.credential_names) {
+      if (!venue.credential_surface.includes(cred)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["connectors", i, "credential_names"],
+          message:
+            `connector "${c.slug}" needs credential "${cred}", which venue "${venue.slug}" does not admit in credential_surface — ` +
+            `an unlisted credential is a breach, not a default. Add "${cred}" to credential_surface.`,
         });
       }
     }

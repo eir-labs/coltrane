@@ -18,8 +18,8 @@
 //     minting a standing one is an escalation no store-side gate catches; absent caller fails closed)
 //   · no_backend         — no deployment wired deps.issueAgentToken; the verb answers, never throws
 //   · bad_ttl            — the store takes INTEGER HOURS ≥ 1; a TTL it cannot express is refused,
-//     never rounded (rounding 15 minutes up to an hour quadruples the exposure silently — Envoy's
-//     session issuer refuses the same way, addendum b20dc2c)
+//     never rounded (rounding 15 minutes up to an hour quadruples the exposure silently — the
+//     deployment's session issuer refuses the same way, for the same reason)
 // Who may issue, whether the agent is a member, whether it has been named — the store's answers,
 // carried back as typed codes (not_a_member, not_named). The token is returned ONCE and is never
 // sealed to the ledger: the store's row is its record.

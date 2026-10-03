@@ -17,7 +17,7 @@
 // structural facts before any backend is reached: an agent token may not issue an agent token
 // (escalation: a one-sitting credential minting a standing one); a TTL the store cannot express is
 // refused rather than rounded (the store takes INTEGER HOURS; rounding 15 minutes up to an hour
-// quadruples the exposure silently — Envoy's issuer refuses the same way); and the token is
+// quadruples the exposure silently — the deployment's session issuer refuses the same way); and the token is
 // returned ONCE, never read back, never sealed to the ledger (the store holds its hash and who
 // issued it).
 import { describe, it, expect, vi } from "vitest";

@@ -89,7 +89,11 @@ cd "$(dirname "$0")/.."
 #       reached for a real dispatch); prepareWorkspace fetches the named base while the credential is
 #       in hand; stampChangeAddresses refuses base_not_in_tree by name; cloneInto refuses
 #       base_not_in_origin by name. 4413 + 6 = 4419.
-EXPECTED_LAWS="${EXPECTED_LAWS:-4419}"
+#   +1  after the non-author grade (F1): a base is a revision, never an option — a value git could read
+#       as an option (`--depth=999999` after `origin` un-shallows the clone; `--upload-pack=…` names a
+#       program) is refused bad_base by name before git sees it, in the clone and at the seal, and
+#       `--end-of-options` is pinned on fetch, cat-file and diff. 4419 + 1 = 4420.
+EXPECTED_LAWS="${EXPECTED_LAWS:-4420}"
 #   +3 blob_sha_refuses_rather_than_seals (new file) — the three refusals of `blobShaOfFile`, which
 #      had no law that could red them. Measured on the grade: with BOTH mid-read length refusals
 #      deleted, all 21 blob laws stayed green; with the `!stat.isFile()` refusal deleted, all 21

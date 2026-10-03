@@ -19,6 +19,9 @@
 //       a change-set is stamped from); a repository the input names beyond the grant is asked for too,
 //       after the grant — the broker, not the engine, is the one that refuses an ungranted tree
 //   K5  the room's genome is read ONCE for a room-named claim — the furnishing read is the run's read
+//   K6  a room that declares a substrate is not a room that needs nothing
+//   K7  a refused claim leaves the worker's credential as it was
+//   K9  the input's .git spelling of a granted tree is that tree — once, the cwd
 import { describe, it, expect, afterEach, vi } from "vitest";
 import { mkdtempSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -38,7 +41,7 @@ afterEach(() => {
 function withBroker() { savedBroker = process.env["COLTRANE_GIT_CREDENTIALS_URL"]; process.env["COLTRANE_GIT_CREDENTIALS_URL"] = BROKER; }
 
 /** A room row the store would serve: furnishings only unless `servers` or `grant` say otherwise. */
-function roomRow(slug: string, extra: { grant?: string[]; servers?: boolean } = {}) {
+function roomRow(slug: string, extra: { grant?: string[]; servers?: boolean; substrate?: string } = {}) {
   return {
     slug, version: 1, status: "active",
     definition: {
@@ -47,6 +50,7 @@ function roomRow(slug: string, extra: { grant?: string[]; servers?: boolean } = 
       equipment: { tools: [] }, lifecycle: { policy: "ephemeral", rebuild_cadence: "per-gig" },
       mcp_servers: extra.servers ? [{ slug: "notes", transport: "http", url: "https://notes.example/mcp", credential_names: [] }] : [],
       ...(extra.grant ? { connectors: [{ kind: "github", grant: { repositories: extra.grant } }] } : {}),
+      ...(extra.substrate ? { substrate: extra.substrate } : {}),
     },
   };
 }
@@ -134,9 +138,14 @@ describe("K3/K4/K5 — a furnished room's trees are prepared, credentialed per t
       claim: claimFor("one-chair-v0", { venue: "change-room", input: { repository: B } }),
       genome: genomeWith(roomRow("change-room", { grant: [A, B] })),
     });
-    const res = await workOnce(venueCtx(), { makeInvoke: () => vi.fn(async (ctx: AgentInvocationContext) => { seen.push(ctx); return sealableSignal; }) as unknown as AgentInvoker, prepareWorkspaces: pw.prepare } as unknown as WorkOnceDeps);
+    // THE REAL DOOR holds a docker realizer (`coltrane work` always passes one). A server-less room
+    // must never reach it: the grade at a3db254 measured a change gig routed into `docker compose`
+    // and failing terminally on a box that had nothing to build.
+    const realize = vi.fn(async () => { throw new Error("REALIZER CALLED for a room that needs nothing"); });
+    const res = await workOnce(venueCtx(), { makeInvoke: () => vi.fn(async (ctx: AgentInvocationContext) => { seen.push(ctx); return sealableSignal; }) as unknown as AgentInvoker, prepareWorkspaces: pw.prepare, venueRealizer: { realize } } as unknown as WorkOnceDeps);
     await settle();
-    expect(res.claimed && res.status).toBe("complete");
+    expect(res.claimed && res.status, `the run did not complete: ${JSON.stringify(res)}`).toBe("complete");
+    expect(realize, "a room that needs nothing stood up was handed to the realizer").not.toHaveBeenCalled();
     expect(pw.asked[0]!.cwdRepo, "the change lands in coltrane-ui, so it is the cwd tree").toBe(B);
     const m = seen[0]!.mounts!;
     expect(m.find((x) => x.repoUrl === B)?.cwd, "the change-request's tree is the cwd mount").toBe(true);
@@ -151,5 +160,40 @@ describe("K3/K4/K5 — a furnished room's trees are prepared, credentialed per t
     expect(res2.claimed && res2.status).toBe("complete");
     expect(pw.asked[1]!.trees, "the input's tree is asked for after the grant; the engine re-derives no grant").toEqual([A, B, C]);
     expect(pw.asked[1]!.cwdRepo).toBe(C);
+  });
+
+  it("K6 a room that declares a substrate is not a room that needs nothing — refused by a box with no realizer", async () => {
+    env = hostedEnv();
+    hostedStore({ claim: claimFor("one-chair-v0", { venue: "floor-room" }), genome: genomeWith(roomRow("floor-room", { substrate: "docker-compose" })) });
+    let error = "";
+    try { await workOnce(venueCtx(), { makeInvoke: () => vi.fn(async () => sealableSignal) as unknown as AgentInvoker } as unknown as WorkOnceDeps); }
+    catch (e) { error = e instanceof Error ? e.message : String(e); }
+    await settle();
+    expect(error).toMatch(/names venue "floor-room", which this worker cannot realize/);
+  });
+
+  it("K7 a refused claim leaves the worker's credential exactly as it was", async () => {
+    env = hostedEnv();
+    hostedStore({ claim: claimFor("one-chair-v0", { venue: "notes-room" }), genome: genomeWith(roomRow("notes-room", { servers: true })) });
+    const ctx = venueCtx();
+    const before = ctx.agentToken;
+    try { await workOnce(ctx, { makeInvoke: () => vi.fn(async () => sealableSignal) as unknown as AgentInvoker } as unknown as WorkOnceDeps); } catch { /* the refusal */ }
+    await settle();
+    expect(ctx.agentToken, "a refused claim changed what this worker is").toBe(before);
+  });
+
+  it("K9 the input's .git spelling of a granted tree is that tree — cloned once, the cwd", async () => {
+    env = hostedEnv(); withBroker();
+    const pw = preparer();
+    const seen: AgentInvocationContext[] = [];
+    hostedStore({
+      claim: claimFor("one-chair-v0", { venue: "change-room", input: { repository: `${B}.git` } }),
+      genome: genomeWith(roomRow("change-room", { grant: [A, B] })),
+    });
+    const res = await workOnce(venueCtx(), { makeInvoke: () => vi.fn(async (ctx: AgentInvocationContext) => { seen.push(ctx); return sealableSignal; }) as unknown as AgentInvoker, prepareWorkspaces: pw.prepare } as unknown as WorkOnceDeps);
+    await settle();
+    expect(res.claimed && res.status).toBe("complete");
+    expect(pw.asked[0]!.trees, "a .git spelling of a granted tree became a second tree").toEqual([A, B]);
+    expect(seen[0]!.mounts!.find((m) => m.repoUrl === B)?.cwd, "the .git spelling names the cwd tree").toBe(true);
   });
 });

@@ -17,6 +17,10 @@
 //   W3  the cwd is the change-request's tree when it is among the trees; otherwise the root
 //   W4  cleanup removes the whole root; revoke hands back every token
 //   W5  no trees → null, the normal answer (a research gig in a room with no github connector)
+//   W6  a tree whose folder would fall outside the workspace root is refused before any clone or
+//       mint — cloneInto's failure path reaps its target, and a target outside the root would reap
+//       the root's parent (the grade at a3db254, B2)
+//   W7  a mid-way failure hands back every credential it minted before it reaps the directories
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, writeFileSync, existsSync } from "node:fs";
@@ -118,5 +122,28 @@ describe("W2–W4 — every granted tree, its own folder, its own credential", (
   it("W5 no trees is null — the normal answer for a gig in a room that grants no repositories", async () => {
     const ws = await prepareWorkspaces({ trees: [], gigId: "g", drainKey: "dk", instance: "box", endpoint: "https://x/api" });
     expect(ws).toBeNull();
+  });
+
+  it("W6 a tree named \"..\" never escapes the root: its clone fails inside the root, and the root's PARENT survives", async () => {
+    // The grade at a3db254 measured the alternative: mountName yielded "..", the target was the root's
+    // parent, git refused the non-empty directory, and cloneInto's failure path removed the parent.
+    const parent = mkdtempSync(join(tmpdir(), "trees-parent-"));
+    writeFileSync(join(parent, "CANARY"), "still here");
+    const root = join(parent, "ws");
+    broker();
+    await expect(prepareWorkspaces({ trees: ["https://github.com/eir-labs/.."], gigId: "g", drainKey: "dk", instance: "box", endpoint: "https://x/api", root }))
+      .rejects.toThrow(/clone of .* failed|refusing to mount|outside the workspace root/);
+    expect(existsSync(join(parent, "CANARY")), "the workspace root's parent was reaped by a failed clone of a tree named ..").toBe(true);
+    expect(existsSync(parent)).toBe(true);
+  });
+
+  it("W7 a mid-way failure revokes every credential it minted, the cloned tree's and the failed tree's", async () => {
+    const a = origin("eta", "H.md");
+    const br = broker();
+    // The second tree is a real path that is not a repository: the clone fails after its mint.
+    const notARepo = mkdtempSync(join(tmpdir(), "trees-not-a-repo-"));
+    await expect(prepareWorkspaces({ trees: [a, notARepo], gigId: "g", drainKey: "dk", instance: "box", endpoint: "https://x/api" })).rejects.toThrow(/clone of .* failed/);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(br.revoked.length, "a token minted for a workspace that no longer exists was left to live out its hour").toBe(2);
   });
 });

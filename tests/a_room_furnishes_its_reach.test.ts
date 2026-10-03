@@ -138,4 +138,12 @@ describe("a room furnishes its reach — the github connector", () => {
     if (!r.success) return;
     expect(githubGrant(r.data)).toEqual({ repositories: ["https://github.com/eir-labs/coltrane-ui"], permissions: "contents:read" });
   });
+
+  it("C10 a segment is never \".\" or \"..\": https://github.com/<owner>/.. is refused by name — a grant that no broker can honour and that a failed clone would turn into a reap of the workspace's parent", () => {
+    for (const bad of ["https://github.com/eir-labs/..", "https://github.com/eir-labs/.", "https://github.com/../coltrane", "https://github.com/eir-labs/.hidden"]) {
+      const r = VenueSchema.safeParse(room({ connectors: [{ kind: "github", grant: { repositories: [bad] } }] }));
+      expect(r.success, `accepted ${JSON.stringify(bad)}`).toBe(false);
+      expect(normalizeRepoUrl(bad), `normalized ${JSON.stringify(bad)} to a name`).toBeNull();
+    }
+  });
 });

@@ -119,6 +119,8 @@ export interface AgentInvocationContext {
    * so a chair cannot use this as a free channel into the prompt.
    */
   hydration?: Record<string, unknown> | undefined;
+  /** The trees the room furnished this run (RunDeps.mounts), so the prompt can name them. */
+  mounts?: readonly { repoUrl: string; dir: string; cwd: boolean }[] | undefined;
   inputs: readonly OutputRecord[]; // upstream outputs matching this agent's input_types
   gig_input: Record<string, unknown>;
   // The output types THIS chair seals — the chair's output_contract intersected with the
@@ -744,6 +746,14 @@ export interface RunDeps {
    * an ambient host path.
    */
   tree_root?: string | undefined;
+  /**
+   * THE TREES THE ROOM FURNISHED (R38, 3 Oct 2026): every repository the gig's room granted, cloned
+   * under one root, each in its own folder, by the drain (prepareWorkspaces). Threaded onto every
+   * seat's invocation context so the prompt can name them — a seat that holds four trees must be
+   * told where each sits; `cwd` marks the one a change lands in (the change-request's tree), when
+   * there is one. Absent = the single-tree or tree-less run, byte-identical to before this field.
+   */
+  mounts?: readonly { repoUrl: string; dir: string; cwd: boolean }[] | undefined;
 }
 
 /**
@@ -3809,6 +3819,8 @@ export async function runGig(
           // #seat-effort (O2) — the RESOLVED effort reaches the invoker on the ctx, always present
           // (resolveEffort floors to medium), so both invokers carry it without re-deriving.
           effort: resolvedEffort,
+          // R38 — the trees the room furnished reach every seat, so the prompt can name them.
+          ...(deps.mounts && deps.mounts.length > 0 ? { mounts: deps.mounts } : {}),
           // contract-seat-context-ceiling-v1 (O2/O3) — the RESOLVED ceiling reaches the invoker on the
           // ctx, present ONLY when declared (no floor), so an undeclared seat stays uncapped (I1).
           ...(resolvedMaxContext !== undefined ? { max_context_tokens: resolvedMaxContext } : {}),

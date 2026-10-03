@@ -44,6 +44,7 @@ export const STORE_MAX_ATTEMPTS = 3;
 export const LEASE_MODULE = "../src/lease.js";
 export interface LeaseModule {
   HOSTED_LEASE_MS: number;
+  PLAYER_LEASE_MS: number;
   DRAIN_LEASE_ROUTES: { renew: string; release: string };
 }
 export const loadLease = async (): Promise<LeaseModule> =>

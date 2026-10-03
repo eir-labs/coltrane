@@ -26,7 +26,7 @@ import { execFileSync } from "node:child_process";
 import { isSafeGitRev } from "./run_deps.js";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve, sep } from "node:path";
 
 /** What the mint endpoint answers with. `expires_at` is GitHub's hour, not our thirty-minute lease
  *  — carried through so a caller can see the difference rather than assume they match. */
@@ -113,6 +113,17 @@ export async function fetchGitCredential(
  * revoke — is IDENTICAL, because a room's working tree and the drain's must be the same thing prepared
  * the same way. Omitted (the drain's call) keeps the original mkdtempSync behaviour byte-for-byte.
  */
+/** GitHub's only early-revocation path for an installation token, authenticated with the token itself.
+ *  Never throws: the token expires on its own within the hour regardless. */
+export async function revokeGithubToken(token: string): Promise<void> {
+  try {
+    await fetch("https://api.github.com/installation/token", {
+      method: "DELETE",
+      headers: { authorization: `Bearer ${token}`, accept: "application/vnd.github+json" },
+    });
+  } catch { /* best effort */ }
+}
+
 export function cloneInto(repoUrl: string, token: string, targetDir?: string, base?: string | null): PreparedWorkspace {
   const dir = targetDir ?? mkdtempSync(join(tmpdir(), "coltrane-gig-"));
   const cleanup = () => {
@@ -120,14 +131,7 @@ export function cloneInto(repoUrl: string, token: string, targetDir?: string, ba
       rmSync(dir, { recursive: true, force: true });
     } catch { /* a temp dir that will not delete is not worth failing a drained gig over */ }
   };
-  const revoke = async () => {
-    try {
-      await fetch("https://api.github.com/installation/token", {
-        method: "DELETE",
-        headers: { authorization: `Bearer ${token}`, accept: "application/vnd.github+json" },
-      });
-    } catch { /* best effort: the token expires on its own within the hour regardless */ }
-  };
+  const revoke = async () => { await revokeGithubToken(token); };
 
   const env = {
     ...process.env,
@@ -234,7 +238,7 @@ function mountName(repoUrl: string, taken: Set<string>): string {
   while (end > 0 && t.charCodeAt(end - 1) === 47 /* "/" */) end--;   // a scan, not /\/+$/ (CodeQL js/polynomial-redos)
   t = t.slice(0, end);
   if (t.endsWith(".git")) t = t.slice(0, -4);
-  const parts = t.split(/[\/:]/).filter(Boolean);
+  const parts = t.split(/[\/:]/).filter((seg) => seg.length > 0 && seg !== "." && seg !== "..");
   const base = parts[parts.length - 1] ?? "tree";
   let name = base;
   if (taken.has(name) && parts.length >= 2) name = `${parts[parts.length - 2]}__${base}`;
@@ -297,6 +301,7 @@ export async function prepareWorkspaces(opts: {
   const root = opts.root ?? mkdtempSync(join(tmpdir(), "coltrane-gig-"));
   const prepared: PreparedWorkspace[] = [];
   const mounts: MountedTree[] = [];
+  const minted: string[] = [];
   const taken = new Set<string>();
   const cleanupAll = () => {
     for (const p of prepared) p.cleanup();
@@ -304,14 +309,26 @@ export async function prepareWorkspaces(opts: {
   };
   try {
     for (const repoUrl of trees) {
-      const cred = await fetchGitCredential(opts.endpoint, opts.drainKey, opts.instance, opts.gigId, repoUrl);
+      // THE TARGET STAYS UNDER THE ROOT. mountName drops "." and ".." segments, and this asserts it:
+      // cloneInto's own failure path removes its target directory, and a target that escaped the
+      // root would have removed the root's parent (the grade at a3db254, B2).
       const target = join(root, mountName(repoUrl, taken));
+      if (!resolve(target).startsWith(resolve(root) + sep)) {
+        throw new Error(`refusing to mount ${repoUrl}: its folder would fall outside the workspace root`);
+      }
+      const cred = await fetchGitCredential(opts.endpoint, opts.drainKey, opts.instance, opts.gigId, repoUrl);
+      minted.push(cred.token);
       const base = opts.base && opts.base.repoUrl === repoUrl ? opts.base.rev : null;
       const ws = cloneInto(repoUrl, cred.token, target, base);
       prepared.push(ws);
       mounts.push({ repoUrl, dir: ws.dir });
     }
   } catch (e) {
+    // A mid-way failure hands back EVERY credential it minted — the trees that cloned and the one
+    // that did not — before it reaps the directories; a token left to live out GitHub's hour for a
+    // workspace that no longer exists is the leak the grade named (note 4). Best effort, never awaited
+    // past the failure: the failure is what the caller must hear.
+    void Promise.all(minted.map((token) => revokeGithubToken(token)));
     cleanupAll();
     throw e;
   }

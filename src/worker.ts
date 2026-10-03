@@ -45,7 +45,7 @@ import { rpcGenomeStore } from "./genome_store.js";
 import { workerCredentialMode } from "./worker_env.js";
 import { prepareWorkspace, prepareWorkspaces, type PreparedWorkspaces } from "./workspace.js";
 import { engineToolProviders, drainBudget, drainTimeoutMs, resolveWorkingRepo, resolveChangeSetBase, assembleRunDeps } from "./run_deps.js";
-import { githubGrant } from "./genome_schema.js";
+import { githubGrant, normalizeRepoUrl } from "./genome_schema.js";
 // The repository resolver's ONE home is run_deps.ts (shared by both doors). Re-exported here so
 // worker.ts's own consumers — and tests/the_repo_is_typed_input — keep importing it from this path.
 export { resolveWorkingRepo } from "./run_deps.js";
@@ -573,9 +573,12 @@ export const defaultRoomNeedsNothing: RoomNeedsNothing = async (ctx, venue) => {
   // Read once: the gate's load is kept on the context so the run below does not pay for it twice
   // (one process claims one gig; the cache lives exactly as long as that claim).
   const genome = await rpcGenomeStore(ctx).load();
-  genomeReadAtGate.set(ctx, genome);
   const room = genome.venues.get(venue);
-  return Boolean(room) && room!.mcp_servers.length === 0 && !room!.substrate;
+  const admitted = Boolean(room) && room!.mcp_servers.length === 0 && !room!.substrate;
+  // Kept for the run ONLY on admission: a refused claim's read must not be consumed by a later
+  // claim on the same context (the grade's note 2).
+  if (admitted) genomeReadAtGate.set(ctx, genome); else genomeReadAtGate.delete(ctx);
+  return admitted;
 };
 /** The genome the claim gate read for this context, if it read one — consumed by the run. */
 const genomeReadAtGate = new WeakMap<WorkerContext, Awaited<ReturnType<ReturnType<typeof rpcGenomeStore>["load"]>>>();
@@ -1396,6 +1399,7 @@ export async function workOnce(ctx: WorkerContext, deps: WorkOnceDeps): Promise<
   let workspace: Awaited<ReturnType<typeof prepareWorkspace>> = null;
   let workspaces: PreparedWorkspaces | null = null;
   let genomeForRun: Awaited<ReturnType<ReturnType<typeof rpcGenomeStore>["load"]>> | undefined;
+  const genomeForRunVenue = (g: NonNullable<typeof genomeForRun>, slug: string) => g.venues.get(slug);
   // Declared out here so the finally can clear it: a timer left armed keeps the process alive past
   // a finished gig, which on a drain means the loop's next claim waits on nothing.
   let deadline: ReturnType<typeof setTimeout> | undefined;
@@ -1408,8 +1412,9 @@ export async function workOnce(ctx: WorkerContext, deps: WorkOnceDeps): Promise<
     // Cloning HERE as well would mint a SECOND git credential and stand up a SECOND live tree for one
     // gig — the collision. The decision uses only facts available BEFORE the genome load at :939:
     // claim.venue and claim.repo_url (claim-level ClaimedGig fields) plus the run-level venueRealizer
-    // dep. No genome is hoisted; reordering the load would entangle the workspace lifecycle with
-    // genome-load failure paths, which is exactly what is avoided here.
+    // dep — and, since R38, the ROOM ITSELF: for a room-named claim the genome is read first (the gate
+    // already read it), because whether the room needs anything stood up is a fact of the genome. A
+    // genome-load failure there happens before any clone, so nothing is left to reap.
     //
     // ERROR PATHS. When SUPPRESSED the Booker neither clones nor mints, so the whole workspace
     // lifecycle — the credential mint, the clone, and every failure of either — shifts to realize()'s
@@ -1418,21 +1423,32 @@ export async function workOnce(ctx: WorkerContext, deps: WorkOnceDeps): Promise<
     // and its error paths are byte-identical to before this guard existed.
     // Resolved ONCE per run, from the work's own contract first (see resolveWorkingRepo).
     const workingRepo = resolveWorkingRepo(claim);
-    const roomWillPopulate = Boolean(claim.venue && workingRepo && deps.venueRealizer);
-    // R38 — A ROOM FURNISHES ITS TREES. When the claim names a room whose github connector grants
-    // repositories, every granted tree is cloned under one root, each with its own credential, and
-    // the change-request's tree (when the input names one) is the cwd and the tree a change-set is
-    // stamped from. The genome is read first for a room-named claim — a room's grant is a fact of the
-    // genome, not of the claim — and that load is the same one the run needs below (loaded once).
-    let furnishedTrees: readonly string[] = [];
-    if (claim.venue && !roomWillPopulate) {
+    // R38 — THE ROOM DECIDES. For a room-named claim the room is read now (the gate's read, else one
+    // load): a room that declares no mcp_servers and no substrate NEEDS NOTHING STOOD UP, so it is
+    // never handed to the realizer — the realizer is for rooms that declare servers. The grade at
+    // a3db254 measured the alternative: with `coltrane work` always holding a docker realizer, every
+    // room-named change gig was routed past the furnished branch into `docker compose`, and a gig the
+    // new gate had admitted then failed terminally on a box that had nothing to build.
+    let room: ReturnType<typeof genomeForRunVenue> = undefined;
+    if (claim.venue) {
       genomeForRun = genomeReadAtGate.get(ctx) ?? (await rpcGenomeStore(ctx).load());
       genomeReadAtGate.delete(ctx);
-      const room = genomeForRun.venues.get(claim.venue);
-      const grant = room ? githubGrant(room) : undefined;
+      room = genomeForRun.venues.get(claim.venue);
+    }
+    const roomNeedsNothing = Boolean(room) && room!.mcp_servers.length === 0 && !room!.substrate;
+    const roomWillPopulate = Boolean(claim.venue && workingRepo && deps.venueRealizer && !roomNeedsNothing);
+    // A ROOM FURNISHES ITS TREES. When the room's github connector grants repositories, every granted
+    // tree is cloned under one root, each with its own credential, and the change-request's tree
+    // (when the input names one) is the cwd and the tree a change-set is stamped from. The input's
+    // spelling is normalized before it is matched against the grant: "names one tree once" is the
+    // engine's rule too (a `.git` spelling of a granted tree is that tree, not a second clone).
+    const workingRepoNorm = workingRepo ? (normalizeRepoUrl(workingRepo) ?? workingRepo) : null;
+    let furnishedTrees: readonly string[] = [];
+    if (roomNeedsNothing) {
+      const grant = githubGrant(room!);
       if (grant) {
-        furnishedTrees = workingRepo && !grant.repositories.includes(workingRepo)
-          ? [...grant.repositories, workingRepo]
+        furnishedTrees = workingRepoNorm && !grant.repositories.includes(workingRepoNorm)
+          ? [...grant.repositories, workingRepoNorm]
           : grant.repositories;
       }
     }
@@ -1440,16 +1456,16 @@ export async function workOnce(ctx: WorkerContext, deps: WorkOnceDeps): Promise<
       const base = resolveChangeSetBase(claim);
       workspaces = await (deps.prepareWorkspaces ?? prepareWorkspaces)({
         trees: furnishedTrees,
-        cwdRepo: workingRepo,
+        cwdRepo: workingRepoNorm,
         gigId: claim.gig_id,
         drainKey: ctx.drainKey,
         instance: ctx.instance,
         endpoint: process.env["COLTRANE_GIT_CREDENTIALS_URL"],
-        ...(workingRepo && base ? { base: { repoUrl: workingRepo, rev: base } } : {}),
+        ...(workingRepoNorm && base ? { base: { repoUrl: workingRepoNorm, rev: base } } : {}),
       });
       if (workspaces) {
         process.chdir(workspaces.dir);
-        log(`room "${claim.venue}" furnished ${workspaces.mounts.length} tree(s): ${workspaces.mounts.map((m) => m.repoUrl).join(", ")}${workingRepo ? ` — cwd ${workingRepo}` : " — cwd the root"}`);
+        log(`room "${claim.venue}" furnished ${workspaces.mounts.length} tree(s): ${workspaces.mounts.map((m) => m.repoUrl).join(", ")}${workingRepoNorm ? ` — cwd ${workingRepoNorm}` : " — cwd the root"}`);
       }
     } else if (!roomWillPopulate) {
       workspace = await prepareWorkspace({
@@ -1818,17 +1834,17 @@ export async function workOnce(ctx: WorkerContext, deps: WorkOnceDeps): Promise<
         venue: claim.venue ?? undefined,
         venues: genome.venues,
         venueRealizer: deps.venueRealizer,
-        repoUrl: claim.venue ? workingRepo : undefined,
-        changeSetBase: claim.venue ? resolveChangeSetBase(claim) ?? undefined : undefined,
+        repoUrl: claim.venue && !roomNeedsNothing ? workingRepo : undefined,
+        changeSetBase: claim.venue && !roomNeedsNothing ? resolveChangeSetBase(claim) ?? undefined : undefined,
         // The address-stamping tree (records-by-address): the drain's OWN working clone, the tree its
         // chairs edited and the one `git diff`/`git rev-parse` must read to stamp a sealed change-set's
         // `changes` or red-spec's `laws`. Never process.cwd(): when the Booker did not clone (a
         // venue-populated room, or a claim naming no repository) there is no tree here, so tree_root is
         // undefined and a laws/changes seal refuses `tree_root_unknown` rather than stamping the wrong tree.
-        tree_root: workspaces ? (workingRepo ? workspaces.dir : undefined) : workspace?.dir,
+        tree_root: workspaces ? (workingRepoNorm ? workspaces.dir : undefined) : workspace?.dir,
         // R38 — the trees the room furnished, so every seat is told where they sit (the prompt's
         // "# Trees" layer); the change-request's tree, when there is one, is marked as the cwd.
-        mounts: workspaces ? workspaces.mounts.map((m) => ({ ...m, cwd: m.dir === workspaces!.dir && Boolean(workingRepo) })) : undefined,
+        mounts: workspaces ? workspaces.mounts.map((m) => ({ ...m, cwd: m.dir === workspaces!.dir && Boolean(workingRepoNorm) })) : undefined,
       }),
       gig_id: claim.gig_id, // ← the run IS the queue row; the drained header completes it
       signal: aborter.signal,

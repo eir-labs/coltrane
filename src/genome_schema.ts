@@ -1204,7 +1204,10 @@ export function normalizeRepoUrl(url: string): string | null {
   dropTrailingSlashes();
   if (t.endsWith(".git")) t = t.slice(0, -4);
   dropTrailingSlashes();
-  const m = /^https:\/\/github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)$/.exec(t);
+  // A segment never begins with a dot: "." and ".." are paths, not names, and a grant of
+  // https://github.com/<owner>/.. would have let a failed clone reap the workspace root's PARENT
+  // (the grade at a3db254, B2). GitHub names cannot begin with a dot either.
+  const m = /^https:\/\/github\.com\/([A-Za-z0-9_-][A-Za-z0-9_.-]*)\/([A-Za-z0-9_-][A-Za-z0-9_.-]*)$/.exec(t);
   return m ? `https://github.com/${m[1]}/${m[2]}` : null;
 }
 

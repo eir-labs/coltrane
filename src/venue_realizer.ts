@@ -107,6 +107,10 @@ export interface RealizeOpts {
   drainKey?: string;
   instance?: string;
   gitCredentialsEndpoint?: string;
+  /** The commit a change-set is measured from (change_set_base on the typed input), threaded in from
+   *  the run exactly as `repoUrl` is, so the room's tree is prepared the same way the drain's is: the
+   *  base fetched into the shallow clone while the credential is in hand. */
+  changeSetBase?: string | null;
 }
 
 /** The seam. The engine ships the interface, the state machine, the probe and the drift guard; a
@@ -966,6 +970,7 @@ export function dockerComposeRealizer(opts?: { run?: ComposeRunner; prepareWorks
         if (opts.repoUrl) {
           workspace = await prepare({
             repoUrl: opts.repoUrl,
+            base: opts.changeSetBase ?? null,
             gigId: opts.gigId,
             drainKey: opts.drainKey,
             instance: opts.instance,

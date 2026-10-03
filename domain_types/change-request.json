@@ -21,7 +21,7 @@
         "items": {
           "type": "string"
         },
-        "description": "Paths the requester believes are in scope. A belief, not a finding — the reading phase may contradict it."
+        "description": "Paths the requester believes are in scope. A belief, not a finding \u2014 the reading phase may contradict it."
       },
       "acceptance_criteria": {
         "type": "array",
@@ -44,6 +44,10 @@
       "change_set_branch": {
         "type": "string",
         "description": "The change-set branch (changeset/<originating-gig-uuid>[/<slug>]) the implementation run must work on. CARRIED here, never inferred from the working tree. Optional and additive: a request that omits it is refused as branch-absent-but-expected only where a run needs it."
+      },
+      "change_set_base": {
+        "type": "string",
+        "description": "The commit the change-set is measured from (git diff <base> -- <path> at seal), as a FULL sha. CARRIED here, never inferred from the working tree: the drain clones one commit deep, and prepareWorkspace fetches this commit into the tree while the gig's credential is in hand, so a change-set of DELIVERED work can name the parent of the landing commit. A full sha is required in practice: an abbreviated sha cannot be fetched, and a tag or branch name fetched into a shallow clone lands only in FETCH_HEAD, so the seal refuses it base_not_in_tree. Optional and additive; absent, the seat's own base must already be in the tree or the seal refuses base_not_in_tree."
       }
     }
   },

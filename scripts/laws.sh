@@ -81,7 +81,22 @@ cd "$(dirname "$0")/.."
 #   +1  after the non-author grade (D3, D5): a malformed may_dispatch is refused by name (bad_may_dispatch),
 #       never narrowed to []; a success the backend answers must BE a credential (a ctk_ token and its key)
 #       or it is answered as a failure, never forwarded as ok:true with nothing in it. 4412 + 1 = 4413.
-EXPECTED_LAWS="${EXPECTED_LAWS:-4413}"
+#   +6 the_base_is_in_the_tree (new file) — a change-set names the commit it is measured from, and the
+#       tree holds it (spec.order-lifecycle.transition-law R27: the receipts of DELIVERED work). The
+#       drain clones one commit deep, so a base that is not HEAD was not in the tree and the seal died
+#       inside git. change-request carries change_set_base; both resolvers read the typed input at the
+#       top AND one level down (a dispatched gig's input is keyed by type slug — `repository` was never
+#       reached for a real dispatch); prepareWorkspace fetches the named base while the credential is
+#       in hand; stampChangeAddresses refuses base_not_in_tree by name; cloneInto refuses
+#       base_not_in_origin by name. 4413 + 6 = 4419.
+#   +1  after the non-author grade (F1): a base is a revision, never an option — a value git could read
+#       as an option (`--depth=999999` after `origin` un-shallows the clone; `--upload-pack=…` names a
+#       program) is refused bad_base by name before git sees it, in the clone and at the seal, and
+#       `--end-of-options` is pinned on fetch, cat-file and diff. 4419 + 1 = 4420.
+#   +1  the grade's F2: the room-realization path threads the base exactly as the drain's does —
+#       worker → RunDeps.changeSetBase → the realizer's prepare(base) — so a room's tree and the drain's
+#       are the same thing prepared the same way. 4420 + 1 = 4421.
+EXPECTED_LAWS="${EXPECTED_LAWS:-4421}"
 #   +3 blob_sha_refuses_rather_than_seals (new file) — the three refusals of `blobShaOfFile`, which
 #      had no law that could red them. Measured on the grade: with BOTH mid-read length refusals
 #      deleted, all 21 blob laws stayed green; with the `!stat.isFile()` refusal deleted, all 21
@@ -325,7 +340,7 @@ EXPECTED_LAWS="${EXPECTED_LAWS:-4413}"
 #       behavioural and holds the other direction, that every pin names git's own default so nothing
 #       a seal records moves. Seven plants, each observed red and reverted; a no-op control stayed
 #       green first, and each plant's anchor was asserted to land before its run was believed.
-EXPECTED_FILES="${EXPECTED_FILES:-449}"   # + tests/agent_token_issue_is_governed.test.ts, + tests/verb_cap_grant.test.ts (#573), + tests/the_tracked_ledger_parses.test.ts, + tests/chair_narrows_what_it_may_reach.test.ts, + tests/git_invocation_pinned.test.ts, + tests/chair_spend_names_its_agent.test.ts, + tests/blob_sha_refuses_rather_than_seals.test.ts, + tests/blob_sha_is_the_git_stored_blob.test.ts, + tests/blob_sha_in_process.test.ts, + tests/genome_writes_stay_in_root.test.ts, + tests/skill_runs_on_exec_path.test.ts, + tests/node_floor_where_skills_run.test.ts, + tests/bus_not_hosted.test.ts, + tests/every_skill_runs_its_fixtures.test.ts, + tests/node_floor_refuses.test.ts, + tests/spec_reside_drive.test.ts (#537), + tests/a_red_law_names_its_plant.test.ts (#551), + tests/sealed_inputs.test.ts, tests/fan_out.test.ts, tests/completions_seal.test.ts, tests/tier_ladder.test.ts, tests/amend_ladder.test.ts, tests/completions_reasoning_effort.test.ts, tests/bus.test.ts, tests/bus_chair.test.ts, tests/bus_terminal.test.ts, tests/bus_verbs.test.ts, tests/bus_commit.test.ts, tests/code_tools.test.ts, tests/gig_input_validated.test.ts, tests/seat_reads_recorded.test.ts, tests/claude_seat_reads.test.ts, tests/optional_declared_input.test.ts, tests/simulate_names_seats.test.ts
+EXPECTED_FILES="${EXPECTED_FILES:-450}"   # + tests/the_base_is_in_the_tree.test.ts, + tests/agent_token_issue_is_governed.test.ts, + tests/verb_cap_grant.test.ts (#573), + tests/the_tracked_ledger_parses.test.ts, + tests/chair_narrows_what_it_may_reach.test.ts, + tests/git_invocation_pinned.test.ts, + tests/chair_spend_names_its_agent.test.ts, + tests/blob_sha_refuses_rather_than_seals.test.ts, + tests/blob_sha_is_the_git_stored_blob.test.ts, + tests/blob_sha_in_process.test.ts, + tests/genome_writes_stay_in_root.test.ts, + tests/skill_runs_on_exec_path.test.ts, + tests/node_floor_where_skills_run.test.ts, + tests/bus_not_hosted.test.ts, + tests/every_skill_runs_its_fixtures.test.ts, + tests/node_floor_refuses.test.ts, + tests/spec_reside_drive.test.ts (#537), + tests/a_red_law_names_its_plant.test.ts (#551), + tests/sealed_inputs.test.ts, tests/fan_out.test.ts, tests/completions_seal.test.ts, tests/tier_ladder.test.ts, tests/amend_ladder.test.ts, tests/completions_reasoning_effort.test.ts, tests/bus.test.ts, tests/bus_chair.test.ts, tests/bus_terminal.test.ts, tests/bus_verbs.test.ts, tests/bus_commit.test.ts, tests/code_tools.test.ts, tests/gig_input_validated.test.ts, tests/seat_reads_recorded.test.ts, tests/claude_seat_reads.test.ts, tests/optional_declared_input.test.ts, tests/simulate_names_seats.test.ts
 
 # THE OTHER BANDS. `vitest run` is ROOT-CONFIG ONLY — this repo's own workflow comments
 # record that four configs went unexecuted once for exactly that reason. So pinning only the

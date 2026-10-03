@@ -4,6 +4,7 @@
 // and records one ledger entry with a deterministic genome_hash + a run_fingerprint
 // that carries model_version + (empty, v0) eval_scores — honestly un-tempered.
 import { lineageAdoption } from "./lineage_adoption.js";
+import { isSafeGitRev } from "./run_deps.js";
 import { randomUUID, createHash } from "node:crypto";
 import { performance } from "node:perf_hooks";
 import { execFileSync } from "node:child_process";
@@ -657,6 +658,8 @@ export interface RunDeps {
    * the room declines to populate (an empty read-only workspace) and no git credential is minted.
    */
   repoUrl?: string | undefined;
+  /** The commit a change-set is measured from, threaded to the realizer beside repoUrl (the base is in the tree). */
+  changeSetBase?: string | undefined;
   /**
    * The directory whose git objects the SEAL stamps law and change addresses from (records-by-address,
    * contract-records-by-address-v1). When a sealed `red-spec` record carries `laws` or a `change-set`
@@ -1312,7 +1315,25 @@ export function stampChangeAddresses(
     const blob_sha = existsSync(joinPath(tree_root, change.path))
       ? blobShaOfFile(tree_root, change.path)
       : "deleted";
-    const diff = gitInTree(tree_root, ["diff", change.base, "--", change.path]);
+    // THE BASE IS IN THE TREE, or the refusal names it. The drain clones one commit deep; a base that
+    // is not HEAD is in the tree only if the request carried it as change_set_base and the clone
+    // fetched it. Asked first, so the seal's answer is the missing commit and not git's own failure.
+    if (!isSafeGitRev(change.base)) {
+      throw new RuntimeError(
+        `bad_base: change ${change.path} names base ${JSON.stringify(change.base)}, which is not a git revision the ` +
+          `engine will hand to git — a sha, a tag or a branch name; nothing beginning with a dash, no whitespace, no '..'`,
+      );
+    }
+    try {
+      gitInTree(tree_root, ["cat-file", "-e", "--end-of-options", `${change.base}^{commit}`]);
+    } catch {
+      throw new RuntimeError(
+        `base_not_in_tree: change ${change.path} is measured from ${change.base}, and the working tree does not ` +
+          `hold that commit. A gig's clone is one commit deep; name the base on the request as change_set_base ` +
+          `so the clone fetches it, or measure from a commit the tree holds.`,
+      );
+    }
+    const diff = gitInTree(tree_root, ["diff", "--end-of-options", change.base, "--", change.path]);
     const patch_sha256 = sha256Hex(diff);
     const bytes = Buffer.byteLength(diff, "utf8");
     if (change.blob_sha !== undefined && change.blob_sha !== blob_sha) {
@@ -1572,6 +1593,7 @@ export async function runGig(
         {
           gigId: gig_id,
           ...(deps.repoUrl ? { repoUrl: deps.repoUrl } : {}),
+          ...(deps.changeSetBase ? { changeSetBase: deps.changeSetBase } : {}),
           ...(process.env["COLTRANE_DRAIN_KEY"] ? { drainKey: process.env["COLTRANE_DRAIN_KEY"] } : {}),
           ...(process.env["COLTRANE_INSTANCE"] ? { instance: process.env["COLTRANE_INSTANCE"] } : {}),
           ...(process.env["COLTRANE_GIT_CREDENTIALS_URL"]

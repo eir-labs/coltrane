@@ -2558,7 +2558,9 @@ export async function runGig(
           });
           // The record's own forebear (lineage-record v3): read here, reported with the adoption, so
           // the store that lands the rite row never infers a forebear from external_body prose.
-          const forebearObj = (target?.data as Record<string, unknown> | undefined)?.["forebear"] as Record<string, unknown> | undefined;
+          // on an ENTRY human chair there is no upstream record (`target` is undefined) and the record came
+          // in seeded with the payload — read the forebear from whichever the verdict stands on
+          const forebearObj = ((target?.data as Record<string, unknown> | undefined) ?? seeded)?.["forebear"] as Record<string, unknown> | undefined;
           const forebear_ref = typeof forebearObj?.["slug"] === "string" ? (forebearObj["slug"] as string) : undefined;
           emit({
             type: "lineage_adoption", phase: phase.name, role: hc.role,

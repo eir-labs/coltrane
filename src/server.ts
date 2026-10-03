@@ -2771,7 +2771,8 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         // a harmonic (type-graph) or creative (identity/method) change does not.
         const base = args["base"] as AgentProfile | undefined;
         const next = args["next"] as AgentProfile | undefined;
-        const new_version = Number(args["new_version"] ?? ((base?.version ?? 0) + 1));
+        let new_version = Number(args["new_version"] ?? ((base?.version ?? 0) + 1));
+        let parent_version: number | undefined = base?.version;
         if (base && next) {
           const change = proposeAgentChange(base, next);
           // For a creative-space change, return the lineage-threaded evolved profile
@@ -2827,6 +2828,12 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
           } else {
             return { ok: false, requires_approval: approval, error: `agent_evolve: unknown agent "${evolveSlug}" (no agents/${evolveSlug}.json)` };
           }
+          // THE DEFAULT VERSION IS THE LOADED BASE'S PLUS ONE (the grade of #578, note e). This path
+          // never carries `args.base`, so the default above read `(undefined ?? 0) + 1 = 1` whatever the
+          // loaded definition's version was — and a hosted upsert at version 1 is the in-place write
+          // this change exists to end. An explicit new_version still wins.
+          parent_version = Number((currentDef as { version?: unknown }).version ?? 1);
+          if (args["new_version"] === undefined || args["new_version"] === null) new_version = parent_version + 1;
           const nextDef = { ...currentDef, ...changes };
 
           // The agent must still be a legal composition on its own…
@@ -2884,7 +2891,7 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
           deps.agents?.set(evolveSlug, sealed.agent);
           return {
             ok: true, requires_approval: approval,
-            data: { new_version, evolved: sealed.agent, next_def: nextDef, content_hash: sealed.content_hash, effective_hash: sealed.effective_hash, cascade_check: { agents_affected: [], standards_affected } },
+            data: { new_version, parent_version, evolved: sealed.agent, next_def: nextDef, content_hash: sealed.content_hash, effective_hash: sealed.effective_hash, cascade_check: { agents_affected: [], standards_affected } },
           };
         }
         return { ok: true, requires_approval: approval, data: { new_version, cascade_check: { agents_affected: [], standards_affected: [] } } };

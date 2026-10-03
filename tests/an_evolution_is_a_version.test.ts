@@ -30,7 +30,8 @@ describe("agent_evolve, hosted: the upsert payload carries the version it report
     const res = await surface.find((t) => t.name === "agent_evolve")!.call({ slug: "scout", changes: { method: "1. look harder 2. report 3. stop" } });
     expect(res.ok, JSON.stringify(res)).toBe(true);
     const reported = (res.data as Record<string, unknown>)["new_version"];
-    expect(typeof reported).toBe("number");
+    expect(reported, "a v1 base evolves to v2 by default — the default reads the LOADED base, not an absent args.base").toBe(2);
+    expect((res.data as Record<string, unknown>)["parent_version"]).toBe(1);
     expect(upsert).toHaveBeenCalledTimes(1);
     const [cls, payload] = upsert.mock.calls[0] as unknown as [string, Record<string, unknown>];
     expect(cls).toBe("agent");
@@ -39,6 +40,17 @@ describe("agent_evolve, hosted: the upsert payload carries the version it report
     expect(payload["version"], "the reported version is the recorded version").toBe(reported);
     // and it is a NEW version, above the base's (the merged definition carries the base's otherwise)
     expect(Number(reported)).toBeGreaterThan(Number((res.data as Record<string, unknown>)["parent_version"] ?? 0));
+  });
+
+  it("L3 · a v3 base evolves to v4 by default", async () => {
+    const upsert = vi.fn(async () => undefined);
+    const base = { ...testAgent({ slug: "scout", primitives: ["SENSE"], output_types: ["scan-report"], domain: "demo" }), version: 3 } as Agent;
+    const surface = createToolSurface(hostedDeps(upsert, new Map([["scout", base]])));
+    const res = await surface.find((t) => t.name === "agent_evolve")!.call({ slug: "scout", changes: { method: "1. look 2. report 3. stop 4. file" } });
+    expect(res.ok, JSON.stringify(res)).toBe(true);
+    expect((res.data as Record<string, unknown>)["new_version"]).toBe(4);
+    const [, payload] = upsert.mock.calls[0] as unknown as [string, Record<string, unknown>];
+    expect(payload["version"]).toBe(4);
   });
 
   it("L2 · an explicit new_version rides through unchanged", async () => {

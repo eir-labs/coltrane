@@ -111,7 +111,10 @@ cd "$(dirname "$0")/.."
 #       rows at one version refuse naming both; drafts stay apart. Measured 3 Oct: the governed upsert
 #       retired a v1 beside its active v2 and the loader reported the slug as a duplicate, refusing the
 #       org's drain over a version history. 4432 + 7 = 4439.
-EXPECTED_LAWS="${EXPECTED_LAWS:-4439}"
+#   +3  after the non-author grade: the same rule for AGENTS (retired v1 + active v2 is a history, L8; a
+#       same-version clash refuses naming both, L9) and a version that is not a number is refused by name in
+#       every branch rather than winning or vanishing by row order (L10). 4439 + 3 = 4442.
+EXPECTED_LAWS="${EXPECTED_LAWS:-4442}"
 #   +3 blob_sha_refuses_rather_than_seals (new file) — the three refusals of `blobShaOfFile`, which
 #      had no law that could red them. Measured on the grade: with BOTH mid-read length refusals
 #      deleted, all 21 blob laws stayed green; with the `!stat.isFile()` refusal deleted, all 21

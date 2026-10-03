@@ -86,3 +86,55 @@ describe("the store loader's version rule for standards — retired rows are not
     expect(g.draft_standards.has("scan-v1")).toBe(true);
   });
 });
+
+// ── After the non-author grade: the same door one table over, and the coin toss it left open ──
+const agentRow = (version: unknown, status: string, identity: string) => ({
+  slug: "scout", version, status,
+  primitives: ["SENSE"], input_types: [], output_types: ["scan-report"], domain: "demo",
+  identity, method: "1. look 2. report 3. stop", constraints: [], depth_profile: "standard",
+  permissions: { allowed_tools: ["Read"], model_tier: "economy", max_tool_calls: 5 },
+  behavioral_primitives: ["explorer", "critic"], skill_slots: [], default_skills: [],
+});
+const loadAgents = (agents: unknown[]) =>
+  reconstructGenome({ core_types: [], domain_types: TYPE_ROWS, agents, standards: [], skills: [] } as never, { base: null });
+const skillRow = (version: unknown, status: string, description: string) => ({
+  slug: "tight-scan", name: "Tight scan", description, skill_md: "# tight scan", tier: 0,
+  input_type: "Signal", output_type: "Signal", status, version,
+});
+const loadSkills = (skills: unknown[]) =>
+  reconstructGenome({ core_types: [], domain_types: [], agents: [], standards: [], skills } as never, { base: null });
+
+describe("the grade's two notes: agents get the same rule, and a version that is not a number is refused, never tossed", () => {
+  it("L8 · agents: v1 retired + v2 active under one slug is a version history — the active one loads, no duplicate", () => {
+    const g = loadAgents([agentRow(1, "retired", "the old scout"), agentRow(2, "active", "the new scout")]);
+    expect(g.load_errors).toEqual([]);
+    expect(g.agents.get("scout")?.identity).toBe("the new scout");
+    // and the other order
+    const g2 = loadAgents([agentRow(2, "active", "the new scout"), agentRow(1, "retired", "the old scout")]);
+    expect(g2.load_errors).toEqual([]);
+    expect(g2.agents.get("scout")?.identity).toBe("the new scout");
+  });
+
+  it("L9 · agents: two active rows at one version refuse, naming both; the highest of two versions wins", () => {
+    const clash = loadAgents([agentRow(2, "active", "a"), agentRow(2, "active", "b")]);
+    expect(clash.load_errors.map((e) => e.error).join("\n")).toMatch(/ambiguous agent "scout": 2 rows share one version/);
+    expect(clash.agents.has("scout")).toBe(false);
+    const g = loadAgents([agentRow(1, "active", "a"), agentRow(3, "active", "c")]);
+    expect(g.load_errors).toEqual([]);
+    expect(g.agents.get("scout")?.identity).toBe("c");
+  });
+
+  it("L10 · a version that is not a number is refused by name in every branch — it neither wins nor vanishes by row order", () => {
+    for (const rows of [[standardRow("abc" as never, "active", "scout"), standardRow(2, "active", "sentry")], [standardRow(2, "active", "sentry"), standardRow("abc" as never, "active", "scout")]]) {
+      const g = load(rows);
+      expect(g.load_errors.map((e) => e.error).join("\n")).toMatch(/standard "scan-v1": version "abc" is not a number/);
+      expect(seatOf(g), "the numeric row still loads").toBe("sentry");
+    }
+    const a = loadAgents([agentRow("abc", "active", "x"), agentRow(2, "active", "y")]);
+    expect(a.load_errors.map((e) => e.error).join("\n")).toMatch(/agent "scout": version "abc" is not a number/);
+    expect(a.agents.get("scout")?.identity).toBe("y");
+    const s = loadSkills([skillRow("abc", "active", "x"), skillRow(2, "active", "y")]);
+    expect(s.load_errors.map((e) => e.error).join("\n")).toMatch(/skill "tight-scan": version "abc" is not a number/);
+    expect(s.skills.get("tight-scan")?.description).toBe("y");
+  });
+});

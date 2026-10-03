@@ -96,7 +96,17 @@ cd "$(dirname "$0")/.."
 #   +1  the grade's F2: the room-realization path threads the base exactly as the drain's does —
 #       worker → RunDeps.changeSetBase → the realizer's prepare(base) — so a room's tree and the drain's
 #       are the same thing prepared the same way. 4420 + 1 = 4421.
-EXPECTED_LAWS="${EXPECTED_LAWS:-4421}"
+#  +10  the_store_genome_has_a_base (new file) — the store genome gets a base (3 Oct): the store genome had
+#       nothing under it, so an org copied every engine agent its standards named, and the day one copy
+#       was incomplete the drain refused every gig in the org at claim time ("references unknown agent
+#       john", 3 Oct). L0 the engine knows its own root; L1 the measured negative pinned by name; L2 the
+#       base under the rows composes; L3 an org row overrides a base slug; L4 two ORG rows still refuse;
+#       L5 base standards and types are inherited; L6 a draft does not displace the base; L7 rooms and
+#       charts are not folded; L8/L9 both store backings read the base by default. 4421 + 10 = 4431.
+#   +1  after the non-author grade (note 1): a broken packaged base is NAMED — its load errors ride into
+#       the effective genome as loadLayeredGenome carries every layer's — not inferred from the
+#       downstream "references unknown agent" symptom (L10). 4431 + 1 = 4432.
+EXPECTED_LAWS="${EXPECTED_LAWS:-4432}"
 #   +3 blob_sha_refuses_rather_than_seals (new file) — the three refusals of `blobShaOfFile`, which
 #      had no law that could red them. Measured on the grade: with BOTH mid-read length refusals
 #      deleted, all 21 blob laws stayed green; with the `!stat.isFile()` refusal deleted, all 21
@@ -340,7 +350,7 @@ EXPECTED_LAWS="${EXPECTED_LAWS:-4421}"
 #       behavioural and holds the other direction, that every pin names git's own default so nothing
 #       a seal records moves. Seven plants, each observed red and reverted; a no-op control stayed
 #       green first, and each plant's anchor was asserted to land before its run was believed.
-EXPECTED_FILES="${EXPECTED_FILES:-450}"   # + tests/the_base_is_in_the_tree.test.ts, + tests/agent_token_issue_is_governed.test.ts, + tests/verb_cap_grant.test.ts (#573), + tests/the_tracked_ledger_parses.test.ts, + tests/chair_narrows_what_it_may_reach.test.ts, + tests/git_invocation_pinned.test.ts, + tests/chair_spend_names_its_agent.test.ts, + tests/blob_sha_refuses_rather_than_seals.test.ts, + tests/blob_sha_is_the_git_stored_blob.test.ts, + tests/blob_sha_in_process.test.ts, + tests/genome_writes_stay_in_root.test.ts, + tests/skill_runs_on_exec_path.test.ts, + tests/node_floor_where_skills_run.test.ts, + tests/bus_not_hosted.test.ts, + tests/every_skill_runs_its_fixtures.test.ts, + tests/node_floor_refuses.test.ts, + tests/spec_reside_drive.test.ts (#537), + tests/a_red_law_names_its_plant.test.ts (#551), + tests/sealed_inputs.test.ts, tests/fan_out.test.ts, tests/completions_seal.test.ts, tests/tier_ladder.test.ts, tests/amend_ladder.test.ts, tests/completions_reasoning_effort.test.ts, tests/bus.test.ts, tests/bus_chair.test.ts, tests/bus_terminal.test.ts, tests/bus_verbs.test.ts, tests/bus_commit.test.ts, tests/code_tools.test.ts, tests/gig_input_validated.test.ts, tests/seat_reads_recorded.test.ts, tests/claude_seat_reads.test.ts, tests/optional_declared_input.test.ts, tests/simulate_names_seats.test.ts
+EXPECTED_FILES="${EXPECTED_FILES:-451}"   # + tests/the_store_genome_has_a_base.test.ts, + tests/the_base_is_in_the_tree.test.ts, + tests/agent_token_issue_is_governed.test.ts, + tests/verb_cap_grant.test.ts (#573), + tests/the_tracked_ledger_parses.test.ts, + tests/chair_narrows_what_it_may_reach.test.ts, + tests/git_invocation_pinned.test.ts, + tests/chair_spend_names_its_agent.test.ts, + tests/blob_sha_refuses_rather_than_seals.test.ts, + tests/blob_sha_is_the_git_stored_blob.test.ts, + tests/blob_sha_in_process.test.ts, + tests/genome_writes_stay_in_root.test.ts, + tests/skill_runs_on_exec_path.test.ts, + tests/node_floor_where_skills_run.test.ts, + tests/bus_not_hosted.test.ts, + tests/every_skill_runs_its_fixtures.test.ts, + tests/node_floor_refuses.test.ts, + tests/spec_reside_drive.test.ts (#537), + tests/a_red_law_names_its_plant.test.ts (#551), + tests/sealed_inputs.test.ts, tests/fan_out.test.ts, tests/completions_seal.test.ts, tests/tier_ladder.test.ts, tests/amend_ladder.test.ts, tests/completions_reasoning_effort.test.ts, tests/bus.test.ts, tests/bus_chair.test.ts, tests/bus_terminal.test.ts, tests/bus_verbs.test.ts, tests/bus_commit.test.ts, tests/code_tools.test.ts, tests/gig_input_validated.test.ts, tests/seat_reads_recorded.test.ts, tests/claude_seat_reads.test.ts, tests/optional_declared_input.test.ts, tests/simulate_names_seats.test.ts
 
 # THE OTHER BANDS. `vitest run` is ROOT-CONFIG ONLY — this repo's own workflow comments
 # record that four configs went unexecuted once for exactly that reason. So pinning only the

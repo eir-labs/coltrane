@@ -200,6 +200,16 @@ const TOOL_DEFS: readonly Omit<MCPToolDef, "description">[] = [
   // deliberately NO read-back verb (see the venue_credential_* exact-list law) and NO authorization
   // policy in the engine — who may mint lives in the store.
   { slug: "venue_credential_mint",         category: "run", input_schema: obj({ org_slug: "string", instance: "string" }), output_schema: obj({ instance: "string", env: "object", credential_classes: "array", expires_at: nullable("string") }) },
+  // agent_token_issue — the verb that issues a STANDING agent token (ctk_) to an agent seated in
+  // an org: the credential a reconciler holds BETWEEN sittings (spec.order-lifecycle.transition-law
+  // R23 — the force guard reads it; measured 3 Oct, every token the reconciler ever held was a
+  // one-sitting gig-token and no verb issued a standing one). The same division as
+  // venue_credential_mint and org_hire: the engine ships the schema and its refusals, a deployment
+  // wires the mint (deps.issueAgentToken → the store's coltrane_issue_agent_token, which gates on an
+  // authenticated human member). The schema is the store's mint and nothing more — no chair, no
+  // caps: a verb that could issue AND seat would be a path to mint authority. Hours are INTEGER (the
+  // store's granularity); the token is returned ONCE and never read back.
+  { slug: "agent_token_issue",             category: "run", input_schema: obj({ org_slug: "string", agent_slug: "string", may_dispatch: "array", ttl_hours: "number" }), output_schema: obj({ key_id: "string", org_slug: "string", agent_slug: "string", expires_at: "string", agent_token: "string" }) },
   // org_hire — the verb that ADMITS an agent to an org. The org-membership analogue of
   // venue_credential_mint: the engine ships the schema and its refusals, a deployment wires the
   // admission backend (deps.hireMember). `input_schema` is derived from the single Zod source
@@ -387,6 +397,8 @@ export const TOOL_DESCRIPTIONS: Record<string, string> = {
     "Mint a scoped credential for one venue instance — the room's own environment, never a standing key.",
   org_hire:
     "Seat an agent as a member of an organization.",
+  agent_token_issue:
+    "Issue a standing agent token (ctk_) to an agent seated in your organization — the credential a reconciler holds between sittings. `ttl_hours` is a whole number of hours; `may_dispatch` lists standard slugs. Returned ONCE; only its hash is stored. Requires a human member; an agent token may not issue one.",
   output_write:
     "Seal an output. The write path enforces the core type's substance floor — a Verdict without a method on every check, an Interpretation without claims, is REFUSED and the run stops. Not a warning, not a score you can override.",
   skill_execute:

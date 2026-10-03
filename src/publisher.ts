@@ -25,6 +25,9 @@ export interface TreePublisher {
   push(dir: string, branch: string): void;
   /** Open the pull request by API. Refuses by name for a repository that is not on GitHub. */
   openPullRequest(o: { base: string; head: string; title: string; body: string }): Promise<{ url: string; number: number }>;
+  /** `git ls-remote --heads origin <ref>` with the credential — the origin's own answer about a
+   *  branch, read through the engine's hands. Empty when the origin holds no such head. */
+  remoteHeads(dir: string, ref: string): string;
 }
 
 /**
@@ -59,13 +62,24 @@ export function pushInvocation(dir: string, branch: string, token: string): { fi
   };
 }
 
+/** A remote READ, built before it is run, with the same helper (W9d): a private origin challenges a
+ *  read exactly as it challenges a push (gig 44bd82b3, 4 Oct 2026). */
+export function remoteInvocation(dir: string, ref: string, token: string): { file: string; argv: readonly string[]; env: NodeJS.ProcessEnv } {
+  // The full ref, not the short name: ls-remote matches a pattern on the TAIL of a ref, so a bare
+  // `main` would also answer for refs/heads/x/main (the grade at 598d790, note 5).
+  return { file: "git", argv: ["-C", dir, "ls-remote", "--heads", "--", "origin", `refs/heads/${ref}`], env: credentialEnv(token) };
+}
+
+/** THE ONE SPAWN in this module: it runs exactly what a builder built — argv and env. */
+function run(built: { file: string; argv: readonly string[]; env: NodeJS.ProcessEnv }): string {
+  return execFileSync(built.file, [...built.argv], { env: built.env, stdio: ["ignore", "pipe", "pipe"] }).toString();
+}
+
 export function makePublisher(repoUrl: string, token: string): TreePublisher {
   return {
     repoUrl,
-    push(dir, branch) {
-      const built = pushInvocation(dir, branch, token);
-      execFileSync(built.file, [...built.argv], { env: built.env, stdio: ["ignore", "ignore", "pipe"] });
-    },
+    push(dir, branch) { run(pushInvocation(dir, branch, token)); },
+    remoteHeads(dir, ref) { return run(remoteInvocation(dir, ref, token)); },
     async openPullRequest(o) {
       const m = GITHUB_REPO.exec(repoUrl);
       if (!m) throw new Error(`not_a_github_repository: ${repoUrl} is not a GitHub repository, so no pull request can be opened on it`);

@@ -43,8 +43,9 @@ import { createOutputStore, type OutputStore } from "./outputs.js";
 import { MemoryLedger } from "./ledger.js";
 import { rpcGenomeStore } from "./genome_store.js";
 import { workerCredentialMode } from "./worker_env.js";
-import { prepareWorkspace } from "./workspace.js";
+import { prepareWorkspace, prepareWorkspaces, type PreparedWorkspaces } from "./workspace.js";
 import { engineToolProviders, drainBudget, drainTimeoutMs, resolveWorkingRepo, resolveChangeSetBase, assembleRunDeps } from "./run_deps.js";
+import { githubGrant } from "./genome_schema.js";
 // The repository resolver's ONE home is run_deps.ts (shared by both doors). Re-exported here so
 // worker.ts's own consumers — and tests/the_repo_is_typed_input — keep importing it from this path.
 export { resolveWorkingRepo } from "./run_deps.js";
@@ -333,6 +334,13 @@ export interface WorkOnceDeps {
    * without sleeping.
    */
   scheduleHeartbeat?: (intervalMs: number, beat: () => Promise<unknown>) => () => void;
+  /** R38 — whether a named room needs nothing stood up (no servers, no substrate), so any box may run
+   *  in it. Default reads the room from the genome under the claimed gig's credential. */
+  roomNeedsNothing?: RoomNeedsNothing;
+  /** R38 — the workspace preparer for a furnished room, injected (the real one clones with git and
+   *  asks the broker per tree: tests/a_room_furnishes_its_trees); a law passes its own to drive the
+   *  drain with GitHub-shaped grants and no network. */
+  prepareWorkspaces?: typeof prepareWorkspaces;
   /**
    * THE WALL CLOCK the lease window is measured on, injected: epoch milliseconds. Read at the claim
    * and at every renewal that lands (`leaseConfirmedAt`), and compared at every renewal that fails to
@@ -558,7 +566,21 @@ export function standardForRun<S>(
   return standard;
 }
 
-export async function claimNextGig(ctx: WorkerContext): Promise<ClaimedGig | null> {
+/** Does this room need nothing stood up — no mcp_servers, no substrate — so any box may run in it? */
+export type RoomNeedsNothing = (ctx: WorkerContext, venue: string) => Promise<boolean>;
+
+export const defaultRoomNeedsNothing: RoomNeedsNothing = async (ctx, venue) => {
+  // Read once: the gate's load is kept on the context so the run below does not pay for it twice
+  // (one process claims one gig; the cache lives exactly as long as that claim).
+  const genome = await rpcGenomeStore(ctx).load();
+  genomeReadAtGate.set(ctx, genome);
+  const room = genome.venues.get(venue);
+  return Boolean(room) && room!.mcp_servers.length === 0 && !room!.substrate;
+};
+/** The genome the claim gate read for this context, if it read one — consumed by the run. */
+const genomeReadAtGate = new WeakMap<WorkerContext, Awaited<ReturnType<ReturnType<typeof rpcGenomeStore>["load"]>>>();
+
+export async function claimNextGig(ctx: WorkerContext, roomNeedsNothing?: RoomNeedsNothing): Promise<ClaimedGig | null> {
   // ONE DERIVATION, and it is the same one the CLI door asks — Gap 4's whole point. This used to
   // re-derive `ctx.drainKey && ctx.instance` here, which is the second home the specification
   // named; the defensive branch below it existed only because two homes might disagree.
@@ -602,11 +624,26 @@ export async function claimNextGig(ctx: WorkerContext): Promise<ClaimedGig | nul
     // this worker's realizable set so the operator learns which is misconfigured, and the row is
     // RELEASED (non-terminally, naming the room) so a box that can stand the room up takes it now.
     if (!venueMayClaim(claim.venue, ctx.realizableVenues)) {
-      const why =
-        `claimed gig ${claim.gig_id} names venue "${claim.venue}", which this worker cannot realize ` +
-        `(realizable: ${JSON.stringify(ctx.realizableVenues ?? [])})`;
-      const released = await releaseRefusedClaim(ctx, claim.gig_id, why);
-      throw new Error(`${why}; ${released}`);
+      // R38 — A ROOM THAT NEEDS NOTHING STOOD UP IS REALIZABLE BY EVERY BOX. A room that declares
+      // no mcp_servers and no substrate is furnishings only — equipment, doors, connectors — and a
+      // box builds nothing to run in it; refusing it because the box declared no realizable rooms
+      // would make targeting mandatory routing for the common room. The room's definition is read
+      // from the genome under the gig's own credential (the claim just minted it), and the token is
+      // restored on refusal so a refused claim never changes what this worker is.
+      const previousToken = ctx.agentToken;
+      ctx.agentToken = claim.token;
+      let needsNothing = false;
+      try {
+        needsNothing = await (roomNeedsNothing ?? defaultRoomNeedsNothing)(ctx, claim.venue!);
+      } catch { needsNothing = false; }
+      if (!needsNothing) {
+        ctx.agentToken = previousToken;
+        const why =
+          `claimed gig ${claim.gig_id} names venue "${claim.venue}", which this worker cannot realize ` +
+          `(realizable: ${JSON.stringify(ctx.realizableVenues ?? [])}; the room declares servers or a substrate this box has no realizer for)`;
+        const released = await releaseRefusedClaim(ctx, claim.gig_id, why);
+        throw new Error(`${why}; ${released}`);
+      }
     }
     ctx.agentToken = claim.token;
     return claim;
@@ -1289,7 +1326,7 @@ export async function workOnce(ctx: WorkerContext, deps: WorkOnceDeps): Promise<
   // asked for work: a claim would lease the row and spend one of its attempts, and this worker could
   // not even release it — the release goes through the service it cannot reach.
   refuseBlindDrain();
-  const claim = await claimNextGig(ctx);
+  const claim = await claimNextGig(ctx, deps.roomNeedsNothing);
   if (!claim) return { claimed: false };
   log(`claimed ${claim.gig_id} (${claim.standard_slug}, ${claim.mode}) as ${claim.acting_for}`);
 
@@ -1357,6 +1394,8 @@ export async function workOnce(ctx: WorkerContext, deps: WorkOnceDeps): Promise<
   // stranded temp directory.
   const cwdBefore = process.cwd();
   let workspace: Awaited<ReturnType<typeof prepareWorkspace>> = null;
+  let workspaces: PreparedWorkspaces | null = null;
+  let genomeForRun: Awaited<ReturnType<ReturnType<typeof rpcGenomeStore>["load"]>> | undefined;
   // Declared out here so the finally can clear it: a timer left armed keeps the process alive past
   // a finished gig, which on a drain means the loop's next claim waits on nothing.
   let deadline: ReturnType<typeof setTimeout> | undefined;
@@ -1380,7 +1419,39 @@ export async function workOnce(ctx: WorkerContext, deps: WorkOnceDeps): Promise<
     // Resolved ONCE per run, from the work's own contract first (see resolveWorkingRepo).
     const workingRepo = resolveWorkingRepo(claim);
     const roomWillPopulate = Boolean(claim.venue && workingRepo && deps.venueRealizer);
-    if (!roomWillPopulate) {
+    // R38 — A ROOM FURNISHES ITS TREES. When the claim names a room whose github connector grants
+    // repositories, every granted tree is cloned under one root, each with its own credential, and
+    // the change-request's tree (when the input names one) is the cwd and the tree a change-set is
+    // stamped from. The genome is read first for a room-named claim — a room's grant is a fact of the
+    // genome, not of the claim — and that load is the same one the run needs below (loaded once).
+    let furnishedTrees: readonly string[] = [];
+    if (claim.venue && !roomWillPopulate) {
+      genomeForRun = genomeReadAtGate.get(ctx) ?? (await rpcGenomeStore(ctx).load());
+      genomeReadAtGate.delete(ctx);
+      const room = genomeForRun.venues.get(claim.venue);
+      const grant = room ? githubGrant(room) : undefined;
+      if (grant) {
+        furnishedTrees = workingRepo && !grant.repositories.includes(workingRepo)
+          ? [...grant.repositories, workingRepo]
+          : grant.repositories;
+      }
+    }
+    if (furnishedTrees.length > 0) {
+      const base = resolveChangeSetBase(claim);
+      workspaces = await (deps.prepareWorkspaces ?? prepareWorkspaces)({
+        trees: furnishedTrees,
+        cwdRepo: workingRepo,
+        gigId: claim.gig_id,
+        drainKey: ctx.drainKey,
+        instance: ctx.instance,
+        endpoint: process.env["COLTRANE_GIT_CREDENTIALS_URL"],
+        ...(workingRepo && base ? { base: { repoUrl: workingRepo, rev: base } } : {}),
+      });
+      if (workspaces) {
+        process.chdir(workspaces.dir);
+        log(`room "${claim.venue}" furnished ${workspaces.mounts.length} tree(s): ${workspaces.mounts.map((m) => m.repoUrl).join(", ")}${workingRepo ? ` — cwd ${workingRepo}` : " — cwd the root"}`);
+      }
+    } else if (!roomWillPopulate) {
       workspace = await prepareWorkspace({
         repoUrl: workingRepo,
         gigId: claim.gig_id,
@@ -1399,7 +1470,7 @@ export async function workOnce(ctx: WorkerContext, deps: WorkOnceDeps): Promise<
       log(`working tree deferred to room realization for venue "${claim.venue}" (${workingRepo})`);
     }
 
-    const genome = await rpcGenomeStore(ctx).load();
+    const genome = genomeForRun ?? (await rpcGenomeStore(ctx).load());
 
     const standard = standardForRun(genome, claim.standard_slug);
     const registry = loadRegistry(genome);
@@ -1754,7 +1825,10 @@ export async function workOnce(ctx: WorkerContext, deps: WorkOnceDeps): Promise<
         // `changes` or red-spec's `laws`. Never process.cwd(): when the Booker did not clone (a
         // venue-populated room, or a claim naming no repository) there is no tree here, so tree_root is
         // undefined and a laws/changes seal refuses `tree_root_unknown` rather than stamping the wrong tree.
-        tree_root: workspace?.dir,
+        tree_root: workspaces ? (workingRepo ? workspaces.dir : undefined) : workspace?.dir,
+        // R38 — the trees the room furnished, so every seat is told where they sit (the prompt's
+        // "# Trees" layer); the change-request's tree, when there is one, is marked as the cwd.
+        mounts: workspaces ? workspaces.mounts.map((m) => ({ ...m, cwd: m.dir === workspaces!.dir && Boolean(workingRepo) })) : undefined,
       }),
       gig_id: claim.gig_id, // ← the run IS the queue row; the drained header completes it
       signal: aborter.signal,
@@ -1879,12 +1953,14 @@ export async function workOnce(ctx: WorkerContext, deps: WorkOnceDeps): Promise<
     } catch { /* the original cwd is gone; nothing useful left to do about it here */ }
     if (deadline) clearTimeout(deadline);
     workspace?.cleanup();
+    workspaces?.cleanup();
     // Hand the git credential back. GitHub fixes installation tokens at an hour, so a finished gig
     // otherwise leaves a live credential behind for the remainder of it. Not a security control — a
     // compromised drain declines to call it — but in the ordinary case a four-minute run stops
     // holding one fifty-six minutes early.
     // Deliberately not awaited: the gig is drained and its result must not wait on GitHub.
     void workspace?.revoke();
+    void workspaces?.revoke();
 
     // In venue mode the credential arrived WITH the work and must not outlive it.
     //

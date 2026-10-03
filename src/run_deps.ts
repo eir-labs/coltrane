@@ -150,6 +150,18 @@ export function resolveChangeSetBase(claim: { input?: unknown }): string | null 
 }
 
 /**
+ * A git revision the engine will hand to git as a POSITIONAL argument. Conservative on purpose: a
+ * full or abbreviated sha, a tag or branch name, `HEAD~3` — and nothing that git could read as an
+ * option (a leading dash: `--depth=999999` after `origin` un-shallows the clone; `--upload-pack=…`
+ * names a program), nothing with whitespace, nothing with `..` (a range, not a commit). The grade of
+ * coltrane#575 found the option injection; this is the wall, at every place a base reaches git.
+ */
+export const SAFE_GIT_REV = /^[A-Za-z0-9][A-Za-z0-9._\/~^-]{0,255}$/;
+export function isSafeGitRev(rev: string): boolean {
+  return SAFE_GIT_REV.test(rev) && !rev.includes("..") && !rev.endsWith("/") && !rev.endsWith(".lock");
+}
+
+/**
  * The SHARED run-deps every gig runs under, assembled once so the four call sites cannot drift.
  *
  * WHY THIS EXISTS. `runGig` takes its dependencies as a bag of optionals, and `runGig` has four call

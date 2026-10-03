@@ -4,6 +4,7 @@
 // and records one ledger entry with a deterministic genome_hash + a run_fingerprint
 // that carries model_version + (empty, v0) eval_scores — honestly un-tempered.
 import { lineageAdoption } from "./lineage_adoption.js";
+import { isSafeGitRev } from "./run_deps.js";
 import { randomUUID, createHash } from "node:crypto";
 import { performance } from "node:perf_hooks";
 import { execFileSync } from "node:child_process";
@@ -1315,8 +1316,14 @@ export function stampChangeAddresses(
     // THE BASE IS IN THE TREE, or the refusal names it. The drain clones one commit deep; a base that
     // is not HEAD is in the tree only if the request carried it as change_set_base and the clone
     // fetched it. Asked first, so the seal's answer is the missing commit and not git's own failure.
+    if (!isSafeGitRev(change.base)) {
+      throw new RuntimeError(
+        `bad_base: change ${change.path} names base ${JSON.stringify(change.base)}, which is not a git revision the ` +
+          `engine will hand to git — a sha, a tag or a branch name; nothing beginning with a dash, no whitespace, no '..'`,
+      );
+    }
     try {
-      gitInTree(tree_root, ["cat-file", "-e", `${change.base}^{commit}`]);
+      gitInTree(tree_root, ["cat-file", "-e", "--end-of-options", `${change.base}^{commit}`]);
     } catch {
       throw new RuntimeError(
         `base_not_in_tree: change ${change.path} is measured from ${change.base}, and the working tree does not ` +
@@ -1324,7 +1331,7 @@ export function stampChangeAddresses(
           `so the clone fetches it, or measure from a commit the tree holds.`,
       );
     }
-    const diff = gitInTree(tree_root, ["diff", change.base, "--", change.path]);
+    const diff = gitInTree(tree_root, ["diff", "--end-of-options", change.base, "--", change.path]);
     const patch_sha256 = sha256Hex(diff);
     const bytes = Buffer.byteLength(diff, "utf8");
     if (change.blob_sha !== undefined && change.blob_sha !== blob_sha) {

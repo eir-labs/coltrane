@@ -27,7 +27,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, writeFileSync, readFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { resolveWorkingRepo, resolveChangeSetBase } from "../src/run_deps.js";
+import { resolveWorkingRepo, resolveChangeSetBase, isSafeGitRev } from "../src/run_deps.js";
 import { stampChangeAddresses, RuntimeError } from "../src/runtime.js";
 import { cloneInto } from "../src/workspace.js";
 
@@ -98,6 +98,30 @@ describe("the base is in the tree", () => {
     expect(c.bytes).toBeGreaterThan(0);
     expect(c.patch_sha256).toMatch(/^[0-9a-f]{64}$/);
     expect(c.blob_sha).toBe(git(shallow, "hash-object", "src/a.txt"));
+  });
+
+  it("law 7 — a base is a revision, never an option: a value git could read as an option is refused by name before git sees it, in the clone and at the seal (the grade's F1)", () => {
+    const { origin, first } = originWithTwoCommits();
+    for (const bad of ["--depth=999999", "--upload-pack=echo", "-x", "a b", "main..HEAD", "", " "]) {
+      expect(isSafeGitRev(bad), JSON.stringify(bad)).toBe(false);
+    }
+    for (const ok of [first, first.slice(0, 7), "main", "v1.2.3", "HEAD~3", "release/2026-10"]) {
+      expect(isSafeGitRev(ok), ok).toBe(true);
+    }
+    // the clone: refused before any fetch, dir cleaned, still a clone of nothing
+    let err: unknown;
+    try { cloneInto(`file://${origin}`, "unused-token", undefined, "--depth=999999"); } catch (e) { err = e; }
+    expect(String((err as Error).message)).toMatch(/^bad_base: /);
+    // the seal: refused before cat-file
+    const shallow = mkdtempSync(join(tmpdir(), "base-shallow-"));
+    git(shallow, "clone", "-q", "--depth", "1", `file://${origin}`, ".");
+    let err2: unknown;
+    try { stampChangeAddresses([{ path: "src/a.txt", base: "--batch" }], shallow); } catch (e) { err2 = e; }
+    expect(err2).toBeInstanceOf(RuntimeError);
+    expect(String((err2 as Error).message)).toMatch(/^bad_base: /);
+    // and a lawful fetch still passes --end-of-options: the clone stays shallow with the base present
+    const ws = cloneInto(`file://${origin}`, "unused-token", undefined, first);
+    try { expect(git(ws.dir, "rev-parse", "--is-shallow-repository")).toBe("true"); } finally { ws.cleanup(); }
   });
 
   it("law 6 — cloneInto with a base fetches it while the credential is in hand: the clone is shallow and still holds the base; a base the origin does not have is refused by name", () => {

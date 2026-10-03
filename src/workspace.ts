@@ -23,6 +23,7 @@
  */
 
 import { execFileSync } from "node:child_process";
+import { isSafeGitRev } from "./run_deps.js";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -148,17 +149,29 @@ export function cloneInto(repoUrl: string, token: string, targetDir?: string, ba
   // later in the run holds one — and only to depth 1: the base itself, not its history. A base the
   // origin does not have is refused by name: the request named a commit that is not this repository's.
   if (typeof base === "string" && base.trim().length > 0) {
+    const rev = base.trim();
+    // THE BASE IS A REVISION, NEVER AN OPTION. git reads a positional that begins with a dash as an
+    // option even after `origin` (`--depth=999999` would un-shallow the clone; `--upload-pack=…`
+    // would name a program). Refused by name before git sees it, and `--end-of-options` is pinned so
+    // nothing positional is ever read as one.
+    if (!isSafeGitRev(rev)) {
+      cleanup();
+      throw new Error(
+        `bad_base: change_set_base ${JSON.stringify(rev)} is not a git revision the engine will hand to git — ` +
+          `a sha, a tag or a branch name; nothing beginning with a dash, no whitespace, no '..'`,
+      );
+    }
     try {
       execFileSync(
         "git",
-        ["-C", dir, "fetch", "--quiet", "--depth", "1", "origin", base.trim()],
+        ["-C", dir, "fetch", "--quiet", "--depth", "1", "--end-of-options", "origin", rev],
         { env, stdio: ["ignore", "ignore", "pipe"] },
       );
     } catch (e) {
       cleanup();
       const stderr = (e as { stderr?: Buffer }).stderr?.toString().trim();
       throw new Error(
-        `base_not_in_origin: change_set_base ${base.trim()} could not be fetched from ${repoUrl} — the ` +
+        `base_not_in_origin: change_set_base ${rev} could not be fetched from ${repoUrl} — the ` +
           `request named a commit this repository does not have${stderr ? `: ${stderr}` : ""}`,
       );
     }

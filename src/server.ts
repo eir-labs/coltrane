@@ -172,7 +172,12 @@ export function usdToMicroUsd(maxUsd: unknown): { ok: true; micro: number } | { 
   const m = /^(\d+)(?:\.(\d+))?$/.exec(digits);
   if (!m) return { ok: false, why: `budget.max_usd ${String(maxUsd)} is not a decimal amount` };
   const whole = m[1] ?? "0";
-  const frac = (m[2] ?? "").replace(/0+$/, "");
+  // Trailing zeros are dropped by a scan, not a regex: CodeQL (js/polynomial-redos) flags `/0+$/` on
+  // input it cannot bound, and a loop over a string this short costs nothing to make that unarguable.
+  let frac = m[2] ?? "";
+  let fracEnd = frac.length;
+  while (fracEnd > 0 && frac.charCodeAt(fracEnd - 1) === 48 /* "0" */) fracEnd--;
+  frac = frac.slice(0, fracEnd);
   if (frac.length > 6) return { ok: false, why: `budget.max_usd ${String(maxUsd)} has more than 6 decimal places — refused, never rounded` };
   const micro = BigInt(whole) * 1_000_000n + BigInt(frac.padEnd(6, "0") || "0");
   if (micro > BigInt(Number.MAX_SAFE_INTEGER)) return { ok: false, why: `budget.max_usd ${String(maxUsd)} is too large to carry as integer micro-dollars` };

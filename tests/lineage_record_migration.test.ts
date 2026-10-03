@@ -73,9 +73,9 @@ function storeWithRows(rows: Record<string, unknown>[], gig: string): OutputStor
 }
 
 describe("I10 — a v1 lineage-record stays readable and traceable after the v2 bump", () => {
-  it("lineage-record is bumped to version 2 on disk", () => {
+  it("lineage-record is at version 3 on disk (v2 tightened it; v3 lets it name its forebear — a_lineage_record_names_its_forebear)", () => {
     const genome = loadGenome(REPO_ROOT);
-    expect(genome.domain_types.get("lineage-record")?.version).toBe(2);
+    expect(genome.domain_types.get("lineage-record")?.version).toBe(3);
   });
 
   it("record 03cacf6a (nine connections, prose grounding — invalid under v2) still hydrates and reports domain_type_version:1", () => {
@@ -127,8 +127,8 @@ describe("I10 — a v1 lineage-record stays readable and traceable after the v2 
 describe("I11 — the 2 sealed lineage-verdicts are unaffected by the record tightening", () => {
   it("both verdicts still hydrate, and lineage-verdict stays at version 1", () => {
     const genome = loadGenome(REPO_ROOT);
-    // the migration precondition: the record type moved to v2 (RED until the bump)
-    expect(genome.domain_types.get("lineage-record")?.version).toBe(2);
+    // the migration precondition: the record type moved past v2 (v3 since 3 Oct 2026; additive)
+    expect(genome.domain_types.get("lineage-record")?.version).toBe(3);
     // the verdict type is NOT re-typed by this change
     expect(genome.domain_types.get("lineage-verdict")?.version).toBe(1);
 

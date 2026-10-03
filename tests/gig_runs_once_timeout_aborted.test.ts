@@ -16,7 +16,7 @@
 // The deadline is shortened with COLTRANE_GIG_TIMEOUT_MS, the override drainTimeoutMs() already
 // honours. The chair honours the run's signal the way a real invoker does.
 import { describe, it, expect, afterEach, vi } from "vitest";
-import { workOnce, type WorkOnceDeps } from "../src/worker.js";
+import { workOnce, type WorkOnceDeps, type WorkerContext } from "../src/worker.js";
 import type { AgentInvoker, AgentInvocationContext } from "../src/runtime.js";
 import { hostedStore, hostedEnv, venueCtx, claimFor, sealableSignal, settle, GIG_ID } from "./gig_runs_once_fixtures.js";
 
@@ -36,7 +36,17 @@ const slowChair = vi.fn((ctx: AgentInvocationContext) => new Promise<Record<stri
   else ctx.signal?.addEventListener("abort", onAbort, { once: true });
 }));
 
-describe("Q6 — the drain deadline ends a gig as aborted/timeout, acknowledged", () => {
+// A PLAYER context: the same box, logged in with a player's own token and NO drain key or instance, so
+// the claim goes through coltrane_mcp_claim — a thirty-minute lease with no renew door. That is the one
+// path on which a run deadline is still a fact (the lease, restated). A VENUE run has none: see
+// tests/a_venue_run_stops_on_facts_not_on_the_clock.test.ts (F1), founder's ruling of 3 Oct 2026.
+const playerCtx = (): WorkerContext => {
+  const { instance: _venueInstance, ...rest } = venueCtx();
+  void _venueInstance;
+  return { ...rest, drainKey: "", agentToken: "player-token" };
+};
+
+describe("Q6 — on the PLAYER path, the drain deadline ends a gig as aborted/timeout, acknowledged", () => {
   it("Q6 the run timeout fires: WorkOnceResult is aborted/timeout, the terminal header says `aborted` (retried to acknowledgement), and nothing reports it failed", async () => {
     env = hostedEnv();
     process.env["COLTRANE_GIG_TIMEOUT_MS"] = "80";
@@ -44,7 +54,7 @@ describe("Q6 — the drain deadline ends a gig as aborted/timeout, acknowledged"
       claim: claimFor("one-chair-v0"),
       header: (b, n) => (b["status"] === "aborted" && n === 1 ? unavailable() : undefined),
     });
-    const res = await workOnce(venueCtx(), { makeInvoke: () => slowChair as unknown as AgentInvoker } as WorkOnceDeps);
+    const res = await workOnce(playerCtx(), { makeInvoke: () => slowChair as unknown as AgentInvoker } as WorkOnceDeps);
     await settle();
 
     expect(slowChair, "precondition: the chair was running when the deadline fired").toHaveBeenCalledTimes(1);
@@ -73,7 +83,7 @@ describe("Q6 — the drain deadline ends a gig as aborted/timeout, acknowledged"
       if (ctx.signal?.aborted) onAbort();
       else ctx.signal?.addEventListener("abort", onAbort, { once: true });
     }));
-    const res = await workOnce(venueCtx(), { makeInvoke: () => mute as unknown as AgentInvoker } as WorkOnceDeps);
+    const res = await workOnce(playerCtx(), { makeInvoke: () => mute as unknown as AgentInvoker } as WorkOnceDeps);
     await settle();
     expect(res.claimed && res.status, "precondition: the deadline ended the gig aborted").toBe("aborted");
     const aborted = store.headers().filter((c) => c.body["id"] === GIG_ID && c.body["status"] === "aborted");

@@ -33,13 +33,21 @@ afterEach(() => {
 });
 
 describe("E8 — the lease length is one constant", () => {
-  it("E8 HOSTED_LEASE_MS is sixty minutes, and the drain's default run timeout sits under it", async () => {
-    const { HOSTED_LEASE_MS } = await loadLease();
+  it("E8 HOSTED_LEASE_MS is sixty minutes; a VENUE run has no run deadline (the lease is its only clock), and a PLAYER run's deadline sits under the player lease", async () => {
+    const { HOSTED_LEASE_MS, PLAYER_LEASE_MS } = await loadLease();
     expect(HOSTED_LEASE_MS, "the store leases a claimed row for sixty minutes").toBe(60 * 60 * 1000);
     delete process.env["COLTRANE_GIG_TIMEOUT_MS"];
-    const { drainTimeoutMs } = (await import(/* @vite-ignore */ RUN_DEPS_MODULE)) as { drainTimeoutMs(): number };
-    expect(drainTimeoutMs()).toBeGreaterThan(0);
-    expect(drainTimeoutMs(), "a run that outlives its lease is working on a gig another drain may hold").toBeLessThan(HOSTED_LEASE_MS);
+    const { drainTimeoutMs } = (await import(/* @vite-ignore */ RUN_DEPS_MODULE)) as { drainTimeoutMs(mode?: "venue" | "player"): number | undefined };
+    // Founder's ruling, 3 Oct 2026: a venue run stops on facts (lease lost or unverifiable, budget,
+    // abort), never because time passed — tests/a_venue_run_stops_on_facts_not_on_the_clock.test.ts.
+    expect(drainTimeoutMs("venue"), "a venue run was given a run deadline: a clock cutting work whose lease is renewing").toBeUndefined();
+    expect(drainTimeoutMs(), "the default mode is venue, and it has no deadline").toBeUndefined();
+    process.env["COLTRANE_GIG_TIMEOUT_MS"] = "80";
+    expect(drainTimeoutMs("venue"), "COLTRANE_GIG_TIMEOUT_MS gave a venue run a deadline — the variable is not read on that path").toBeUndefined();
+    delete process.env["COLTRANE_GIG_TIMEOUT_MS"];
+    // The player path has no renew door, so its deadline is its lease restated — under it.
+    expect(drainTimeoutMs("player")).toBeGreaterThan(0);
+    expect(drainTimeoutMs("player"), "a player run that outlives its lease is working on a gig another player may hold").toBeLessThan(PLAYER_LEASE_MS);
   });
 
   it("E8 move the constant and the heartbeat interval AND the run timeout follow it — neither is a second copy", async () => {
@@ -54,9 +62,12 @@ describe("E8 — the lease length is one constant", () => {
     expect(moved.HOSTED_LEASE_MS, "the module mock did not take — this law would be testing nothing").toBe(MOVED_LEASE_MS);
 
     delete process.env["COLTRANE_GIG_TIMEOUT_MS"];
-    const { drainTimeoutMs } = (await import(/* @vite-ignore */ RUN_DEPS_MODULE)) as { drainTimeoutMs(): number };
-    expect(drainTimeoutMs(), "the run timeout did not follow the lease — it is its own number").toBeLessThan(MOVED_LEASE_MS);
-    expect(drainTimeoutMs()).toBeGreaterThan(0);
+    const { drainTimeoutMs } = (await import(/* @vite-ignore */ RUN_DEPS_MODULE)) as { drainTimeoutMs(mode?: "venue" | "player"): number | undefined };
+    // The venue run has no deadline to follow the constant — moving the lease moves only the
+    // heartbeat interval (asserted below); the player deadline follows PLAYER_LEASE_MS, untouched here.
+    expect(drainTimeoutMs("venue"), "moving the lease conjured a venue run deadline").toBeUndefined();
+    expect(drainTimeoutMs("player")).toBeGreaterThan(0);
+    expect(drainTimeoutMs("player"), "the player deadline followed the HOSTED lease, which is not the lease it runs under").toBeLessThan(moved.PLAYER_LEASE_MS);
 
     env = hostedEnv();
     hostedStore({ claim: claimFor("one-chair-v0") });

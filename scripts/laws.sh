@@ -119,9 +119,11 @@ cd "$(dirname "$0")/.."
 #       external_body fields the closed v2 shape never carried (a store door's grade found the phantom). 4442 + 6 = 4448.
 #   +2  an_evolution_is_a_version (new file) — the hosted agent_evolve upsert carries the version it reports;
 #       the store had updated v1 in place three times in one day while the surface answered v2, v3. 4448 + 2 = 4450.
+#   +1  after the grade (note e): the DEFAULT new_version is the loaded base's + 1 — the (slug, changes) path
+#       never carries args.base, so the default was 1 whatever the base's version (L3: a v3 base → v4). 4450 + 1 = 4451.
 #   +1  spec_reside_router — the work-order-dispatch call sends the door's parameter names (p_…); the bare
-#       names were refused PGRST202 by the store on the first dispatch through the served surface. 4450 + 1 = 4451.
-EXPECTED_LAWS="${EXPECTED_LAWS:-4451}"
+#       names were refused PGRST202 by the store on the first dispatch through the served surface. 4451 + 1 = 4452.
+EXPECTED_LAWS="${EXPECTED_LAWS:-4452}"
 #   +3 blob_sha_refuses_rather_than_seals (new file) — the three refusals of `blobShaOfFile`, which
 #      had no law that could red them. Measured on the grade: with BOTH mid-read length refusals
 #      deleted, all 21 blob laws stayed green; with the `!stat.isFile()` refusal deleted, all 21

@@ -220,6 +220,11 @@ export interface HostedOpts {
    * WITHOUT a refund.
    */
   queue?: Array<Record<string, unknown>> | undefined;
+  /** R38 laws: the genome the store serves (default GENOME_ROWS) — a room with connectors, for example. */
+  genome?: Record<string, unknown> | undefined;
+  /** R38 laws: hosts the fixture does not model (the git-credential broker, GitHub's revoke) — answer
+   *  them here, or they are a 500 as before. */
+  other?: ((url: URL, body: Record<string, unknown>, init?: RequestInit) => Response | undefined) | undefined;
   maxAttempts?: number | undefined;
 }
 
@@ -334,7 +339,7 @@ export function hostedStore(initial: HostedOpts): HostedStore {
         }
         return ok(c ?? null);
       }
-      if (fn === "coltrane_mcp_genome") return ok(GENOME_ROWS);
+      if (fn === "coltrane_mcp_genome") return ok(opts.genome ?? GENOME_ROWS);
       if (fn === "coltrane_mcp_gig_status") {
         const refused = scopeRefusal(body, "read") ?? await resumedReadAnswer(body, "status");
         if (refused) return refused;
@@ -410,6 +415,8 @@ export function hostedStore(initial: HostedOpts): HostedStore {
       }
       return new Response(`unexpected drain path ${u.pathname}`, { status: 404 });
     }
+    const answered = opts.other?.(u, body, init);
+    if (answered) return answered;
     return new Response(`unexpected url ${String(url)}`, { status: 500 });
   });
   vi.stubGlobal("fetch", fetchFake);

@@ -1554,11 +1554,30 @@ export async function stampPullRequest(
     GIT_AUTHOR_NAME: attribution.author.name, GIT_AUTHOR_EMAIL: attribution.author.email,
     GIT_COMMITTER_NAME: attribution.committer.name, GIT_COMMITTER_EMAIL: attribution.committer.email,
   };
+  // THE TREE IS LEFT AS IT WAS FOUND when the commit does not happen: a later chair in the same
+  // tree must not inherit a half-made branch with paths staged (the grade at 5c0688e, note 4).
+  const foundOn = gitInTree(tree_root, ["rev-parse", "--abbrev-ref", "HEAD"]).trim();
+  const restore = () => {
+    try { gitInTree(tree_root, ["reset", "--quiet"]); } catch { /* best effort */ }
+    try { gitInTree(tree_root, ["switch", "--quiet", "--", foundOn]); } catch { /* best effort */ }
+    try { gitInTree(tree_root, ["branch", "--quiet", "-D", "--", branch]); } catch { /* best effort */ }
+  };
   try {
     gitInTree(tree_root, ["switch", "--quiet", "-c", branch], signing);
     gitInTree(tree_root, ["add", "--", ...paths], signing);
+  } catch (e) {
+    restore();
+    const stderr = (e as { stderr?: Buffer }).stderr?.toString().trim();
+    throw new RuntimeError(`commit_failed: ${stderr || (e instanceof Error ? e.message : String(e))}`);
+  }
+  if (gitInTree(tree_root, ["diff", "--cached", "--name-only"]).trim() === "") {
+    restore();
+    throw new RuntimeError(`nothing_to_commit: the named paths (${paths.join(", ")}) carry no change against ${JSON.stringify(foundOn)}; a pull request records a change, so none is opened`);
+  }
+  try {
     gitInTree(tree_root, ["commit", "--quiet", "-m", message], signing);
   } catch (e) {
+    restore();
     const stderr = (e as { stderr?: Buffer }).stderr?.toString().trim();
     throw new RuntimeError(`commit_failed: ${stderr || (e instanceof Error ? e.message : String(e))}`);
   }

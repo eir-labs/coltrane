@@ -26,7 +26,8 @@
     "RULING ON isPermanentStoreRefusal (round 10): IT STAYS AND EARNS ITS READER. It was exported, documented and threaded through `permanent` into rebuildFromDrain's refusals (src/worker.ts:704, :739, :1050, :1059, :1069) and READ BY NOTHING for a decision since round 8 replaced that logic with `gone`; the grader confirmed an always-true and an always-false plant both survive the whole root suite. Ruling A is precisely the decision it was carried out for: answered 4xx (permanent) \u2192 LAPSE (V2a \u00b7 V2b \u00b7 V9 \u00b7 V10); 5xx / network / no answer \u2192 the COUNTED REFUND (V1 \u00b7 V7 \u00b7 drain_budget B2). Those can only both be green if the code distinguishes them at this site. IMPLEMENTER OBLIGATION: after the cure, re-run both plants \u2014 always-false must red V2a/V2b, always-true must red V1 \u2014 and record both. Round 10 could not measure them because measuring them needs the production code it is forbidden to write; if the cure lands without reading `permanent`, the classifier must be DELETED instead, along with the `permanent` field on fetchDrainedOutputs / fetchDrainedGenomeHash and on the rebuildFromDrain refusal shape.",
     "BREAKING CHANGE FOR DOWNSTREAM, BOOKED IN THE OPEN (round 6c, surfaced in round 10 because it belongs in the PR body rather than buried): genome_store's postgrestQueueGig / rpcQueueGig now THROW on `resumes` or `budget_micro_usd` where they previously dropped them silently (Q1/Q2, tests/gig_runs_once_queue_clients.test.ts). This is intended \u2014 a silently dropped resume is how a resume becomes a cold run \u2014 but it WILL break an external caller that passes either key against a store whose RPC signatures have not been migrated. It needs a line in the PR body and in the release notes.",
     "ROLLOUT ORDER, UNCHANGED: the drain pin moves only after the status widening (coltrane-ui #253) is live. Until it is, every resuming gig meets the answered 42501 that ruling A is about, and the lapse path is what keeps those gigs alive for the length of the deploy.",
-    "round 12 (founder's ruling, 3 Oct 2026): a venue run is never stopped because time passed \u2014 only a lost lease (E4), an unverifiable lease (F2), the budget (B1) or an abort door stops it; F1 pins that no venue deadline exists and that COLTRANE_GIG_TIMEOUT_MS is not read on that path"
+    "round 12 (founder's ruling, 3 Oct 2026): a venue run is never stopped because time passed \u2014 only a lost lease (E4), an unverifiable lease (F2), the budget (B1) or an abort door stops it; F1 pins that no venue deadline exists and that COLTRANE_GIG_TIMEOUT_MS is not read on that path",
+    "round 12b (the grade at 478a408): the lease window is measured from the renewal's SEND instant (F4), so a slow landed renewal cannot let a run outlive the store's lapse; the venue-mode log line is conditional on the variable (F1b)"
   ],
   "input_refs": [
     "SPEC-worker-contract.md",
@@ -1024,6 +1025,24 @@
       "drives": "workOnce(ctx, deps) \u2014 src/worker.ts \u2014 `leaseConfirmedAt = now()` on a renewal that landed (renewLease ok), read by the window check on the next failure",
       "plant": "drop `leaseConfirmedAt = now()` on a landed renewal, so the window is measured from the claim (src/worker.ts)",
       "plant_observed": "red: 1 failed (a run whose lease had been confirmed 40 minutes earlier was abandoned at the third beat); reverted, control 3 passed"
+    },
+    {
+      "invariant_id": "F4",
+      "test_name": "F4 \u2014 the window is measured from the renewal's SEND instant, not its response > F4 a landed renewal with round-trip latency L confirms a lease L old: a whole window later, measured from the send, the run is abandoned \u2014 never one beat past the store's lapse",
+      "test_file": "tests/a_venue_run_stops_on_facts_not_on_the_clock.test.ts",
+      "kind": "behavioural",
+      "drives": "workOnce(ctx, deps) \u2014 src/worker.ts \u2014 `sentAt = now()` before renewLease and `leaseConfirmedAt = sentAt` on a landed renewal, read by the window check at the fourth beat under WorkOnceDeps.now with beats on absolute thirds of the lease",
+      "plant": "set leaseConfirmedAt from the response instant again (`leaseConfirmedAt = now()` after renewLease) in src/worker.ts",
+      "plant_observed": "red: 1 failed (the run waited for beat 5; the store's lease had lapsed at beat 4); reverted, control 5 passed. A first fixture advanced a shared clock inside the renewal and could not see the defect; rewritten to absolute beat times before sealing."
+    },
+    {
+      "invariant_id": "F1b",
+      "test_name": "F1b \u2014 the unread-variable line is said only when the variable is set > F1b with COLTRANE_GIG_TIMEOUT_MS unset, a venue run logs no 'set and NOT read' line",
+      "test_file": "tests/a_venue_run_stops_on_facts_not_on_the_clock.test.ts",
+      "kind": "behavioural",
+      "drives": "workOnce(ctx, deps) \u2014 src/worker.ts \u2014 the `else if (process.env[\"COLTRANE_GIG_TIMEOUT_MS\"])` guard on the venue-mode log line",
+      "plant": "make the line unconditional: `else {` in place of `else if (process.env[\"COLTRANE_GIG_TIMEOUT_MS\"]) {` (src/worker.ts)",
+      "plant_observed": "red: 1 failed; reverted, control 5 passed"
     }
   ],
   "testing_method": "vitest, example-based and behavioural: every engine law drives workOnce (or runCli / openLocalQueue) through a stubbed global fetch that plays both hosts \u2014 the org store (ctx.baseUrl RPCs) and the drain service (COLTRANE_DRAIN_URL: header, outputs, storage, renew, release) \u2014 statefully, so a re-claim reads what the first worker's acknowledged writes left behind. The heartbeat's clock is injected (WorkOnceDeps.scheduleHeartbeat) and fired from inside the chair invocation; acknowledgement is observed by holding the store's answer back (a delayed Response) and asserting what had resolved when workOnce returned. E8 moves the lease constant with vi.doMock over src/lease.ts and asserts both derived numbers follow. New symbols are reached by variable specifiers and casts so tsc over tests/ stays clean.",
@@ -1123,7 +1142,7 @@
     },
     {
       "path": "tests/a_venue_run_stops_on_facts_not_on_the_clock.test.ts",
-      "commit": "73d43c5d991fb7172ea48ab02d761dd04a62ccbd"
+      "commit": "3c228b1bafb459a0df856b43af0fc3ff607bb683"
     }
   ]
 }

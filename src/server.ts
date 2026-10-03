@@ -64,7 +64,7 @@ import {
   type CallerIdentity,
   type VenueCredentialGrant,
 } from "./venue_credential.js";
-import { ttlHoursOrRefusal, mayDispatchOrRefusal, issuedOrError, type IssueAgentTokenResult, type IssueAgentTokenArgs } from "./agent_token.js";
+import { ttlHoursOrRefusal, mayDispatchOrRefusal, issuedOrError, ceilingHoursOrRefusal, reasonOrRefusal, hoursOrRefusal, keyIdOrRefusal, type IssueAgentTokenResult, type IssueAgentTokenArgs, type ExtendAgentTokenArgs, type ExtendAgentTokenResult, type RewindAgentTokenArgs, type RewindAgentTokenResult } from "./agent_token.js";
 import type { HireMemberResult } from "./org_hire.js";
 import { composeStandard, defineAgent, CompositionError, type Standard, type Agent, type AgentDef, type PhaseDef } from "./composition.js";
 import { PRIMITIVE_OUTPUT_TYPE, type Primitive } from "./core_types.js";
@@ -3847,12 +3847,37 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         const agent_slug = String(args["agent_slug"] ?? "");
         const may_dispatch = args["may_dispatch"];
         const ttl_hours = args["ttl_hours"];
+        const tenure_ceiling_hours = args["tenure_ceiling_hours"];
+        const reason = args["reason"];
         return {
           ok: false, refusal: "no_backend", requires_approval: approval,
           error:
             `agent_token_issue is served by the tool surface (createToolSurface), which wires the caller ` +
             `and the deps.issueAgentToken backend; the bare dispatcher cannot issue for agent "${agent_slug}" ` +
-            `in org "${org_slug}" (may_dispatch ${JSON.stringify(may_dispatch ?? [])}, ttl_hours ${String(ttl_hours ?? "")}). Call it through the surface.`,
+            `in org "${org_slug}" (may_dispatch ${JSON.stringify(may_dispatch ?? [])}, ttl_hours ${String(ttl_hours ?? "")}, ` +
+            `tenure_ceiling_hours ${String(tenure_ceiling_hours ?? "")}, reason ${JSON.stringify(reason ?? "")}). Call it through the surface.`,
+        };
+      }
+      case "agent_token_extend": {
+        // NOT the live path (served by the surface, which holds the caller and deps.extendAgentToken);
+        // this handler reads exactly its four arguments (advertised_args_are_read.test.ts).
+        const org_slug = String(args["org_slug"] ?? "");
+        const key_id = String(args["key_id"] ?? "");
+        const hours = args["hours"];
+        const reason = args["reason"];
+        return {
+          ok: false, refusal: "no_backend", requires_approval: approval,
+          error: `agent_token_extend is served by the tool surface; the bare dispatcher cannot extend "${key_id}" in org "${org_slug}" (hours ${String(hours ?? "")}, reason ${JSON.stringify(reason ?? "")}). Call it through the surface.`,
+        };
+      }
+      case "agent_token_rewind": {
+        // NOT the live path (served by the surface); reads exactly its three arguments.
+        const org_slug = String(args["org_slug"] ?? "");
+        const key_id = String(args["key_id"] ?? "");
+        const reason = args["reason"];
+        return {
+          ok: false, refusal: "no_backend", requires_approval: approval,
+          error: `agent_token_rewind is served by the tool surface; the bare dispatcher cannot re-wind "${key_id}" in org "${org_slug}" (reason ${JSON.stringify(reason ?? "")}). Call it through the surface.`,
         };
       }
       case "org_hire": {
@@ -4005,6 +4030,10 @@ export interface ToolSurfaceDeps extends ServerDeps {
    *  survive the seam: `not_a_member`, `not_named`. Without it, agent_token_issue is an honest typed
    *  refusal (`no_backend`). The token is returned ONCE and never sealed to the ledger. */
   issueAgentToken?: ((args: IssueAgentTokenArgs) => Promise<IssueAgentTokenResult>) | undefined;
+  /** The governor's two acts on a standing token's watch (a delegation is a pocket watch): wired by
+   *  a deployment over the store's coltrane_extend_agent_token / coltrane_rewind_agent_token. */
+  extendAgentToken?: ((args: ExtendAgentTokenArgs) => Promise<ExtendAgentTokenResult>) | undefined;
+  rewindAgentToken?: ((args: RewindAgentTokenArgs) => Promise<RewindAgentTokenResult>) | undefined;
 }
 
 export interface SurfaceTool {
@@ -4156,6 +4185,11 @@ async function callSurfaceTool(
       return { ok: false, refusal: md.refusal, error: md.error };
     }
     // (c) No backend wired → the verb answers, naming the seam.
+    // A DELEGATION IS A POCKET WATCH: the mainspring and the reason, with no default.
+    const ceil = ceilingHoursOrRefusal(args.tenure_ceiling_hours, ttl.ttl_hours);
+    if ("refusal" in ceil) return { ok: false, refusal: ceil.refusal, error: ceil.error };
+    const why = reasonOrRefusal(args.reason);
+    if ("refusal" in why) return { ok: false, refusal: why.refusal, error: why.error };
     if (!deps.issueAgentToken) {
       return {
         ok: false,
@@ -4170,7 +4204,7 @@ async function callSurfaceTool(
     //     facts; the engine never checks them. The token is returned ONCE and sealed nowhere.
     let issued: IssueAgentTokenResult;
     try {
-      issued = await deps.issueAgentToken({ org_slug, agent_slug, may_dispatch: md.may_dispatch, ttl_hours: ttl.ttl_hours });
+      issued = await deps.issueAgentToken({ org_slug, agent_slug, may_dispatch: md.may_dispatch, ttl_hours: ttl.ttl_hours, tenure_ceiling_hours: ceil.tenure_ceiling_hours, reason: why.reason });
     } catch (e) {
       return { ok: false, error: e instanceof Error ? e.message : String(e) };
     }
@@ -4179,7 +4213,39 @@ async function callSurfaceTool(
     // violated upstream is answered as a failure here, never forwarded as ok:true with nothing in it.
     const shape = issuedOrError(issued);
     if (!shape.ok) return { ok: false, error: shape.error };
-    return { ok: true, data: { key_id: shape.key_id, org_slug, agent_slug, expires_at: shape.expires_at, agent_token: shape.agent_token } };
+    const ceilingAt = issued && typeof issued === "object" && typeof (issued as { tenure_ceiling_at?: unknown }).tenure_ceiling_at === "string" ? (issued as { tenure_ceiling_at: string }).tenure_ceiling_at : null;
+    return { ok: true, data: { key_id: shape.key_id, org_slug, agent_slug, expires_at: shape.expires_at, tenure_ceiling_at: ceilingAt, agent_token: shape.agent_token } };
+  }
+  if (slug === "agent_token_extend" || slug === "agent_token_rewind") {
+    // THE GOVERNOR'S TWO ACTS ON THE WATCH. Human member only — a seat never winds, extends or
+    // re-winds itself; an agent-token caller is refused before any backend. The store's typed
+    // refusals ride back as-is; no answer ever carries a token.
+    const org_slug = String(args.org_slug ?? "");
+    if (deps.caller?.kind !== "member") {
+      return { ok: false, refusal: "not_a_human_member", error: `only a human member may ${slug === "agent_token_extend" ? "extend" : "re-wind"} a standing token: a seat never winds itself. Act from a member session.` };
+    }
+    const kid = keyIdOrRefusal(args.key_id);
+    if ("refusal" in kid) return { ok: false, refusal: kid.refusal, error: kid.error };
+    const why = reasonOrRefusal(args.reason);
+    if ("refusal" in why) return { ok: false, refusal: why.refusal, error: why.error };
+    if (slug === "agent_token_extend") {
+      const h = hoursOrRefusal(args.hours, "hours");
+      if ("refusal" in h) return { ok: false, refusal: h.refusal, error: h.error };
+      if (!deps.extendAgentToken) return { ok: false, refusal: "no_backend", error: "no extending backend is wired on this surface — wire deps.extendAgentToken over the store's coltrane_extend_agent_token." };
+      let r: ExtendAgentTokenResult;
+      try { r = await deps.extendAgentToken({ org_slug, key_id: kid.key_id, hours: h.hours, reason: why.reason }); } catch (e) { return { ok: false, error: e instanceof Error ? e.message : String(e) }; }
+      if (!r || typeof r !== "object") return { ok: false, error: "the extending backend answered nothing" };
+      if (r.ok === false) return { ok: false, refusal: r.code };
+      if (typeof r.expires_at !== "string" || typeof r.tenure_ceiling_at !== "string") return { ok: false, error: "the extending backend answered ok without the watch's state (expires_at, tenure_ceiling_at)" };
+      return { ok: true, data: { key_id: kid.key_id, org_slug, expires_at: r.expires_at, tenure_ceiling_at: r.tenure_ceiling_at } };
+    }
+    if (!deps.rewindAgentToken) return { ok: false, refusal: "no_backend", error: "no re-winding backend is wired on this surface — wire deps.rewindAgentToken over the store's coltrane_rewind_agent_token." };
+    let w: RewindAgentTokenResult;
+    try { w = await deps.rewindAgentToken({ org_slug, key_id: kid.key_id, reason: why.reason }); } catch (e) { return { ok: false, error: e instanceof Error ? e.message : String(e) }; }
+    if (!w || typeof w !== "object") return { ok: false, error: "the re-winding backend answered nothing" };
+    if (w.ok === false) return { ok: false, refusal: w.code };
+    if (typeof w.act_id !== "string" || typeof w.wound_at !== "string") return { ok: false, error: "the re-winding backend answered ok without the act (act_id, wound_at)" };
+    return { ok: true, data: { key_id: kid.key_id, org_slug, act_id: w.act_id, wound_at: w.wound_at } };
   }
   if (slug === "org_hire") {
     // The engine half of org admission: the two engine-decided refusals and the ledger seal around

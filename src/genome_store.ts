@@ -28,6 +28,9 @@ import { composeChart, chartEntrySeedTypes, type Chart, type Venue } from "./cha
 import { DomainTypeSchema, SkillSchema, ChartSchema, VenueSchema, venueDefect } from "./genome_schema.js";
 import { domainTypeDefect } from "./registry.js";
 import { CANONICAL_CORE_TYPES } from "./canonical_core_types.js";
+import { existsSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 /** The genome classes a store can persist. (Core types are engine-owned and immutable.)
  *
@@ -66,6 +69,13 @@ export interface PostgrestContext {
    * a contested name still refuses — ambient org context is a refusal condition, not a default.
    */
   acting_org_id?: string | undefined;
+  /** The base under the rows; see GenomeLoadPin.base. Absent: the engine's packaged genome. */
+  base?: LoadedGenome | null | undefined;
+}
+
+/** The base a store backing hands to reconstructGenome: the engine's own unless told `null`. */
+function baseFor(ctx: { base?: LoadedGenome | null | undefined }): LoadedGenome | null {
+  return ctx.base === null ? null : (ctx.base ?? engineBaseGenome());
 }
 
 const CLASS_SUBDIR: Record<GenomeClass, string> = {
@@ -231,11 +241,103 @@ export interface GenomeRows {
  */
 export interface GenomeLoadPin {
   acting_org_id?: string | undefined;
+  /**
+   * THE BASE UNDER THE ROWS (3 Oct 2026). A file genome layers
+   * `{ "extends": ["./coltrane"] }` over the engine's own agents, standards, types and skills; the
+   * store genome had nothing under it, so an org had to COPY every engine definition its standards
+   * named — and the day one copy was incomplete, the drain refused every gig in the org at claim
+   * time ("references unknown agent \"john\"", 3 Oct 2026). A copy of engine material into an org
+   * layer is a missing operator; this is the operator.
+   *
+   * Org rows OVERRIDE the base by slug (the file loader's fold, loadLayeredGenome). `null` means
+   * rows alone — what a test or a diagnostic asks for; `undefined` means no base was handed in,
+   * which is how reconstructGenome is called directly. The two store backings pass the engine's
+   * packaged genome unless told `null`, so the box and the hosted surface read ONE effective genome.
+   *
+   * NOT folded: venues, charts, institutions. A room or a chart is an org's statement about itself,
+   * and an org's rooms are its own (WI-11). Core types are the canonical six either way.
+   */
+  base?: LoadedGenome | null | undefined;
+}
+
+/** Where the engine's own genome lives: the directory holding package.json AND agents/, found by
+ *  walking up from this module — one level up from src/ (vitest), two from dist/src/ (built). The
+ *  package ships agents, standards, domain_types, skills, charts, venues, institutions (package.json
+ *  `files`), so an installed engine carries its base with it. */
+export function engineBaseRoot(): string | undefined {
+  let dir = dirname(fileURLToPath(import.meta.url));
+  for (let i = 0; i < 6; i++) {
+    if (existsSync(join(dir, "package.json")) && existsSync(join(dir, "agents"))) return dir;
+    const up = resolve(dir, "..");
+    if (up === dir) break;
+    dir = up;
+  }
+  return undefined;
+}
+
+let ENGINE_BASE: LoadedGenome | undefined;
+/** The engine's packaged genome, loaded once per process through the manifest-aware file loader.
+ *  No root found is a packaging fault and says so — a silent empty base would be exactly the
+ *  "rows alone" state this operator exists to end. */
+export function engineBaseGenome(): LoadedGenome {
+  if (ENGINE_BASE) return ENGINE_BASE;
+  const root = engineBaseRoot();
+  if (!root) throw new GenomeLoadError("engine base: no package root holding package.json and agents/ above this module");
+  ENGINE_BASE = resolveGenome(root);
+  return ENGINE_BASE;
+}
+
+/** THE VERSION RULE, one for every class (3 Oct 2026). Among the rows that stand, the HIGHEST version
+ *  per slug wins — that is what a version is. Two rows at one version are contradictory data and refuse
+ *  naming both. A version that is not a number is refused by name and dropped: it must neither win nor
+ *  vanish by row order (the non-author grade of the standards rule found that coin toss in every branch).
+ *  Rows with no slug pass through so the class loop reports `missing required "slug" field` itself. */
+function highestVersionPerSlug(rows: Row[], kind: "agent" | "standard" | "skill", table: string, load_errors: LoadError[]): Row[] {
+  const best = new Map<string, Row>();
+  const clash = new Map<string, Row[]>();
+  const noSlug: Row[] = [];
+  for (const r of rows) {
+    const slug = typeof r["slug"] === "string" ? r["slug"] : null;
+    if (!slug) { noSlug.push(r); continue; }
+    const raw = r["version"];
+    const v = raw === undefined || raw === null ? 1 : Number(raw);
+    if (!Number.isFinite(v)) {
+      load_errors.push({ kind, path: `postgrest:${table}/${slug}`, slug,
+        error: `${kind} "${slug}": version ${JSON.stringify(raw)} is not a number — a version is a number, and the engine will not order rows it cannot compare` });
+      continue;
+    }
+    const cur = best.get(slug);
+    const cv = cur ? Number(cur["version"] ?? 1) : -Infinity;
+    if (!cur || v > cv) { best.set(slug, r); clash.set(slug, [r]); }
+    else if (v === cv) { clash.set(slug, [...(clash.get(slug) ?? []), r]); }
+  }
+  for (const [slug, rs] of clash) {
+    if (rs.length <= 1) continue;
+    const how = rs.map((r) => `status ${String(r["status"] ?? "active")}`).join(", ");
+    load_errors.push({ kind, path: `postgrest:${table}/${slug}`, slug,
+      error: `ambiguous ${kind} "${slug}": ${rs.length} rows share one version (${how}) — `
+           + `a version history has one row per version, and the engine will not pick by row order` });
+    best.delete(slug);
+  }
+  return [...best.values(), ...noSlug];
 }
 
 export function reconstructGenome(rows: GenomeRows, pin?: GenomeLoadPin): LoadedGenome {
   const { core_types: coreRows, domain_types: typeRows, agents: agentRows, standards: standardRows, skills: skillRows } = rows;
   const load_errors: LoadError[] = [];
+  // The base under the rows. Seeded first; org rows override by slug below. `provenance`
+  // records which layer supplied each effective definition, as loadLayeredGenome does.
+  const base = pin?.base ?? undefined;
+  const provenance = new Map<string, string>();
+  const seed = <V>(into: Map<string, V>, from: ReadonlyMap<string, V> | undefined, kind: string) => {
+    if (!from) return;
+    for (const [k, v] of from) { into.set(k, v); provenance.set(`${kind}:${k}`, "engine-base"); }
+  };
+  // A broken packaged base is NAMED, not inferred: its load errors ride into the effective genome,
+  // exactly as loadLayeredGenome carries every layer's errors. Without this a base definition that
+  // failed to parse is silently a smaller base, and the org sees only the downstream symptom
+  // ("references unknown agent …") — the non-author grade's note 1.
+  for (const e of base?.load_errors ?? []) load_errors.push(e);
 
       // core types — engine-owned, immutable 6. No rows visible → seed the canonical set,
       // exactly as loadGenome does for a root with no core_types/. A PARTIAL set is a corrupt
@@ -261,6 +363,7 @@ export function reconstructGenome(rows: GenomeRows, pin?: GenomeLoadPin): Loaded
       // domain types — the loader's three checks, in the loader's order: core-type extends,
       // representability (domainTypeDefect), then the single Zod source. Soft-fail per row.
       const domain_types = new Map<string, DomainTypeRecord>();
+      seed(domain_types, base?.domain_types, "domain_type");
       for (const r of typeRows) {
         const slug = typeof r["slug"] === "string" ? r["slug"] : null;
         const path = `postgrest:coltrane_domain_types/${slug ?? "?"}`;
@@ -274,6 +377,7 @@ export function reconstructGenome(rows: GenomeRows, pin?: GenomeLoadPin): Loaded
           if (!check.success) throw new Error(`type schema validation failed — ${zodWhy(check.error.issues)}`);
           const rec = check.data as DomainTypeRecord;
           domain_types.set(`${rec.slug}@${rec.version}`, rec);
+          provenance.set(`domain_type:${rec.slug}@${rec.version}`, "store");
         } catch (e) {
           load_errors.push({ kind: "domain_type", path, slug, error: e instanceof Error ? e.message : String(e) });
         }
@@ -283,13 +387,24 @@ export function reconstructGenome(rows: GenomeRows, pin?: GenomeLoadPin): Loaded
       // Hosted rows soft-fail per row: one broken profile is a reported load error, not a
       // dead genome for every caller behind this RLS scope.
       const agents = new Map<string, Agent>();
-      for (const r of agentRows) {
+      seed(agents, base?.agents, "agent");
+      // A duplicate is two ORG rows claiming one slug. An org row under a BASE slug is an override,
+      // which is the whole point of a layer — so the check reads what the org stated, not the map.
+      const orgAgents = new Set<string>();
+      // The version rule for agents (after the grade of the standards rule): retired and superseded
+      // rows are not agents; the highest standing version per slug wins; a same-version clash refuses.
+      const standingAgentRows = highestVersionPerSlug(
+        agentRows.filter((r) => r["status"] !== "retired" && r["status"] !== "superseded"),
+        "agent", "coltrane_agent_profiles", load_errors);
+      for (const r of standingAgentRows) {
         const slug = typeof r["slug"] === "string" ? r["slug"] : null;
         const path = `postgrest:coltrane_agent_profiles/${slug ?? "?"}`;
         try {
           if (!slug) throw new Error(`missing required "slug" field`);
-          if (agents.has(slug)) throw new Error(`duplicate agent slug "${slug}"`);
+          if (orgAgents.has(slug)) throw new Error(`duplicate agent slug "${slug}"`);
           agents.set(slug, defineAgent(agentDefFromRow(r) as never));
+          orgAgents.add(slug);
+          provenance.set(`agent:${slug}`, "store");
         } catch (e) {
           load_errors.push({ kind: "agent", path, slug, error: e instanceof Error ? e.message : String(e) });
         }
@@ -298,6 +413,8 @@ export function reconstructGenome(rows: GenomeRows, pin?: GenomeLoadPin): Loaded
       // standards — phases jsonb is already the engine phase shape; the agents a standard
       // composes are the ones its chairs name. composeStandard is the loader's own gate.
       const standards = new Map<string, Standard>();
+      seed(standards, base?.standards, "standard");
+      const orgStandards = new Set<string>();
 
       // A DRAFT IS NOT A PROMISE — the sovereign's ruling, and the venue rule one class over.
       //
@@ -316,7 +433,16 @@ export function reconstructGenome(rows: GenomeRows, pin?: GenomeLoadPin): Loaded
       // because an error the operator cannot act on (they did not ask for the draft to run) is
       // noise that trains people to ignore the list.
       const isDraft = (r: Row) => r["status"] === "draft";
-      const liveStandardRows = standardRows.filter((r) => !isDraft(r));
+      // WHICH ROWS ARE STANDARDS — the skills rule, one class over (3 Oct 2026). The governed upsert
+      // RETIRES the prior active version when a new one lands; this branch dropped drafts and nothing
+      // else, so a retired v1 beside its active v2 was two live claimants, the second threw
+      // "duplicate standard slug", and the org's drain refused every gig at claim time over a
+      // version history. Retired is not a room with a problem — it is not a room. Deprecated stands
+      // ("do not reach for this", not "this does not exist"). Among what stands, the HIGHEST version
+      // per slug wins, because that is what a version is; two rows at ONE version is contradictory
+      // data and refuses naming both — never a coin toss by row order.
+      const standingStandardRows = standardRows.filter((r) => !isDraft(r) && r["status"] !== "retired" && r["status"] !== "superseded");
+      const liveStandardRows = highestVersionPerSlug(standingStandardRows, "standard", "coltrane_standards", load_errors);
 
       // Drafts are parsed into their OWN map, not dropped: standard_promote validates against
       // the loaded genome, so a draft absent from everything would be `notFound` and could
@@ -341,7 +467,7 @@ export function reconstructGenome(rows: GenomeRows, pin?: GenomeLoadPin): Loaded
         const path = `postgrest:coltrane_standards/${slug ?? "?"}`;
         try {
           if (!slug) throw new Error(`missing required "slug" field`);
-          if (standards.has(slug)) throw new Error(`duplicate standard slug "${slug}"`);
+          if (orgStandards.has(slug)) throw new Error(`duplicate standard slug "${slug}"`);
           // F2 — a malformed examine loop is a NAMED load error, never a loop silently disabled. A
           // present max_examine_rounds must be a non-negative integer; the store row keeps it (O5).
           const mer = r["max_examine_rounds"];
@@ -376,6 +502,8 @@ export function reconstructGenome(rows: GenomeRows, pin?: GenomeLoadPin): Loaded
               ...(typeof rp === "number" ? { reserve_pool: rp } : {}),
             }),
           );
+          orgStandards.add(slug);
+          provenance.set(`standard:${slug}`, "store");
         } catch (e) {
           load_errors.push({ kind: "standard", path, slug, error: e instanceof Error ? e.message : String(e) });
         }
@@ -384,6 +512,7 @@ export function reconstructGenome(rows: GenomeRows, pin?: GenomeLoadPin): Loaded
       // skills — the row's skill_md IS the loaded reasoning half (`md`, the prompt's Skills
       // layer). Hosted skills carry no local package dir / code half by construction.
       const skills = new Map<string, SkillRecord>();
+      seed(skills, base?.skills, "skill");
       // WHICH ROWS ARE SKILLS — the venue rule, one class over, with one difference that
       // matters. Venues could filter to `active` alone because a superseded room is not a
       // room. Skills carry three statuses and the engine defaults a missing one to "active"
@@ -408,6 +537,11 @@ export function reconstructGenome(rows: GenomeRows, pin?: GenomeLoadPin): Loaded
         const key = `${String(r["org_id"] ?? "")}\u0000${slug}`;
         const cur = bestSkill.get(key);
         const v = Number(r["version"] ?? 1);
+        if (!Number.isFinite(v)) {
+          load_errors.push({ kind: "skill", path: `postgrest:coltrane_skills/${slug}`, slug,
+            error: `skill "${slug}": version ${JSON.stringify(r["version"])} is not a number — a version is a number, and the engine will not order rows it cannot compare` });
+          continue;
+        }
         const cv = cur ? Number(cur["version"] ?? 1) : -Infinity;
         if (!cur || v > cv) { bestSkill.set(key, r); skillClash.set(key, [r]); }
         else if (v === cv) { skillClash.set(key, [...(skillClash.get(key) ?? []), r]); }
@@ -450,6 +584,7 @@ export function reconstructGenome(rows: GenomeRows, pin?: GenomeLoadPin): Loaded
           const check = SkillSchema.safeParse(meta);
           if (!check.success) throw new Error(`skill schema validation failed — ${zodWhy(check.error.issues)}`);
           skills.set(slug, check.data as SkillRecord);
+          provenance.set(`skill:${slug}`, "store");
         } catch (e) {
           load_errors.push({ kind: "skill", path, slug, error: e instanceof Error ? e.message : String(e) });
         }
@@ -577,7 +712,7 @@ export function reconstructGenome(rows: GenomeRows, pin?: GenomeLoadPin): Loaded
     }
   }
 
-  return { core_types, domain_types, agents, standards, draft_standards, skills, evals, charts, venues, load_errors };
+  return { core_types, domain_types, agents, standards, draft_standards, skills, evals, charts, venues, load_errors, provenance };
 }
 
 /** Hosted backing: load the genome from the store's five tables and reconstruct the SAME
@@ -596,7 +731,7 @@ export function postgrestGenomeStore(ctx: PostgrestContext): GenomeStore {
       ]);
       return reconstructGenome(
         { core_types, domain_types, agents, standards, skills, charts, venues },
-        { acting_org_id: ctx.acting_org_id },
+        { acting_org_id: ctx.acting_org_id, base: baseFor(ctx) },
       );
     },
 
@@ -632,7 +767,7 @@ export function postgrestGenomeStore(ctx: PostgrestContext): GenomeStore {
  *  known to whoever minted it — passed here rather than re-derived, because a second derivation is a
  *  second belief about who is acting. */
 export function rpcGenomeStore(
-  ctx: { baseUrl: string; anonKey: string; agentToken: string; acting_org_id?: string | undefined },
+  ctx: { baseUrl: string; anonKey: string; agentToken: string; acting_org_id?: string | undefined; base?: LoadedGenome | null | undefined },
 ): GenomeStore {
   return {
     async load(): Promise<LoadedGenome> {
@@ -674,7 +809,7 @@ export function rpcGenomeStore(
         skills: rows.skills ?? [],
         charts: rows.charts ?? [],
         venues: rows.venues ?? [],
-      }, { acting_org_id: ctx.acting_org_id ?? answeredOrg });
+      }, { acting_org_id: ctx.acting_org_id ?? answeredOrg, base: baseFor(ctx) });
     },
     async upsert(): Promise<void> {
       throw new Error("an agent token does not author genome — authoring is a member act through the governed upsert");

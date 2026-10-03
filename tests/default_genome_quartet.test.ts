@@ -29,7 +29,7 @@ import {
   AgentRecordSchema,
   OrgMemberSchema,
   InstitutionalChairSchema,
-  ChairAssignmentSchema,
+  ChairAssignmentSchema, DispatchCapGrantSchema,
   ForebearSchema,
   LineageEdgeSchema,
 } from "../src/genome_schema.js";
@@ -318,8 +318,9 @@ describe("the chair contract is the dispatch authority — and it has no dead na
         if (!chair) continue; // reported by the resolution test above
         const granted = grantsByAgent.get(seat.agent_slug) ?? new Set<string>();
         for (const cap of [...chair.caps, ...seat.contract_caps]) {
-          if (!("grant" in cap) || cap.grant !== "dispatch") continue;
-          for (const s of cap.standards) granted.add(s);
+          const dispatch = DispatchCapGrantSchema.safeParse(cap);
+          if (!dispatch.success) continue;
+          for (const s of dispatch.data.standards) granted.add(s);
         }
         grantsByAgent.set(seat.agent_slug, granted);
       }

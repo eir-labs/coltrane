@@ -24,9 +24,10 @@ describe("naming-ritual-v1 · INV-2 the three phases, in order", () => {
 });
 
 describe("naming-ritual-v1 · INV-3 the reader frames, never judges", () => {
-  it("context-reader seat with change-context out", () => {
+  it("john seat with change-context out, and its own turn_budget", () => {
     const c = load().phases[0].chairs[0];
-    expect(c.agent_slug).toBe("context-reader");
+    expect(c.agent_slug).toBe("john");
+    expect(c.turn_budget, "the chair carries the cap, not the player").toBe(40);
     expect(c.input_contract).toEqual(["draft-agent-profile"]);
     expect(c.output_contract).toEqual(["change-context"]);
     expect(c.depends_on).toEqual([]);

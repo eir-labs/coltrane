@@ -4,10 +4,11 @@
 // and records one ledger entry with a deterministic genome_hash + a run_fingerprint
 // that carries model_version + (empty, v0) eval_scores — honestly un-tempered.
 import { lineageAdoption } from "./lineage_adoption.js";
-import { randomUUID } from "node:crypto";
+import { isSafeGitRev } from "./run_deps.js";
+import { randomUUID, createHash } from "node:crypto";
 import { performance } from "node:perf_hooks";
 import { execFileSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, openSync, closeSync, readSync, fstatSync } from "node:fs";
 import { join as joinPath, relative as relPath, isAbsolute as isAbsPath, sep as pathSep } from "node:path";
 import type { Standard, Agent, Chair } from "./composition.js";
 import { PRIMITIVE_OUTPUT_TYPE, CORE_TYPES } from "./core_types.js";
@@ -38,6 +39,8 @@ import { producersSha,
   type ReuseStore, type ReuseEntry, type ReuseOutput, type RunIdentity, type PriorBudgetState,
 } from "./reuse.js";
 import type { OutputStore, OutputRecord, InputResolution, ShardStamp } from "./outputs.js";
+// The ONE oracle for what a seat may reach (agent ∩ chair ∩ venue) — never a re-inlined intersection.
+import { seatEffectiveTools } from "./chart.js";
 import { resolveSealedInputs } from "./sealed_inputs.js";
 import { expandFanOut, type FanOutInstance } from "./fan_out.js";
 import { checkGigConformance, type GigConformanceResult } from "./gig_conformance.js";
@@ -124,6 +127,16 @@ export interface AgentInvocationContext {
   // Task layer on this so the model is asked for exactly these types. Absent/empty (legacy
   // hand-rolled ctx) → the invoker falls back to the agent's full output_types.
   output_types?: readonly string[];
+  /**
+   * What THIS seat may reach: the agent's grants narrowed by its chair's ceiling and the room's
+   * equipment, computed by the one shared oracle `seatEffectiveTools` (src/chart.ts). The sibling of
+   * `output_types` above — #174 narrowed what a chair SEALS, this narrows what it may TOUCH, so one
+   * agent seated in two chairs can hold two different authorities in a single run.
+   *
+   * Absent (legacy hand-rolled ctx, or a seat whose chair declares no ceiling and sits in no room)
+   * → the invoker falls back to the agent's own `allowed_tools`, exactly as before.
+   */
+  allowed_tools?: readonly string[];
   skills?: readonly SkillRecord[];
   // #241 — the skill slugs this agent DECLARES that resolved to no package at all. Present
   // (possibly empty) whenever the runtime actually attempted resolution; ABSENT means no
@@ -327,6 +340,11 @@ export type GigProgressEvent =
       approved_by?: string;
       /** every applicable refusal, not just the first — see lineageAdoption. */
       refusals?: string[];
+      /** The forebear the sealed record NAMES (lineage-record v3 `forebear.slug`), when it names one —
+       *  so a host can land the forebear and the descends-from edge from the report without
+       *  re-opening the record. Absent when the record carries no forebear object (an institutional
+       *  grounding rather than a naming). */
+      forebear_ref?: string;
     }
   | { type: "agent_event"; phase: string; role: string; event: AgentStreamEvent }
   // #turn-budget — the operator-facing read of the gig's budget agent_state. Emitted at the single
@@ -712,6 +730,8 @@ export interface RunDeps {
    * the room declines to populate (an empty read-only workspace) and no git credential is minted.
    */
   repoUrl?: string | undefined;
+  /** The commit a change-set is measured from, threaded to the realizer beside repoUrl (the base is in the tree). */
+  changeSetBase?: string | undefined;
   /**
    * The directory whose git objects the SEAL stamps law and change addresses from (records-by-address,
    * contract-records-by-address-v1). When a sealed `red-spec` record carries `laws` or a `change-set`
@@ -1180,8 +1200,138 @@ export function workingModel(outputByModel: ReadonlyMap<string, number>): string
 type LawAddress = { path: string; commit: string; blob_sha?: string; tests?: string[] };
 type ChangeAddress = { path: string; base: string; blob_sha?: string; patch_sha256?: string; bytes?: number };
 
+// ── ONE CONSTRUCTION SITE FOR EVERY GIT READ ────────────────────────────────────────────────────
+// `tree_root` is a directory the engine reads but does not own: a seat's checkout, a drained
+// workspace, a contributor's laptop. When git answers a read there it consults, besides the objects
+// the question is about, settings that live OUTSIDE the question — some belonging to the machine
+// and the account the engine happens to be running under, some belonging to the directory being
+// read. So the same objects can produce two answers on two hosts, and the same host can produce a
+// different answer tomorrow because something under it changed. A sealed record must not depend on
+// any of that: `blob_sha`, `patch_sha256` and `bytes` are claims about git's objects, and a claim
+// that moves with its surroundings is not a claim.
+//
+// `gitInvocation` is where the engine's ONE invocation shape is built — the environment pinned so
+// the answer cannot vary by host, and the per-invocation settings pinned so it cannot vary by
+// directory. `gitInTree` is its only caller and the only place in this file that spawns git, so a
+// read added here later is pinned by existing rather than by remembering. Held by
+// `tests/git_invocation_pinned.test.ts`.
+//
+// Every pin names git's own default, so on an ordinary checkout not one value moves: what a read
+// returns is what plain `git` returns, which is what keeps `blob_sha` naming the content git stores
+// (spec.coltrane.blob-sha-contract) rather than something this seam invented.
+
+/** Pinned environment: the host and the account contribute nothing to a read's answer. */
+const GIT_PINNED_ENV: Readonly<Record<string, string>> = {
+  GIT_CONFIG_GLOBAL: "/dev/null",
+  GIT_CONFIG_SYSTEM: "/dev/null",
+  GIT_CONFIG_NOSYSTEM: "1",
+  GIT_ATTR_NOSYSTEM: "1",
+  // A snapshot is a commit object, and a commit object needs an identity. With the account's own
+  // settings pinned away, git would otherwise guess one from the host's user database — which
+  // differs per machine and is absent entirely in a bare container. Stated, so the snapshot is
+  // written the same way everywhere and never fails for want of a name.
+  GIT_AUTHOR_NAME: "coltrane",
+  GIT_AUTHOR_EMAIL: "coltrane@invalid",
+  GIT_COMMITTER_NAME: "coltrane",
+  GIT_COMMITTER_EMAIL: "coltrane@invalid",
+};
+
+/** Pinned on EVERY invocation, ahead of the subcommand. */
+const GIT_PINNED_SETTINGS: readonly string[] = [
+  "-c", "core.fsmonitor=",
+  "-c", "core.hooksPath=/dev/null",
+  "-c", "core.attributesFile=/dev/null",
+];
+
+/**
+ * Pinned on ONE subcommand, where the general pins above have no equivalent: `diff` is asked for
+ * git's own rendering of the objects, not for some other rendering of them, because the bytes it
+ * emits are folded straight into a sealed `patch_sha256`.
+ */
+const GIT_SUBCOMMAND_PINS: ReadonlyMap<string, readonly string[]> = new Map([
+  ["diff", ["--no-textconv", "--no-ext-diff"] as readonly string[]],
+]);
+
+/** The exact spawn a git read in `tree_root` is made of — argv and environment together. */
+export type GitInvocation = { readonly file: "git"; readonly argv: readonly string[]; readonly env: NodeJS.ProcessEnv };
+
+/** Build the pinned invocation for `git <args>` in `tree_root`. The caller's `args` survive in order. */
+export function gitInvocation(tree_root: string, args: readonly string[]): GitInvocation {
+  const [subcommand, ...rest] = args;
+  return {
+    file: "git",
+    argv: [
+      "-C", tree_root,
+      ...GIT_PINNED_SETTINGS,
+      ...(subcommand === undefined ? [] : [subcommand, ...(GIT_SUBCOMMAND_PINS.get(subcommand) ?? [])]),
+      ...rest,
+    ],
+    env: { ...process.env, ...GIT_PINNED_ENV },
+  };
+}
+
 function gitInTree(tree_root: string, args: readonly string[]): string {
-  return execFileSync("git", ["-C", tree_root, ...args]).toString();
+  const { file, argv, env } = gitInvocation(tree_root, args);
+  return execFileSync(file, [...argv], { env }).toString();
+}
+
+/** How much of a file is held in memory at once while its blob sha is folded. */
+const BLOB_SHA_CHUNK_BYTES = 64 * 1024;
+
+/**
+ * A file's git blob sha, computed IN PROCESS from the file's own bytes.
+ *
+ * A blob sha is a pure function of those bytes — `SHA-1("blob " + <byte length> + "\0" + <contents>)`
+ * — so the engine, which already has the bytes, computes it itself instead of spawning
+ * `git hash-object` inside a tree it does not own. Same answer, one fewer subprocess, and the
+ * value no longer depends on anything outside the file being hashed.
+ *
+ * The answer this returns is `git hash-object --no-filters`: the bytes AS THEY ARE ON DISK. For a
+ * repository with no attributes and no filters configured that is also bare `git hash-object`'s
+ * answer — the equivalence is pinned over a corpus (empty, single byte, embedded NULs, CRLF,
+ * multi-chunk, no trailing newline, UTF-8 multibyte) in `tests/blob_sha_in_process.test.ts`,
+ * against real `git hash-object --no-filters` in a throwaway repo.
+ *
+ * `path` is resolved against `tree_root` when relative — the same resolution `git -C <tree_root>
+ * hash-object <path>` performs, which is relative to the named directory, not to the repository
+ * root. Symlinks are followed, as git follows them.
+ *
+ * THROWS, exactly where the subprocess used to fail, so every caller keeps its own handling: a
+ * file that is absent, unreadable, or not a regular file has no blob sha and never gets a
+ * plausible stand-in. A file whose length changes UNDER the read is refused for the same reason —
+ * a sha folded over a torn read is a wrong answer wearing a right answer's shape.
+ */
+export function blobShaOfFile(tree_root: string, path: string): string {
+  const abs = isAbsPath(path) ? path : joinPath(tree_root, path);
+  const fd = openSync(abs, "r");
+  try {
+    const stat = fstatSync(fd);
+    if (!stat.isFile()) {
+      throw new Error(`blob_sha_unhashable: ${abs} is not a regular file — it has no blob sha.`);
+    }
+    const size = stat.size;
+    const hash = createHash("sha1");
+    hash.update(Buffer.from(`blob ${size}\0`, "latin1"));
+    const chunk = Buffer.allocUnsafe(BLOB_SHA_CHUNK_BYTES);
+    let read = 0;
+    for (;;) {
+      const n = readSync(fd, chunk, 0, chunk.length, null);
+      if (n === 0) break;
+      read += n;
+      if (read > size) {
+        throw new Error(`blob_sha_unhashable: ${abs} grew while it was being hashed — nothing is stamped.`);
+      }
+      hash.update(chunk.subarray(0, n));
+    }
+    if (read !== size) {
+      throw new Error(
+        `blob_sha_unhashable: ${abs} is ${size} bytes by its own stat but only ${read} could be read — nothing is stamped.`,
+      );
+    }
+    return hash.digest("hex");
+  } finally {
+    closeSync(fd);
+  }
 }
 
 // The it/test titles a law blob declares, in file order — the `tests` the reviewer is handed instead
@@ -1240,8 +1390,9 @@ export function stampLawAddresses(
 }
 
 /**
- * Stamp each change's `blob_sha` (`git hash-object` of the file in `tree_root`, or the literal
- * `"deleted"` when the file is absent from the tree), `patch_sha256` (sha256 of `git diff <base> --
+ * Stamp each change's `blob_sha` (the git blob sha of the file's bytes in `tree_root`, computed
+ * in process by `blobShaOfFile`, or the literal `"deleted"` when the file is absent from the
+ * tree), `patch_sha256` (sha256 of `git diff <base> --
  * <path>` in `tree_root`) and `bytes` (that diff's length) from a supplied `{path, base}`.
  * REFUSALS: no `tree_root` → `tree_root_unknown`; a seat-supplied `blob_sha`/`patch_sha256`/`bytes`
  * that disagrees with git → `law_bytes_mismatch` naming the path and field.
@@ -1257,9 +1408,27 @@ export function stampChangeAddresses(
   }
   return changes.map((change) => {
     const blob_sha = existsSync(joinPath(tree_root, change.path))
-      ? gitInTree(tree_root, ["hash-object", change.path]).trim()
+      ? blobShaOfFile(tree_root, change.path)
       : "deleted";
-    const diff = gitInTree(tree_root, ["diff", change.base, "--", change.path]);
+    // THE BASE IS IN THE TREE, or the refusal names it. The drain clones one commit deep; a base that
+    // is not HEAD is in the tree only if the request carried it as change_set_base and the clone
+    // fetched it. Asked first, so the seal's answer is the missing commit and not git's own failure.
+    if (!isSafeGitRev(change.base)) {
+      throw new RuntimeError(
+        `bad_base: change ${change.path} names base ${JSON.stringify(change.base)}, which is not a git revision the ` +
+          `engine will hand to git — a sha, a tag or a branch name; nothing beginning with a dash, no whitespace, no '..'`,
+      );
+    }
+    try {
+      gitInTree(tree_root, ["cat-file", "-e", "--end-of-options", `${change.base}^{commit}`]);
+    } catch {
+      throw new RuntimeError(
+        `base_not_in_tree: change ${change.path} is measured from ${change.base}, and the working tree does not ` +
+          `hold that commit. A gig's clone is one commit deep; name the base on the request as change_set_base ` +
+          `so the clone fetches it, or measure from a commit the tree holds.`,
+      );
+    }
+    const diff = gitInTree(tree_root, ["diff", "--end-of-options", change.base, "--", change.path]);
     const patch_sha256 = sha256Hex(diff);
     const bytes = Buffer.byteLength(diff, "utf8");
     if (change.blob_sha !== undefined && change.blob_sha !== blob_sha) {
@@ -1522,6 +1691,7 @@ export async function runGig(
         {
           gigId: gig_id,
           ...(deps.repoUrl ? { repoUrl: deps.repoUrl } : {}),
+          ...(deps.changeSetBase ? { changeSetBase: deps.changeSetBase } : {}),
           ...(process.env["COLTRANE_DRAIN_KEY"] ? { drainKey: process.env["COLTRANE_DRAIN_KEY"] } : {}),
           ...(process.env["COLTRANE_INSTANCE"] ? { instance: process.env["COLTRANE_INSTANCE"] } : {}),
           ...(process.env["COLTRANE_GIT_CREDENTIALS_URL"]
@@ -2478,10 +2648,17 @@ export async function runGig(
             sealed_at: rec.created_at,
             institution_slug,
           });
+          // The record's own forebear (lineage-record v3): read here, reported with the adoption, so
+          // the store that lands the rite row never infers a forebear from external_body prose.
+          // on an ENTRY human chair there is no upstream record (`target` is undefined) and the record came
+          // in seeded with the payload — read the forebear from whichever the verdict stands on
+          const forebearObj = ((target?.data as Record<string, unknown> | undefined) ?? seeded)?.["forebear"] as Record<string, unknown> | undefined;
+          const forebear_ref = typeof forebearObj?.["slug"] === "string" ? (forebearObj["slug"] as string) : undefined;
           emit({
             type: "lineage_adoption", phase: phase.name, role: hc.role,
             adopt: decision.adopt,
             ...(decision.ref ? { record_ref: decision.ref.record_ref, approved_by: decision.ref.approved_by ?? "" } : {}),
+            ...(forebear_ref ? { forebear_ref } : {}),
             ...(decision.institution_slug ? { institution_slug: decision.institution_slug } : {}),
             ...(decision.refusals.length ? { refusals: decision.refusals.map((r) => r.reason) } : {}),
           });
@@ -3273,14 +3450,14 @@ export async function runGig(
         if (ceiling !== undefined && primer_context > ceiling) {
           fork_fallback = "primer_too_large";
         } else {
-          // O4 — staleness is decided by BLOBS against the working tree, through the SAME gitInTree seam
-          // the law/change stampers use. A file git can no longer hash (removed since priming) is stale.
+          // O4 — staleness is decided by BLOBS against the working tree, through the SAME blob seam
+          // the change stamper uses. A file that can no longer be hashed (removed since priming) is stale.
           const files = Array.isArray(pd["files"]) ? (pd["files"] as Array<{ path: string; blob_sha: string }>) : [];
           const stale_paths = files
             .filter((f) => {
               if (deps.tree_root === undefined) return false;
               let current: string;
-              try { current = gitInTree(deps.tree_root, ["hash-object", f.path]).trim(); } catch { return true; }
+              try { current = blobShaOfFile(deps.tree_root, f.path); } catch { return true; }
               return current !== f.blob_sha;
             })
             .map((f) => f.path);
@@ -3603,7 +3780,7 @@ export async function runGig(
         // tree, so HEAD is the snapshot). A file the seat reads then edits is sealed at this pre-edit blob
         // (git rev-parse <snapshot>:<path>), and a carried file the seat never re-reads keeps its forked
         // blob — so a fork remembers exactly what the primer READ, not what it then DID. Best-effort: a
-        // tree that cannot be snapshotted leaves this undefined and the seal falls back to hash-object.
+        // tree that cannot be snapshotted leaves this undefined and the seal falls back to the at-seal blob.
         if (chair.prime && deps.tree_root !== undefined) {
           try {
             const created = gitInTree(deps.tree_root, ["stash", "create"]).trim();
@@ -3622,6 +3799,9 @@ export async function runGig(
             ? { hydration: { ...(p.chair.supplies ?? {}), ...(placedHydration ?? {}) } }
             : {}),
           output_types: output_specs.map((s) => s.domain_type), // #174 — the chair's promised subset
+          // The sibling of the line above: what this SEAT may reach, from the one shared oracle, so
+          // two chairs seating one agent carry two authorities. Ceiling only — never a grant.
+          allowed_tools: seatEffectiveTools(agent, chair, gigVenue),
           // #250 level 2 + #237 — the cancellation signal and the run's depth reach the invocation
           // itself, so an invoker can kill its child and shape what it asks the model for.
           ...(deps.signal ? { signal: deps.signal } : {}),
@@ -3778,6 +3958,8 @@ export async function runGig(
         entry_id: `chair_spend:${gig_id}:${chair.role}:${p.round ?? 1}:${randomUUID()}`,
         gig_id,
         role: chair.role,
+        // WHO spent, not just which seat: the row must stay attributable after the standard moves.
+        agent_slug: agent.slug,
         phase: phaseName,
         round: p.round ?? 1,
         captured: sink.attributed(),
@@ -4184,7 +4366,7 @@ export async function runGig(
     }
     // contract-seat-primer-v1 (O1/I2) — a PRIME chair seals a `seat-primer` record DERIVED by the
     // engine (never typed by the model): its own (gig, role) session, HEAD at seal, and the files its
-    // seat Read, each with the `git hash-object` blob in the tree at seal. The reads arrive through the
+    // seat Read, each with the file's blob sha in the tree at seal. The reads arrive through the
     // invoker's `seat_reads` event (captured above); the record is sealed HERE, through the same write
     // boundary a derived output crosses, so it enters this gig's store and any later fork can find it.
     if (chair.prime) {
@@ -4206,7 +4388,7 @@ export async function runGig(
       // so both spellings of the same file collapse to one key — I1), and DROP any path that resolves
       // OUTSIDE tree_root — it is not part of the area and must never be stored, above all not as an
       // absolute path escaping it (F1). With paths stored relative, the fork-time staleness hash
-      // (gitInTree hash-object) resolves them in the FORKING run's own checkout, so a primer sealed
+      // (blobShaOfFile) resolves them in the FORKING run's own checkout, so a primer sealed
       // under one checkout is fresh in another of the same content (O2). Without a tree_root there is no
       // anchor (and no git resolution downstream), so the raw path is kept unchanged.
       const toTreeRelative = (raw: string): string | undefined => {
@@ -4257,7 +4439,7 @@ export async function runGig(
             try { return gitInTree(deps.tree_root, ["rev-parse", `${primerStartSnapshot}:${path}`]).trim(); }
             catch { /* untracked at chair start — hash at seal below */ }
           }
-          try { return gitInTree(deps.tree_root, ["hash-object", path]).trim(); } catch { return ""; }
+          try { return blobShaOfFile(deps.tree_root, path); } catch { return ""; }
         }
         return forkedBlob.get(path) ?? "";
       };

@@ -1,0 +1,85 @@
+{
+  "slug": "pr-review-surface",
+  "version": 1,
+  "extends": "Interpretation",
+  "domain": "software-change",
+  "status": "active",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "dimensions": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "dimension": {
+              "type": "string",
+              "description": "The defect class this seat hunts. The key the review phase is split on."
+            },
+            "question": {
+              "type": "string",
+              "description": "The one question this seat answers, stated so that a NO is possible."
+            },
+            "look_at": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Paths this dimension should read. A pointer, not a payload — the seat opens them itself, and what it opens is recorded."
+            }
+          }
+        },
+        "description": "The review dimensions, each already pointed at its own slice."
+      },
+      "mechanisms": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "files": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "declared_purpose": {
+              "type": "string",
+              "description": "What the change says this mechanism is for."
+            },
+            "callers": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Where it is REACHED from, as found in the tree — empty is a finding, not a blank."
+            }
+          }
+        },
+        "description": "Each new or changed mechanism, and what calls it. The North Star this repo keeps failing: a mechanism that works, has passing tests, and is never reached."
+      },
+      "new_laws": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Test files and law names the change adds, so a reviewer can ask of each whether it could ever have been red."
+      },
+      "unread": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Parts of the diff this survey did NOT open. An honest gap, stated, rather than a survey that implies completeness."
+      }
+    }
+  },
+  "required_fields": [
+    "claims",
+    "dimensions",
+    "mechanisms",
+    "unread"
+  ]
+}

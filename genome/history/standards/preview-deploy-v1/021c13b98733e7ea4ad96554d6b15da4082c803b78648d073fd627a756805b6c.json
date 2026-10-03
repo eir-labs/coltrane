@@ -1,0 +1,89 @@
+{
+  "slug": "preview-deploy-v1",
+  "domain": "preview-deploy",
+  "status": "active",
+  "description": "The phone conducts, Vercel builds, the officer seals. Sense the branch HEAD → deploy it to a Vercel preview and wait on the build with a bounded in-turn poll → verify the terminal state. Three seams: the seat that senses the branch does not deploy, the seat that deploys reads the build it made, and the verdict is the honest terminal state — READY passes, a non-READY terminal fails with its logs, a spent poll budget is UNSETTLED. The branch commit is sensed independently rather than read out of the change-set, because a change-set carries diffs, never an applied commit. The deploy seat holds exactly one narrow WebFetch grant, the Vercel REST origin, and its credentials are institution-bound slots filled at seat time — never in the genome.",
+  "agent_slugs": [
+    "deploy-scout",
+    "deploy-agent"
+  ],
+  "phases": [
+    {
+      "name": "sense-branch",
+      "chairs": [
+        {
+          "role": "sense-branch",
+          "agent_slug": "deploy-scout",
+          "depends_on": [],
+          "input_contract": [
+            "change-set"
+          ],
+          "output_contract": [
+            "branch-state"
+          ],
+          "required_skills": []
+        }
+      ],
+      "intent": "Read the branch HEAD the verified change lives on and report the commit and branch the preview will build. The incoming change-set is provenance only — the commit is sensed directly, because a change-set carries diffs and rationale, not an applied commit. No deploy is made here."
+    },
+    {
+      "name": "deploy-branch",
+      "chairs": [
+        {
+          "role": "deploy-branch",
+          "agent_slug": "deploy-agent",
+          "depends_on": [
+            "sense-branch"
+          ],
+          "input_contract": [
+            "branch-state"
+          ],
+          "output_contract": [
+            "preview-deployment"
+          ],
+          "required_skills": [
+            "vercel-api"
+          ],
+          "supplies": {
+            "vercel_token": "env:VERCEL_TOKEN",
+            "vercel_team_id": "env:VERCEL_TEAM_ID"
+          }
+        }
+      ],
+      "intent": "Call POST /v13/deployments for a preview target against the sensed commit, then wait on the build with a bounded synchronous poll — one WebFetch GET /v6/deployments per iteration, capped by the turn budget, no subprocess — until a terminal readyState is observed or the budget is spent. Seal a preview-deployment either way, carrying the url, commit, branch, project id, deployment id, the last observed build_status and the protection mode. The Vercel token and team id enter here from the chair's supplies; the venue fills them from environment secrets."
+    },
+    {
+      "name": "verify-build",
+      "chairs": [
+        {
+          "role": "verify-build",
+          "agent_slug": "deploy-agent",
+          "depends_on": [
+            "deploy-branch"
+          ],
+          "input_contract": [
+            "preview-deployment"
+          ],
+          "output_contract": [
+            "deploy-verdict"
+          ],
+          "required_skills": [
+            "vercel-api"
+          ],
+          "supplies": {
+            "vercel_token": "env:VERCEL_TOKEN",
+            "vercel_team_id": "env:VERCEL_TEAM_ID"
+          }
+        }
+      ],
+      "intent": "Read the sealed preview-deployment and say whether the build settled. pass is true only on READY; a non-READY terminal (ERROR, CANCELED) fails and carries the build log tail; and when the poll budget was spent with no terminal readyState, the verdict is terminal_state UNSETTLED with deadline_exceeded true and pass false — the honest never-settled path, visible in the ledger rather than a guessed READY."
+    }
+  ],
+  "input_types": [
+    "change-set"
+  ],
+  "output_types": [
+    "preview-deployment",
+    "deploy-verdict"
+  ]
+}

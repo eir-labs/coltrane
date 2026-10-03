@@ -123,7 +123,7 @@ cd "$(dirname "$0")/.."
 #       never carries args.base, so the default was 1 whatever the base's version (L3: a v3 base → v4). 4450 + 1 = 4451.
 #   +1  spec_reside_router — the work-order-dispatch call sends the door's parameter names (p_…); the bare
 #       names were refused PGRST202 by the store on the first dispatch through the served surface. 4451 + 1 = 4452.
-EXPECTED_LAWS="${EXPECTED_LAWS:-4576}"   # 4574 → 4576: round 12b, F4 + F1b (the grade at 478a408)   # 4571 → 4574: round 12, F1–F3 (a venue run stops on facts, not on the clock)   # 4452 (main) + 119 (work/gig-runs-once, rounds 1–11): the collected count after merging main at ace70d8, every law green
+EXPECTED_LAWS="${EXPECTED_LAWS:-4578}"   # 4576 → 4578: O4 + O4b, a resumed seat carries its continuation (finding 36)   # 4574 → 4576: round 12b, F4 + F1b (the grade at 478a408)   # 4571 → 4574: round 12, F1–F3 (a venue run stops on facts, not on the clock)   # 4452 (main) + 119 (work/gig-runs-once, rounds 1–11): the collected count after merging main at ace70d8, every law green
 #   +3 blob_sha_refuses_rather_than_seals (new file) — the three refusals of `blobShaOfFile`, which
 #      had no law that could red them. Measured on the grade: with BOTH mid-read length refusals
 #      deleted, all 21 blob laws stayed green; with the `!stat.isFile()` refusal deleted, all 21

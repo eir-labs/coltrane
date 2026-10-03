@@ -1172,6 +1172,7 @@ export async function workOnce(ctx: WorkerContext, deps: WorkOnceDeps): Promise<
         venues: genome.venues,
         venueRealizer: deps.venueRealizer,
         repoUrl: claim.venue ? workingRepo : undefined,
+        changeSetBase: claim.venue ? resolveChangeSetBase(claim) ?? undefined : undefined,
         // The address-stamping tree (records-by-address): the drain's OWN working clone, the tree its
         // chairs edited and the one `git diff`/`git rev-parse` must read to stamp a sealed change-set's
         // `changes` or red-spec's `laws`. Never process.cwd(): when the Booker did not clone (a

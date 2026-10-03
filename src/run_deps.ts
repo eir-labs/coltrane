@@ -209,6 +209,9 @@ export type AssembleRunDepsArgs = Pick<
   mcpServerConfigs: Readonly<Record<string, unknown>> | undefined;
   /** The repository this run operates on, already resolved via `resolveWorkingRepo`. Null → not threaded. */
   repoUrl?: string | null | undefined;
+  /** The commit a change-set is measured from (change_set_base on the typed input), threaded to the
+   *  realizer exactly as repoUrl is, so a room's tree is prepared the same way the drain's is. */
+  changeSetBase?: string | null | undefined;
 };
 
 export function assembleRunDeps(args: AssembleRunDepsArgs): RunDeps {
@@ -231,6 +234,7 @@ export function assembleRunDeps(args: AssembleRunDepsArgs): RunDeps {
     ...(args.venueRealizer ? { venueRealizer: args.venueRealizer } : {}),
     ...(args.placementResolver ? { placementResolver: args.placementResolver } : {}),
     ...(args.repoUrl ? { repoUrl: args.repoUrl } : {}),
+    ...(args.changeSetBase ? { changeSetBase: args.changeSetBase } : {}),
     // The address-stamping tree (records-by-address): the directory whose git objects the seal reads
     // to stamp a red-spec's `laws` / a change-set's `changes`. Supplied per door — the server/CLI
     // name the repository root the server was bootstrapped with, the drain its working clone — and

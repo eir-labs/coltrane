@@ -124,6 +124,19 @@ describe("the base is in the tree", () => {
     try { expect(git(ws.dir, "rev-parse", "--is-shallow-repository")).toBe("true"); } finally { ws.cleanup(); }
   });
 
+  it("law 8 — the room-realization path threads the base exactly as the drain's does: realize()'s prepare receives it from the run (the grade's F2)", () => {
+    const realizer = readFileSync(new URL("../src/venue_realizer.ts", import.meta.url), "utf8");
+    const worker = readFileSync(new URL("../src/worker.ts", import.meta.url), "utf8");
+    expect(realizer).toMatch(/changeSetBase\?: string \| null;/);
+    expect(realizer).toMatch(/base: opts\.changeSetBase \?\? null,/);
+    expect(worker).toMatch(/changeSetBase: claim\.venue \? resolveChangeSetBase\(claim\)/);
+    const runDeps = readFileSync(new URL("../src/run_deps.ts", import.meta.url), "utf8");
+    const runtime = readFileSync(new URL("../src/runtime.ts", import.meta.url), "utf8");
+    expect(runDeps).toMatch(/changeSetBase: args\.changeSetBase/);
+    expect(runtime).toMatch(/changeSetBase: deps\.changeSetBase/);
+    expect(worker).toMatch(/base: resolveChangeSetBase\(claim\),/);
+  });
+
   it("law 6 — cloneInto with a base fetches it while the credential is in hand: the clone is shallow and still holds the base; a base the origin does not have is refused by name", () => {
     const { origin, first, second } = originWithTwoCommits();
     const ws = cloneInto(`file://${origin}`, "unused-token", undefined, first);

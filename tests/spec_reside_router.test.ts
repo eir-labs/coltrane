@@ -4,7 +4,8 @@
 // The verb contract these laws encode is WI-4's, taken from spec.callVerb-residency.callVerb-binds-the-verbs
 // (amendments a-c) rather than guessed:
 //   work-order-due       args {}            — a row-routed READ; no pin, the credential is the header
-//   work-order-dispatch  args {work_order_id, schedule_ordinal, mode?, input?, pin:{org,venue}}
+//   work-order-dispatch  args {p_work_order_id, p_schedule_ordinal, p_mode?, p_input?, pin:{org,venue}} — the door's
+//                        parameter names since 3 Oct 2026 (amendment (a)'s bare names were refused PGRST202 by the store)
 //   gig_monitor          args {gig_id}
 // Every refusal carries `message`; a store refusal also carries `errcode` and, when its message
 // cites one, `law_ref`. Re-dispatching a (work_order_id, schedule_ordinal) that already has a
@@ -25,7 +26,7 @@ const PIN = { org: "org.house", venue: "venue.studio" };
 
 /** An callVerb stub that answers `due` with the given entries and dispatches each to a fresh gig. */
 function verbsWith(
-  due: { work_order_id: string; schedule_ordinal: number }[],
+  due: { work_order_id: string; schedule_ordinal: number; mode?: string; input?: Record<string, unknown> }[],
   over: { dispatch?: (args: Record<string, unknown>) => VerbAnswer } = {},
 ) {
   const seen: { verb: string; args: Record<string, unknown> }[] = [];
@@ -123,7 +124,7 @@ describe("LAW 9 — the router is code: every due entry once, the cortex zero ti
     expect(res.ok).toBe(true);
     const dispatches = seen.filter((s) => s.verb === "work-order-dispatch");
     expect(dispatches.length, "the router did not dispatch every due entry exactly once").toBe(3);
-    const pairs = dispatches.map((d) => `${String(d.args["work_order_id"])}:${String(d.args["schedule_ordinal"])}`);
+    const pairs = dispatches.map((d) => `${String(d.args["p_work_order_id"])}:${String(d.args["p_schedule_ordinal"])}`);
     expect(new Set(pairs).size, "the same (order, ordinal) was dispatched twice").toBe(3);
   });
 
@@ -266,5 +267,33 @@ describe("LAW 10 — reside does not fork the gig path", () => {
     const { loadResidency } = await import("./spec_reside_fixtures.js");
     const Res = await loadResidency();
     expect(Res.residencyGigPath).toBe(workOnce);
+  });
+});
+
+// ── 3 Oct 2026 · the dispatch's argument names are the door's ─────────────────────────────────
+// MEASURED: the served verb forwards arguments to the store RPC exactly as named, and every other
+// coltrane:-routed registry row names its function's parameters (p_work_order_id, …). The first
+// dispatch of a work order through the served surface answered PGRST202 because this router and
+// the row advertised bare names the door does not take. WI-4's amendment (a) is superseded here:
+// the router sends the door's parameter names; a served surface that wants clean public names maps
+// them itself when it becomes its own library (R29).
+describe("work-order-dispatch is sent with the door's parameter names", () => {
+  it("p_work_order_id / p_schedule_ordinal / p_mode / p_input — never the bare names the door refuses", async () => {
+    const R: ResideModule = await loadReside();
+    const { callVerb, seen } = verbsWith([{ work_order_id: "wo-9", schedule_ordinal: 2, mode: "studio", input: { k: 1 } }]);
+    const { deps } = recordingDeps({ callVerb });
+    const r = R.createResidency({ residency: "any", escalateOn: [SCHEDULE_LAW_REF] }, deps);
+    await r.boot();
+    await r.tick();
+    const d = seen.find((s) => s.verb === "work-order-dispatch");
+    expect(d, "no dispatch went out").toBeTruthy();
+    expect(d?.args["p_work_order_id"]).toBe("wo-9");
+    expect(d?.args["p_schedule_ordinal"]).toBe(2);
+    expect(d?.args["p_mode"]).toBe("studio");
+    expect(d?.args["p_input"]).toEqual({ k: 1 });
+    for (const bare of ["work_order_id", "schedule_ordinal", "mode", "input"]) {
+      expect(d?.args, `bare "${bare}" still sent — the door does not take it`).not.toHaveProperty(bare);
+    }
+    expect(d?.args["pin"], "the pin law still holds").toEqual(PIN);
   });
 });

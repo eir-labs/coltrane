@@ -114,7 +114,16 @@ cd "$(dirname "$0")/.."
 #   +3  after the non-author grade: the same rule for AGENTS (retired v1 + active v2 is a history, L8; a
 #       same-version clash refuses naming both, L9) and a version that is not a number is refused by name in
 #       every branch rather than winning or vanishing by row order (L10). 4439 + 3 = 4442.
-EXPECTED_LAWS="${EXPECTED_LAWS:-4442}"
+#   +6  a_lineage_record_names_its_forebear (new file) — lineage-record v3: the record may NAME its forebear
+#       as a closed object, so a store can land the forebear from the record rather than infer it from
+#       external_body fields the closed v2 shape never carried (a store door's grade found the phantom). 4442 + 6 = 4448.
+#   +2  an_evolution_is_a_version (new file) — the hosted agent_evolve upsert carries the version it reports;
+#       the store had updated v1 in place three times in one day while the surface answered v2, v3. 4448 + 2 = 4450.
+#   +1  after the grade (note e): the DEFAULT new_version is the loaded base's + 1 — the (slug, changes) path
+#       never carries args.base, so the default was 1 whatever the base's version (L3: a v3 base → v4). 4450 + 1 = 4451.
+#   +1  spec_reside_router — the work-order-dispatch call sends the door's parameter names (p_…); the bare
+#       names were refused PGRST202 by the store on the first dispatch through the served surface. 4451 + 1 = 4452.
+EXPECTED_LAWS="${EXPECTED_LAWS:-4452}"
 #   +3 blob_sha_refuses_rather_than_seals (new file) — the three refusals of `blobShaOfFile`, which
 #      had no law that could red them. Measured on the grade: with BOTH mid-read length refusals
 #      deleted, all 21 blob laws stayed green; with the `!stat.isFile()` refusal deleted, all 21
@@ -358,7 +367,7 @@ EXPECTED_LAWS="${EXPECTED_LAWS:-4442}"
 #       behavioural and holds the other direction, that every pin names git's own default so nothing
 #       a seal records moves. Seven plants, each observed red and reverted; a no-op control stayed
 #       green first, and each plant's anchor was asserted to land before its run was believed.
-EXPECTED_FILES="${EXPECTED_FILES:-452}"   # + tests/a_retired_standard_is_not_a_duplicate.test.ts, + tests/the_store_genome_has_a_base.test.ts, + tests/the_base_is_in_the_tree.test.ts, + tests/agent_token_issue_is_governed.test.ts, + tests/verb_cap_grant.test.ts (#573), + tests/the_tracked_ledger_parses.test.ts, + tests/chair_narrows_what_it_may_reach.test.ts, + tests/git_invocation_pinned.test.ts, + tests/chair_spend_names_its_agent.test.ts, + tests/blob_sha_refuses_rather_than_seals.test.ts, + tests/blob_sha_is_the_git_stored_blob.test.ts, + tests/blob_sha_in_process.test.ts, + tests/genome_writes_stay_in_root.test.ts, + tests/skill_runs_on_exec_path.test.ts, + tests/node_floor_where_skills_run.test.ts, + tests/bus_not_hosted.test.ts, + tests/every_skill_runs_its_fixtures.test.ts, + tests/node_floor_refuses.test.ts, + tests/spec_reside_drive.test.ts (#537), + tests/a_red_law_names_its_plant.test.ts (#551), + tests/sealed_inputs.test.ts, tests/fan_out.test.ts, tests/completions_seal.test.ts, tests/tier_ladder.test.ts, tests/amend_ladder.test.ts, tests/completions_reasoning_effort.test.ts, tests/bus.test.ts, tests/bus_chair.test.ts, tests/bus_terminal.test.ts, tests/bus_verbs.test.ts, tests/bus_commit.test.ts, tests/code_tools.test.ts, tests/gig_input_validated.test.ts, tests/seat_reads_recorded.test.ts, tests/claude_seat_reads.test.ts, tests/optional_declared_input.test.ts, tests/simulate_names_seats.test.ts
+EXPECTED_FILES="${EXPECTED_FILES:-454}"   # + tests/a_lineage_record_names_its_forebear.test.ts, + tests/an_evolution_is_a_version.test.ts, + tests/a_retired_standard_is_not_a_duplicate.test.ts, + tests/the_store_genome_has_a_base.test.ts, + tests/the_base_is_in_the_tree.test.ts, + tests/agent_token_issue_is_governed.test.ts, + tests/verb_cap_grant.test.ts (#573), + tests/the_tracked_ledger_parses.test.ts, + tests/chair_narrows_what_it_may_reach.test.ts, + tests/git_invocation_pinned.test.ts, + tests/chair_spend_names_its_agent.test.ts, + tests/blob_sha_refuses_rather_than_seals.test.ts, + tests/blob_sha_is_the_git_stored_blob.test.ts, + tests/blob_sha_in_process.test.ts, + tests/genome_writes_stay_in_root.test.ts, + tests/skill_runs_on_exec_path.test.ts, + tests/node_floor_where_skills_run.test.ts, + tests/bus_not_hosted.test.ts, + tests/every_skill_runs_its_fixtures.test.ts, + tests/node_floor_refuses.test.ts, + tests/spec_reside_drive.test.ts (#537), + tests/a_red_law_names_its_plant.test.ts (#551), + tests/sealed_inputs.test.ts, tests/fan_out.test.ts, tests/completions_seal.test.ts, tests/tier_ladder.test.ts, tests/amend_ladder.test.ts, tests/completions_reasoning_effort.test.ts, tests/bus.test.ts, tests/bus_chair.test.ts, tests/bus_terminal.test.ts, tests/bus_verbs.test.ts, tests/bus_commit.test.ts, tests/code_tools.test.ts, tests/gig_input_validated.test.ts, tests/seat_reads_recorded.test.ts, tests/claude_seat_reads.test.ts, tests/optional_declared_input.test.ts, tests/simulate_names_seats.test.ts
 
 # THE OTHER BANDS. `vitest run` is ROOT-CONFIG ONLY — this repo's own workflow comments
 # record that four configs went unexecuted once for exactly that reason. So pinning only the

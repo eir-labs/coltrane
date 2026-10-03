@@ -2771,7 +2771,8 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         // a harmonic (type-graph) or creative (identity/method) change does not.
         const base = args["base"] as AgentProfile | undefined;
         const next = args["next"] as AgentProfile | undefined;
-        const new_version = Number(args["new_version"] ?? ((base?.version ?? 0) + 1));
+        let new_version = Number(args["new_version"] ?? ((base?.version ?? 0) + 1));
+        let parent_version: number | undefined = base?.version;
         if (base && next) {
           const change = proposeAgentChange(base, next);
           // For a creative-space change, return the lineage-threaded evolved profile
@@ -2827,6 +2828,12 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
           } else {
             return { ok: false, requires_approval: approval, error: `agent_evolve: unknown agent "${evolveSlug}" (no agents/${evolveSlug}.json)` };
           }
+          // THE DEFAULT VERSION IS THE LOADED BASE'S PLUS ONE (the grade of #578, note e). This path
+          // never carries `args.base`, so the default above read `(undefined ?? 0) + 1 = 1` whatever the
+          // loaded definition's version was — and a hosted upsert at version 1 is the in-place write
+          // this change exists to end. An explicit new_version still wins.
+          parent_version = Number((currentDef as { version?: unknown }).version ?? 1);
+          if (args["new_version"] === undefined || args["new_version"] === null) new_version = parent_version + 1;
           const nextDef = { ...currentDef, ...changes };
 
           // The agent must still be a legal composition on its own…
@@ -2884,7 +2891,7 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
           deps.agents?.set(evolveSlug, sealed.agent);
           return {
             ok: true, requires_approval: approval,
-            data: { new_version, evolved: sealed.agent, next_def: nextDef, content_hash: sealed.content_hash, effective_hash: sealed.effective_hash, cascade_check: { agents_affected: [], standards_affected } },
+            data: { new_version, parent_version, evolved: sealed.agent, next_def: nextDef, content_hash: sealed.content_hash, effective_hash: sealed.effective_hash, cascade_check: { agents_affected: [], standards_affected } },
           };
         }
         return { ok: true, requires_approval: approval, data: { new_version, cascade_check: { agents_affected: [], standards_affected: [] } } };
@@ -4215,6 +4222,15 @@ async function callSurfaceTool(
         : args;
     const payload: Record<string, unknown> = {};
     for (const k of up.keys) if (source[k] !== undefined) payload[k] = source[k];
+    // A VERSION REPORTED IS A VERSION RECORDED (3 Oct 2026). agent_evolve answers `new_version`
+    // and the merged definition carries the BASE's version (or none), so the store's upsert
+    // matched the existing row and updated it in place — three times in one day the surface
+    // reported v2 and the store held v1. The payload carries the version the handler reported;
+    // the store lands a new row and retires the prior by its own supersede rule.
+    if (slug === "agent_evolve" && result.data && typeof result.data === "object") {
+      const nv = (result.data as Record<string, unknown>)["new_version"];
+      if (typeof nv === "number" && Number.isFinite(nv)) payload["version"] = nv;
+    }
     try {
       await deps.store.upsert(up.cls, payload);
     } catch (e) {

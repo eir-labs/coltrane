@@ -135,7 +135,7 @@ describe("agent_token_issue — a governed verb that issues a STANDING token to 
     expect(res.ok).toBe(true);
     expect(backend).toHaveBeenCalledWith({ org_slug: ORG, agent_slug: AGENT, may_dispatch: [], ttl_hours: 72 });
     expect(Object.keys(res.data ?? {}).sort()).toEqual(["agent_slug", "agent_token", "expires_at", "key_id", "org_slug"]);
-    expect(String(res.data?.agent_token)).toMatch(/^ctk_/);
+    expect(res.data?.agent_token).toBe("ctk_" + "0".repeat(48));
     expect(ledger.query({}), "the token is the store's record (hash + issuer), never the ledger's").toHaveLength(0);
   });
 
@@ -154,13 +154,27 @@ describe("agent_token_issue — a governed verb that issues a STANDING token to 
     }
   });
 
-  it("INV-10 · a success the backend answers must BE a credential: ok without a ctk_ token, a non-object, or null is a failure, never ok:true with nothing in it (the grade's D5)", async () => {
-    for (const bad of [{ ok: true }, { ok: true, key_id: "k", agent_token: "not-a-token" }, { ok: true, key_id: "", agent_token: "ctk_" + "0".repeat(48) }, null, undefined, "yes"]) {
+  it("INV-10 · a success the backend answers must BE a credential: ok without a token, an empty token or key, a non-object, or null is a failure, never ok:true with nothing in it (the grade's D5) — and the engine does NOT sniff the token's format (the host declares what a bearer is)", async () => {
+    for (const bad of [{ ok: true }, { ok: true, key_id: "k", agent_token: "" }, { ok: true, key_id: "k", agent_token: "   " }, { ok: true, key_id: "", agent_token: "ctk_" + "0".repeat(48) }, { ok: true, key_id: "k", agent_token: 42 }, null, undefined, "yes"]) {
       const backend = vi.fn(async (_a: IssueArgs) => bad as never);
       const tool = issueTool(surfaceDeps({ caller: { kind: "member" }, issueAgentToken: backend }));
       const res = (await tool!.call({ org_slug: ORG, agent_slug: AGENT, ttl_hours: 72 })) as SurfaceToolResult;
       expect(res.ok, JSON.stringify(bad)).toBe(false);
       expect(res.error, JSON.stringify(bad)).toMatch(/nothing issued/);
     }
+    // No format sniff: a deployment's token in another alphabet or length is still a token here.
+    for (const tok of ["ctk_ABCDEF0123456789", "ctk_x", "tok-of-another-deployment", "ctk_" + "f".repeat(48)]) {
+      const backend = vi.fn(async (_a: IssueArgs) => ({ ok: true as const, key_id: "k", expires_at: "2026-10-06T00:00:00.000Z", agent_token: tok }));
+      const tool = issueTool(surfaceDeps({ caller: { kind: "member" }, issueAgentToken: backend }));
+      const res = (await tool!.call({ org_slug: ORG, agent_slug: AGENT, ttl_hours: 72 })) as SurfaceToolResult & { data?: Record<string, unknown> };
+      expect(res.ok, tok).toBe(true);
+      expect(res.data?.agent_token, tok).toBe(tok);
+    }
+    // The expiry is the store's number or null — never a blank string wearing a date.
+    const noExp = vi.fn(async (_a: IssueArgs) => ({ ok: true as const, key_id: "k", agent_token: "ctk_abc" }) as never);
+    const t2 = issueTool(surfaceDeps({ caller: { kind: "member" }, issueAgentToken: noExp }));
+    const r2 = (await t2!.call({ org_slug: ORG, agent_slug: AGENT, ttl_hours: 72 })) as SurfaceToolResult & { data?: Record<string, unknown> };
+    expect(r2.ok).toBe(true);
+    expect(r2.data?.expires_at).toBeNull();
   });
 });

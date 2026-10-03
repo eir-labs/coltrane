@@ -34,7 +34,7 @@ export type AgentTokenRefusal = (typeof AGENT_TOKEN_REFUSALS)[number];
 /** The deployment's contract: resolve to a typed struct, never a generic throw, so the store's own
  *  refusal codes survive the seam. */
 export type IssueAgentTokenResult =
-  | { ok: true; key_id: string; expires_at: string; agent_token: string }
+  | { ok: true; key_id: string; expires_at: string | null; agent_token: string }
   | { ok: false; code: "not_a_member" | "not_named" };
 
 export interface IssueAgentTokenArgs {
@@ -76,13 +76,17 @@ export function mayDispatchOrRefusal(raw: unknown): { may_dispatch: string[] } |
   return { may_dispatch: raw.map((s) => (s as string).trim()) };
 }
 
-/** A success the backend answers must carry a ctk_ token and a key; a typed contract the deployment
- *  violated is not a credential issued (the grade's D5). */
-export function issuedOrError(r: unknown): { ok: true; key_id: string; expires_at: string; agent_token: string } | { ok: false; error: string } {
+/** A success the backend answers must carry a token and a key — non-empty strings, nothing more
+ *  specific: the engine does not sniff a deployment's credential format (SPEC-worker-contract.md —
+ *  the host declares what a bearer is because the host issued it; a format pinned here could not
+ *  change without a release). A typed contract the deployment violated is not a credential issued
+ *  (the grade's D5). The expiry is the store's number or null — never a blank string wearing a date. */
+export function issuedOrError(r: unknown): { ok: true; key_id: string; expires_at: string | null; agent_token: string } | { ok: false; error: string } {
   const x = r as { ok?: unknown; key_id?: unknown; expires_at?: unknown; agent_token?: unknown } | null | undefined;
   if (!x || typeof x !== "object" || x.ok !== true) return { ok: false, error: "the issuing backend answered without ok:true — nothing issued" };
-  if (typeof x.agent_token !== "string" || !/^ctk_[0-9a-f]{16,}$/.test(x.agent_token) || typeof x.key_id !== "string" || x.key_id === "") {
-    return { ok: false, error: "the issuing backend answered ok without a ctk_ token and a key_id — a success with no credential is nothing issued" };
+  if (typeof x.agent_token !== "string" || x.agent_token.trim() === "" || typeof x.key_id !== "string" || x.key_id.trim() === "") {
+    return { ok: false, error: "the issuing backend answered ok without a token and a key_id — a success with no credential is nothing issued" };
   }
-  return { ok: true, key_id: x.key_id, expires_at: typeof x.expires_at === "string" ? x.expires_at : "", agent_token: x.agent_token };
+  const expires_at = typeof x.expires_at === "string" && x.expires_at.trim() !== "" ? x.expires_at : null;
+  return { ok: true, key_id: x.key_id, expires_at, agent_token: x.agent_token };
 }

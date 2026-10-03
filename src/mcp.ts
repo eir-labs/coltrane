@@ -209,7 +209,7 @@ const TOOL_DEFS: readonly Omit<MCPToolDef, "description">[] = [
   // authenticated human member). The schema is the store's mint and nothing more — no chair, no
   // caps: a verb that could issue AND seat would be a path to mint authority. Hours are INTEGER (the
   // store's granularity); the token is returned ONCE and never read back.
-  { slug: "agent_token_issue",             category: "run", input_schema: obj({ org_slug: "string", agent_slug: "string", may_dispatch: "array", ttl_hours: "number" }), output_schema: obj({ key_id: "string", org_slug: "string", agent_slug: "string", expires_at: "string", agent_token: "string" }) },
+  { slug: "agent_token_issue",             category: "run", input_schema: obj({ org_slug: "string", agent_slug: "string", may_dispatch: "array", ttl_hours: "number" }), output_schema: obj({ key_id: "string", org_slug: "string", agent_slug: "string", expires_at: nullable("string"), agent_token: "string" }) },
   // org_hire — the verb that ADMITS an agent to an org. The org-membership analogue of
   // venue_credential_mint: the engine ships the schema and its refusals, a deployment wires the
   // admission backend (deps.hireMember). `input_schema` is derived from the single Zod source

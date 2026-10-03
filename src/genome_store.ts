@@ -298,6 +298,11 @@ export function reconstructGenome(rows: GenomeRows, pin?: GenomeLoadPin): Loaded
     if (!from) return;
     for (const [k, v] of from) { into.set(k, v); provenance.set(`${kind}:${k}`, "engine-base"); }
   };
+  // A broken packaged base is NAMED, not inferred: its load errors ride into the effective genome,
+  // exactly as loadLayeredGenome carries every layer's errors. Without this a base definition that
+  // failed to parse is silently a smaller base, and the org sees only the downstream symptom
+  // ("references unknown agent …") — the non-author grade's note 1.
+  for (const e of base?.load_errors ?? []) load_errors.push(e);
 
       // core types — engine-owned, immutable 6. No rows visible → seed the canonical set,
       // exactly as loadGenome does for a root with no core_types/. A PARTIAL set is a corrupt

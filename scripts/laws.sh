@@ -103,7 +103,10 @@ cd "$(dirname "$0")/.."
 #       base under the rows composes; L3 an org row overrides a base slug; L4 two ORG rows still refuse;
 #       L5 base standards and types are inherited; L6 a draft does not displace the base; L7 rooms and
 #       charts are not folded; L8/L9 both store backings read the base by default. 4421 + 10 = 4431.
-EXPECTED_LAWS="${EXPECTED_LAWS:-4431}"
+#   +1  after the non-author grade (note 1): a broken packaged base is NAMED — its load errors ride into
+#       the effective genome as loadLayeredGenome carries every layer's — not inferred from the
+#       downstream "references unknown agent" symptom (L10). 4431 + 1 = 4432.
+EXPECTED_LAWS="${EXPECTED_LAWS:-4432}"
 #   +3 blob_sha_refuses_rather_than_seals (new file) — the three refusals of `blobShaOfFile`, which
 #      had no law that could red them. Measured on the grade: with BOTH mid-read length refusals
 #      deleted, all 21 blob laws stayed green; with the `!stat.isFile()` refusal deleted, all 21

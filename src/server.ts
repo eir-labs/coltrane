@@ -22,7 +22,7 @@ import {
 } from "./mcp.js";
 import { createRegistry, loadRegistry, domainTypeDefect, type Registry, type DomainType } from "./registry.js";
 import { loadGenome, resolveGenome, type SkillRecord, type EvalRecord, type LoadError } from "./loader.js";
-import { SkillSchema, AgentObjectSchema, StandardSchema, DomainTypeSchema, ChartSchema, VenueSchema, VenueObjectSchema, venueDefect, EffortSchema, type Effort } from "./genome_schema.js";
+import { SkillSchema, AgentObjectSchema, StandardSchema, DomainTypeSchema, ChartSchema, VenueSchema, VenueObjectSchema, venueDefect, EffortSchema, githubGrant, type Effort } from "./genome_schema.js";
 import {
   composeChart, runChart, chartHash, chartEntrySeedTypes, dispatchTarget,
   type Chart, type Venue, type ChartPlan, type ChartResult, type ResolvedMovement,
@@ -900,7 +900,31 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
           { phases: std.phases.map((p) => ({ name: p.name, chairs: p.chairs.map((c) => ({ role: c.role, output_contract: c.output_contract })) })) },
           deps.registry,
         );
-        return { ok: true, requires_approval: approval, data: { ...res, seal_drill: drill, seat_plan: plan } };
+        // R38 — FURNISHINGS. "part of simulation should be to test the grants" (3 Oct 2026): when the
+        // caller names the room the gig would run in, the report says what that room furnishes — its
+        // connectors and their grants — so the reach is read BEFORE anything is queued. An unknown
+        // room is refused by name, exactly as dispatch would refuse it.
+        const simVenue = typeof args["venue"] === "string" && args["venue"].trim() ? args["venue"].trim() : undefined;
+        let furnishings: Record<string, unknown> | undefined;
+        if (simVenue) {
+          const room = deps.venues?.get(simVenue);
+          if (!room) {
+            return {
+              ok: false,
+              requires_approval: approval,
+              error: `unknown venue "${simVenue}" — a gig dispatched there would be refused; name a room the genome holds`,
+            };
+          }
+          const grant = githubGrant(room);
+          furnishings = {
+            venue: room.slug,
+            connectors: room.connectors.map((c) => ({ kind: c.kind, slug: c.slug })),
+            ...(grant ? { github: grant } : {}),
+            mcp_servers: room.mcp_servers.map((m) => m.slug),
+            equipment: room.equipment.tools,
+          };
+        }
+        return { ok: true, requires_approval: approval, data: { ...res, seal_drill: drill, seat_plan: plan, ...(furnishings ? { furnishings } : {}) } };
       }
       case "output_query": {
         const mirror = deps.output_mirror;

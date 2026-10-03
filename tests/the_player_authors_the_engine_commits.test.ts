@@ -35,6 +35,13 @@
 //       never challenges)
 //   P9  an intent whose paths carry no change → nothing_to_commit, and the tree is left as it was
 //       found: on its original branch, nothing staged, the new branch gone
+//   P10 EVERY remote act of the stamp goes through the publisher — the base and branch checks are
+//       publisher.remoteHeads calls, and runtime.ts never runs ls-remote through the bare seam.
+//       (Measured 4 Oct on gig 44bd82b3, B01 run 5, engine 0.25.26: the seventh chair sealed its
+//       intent and the stamp's first act, `ls-remote --heads origin main` through gitInTree, failed
+//       against the private origin with no credential — the law file's local origins never challenge)
+//   W9d remoteInvocation is built with the credential helper too, and publisher.ts runs every
+//       invocation through one spawn
 //   K1  the drain threads the workspace's publisher and the claim's attribution into the run deps
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { execFileSync } from "node:child_process";
@@ -44,7 +51,7 @@ import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { stampPullRequest, RuntimeError, type TreePublisher, type CommitAttribution } from "../src/runtime.js";
 import { makePublisher } from "../src/workspace.js";
-import { pushInvocation } from "../src/publisher.js";
+import { pushInvocation, remoteInvocation } from "../src/publisher.js";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -71,10 +78,11 @@ function tree(): { origin: string; root: string } {
 }
 
 /** The publisher, faked: a real push to the local bare origin, a recorded PR open. */
-function fakePublisher(origin: string, opts: { pushFails?: boolean } = {}): TreePublisher & { pushes: string[]; opened: unknown[] } {
-  const pushes: string[] = []; const opened: unknown[] = [];
+function fakePublisher(origin: string, opts: { pushFails?: boolean } = {}): TreePublisher & { pushes: string[]; opened: unknown[]; reads: string[] } {
+  const pushes: string[] = []; const opened: unknown[] = []; const reads: string[] = [];
   return {
-    repoUrl: origin, pushes, opened,
+    repoUrl: origin, pushes, opened, reads,
+    remoteHeads(dir, ref) { reads.push(ref); return git(dir, "ls-remote", "--heads", "--", "origin", `refs/heads/${ref}`); },
     push(dir, branch) {
       if (opts.pushFails) throw new Error("fatal: unable to access 'origin': the credential was refused");
       git(dir, "push", "--quiet", "origin", `refs/heads/${branch}:refs/heads/${branch}`); pushes.push(branch);
@@ -245,6 +253,27 @@ describe("P9 — nothing to commit leaves the tree as it was found", () => {
     expect(git(root, "diff", "--cached", "--name-only"), "nothing is left staged").toBe("");
     expect(git(root, "branch", "--list", "changeset/g1"), "the new branch is gone").toBe("");
     expect(pub.pushes).toEqual([]); expect(pub.opened).toEqual([]);
+  });
+});
+
+describe("P10 / W9d — every remote act is the publisher's", () => {
+  it("P10 the base and branch checks are publisher.remoteHeads calls, and runtime.ts never runs ls-remote through the bare seam", async () => {
+    const { origin, root } = tree();
+    const pub = fakePublisher(origin);
+    await stampPullRequest(intent(), { tree_root: root, publisher: pub, attribution: ATTR }, "g1");
+    expect(pub.reads, "the base and the branch are read through the engine's hands").toEqual(["main", "changeset/g1"]);
+    const rt = readFileSync(new URL("../src/runtime.ts", import.meta.url), "utf8");
+    expect(rt.includes("ls-remote"), "runtime.ts reaches the origin only through the publisher").toBe(false);
+  });
+  it("W9d remoteInvocation carries the helper, and publisher.ts has exactly one spawn that runs what a builder built", () => {
+    const built = remoteInvocation("/tmp/x", "main", "tok-w9d");
+    expect(built.argv, "the full ref, never a tail pattern").toEqual(["-C", "/tmp/x", "ls-remote", "--heads", "--", "origin", "refs/heads/main"]);
+    expect(built.env["COLTRANE_GIT_TOKEN"]).toBe("tok-w9d");
+    expect(built.env["GIT_CONFIG_KEY_0"]).toBe("credential.https://github.com.helper");
+    const src = readFileSync(new URL("../src/publisher.ts", import.meta.url), "utf8");
+    const spawns = (src.match(/\b(?:execFileSync|execSync|spawnSync|execFile|spawn|fork)\s*\(/g) ?? []).length;
+    expect(spawns).toBe(1);
+    expect(/execFileSync\(\s*built\.file\s*,\s*\[\s*\.\.\.built\.argv\s*\]\s*,\s*\{\s*env:\s*built\.env\b/.test(src)).toBe(true);
   });
 });
 

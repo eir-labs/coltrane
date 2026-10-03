@@ -82,7 +82,7 @@ function fakePublisher(origin: string, opts: { pushFails?: boolean } = {}): Tree
   const pushes: string[] = []; const opened: unknown[] = []; const reads: string[] = [];
   return {
     repoUrl: origin, pushes, opened, reads,
-    remoteHeads(dir, ref) { reads.push(ref); return git(dir, "ls-remote", "--heads", "origin", ref); },
+    remoteHeads(dir, ref) { reads.push(ref); return git(dir, "ls-remote", "--heads", "--", "origin", `refs/heads/${ref}`); },
     push(dir, branch) {
       if (opts.pushFails) throw new Error("fatal: unable to access 'origin': the credential was refused");
       git(dir, "push", "--quiet", "origin", `refs/heads/${branch}:refs/heads/${branch}`); pushes.push(branch);
@@ -267,7 +267,7 @@ describe("P10 / W9d — every remote act is the publisher's", () => {
   });
   it("W9d remoteInvocation carries the helper, and publisher.ts has exactly one spawn that runs what a builder built", () => {
     const built = remoteInvocation("/tmp/x", "main", "tok-w9d");
-    expect(built.argv).toEqual(["-C", "/tmp/x", "ls-remote", "--heads", "--", "origin", "main"]);
+    expect(built.argv, "the full ref, never a tail pattern").toEqual(["-C", "/tmp/x", "ls-remote", "--heads", "--", "origin", "refs/heads/main"]);
     expect(built.env["COLTRANE_GIT_TOKEN"]).toBe("tok-w9d");
     expect(built.env["GIT_CONFIG_KEY_0"]).toBe("credential.https://github.com.helper");
     const src = readFileSync(new URL("../src/publisher.ts", import.meta.url), "utf8");

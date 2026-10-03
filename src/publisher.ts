@@ -65,7 +65,9 @@ export function pushInvocation(dir: string, branch: string, token: string): { fi
 /** A remote READ, built before it is run, with the same helper (W9d): a private origin challenges a
  *  read exactly as it challenges a push (gig 44bd82b3, 4 Oct 2026). */
 export function remoteInvocation(dir: string, ref: string, token: string): { file: string; argv: readonly string[]; env: NodeJS.ProcessEnv } {
-  return { file: "git", argv: ["-C", dir, "ls-remote", "--heads", "--", "origin", ref], env: credentialEnv(token) };
+  // The full ref, not the short name: ls-remote matches a pattern on the TAIL of a ref, so a bare
+  // `main` would also answer for refs/heads/x/main (the grade at 598d790, note 5).
+  return { file: "git", argv: ["-C", dir, "ls-remote", "--heads", "--", "origin", `refs/heads/${ref}`], env: credentialEnv(token) };
 }
 
 /** THE ONE SPAWN in this module: it runs exactly what a builder built — argv and env. */

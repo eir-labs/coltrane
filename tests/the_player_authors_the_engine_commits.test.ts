@@ -28,7 +28,13 @@
 //   G1  no agent whose output_types include pull-request holds a git or gh Bash grant
 //   G2  the pull-request type requires the INTENT's fields and not the engine-stamped ones
 //   W9  the workspace publisher pushes through the challenge-time helper: the token is never in
-//       the clone's .git/config, and a push with a wrong token is refused by the origin
+//       the clone's .git/config, and a non-GitHub origin opens no PR
+//   W9c the push is BUILT with the credential helper in its environment — COLTRANE_GIT_TOKEN and
+//       the GIT_CONFIG_* helper scoped to github.com — and publisher.ts spawns exactly what it built
+//       (the grade at 5c0688e planted `process.env` in the push and no law noticed: a local origin
+//       never challenges)
+//   P9  an intent whose paths carry no change → nothing_to_commit, and the tree is left as it was
+//       found: on its original branch, nothing staged, the new branch gone
 //   K1  the drain threads the workspace's publisher and the claim's attribution into the run deps
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { execFileSync } from "node:child_process";
@@ -38,6 +44,7 @@ import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { stampPullRequest, RuntimeError, type TreePublisher, type CommitAttribution } from "../src/runtime.js";
 import { makePublisher } from "../src/workspace.js";
+import { pushInvocation } from "../src/publisher.js";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -206,6 +213,34 @@ describe("W9 — the workspace publisher pushes through the challenge-time helpe
     expect(calls[0]!.url).toBe("https://api.github.com/repos/eir-labs/coltrane-ui/pulls");
     expect((calls[0]!.init.headers as Record<string, string>)["authorization"]).toBe("Bearer ghs_t0k");
     expect(JSON.parse(String(calls[0]!.init.body))).toEqual({ title: "T", head: "changeset/g1", base: "main", body: "B" });
+  });
+});
+
+describe("W9c — the push is built with the credential helper, and spawned as built", () => {
+  it("W9c pushInvocation carries the token and the github-scoped helper in its env, and the one spawn in publisher.ts uses what it built", () => {
+    const built = pushInvocation("/tmp/x", "changeset/g1", "tok-w9c");
+    expect(built.file).toBe("git");
+    expect(built.argv).toEqual(["-C", "/tmp/x", "push", "--quiet", "--", "origin", "refs/heads/changeset/g1:refs/heads/changeset/g1"]);
+    expect(built.env["COLTRANE_GIT_TOKEN"], "the token rides the push process's env for the helper to read at challenge time").toBe("tok-w9c");
+    expect(built.env["GIT_CONFIG_KEY_0"]).toBe("credential.https://github.com.helper");
+    expect(built.env["GIT_CONFIG_VALUE_0"]).toContain("password=$COLTRANE_GIT_TOKEN");
+    expect(built.env["GIT_CONFIG_COUNT"]).toBe("1");
+    const src = readFileSync(new URL("../src/publisher.ts", import.meta.url), "utf8");
+    const spawns = (src.match(/\b(?:execFileSync|execSync|spawnSync|execFile|spawn|fork)\s*\(/g) ?? []).length;
+    expect(spawns, "publisher.ts starts a process somewhere other than the push seam").toBe(1);
+    expect(/execFileSync\(\s*built\.file\s*,\s*\[\s*\.\.\.built\.argv\s*\]\s*,\s*\{\s*env:\s*built\.env\b/.test(src), "the push does not spawn what pushInvocation built (argv AND env)").toBe(true);
+  });
+});
+
+describe("P9 — nothing to commit leaves the tree as it was found", () => {
+  it("P9 paths that carry no change → nothing_to_commit; the tree is back on its branch, nothing staged, the new branch gone", async () => {
+    const { origin, root } = tree();
+    const pub = fakePublisher(origin);
+    await expect(stampPullRequest(intent({ paths: ["README.md"] }), { tree_root: root, publisher: pub, attribution: ATTR }, "g1")).rejects.toThrow(/nothing_to_commit/);
+    expect(git(root, "rev-parse", "--abbrev-ref", "HEAD"), "the tree is back on the branch it was found on").toBe("main");
+    expect(git(root, "diff", "--cached", "--name-only"), "nothing is left staged").toBe("");
+    expect(git(root, "branch", "--list", "changeset/g1"), "the new branch is gone").toBe("");
+    expect(pub.pushes).toEqual([]); expect(pub.opened).toEqual([]);
   });
 });
 

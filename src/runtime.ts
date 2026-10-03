@@ -1312,6 +1312,18 @@ export function stampChangeAddresses(
     const blob_sha = existsSync(joinPath(tree_root, change.path))
       ? blobShaOfFile(tree_root, change.path)
       : "deleted";
+    // THE BASE IS IN THE TREE, or the refusal names it. The drain clones one commit deep; a base that
+    // is not HEAD is in the tree only if the request carried it as change_set_base and the clone
+    // fetched it. Asked first, so the seal's answer is the missing commit and not git's own failure.
+    try {
+      gitInTree(tree_root, ["cat-file", "-e", `${change.base}^{commit}`]);
+    } catch {
+      throw new RuntimeError(
+        `base_not_in_tree: change ${change.path} is measured from ${change.base}, and the working tree does not ` +
+          `hold that commit. A gig's clone is one commit deep; name the base on the request as change_set_base ` +
+          `so the clone fetches it, or measure from a commit the tree holds.`,
+      );
+    }
     const diff = gitInTree(tree_root, ["diff", change.base, "--", change.path]);
     const patch_sha256 = sha256Hex(diff);
     const bytes = Buffer.byteLength(diff, "utf8");

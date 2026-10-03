@@ -78,7 +78,10 @@ cd "$(dirname "$0")/.."
 #       backend named (hosted too, ahead of the hosted check); a TTL the store cannot express refused
 #       by name, never rounded; the store's codes survive the seam; returned ONCE, sealed nowhere;
 #       may_dispatch passes through as slugs only. 4403 + 9 = 4412.
-EXPECTED_LAWS="${EXPECTED_LAWS:-4412}"
+#   +1  after the non-author grade (D3, D5): a malformed may_dispatch is refused by name (bad_may_dispatch),
+#       never narrowed to []; a success the backend answers must BE a credential (a ctk_ token and its key)
+#       or it is answered as a failure, never forwarded as ok:true with nothing in it. 4412 + 1 = 4413.
+EXPECTED_LAWS="${EXPECTED_LAWS:-4413}"
 #   +3 blob_sha_refuses_rather_than_seals (new file) — the three refusals of `blobShaOfFile`, which
 #      had no law that could red them. Measured on the grade: with BOTH mid-read length refusals
 #      deleted, all 21 blob laws stayed green; with the `!stat.isFile()` refusal deleted, all 21

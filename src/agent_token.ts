@@ -17,6 +17,10 @@
 //   · not_a_human_member — an agent token may not issue an agent token (a one-sitting credential
 //     minting a standing one is an escalation no store-side gate catches; absent caller fails closed)
 //   · no_backend         — no deployment wired deps.issueAgentToken; the verb answers, never throws
+//   · bad_may_dispatch   — may_dispatch is a list of standard slugs or absent; a bare string, an
+//     object or a list with anything but non-empty strings is refused by name rather than
+//     silently narrowed to [] (a token that may dispatch nothing, issued to a caller who asked
+//     for one slug and mistyped the shape, is a silent no-op wearing a success)
 //   · bad_ttl            — the store takes INTEGER HOURS ≥ 1; a TTL it cannot express is refused,
 //     never rounded (rounding 15 minutes up to an hour quadruples the exposure silently — the
 //     deployment's session issuer refuses the same way, for the same reason)
@@ -24,7 +28,7 @@
 // carried back as typed codes (not_a_member, not_named). The token is returned ONCE and is never
 // sealed to the ledger: the store's row is its record.
 
-export const AGENT_TOKEN_REFUSALS = ["bad_ttl", "no_backend", "not_a_human_member"] as const;
+export const AGENT_TOKEN_REFUSALS = ["bad_may_dispatch", "bad_ttl", "no_backend", "not_a_human_member"] as const;
 export type AgentTokenRefusal = (typeof AGENT_TOKEN_REFUSALS)[number];
 
 /** The deployment's contract: resolve to a typed struct, never a generic throw, so the store's own
@@ -56,8 +60,29 @@ export function ttlHoursOrRefusal(raw: unknown): { ttl_hours: number } | { refus
   return { ttl_hours: n };
 }
 
-/** `may_dispatch` passes through as a list of standard slugs — strings, non-empty — and nothing else. */
-export function mayDispatchList(raw: unknown): string[] {
-  if (!Array.isArray(raw)) return [];
-  return raw.filter((s): s is string => typeof s === "string" && s.trim() !== "").map((s) => s.trim());
+/** `may_dispatch` is absent (→ []) or a list of non-empty standard slugs. Anything else is refused by
+ *  name — never narrowed to [] silently (the grade's D3). */
+export function mayDispatchOrRefusal(raw: unknown): { may_dispatch: string[] } | { refusal: "bad_may_dispatch"; error: string } {
+  if (raw === undefined || raw === null) return { may_dispatch: [] };
+  if (!Array.isArray(raw) || raw.some((s) => typeof s !== "string" || s.trim() === "")) {
+    return {
+      refusal: "bad_may_dispatch",
+      error:
+        `may_dispatch must be a list of standard slugs (non-empty strings) or absent (got ${JSON.stringify(raw)}) — ` +
+        "a malformed list is refused, not narrowed: a token that may dispatch nothing, issued to a caller who " +
+        "asked for one slug and mistyped the shape, is a silent no-op wearing a success.",
+    };
+  }
+  return { may_dispatch: raw.map((s) => (s as string).trim()) };
+}
+
+/** A success the backend answers must carry a ctk_ token and a key; a typed contract the deployment
+ *  violated is not a credential issued (the grade's D5). */
+export function issuedOrError(r: unknown): { ok: true; key_id: string; expires_at: string; agent_token: string } | { ok: false; error: string } {
+  const x = r as { ok?: unknown; key_id?: unknown; expires_at?: unknown; agent_token?: unknown } | null | undefined;
+  if (!x || typeof x !== "object" || x.ok !== true) return { ok: false, error: "the issuing backend answered without ok:true — nothing issued" };
+  if (typeof x.agent_token !== "string" || !/^ctk_[0-9a-f]{16,}$/.test(x.agent_token) || typeof x.key_id !== "string" || x.key_id === "") {
+    return { ok: false, error: "the issuing backend answered ok without a ctk_ token and a key_id — a success with no credential is nothing issued" };
+  }
+  return { ok: true, key_id: x.key_id, expires_at: typeof x.expires_at === "string" ? x.expires_at : "", agent_token: x.agent_token };
 }

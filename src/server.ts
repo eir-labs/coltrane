@@ -64,7 +64,7 @@ import {
   type CallerIdentity,
   type VenueCredentialGrant,
 } from "./venue_credential.js";
-import { ttlHoursOrRefusal, mayDispatchList, type IssueAgentTokenResult, type IssueAgentTokenArgs } from "./agent_token.js";
+import { ttlHoursOrRefusal, mayDispatchOrRefusal, issuedOrError, type IssueAgentTokenResult, type IssueAgentTokenArgs } from "./agent_token.js";
 import type { HireMemberResult } from "./org_hire.js";
 import { composeStandard, defineAgent, CompositionError, type Standard, type Agent, type AgentDef, type PhaseDef } from "./composition.js";
 import { PRIMITIVE_OUTPUT_TYPE, type Primitive } from "./core_types.js";
@@ -3949,6 +3949,10 @@ async function callSurfaceTool(
     if ("refusal" in ttl) {
       return { ok: false, refusal: ttl.refusal, error: ttl.error };
     }
+    const md = mayDispatchOrRefusal(args.may_dispatch);
+    if ("refusal" in md) {
+      return { ok: false, refusal: md.refusal, error: md.error };
+    }
     // (c) No backend wired → the verb answers, naming the seam.
     if (!deps.issueAgentToken) {
       return {
@@ -3964,12 +3968,16 @@ async function callSurfaceTool(
     //     facts; the engine never checks them. The token is returned ONCE and sealed nowhere.
     let issued: IssueAgentTokenResult;
     try {
-      issued = await deps.issueAgentToken({ org_slug, agent_slug, may_dispatch: mayDispatchList(args.may_dispatch), ttl_hours: ttl.ttl_hours });
+      issued = await deps.issueAgentToken({ org_slug, agent_slug, may_dispatch: md.may_dispatch, ttl_hours: ttl.ttl_hours });
     } catch (e) {
       return { ok: false, error: e instanceof Error ? e.message : String(e) };
     }
-    if (!issued.ok) return { ok: false, refusal: issued.code };
-    return { ok: true, data: { key_id: issued.key_id, org_slug, agent_slug, expires_at: issued.expires_at, agent_token: issued.agent_token } };
+    if (issued && typeof issued === "object" && issued.ok === false) return { ok: false, refusal: issued.code };
+    // A success the deployment answers must BE a credential: a ctk_ token and its key. A typed contract
+    // violated upstream is answered as a failure here, never forwarded as ok:true with nothing in it.
+    const shape = issuedOrError(issued);
+    if (!shape.ok) return { ok: false, error: shape.error };
+    return { ok: true, data: { key_id: shape.key_id, org_slug, agent_slug, expires_at: shape.expires_at, agent_token: shape.agent_token } };
   }
   if (slug === "org_hire") {
     // The engine half of org admission: the two engine-decided refusals and the ledger seal around

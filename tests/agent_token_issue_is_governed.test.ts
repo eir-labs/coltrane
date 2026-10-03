@@ -76,7 +76,7 @@ describe("agent_token_issue — a governed verb that issues a STANDING token to 
 
   it("INV-3 · the refusal vocabulary is closed and named", async () => {
     const m = await agentTokenModule();
-    expect([...m.AGENT_TOKEN_REFUSALS].sort()).toEqual(["bad_ttl", "no_backend", "not_a_human_member"]);
+    expect([...m.AGENT_TOKEN_REFUSALS].sort()).toEqual(["bad_may_dispatch", "bad_ttl", "no_backend", "not_a_human_member"]);
   });
 
   it("INV-4 · an agent token may not issue an agent token — gig, player, venue and absent callers are refused before any backend", async () => {
@@ -139,10 +139,28 @@ describe("agent_token_issue — a governed verb that issues a STANDING token to 
     expect(ledger.query({}), "the token is the store's record (hash + issuer), never the ledger's").toHaveLength(0);
   });
 
-  it("INV-9 · may_dispatch is passed through as a list of standard slugs, nothing else", async () => {
+  it("INV-9 · may_dispatch is a list of standard slugs or absent; a malformed one is refused by name, never narrowed to [] (the grade's D3)", async () => {
     const backend = okIssue();
     const tool = issueTool(surfaceDeps({ caller: { kind: "member" }, issueAgentToken: backend }));
-    await tool!.call({ org_slug: ORG, agent_slug: AGENT, may_dispatch: ["reconcile-work-order-v0", 7, ""], ttl_hours: 72 });
+    await tool!.call({ org_slug: ORG, agent_slug: AGENT, may_dispatch: [" reconcile-work-order-v0 "], ttl_hours: 72 });
     expect(backend).toHaveBeenCalledWith({ org_slug: ORG, agent_slug: AGENT, may_dispatch: ["reconcile-work-order-v0"], ttl_hours: 72 });
+    for (const bad of ["reconcile-work-order-v0", { 0: "x" }, 42, ["reconcile-work-order-v0", 7], [""], [null]]) {
+      const spy = okIssue();
+      const t = issueTool(surfaceDeps({ caller: { kind: "member" }, issueAgentToken: spy }));
+      const res = (await t!.call({ org_slug: ORG, agent_slug: AGENT, may_dispatch: bad, ttl_hours: 72 })) as SurfaceToolResult;
+      expect(res.ok, JSON.stringify(bad)).toBe(false);
+      expect(res.refusal, JSON.stringify(bad)).toBe("bad_may_dispatch");
+      expect(spy, "a refused shape never reaches the backend").not.toHaveBeenCalled();
+    }
+  });
+
+  it("INV-10 · a success the backend answers must BE a credential: ok without a ctk_ token, a non-object, or null is a failure, never ok:true with nothing in it (the grade's D5)", async () => {
+    for (const bad of [{ ok: true }, { ok: true, key_id: "k", agent_token: "not-a-token" }, { ok: true, key_id: "", agent_token: "ctk_" + "0".repeat(48) }, null, undefined, "yes"]) {
+      const backend = vi.fn(async (_a: IssueArgs) => bad as never);
+      const tool = issueTool(surfaceDeps({ caller: { kind: "member" }, issueAgentToken: backend }));
+      const res = (await tool!.call({ org_slug: ORG, agent_slug: AGENT, ttl_hours: 72 })) as SurfaceToolResult;
+      expect(res.ok, JSON.stringify(bad)).toBe(false);
+      expect(res.error, JSON.stringify(bad)).toMatch(/nothing issued/);
+    }
   });
 });

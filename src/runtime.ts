@@ -1495,7 +1495,7 @@ export function canonicalPullRequestIntent(i: { base: string; branch: string; bo
  *
  * REFUSALS, each by name and before anything is pushed: `tree_root_unknown`, `publisher_unavailable`,
  * `bad_branch` (option-shaped or unsafe), `protected_branch` (main/master, or equal to the base),
- * `base_unknown` (the origin holds no such branch), `branch_exists` (one fresh branch per run),
+ * `base_unknown` (the origin holds no such branch), `branch_exists` (one fresh branch per run), `remote_unreachable` (the origin could not be read),
  * `path_outside_tree`, `path_missing`, `nothing_to_commit`, `push_failed` (git's own words),
  * `pull_request_refused` (the API's own words). A failed push opens no PR.
  */
@@ -1539,7 +1539,15 @@ export async function stampPullRequest(
     }
     if (!existsSync(abs)) throw new RuntimeError(`path_missing: ${JSON.stringify(p)} is not in the tree; a pull-request names files the seats wrote, by path`);
   }
-  const heads = (ref: string) => gitInTree(tree_root, ["ls-remote", "--heads", "origin", ref]).trim();
+  // EVERY REMOTE ACT IS THE PUBLISHER'S (P10): a private origin challenges a read as it challenges
+  // a push, and only the engine's hands hold the credential (gig 44bd82b3, 4 Oct 2026 — the base
+  // check through the bare seam was the stamp's first act and its first failure).
+  const heads = (ref: string): string => {
+    try { return publisher.remoteHeads(tree_root, ref).trim(); } catch (e) {
+      const stderr = (e as { stderr?: Buffer }).stderr?.toString().trim();
+      throw new RuntimeError(`remote_unreachable: the origin could not be read for ${JSON.stringify(ref)}: ${stderr || (e instanceof Error ? e.message : String(e))}`);
+    }
+  };
   if (heads(base) === "") throw new RuntimeError(`base_unknown: the origin holds no branch ${JSON.stringify(base)}; a pull request against it would merge into nothing`);
   if (heads(branch) !== "") throw new RuntimeError(`branch_exists: the origin already holds ${JSON.stringify(branch)}; a run opens one fresh branch and one pull request`);
   // A LOCAL branch of that name is refused too: restore() deletes the branch it created, and it

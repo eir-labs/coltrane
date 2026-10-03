@@ -122,6 +122,15 @@ describe("E1 · the store genome has a base: the engine's packaged genome sits u
     expect(g.charts.size).toBe(0);
   });
 
+  it("L10 · a broken packaged base is named, not inferred: its load errors ride into the effective genome", () => {
+    const real = engineBaseGenome();
+    const broken = { ...real, load_errors: [{ kind: "agent" as const, path: "agents/ghost.json", slug: "ghost", error: "synthetic: the base's ghost does not parse" }] };
+    const g = reconstructGenome({ core_types: [], domain_types: [], agents: [], standards: [], skills: [] } as never, { base: broken });
+    expect(errorsNaming(g, "synthetic: the base's ghost does not parse").length, "the base's own error is on the org genome, by name").toBe(1);
+    // and the real base, which loads clean, adds none (L2/L5 already assert [] — this pins the reason)
+    expect(reconstructGenome({ core_types: [], domain_types: [], agents: [], standards: [], skills: [] } as never, { base: real }).load_errors).toEqual([]);
+  });
+
   it("L8 · the box's backing (an agent token) reads the base by default, and `base: null` is rows alone", async () => {
     const answer = { org_id: "c0000000-0000-4000-8000-00000000e17a", core_types: [], domain_types: [], agents: [], standards: [JOHN_STANDARD_ROW], skills: [] };
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(answer), { status: 200 })));

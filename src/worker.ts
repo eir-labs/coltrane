@@ -43,7 +43,7 @@ import { MemoryLedger } from "./ledger.js";
 import { rpcGenomeStore } from "./genome_store.js";
 import { workerCredentialMode } from "./worker_env.js";
 import { prepareWorkspace } from "./workspace.js";
-import { engineToolProviders, drainBudget, drainTimeoutMs, resolveWorkingRepo, assembleRunDeps } from "./run_deps.js";
+import { engineToolProviders, drainBudget, drainTimeoutMs, resolveWorkingRepo, resolveChangeSetBase, assembleRunDeps } from "./run_deps.js";
 // The repository resolver's ONE home is run_deps.ts (shared by both doors). Re-exported here so
 // worker.ts's own consumers — and tests/the_repo_is_typed_input — keep importing it from this path.
 export { resolveWorkingRepo } from "./run_deps.js";
@@ -1031,6 +1031,9 @@ export async function workOnce(ctx: WorkerContext, deps: WorkOnceDeps): Promise<
         drainKey: ctx.drainKey,
         instance: ctx.instance,
         endpoint: process.env["COLTRANE_GIT_CREDENTIALS_URL"],
+        // the commit a change-set is measured from, carried on the typed input; fetched now, while
+        // the credential is in hand (the base is in the tree)
+        base: resolveChangeSetBase(claim),
       });
       if (workspace) {
         process.chdir(workspace.dir);
@@ -1169,6 +1172,7 @@ export async function workOnce(ctx: WorkerContext, deps: WorkOnceDeps): Promise<
         venues: genome.venues,
         venueRealizer: deps.venueRealizer,
         repoUrl: claim.venue ? workingRepo : undefined,
+        changeSetBase: claim.venue ? resolveChangeSetBase(claim) ?? undefined : undefined,
         // The address-stamping tree (records-by-address): the drain's OWN working clone, the tree its
         // chairs edited and the one `git diff`/`git rev-parse` must read to stamp a sealed change-set's
         // `changes` or red-spec's `laws`. Never process.cwd(): when the Booker did not clone (a

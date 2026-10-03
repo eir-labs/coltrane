@@ -96,7 +96,10 @@ describe("E1 · the store genome has a base: the engine's packaged genome sits u
   it("L4 · two ORG rows claiming one slug still refuse — the base does not launder a duplicate", () => {
     const rows = asRows({ ...ROWS_JOHN_STANDARD_NO_AGENTS, agents: [ORG_JOHN_ROW, { ...ORG_JOHN_ROW, identity: "the second john" }] });
     const g = reconstructGenome(rows, { base: engineBaseGenome() });
-    expect(errorsNaming(g, 'duplicate agent slug "john"').length).toBe(1);
+    // the version rule's vocabulary (a_retired_standard_is_not_a_duplicate L9): two org rows at one
+    // version are contradictory data, refused naming both — and neither launders through the base
+    expect(errorsNaming(g, 'ambiguous agent "john": 2 rows share one version').length).toBe(1);
+    expect(g.agents.get("john")?.identity, "the base's john does not stand in for a contested org row").not.toBe("you are the org's own john");
   });
 
   it("L5 · the base's standards are inherited: an org with no standard rows can still run the engine's", () => {

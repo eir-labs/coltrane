@@ -397,6 +397,12 @@ const GENOME_ROWS = {
 const sealableSignal = { id: "sig-1", source: "test", data: { seen: true }, completeness: 1, acquisition_cost: 0 };
 
 const CRED_URL = "https://store.example/git-cred";
+/** The drain SERVICE this suite's drain speaks to (headers, output rows, artifacts, lease renew/release).
+ *  Set because a drain key without a drain URL now refuses the run (gig-runs-once A1, the conductor's
+ *  "no blind drain" ruling). The suite used to run with a key and no URL, and the worker logged
+ *  the misconfiguration and ran anyway. That is exactly what A1 forbids. The fake service below
+ *  acknowledges every write, so these laws keep testing what they test: clones and mints per gig. */
+const DRAIN_URL = "https://drain.example";
 
 /** Mock the org store AND the git-credential mint. Returns a counter of mints: one call to CRED_URL is
  *  one credential minted, and (per this gig's one repository) one clone. Everything else answers the
@@ -406,6 +412,12 @@ function mockStoreAndCred(claim: unknown): { mints: () => number } {
   vi.stubGlobal("fetch", vi.fn(async (url: string | URL) => {
     const u = String(url);
     if (u === CRED_URL) { mints++; return new Response(JSON.stringify({ token: "ghs_hermetic_token" }), { status: 200 }); }
+    // The drain service (see DRAIN_URL): acknowledge every write. Renew answers a new lease_until.
+    if (u.startsWith(`${DRAIN_URL}/`)) {
+      if (u.endsWith("/coltrane_drain_renew")) return new Response(JSON.stringify(new Date(Date.now() + 3_600_000).toISOString()), { status: 200 });
+      if (u.endsWith("/coltrane_drain_release")) return new Response(JSON.stringify(true), { status: 200 });
+      return new Response(null, { status: 201 });
+    }
     // THE DRAIN CLAIMS THROUGH coltrane_drain_claim, NOT coltrane_mcp_claim. Which RPC workOnce calls
     // is decided by credential MODE (src/worker.ts:383): with COLTRANE_DRAIN_KEY and COLTRANE_INSTANCE
     // set — which this suite's beforeEach does, because realize()'s populate needs them — the mode is
@@ -454,8 +466,9 @@ describe("DRAIN — one clone / one mint per gig, and the Booker's clone kept wh
     process.env["COLTRANE_WORKER_CHECKPOINTS"] = stateRoot;
     // realize()'s populate reads the git-credential plumbing from the ambient env — the same discipline
     // the drain uses for its own clone; the repository SOURCE is the explicit, per-run fact.
-    for (const k of ["COLTRANE_DRAIN_KEY", "COLTRANE_INSTANCE", "COLTRANE_GIT_CREDENTIALS_URL"]) savedEnv[k] = process.env[k];
+    for (const k of ["COLTRANE_DRAIN_KEY", "COLTRANE_DRAIN_URL", "COLTRANE_INSTANCE", "COLTRANE_GIT_CREDENTIALS_URL"]) savedEnv[k] = process.env[k];
     process.env["COLTRANE_DRAIN_KEY"] = "dk";
+    process.env["COLTRANE_DRAIN_URL"] = DRAIN_URL;
     process.env["COLTRANE_INSTANCE"] = "box";
     process.env["COLTRANE_GIT_CREDENTIALS_URL"] = CRED_URL;
   });

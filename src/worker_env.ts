@@ -218,7 +218,7 @@ export const WORKER_ENV_CONTRACT: readonly WorkerEnvVar[] = [
     role: "tuning",
     required: "never",
     meaning:
-      "Overall wall-clock timeout in milliseconds for a single gig before the worker abandons it.",
+      "PLAYER path only: wall-clock deadline in milliseconds for a single gig claimed through coltrane_mcp_claim (a thirty-minute lease with no renew door); default five sixths of that lease. NOT read in venue mode — a venue run has no run deadline and stops only on facts (lease lost or unverifiable, budget, abort); when set there the worker logs once per claimed gig that it is set and not read.",
   },
   {
     name: "COLTRANE_WORKER_CHECKPOINTS",

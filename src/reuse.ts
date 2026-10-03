@@ -291,6 +291,14 @@ export interface GigCheckpoint {
    */
   prior_usage?: unknown;
   /**
+   * Set when the run that wrote this checkpoint ENDED — failed or aborted — rather than parking or
+   * being killed mid-flight. It is what makes "resume this gig" answerable at the dispatch door:
+   * what's closed is closed, so a resume of an ended gig dispatches a NEW gig that takes these
+   * seals as inputs by reference, instead of reopening a row the store's terminal guard now
+   * refuses. Absent on a parked gig (not terminal) and on a crash (the run never got to say).
+   */
+  ended?: { status: "failed" | "aborted"; at: string };
+  /**
    * The cumulative budget state at this checkpoint's MOVEMENT BOUNDARY (charts only).
    *
    * A chart's envelope spans movements, so a resumed performance has to know what the earlier

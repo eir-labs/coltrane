@@ -22,8 +22,15 @@
 //   K6  a room that declares a substrate is not a room that needs nothing
 //   K7  a refused claim leaves the worker's credential as it was
 //   K9  the input's .git spelling of a granted tree is that tree — once, the cwd
+//   K10 a plain room (no servers, no connector) with a typed repository, on a box holding a docker
+//       realizer: the drain's single-tree path runs and the realizer is never reached — the
+//       connector-less room is the common case, and `!roomNeedsNothing` on roomWillPopulate decides it
+//   K11 a room WITH an mcp server, in the box's realizable set, a realizer present: the drain furnishes
+//       nothing (no second tree beside the room's) and defers to realization, as on main
+//   K12 the finally cleans up and revokes a furnished room's workspace after the run
 import { describe, it, expect, afterEach, vi } from "vitest";
-import { mkdtempSync, mkdirSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join, basename } from "node:path";
 import { workOnce, type WorkOnceDeps } from "../src/worker.js";
@@ -195,5 +202,78 @@ describe("K3/K4/K5 — a furnished room's trees are prepared, credentialed per t
     expect(res.claimed && res.status).toBe("complete");
     expect(pw.asked[0]!.trees, "a .git spelling of a granted tree became a second tree").toEqual([A, B]);
     expect(seen[0]!.mounts!.find((m) => m.repoUrl === B)?.cwd, "the .git spelling names the cwd tree").toBe(true);
+  });
+
+  /** A real local origin with one commit on main, for the single-tree path. */
+  function origin(name: string): string {
+    const bare = mkdtempSync(join(tmpdir(), `room-${name}-origin-`));
+    execFileSync("git", ["init", "--quiet", "--bare", "--initial-branch=main", bare]);
+    const seed = mkdtempSync(join(tmpdir(), `room-${name}-seed-`));
+    execFileSync("git", ["init", "--quiet", "--initial-branch=main", seed]);
+    writeFileSync(join(seed, `${name}.md`), name);
+    const g = (args: string[]) => execFileSync("git", ["-C", seed, ...args], {
+      env: { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" },
+    });
+    g(["add", "-A"]); g(["commit", "--quiet", "-m", "seed"]);
+    g(["remote", "add", "origin", bare]); g(["push", "--quiet", "origin", "HEAD:refs/heads/main"]);
+    return bare;
+  }
+
+  it("K10 a plain room with a typed repository, under a docker realizer: the single-tree path runs; the realizer is never reached", async () => {
+    // The grade at 7c97437, plant K4a: drop `!roomNeedsNothing` from roomWillPopulate and this gig is
+    // "deferred to room realization", gets no tree, and the realizer is never called either — it runs
+    // with no working tree, silently. The connector-less room is the pre-R38 common case.
+    env = hostedEnv(); withBroker();
+    const repo = origin("plain");
+    const brokerBodies: Record<string, unknown>[] = [];
+    const logs: string[] = [];
+    hostedStore({
+      claim: claimFor("one-chair-v0", { venue: "plain-room", input: { "change-request": { repository: repo } } }),
+      genome: genomeWith(roomRow("plain-room")),
+      other: (u, body) => { if (u.host === "broker.example") { brokerBodies.push(body); return new Response(JSON.stringify({ ok: true, token: "tok-plain" }), { status: 200 }); } if (u.host === "api.github.com") return new Response(null, { status: 204 }); return undefined; },
+    });
+    const realize = vi.fn(async () => { throw new Error("REALIZER CALLED for a plain room"); });
+    const pw = preparer();
+    const seen: AgentInvocationContext[] = [];
+    const res = await workOnce(venueCtx(), { makeInvoke: () => vi.fn(async (c: AgentInvocationContext) => { seen.push(c); return sealableSignal; }) as unknown as AgentInvoker, venueRealizer: { realize }, prepareWorkspaces: pw.prepare, log: (l: string) => { logs.push(l); } } as unknown as WorkOnceDeps);
+    await settle();
+    expect(res.claimed && res.status, JSON.stringify(res)).toBe("complete");
+    expect(realize, "a plain room was handed to the realizer").not.toHaveBeenCalled();
+    expect(pw.asked.length, "a plain room furnishes nothing — the furnished preparer must not run").toBe(0);
+    expect(logs.some((l) => l.startsWith("working tree ready: ")), "the single-tree path did not run: the gig ran with no working tree").toBe(true);
+    expect(brokerBodies.length, "the single-tree path asks the broker once").toBe(1);
+    expect(brokerBodies[0]!["repository"], "the single-tree path sends the old body, with no repository field").toBeUndefined();
+    expect(seen[0]!.mounts).toBeUndefined();
+  });
+
+  it("K11 a room WITH an mcp server, realizable by this box, a realizer present: the drain furnishes nothing and defers to realization, as on main", async () => {
+    env = hostedEnv(); withBroker();
+    const logs: string[] = [];
+    hostedStore({
+      claim: claimFor("one-chair-v0", { venue: "notes-room", input: { "change-request": { repository: B } } }),
+      genome: genomeWith(roomRow("notes-room", { servers: true, grant: [B] })),
+    });
+    const realize = vi.fn(async (_v: unknown, _c: unknown, opts: { repoUrl?: string }) => { throw new Error(`REALIZER repoUrl=${opts.repoUrl}`); });
+    const pw = preparer();
+    const ctx = { ...venueCtx(), realizableVenues: ["notes-room"] };
+    const res = await workOnce(ctx, { makeInvoke: () => vi.fn(async () => sealableSignal) as unknown as AgentInvoker, venueRealizer: { realize }, prepareWorkspaces: pw.prepare, log: (l: string) => { logs.push(l); } } as unknown as WorkOnceDeps);
+    await settle();
+    expect(realize, "a server room must reach the realizer").toHaveBeenCalledTimes(1);
+    expect(pw.asked.length, "a server room's grant must NOT be furnished by the drain — that would be a second tree beside the room's").toBe(0);
+    expect(logs.some((l) => l.includes("deferred to room realization"))).toBe(true);
+    expect(res.claimed && res.status).toBe("failed");
+    expect(res.claimed && res.status === "failed" ? String(res.error) : "").toMatch(/REALIZER repoUrl=https:\/\/github\.com\/eir-labs\/coltrane-ui/);
+  });
+
+  it("K12 the finally cleans up and revokes a furnished room's workspace after the run", async () => {
+    env = hostedEnv(); withBroker();
+    const cleanup = vi.fn(); const revoke = vi.fn(async () => undefined);
+    hostedStore({ claim: claimFor("one-chair-v0", { venue: "r" }), genome: genomeWith(roomRow("r", { grant: [A] })) });
+    const prepare = vi.fn(async () => { const root = mkdtempSync(join(tmpdir(), "k12-")); const d = join(root, "coltrane"); mkdirSync(d); return { root, dir: root, mounts: [{ repoUrl: A, dir: d }], cleanup, revoke }; });
+    const res = await workOnce(venueCtx(), { makeInvoke: () => vi.fn(async () => sealableSignal) as unknown as AgentInvoker, prepareWorkspaces: prepare } as unknown as WorkOnceDeps);
+    await settle();
+    expect(res.claimed && res.status).toBe("complete");
+    expect(cleanup, "the furnished workspace was not cleaned up after the run").toHaveBeenCalledTimes(1);
+    expect(revoke, "the furnished workspace's credentials were not handed back after the run").toHaveBeenCalledTimes(1);
   });
 });

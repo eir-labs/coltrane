@@ -29,6 +29,7 @@ import { amendLadderFromEnv } from "./invoker_selection.js";
 import { MCP_TOOLS } from "./mcp.js";
 import { ENGINE_MCP_SERVER, type ToolProvider, type ToolProviderRegistry } from "./tool_providers.js";
 import type { BudgetInput, RunDeps } from "./runtime.js";
+import { PLAYER_LEASE_MS } from "./lease.js";
 
 /**
  * Every engine tool as an in-house provider, tagged with the engine's own MCP server.
@@ -57,7 +58,20 @@ export function engineToolProviders(): ToolProviderRegistry {
  * Returns a { max_usd } when a ceiling applies, or {} (no enforcement) when none does — never
  * undefined, so a caller reading `.max_usd` off the result never trips on undefined.
  */
-export function drainBudget(input: Record<string, unknown> | undefined): BudgetInput {
+export function drainBudget(
+  input: Record<string, unknown> | undefined,
+  /** The claim's own ceiling in integer micro-dollars (coltrane_gigs.budget_micro_usd, #555). The
+   *  hosted door strips `budget` from what it queues and the store hands this back on the claim, so it
+   *  WINS: it is the gig's own ceiling. Not an integer ≥ 0 → refused rather than guessed at. */
+  claimMicroUsd?: unknown,
+): BudgetInput {
+  if (claimMicroUsd !== undefined && claimMicroUsd !== null) {
+    if (typeof claimMicroUsd !== "number" || !Number.isSafeInteger(claimMicroUsd) || claimMicroUsd < 0) {
+      throw new Error(`the claim's budget_micro_usd must be a non-negative integer of micro-dollars; got ${JSON.stringify(claimMicroUsd)}`);
+    }
+    // Dollars only for reporting; the gate compares max_micro_usd (see BudgetInput).
+    return { max_usd: claimMicroUsd / 1_000_000, max_micro_usd: claimMicroUsd };
+  }
   const named = (input?.["budget"] as { max_usd?: unknown } | undefined)?.["max_usd"];
   if (typeof named === "number" && Number.isFinite(named) && named > 0) return { max_usd: named };
 
@@ -71,17 +85,27 @@ export function drainBudget(input: Record<string, unknown> | undefined): BudgetI
 }
 
 /**
- * How long a single drained gig may run before it is aborted.
+ * How long a single drained gig may run before it is aborted — or `undefined`: NO clock.
  *
- * The store's lease is thirty minutes; a run that outlives it is working on a gig another drain may
- * already have reclaimed. Defaulting under the lease keeps one gig to one worker without needing
- * the two clocks to agree exactly.
+ * A VENUE run has no run deadline. Founder's ruling, 3 Oct 2026: a run is never cut off because time
+ * passed, only because a fact says it must stop — its lease is lost (the store answers that another
+ * worker holds it) or can no longer be shown held (no renewal landed for a whole lease window:
+ * LeaseUnverifiable, src/lease.ts), its settled spend reached its budget, or an abort door was used.
+ * Duration is not the ceiling; budget is, and any per-gig time belongs to the gig's own voicing and
+ * seating, not to the box. The 25-minute default this replaced was a stand-in for a thirty-minute
+ * lease the store had already moved to sixty, and it aborted a seven-chair run at its last chair with
+ * no cause named. COLTRANE_GIG_TIMEOUT_MS is NOT read in venue mode; the worker says so in its log
+ * when it is set, rather than silently ignoring it.
+ *
+ * A PLAYER run (coltrane_mcp_claim) keeps a deadline, because that path holds a thirty-minute lease
+ * (PLAYER_LEASE_MS) and has no renew door: its run must end inside that one lease or another player
+ * claims it mid-run. Five sixths of the lease, overridable by COLTRANE_GIG_TIMEOUT_MS. The honest fix
+ * there is a renew door for players, not a clock; until it exists the clock is the lease, restated.
  */
-const DEFAULT_DRAIN_TIMEOUT_MS = 25 * 60 * 1000;
-
-export function drainTimeoutMs(): number {
+export function drainTimeoutMs(mode: "venue" | "player" = "venue"): number | undefined {
+  if (mode === "venue") return undefined;
   const env = Number(process.env["COLTRANE_GIG_TIMEOUT_MS"]);
-  return Number.isFinite(env) && env > 0 ? env : DEFAULT_DRAIN_TIMEOUT_MS;
+  return Number.isFinite(env) && env > 0 ? env : Math.floor((PLAYER_LEASE_MS * 5) / 6);
 }
 
 /**

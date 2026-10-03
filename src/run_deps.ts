@@ -110,11 +110,43 @@ export function resolveWorkingRepo(
   claim: { input?: unknown; repo_url?: string | null | undefined },
   explicitRepoUrl: string | undefined = undefined,
 ): string | null {
-  const typed = (claim.input as { repository?: unknown } | undefined)?.repository;
-  if (typeof typed === "string" && typed.trim().length > 0) return typed;
+  const typed = typedInputField(claim.input, "repository");
+  if (typed !== null) return typed;
   if (typeof explicitRepoUrl === "string" && explicitRepoUrl.trim().length > 0) return explicitRepoUrl;
   const orgDefault = claim.repo_url;
   return typeof orgDefault === "string" && orgDefault.trim().length > 0 ? orgDefault : null;
+}
+
+/**
+ * A typed input field, read where a typed input actually arrives. A gig's `input` is keyed by TYPE
+ * SLUG ({"change-request": {...}}) — the hosted dispatch refuses a bare payload as MissingGigInput —
+ * so a field "in the typed input" sits one level down. The top level is read first (a bare payload,
+ * a test), then each object one level down, first match. A non-string or an empty string is not a
+ * value. (3 Oct 2026: `repository` had been read at the top only, and so was never reached for a
+ * real dispatch; the org default answered instead.)
+ */
+export function typedInputField(input: unknown, field: string): string | null {
+  const str = (v: unknown): string | null => (typeof v === "string" && v.trim().length > 0 ? v.trim() : null);
+  if (!input || typeof input !== "object") return null;
+  const top = str((input as Record<string, unknown>)[field]);
+  if (top !== null) return top;
+  for (const v of Object.values(input as Record<string, unknown>)) {
+    if (v && typeof v === "object" && !Array.isArray(v)) {
+      const inner = str((v as Record<string, unknown>)[field]);
+      if (inner !== null) return inner;
+    }
+  }
+  return null;
+}
+
+/**
+ * THE BASE A CHANGE-SET IS MEASURED FROM — `change_set_base` on the typed input, read the same two
+ * ways as `repository`. Null when the request carries none: then the seat's own base must already be
+ * in the tree, or the seal refuses `base_not_in_tree`. prepareWorkspace fetches a named base into the
+ * shallow clone while the gig's credential is in hand; nothing later in the run holds that credential.
+ */
+export function resolveChangeSetBase(claim: { input?: unknown }): string | null {
+  return typedInputField(claim.input, "change_set_base");
 }
 
 /**

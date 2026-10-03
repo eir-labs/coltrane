@@ -108,7 +108,7 @@ export async function fetchGitCredential(
  * revoke — is IDENTICAL, because a room's working tree and the drain's must be the same thing prepared
  * the same way. Omitted (the drain's call) keeps the original mkdtempSync behaviour byte-for-byte.
  */
-export function cloneInto(repoUrl: string, token: string, targetDir?: string): PreparedWorkspace {
+export function cloneInto(repoUrl: string, token: string, targetDir?: string, base?: string | null): PreparedWorkspace {
   const dir = targetDir ?? mkdtempSync(join(tmpdir(), "coltrane-gig-"));
   const cleanup = () => {
     try {
@@ -124,42 +124,45 @@ export function cloneInto(repoUrl: string, token: string, targetDir?: string): P
     } catch { /* best effort: the token expires on its own within the hour regardless */ }
   };
 
+  const env = {
+    ...process.env,
+    COLTRANE_GIT_TOKEN: token,
+    GIT_CONFIG_COUNT: "1",
+    GIT_CONFIG_KEY_0: "credential.https://github.com.helper",
+    GIT_CONFIG_VALUE_0:
+      '!f() { echo username=x-access-token; echo "password=$COLTRANE_GIT_TOKEN"; }; f',
+  };
   try {
     execFileSync(
       "git",
       ["clone", "--quiet", "--depth", "1", repoUrl, dir],
-      {
-        // CONFIG VIA ENVIRONMENT, NOT `-c`. `git clone -c k=v` PERSISTS k into the new clone's
-        // .git/config — so a helper passed that way survives into the very tree the gig's seats
-        // read. The token itself would not be there, but the helper would, and a later
-        // `git push` from a publish seat would consult it, find COLTRANE_GIT_TOKEN unset in that
-        // seat's environment, and send an empty password. Caught by a test asserting on the
-        // resulting .git/config rather than on the arguments passed.
-        //
-        // GIT_CONFIG_COUNT applies config to THIS process only and writes nothing to the clone.
-        //
-        // Scoped to https://github.com so a URL naming any other host is never offered the token.
-        // The store constrains repo_url to https and this layer cannot be reached with a
-        // gig-supplied string, but a credential helper that answers any host is one refactor away
-        // from exfiltration and costs nothing to scope now.
-        env: {
-          ...process.env,
-          COLTRANE_GIT_TOKEN: token,
-          GIT_CONFIG_COUNT: "1",
-          GIT_CONFIG_KEY_0: "credential.https://github.com.helper",
-          GIT_CONFIG_VALUE_0:
-            '!f() { echo username=x-access-token; echo "password=$COLTRANE_GIT_TOKEN"; }; f',
-        },
-        stdio: ["ignore", "ignore", "pipe"],
-      },
+      { env, stdio: ["ignore", "ignore", "pipe"] },
     );
   } catch (e) {
     cleanup();
-    // git writes the useful part to stderr; the message alone is usually just an exit status.
     const stderr = (e as { stderr?: Buffer }).stderr?.toString().trim();
     throw new Error(`clone of ${repoUrl} failed${stderr ? `: ${stderr}` : ""}`);
   }
-
+  // THE BASE IS IN THE TREE. A change-set names the commit it is measured from (change_set_base);
+  // a one-commit clone does not hold it. Fetched HERE, while the credential is in hand — nothing
+  // later in the run holds one — and only to depth 1: the base itself, not its history. A base the
+  // origin does not have is refused by name: the request named a commit that is not this repository's.
+  if (typeof base === "string" && base.trim().length > 0) {
+    try {
+      execFileSync(
+        "git",
+        ["-C", dir, "fetch", "--quiet", "--depth", "1", "origin", base.trim()],
+        { env, stdio: ["ignore", "ignore", "pipe"] },
+      );
+    } catch (e) {
+      cleanup();
+      const stderr = (e as { stderr?: Buffer }).stderr?.toString().trim();
+      throw new Error(
+        `base_not_in_origin: change_set_base ${base.trim()} could not be fetched from ${repoUrl} — the ` +
+          `request named a commit this repository does not have${stderr ? `: ${stderr}` : ""}`,
+      );
+    }
+  }
   return { dir, cleanup, revoke };
 }
 
@@ -182,6 +185,9 @@ export async function prepareWorkspace(opts: {
    *  room) → `<realizationDir>/workspace`, so the seat's cwd is the room's tree and the realizer's
    *  existing teardown subsumes the clone. The credential path is unchanged either way. */
   target?: string | undefined;
+  /** The commit a change-set is measured from (change_set_base on the typed input): fetched into the
+   *  shallow clone while the credential is in hand, so the seal can diff against it. */
+  base?: string | null | undefined;
 }): Promise<PreparedWorkspace | null> {
   if (!opts.repoUrl) return null;
   if (!opts.drainKey || !opts.instance) {
@@ -197,5 +203,5 @@ export async function prepareWorkspace(opts: {
     );
   }
   const cred = await fetchGitCredential(opts.endpoint, opts.drainKey, opts.instance, opts.gigId);
-  return cloneInto(opts.repoUrl, cred.token, opts.target);
+  return cloneInto(opts.repoUrl, cred.token, opts.target, opts.base ?? null);
 }

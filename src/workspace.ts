@@ -24,6 +24,9 @@
 
 import { execFileSync } from "node:child_process";
 import { isSafeGitRev } from "./run_deps.js";
+import { makePublisher, credentialEnv, type TreePublisher } from "./publisher.js";
+export { makePublisher } from "./publisher.js";
+export type { TreePublisher } from "./publisher.js";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve, sep } from "node:path";
@@ -38,6 +41,9 @@ export interface GitCredential {
 export interface PreparedWorkspace {
   /** Absolute path to the clone. The gig runs with this as cwd. */
   dir: string;
+  /** THE ENGINE'S HANDS on this tree (item 43): push a branch, open a pull request, with the
+   *  credential this clone was minted — held in the closure, never exported, never on disk. */
+  publisher: TreePublisher;
   /** Idempotent. Safe to call from a `finally` that may run after a partial failure. */
   cleanup: () => void;
   /**
@@ -133,14 +139,7 @@ export function cloneInto(repoUrl: string, token: string, targetDir?: string, ba
   };
   const revoke = async () => { await revokeGithubToken(token); };
 
-  const env = {
-    ...process.env,
-    COLTRANE_GIT_TOKEN: token,
-    GIT_CONFIG_COUNT: "1",
-    GIT_CONFIG_KEY_0: "credential.https://github.com.helper",
-    GIT_CONFIG_VALUE_0:
-      '!f() { echo username=x-access-token; echo "password=$COLTRANE_GIT_TOKEN"; }; f',
-  };
+  const env = credentialEnv(token);
   try {
     execFileSync(
       "git",
@@ -186,7 +185,7 @@ export function cloneInto(repoUrl: string, token: string, targetDir?: string, ba
       );
     }
   }
-  return { dir, cleanup, revoke };
+  return { dir, publisher: makePublisher(repoUrl, token), cleanup, revoke };
 }
 
 /**
@@ -260,6 +259,8 @@ export interface PreparedWorkspaces {
   /** The seat's cwd: the change-request's tree when it is among the mounts, otherwise the root. */
   dir: string;
   mounts: MountedTree[];
+  /** The publisher of the tree a change lands in (the cwd tree); absent for a reading run. */
+  publisher?: TreePublisher | undefined;
   cleanup: () => void;
   revoke: () => Promise<void>;
 }
@@ -305,6 +306,7 @@ export async function prepareWorkspaces(opts: {
   const mounts: MountedTree[] = [];
   const minted: string[] = [];
   const taken = new Set<string>();
+  let cwdPublisher: TreePublisher | undefined;
   const cleanupAll = () => {
     for (const p of prepared) p.cleanup();
     try { rmSync(root, { recursive: true, force: true }); } catch { /* best effort */ }
@@ -331,6 +333,7 @@ export async function prepareWorkspaces(opts: {
       const ws = cloneInto(repoUrl, cred.token, target, base);
       prepared.push(ws);
       mounts.push({ repoUrl, dir: ws.dir });
+      if (opts.cwdRepo === repoUrl) cwdPublisher = ws.publisher;
     }
   } catch (e) {
     // A mid-way failure hands back EVERY credential it minted — the trees that cloned and the one
@@ -346,6 +349,7 @@ export async function prepareWorkspaces(opts: {
     root,
     dir: cwd?.dir ?? root,
     mounts,
+    ...(cwdPublisher ? { publisher: cwdPublisher } : {}),
     cleanup: cleanupAll,
     revoke: async () => { await Promise.all(prepared.map((p) => p.revoke())); },
   };

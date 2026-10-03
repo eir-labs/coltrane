@@ -4215,6 +4215,15 @@ async function callSurfaceTool(
         : args;
     const payload: Record<string, unknown> = {};
     for (const k of up.keys) if (source[k] !== undefined) payload[k] = source[k];
+    // A VERSION REPORTED IS A VERSION RECORDED (3 Oct 2026). agent_evolve answers `new_version`
+    // and the merged definition carries the BASE's version (or none), so the store's upsert
+    // matched the existing row and updated it in place — three times in one day the surface
+    // reported v2 and the store held v1. The payload carries the version the handler reported;
+    // the store lands a new row and retires the prior by its own supersede rule.
+    if (slug === "agent_evolve" && result.data && typeof result.data === "object") {
+      const nv = (result.data as Record<string, unknown>)["new_version"];
+      if (typeof nv === "number" && Number.isFinite(nv)) payload["version"] = nv;
+    }
     try {
       await deps.store.upsert(up.cls, payload);
     } catch (e) {

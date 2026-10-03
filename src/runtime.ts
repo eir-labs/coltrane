@@ -1542,6 +1542,11 @@ export async function stampPullRequest(
   const heads = (ref: string) => gitInTree(tree_root, ["ls-remote", "--heads", "origin", ref]).trim();
   if (heads(base) === "") throw new RuntimeError(`base_unknown: the origin holds no branch ${JSON.stringify(base)}; a pull request against it would merge into nothing`);
   if (heads(branch) !== "") throw new RuntimeError(`branch_exists: the origin already holds ${JSON.stringify(branch)}; a run opens one fresh branch and one pull request`);
+  // A LOCAL branch of that name is refused too: restore() deletes the branch it created, and it
+  // must never delete one it found (the grade at 7dcd05d, note 4).
+  let localExists = false;
+  try { gitInTree(tree_root, ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`]); localExists = true; } catch { /* absent */ }
+  if (localExists) throw new RuntimeError(`branch_exists: the tree already holds a local branch ${JSON.stringify(branch)}; a run opens one fresh branch and never adopts or deletes one it found`);
   const intent_sha = sha256Hex(canonicalPullRequestIntent({ base, branch, body, commit_message, paths, title }));
   const attribution: CommitAttribution = deps.attribution ?? {
     author: { name: "coltrane-engine", email: "engine@coltrane" },

@@ -163,12 +163,16 @@ describe("P4–P8 — refusals by name, and nothing pushed", () => {
     await expect(stampPullRequest(intent(), { tree_root: root, publisher: pub, attribution: ATTR }, "g1")).rejects.toThrow(/push_failed.*credential was refused/);
     expect(pub.opened).toEqual([]);
   });
-  it("P8 a branch the origin already holds → branch_exists", async () => {
+  it("P8 a branch the origin already holds → branch_exists; a LOCAL branch of that name too, and it survives", async () => {
     const { origin, root } = tree();
     git(root, "push", "--quiet", "origin", "HEAD:refs/heads/changeset/g1");
     const pub = fakePublisher(origin);
     await expect(stampPullRequest(intent(), { tree_root: root, publisher: pub, attribution: ATTR }, "g1")).rejects.toThrow(/branch_exists/);
     expect(pub.opened).toEqual([]);
+    const t2 = tree();
+    git(t2.root, "branch", "changeset/local");
+    await expect(stampPullRequest(intent({ branch: "changeset/local" }), { tree_root: t2.root, publisher: fakePublisher(t2.origin), attribution: ATTR }, "g1")).rejects.toThrow(/branch_exists/);
+    expect(git(t2.root, "branch", "--list", "changeset/local"), "the branch the tree was found with is never deleted").toContain("changeset/local");
   });
 });
 

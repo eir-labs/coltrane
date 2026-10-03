@@ -45,16 +45,26 @@ export function credentialEnv(token: string): NodeJS.ProcessEnv {
 
 const GITHUB_REPO = /^https:\/\/github\.com\/([A-Za-z0-9_-][A-Za-z0-9_.-]*)\/([A-Za-z0-9_-][A-Za-z0-9_.-]*?)(?:\.git)?\/?$/;
 
+/**
+ * THE PUSH, BUILT BEFORE IT IS RUN — one construction site, so a law can read what the push carries
+ * (W9c) without a GitHub origin to challenge it: the credential helper rides the push process's
+ * environment exactly as it rides the clone's. `--` ends git's options, as the clone pins it: a
+ * branch is a ref, never an option.
+ */
+export function pushInvocation(dir: string, branch: string, token: string): { file: string; argv: readonly string[]; env: NodeJS.ProcessEnv } {
+  return {
+    file: "git",
+    argv: ["-C", dir, "push", "--quiet", "--", "origin", `refs/heads/${branch}:refs/heads/${branch}`],
+    env: credentialEnv(token),
+  };
+}
+
 export function makePublisher(repoUrl: string, token: string): TreePublisher {
   return {
     repoUrl,
     push(dir, branch) {
-      // `--` ends git's options, as the clone pins it: a branch is a ref, never an option.
-      execFileSync(
-        "git",
-        ["-C", dir, "push", "--quiet", "--", "origin", `refs/heads/${branch}:refs/heads/${branch}`],
-        { env: credentialEnv(token), stdio: ["ignore", "ignore", "pipe"] },
-      );
+      const built = pushInvocation(dir, branch, token);
+      execFileSync(built.file, [...built.argv], { env: built.env, stdio: ["ignore", "ignore", "pipe"] });
     },
     async openPullRequest(o) {
       const m = GITHUB_REPO.exec(repoUrl);

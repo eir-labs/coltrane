@@ -25,7 +25,8 @@
     "RULING B (the seat, round 10) \u2014 THE START-HEADER SITE, pre-existing since 2597854 and never looked at. src/worker.ts's start-header catch: a 503 on the `running` header is neither `misconfigured` nor `refusedOutright`, so it takes the non-terminal release, WHICH REFUNDS, so the store's cap never trips and nothing at this site counts. A gig-specific 5xx starves its whole organization's queue indefinitely \u2014 the exact defect this PR was opened for, at a second site. The comment there reasons about COST ('nothing has been spent') where the question is BOUNDING. A persistent 5xx on the start header must END the gig or lapse to the store's cap (V11 pins the destination, not the mechanism), and a one-poll 5xx must still be survived (V12), so the cure cannot be 'terminate on the first one'.",
     "RULING ON isPermanentStoreRefusal (round 10): IT STAYS AND EARNS ITS READER. It was exported, documented and threaded through `permanent` into rebuildFromDrain's refusals (src/worker.ts:704, :739, :1050, :1059, :1069) and READ BY NOTHING for a decision since round 8 replaced that logic with `gone`; the grader confirmed an always-true and an always-false plant both survive the whole root suite. Ruling A is precisely the decision it was carried out for: answered 4xx (permanent) \u2192 LAPSE (V2a \u00b7 V2b \u00b7 V9 \u00b7 V10); 5xx / network / no answer \u2192 the COUNTED REFUND (V1 \u00b7 V7 \u00b7 drain_budget B2). Those can only both be green if the code distinguishes them at this site. IMPLEMENTER OBLIGATION: after the cure, re-run both plants \u2014 always-false must red V2a/V2b, always-true must red V1 \u2014 and record both. Round 10 could not measure them because measuring them needs the production code it is forbidden to write; if the cure lands without reading `permanent`, the classifier must be DELETED instead, along with the `permanent` field on fetchDrainedOutputs / fetchDrainedGenomeHash and on the rebuildFromDrain refusal shape.",
     "BREAKING CHANGE FOR DOWNSTREAM, BOOKED IN THE OPEN (round 6c, surfaced in round 10 because it belongs in the PR body rather than buried): genome_store's postgrestQueueGig / rpcQueueGig now THROW on `resumes` or `budget_micro_usd` where they previously dropped them silently (Q1/Q2, tests/gig_runs_once_queue_clients.test.ts). This is intended \u2014 a silently dropped resume is how a resume becomes a cold run \u2014 but it WILL break an external caller that passes either key against a store whose RPC signatures have not been migrated. It needs a line in the PR body and in the release notes.",
-    "ROLLOUT ORDER, UNCHANGED: the drain pin moves only after the status widening (coltrane-ui #253) is live. Until it is, every resuming gig meets the answered 42501 that ruling A is about, and the lapse path is what keeps those gigs alive for the length of the deploy."
+    "ROLLOUT ORDER, UNCHANGED: the drain pin moves only after the status widening (coltrane-ui #253) is live. Until it is, every resuming gig meets the answered 42501 that ruling A is about, and the lapse path is what keeps those gigs alive for the length of the deploy.",
+    "round 12 (founder's ruling, 3 Oct 2026): a venue run is never stopped because time passed \u2014 only a lost lease (E4), an unverifiable lease (F2), the budget (B1) or an abort door stops it; F1 pins that no venue deadline exists and that COLTRANE_GIG_TIMEOUT_MS is not read on that path"
   ],
   "input_refs": [
     "SPEC-worker-contract.md",
@@ -34,7 +35,8 @@
     "src/runtime.ts",
     "src/output_mirror.ts",
     "src/local_queue.ts",
-    "src/run_deps.ts"
+    "src/run_deps.ts",
+    "src/lease.ts"
   ],
   "coverage_map": [
     {
@@ -263,10 +265,10 @@
     },
     {
       "invariant_id": "Q6",
-      "test_name": "Q6 \u2014 the drain deadline ends a gig as aborted/timeout, acknowledged > Q6 the run timeout fires: WorkOnceResult is aborted/timeout, the terminal header says `aborted` (retried to acknowledgement), and nothing reports it failed",
+      "test_name": "Q6 \u2014 on the PLAYER path, the drain deadline ends a gig as aborted/timeout, acknowledged > Q6 the run timeout fires: WorkOnceResult is aborted/timeout, the terminal header says `aborted` (retried to acknowledgement), and nothing reports it failed",
       "test_file": "tests/gig_runs_once_timeout_aborted.test.ts",
       "kind": "behavioural",
-      "drives": "workOnce(ctx, deps) \u2014 src/worker.ts \u2014 the drainTimeoutMs() deadline (src/run_deps.ts) through runGig's abort, WorkOnceResult.aborted, the aborted header",
+      "drives": "workOnce(ctx, deps) \u2014 src/worker.ts \u2014 on the PLAYER path (coltrane_mcp_claim: a thirty-minute lease with no renew door) the drainTimeoutMs('player') deadline (src/run_deps.ts) through runGig's abort, WorkOnceResult.aborted, the aborted header. Round 12: a VENUE run has no deadline (F1).",
       "plant": "let the deadline's abort fall into workOnce's generic catch (status failed, failGig, failed header)"
     },
     {
@@ -995,6 +997,33 @@
       "drives": "workOnce(ctx, deps) \u2014 src/worker.ts, the same START-HEADER catch, with the header route healed after one poll",
       "plant": "GREEN AT HEAD, plant-verified. THE OTHER SIDE OF V11, and the reason the pair is two laws and not one: the cheapest way to make V11 green is to end the gig on the first 503, which is round 6's inversion at a new site. PLANT: `releaseLease(claim.gig_id, error, false, leaseCred)` \u2192 `true` at src/worker.ts:1643 (the start-header site; the identical line at :1503 is the resume site and was NOT touched \u2014 the plant was applied line-scoped and both lines were re-read after).",
       "plant_observed": "\u00d7 V12 \u2026 \u2192 one poll's 503 on the start header: the resuming gig was FAILED \u2026: expected 'failed' not to be 'failed'. tsc --noEmit clean under the plant. Reverted; src/worker.ts sha256 d64b33bb0341f90539c6c823aefe6d971854356bb92d969be4eb34c0e772301d restored."
+    },
+    {
+      "invariant_id": "F1",
+      "test_name": "F1 \u2014 a venue run has no run deadline > F1 with COLTRANE_GIG_TIMEOUT_MS far below the chair's duration and the lease renewing, the gig COMPLETES, and the log says the variable is set and not read",
+      "test_file": "tests/a_venue_run_stops_on_facts_not_on_the_clock.test.ts",
+      "kind": "behavioural",
+      "drives": "workOnce(ctx, deps) \u2014 src/worker.ts \u2014 drainTimeoutMs('venue') (src/run_deps.ts) returning undefined, so no deadline is armed; the heartbeat's renewLease (src/lease.ts); the worker's log line naming the unread variable",
+      "plant": "restore `if (mode === \"venue\") return undefined` \u2192 an env-or-default deadline in drainTimeoutMs (src/run_deps.ts)",
+      "plant_observed": "red: 1 failed (the gig ended aborted/timeout at 20 ms while its chair worked and its lease renewed); reverted, control 3 passed"
+    },
+    {
+      "invariant_id": "F2",
+      "test_name": "F2 \u2014 a lease that cannot be shown held ends the run > F2 renewals failing to LAND for a whole lease window abort the run as LeaseUnverifiable: the chair's signal names the cause, no further chair, nothing terminal written, result `abandoned`",
+      "test_file": "tests/a_venue_run_stops_on_facts_not_on_the_clock.test.ts",
+      "kind": "behavioural",
+      "drives": "workOnce(ctx, deps) \u2014 src/worker.ts \u2014 the heartbeat's leaseConfirmedAt window over WorkOnceDeps.now, renewLease's non-lost failure branch, LeaseUnverifiable (src/lease.ts) through the run's AbortSignal and the LeaseLost `abandoned` path",
+      "plant": "make the window check never fire: `if (sinceConfirmed >= HOSTED_LEASE_MS * 1_000_000)` in the heartbeat (src/worker.ts)",
+      "plant_observed": "red: 1 failed (three beats passed a whole lease window with 503s and the run completed, sealing under a lease it could not show it held); a first plant `if (false && \u2026)` was rejected by tsc and discarded; reverted, control 3 passed"
+    },
+    {
+      "invariant_id": "F3",
+      "test_name": "F3 \u2014 the window is measured from the last renewal that LANDED > F3 renewals that land, then fail twice, leave the run inside its confirmed lease: it keeps running and completes",
+      "test_file": "tests/a_venue_run_stops_on_facts_not_on_the_clock.test.ts",
+      "kind": "behavioural",
+      "drives": "workOnce(ctx, deps) \u2014 src/worker.ts \u2014 `leaseConfirmedAt = now()` on a renewal that landed (renewLease ok), read by the window check on the next failure",
+      "plant": "drop `leaseConfirmedAt = now()` on a landed renewal, so the window is measured from the claim (src/worker.ts)",
+      "plant_observed": "red: 1 failed (a run whose lease had been confirmed 40 minutes earlier was abandoned at the third beat); reverted, control 3 passed"
     }
   ],
   "testing_method": "vitest, example-based and behavioural: every engine law drives workOnce (or runCli / openLocalQueue) through a stubbed global fetch that plays both hosts \u2014 the org store (ctx.baseUrl RPCs) and the drain service (COLTRANE_DRAIN_URL: header, outputs, storage, renew, release) \u2014 statefully, so a re-claim reads what the first worker's acknowledged writes left behind. The heartbeat's clock is injected (WorkOnceDeps.scheduleHeartbeat) and fired from inside the chair invocation; acknowledgement is observed by holding the store's answer back (a delayed Response) and asserting what had resolved when workOnce returned. E8 moves the lease constant with vi.doMock over src/lease.ts and asserts both derived numbers follow. New symbols are reached by variable specifiers and casts so tsc over tests/ stays clean.",
@@ -1030,7 +1059,7 @@
     },
     {
       "path": "tests/gig_runs_once_lease_constant.test.ts",
-      "commit": "947f491bc685edd86dd8e4567b0411c71c08b9ea"
+      "commit": "73d43c5d991fb7172ea48ab02d761dd04a62ccbd"
     },
     {
       "path": "tests/gig_runs_once_local_complete.test.ts",
@@ -1090,7 +1119,11 @@
     },
     {
       "path": "tests/gig_runs_once_timeout_aborted.test.ts",
-      "commit": "947f491bc685edd86dd8e4567b0411c71c08b9ea"
+      "commit": "73d43c5d991fb7172ea48ab02d761dd04a62ccbd"
+    },
+    {
+      "path": "tests/a_venue_run_stops_on_facts_not_on_the_clock.test.ts",
+      "commit": "73d43c5d991fb7172ea48ab02d761dd04a62ccbd"
     }
   ]
 }

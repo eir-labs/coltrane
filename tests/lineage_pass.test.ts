@@ -183,13 +183,14 @@ describe("lineage-pass-v1 — the standard's phase/chair graph", () => {
   it("the external sense seals lineage-hits; the internal sense seals an internal-inventory", () => {
     expect(chairOf("identify-external")?.agent_slug).toBe("lineage-scout-external");
     expect(chairOf("identify-external")?.output_contract).toEqual(["lineage-hit"]);
-    expect(chairOf("identify-internal")?.agent_slug).toBe("lineage-scout-internal");
+    expect(chairOf("identify-internal")?.agent_slug).toBe("john");
+    expect(chairOf("identify-internal")?.turn_budget, "the cap rides the chair now").toBe(30);
     expect(chairOf("identify-internal")?.output_contract).toEqual(["internal-inventory"]);
   });
 
   it("least authority: each identifier holds ONLY its own sensing tools — the grants are disjoint", () => {
     const ext = genome.agents.get("lineage-scout-external")!;
-    const int = genome.agents.get("lineage-scout-internal")!;
+    const int = genome.agents.get("john")!;
     // external senses the web
     expect(ext.allowed_tools).toEqual(expect.arrayContaining(["WebSearch", "WebFetch"]));
     expect((ext.allowed_tools ?? []).some((t) => t.startsWith("mcp__eir-wiki"))).toBe(false);
@@ -236,7 +237,7 @@ describe("lineage-pass-v1 — the standard's phase/chair graph", () => {
 
 describe("the lineage agents clear the behavioral floor for what they do", () => {
   it("both scouts owe retrieval discipline (external substrate) and carry it verbatim", () => {
-    for (const slug of ["lineage-scout-external", "lineage-scout-internal"]) {
+    for (const slug of ["lineage-scout-external", "john"]) {
       const a = genome.agents.get(slug)!;
       for (const s of [...FLOOR, ...RETRIEVAL]) expect(a.constraints, `${slug} missing "${s.slice(0, 40)}…"`).toContain(s);
     }

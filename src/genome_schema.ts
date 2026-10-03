@@ -201,6 +201,24 @@ export type AgentOutput = z.output<typeof AgentSchema>;
 export const ChairSchema = z.object({
   role: z.string(),
   agent_slug: z.string().optional(),
+  /**
+   * A CEILING on what the agent seated here may reach — never a grant.
+   *
+   * Without this, `allowed_tools` lives only on the agent, so two chairs seating one agent get the
+   * identical authority and the only way to give two seats different reach is to author two agents.
+   * That is what grows a repertoire: the default genome's 68 agents collapse to 49 distinct
+   * capability signatures, most differing from a sibling only by their grant.
+   *
+   * The precedent is #174, one field over: a chair already narrows the agent's OUTPUT types, so a
+   * multi-capability agent in a single-purpose chair seals only the promised subset. This is the
+   * same move for what the seat may REACH.
+   *
+   * Direction is the whole point, exactly as for a venue: the effective set is
+   * `agent.allowed_tools ∩ chair.allowed_tools ∩ venue.equipment.tools`, so a standard can only ever
+   * narrow a player, never hand it authority its charter never claimed. Absent = no narrowing.
+   * Resolved by the one shared oracle `seatEffectiveTools` (src/chart.ts).
+   */
+  allowed_tools: z.array(z.string()).optional(),
   skill_slug: z.string().optional(),
   /** The human seat: the chair is an approval office held by a person. No agent, no skill —
    *  the incumbent's sealed verdict is the chair's output, and a gig that reaches this chair
@@ -829,7 +847,17 @@ export const DispatchCapGrantSchema = z.object({
 });
 
 /** A chair cap is a lineage-edge grant or a dispatch grant. One union, one Zod source. */
-export const CapGrantSchema = z.union([EdgeCapGrantSchema, DispatchCapGrantSchema]);
+/** A store verb grant — the mutation authority a chair carries in the store ("org-lift", "force-work-order", …).
+ *  The store has served these since 20260827300000; the engine had no shape for them. The slug's validity is
+ *  the STORE's (its registry is the wall that refuses a dead name); the engine reads what the store sealed and
+ *  resolves nothing at load — it has no verb registry to resolve against, so a load-time check would be a dead
+ *  name one level up. `expires` defaults null because the store's own rows carry `{grant: X}` with no key. */
+export const VerbCapGrantSchema = z.object({
+  grant: z.string().min(1, { message: "a verb grant names its verb" })
+    .refine((g) => g !== "dispatch", { message: "a dispatch grant names its standards" }),
+  expires: z.string().nullable().default(null),
+}).strict();
+export const CapGrantSchema = z.union([EdgeCapGrantSchema, DispatchCapGrantSchema, VerbCapGrantSchema]);
 
 /** The chair is the thing: the seat's configuration, not a person. */
 export const InstitutionalChairSchema = z.object({

@@ -130,11 +130,55 @@ export function resolveWorkingRepo(
   claim: { input?: unknown; repo_url?: string | null | undefined },
   explicitRepoUrl: string | undefined = undefined,
 ): string | null {
-  const typed = (claim.input as { repository?: unknown } | undefined)?.repository;
-  if (typeof typed === "string" && typed.trim().length > 0) return typed;
+  const typed = typedInputField(claim.input, "repository");
+  if (typed !== null) return typed;
   if (typeof explicitRepoUrl === "string" && explicitRepoUrl.trim().length > 0) return explicitRepoUrl;
   const orgDefault = claim.repo_url;
   return typeof orgDefault === "string" && orgDefault.trim().length > 0 ? orgDefault : null;
+}
+
+/**
+ * A typed input field, read where a typed input actually arrives. A gig's `input` is keyed by TYPE
+ * SLUG ({"change-request": {...}}) — the hosted dispatch refuses a bare payload as MissingGigInput —
+ * so a field "in the typed input" sits one level down. The top level is read first (a bare payload,
+ * a test), then each object one level down, first match. A non-string or an empty string is not a
+ * value. (3 Oct 2026: `repository` had been read at the top only, and so was never reached for a
+ * real dispatch; the org default answered instead.)
+ */
+export function typedInputField(input: unknown, field: string): string | null {
+  const str = (v: unknown): string | null => (typeof v === "string" && v.trim().length > 0 ? v.trim() : null);
+  if (!input || typeof input !== "object") return null;
+  const top = str((input as Record<string, unknown>)[field]);
+  if (top !== null) return top;
+  for (const v of Object.values(input as Record<string, unknown>)) {
+    if (v && typeof v === "object" && !Array.isArray(v)) {
+      const inner = str((v as Record<string, unknown>)[field]);
+      if (inner !== null) return inner;
+    }
+  }
+  return null;
+}
+
+/**
+ * THE BASE A CHANGE-SET IS MEASURED FROM — `change_set_base` on the typed input, read the same two
+ * ways as `repository`. Null when the request carries none: then the seat's own base must already be
+ * in the tree, or the seal refuses `base_not_in_tree`. prepareWorkspace fetches a named base into the
+ * shallow clone while the gig's credential is in hand; nothing later in the run holds that credential.
+ */
+export function resolveChangeSetBase(claim: { input?: unknown }): string | null {
+  return typedInputField(claim.input, "change_set_base");
+}
+
+/**
+ * A git revision the engine will hand to git as a POSITIONAL argument. Conservative on purpose: a
+ * full or abbreviated sha, a tag or branch name, `HEAD~3` — and nothing that git could read as an
+ * option (a leading dash: `--depth=999999` after `origin` un-shallows the clone; `--upload-pack=…`
+ * names a program), nothing with whitespace, nothing with `..` (a range, not a commit). The grade of
+ * coltrane#575 found the option injection; this is the wall, at every place a base reaches git.
+ */
+export const SAFE_GIT_REV = /^[A-Za-z0-9][A-Za-z0-9._\/~^-]{0,255}$/;
+export function isSafeGitRev(rev: string): boolean {
+  return SAFE_GIT_REV.test(rev) && !rev.includes("..") && !rev.endsWith("/") && !rev.endsWith(".lock");
 }
 
 /**
@@ -185,6 +229,9 @@ export type AssembleRunDepsArgs = Pick<
   mcpServerConfigs: Readonly<Record<string, unknown>> | undefined;
   /** The repository this run operates on, already resolved via `resolveWorkingRepo`. Null → not threaded. */
   repoUrl?: string | null | undefined;
+  /** The commit a change-set is measured from (change_set_base on the typed input), threaded to the
+   *  realizer exactly as repoUrl is, so a room's tree is prepared the same way the drain's is. */
+  changeSetBase?: string | null | undefined;
 };
 
 export function assembleRunDeps(args: AssembleRunDepsArgs): RunDeps {
@@ -207,6 +254,7 @@ export function assembleRunDeps(args: AssembleRunDepsArgs): RunDeps {
     ...(args.venueRealizer ? { venueRealizer: args.venueRealizer } : {}),
     ...(args.placementResolver ? { placementResolver: args.placementResolver } : {}),
     ...(args.repoUrl ? { repoUrl: args.repoUrl } : {}),
+    ...(args.changeSetBase ? { changeSetBase: args.changeSetBase } : {}),
     // The address-stamping tree (records-by-address): the directory whose git objects the seal reads
     // to stamp a red-spec's `laws` / a change-set's `changes`. Supplied per door — the server/CLI
     // name the repository root the server was bootstrapped with, the drain its working clone — and

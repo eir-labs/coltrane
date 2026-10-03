@@ -46,7 +46,7 @@ import { standardSimulate } from "./simulate.js";
 import { planSeats } from "./seat_plan.js";
 import { resolveSealedInputs } from "./sealed_inputs.js";
 import { runGig, outputSatisfiesType, BudgetExhausted, GigAborted, ResumeRefused, partialGigUsage, partialBudgetState, partitionGigInputKeys, unknownGigInputMessage, type AgentInvoker } from "./runtime.js";
-import { assembleRunDeps, resolveWorkingRepo } from "./run_deps.js";
+import { assembleRunDeps, resolveWorkingRepo, resolveChangeSetBase } from "./run_deps.js";
 import { createCheckpointStore, createReuseStore, type CheckpointStore, type ReuseStore } from "./reuse.js";
 import { killLiveChairChildren, type SeatAsker } from "./claude_invoker.js";
 import { selectChairInvoker } from "./invoker_selection.js";
@@ -64,6 +64,7 @@ import {
   type CallerIdentity,
   type VenueCredentialGrant,
 } from "./venue_credential.js";
+import { ttlHoursOrRefusal, mayDispatchOrRefusal, issuedOrError, type IssueAgentTokenResult, type IssueAgentTokenArgs } from "./agent_token.js";
 import type { HireMemberResult } from "./org_hire.js";
 import { composeStandard, defineAgent, CompositionError, type Standard, type Agent, type AgentDef, type PhaseDef } from "./composition.js";
 import { PRIMITIVE_OUTPUT_TYPE, type Primitive } from "./core_types.js";
@@ -1609,6 +1610,8 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
           toolProviders: deps.toolProviders, mcpServerConfigs: deps.mcpServerConfigs, // dispatch preflight resolves against the invoker's environment
           venue, venues: deps.venues, venueRealizer: deps.venueRealizer,
           repoUrl: dispatchRepoUrl,
+          // the base beside the repository, as on the drain (the base is in the tree; the grade's F2b)
+          changeSetBase: resolveChangeSetBase({ input: gigInput }) ?? undefined,
           // The address-stamping tree (records-by-address): the repository root this server was
           // bootstrapped with. The CLI reaches this same door through `dispatchTool`, so its stamps
           // resolve against the bootstrapped root too. Never process.cwd(): absent genome_dir → no
@@ -2364,7 +2367,33 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
           ? `counts are SHORT: ${damaged.join(" and ")} — every total below is computed over the rows that parsed. ` +
             `Note the output store's report also covers the refs graph, which feeds only \`refs\`; if the damage is ` +
             `confined there the other totals may in fact be whole.`
-          : `no unreadable line was found (ledger: ${ledger_integrity.entries} entries; output store: ` +
+          : // A CHECK NOT PERFORMED IS NOT A CHECK THAT PASSED. `ok` is true both when an artifact was read
+            // and found whole AND when there was no artifact to read: MemoryLedger returns ok:true with an
+            // EMPTY PATH by construction (src/ledger.ts) — honest about itself, and indistinguishable here.
+            // Saying "no unreadable line was found" on a memory-backed surface states a finding nobody
+            // looked for, which is a green that cannot go red. The empty path is the signal, so it is what
+            // this branches on. Held by tests/the_tracked_ledger_parses.test.ts (P4).
+            ledger_integrity.path === ""
+            ? `this ledger holds no artifact to check (in-memory; ${ledger_integrity.entries} entries this ` +
+              `process), so nothing is claimed about unreadable lines. Output store: ` +
+              `${outputs_integrity.scanned} jsonl file(s) scanned${outputs_integrity.ok ? "" : " — see its corruption report"}.`
+            // THIRD STATE, and the one that matters operationally. FileLedger.read() returns empty when the
+            // path does not exist, so integrity() answers ok:true with a REAL path and zero entries — which
+            // took the branch below and claimed a line had been looked for in a file that was never created.
+            // A drain that has never written a row then reports IDENTICALLY to a healthy one: a box that looks
+            // fine and has done nothing. Measured against a .coltrane/ledger.jsonl whose directory did not exist.
+            //
+            // NOTE, owed: this is the SECOND inference drawn off `path` as a sentinel (empty ⇒ no backing; set
+            // but missing ⇒ never written). LedgerIntegrityReport has no way to say "not applicable", so every
+            // consumer must re-derive applicability the way this one does, and the next consumer reproduces the
+            // bug with nothing to warn it. The type should carry an explicit state; that is a surface change and
+            // is recorded as owed rather than done here. The absent-file case IS the evidence it is a defect and
+            // not a preference — under an enumerated state it would have fallen out for free.
+            : !existsSync(ledger_integrity.path)
+              ? `the ledger artifact at ${ledger_integrity.path} DOES NOT EXIST — nothing has been written to it, ` +
+                `so no line was looked for and none is reported. This is not a clean ledger; it is an absent one. ` +
+                `Output store: ${outputs_integrity.scanned} jsonl file(s) scanned.`
+              : `no unreadable line was found (ledger: ${ledger_integrity.entries} entries; output store: ` +
             `${outputs_integrity.scanned} file(s) scanned). That is NOT proof the counts are complete — a jsonl ` +
             `truncated at a line boundary loses whole rows without leaving a parse error, and an in-memory ledger ` +
             `or a store with no persistDir has nothing to scan at all.`;
@@ -2903,7 +2932,8 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         // a harmonic (type-graph) or creative (identity/method) change does not.
         const base = args["base"] as AgentProfile | undefined;
         const next = args["next"] as AgentProfile | undefined;
-        const new_version = Number(args["new_version"] ?? ((base?.version ?? 0) + 1));
+        let new_version = Number(args["new_version"] ?? ((base?.version ?? 0) + 1));
+        let parent_version: number | undefined = base?.version;
         if (base && next) {
           const change = proposeAgentChange(base, next);
           // For a creative-space change, return the lineage-threaded evolved profile
@@ -2959,6 +2989,12 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
           } else {
             return { ok: false, requires_approval: approval, error: `agent_evolve: unknown agent "${evolveSlug}" (no agents/${evolveSlug}.json)` };
           }
+          // THE DEFAULT VERSION IS THE LOADED BASE'S PLUS ONE (the grade of #578, note e). This path
+          // never carries `args.base`, so the default above read `(undefined ?? 0) + 1 = 1` whatever the
+          // loaded definition's version was — and a hosted upsert at version 1 is the in-place write
+          // this change exists to end. An explicit new_version still wins.
+          parent_version = Number((currentDef as { version?: unknown }).version ?? 1);
+          if (args["new_version"] === undefined || args["new_version"] === null) new_version = parent_version + 1;
           const nextDef = { ...currentDef, ...changes };
 
           // The agent must still be a legal composition on its own…
@@ -3016,7 +3052,7 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
           deps.agents?.set(evolveSlug, sealed.agent);
           return {
             ok: true, requires_approval: approval,
-            data: { new_version, evolved: sealed.agent, next_def: nextDef, content_hash: sealed.content_hash, effective_hash: sealed.effective_hash, cascade_check: { agents_affected: [], standards_affected } },
+            data: { new_version, parent_version, evolved: sealed.agent, next_def: nextDef, content_hash: sealed.content_hash, effective_hash: sealed.effective_hash, cascade_check: { agents_affected: [], standards_affected } },
           };
         }
         return { ok: true, requires_approval: approval, data: { new_version, cascade_check: { agents_affected: [], standards_affected: [] } } };
@@ -3768,6 +3804,25 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
           },
         };
       }
+      case "agent_token_issue": {
+        // NOT the live path — issuance is intercepted in callSurfaceTool (which holds the caller
+        // identity and the deps.issueAgentToken backend that dispatchTool never receives). This block
+        // exists, like org_hire's, so the verb's advertised schema has a matching handler that reads
+        // exactly its four arguments (advertised_args_are_read.test.ts); it sits BEFORE org_hire so
+        // venue_credential_mint stays the LAST case. Reaching it at runtime means the surface
+        // interception was bypassed — answer honestly rather than pretend a token was issued.
+        const org_slug = String(args["org_slug"] ?? "");
+        const agent_slug = String(args["agent_slug"] ?? "");
+        const may_dispatch = args["may_dispatch"];
+        const ttl_hours = args["ttl_hours"];
+        return {
+          ok: false, refusal: "no_backend", requires_approval: approval,
+          error:
+            `agent_token_issue is served by the tool surface (createToolSurface), which wires the caller ` +
+            `and the deps.issueAgentToken backend; the bare dispatcher cannot issue for agent "${agent_slug}" ` +
+            `in org "${org_slug}" (may_dispatch ${JSON.stringify(may_dispatch ?? [])}, ttl_hours ${String(ttl_hours ?? "")}). Call it through the surface.`,
+        };
+      }
       case "org_hire": {
         // NOT the live path — admission is intercepted in callSurfaceTool (which holds the caller
         // identity and the deps.hireMember backend that dispatchTool never receives). This block
@@ -3910,6 +3965,14 @@ export interface ToolSurfaceDeps extends ServerDeps {
    *  — the verb still answers, it never throws. ADMISSION IS NOT AUTHORITY: this seam admits, and no
    *  capability travels through it. */
   hireMember?: ((args: { org_slug: string; agent_slug: string }) => Promise<HireMemberResult>) | undefined;
+  /** Deployment-wired standing-token issuance: mint a ctk_ agent token for an agent seated in an
+   *  org (the store's coltrane_issue_agent_token, which gates on an authenticated human member).
+   *  Parallel to hireMember — the engine ships the verb, its schema, its shape validation and its
+   *  refusals (an agent token may not issue one; a TTL the store cannot express is refused, not
+   *  rounded); the deployment ships the mint. Resolves to a TYPED struct so the store's codes
+   *  survive the seam: `not_a_member`, `not_named`. Without it, agent_token_issue is an honest typed
+   *  refusal (`no_backend`). The token is returned ONCE and never sealed to the ledger. */
+  issueAgentToken?: ((args: IssueAgentTokenArgs) => Promise<IssueAgentTokenResult>) | undefined;
 }
 
 export interface SurfaceTool {
@@ -4030,6 +4093,61 @@ async function callSurfaceTool(
     //     (that is the room contract's job, checked by realize before dispatch). The grant is the
     //     answer, returned exactly once; the engine does not persist it and there is no read-back.
     return { ok: true, data: grant };
+  }
+  if (slug === "agent_token_issue") {
+    // The engine half of a standing agent token: three engine-decided refusals around whatever mint
+    // a deployment injects. Intercepted here (like venue_credential_mint and org_hire) for ALL
+    // callers, BEFORE the hosted check. Args are read by DOT access for the reason org_hire's are:
+    // the advertised_args_are_read parser slurps the last dispatchTool case's tail, and a bracket
+    // read here would be counted against venue_credential_mint.
+    const org_slug = String(args.org_slug ?? "");
+    const agent_slug = String(args.agent_slug ?? "");
+    // (a) AN AGENT TOKEN MAY NOT ISSUE AN AGENT TOKEN. A one-sitting credential minting a standing
+    //     one is an escalation no store-side gate catches; decided from caller identity ALONE, before
+    //     the backend is reached. Absent caller (a bare surface) fails closed.
+    if (deps.caller?.kind !== "member") {
+      return {
+        ok: false,
+        refusal: "not_a_human_member",
+        error:
+          "only a human member may issue an agent token: this caller presented an agent token, and a " +
+          "one-sitting credential may not mint a standing one. Issue it from a member session.",
+      };
+    }
+    // (b) A TTL the store cannot express is refused by name, never rounded.
+    const ttl = ttlHoursOrRefusal(args.ttl_hours);
+    if ("refusal" in ttl) {
+      return { ok: false, refusal: ttl.refusal, error: ttl.error };
+    }
+    const md = mayDispatchOrRefusal(args.may_dispatch);
+    if ("refusal" in md) {
+      return { ok: false, refusal: md.refusal, error: md.error };
+    }
+    // (c) No backend wired → the verb answers, naming the seam.
+    if (!deps.issueAgentToken) {
+      return {
+        ok: false,
+        refusal: "no_backend",
+        error:
+          "no issuing backend is wired on this surface — agent_token_issue ships its schema and " +
+          "refusals, but a deployment supplies the mint. Wire deps.issueAgentToken (parallel to " +
+          "deps.hireMember) over the store's coltrane_issue_agent_token.",
+      };
+    }
+    // (d) Issue, then carry the store's typed answer back. Membership and naming are the store's
+    //     facts; the engine never checks them. The token is returned ONCE and sealed nowhere.
+    let issued: IssueAgentTokenResult;
+    try {
+      issued = await deps.issueAgentToken({ org_slug, agent_slug, may_dispatch: md.may_dispatch, ttl_hours: ttl.ttl_hours });
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : String(e) };
+    }
+    if (issued && typeof issued === "object" && issued.ok === false) return { ok: false, refusal: issued.code };
+    // A success the deployment answers must BE a credential: a ctk_ token and its key. A typed contract
+    // violated upstream is answered as a failure here, never forwarded as ok:true with nothing in it.
+    const shape = issuedOrError(issued);
+    if (!shape.ok) return { ok: false, error: shape.error };
+    return { ok: true, data: { key_id: shape.key_id, org_slug, agent_slug, expires_at: shape.expires_at, agent_token: shape.agent_token } };
   }
   if (slug === "org_hire") {
     // The engine half of org admission: the two engine-decided refusals and the ledger seal around
@@ -4268,6 +4386,15 @@ async function callSurfaceTool(
         : args;
     const payload: Record<string, unknown> = {};
     for (const k of up.keys) if (source[k] !== undefined) payload[k] = source[k];
+    // A VERSION REPORTED IS A VERSION RECORDED (3 Oct 2026). agent_evolve answers `new_version`
+    // and the merged definition carries the BASE's version (or none), so the store's upsert
+    // matched the existing row and updated it in place — three times in one day the surface
+    // reported v2 and the store held v1. The payload carries the version the handler reported;
+    // the store lands a new row and retires the prior by its own supersede rule.
+    if (slug === "agent_evolve" && result.data && typeof result.data === "object") {
+      const nv = (result.data as Record<string, unknown>)["new_version"];
+      if (typeof nv === "number" && Number.isFinite(nv)) payload["version"] = nv;
+    }
     try {
       await deps.store.upsert(up.cls, payload);
     } catch (e) {

@@ -29,67 +29,160 @@ cd "$(dirname "$0")/.."
 # stopped being true at Node 24), and two pure flag-string laws replaced it in this band. The nine
 # laws that need a real request moved to tests/security — a band may reach out, the root suite may
 # not — so they are counted there, by file, not here.
-EXPECTED_LAWS="${EXPECTED_LAWS:-4429}"   # 4425 → 4429: round 10 answers the grade on 8b1cf30. +4 in resume_unreadable — V9 (the window is a DEPLOY, not a retry: V2a widened the store at poll 2, so its fixture could not contain the poll-3 termination the counted refund causes on the live store), V10 (the lapse path's survival bound written down as a number: STORE_MAX_ATTEMPTS × HOSTED_LEASE_MS, floored at a deploy and capped so "bounded" cannot become "never"), V11 and V12 (THE START-HEADER SITE, pre-existing since 2597854: a persistent 5xx on the `running` header takes the non-terminal release, WHICH REFUNDS, so nothing bounds it and a healthy gig behind it never runs — and V12, its other side, so the cure cannot be "terminate on the first one"). V2a/V2b are AMENDED in place (the answered 42501 lapses instead of refunding) and are not counted. # 4422 → 4425: round 9 writes the two plants that SURVIVED round 8's mutation test — V7 (outputs-empty AND status-unreadable on one poll: the corner U2/V3/V4/V5 all miss) and V8a/V8b (the LAPSE hand-back, pinned at both sites, where V3/V4/V5 asserted only survival). # 4418 → 4422: round 7 re-points the resume-unreadable band (7 laws → 11). Round 6's 4×U2 + 2×U3 + U4 collapsed (isPermanentStoreRefusal reads only e.status, so no src mutation could red `refuse` without `unseated`); they are replaced by U2-gone, U3, V1, V2a, V2b, V3×3, V4, V5, V6, each falsifiable on its own.
-#   +6 gig-runs-once round 6g (review 5327331488), on fe5ffb3: drain_budget B2 narrowed to TRANSIENT read failures
-#      (-2 42501 cases, +1 network error); resume_unreadable (new file, +7) — U2 a PERMANENTLY unreadable resume
-#      (scope 42501, unseated agent 42501, outputs 42501, closed gig gone) terminates the gig: failed, named, no
-#      refund; U3 the queue advances past it; U4 a persistent transient failure still ends (the attempts cap).
-#  merge of main (#559 genome-writes-stay-in-root, with #556/#558: 4310 in 440) into #554 (gig-runs-once: 4334 in 460),
-#  4334 + 78 (main moved 4232 → 4310 since the last merge) = 4412 laws, 462 files, read from the run (bash scripts/laws.sh).
-#  merge of main (#557 + #556: 4232) into #554 (gig-runs-once: 4295), both from 4193: 4193 + 102 + 39 = 4334, read from the run.
-#   +2 gig-runs-once round 6f, on 7b554e6: drain_budget B1c (the ceiling gates each chair INSIDE a phase, not just
-#      the phase start) and B1f (integer micro-dollars: 0.3+0.3+0.3 USD reaches a 900000 ceiling; a float compare
-#      lets a fourth chair run). Both green at head, red under their plants.
-#   +8 gig-runs-once round 6e, on 0fdc905 (review 5326586074): drain_budget (new file, 6) — B1 the claim's
-#      budget_micro_usd is the drain's ceiling (batch-boundary, settled spend), no budget = unbounded; B2 a
-#      `resumes` claim whose closed gig cannot be read (42501 / 500 / no answer / outputs 42501) is refused and
-#      released non-terminally, never run cold. hosted_dispatch H6 (2) — unknown budget.* keys and a raw
-#      `resumes` argument are refused by name (the review's two non-equivalent surviving plants).
-#   +2 gig-runs-once round 6d, on efd10a1: real_store A2 (workOnce and `coltrane work`) — a drain key with no
-#      COLTRANE_DRAIN_URL makes NO claim; it refuses at startup naming the variable. RED at efd10a1.
-#  +16 gig-runs-once round 6c, on 2597854: hosted_dispatch H4 loses `budget` (-1: coltrane-ui #253 carries it now)
-#      and gains H5 (+10: budget.max_usd -> integer budget_micro_usd, exact; >6 decimals / negative / non-finite /
-#      non-number refused by name; absent -> no key); queue_clients (new file, +6: postgrestQueueGig/rpcQueueGig
-#      send or refuse resumes/budget_micro_usd, never drop them; absent -> no key); real_store A1 (+1: a drain key
-#      with no COLTRANE_DRAIN_URL refuses the run). room_workspace_populated now sets COLTRANE_DRAIN_URL.
-#   +8 gig-runs-once round 6b, from review 5326196799 at 2d4e7ab: real_store (new file) — D1 a resuming gig never
-#      re-pays for the closed gig's seals under the REAL scope rules; D2 player mode stops under its 30-minute lease;
-#      D3 (x3) any refusal of the start header, in the drain service's real shape (400 {error}, no code), stops the
-#      run; S2-S4 the review's surviving plants. The fixture enforces the store's gig-token scope as the coltrane-ui
-#      follow-up defines it (status + outputs readable for exactly the resumed gig; writes own-gig only).
-#  +21 gig-runs-once round 6, RED at 2d4e7ab: hosted_dispatch (new file) — the HOSTED gig_dispatch branch
-#      (createToolSurface, deps.queueGig): H1 a closed gig's resume queues resumes:<old id>, never resume_gig_id
-#      (x4); H2 an open gig's resume is refused (x3); H3 a store that throws / never answers / is not wired
-#      refuses (x3); H4 only host-contract arguments reach queueGig and every other advertised one is refused
-#      by name (1 + x10).
-#   +9 gig-runs-once round 5, on 30183e1: resumed_reclaim (1, new file — a resumed gig re-claimed on a
-#      fresh box rebuilds from the closed gig's seals AND its own; RED at head), store_decides (8, new file —
-#      R5.2 a store that throws/never answers refuses the resume (the never-answers half RED at head), R5.3 the
-#      closed set is complete (completed/cancelled closed; running/queued/awaiting_approval open), R5.4 the
-#      real rpcGigStatus drives the decision).
-#   +4 gig-runs-once round 4, on the implementation (16b00dc): late_answer (1, new file — an answer arriving
-#      after a lost lease is never sealed; the chair ignores the abort), local_complete +1 (a stale holder of
-#      a REQUEUED row is refused), timeout_aborted +1 (Q6r — the aborted header carries manifest.abort_reason
-#      "timeout" as a field), closed_by_store (1, new file — with a store present, the store's status decides
-#      whether a gig is closed for G4, never only the checkpoint). Q6r and L4 are RED until implemented.
-#   +2 gig-runs-once G4, RED: terminal_resume gains the ABORTED case of the gig_dispatch resume law (+1), and
-#      claim_resumes (1, new file) — a hosted claim carrying resumes:<old id> runs under its own id, takes the
-#      closed gig's drained seals as inputs by reference, pays for no sealed chair, writes nothing under the old id.
-#   +7 gig-runs-once round 3, RED: heartbeat_window (2, G1 — armed until the terminal header is
-#      acknowledged; a renew refused in that window suppresses the terminal write), release_after_outcome
-#      (3, G2 — no release once the outcome is decided; REFUND — after the first chair every release is
-#      terminal), timeout_aborted (1, Q6 — the drain deadline ends a gig aborted/timeout, acknowledged),
-#      terminal_resume (1, G4 — gig_dispatch resume of a FAILED gig is a NEW gig with resumes:<old id>,
-#      the old seals entering as inputs by reference; nothing written under the old id — founder ruling).
-#   +5 gig-runs-once round 2, RED: gig_runs_once_outputs_first (3, E9 — outputs acknowledged before the
-#      completed header) and gig_runs_once_refused_header (2, E10 — a start header refused with 23514 or
-#      403/42501 stops the worker). E3/E5 reconciled with the store route (coltrane-ui #250): the body is
-#      {p_gig_id[, p_reason, p_terminal]} and the instance rides X-Coltrane-Instance only.
-#  +18 gig-runs-once battery, committed RED (docs/specs/gig-runs-once.red-spec.json): seven new files,
-#      tests/gig_runs_once_*.test.ts — E1 start header (1), E2 terminal writes acknowledged (5), E3/E4
-#      heartbeat + lost lease (3), E5 release never hold (3), E6 re-claim finishes without re-running (2),
-#      E7 local complete() holder check (2), E8 one lease constant (2). All 18 fail until the engine half
-#      lands; this script refuses a red suite, so it goes green with the implementation, not before.
+#   +7 chair_spend_names_its_agent (new file) — a chair_spend row records the AGENT that spent, not
+#       only the role. P1 is the write path, P2 holds attribution across the exact mutation that
+#       destroys it today (renaming every role), P3 is the validator so a hand-rolled row cannot omit
+#       it. Measured motive: of 250 real chair_spend rows on the author's run ledger, 126 could not be
+#       joined to any agent because their roles no longer exist in standards/.
+#   +12 chair_narrows_what_it_may_reach (new file) — a chair is a CEILING on what the agent seated in
+#       it may reach, so one agent in two chairs holds two authorities. C1 the narrowing and the
+#       never-grants direction, C2 the point (two seats, one player, different reach), C3 chair ∩ venue
+#       compose and venueEffectiveTools IS the same oracle with no chair, C4 a ceiling that reaches
+#       nothing is a dead chair refused at COMPOSE time, C5 the narrowed set reaches the INVOCATION.
+#       Two plants: cut the ctx wire -> 2 red; invert the ceiling into a grant -> 8 red.
+#   -17 one seat, many chairs: context-reader, deploy-scout and lineage-scout-internal are RETIRED into
+#       john, which they were capability-identical to (SENSE+INTERPRET, tier standard, code read, the
+#       identical [Read, Glob, Grep] grant). The genome behavioral floor is data-driven over agents/, so
+#       three fewer agents is 21 fewer floor laws; +4 new assertions on the five re-seated chairs pin
+#       that each carries the turn_budget the retired agent used to hold (chair > agent resolution).
+#       +1 (found in a non-author review): the FIFTH re-seated chair, preview-deploy-v1/sense-branch, was the
+#       one left unasserted. It matters because john carries max_tool_calls 260, so a chair that
+#       silently failed to carry deploy-scout's 24 would not fail loudly — it would hand a narrow
+#       branch read ten times the headroom it needs. All five are now pinned.
+#       A DECREASE is the honest direction here: the laws that went away were laws about definitions
+#       that no longer exist, not coverage that was dropped.
+#   +21 the pr-review trio (pr-review-v1): the genome behavioral floor is data-driven over agents/,
+#       so pr-surveyor, pr-dimension-reviewer and review-adjudicator each add the 7 floor laws every
+#       genome agent answers (method shape, identity, owed constraint families, a real grant, a turn
+#       cap, grant/code_tool_access agreement). No new test FILE, so EXPECTED_FILES is unchanged.
+#   +10 the_tracked_ledger_parses (new file) — the COMMITTED genome/ledger.jsonl becomes the SUBJECT of
+#       a law, not just the capability that reads it. The engine could already detect a torn ledger
+#       (FileLedger.read collects a LedgerCorruption per bad line, integrity() returns them, #255 wired
+#       system_health to surface it) and all of that is tested — against tmpdir FIXTURES. Nothing was
+#       pointed at the artifact that ships. P1 calls the engine's own integrity() on this repo's ledger
+#       and names any unreadable line; P2 states the scope (parse-validity, NOT completeness — a jsonl
+#       truncated at a line boundary is clean and short, as system_health itself says); P3 keeps a
+#       memory ledger's report distinguishable from a file one; P4 is the fix — system_health no longer
+#       says "no unreadable line was found" when it read NO artifact. Plants: a conflict marker -> 3 red
+#       with the line named, a bare `42` -> 3 red, a row with an undeclared kind -> 1 red (shape law
+#       only, correctly), removing the empty-path branch -> 2 red.
+#       +4 (found in a non-author review): THREE states, not two. FileLedger.read() returns empty for a
+#       path that does not exist, so integrity() answers ok:true with a REAL path — which took the
+#       clean branch and claimed a line was looked for in a file never created. A drain that has never
+#       written a row then reads identically to a healthy one. P5 pins all three apart.
+#   +9 agent_token_issue_is_governed (new file) — the verb that issues a STANDING agent token, the
+#       credential a reconciler holds between sittings (spec.order-lifecycle.transition-law R23;
+#       measured 3 Oct: every token the reconciler ever held was a one-sitting gig-token and no verb
+#       issued a standing one). On the surface; schema = the store's mint and nothing a capability
+#       could travel on; refusals closed; an agent token may not issue one (before any backend); no
+#       backend named (hosted too, ahead of the hosted check); a TTL the store cannot express refused
+#       by name, never rounded; the store's codes survive the seam; returned ONCE, sealed nowhere;
+#       may_dispatch passes through as slugs only. 4403 + 9 = 4412.
+#   +1  after the non-author grade (D3, D5): a malformed may_dispatch is refused by name (bad_may_dispatch),
+#       never narrowed to []; a success the backend answers must BE a credential (a ctk_ token and its key)
+#       or it is answered as a failure, never forwarded as ok:true with nothing in it. 4412 + 1 = 4413.
+#   +6 the_base_is_in_the_tree (new file) — a change-set names the commit it is measured from, and the
+#       tree holds it (spec.order-lifecycle.transition-law R27: the receipts of DELIVERED work). The
+#       drain clones one commit deep, so a base that is not HEAD was not in the tree and the seal died
+#       inside git. change-request carries change_set_base; both resolvers read the typed input at the
+#       top AND one level down (a dispatched gig's input is keyed by type slug — `repository` was never
+#       reached for a real dispatch); prepareWorkspace fetches the named base while the credential is
+#       in hand; stampChangeAddresses refuses base_not_in_tree by name; cloneInto refuses
+#       base_not_in_origin by name. 4413 + 6 = 4419.
+#   +1  after the non-author grade (F1): a base is a revision, never an option — a value git could read
+#       as an option (`--depth=999999` after `origin` un-shallows the clone; `--upload-pack=…` names a
+#       program) is refused bad_base by name before git sees it, in the clone and at the seal, and
+#       `--end-of-options` is pinned on fetch, cat-file and diff. 4419 + 1 = 4420.
+#   +1  the grade's F2: the room-realization path threads the base exactly as the drain's does —
+#       worker → RunDeps.changeSetBase → the realizer's prepare(base) — so a room's tree and the drain's
+#       are the same thing prepared the same way. 4420 + 1 = 4421.
+#  +10  the_store_genome_has_a_base (new file) — the store genome gets a base (3 Oct): the store genome had
+#       nothing under it, so an org copied every engine agent its standards named, and the day one copy
+#       was incomplete the drain refused every gig in the org at claim time ("references unknown agent
+#       john", 3 Oct). L0 the engine knows its own root; L1 the measured negative pinned by name; L2 the
+#       base under the rows composes; L3 an org row overrides a base slug; L4 two ORG rows still refuse;
+#       L5 base standards and types are inherited; L6 a draft does not displace the base; L7 rooms and
+#       charts are not folded; L8/L9 both store backings read the base by default. 4421 + 10 = 4431.
+#   +1  after the non-author grade (note 1): a broken packaged base is NAMED — its load errors ride into
+#       the effective genome as loadLayeredGenome carries every layer's — not inferred from the
+#       downstream "references unknown agent" symptom (L10). 4431 + 1 = 4432.
+#   +7  a_retired_standard_is_not_a_duplicate (new file) — the standards branch gets the skills rule:
+#       retired/superseded rows are not rooms; deprecated stands; the highest version per slug wins; two
+#       rows at one version refuse naming both; drafts stay apart. Measured 3 Oct: the governed upsert
+#       retired a v1 beside its active v2 and the loader reported the slug as a duplicate, refusing the
+#       org's drain over a version history. 4432 + 7 = 4439.
+#   +3  after the non-author grade: the same rule for AGENTS (retired v1 + active v2 is a history, L8; a
+#       same-version clash refuses naming both, L9) and a version that is not a number is refused by name in
+#       every branch rather than winning or vanishing by row order (L10). 4439 + 3 = 4442.
+#   +6  a_lineage_record_names_its_forebear (new file) — lineage-record v3: the record may NAME its forebear
+#       as a closed object, so a store can land the forebear from the record rather than infer it from
+#       external_body fields the closed v2 shape never carried (a store door's grade found the phantom). 4442 + 6 = 4448.
+#   +2  an_evolution_is_a_version (new file) — the hosted agent_evolve upsert carries the version it reports;
+#       the store had updated v1 in place three times in one day while the surface answered v2, v3. 4448 + 2 = 4450.
+#   +1  after the grade (note e): the DEFAULT new_version is the loaded base's + 1 — the (slug, changes) path
+#       never carries args.base, so the default was 1 whatever the base's version (L3: a v3 base → v4). 4450 + 1 = 4451.
+#   +1  spec_reside_router — the work-order-dispatch call sends the door's parameter names (p_…); the bare
+#       names were refused PGRST202 by the store on the first dispatch through the served surface. 4451 + 1 = 4452.
+EXPECTED_LAWS="${EXPECTED_LAWS:-4571}"   # 4452 (main) + 119 (work/gig-runs-once, rounds 1–11): the collected count after merging main at ace70d8, every law green
+#   +3 blob_sha_refuses_rather_than_seals (new file) — the three refusals of `blobShaOfFile`, which
+#      had no law that could red them. Measured on the grade: with BOTH mid-read length refusals
+#      deleted, all 21 blob laws stayed green; with the `!stat.isFile()` refusal deleted, all 21
+#      stayed green — B7's only non-regular file was a DIRECTORY and its `/blob_sha_unhashable|EISDIR/`
+#      alternation was satisfied by the EISDIR `readSync` raises on a directory fd whether the guard
+#      existed or not. R1/R2 inject the size (`fstatSync` mocked to under- or over-report ONE call,
+#      passthrough otherwise) rather than racing a growing file: the grade's race returned 9 clean /
+#      5 refusals / 0 torn over 14 attempts, which proves the guard fires and would make a flaky law.
+#      R3 drives /dev/null — a FIFO blocks in `open` and a unix socket cannot be opened at all, while
+#      a character device opens, and with the guard deleted returns git's EMPTY BLOB: a plausible
+#      stand-in sealed as an address. Plants, each observed red then reverted: delete the `read > size`
+#      throw reds R1; delete the `read !== size` throw reds R2; delete both reds R1+R2 and nothing
+#      else; delete the `!stat.isFile()` throw reds R3 — and now B7 too, which was tightened to the
+#      helper's own refusal in the same commit.
+#   +2 blob_sha_in_process, closing the same grade — B9: the B8 equivalence is conditional on the
+#      SHA-1 OBJECT FORMAT, not just on "no attributes and no filters"; a repository created with
+#      `--object-format=sha256` has neither and still disagrees (git 64 hex, the arithmetic 40), so
+#      the precondition is a law and not a sentence. B10: a path beginning with `-` is a path, never
+#      an option — the subprocess this replaced passed `change.path` with no `--` separator. Plants:
+#      `createHash("sha1")` -> `"sha256"` reds 14 of 16 (B9 among them); putting the old
+#      `execFileSync(... "hash-object", path)` back at the top of the helper reds 3 — B7, B9, B10.
+#   +7 blob_sha_is_the_git_stored_blob (new file) — what the sealed `blob_sha` MEANS, settled from the
+#      record rather than adjudicated: the content GIT STORES for a path, not the bytes that happen to
+#      be on disk. The two coincide on a plain checkout and part on a converting one, so something had
+#      to say which is sealed. Four witnesses already in the tree say git-stored: the siblings on the
+#      same record (`base` a commit; `patch_sha256`/`bytes` from `git diff`, which speaks git's terms);
+#      the same field name on a LawAddress, stamped from `git rev-parse <commit>:<path>`; the two
+#      shipped readers (change-verifier step 2b recomputes it with bare `git hash-object <path>` and
+#      FAILS the verdict on a difference, red-law-reviewer step 4 with `git rev-parse <commit>:<path>`);
+#      and `law_bytes_mismatch`, calibrated against exactly what those recipes tell a seat to compute.
+#      S1 pins the change-verifier's join; S2 that the change stamper and the law stamper name one
+#      object for one content; S3 that the value RESOLVES (`git cat-file blob`) — O5 in address form;
+#      S4 that an honest seat is accepted and a liar still refused; S5 that blob_sha and patch_sha256
+#      do not speak different vocabularies (an empty diff from base means base's own blob); S6 that the
+#      primer's two blob producers agree, so a fork cannot read a false stale; S7 (structural) that the
+#      two reader methods keep naming a git-stored comparand, so the engine's half and the seats' half
+#      cannot drift apart in silence. Plants, each observed red then reverted: `rev-parse <commit>`
+#      without `:<path>` reds 2; dropping the header word, dropping the header NUL, or an off-by-one
+#      length reds 5 each; deleting `git hash-object <path>` from the change-verifier's method reds S7.
+#      A chunk-loop plant leaves all 7 GREEN — every file here is under one chunk, and that plant is
+#      blob_sha_in_process's job. Said in the file too, so the coverage is not overread.
+#  +14 blob_sha_in_process (new file; 16 with the +2 above) — the engine computes a git blob sha from the file's own bytes
+#      instead of spawning `git hash-object` inside a seat's working tree. An EQUIVALENCE PROOF, not a
+#      feature: B1 drives real `git hash-object --no-filters` over a seven-entry corpus (empty, one
+#      byte, embedded NULs, CRLF, 5 MiB across ~80 chunks, no trailing newline, multibyte UTF-8) in a
+#      throwaway repo the law creates; B8 drives the BARE form over the same corpus, which is what
+#      makes the swap invisible to every caller on a plain SHA-1 repository. Plus B2 (the corpus covers what
+#      it claims), B3 (the well-known empty blob), B4/B5 (a relative path resolves against tree_root,
+#      the way `git -C` resolves it; two same-named files one level apart disagree), B6 (a symlink is
+#      followed, as git follows it) and B7 (absent / not-a-regular-file THROWS where git failed —
+#      never a plausible stand-in). Sabotage, RE-MEASURED over this file (the first numbers here said
+#      9 and 9; they predated B4/B5/B6, which also compare against real git and also red, and a wrong
+#      count in the script whose whole job is counts is the defect it exists to prevent): dropping the
+#      header NUL reds 12 of the 14 this entry adds — every B1, plus B3, B4, B5, B6, B8, leaving only
+#      B2 and B7; an off-by-one length reds the same 12; stopping after the first chunk reds 2 (B1
+#      large.bin and B8, and nothing else — which is what a multi-chunk corpus entry is for). At HEAD
+#      the same NUL plant reds 14 of 16 here (B9 and B10 compare against git too) and 22 suite-wide:
+#      +5 in blob_sha_is_the_git_stored_blob, +1 each in spec_records_stamping, spec_seat_primer and
+#      spec_seat_primer_paths_relative — the three call sites, which is the reach being claimed.
 #  merge of main (#556 + #558: 4249 in 439) into #559 (containment: 4269 in 438), both from 4208 in 437:
 #  4249 + 61 = 4310 laws, 439 + 1 = 440 files, read from the run.
 #  +21 genome_writes_stay_in_root, the two survivors of #559's first grade: 12 laws give every site a value that
@@ -267,7 +360,14 @@ EXPECTED_LAWS="${EXPECTED_LAWS:-4429}"   # 4425 → 4429: round 10 answers the g
 #       with the handler, the description does not. Its first draft could not fail — it forgave any
 #       token no tool anywhere declared, which is exactly what a renamed argument leaves behind.
 #       Sabotage said so (`current` -> `slug_current` stayed green); the exemption is gone.
-EXPECTED_FILES="${EXPECTED_FILES:-463}"   # + gig_runs_once_resume_unreadable (round 6g)   # merge: + main: one_output_gate, skill_runs_on_exec_path, node_floor_where_skills_run, bus_not_hosted   # + gig_runs_once_drain_budget (round 6e)   # + gig_runs_once_queue_clients (round 6c)   # + gig_runs_once_real_store (round 6b)   # + gig_runs_once_hosted_dispatch (round 6)   # + gig_runs_once_resumed_reclaim, gig_runs_once_store_decides (round 5)   # + the fifteen tests/gig_runs_once_*.test.ts (RED battery), + tests/every_skill_runs_its_fixtures.test.ts, + tests/node_floor_refuses.test.ts, + tests/spec_reside_drive.test.ts (#537), + tests/a_red_law_names_its_plant.test.ts (#551), + tests/sealed_inputs.test.ts, tests/fan_out.test.ts, tests/completions_seal.test.ts, tests/tier_ladder.test.ts, tests/amend_ladder.test.ts, tests/completions_reasoning_effort.test.ts, tests/bus.test.ts, tests/bus_chair.test.ts, tests/bus_terminal.test.ts, tests/bus_verbs.test.ts, tests/bus_commit.test.ts, tests/code_tools.test.ts, tests/gig_input_validated.test.ts, tests/seat_reads_recorded.test.ts, tests/claude_seat_reads.test.ts, tests/optional_declared_input.test.ts, tests/simulate_names_seats.test.ts   # and from main: + tests/genome_writes_stay_in_root.test.ts, + tests/skill_runs_on_exec_path.test.ts, + tests/node_floor_where_skills_run.test.ts, + tests/bus_not_hosted.test.ts, + tests/every_skill_runs_its_fixtures.test.ts, + tests/node_floor_refuses.test.ts, + tests/spec_reside_drive.test.ts (#537), + tests/a_red_law_names_its_plant.test.ts (#551), + tests/sealed_inputs.test.ts, tests/fan_out.test.ts, tests/completions_seal.test.ts, tests/tier_ladder.test.ts, tests/amend_ladder.test.ts, tests/completions_reasoning_effort.test.ts, tests/bus.test.ts, tests/bus_chair.test.ts, tests/bus_terminal.test.ts, tests/bus_verbs.test.ts, tests/bus_commit.test.ts, tests/code_tools.test.ts, tests/gig_input_validated.test.ts, tests/seat_reads_recorded.test.ts, tests/claude_seat_reads.test.ts, tests/optional_declared_input.test.ts, tests/simulate_names_seats.test.ts
+#   +26 git_invocation_pinned (new file) — the runtime reads git inside a tree it does not own and
+#       folds the answers into sealed fields, so the invocation it builds is pinned: one construction
+#       site, argv and environment together, and no second way to reach git from src/runtime.ts. P1-P5
+#       are structural because the invariant IS the shape of the invocation, not any one answer; P6 is
+#       behavioural and holds the other direction, that every pin names git's own default so nothing
+#       a seal records moves. Seven plants, each observed red and reverted; a no-op control stayed
+#       green first, and each plant's anchor was asserted to land before its run was believed.
+EXPECTED_FILES="${EXPECTED_FILES:-477}"   # 454 (main) + 23 tests/gig_runs_once_*.test.ts   # + tests/a_lineage_record_names_its_forebear.test.ts, + tests/an_evolution_is_a_version.test.ts, + tests/a_retired_standard_is_not_a_duplicate.test.ts, + tests/the_store_genome_has_a_base.test.ts, + tests/the_base_is_in_the_tree.test.ts, + tests/agent_token_issue_is_governed.test.ts, + tests/verb_cap_grant.test.ts (#573), + tests/the_tracked_ledger_parses.test.ts, + tests/chair_narrows_what_it_may_reach.test.ts, + tests/git_invocation_pinned.test.ts, + tests/chair_spend_names_its_agent.test.ts, + tests/blob_sha_refuses_rather_than_seals.test.ts, + tests/blob_sha_is_the_git_stored_blob.test.ts, + tests/blob_sha_in_process.test.ts, + tests/genome_writes_stay_in_root.test.ts, + tests/skill_runs_on_exec_path.test.ts, + tests/node_floor_where_skills_run.test.ts, + tests/bus_not_hosted.test.ts, + tests/every_skill_runs_its_fixtures.test.ts, + tests/node_floor_refuses.test.ts, + tests/spec_reside_drive.test.ts (#537), + tests/a_red_law_names_its_plant.test.ts (#551), + tests/sealed_inputs.test.ts, tests/fan_out.test.ts, tests/completions_seal.test.ts, tests/tier_ladder.test.ts, tests/amend_ladder.test.ts, tests/completions_reasoning_effort.test.ts, tests/bus.test.ts, tests/bus_chair.test.ts, tests/bus_terminal.test.ts, tests/bus_verbs.test.ts, tests/bus_commit.test.ts, tests/code_tools.test.ts, tests/gig_input_validated.test.ts, tests/seat_reads_recorded.test.ts, tests/claude_seat_reads.test.ts, tests/optional_declared_input.test.ts, tests/simulate_names_seats.test.ts
 
 # THE OTHER BANDS. `vitest run` is ROOT-CONFIG ONLY — this repo's own workflow comments
 # record that four configs went unexecuted once for exactly that reason. So pinning only the

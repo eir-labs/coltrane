@@ -277,8 +277,36 @@ function outsideNeeds(standard: Standard): string[] {
  * player authority its charter never claimed.
  */
 export function venueEffectiveTools(agent: Agent, venue: Venue): string[] {
-  const room = new Set(venue.equipment.tools.map(toolBaseName));
-  return (agent.allowed_tools ?? []).filter((g) => room.has(toolBaseName(g)));
+  return seatEffectiveTools(agent, undefined, venue);
+}
+
+/**
+ * THE one oracle for what a seated agent may reach: its OWN grants, narrowed by the chair it sits in
+ * and by the room the chart is held in. Grants are returned as the agent declared them (scoping
+ * intact) and matched on BASE name, because that is how every grant resolution in this engine
+ * matches — a chair or room that holds `Bash` holds the agent's `Bash(npx vitest run:*)`. A ceiling
+ * therefore chooses WHICH of the agent's grants survive; it never re-scopes what one of them means.
+ *
+ * Both narrowings are CEILINGS. The returned set is always a subset of `agent.allowed_tools`, so
+ * neither a chair nor a venue can grant: a tool named by the seat and absent from the charter does
+ * not appear. `venueEffectiveTools` delegates here so there is exactly one intersection in the
+ * engine and the compose-time refusal, the realization preflight and the spawn cannot drift apart.
+ */
+export function seatEffectiveTools(
+  agent: Agent,
+  chair?: { allowed_tools?: readonly string[] | undefined } | undefined,
+  venue?: Venue | undefined,
+): string[] {
+  let out = [...(agent.allowed_tools ?? [])];
+  if (chair?.allowed_tools !== undefined) {
+    const seat = new Set(chair.allowed_tools.map(toolBaseName));
+    out = out.filter((g) => seat.has(toolBaseName(g)));
+  }
+  if (venue !== undefined) {
+    const room = new Set(venue.equipment.tools.map(toolBaseName));
+    out = out.filter((g) => room.has(toolBaseName(g)));
+  }
+  return out;
 }
 
 /**

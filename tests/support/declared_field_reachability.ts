@@ -301,7 +301,14 @@ export const CALIBRATION_TRAIL = {
 // rest) — but skills/ is in neither corpus, here or in the sealed cross-check that re-derives it. So
 // they surface as unread. A skill is a reader; widening both corpora together would shrink this
 // number rather than grow it, and is worth doing on its own rather than inside a domain PR.
-export const PINNED_UNREAD_FIELDS = 242;
+// 242 → 249 (2026-10-01): the pr-review trio landed (pr-review-v1) — pr-review-request,
+// pr-review-surface and review-finding. All 13 of their payload fields that surface here ARE read,
+// by the three seats that fill and consume them (pr-surveyor names mechanisms/declared_purpose/
+// new_laws/dimensions/look_at/base_ref/head_ref/diff_stat/pr_number/out_of_scope, the dimension
+// reviewer names failure_scenario/sabotage/not_checked), and NONE of them is unread in the contract
+// corpus — the number below it went DOWN, not up. src/ reads none of them, exactly as the landscape
+// and release payload fields above. A renderer would bring both numbers down together.
+export const PINNED_UNREAD_FIELDS = 249;
 
 /* ─────────────────────────────────────────────────────────────────────────────────────────────────
  * TWO CORPORA — engine (src/) vs contract (broad).
@@ -553,4 +560,9 @@ export const PINNED_UNREAD_ENGINE_FIELDS = 20;
 // engine one, for the same reason — declared in the genome, read by seats, not by src/.
 // 121 → 123 (2026-09-21): the landscape charter's competency_questions and layers, read by the
 // framer's own prose and by the skills, for the same corpus reason as the engine pin above.
-export const PINNED_UNREAD_CONTRACT_FIELDS = 123;
+// 123 → 122 (2026-10-01): the pr-review trio (pr-review-v1) brought this ratchet DOWN rather than
+// up. Its own 27 declared fields are all named by the seats that fill or consume them — measured, not
+// asserted — and in wiring them the trio also gave readers to names that had been unread before it:
+// a reviewer that must state a failure_scenario and the base_ref it measured against is a reader of
+// both. Lowered to the measured count, per this law's own instruction when the number shrinks.
+export const PINNED_UNREAD_CONTRACT_FIELDS = 122;

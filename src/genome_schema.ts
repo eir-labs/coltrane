@@ -1193,8 +1193,18 @@ export const KNOWN_CONNECTOR_KINDS = ["github"] as const;
 
 /** `https://github.com/<owner>/<repo>` with a trailing slash and `.git` dropped; null when it is not that. */
 export function normalizeRepoUrl(url: string): string | null {
-  const trimmed = url.trim().replace(/\/+$/, "").replace(/\.git$/, "").replace(/\/+$/, "");
-  const m = /^https:\/\/github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)$/.exec(trimmed);
+  // Trailing slashes are dropped by a scan, not `/\/+$/`: CodeQL (js/polynomial-redos) flags that
+  // regex on input it cannot bound, and a loop over a URL costs nothing to make it unarguable.
+  let t = url.trim();
+  const dropTrailingSlashes = (): void => {
+    let end = t.length;
+    while (end > 0 && t.charCodeAt(end - 1) === 47 /* "/" */) end--;
+    t = t.slice(0, end);
+  };
+  dropTrailingSlashes();
+  if (t.endsWith(".git")) t = t.slice(0, -4);
+  dropTrailingSlashes();
+  const m = /^https:\/\/github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)$/.exec(t);
   return m ? `https://github.com/${m[1]}/${m[2]}` : null;
 }
 

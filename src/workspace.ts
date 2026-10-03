@@ -229,7 +229,12 @@ export async function prepareWorkspace(opts: {
  * origin. Collisions (two owners, one name) are made unique by suffixing the owner.
  */
 function mountName(repoUrl: string, taken: Set<string>): string {
-  const parts = repoUrl.replace(/\/+$/, "").replace(/\.git$/, "").split(/[\/:]/).filter(Boolean);
+  let t = repoUrl;
+  let end = t.length;
+  while (end > 0 && t.charCodeAt(end - 1) === 47 /* "/" */) end--;   // a scan, not /\/+$/ (CodeQL js/polynomial-redos)
+  t = t.slice(0, end);
+  if (t.endsWith(".git")) t = t.slice(0, -4);
+  const parts = t.split(/[\/:]/).filter(Boolean);
   const base = parts[parts.length - 1] ?? "tree";
   let name = base;
   if (taken.has(name) && parts.length >= 2) name = `${parts[parts.length - 2]}__${base}`;

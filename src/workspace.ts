@@ -144,7 +144,9 @@ export function cloneInto(repoUrl: string, token: string, targetDir?: string, ba
   try {
     execFileSync(
       "git",
-      ["clone", "--quiet", "--depth", "1", repoUrl, dir],
+      // THE TREE IS A REPOSITORY, NEVER AN OPTION. `--` ends git's options, so a tree whose name begins
+      // with a dash is read as a repository (and refused by git), never as `--upload-pack=<program>`.
+      ["clone", "--quiet", "--depth", "1", "--", repoUrl, dir],
       { env, stdio: ["ignore", "ignore", "pipe"] },
     );
   } catch (e) {
@@ -312,6 +314,13 @@ export async function prepareWorkspaces(opts: {
       // THE TARGET STAYS UNDER THE ROOT. mountName drops "." and ".." segments, and this asserts it:
       // cloneInto's own failure path removes its target directory, and a target that escaped the
       // root would have removed the root's parent (the grade at a3db254, B2).
+      // THE TREE IS A REPOSITORY, NEVER AN OPTION. The grant reaches the drain from the store; the
+      // engine re-derives no grant, but it refuses by name a tree git would read as an option
+      // (`--upload-pack=<program>` names a program; `--depth=999999` un-shallows) — before the broker
+      // is asked and before git is run. The clone line pins `--` as well: two walls, one rule.
+      if (repoUrl.startsWith("-") || /\s/.test(repoUrl)) {
+        throw new Error(`refusing to mount ${JSON.stringify(repoUrl)}: a tree is a repository URL, never an option`);
+      }
       const target = join(root, mountName(repoUrl, taken));
       if (!resolve(target).startsWith(resolve(root) + sep)) {
         throw new Error(`refusing to mount ${repoUrl}: its folder would fall outside the workspace root`);

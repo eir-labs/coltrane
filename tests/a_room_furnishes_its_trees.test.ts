@@ -21,6 +21,8 @@
 //       mint — cloneInto's failure path reaps its target, and a target outside the root would reap
 //       the root's parent (the grade at a3db254, B2)
 //   W7  a mid-way failure hands back every credential it minted before it reaps the directories
+//   W8  a tree whose name git would read as an OPTION (`--upload-pack=…`) is refused by name before
+//       any mint and before any clone, and the clone pins `--` so no tree is ever read as one
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, writeFileSync, existsSync } from "node:fs";
@@ -145,5 +147,19 @@ describe("W2–W4 — every granted tree, its own folder, its own credential", (
     await expect(prepareWorkspaces({ trees: [a, notARepo], gigId: "g", drainKey: "dk", instance: "box", endpoint: "https://x/api" })).rejects.toThrow(/clone of .* failed/);
     await new Promise((r) => setTimeout(r, 50));
     expect(br.revoked.length, "a token minted for a workspace that no longer exists was left to live out its hour").toBe(2);
+  });
+
+  it("W8 a tree named like an option is refused by name — no mint, no clone — and the clone pins `--`", async () => {
+    // A room's grant comes to the drain from the store. The engine does not re-derive the grant, but it
+    // does refuse to hand git a positional that git would read as an option: `--upload-pack=<program>`
+    // names a program to run; `--depth=999999` would un-shallow. Refused before the broker is asked.
+    const br = broker();
+    await expect(prepareWorkspaces({ trees: ["--upload-pack=/tmp/evil"], gigId: "g", drainKey: "dk", instance: "box", endpoint: "https://x/api" }))
+      .rejects.toThrow(/refusing to mount .*option/);
+    expect(br.bodies.length, "a tree refused by name must never be minted a credential").toBe(0);
+    // And the clone line itself pins `--` before its positionals (git_invocation_pinned covers the
+    // single-tree path; this is the furnished path's own witness).
+    const src = (await import("node:fs")).readFileSync(new URL("../src/workspace.ts", import.meta.url), "utf8");
+    expect(src, "git clone must separate its options from the repository with --").toMatch(/\["clone", "--quiet", "--depth", "1", "--", repoUrl, dir\]/);
   });
 });

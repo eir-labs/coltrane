@@ -34,7 +34,11 @@
     "executor",
     "critic"
   ],
-  "allowed_tools": [],
+  "allowed_tools": [
+    "Read",
+    "Grep",
+    "Glob"
+  ],
   "model_tier": "standard",
   "max_tool_calls": 8,
   "code_tool_access": "full",

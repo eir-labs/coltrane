@@ -2101,6 +2101,9 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
           // and so the advertised schema and the handler stay one statement of the same fact (#234).
           ...(args["substrate"] !== undefined ? { substrate: args["substrate"] } : {}),
           ...(args["mcp_servers"] !== undefined ? { mcp_servers: args["mcp_servers"] } : {}),
+          // R38 — the room's connectors (what it furnishes a gig to reach) reach the schema through the
+          // same explicit pick as every other field: a key the door does not pick is a key it silently drops.
+          ...(args["connectors"] !== undefined ? { connectors: args["connectors"] } : {}),
           ...(args["devices"] !== undefined ? { devices: args["devices"] } : {}),
           ...(args["architectures"] !== undefined ? { architectures: args["architectures"] } : {}),
           ...(args["max_concurrent_chairs"] !== undefined ? { max_concurrent_chairs: args["max_concurrent_chairs"] } : {}),

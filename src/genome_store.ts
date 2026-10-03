@@ -287,6 +287,41 @@ export function engineBaseGenome(): LoadedGenome {
   return ENGINE_BASE;
 }
 
+/** THE VERSION RULE, one for every class (3 Oct 2026). Among the rows that stand, the HIGHEST version
+ *  per slug wins — that is what a version is. Two rows at one version are contradictory data and refuse
+ *  naming both. A version that is not a number is refused by name and dropped: it must neither win nor
+ *  vanish by row order (the non-author grade of the standards rule found that coin toss in every branch).
+ *  Rows with no slug pass through so the class loop reports `missing required "slug" field` itself. */
+function highestVersionPerSlug(rows: Row[], kind: "agent" | "standard" | "skill", table: string, load_errors: LoadError[]): Row[] {
+  const best = new Map<string, Row>();
+  const clash = new Map<string, Row[]>();
+  const noSlug: Row[] = [];
+  for (const r of rows) {
+    const slug = typeof r["slug"] === "string" ? r["slug"] : null;
+    if (!slug) { noSlug.push(r); continue; }
+    const raw = r["version"];
+    const v = raw === undefined || raw === null ? 1 : Number(raw);
+    if (!Number.isFinite(v)) {
+      load_errors.push({ kind, path: `postgrest:${table}/${slug}`, slug,
+        error: `${kind} "${slug}": version ${JSON.stringify(raw)} is not a number — a version is a number, and the engine will not order rows it cannot compare` });
+      continue;
+    }
+    const cur = best.get(slug);
+    const cv = cur ? Number(cur["version"] ?? 1) : -Infinity;
+    if (!cur || v > cv) { best.set(slug, r); clash.set(slug, [r]); }
+    else if (v === cv) { clash.set(slug, [...(clash.get(slug) ?? []), r]); }
+  }
+  for (const [slug, rs] of clash) {
+    if (rs.length <= 1) continue;
+    const how = rs.map((r) => `status ${String(r["status"] ?? "active")}`).join(", ");
+    load_errors.push({ kind, path: `postgrest:${table}/${slug}`, slug,
+      error: `ambiguous ${kind} "${slug}": ${rs.length} rows share one version (${how}) — `
+           + `a version history has one row per version, and the engine will not pick by row order` });
+    best.delete(slug);
+  }
+  return [...best.values(), ...noSlug];
+}
+
 export function reconstructGenome(rows: GenomeRows, pin?: GenomeLoadPin): LoadedGenome {
   const { core_types: coreRows, domain_types: typeRows, agents: agentRows, standards: standardRows, skills: skillRows } = rows;
   const load_errors: LoadError[] = [];
@@ -356,7 +391,12 @@ export function reconstructGenome(rows: GenomeRows, pin?: GenomeLoadPin): Loaded
       // A duplicate is two ORG rows claiming one slug. An org row under a BASE slug is an override,
       // which is the whole point of a layer — so the check reads what the org stated, not the map.
       const orgAgents = new Set<string>();
-      for (const r of agentRows) {
+      // The version rule for agents (after the grade of the standards rule): retired and superseded
+      // rows are not agents; the highest standing version per slug wins; a same-version clash refuses.
+      const standingAgentRows = highestVersionPerSlug(
+        agentRows.filter((r) => r["status"] !== "retired" && r["status"] !== "superseded"),
+        "agent", "coltrane_agent_profiles", load_errors);
+      for (const r of standingAgentRows) {
         const slug = typeof r["slug"] === "string" ? r["slug"] : null;
         const path = `postgrest:coltrane_agent_profiles/${slug ?? "?"}`;
         try {
@@ -393,7 +433,16 @@ export function reconstructGenome(rows: GenomeRows, pin?: GenomeLoadPin): Loaded
       // because an error the operator cannot act on (they did not ask for the draft to run) is
       // noise that trains people to ignore the list.
       const isDraft = (r: Row) => r["status"] === "draft";
-      const liveStandardRows = standardRows.filter((r) => !isDraft(r));
+      // WHICH ROWS ARE STANDARDS — the skills rule, one class over (3 Oct 2026). The governed upsert
+      // RETIRES the prior active version when a new one lands; this branch dropped drafts and nothing
+      // else, so a retired v1 beside its active v2 was two live claimants, the second threw
+      // "duplicate standard slug", and the org's drain refused every gig at claim time over a
+      // version history. Retired is not a room with a problem — it is not a room. Deprecated stands
+      // ("do not reach for this", not "this does not exist"). Among what stands, the HIGHEST version
+      // per slug wins, because that is what a version is; two rows at ONE version is contradictory
+      // data and refuses naming both — never a coin toss by row order.
+      const standingStandardRows = standardRows.filter((r) => !isDraft(r) && r["status"] !== "retired" && r["status"] !== "superseded");
+      const liveStandardRows = highestVersionPerSlug(standingStandardRows, "standard", "coltrane_standards", load_errors);
 
       // Drafts are parsed into their OWN map, not dropped: standard_promote validates against
       // the loaded genome, so a draft absent from everything would be `notFound` and could
@@ -488,6 +537,11 @@ export function reconstructGenome(rows: GenomeRows, pin?: GenomeLoadPin): Loaded
         const key = `${String(r["org_id"] ?? "")}\u0000${slug}`;
         const cur = bestSkill.get(key);
         const v = Number(r["version"] ?? 1);
+        if (!Number.isFinite(v)) {
+          load_errors.push({ kind: "skill", path: `postgrest:coltrane_skills/${slug}`, slug,
+            error: `skill "${slug}": version ${JSON.stringify(r["version"])} is not a number — a version is a number, and the engine will not order rows it cannot compare` });
+          continue;
+        }
         const cv = cur ? Number(cur["version"] ?? 1) : -Infinity;
         if (!cur || v > cv) { bestSkill.set(key, r); skillClash.set(key, [r]); }
         else if (v === cv) { skillClash.set(key, [...(skillClash.get(key) ?? []), r]); }

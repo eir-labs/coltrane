@@ -789,7 +789,18 @@ function withPrompt(args: readonly string[], prompt: string): string[] {
   const i = out.indexOf("-p");
   if (i < 0) return out;
   const positionalFollows = i + 1 < out.length && !out[i + 1]!.startsWith("-");
-  if (positionalFollows) out[i + 1] = prompt;
+  if (positionalFollows) {
+    out[i + 1] = prompt;
+  } else if (!promptViaStdin(prompt)) {
+    // THE LARGE-PROMPT CHAIR'S SHORT CONTINUATION. Round one carried `-p` alone and its prompt on
+    // stdin. A reserve continuation is SHORT, so runOnce writes nothing to stdin for it — and with no
+    // positional either, the CLI received `-p --resume <session>` with no prompt at all and answered
+    // "No deferred tool marker found in the resumed session … Provide a prompt to continue the
+    // conversation" (gig c74944ad, B01's pull-request chair, 3 Oct 2026: six chairs sealed, the
+    // seventh lost). A continuation that fits the argument list is placed as the positional the base
+    // never had; one that does not stays on stdin, where runOnce puts it.
+    out.splice(i + 1, 0, prompt);
+  }
   return out;
 }
 

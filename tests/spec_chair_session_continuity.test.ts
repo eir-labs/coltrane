@@ -116,6 +116,57 @@ describe("a chair's second reach resumes its own conversation", () => {
     expect(after(second, "-p") ?? "", "the continuation must carry only the reserve text, not re-send the whole original prompt").not.toContain(TASK_MARK);
   });
 
+  it("O4 — a chair whose round-one prompt travelled on stdin is resumed for its reserve WITH its continuation, never with an empty spawn", async () => {
+    // Measured 3 Oct 2026 on gig c74944ad (B01's pull-request chair, engine 0.25.23): the round-one
+    // prompt exceeded the argument limit and went to stdin (`-p` alone); the reserve continuation is
+    // short, so runOnce wrote nothing to stdin for it, and withPrompt found no positional to replace —
+    // the CLI received `-p --resume <session>` with no prompt and answered "No deferred tool marker
+    // found in the resumed session … Provide a prompt to continue the conversation". Six chairs sealed,
+    // the seventh lost. The limit is lowered here so round one is a stdin prompt and the continuation
+    // is not, exactly the shape that failed.
+    const saved = process.env["COLTRANE_PROMPT_ARG_LIMIT"];
+    process.env["COLTRANE_PROMPT_ARG_LIMIT"] = "600";
+    try {
+      const s = scripted([
+        { stdout: budgetStop(owWrite("w1", "a")), exit1: true },
+        { stdout: clean(owWrite("w2", "b")), exit1: false },
+      ]);
+      await makeClaudeInvoker({ model: "claude-sonnet-4-6", sealVia: "output_write", turn_reserve: 5, run: s.run })(sweepCtx());
+      expect(s.calls.length, "the reserve continuation never spawned").toBe(2);
+      const first = s.calls[0]!;
+      const firstPositional = after(first, "-p");
+      expect(firstPositional === undefined || firstPositional.startsWith("-"), "precondition: round one's prompt must have travelled on stdin (`-p` with no positional)").toBe(true);
+      const second = s.calls[1]!;
+      expect(second).toContain("--resume");
+      const continuation = after(second, "-p");
+      expect(continuation !== undefined && !continuation.startsWith("-"), "the resumed spawn carried NO prompt: `-p --resume <session>` and nothing else — the CLI refuses that as a deferred-tool continuation").toBe(true);
+      expect(continuation ?? "", "the continuation must carry the reserve text").toMatch(/LAST extension|turns remain/);
+      expect(continuation ?? "", "the continuation must not re-send the whole original prompt").not.toContain(TASK_MARK);
+    } finally {
+      if (saved === undefined) delete process.env["COLTRANE_PROMPT_ARG_LIMIT"]; else process.env["COLTRANE_PROMPT_ARG_LIMIT"] = saved;
+    }
+  });
+  it("O4b — a continuation that is itself over the limit stays on stdin: `-p` with no positional, never on both channels", async () => {
+    // The other arm of the cure (the grade's surviving plant B): with the limit below even the reserve
+    // text, round one AND the continuation are stdin prompts. withPrompt must not insert a positional
+    // for a text runOnce will also write to stdin — one channel, chosen by the same predicate.
+    const saved = process.env["COLTRANE_PROMPT_ARG_LIMIT"];
+    process.env["COLTRANE_PROMPT_ARG_LIMIT"] = "10";
+    try {
+      const s = scripted([
+        { stdout: budgetStop(owWrite("w1", "a")), exit1: true },
+        { stdout: clean(owWrite("w2", "b")), exit1: false },
+      ]);
+      await makeClaudeInvoker({ model: "claude-sonnet-4-6", sealVia: "output_write", turn_reserve: 5, run: s.run })(sweepCtx());
+      expect(s.calls.length).toBe(2);
+      const second = s.calls[1]!;
+      expect(second).toContain("--resume");
+      const positional = after(second, "-p");
+      expect(positional === undefined || positional.startsWith("-"), "an over-limit continuation was placed on the argument list as well as stdin — two channels for one prompt").toBe(true);
+    } finally {
+      if (saved === undefined) delete process.env["COLTRANE_PROMPT_ARG_LIMIT"]; else process.env["COLTRANE_PROMPT_ARG_LIMIT"] = saved;
+    }
+  });
   it("F1 — a resume whose session is gone falls back COLD and loud, never failing the chair", async () => {
     const s = scripted([
       { stdout: budgetStop(owWrite("w1", "a")), exit1: true }, // round one hits its budget

@@ -23,6 +23,12 @@
 //     terminal is written — the gig may already be another worker's, exactly as for a lost lease.
 // F3: the window is measured from the last renewal that LANDED, never from the claim. A run whose
 //     renewals land, then fail twice, is still inside its confirmed lease and keeps running.
+// F4: the window is measured from the instant the renewal was SENT, not the instant its answer landed.
+//     The store grants from receipt; a landed renewal with round trip L confirms a lease already L
+//     old. Measured from the response, a slow renewal lets the run outlive the store's lapse by L
+//     (the non-author grade at 478a408, note 1: one extra beat on an edge-function cold start).
+// F1b: the "set and NOT read" line is emitted only when the variable IS set — a log that fires
+//     unconditionally says nothing (the grade's surviving plant M1).
 //
 // THE CLOCKS ARE INJECTED. WorkOnceDeps.scheduleHeartbeat is the heartbeat seam (the law fires `beat`
 // from inside the chair: "time passed while the model worked"); WorkOnceDeps.now is the wall clock the
@@ -164,5 +170,63 @@ describe("F3 — the window is measured from the last renewal that LANDED", () =
 
     expect(renewCalls, "precondition: renewals were attempted on every beat (a 5xx is retried within a beat, so more POSTs than beats)").toBeGreaterThanOrEqual(3);
     expect(res.claimed && res.status, "the window was measured from the claim, not from the last renewal that landed: a run inside its confirmed lease was stopped").toBe("complete");
+  });
+});
+
+describe("F4 — the window is measured from the renewal's SEND instant, not its response", () => {
+  it("F4 a landed renewal with round-trip latency L confirms a lease L old: a whole window later, measured from the send, the run is abandoned — never one beat past the store's lapse", async () => {
+    env = hostedEnv();
+    const { HOSTED_LEASE_MS } = await loadLease();
+    const LATENCY = 5_000; // a slow landed renewal (an edge-function cold start)
+    const CLAIMED_AT = 1_700_000_000_000;
+    let t = CLAIMED_AT;
+    let renewCalls = 0;
+    const store = hostedStore({
+      claim: claimFor("two-chair-v0"),
+      // The first renewal lands, but slowly: the clock advances LATENCY between send and answer.
+      renew: () => { renewCalls++; if (renewCalls === 1) { t += LATENCY; return landed(); } return unavailable(); },
+    });
+    const seam = heartbeatSeam();
+    let beatsBeforeAbort = 0;
+    const invoke = vi.fn(async (ctx: AgentInvocationContext) => {
+      // Beats fall on ABSOLUTE thirds of the lease from the claim (a real interval timer does not
+      // drift by a slow answer). Beat 1 at +20m lands (sent at +20m, answered at +20m+L); beats 2, 3
+      // fail; at beat 4 (+80m) a whole window has passed since the SEND of the landed renewal
+      // (+20m → +80m), so the run must stop here. Measured from the RESPONSE (+20m+L) the gap is
+      // 60m − L, and the run would wait one more beat — one beat past the store's lapse.
+      for (let i = 1; i <= 5 && !ctx.signal?.aborted; i++) {
+        t = CLAIMED_AT + i * (HOSTED_LEASE_MS / 3);
+        for (const s of seam.scheduled) await s.beat().catch(() => undefined);
+        if (!ctx.signal?.aborted) beatsBeforeAbort++;
+      }
+      if (ctx.signal?.aborted) throw new Error(`chair stopped: ${String((ctx.signal.reason as Error)?.message ?? ctx.signal.reason)}`);
+      return sealableSignal;
+    });
+    const res = await workOnce(venueCtx(), {
+      makeInvoke: () => invoke as unknown as AgentInvoker,
+      scheduleHeartbeat: seam.scheduleHeartbeat,
+      now: () => t,
+    } as unknown as WorkOnceDeps);
+    await settle();
+
+    expect(renewCalls, "precondition: the first renewal landed and the rest failed").toBeGreaterThanOrEqual(4);
+    expect(res.claimed && res.status, "the run was not abandoned when the lease could no longer be shown held").toBe("abandoned");
+    expect(beatsBeforeAbort, "the window was measured from the RESPONSE of the landed renewal: the run outlived the store's lapse by one beat").toBe(3);
+  });
+});
+
+describe("F1b — the unread-variable line is said only when the variable is set", () => {
+  it("F1b with COLTRANE_GIG_TIMEOUT_MS unset, a venue run logs no 'set and NOT read' line", async () => {
+    env = hostedEnv();
+    delete process.env["COLTRANE_GIG_TIMEOUT_MS"];
+    hostedStore({ claim: claimFor("one-chair-v0") });
+    const lines: string[] = [];
+    const res = await workOnce(venueCtx(), {
+      makeInvoke: () => vi.fn(async () => sealableSignal) as unknown as AgentInvoker,
+      log: (l: string) => { lines.push(l); },
+    } as unknown as WorkOnceDeps);
+    await settle();
+    expect(res.claimed && res.status).toBe("complete");
+    expect(lines.some((l) => /NOT read/i.test(l)), "the line fired with nothing set — a log that always speaks says nothing").toBe(false);
   });
 });

@@ -223,6 +223,7 @@ export type AssembleRunDepsArgs = Pick<
   | "venueRealizer"
   | "placementResolver"
   | "tree_root"
+  | "mounts"
 > & {
   /**
    * The enforcement environment, supplied per door: {} on the drain, the bootstrap map on the server
@@ -265,6 +266,9 @@ export function assembleRunDeps(args: AssembleRunDepsArgs): RunDeps {
     // threaded only when present, so a research gig that names no tree stays byte-identical and a
     // laws/changes seal with no tree_root refuses `tree_root_unknown` rather than reading process.cwd().
     ...(args.tree_root ? { tree_root: args.tree_root } : {}),
+    // R38 — the trees the room furnished (prepareWorkspaces): threaded only when present, so a
+    // single-tree or tree-less run is byte-identical; the runtime names them to every seat.
+    ...(args.mounts && args.mounts.length > 0 ? { mounts: args.mounts } : {}),
     // THE AMEND LADDER, from the deployment's environment — here, in the one assembler, so the dispatch
     // door and the drain cannot disagree about it. Absent → no key → the loop is what it was.
     ...(() => { const l = amendLadderFromEnv(process.env); return l ? { tier_ladder: l } : {}; })(),

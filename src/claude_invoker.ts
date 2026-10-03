@@ -281,6 +281,18 @@ export function buildPrompt(
     ? `Depth: ${runDepth}${ctx.depth ? DEPTH_GUIDANCE[ctx.depth] : ""}\n`
     : "";
   layers.push(`# Context\n${depthLine}Gig input: ${JSON.stringify(ctx.gig_input)}\nUpstream outputs:\n${inputsBlock}`);
+  // R38 — A ROOM FURNISHES ITS REACH. When the drain mounted the room's trees, the seat is told where
+  // each sits and which one (if any) a change lands in. Absent = no layer, so a single-tree or
+  // tree-less run's prompt is byte-identical to before this layer existed.
+  if (ctx.mounts && ctx.mounts.length > 0) {
+    const treeLines = ctx.mounts
+      .map((m) => `- ${m.repoUrl} → ${m.dir}${m.cwd ? "  (your working directory; the tree a change lands in)" : ""}`)
+      .join("\n");
+    const cwdNote = ctx.mounts.some((m) => m.cwd)
+      ? ""
+      : "\nNone of these is a working tree for changes: read them where they sit; your working directory is the root they share.";
+    layers.push(`# Trees\nThe room furnished these repositories, each cloned at the path shown:\n${treeLines}${cwdNote}`);
+  }
 
   // 5. Task — produce the types THIS CHAIR promises as JSON. #174: the chair's output_contract
   // (threaded as ctx.output_types) is the selector — a multi-capability agent at a single-purpose

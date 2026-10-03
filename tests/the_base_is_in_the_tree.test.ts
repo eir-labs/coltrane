@@ -129,7 +129,10 @@ describe("the base is in the tree", () => {
     const worker = readFileSync(new URL("../src/worker.ts", import.meta.url), "utf8");
     expect(realizer).toMatch(/changeSetBase\?: string \| null;/);
     expect(realizer).toMatch(/base: opts\.changeSetBase \?\? null,/);
-    expect(worker).toMatch(/changeSetBase: claim\.venue \? resolveChangeSetBase\(claim\)/);
+    // R38 (a room furnishes its reach): the realization path is for a room that declares servers or a
+    // substrate; a room that needs nothing stood up is furnished by the drain itself and never realized,
+    // so the base reaches realize() exactly when the room is realized.
+    expect(worker).toMatch(/changeSetBase: claim\.venue && !roomNeedsNothing \? resolveChangeSetBase\(claim\)/);
     const runDeps = readFileSync(new URL("../src/run_deps.ts", import.meta.url), "utf8");
     const runtime = readFileSync(new URL("../src/runtime.ts", import.meta.url), "utf8");
     expect(runDeps).toMatch(/changeSetBase: args\.changeSetBase/);

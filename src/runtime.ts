@@ -339,6 +339,11 @@ export type GigProgressEvent =
       approved_by?: string;
       /** every applicable refusal, not just the first — see lineageAdoption. */
       refusals?: string[];
+      /** The forebear the sealed record NAMES (lineage-record v3 `forebear.slug`), when it names one —
+       *  so a host can land the forebear and the descends-from edge from the report without
+       *  re-opening the record. Absent when the record carries no forebear object (an institutional
+       *  grounding rather than a naming). */
+      forebear_ref?: string;
     }
   | { type: "agent_event"; phase: string; role: string; event: AgentStreamEvent }
   // #turn-budget — the operator-facing read of the gig's budget agent_state. Emitted at the single
@@ -2551,10 +2556,15 @@ export async function runGig(
             sealed_at: rec.created_at,
             institution_slug,
           });
+          // The record's own forebear (lineage-record v3): read here, reported with the adoption, so
+          // the store that lands the rite row never infers a forebear from external_body prose.
+          const forebearObj = (target?.data as Record<string, unknown> | undefined)?.["forebear"] as Record<string, unknown> | undefined;
+          const forebear_ref = typeof forebearObj?.["slug"] === "string" ? (forebearObj["slug"] as string) : undefined;
           emit({
             type: "lineage_adoption", phase: phase.name, role: hc.role,
             adopt: decision.adopt,
             ...(decision.ref ? { record_ref: decision.ref.record_ref, approved_by: decision.ref.approved_by ?? "" } : {}),
+            ...(forebear_ref ? { forebear_ref } : {}),
             ...(decision.institution_slug ? { institution_slug: decision.institution_slug } : {}),
             ...(decision.refusals.length ? { refusals: decision.refusals.map((r) => r.reason) } : {}),
           });

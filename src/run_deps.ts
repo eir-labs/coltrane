@@ -29,7 +29,7 @@ import { amendLadderFromEnv } from "./invoker_selection.js";
 import { MCP_TOOLS } from "./mcp.js";
 import { ENGINE_MCP_SERVER, type ToolProvider, type ToolProviderRegistry } from "./tool_providers.js";
 import type { BudgetInput, RunDeps } from "./runtime.js";
-import { HOSTED_LEASE_MS, PLAYER_LEASE_MS } from "./lease.js";
+import { PLAYER_LEASE_MS } from "./lease.js";
 
 /**
  * Every engine tool as an in-house provider, tagged with the engine's own MCP server.
@@ -85,23 +85,27 @@ export function drainBudget(
 }
 
 /**
- * How long a single drained gig may run before it is aborted.
+ * How long a single drained gig may run before it is aborted — or `undefined`: NO clock.
  *
- * DERIVED from the one lease constant (HOSTED_LEASE_MS, src/lease.ts), never restated: five sixths of
- * a lease. The heartbeat keeps the lease while the gig runs, so this is the backstop for the case
- * where no renewal lands at all — the run still stops before its first lease could lapse and hand the
- * gig to another drain, and the last sixth is room for the terminal writes (outputs, then the header,
- * each retried). Computed at call time from the imported binding, so moving the constant moves this.
+ * A VENUE run has no run deadline. Founder's ruling, 3 Oct 2026: a run is never cut off because time
+ * passed, only because a fact says it must stop — its lease is lost (the store answers that another
+ * worker holds it) or can no longer be shown held (no renewal landed for a whole lease window:
+ * LeaseUnverifiable, src/lease.ts), its settled spend reached its budget, or an abort door was used.
+ * Duration is not the ceiling; budget is, and any per-gig time belongs to the gig's own voicing and
+ * seating, not to the box. The 25-minute default this replaced was a stand-in for a thirty-minute
+ * lease the store had already moved to sixty, and it aborted a seven-chair run at its last chair with
+ * no cause named. COLTRANE_GIG_TIMEOUT_MS is NOT read in venue mode; the worker says so in its log
+ * when it is set, rather than silently ignoring it.
+ *
+ * A PLAYER run (coltrane_mcp_claim) keeps a deadline, because that path holds a thirty-minute lease
+ * (PLAYER_LEASE_MS) and has no renew door: its run must end inside that one lease or another player
+ * claims it mid-run. Five sixths of the lease, overridable by COLTRANE_GIG_TIMEOUT_MS. The honest fix
+ * there is a renew door for players, not a clock; until it exists the clock is the lease, restated.
  */
-/**
- * PER MODE, because the leases differ. A venue drain holds the hosted lease (HOSTED_LEASE_MS) and
- * renews it; a PLAYER (coltrane_mcp_claim) holds a thirty-minute lease (PLAYER_LEASE_MS) and has no
- * renew at all, so its run must end inside that one lease or another player claims it mid-run.
- */
-export function drainTimeoutMs(mode: "venue" | "player" = "venue"): number {
+export function drainTimeoutMs(mode: "venue" | "player" = "venue"): number | undefined {
+  if (mode === "venue") return undefined;
   const env = Number(process.env["COLTRANE_GIG_TIMEOUT_MS"]);
-  const lease = mode === "player" ? PLAYER_LEASE_MS : HOSTED_LEASE_MS;
-  return Number.isFinite(env) && env > 0 ? env : Math.floor((lease * 5) / 6);
+  return Number.isFinite(env) && env > 0 ? env : Math.floor((PLAYER_LEASE_MS * 5) / 6);
 }
 
 /**

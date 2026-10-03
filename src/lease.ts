@@ -43,6 +43,27 @@ export class LeaseLost extends Error {
   }
 }
 
+/**
+ * Raised (as an abort reason) when this worker can no longer SHOW that it holds the lease: no renewal
+ * has landed for a whole lease window, so the lease the store granted at the last confirmed instant
+ * has lapsed and the gig may already be another worker's. A LeaseLost by evidence rather than by
+ * answer — it takes the same path (nothing further seals, nothing terminal is written, the run ends
+ * `abandoned`), and it is the ONLY clock a venue run has: a run is never stopped because time passed,
+ * only because the fact that justifies its running can no longer be established.
+ */
+export class LeaseUnverifiable extends LeaseLost {
+  /** The token the abandoned result's reason carries. */
+  readonly code = "lease_unverifiable";
+  constructor(gig_id: string, readonly window_ms: number, readonly last_detail: string) {
+    super(
+      gig_id,
+      `no lease renewal landed for ${window_ms} ms (a full lease window), last answer: ${last_detail}; ` +
+        `the lease confirmed at the last renewal has lapsed and the gig may already be another worker's`,
+    );
+    this.name = "LeaseUnverifiable";
+  }
+}
+
 /** Who is speaking to the lease doors: the venue credential and the instance it is bound to. */
 export interface LeaseCredential {
   drainKey: string;

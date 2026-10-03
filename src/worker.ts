@@ -35,7 +35,7 @@ import * as fs from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { runGig, ResumeRefused, genomeHash, CORE_TO_PRIMITIVE, type AgentInvoker, type TerminalHeaderOutcome } from "./runtime.js";
-import { HOSTED_LEASE_MS, LeaseLost, renewLease, releaseLease, type LeaseCredential } from "./lease.js";
+import { HOSTED_LEASE_MS, LeaseLost, LeaseUnverifiable, renewLease, releaseLease, type LeaseCredential } from "./lease.js";
 import { makeGigLogTee, gigLogBaseFromEnv } from "./gig_log_tee.js";
 import { defaultOutputsPersistDir } from "./outputs.js";
 import { loadRegistry, type Registry } from "./registry.js";
@@ -333,6 +333,13 @@ export interface WorkOnceDeps {
    * without sleeping.
    */
   scheduleHeartbeat?: (intervalMs: number, beat: () => Promise<unknown>) => () => void;
+  /**
+   * THE WALL CLOCK the lease window is measured on, injected: epoch milliseconds. Read at the claim
+   * and at every renewal that lands (`leaseConfirmedAt`), and compared at every renewal that fails to
+   * land, so "a whole lease window has passed since the store last confirmed this lease" is a fact a
+   * law can make true without sleeping an hour. Default `Date.now`.
+   */
+  now?: () => number;
 }
 
 function defaultScheduleHeartbeat(intervalMs: number, beat: () => Promise<unknown>): () => void {
@@ -1296,18 +1303,34 @@ export async function workOnce(ctx: WorkerContext, deps: WorkOnceDeps): Promise<
   // logged and tried again next beat; the lease still has two beats of slack.
   const aborter = new AbortController();
   const leaseCred = leaseCredential(ctx);
+  const now = deps.now ?? Date.now;
+  // THE LEASE IS THE ONLY CLOCK A VENUE RUN HAS. The store granted a lease at the claim and grants
+  // another at every renewal that lands; `leaseConfirmedAt` is the instant of the latest grant. A
+  // renewal that merely failed to arrive is tried again next beat — but once a WHOLE lease window has
+  // passed since the last grant, the lease that grant made has lapsed and the store may already have
+  // handed the gig on: the fact that justified running can no longer be shown, and the run stops as
+  // LeaseUnverifiable (a LeaseLost by evidence). No deadline runs beside this: a venue run is never
+  // stopped because time passed (drainTimeoutMs, src/run_deps.ts).
+  let leaseConfirmedAt = now();
   const stopHeartbeat = leaseCred
     ? (deps.scheduleHeartbeat ?? defaultScheduleHeartbeat)(HOSTED_LEASE_MS / 3, async () => {
         if (aborter.signal.aborted) return;
         const r = await renewLease(claim.gig_id, leaseCred);
-        if (r.ok) return;
+        if (r.ok) { leaseConfirmedAt = now(); return; }
         if (r.lost) {
           const lost = new LeaseLost(claim.gig_id, r.detail);
           log(lost.message);
           aborter.abort(lost);
-        } else {
-          log(`lease renewal for ${claim.gig_id} did not land (the next beat tries again): ${r.detail}`);
+          return;
         }
+        const sinceConfirmed = now() - leaseConfirmedAt;
+        if (sinceConfirmed >= HOSTED_LEASE_MS) {
+          const unverifiable = new LeaseUnverifiable(claim.gig_id, sinceConfirmed, r.detail);
+          log(unverifiable.message);
+          aborter.abort(unverifiable);
+          return;
+        }
+        log(`lease renewal for ${claim.gig_id} did not land (the next beat tries again; ${HOSTED_LEASE_MS - sinceConfirmed} ms of the confirmed lease remain): ${r.detail}`);
       })
     : undefined;
   const leaseLost = (): LeaseLost | undefined =>
@@ -1575,12 +1598,22 @@ export async function workOnce(ctx: WorkerContext, deps: WorkOnceDeps): Promise<
     // cwd is a freshly cloned repository, so honouring a `.mcp.json` there would let a repo declare
     // servers for the seat reading it. Present enables resolution; empty makes any grant naming a
     // server other than the engine's own fail closed.
-    // The lease this run is under decides its ceiling: a venue drain renews the hosted lease; a
-    // player holds coltrane_mcp_claim's thirty minutes with no renew (drainTimeoutMs per mode).
-    const timeoutMs = drainTimeoutMs(ctx.drainKey && ctx.instance ? "venue" : "player");
-    deadline = setTimeout(() => aborter.abort(new DrainDeadline(timeoutMs)), timeoutMs);
-    // unref so a finished gig exits promptly instead of waiting out its own timeout.
-    if (typeof deadline === "object" && "unref" in deadline) deadline.unref();
+    // The lease this run is under decides whether it has a deadline at all. A venue drain renews the
+    // hosted lease and has NO run deadline — it stops on facts only (the heartbeat above: lease lost
+    // or unverifiable; the budget; an abort door). A player holds coltrane_mcp_claim's thirty minutes
+    // with no renew, so its deadline is that lease restated (drainTimeoutMs per mode).
+    const venueMode = Boolean(ctx.drainKey && ctx.instance);
+    const timeoutMs = drainTimeoutMs(venueMode ? "venue" : "player");
+    if (timeoutMs !== undefined) {
+      deadline = setTimeout(() => aborter.abort(new DrainDeadline(timeoutMs)), timeoutMs);
+      // unref so a finished gig exits promptly instead of waiting out its own timeout.
+      if (typeof deadline === "object" && "unref" in deadline) deadline.unref();
+    } else if (process.env["COLTRANE_GIG_TIMEOUT_MS"]) {
+      log(
+        `COLTRANE_GIG_TIMEOUT_MS=${process.env["COLTRANE_GIG_TIMEOUT_MS"]} is set and NOT read: a venue run has no run ` +
+          `deadline; it stops when its lease is lost or unverifiable, its budget is reached, or it is aborted`,
+      );
+    }
 
     // ── THE ROOM THE GIG NAMED, carried into the run (SITE 2 — the drain half of the venue wire) ──
     // `venueMayClaim` already gated the CLAIM on this room being one this box can stand up

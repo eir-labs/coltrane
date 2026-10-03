@@ -393,7 +393,39 @@ export function reconstructGenome(rows: GenomeRows, pin?: GenomeLoadPin): Loaded
       // because an error the operator cannot act on (they did not ask for the draft to run) is
       // noise that trains people to ignore the list.
       const isDraft = (r: Row) => r["status"] === "draft";
-      const liveStandardRows = standardRows.filter((r) => !isDraft(r));
+      // WHICH ROWS ARE STANDARDS — the skills rule, one class over (3 Oct 2026). The governed upsert
+      // RETIRES the prior active version when a new one lands; this branch dropped drafts and nothing
+      // else, so a retired v1 beside its active v2 was two live claimants, the second threw
+      // "duplicate standard slug", and the org's drain refused every gig at claim time over a
+      // version history. Retired is not a room with a problem — it is not a room. Deprecated stands
+      // ("do not reach for this", not "this does not exist"). Among what stands, the HIGHEST version
+      // per slug wins, because that is what a version is; two rows at ONE version is contradictory
+      // data and refuses naming both — never a coin toss by row order.
+      const standingStandardRows = standardRows.filter((r) => !isDraft(r) && r["status"] !== "retired" && r["status"] !== "superseded");
+      const bestStandard = new Map<string, Row>();
+      const standardClash = new Map<string, Row[]>();
+      for (const r of standingStandardRows) {
+        const slug = typeof r["slug"] === "string" ? r["slug"] : null;
+        if (!slug) { bestStandard.set(`\u0000${bestStandard.size}`, r); continue; } // kept so the loop below reports the missing slug
+        const cur = bestStandard.get(slug);
+        const v = Number(r["version"] ?? 1);
+        const cv = cur ? Number(cur["version"] ?? 1) : -Infinity;
+        if (!cur || v > cv) { bestStandard.set(slug, r); standardClash.set(slug, [r]); }
+        else if (v === cv) { standardClash.set(slug, [...(standardClash.get(slug) ?? []), r]); }
+      }
+      for (const [slug, rs] of standardClash) {
+        if (rs.length <= 1) continue;
+        const how = rs.map((r) => `status ${String(r["status"] ?? "active")}`).join(", ");
+        load_errors.push({
+          kind: "standard",
+          path: `postgrest:coltrane_standards/${slug}`,
+          slug,
+          error: `ambiguous standard "${slug}": ${rs.length} rows share one version (${how}) — `
+               + `a version history has one row per version, and the engine will not pick by row order`,
+        });
+        bestStandard.delete(slug);
+      }
+      const liveStandardRows = [...bestStandard.values()];
 
       // Drafts are parsed into their OWN map, not dropped: standard_promote validates against
       // the loaded genome, so a draft absent from everything would be `notFound` and could

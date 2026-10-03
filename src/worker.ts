@@ -1315,8 +1315,13 @@ export async function workOnce(ctx: WorkerContext, deps: WorkOnceDeps): Promise<
   const stopHeartbeat = leaseCred
     ? (deps.scheduleHeartbeat ?? defaultScheduleHeartbeat)(HOSTED_LEASE_MS / 3, async () => {
         if (aborter.signal.aborted) return;
+        // The store grants from the instant it RECEIVES the renewal, not the instant the answer lands
+        // here: a landed renewal with round trip L confirms a lease that is already L old. Measured
+        // from the send, so a slow renewal never lets the run outlive the store's lapse by its own
+        // latency (the non-author grade at 478a408, note 1; law F4).
+        const sentAt = now();
         const r = await renewLease(claim.gig_id, leaseCred);
-        if (r.ok) { leaseConfirmedAt = now(); return; }
+        if (r.ok) { leaseConfirmedAt = sentAt; return; }
         if (r.lost) {
           const lost = new LeaseLost(claim.gig_id, r.detail);
           log(lost.message);

@@ -5,8 +5,10 @@
 // restating it:
 //   * the heartbeat renews every HOSTED_LEASE_MS / 3 (src/worker.ts), so two renewals can be lost in a
 //     row before the lease lapses;
-//   * the drain's default run timeout (drainTimeoutMs, src/run_deps.ts) stays under one lease, so a run
-//     stops before its lease could lapse even if not one renewal ever landed.
+//   * a venue run has NO run deadline (drainTimeoutMs("venue") is undefined, src/run_deps.ts): it stops
+//     when the lease is LOST (a refused renewal) or UNVERIFIABLE (no renewal landed for a whole
+//     HOSTED_LEASE_MS since the last grant, measured from the send) — facts, never elapsed time. The
+//     player path (PLAYER_LEASE_MS, no renew door) keeps a deadline under its lease.
 // The engine used to hold this number as prose ("the store's lease is thirty minutes") while the store
 // held sixty. A number in a comment cannot fail; this one is pinned by
 // tests/gig_runs_once_lease_constant.test.ts, which moves it and watches both derivations follow.

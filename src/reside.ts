@@ -431,11 +431,16 @@ export function createResidency(opts: ResideOptions, deps: ResideDeps): Residenc
 
     const entries = (Array.isArray((due.data as { due?: unknown }).due) ? (due.data as { due: DueEntry[] }).due : []);
     for (const entry of entries) {
+      // THE DOOR'S PARAMETER NAMES (3 Oct 2026). A served verb forwards its arguments to the store
+      // RPC exactly as named, and every registry row names its function's parameters; this call
+      // sent the bare names and the first dispatch of a work order through the served surface
+      // answered PGRST202 before the door was reached. WI-4 amendment (a) is superseded: the
+      // router speaks the door's names; a surface that wants clean public names maps them itself.
       const answer = await deps.callVerb("work-order-dispatch", {
-        work_order_id: entry.work_order_id,
-        schedule_ordinal: entry.schedule_ordinal,
-        mode: entry.mode ?? "live",
-        ...(entry.input ? { input: entry.input } : {}),
+        p_work_order_id: entry.work_order_id,
+        p_schedule_ordinal: entry.schedule_ordinal,
+        p_mode: entry.mode ?? "live",
+        ...(entry.input ? { p_input: entry.input } : {}),
         pin,
       });
 

@@ -93,7 +93,10 @@ cd "$(dirname "$0")/.."
 #       as an option (`--depth=999999` after `origin` un-shallows the clone; `--upload-pack=…` names a
 #       program) is refused bad_base by name before git sees it, in the clone and at the seal, and
 #       `--end-of-options` is pinned on fetch, cat-file and diff. 4419 + 1 = 4420.
-EXPECTED_LAWS="${EXPECTED_LAWS:-4420}"
+#   +1  the grade's F2: the room-realization path threads the base exactly as the drain's does —
+#       worker → RunDeps.changeSetBase → the realizer's prepare(base) — so a room's tree and the drain's
+#       are the same thing prepared the same way. 4420 + 1 = 4421.
+EXPECTED_LAWS="${EXPECTED_LAWS:-4421}"
 #   +3 blob_sha_refuses_rather_than_seals (new file) — the three refusals of `blobShaOfFile`, which
 #      had no law that could red them. Measured on the grade: with BOTH mid-read length refusals
 #      deleted, all 21 blob laws stayed green; with the `!stat.isFile()` refusal deleted, all 21

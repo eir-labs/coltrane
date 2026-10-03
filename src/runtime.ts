@@ -658,6 +658,8 @@ export interface RunDeps {
    * the room declines to populate (an empty read-only workspace) and no git credential is minted.
    */
   repoUrl?: string | undefined;
+  /** The commit a change-set is measured from, threaded to the realizer beside repoUrl (the base is in the tree). */
+  changeSetBase?: string | undefined;
   /**
    * The directory whose git objects the SEAL stamps law and change addresses from (records-by-address,
    * contract-records-by-address-v1). When a sealed `red-spec` record carries `laws` or a `change-set`
@@ -1591,6 +1593,7 @@ export async function runGig(
         {
           gigId: gig_id,
           ...(deps.repoUrl ? { repoUrl: deps.repoUrl } : {}),
+          ...(deps.changeSetBase ? { changeSetBase: deps.changeSetBase } : {}),
           ...(process.env["COLTRANE_DRAIN_KEY"] ? { drainKey: process.env["COLTRANE_DRAIN_KEY"] } : {}),
           ...(process.env["COLTRANE_INSTANCE"] ? { instance: process.env["COLTRANE_INSTANCE"] } : {}),
           ...(process.env["COLTRANE_GIT_CREDENTIALS_URL"]

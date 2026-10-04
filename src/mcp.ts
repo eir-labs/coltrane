@@ -218,6 +218,8 @@ const TOOL_DEFS: readonly Omit<MCPToolDef, "description">[] = [
   // ever returned: the secret changes hands once, at the mint.
   { slug: "agent_token_extend",            category: "run", input_schema: obj({ org_slug: "string", key_id: "string", hours: "number", reason: "string" }), output_schema: obj({ key_id: "string", org_slug: "string", expires_at: "string", tenure_ceiling_at: "string" }) },
   { slug: "agent_token_rewind",            category: "run", input_schema: obj({ org_slug: "string", key_id: "string", reason: "string" }), output_schema: obj({ key_id: "string", org_slug: "string", act_id: "string", wound_at: "string" }) },
+  // residency_seat — the sovereign seats a resident presence in a room (RS-5): a MEMBER act; the host only claims
+  { slug: "residency_seat",                category: "run", input_schema: obj({ org_slug: "string", agent_slug: "string", venue_slug: "string", channel_id: "string", hands: "array", repo: "string", may_dispatch: "array" }), output_schema: obj({ residency_id: "string", org_slug: "string", agent_slug: "string", channel_id: "string" }) },
   // org_hire — the verb that ADMITS an agent to an org. The org-membership analogue of
   // venue_credential_mint: the engine ships the schema and its refusals, a deployment wires the
   // admission backend (deps.hireMember). `input_schema` is derived from the single Zod source
@@ -411,6 +413,8 @@ export const TOOL_DESCRIPTIONS: Record<string, string> = {
     "Extend a standing agent token's life toward its mainspring: `hours` (whole) moves expires_at to min(now + hours, tenure_ceiling_at), never past the ceiling, never to null; a reason is required and witnessed. Human member only — a seat never extends itself. Returns the watch's new state, never a token.",
   agent_token_rewind:
     "Re-wind a standing agent token whose watch STOPPED for want of witnessed activity: same secret, same ceiling, one witnessed act. Refused for a run-down (past its ceiling) or revoked token — those cost a mint. Human member only, with a reason.",
+  residency_seat:
+    "Seat a resident presence (a standing seat in one room) for an agent of your organization: `org_slug`, `agent_slug`, `venue_slug` (the room's ceiling), `channel_id` (the ONE room, by id), `hands` (the connectors it holds), `may_dispatch` (an EXACT list of standards — never \"*\"), optional `repo`. A MEMBER act: the store authorizes on your membership; an agent token is refused before any backend. The host never seats itself — it CLAIMS its placed seat at boot (`coltrane reside --residency <id>`). Returns the residency id.",
   output_write:
     "Seal an output. The write path enforces the core type's substance floor — a Verdict without a method on every check, an Interpretation without claims, is REFUSED and the run stops. Not a warning, not a score you can override.",
   skill_execute:

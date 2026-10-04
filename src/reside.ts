@@ -34,7 +34,8 @@
  * module evaluation. The alternative was duplicating the transition table, which is the one thing
  * the surface's identity laws exist to forbid.
  */
-import { selectResidencyBacking, resolveSeatBacking } from "./reside_backing.js";
+import { selectResidencyBacking, resolveSeatBacking, type SeatBacking } from "./reside_backing.js";
+import { hostedSeatBackingFromEnv } from "./reside_hosted.js";
 import {
   applyResidencyOp,
   bootResidency,
@@ -695,7 +696,19 @@ export async function runReside(argv: readonly string[], io: unknown): Promise<n
     say("reside refused: no_backend (seam: store-env) — the hosted backing needs COLTRANE_STORE_URL and COLTRANE_STORE_ANON.");
     return 2;
   }
-  const seat = await resolveSeatBacking(choice, {});
+  // THE HOSTED SEAT IS A DOOR (RS-5): in the drain environment the deployment's provider is the engine's
+  // own postgrestSeatBacking over the public residency doors, built from the same five variables that
+  // marked the environment hosted. A missing variable is a typed refusal naming it, never a null seat.
+  let injected: { hosted?: SeatBacking } = {};
+  if (choice.backing === "hosted") {
+    const hosted = hostedSeatBackingFromEnv(env);
+    if (!hosted.ok) {
+      say(`reside refused: no_backend (seam: store-env) — the hosted backing needs ${hosted.missing.join(", ")}.`);
+      return 2;
+    }
+    injected = { hosted: hosted.seat };
+  }
+  const seat = await resolveSeatBacking(choice, injected);
   if (!seat.ok) {
     say(`reside refused: ${seat.refusal} (seam: ${seat.seam}) — ${seat.message}`);
     return resideExitCode(seat.refusal);

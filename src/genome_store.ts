@@ -1242,3 +1242,26 @@ export function hostedSeatBackingFromEnv(env: Record<string, string | undefined>
   if (missing.length) return { ok: false, missing };
   return { ok: true, seat: postgrestSeatBacking({ baseUrl: baseUrl!, anonKey: anonKey!, key: key!, instance: instance! }) };
 }
+
+// ── A RESIDENCY'S TOKEN IS MINTED INTO ITS VAULT (SF-3 A1) ───────────────────────────────────────
+/** Hosted seam for residency_token_into_vault: the member's own bearer rides PostgREST to
+ *  public.coltrane_residency_token_into_vault (coltrane-ui 20261004100000), which runs the governed mint and
+ *  writes the vault in one transaction and returns key_id + the watch's times — NEVER the token. If the store
+ *  ever answered a token, this seam drops it before the surface sees it: the value never leaves the store. */
+export function postgrestResidencyTokenIntoVault(
+  ctx: PostgrestContext,
+): (args: { org_slug: string; agent_slug: string; ttl_hours: number; tenure_ceiling_hours: number; reason: string; secret_name?: string; may_dispatch?: string[] }) => Promise<{ key_id: string; expires_at: string; tenure_ceiling_at: string; secret_name: string }> {
+  return async (args) => {
+    const out = await storeRead(ctx, "rpc/coltrane_residency_token_into_vault", {
+      method: "POST",
+      body: {
+        p_org_slug: args.org_slug, p_agent_slug: args.agent_slug, p_ttl_hours: args.ttl_hours, p_tenure_ceiling_hours: args.tenure_ceiling_hours,
+        p_reason: args.reason, p_secret_name: args.secret_name ?? "RESIDENCY_AGENT_TOKEN", p_may_dispatch: args.may_dispatch ?? [],
+      },
+    });
+    const row = (Array.isArray(out) ? out[0] : out) as Record<string, unknown> | null;
+    if (!row || typeof row.key_id !== "string" || !row.key_id) throw new Error("coltrane_residency_token_into_vault answered without a key id");
+    return { key_id: row.key_id, expires_at: String(row.expires_at ?? ""), tenure_ceiling_at: String(row.tenure_ceiling_at ?? ""), secret_name: String(row.secret_name ?? args.secret_name ?? "RESIDENCY_AGENT_TOKEN") };
+  };
+}
+

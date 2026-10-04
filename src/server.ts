@@ -3870,6 +3870,16 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
           error: `agent_token_extend is served by the tool surface; the bare dispatcher cannot extend "${key_id}" in org "${org_slug}" (hours ${String(hours ?? "")}, reason ${JSON.stringify(reason ?? "")}). Call it through the surface.`,
         };
       }
+      case "residency_token_into_vault": {
+        // NOT the live path (served by the surface); reads exactly its seven advertised arguments.
+        const org_slug = String(args["org_slug"] ?? ""); const agent_slug = String(args["agent_slug"] ?? "");
+        const ttl_hours = args["ttl_hours"]; const tenure_ceiling_hours = args["tenure_ceiling_hours"]; const reason = args["reason"];
+        const secret_name = args["secret_name"]; const may_dispatch = args["may_dispatch"];
+        return {
+          ok: false, refusal: "no_backend", requires_approval: approval,
+          error: `residency_token_into_vault is served by the tool surface; the bare dispatcher cannot mint for "${agent_slug}" in ${org_slug} (ttl ${String(ttl_hours ?? "")}, ceiling ${String(tenure_ceiling_hours ?? "")}, reason ${JSON.stringify(reason ?? "")}, secret ${JSON.stringify(secret_name ?? "RESIDENCY_AGENT_TOKEN")}, may_dispatch ${JSON.stringify(may_dispatch ?? [])}). Call it through the surface.`,
+        };
+      }
       case "residency_seat": {
         // NOT the live path (served by the surface, which holds the caller and deps.seatResidency); this
         // handler reads exactly its seven advertised arguments (advertised_args_are_read.test.ts).
@@ -4034,6 +4044,11 @@ export interface ToolSurfaceDeps extends ServerDeps {
    *  MEMBER's bearer (e.g. postgrestSeatResidency(ctx)). The surface refuses an agent-token caller first;
    *  without the seam it is an honest typed error. */
   seatResidency?: ((args: { org_slug: string; agent_slug: string; venue_slug: string; channel_id: string; hands?: string[]; repo?: string | null; may_dispatch?: string[] }) => Promise<{ residency_id: string }>) | undefined;
+  /** A RESIDENCY'S TOKEN IS MINTED INTO ITS VAULT (SF-3 A1): hosted residency_token_into_vault → the store's
+   *  public.coltrane_residency_token_into_vault under the MEMBER's bearer (e.g. postgrestResidencyTokenIntoVault(ctx)).
+   *  The backend answers the key and the watch's times and NEVER the token; the surface refuses an agent-token
+   *  caller first; without the seam it is an honest typed error. */
+  residencyTokenIntoVault?: ((args: { org_slug: string; agent_slug: string; ttl_hours: number; tenure_ceiling_hours: number; reason: string; secret_name?: string; may_dispatch?: string[] }) => Promise<{ key_id: string; expires_at: string; tenure_ceiling_at: string; secret_name: string }>) | undefined;
   /** Hosted genome persistence: a successful define/compose/register also upserts through
    *  this store (the governed RPC), or the definition evaporates at end-of-request. */
   store?: GenomeStore | undefined;
@@ -4252,6 +4267,38 @@ async function callSurfaceTool(
     if (!shape.ok) return { ok: false, error: shape.error };
     const ceilingAt = issued && typeof issued === "object" && typeof (issued as { tenure_ceiling_at?: unknown }).tenure_ceiling_at === "string" ? (issued as { tenure_ceiling_at: string }).tenure_ceiling_at : null;
     return { ok: true, data: { key_id: shape.key_id, org_slug, agent_slug, expires_at: shape.expires_at, tenure_ceiling_at: ceilingAt, agent_token: shape.agent_token } };
+  }
+  if (slug === "residency_token_into_vault") {
+    // A RESIDENCY'S TOKEN IS MINTED INTO ITS VAULT; THE VALUE NEVER LEAVES THE STORE (SF-3 A1). A member act —
+    // an agent-token caller is refused before any backend (a seat does not mint seats' hands). The watch's own
+    // argument rules apply here as at agent_token_issue (whole hours; a ceiling never under the ttl; a reason);
+    // the store's refusals ride back by name. The answer carries the key and the times — never a token — and
+    // a backend that answers with one is refused rather than relayed.
+    if (deps.caller?.kind !== "member") {
+      return { ok: false, refusal: "not_a_human_member", error: "only a human member may mint a resident's standing token into the vault: a seat does not mint seats' hands. Act from a member session." };
+    }
+    const org_slug = typeof args.org_slug === "string" ? args.org_slug.trim() : "";
+    const agent_slug = typeof args.agent_slug === "string" ? args.agent_slug.trim() : "";
+    if (!org_slug || !agent_slug) return { ok: false, refusal: "bad_args", error: "residency_token_into_vault needs org_slug and agent_slug" };
+    const ttl = ttlHoursOrRefusal(args.ttl_hours);
+    if ("refusal" in ttl) return { ok: false, refusal: ttl.refusal, error: ttl.error };
+    const ceil = ceilingHoursOrRefusal(args.tenure_ceiling_hours, ttl.ttl_hours);
+    if ("refusal" in ceil) return { ok: false, refusal: ceil.refusal, error: ceil.error };
+    const why = reasonOrRefusal(args.reason);
+    if ("refusal" in why) return { ok: false, refusal: why.refusal, error: why.error };
+    const secret_name = typeof args.secret_name === "string" && args.secret_name.trim() ? args.secret_name.trim() : "RESIDENCY_AGENT_TOKEN";
+    if (!/^[A-Za-z0-9_.-]{1,64}$/.test(secret_name)) return { ok: false, refusal: "bad_args", error: "secret_name must be [A-Za-z0-9_.-]{1,64}" };
+    const may_dispatch = Array.isArray(args.may_dispatch) ? (args.may_dispatch as unknown[]).map(String) : undefined;
+    if (!deps.residencyTokenIntoVault) return { ok: false, refusal: "no_backend", error: "no vault-minting backend is wired on this surface — wire deps.residencyTokenIntoVault (e.g. postgrestResidencyTokenIntoVault(ctx) from ./genome_store) over public.coltrane_residency_token_into_vault." };
+    let r: Record<string, unknown>;
+    try {
+      r = (await deps.residencyTokenIntoVault({ org_slug, agent_slug, ttl_hours: ttl.ttl_hours, tenure_ceiling_hours: ceil.tenure_ceiling_hours, reason: why.reason, secret_name, ...(may_dispatch ? { may_dispatch } : {}) })) as unknown as Record<string, unknown>;
+    } catch (e) { return { ok: false, error: e instanceof Error ? e.message : String(e) }; }
+    if (!r || typeof r !== "object" || typeof r.key_id !== "string" || !r.key_id) return { ok: false, error: "the vault-minting backend answered without a key id" };
+    if (Object.keys(r).some((k) => /token|secret_value|ctk/i.test(k) && k !== "secret_name") || Object.values(r).some((v) => typeof v === "string" && /^ctk_/.test(v))) {
+      return { ok: false, error: "the vault-minting backend answered with a token value — refused: the value never leaves the store" };
+    }
+    return { ok: true, data: { key_id: r.key_id, org_slug, agent_slug, secret_name: typeof r.secret_name === "string" ? r.secret_name : secret_name, expires_at: String(r.expires_at ?? ""), tenure_ceiling_at: String(r.tenure_ceiling_at ?? "") } };
   }
   if (slug === "residency_seat") {
     // THE SOVEREIGN SEATS; THE HOST CLAIMS (RS-5). A member act: an agent-token caller is refused before

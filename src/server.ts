@@ -3958,6 +3958,8 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
 export interface SurfaceToolResult extends ToolResult {
   /** Set when the tool exists but its semantics are local-process and deps.hosted is true. */
   hosted_unsupported?: boolean;
+  /** A hosted read that named a gig the store does not hold (or does not show this caller). */
+  not_found?: boolean;
   /** contract-post-time-gig-input-v1 (O3) — undeclared payload keys the engine will IGNORE, sorted,
    *  named at POST time so the caller who can still fix the key is told, rather than the worker later. */
   undeclared_input_keys?: string[];
@@ -3967,6 +3969,15 @@ export interface SurfaceToolResult extends ToolResult {
   input_validated?: boolean;
   /** contract-post-time-gig-input-v1 (F1) — why the payload could not be validated at post time. */
   reason?: string;
+}
+
+/** What a hosted output read may narrow by — exactly the keys output_query advertises as filters. */
+export interface HostedOutputSelector {
+  gig_id?: string | undefined;
+  domain_type?: string | undefined;
+  agent_slug?: string | undefined;
+  output_id?: string | undefined;
+  content_sha?: string | undefined;
 }
 
 export interface ToolSurfaceDeps extends ServerDeps {
@@ -3997,6 +4008,17 @@ export interface ToolSurfaceDeps extends ServerDeps {
    *  through, the store authorizes and refuses a claimed/running row. Without it, hosted
    *  gig_cancel is an honest typed error. */
   cancelGig?: ((args: Record<string, unknown>) => Promise<Record<string, unknown>>) | undefined;
+  /** A FINISHED GIG'S SEALS ARE READABLE FROM THE DOOR (conformance V-7; item 38). Hosted read of a
+   *  gig's sealed outputs from the ORG STORE (e.g. postgrestReadOutputs(ctx) → GET coltrane_outputs
+   *  under the member's bearer, RLS deciding; coltrane_mcp_gig_outputs for an agent token). The hosted
+   *  surface holds no filesystem and a fresh in-memory `outputs` per request, so without this seam
+   *  output_query would answer a finished gig with a vacuous empty — the one answer the reconciler
+   *  cannot tell from "it sealed nothing". Without it, hosted output_query is an honest typed error. */
+  readOutputs?: ((sel: HostedOutputSelector) => Promise<Record<string, unknown>[]>) | undefined;
+  /** The gig row itself (e.g. postgrestReadGig(ctx) → GET coltrane_gigs by id; coltrane_mcp_gig_status
+   *  for an agent token): status, standard, spend, timestamps. gig_monitor and execution_history_read
+   *  on the hosted surface answer from it — the STORE's status, never "unknown". null = not held. */
+  readGig?: ((gig_id: string) => Promise<Record<string, unknown> | null>) | undefined;
   /** Hosted genome persistence: a successful define/compose/register also upserts through
    *  this store (the governed RPC), or the definition evaporates at end-of-request. */
   store?: GenomeStore | undefined;
@@ -4328,6 +4350,113 @@ async function callSurfaceTool(
   if (deps.hosted) {
     const blocked = HOSTED_BLOCKED[slug];
     if (blocked) return { ok: false, hosted_unsupported: true, error: blocked };
+    // A FINISHED GIG'S SEALS ARE READABLE FROM THE DOOR (conformance V-7; item 38). The hosted
+    // surface holds no filesystem: `outputs` is a fresh in-memory store and `ledger` a fresh
+    // MemoryLedger per request. Read from THOSE, output_query answered a finished gig with
+    // {outputs: [], total_count: 0}, gig_monitor with "unknown" and execution_history_read with
+    // {executions: []} — a vacuous empty, not a refusal, the one answer a reconciler cannot tell
+    // from "it sealed nothing" (measured live at 828dfbc on gig 7bf12626, seven seals on the store).
+    // So on the hosted surface these three read the ORG STORE through host-wired seams, the same
+    // idiom as queueGig/approveGig/cancelGig, and without a seam they are an honest typed error.
+    if (slug === "output_query") {
+      if (!deps.readOutputs) {
+        return {
+          ok: false,
+          hosted_unsupported: true,
+          error:
+            "hosted output_query reads the ORG STORE — this surface holds no filesystem and a fresh in-memory " +
+            "output store per request, so an unwired read would answer a finished gig with an empty it cannot " +
+            "tell from 'sealed nothing'. Wire deps.readOutputs (e.g. postgrestReadOutputs(ctx) from ./genome_store).",
+        };
+      }
+      const str = (k: string): string | undefined => (args[k] === undefined || args[k] === null ? undefined : String(args[k]));
+      const sel: HostedOutputSelector = {
+        gig_id: str("gig_id"), domain_type: str("domain_type"), agent_slug: str("agent_slug"),
+        output_id: str("output_id"), content_sha: str("content_sha"),
+      };
+      let rows: Record<string, unknown>[];
+      try {
+        rows = await deps.readOutputs(sel);
+      } catch (e) {
+        return { ok: false, error: e instanceof Error ? e.message : String(e) };
+      }
+      // The engine's own filters hold on the hosted rows too — a reader may have narrowed by less.
+      if (sel.domain_type) rows = rows.filter((r) => r["domain_type"] === sel.domain_type);
+      if (sel.agent_slug) rows = rows.filter((r) => r["agent_slug"] === sel.agent_slug);
+      if (sel.gig_id) rows = rows.filter((r) => r["gig_id"] === undefined || r["gig_id"] === sel.gig_id);
+      if (sel.output_id) rows = rows.filter((r) => r["id"] === sel.output_id);
+      if (sel.content_sha) rows = rows.filter((r) => r["content_sha"] === sel.content_sha);
+      // DOT access on purpose: the advertised_args_are_read parser slurps the last dispatchTool case to
+      // end-of-file, and a bracket read of a string-literal key here is miscounted as that tool's.
+      const dataFilter = args.data_filter;
+      if (dataFilter && typeof dataFilter === "object" && !Array.isArray(dataFilter)) {
+        const entries = Object.entries(dataFilter as Record<string, unknown>);
+        rows = rows.filter((r) => {
+          const data = (r["data"] ?? {}) as Record<string, unknown>;
+          return entries.every(([k, v]) => canonJson(data[k]) === canonJson(v));
+        });
+      }
+      if (args.include_data === false) rows = rows.map(({ data: _data, ...rest }) => rest);
+      return { ok: true, data: { outputs: rows, total_count: rows.length } };
+    }
+    if (slug === "gig_monitor" || slug === "execution_history_read") {
+      if (!deps.readGig) {
+        return {
+          ok: false,
+          hosted_unsupported: true,
+          error:
+            `hosted ${slug} reads the gig row from the ORG STORE — this surface holds no run table and a fresh ` +
+            "ledger per request, so an unwired read would answer a finished gig with 'unknown' (or no executions). " +
+            "Wire deps.readGig (e.g. postgrestReadGig(ctx) from ./genome_store).",
+        };
+      }
+      const gid = args.gig_id === undefined || args.gig_id === null ? "" : String(args.gig_id);
+      if (!gid) {
+        return { ok: false, hosted_unsupported: true, error: `hosted ${slug} is read per gig: name a gig_id` };
+      }
+      let row: Record<string, unknown> | null;
+      try {
+        row = await deps.readGig(gid);
+      } catch (e) {
+        return { ok: false, error: e instanceof Error ? e.message : String(e) };
+      }
+      // A gig the store does not show is not_found for BOTH reads — an ok-but-empty history would be
+      // the vacuous answer again, one row up (the grade of #584).
+      if (!row) return { ok: false, not_found: true, error: `no gig ${gid} in the store, or none this caller may see` };
+      if (slug === "execution_history_read") {
+        const executions = [{ gig_id: gid, ...row }];
+        return { ok: true, data: { executions, count: executions.length } };
+      }
+      let outs: Record<string, unknown>[] = [];
+      if (deps.readOutputs) {
+        try { outs = await deps.readOutputs({ gig_id: gid }); } catch (e) { return { ok: false, error: e instanceof Error ? e.message : String(e) }; }
+      }
+      const raw = typeof row["status"] === "string" ? (row["status"] as string) : "";
+      // The STORE's vocabulary is the answer: 'completed' is this tool's 'complete'; the rest pass as
+      // the store says them. A row with no status at all is 'unstated' — never 'unknown', which is
+      // what an unread gig used to be called.
+      const status = raw === "completed" ? "complete" : raw === "" ? "unstated" : raw;
+      const last = outs.length ? outs[outs.length - 1]! : undefined;
+      const usage: Record<string, unknown> = {};
+      for (const k of ["total_cost_usd", "total_tokens", "total_duration_ms"]) if (row[k] !== undefined && row[k] !== null) usage[k] = row[k];
+      return {
+        ok: true,
+        data: {
+          status,
+          store_status: raw,
+          ...(typeof row["standard_slug"] === "string" ? { standard_slug: row["standard_slug"] } : {}),
+          phases_complete: outs.length,
+          current_agent: last && typeof last["agent_slug"] === "string" ? last["agent_slug"] : null,
+          outputs_so_far: outs,
+          ...(Object.keys(usage).length ? { usage } : {}),
+          ...(typeof row["run_fingerprint"] === "string" ? { run_fingerprint: row["run_fingerprint"] } : {}),
+          ...(typeof row["genome_hash"] === "string" ? { genome_hash: row["genome_hash"] } : {}),
+          ...(typeof row["started_at"] === "string" ? { started_at: row["started_at"] } : {}),
+          ...(typeof row["completed_at"] === "string" ? { finished_at: row["completed_at"] } : {}),
+          ...(typeof row["acting_for"] === "string" ? { acting_for: row["acting_for"] } : {}),
+        },
+      };
+    }
     if (slug === "gig_dispatch") {
       // Hosted dispatch NEVER spawns. With a queue seam it queues (the gig table is the
       // queue; a drain worker claims and runs); without one it says so, typed.

@@ -1028,3 +1028,73 @@ export function rpcCancelGig(
     return { gig_id: JSON.parse(text) as string, status: "cancelled" };
   };
 }
+
+// ── A FINISHED GIG'S SEALS ARE READABLE FROM THE DOOR (conformance V-7) ─────────────────────────
+// The hosted read seams for createToolSurface: a gig's sealed outputs and the gig row itself, read
+// FROM THE ORG STORE as the caller. A member JWT rides PostgREST and RLS decides (coutputs_org_read /
+// cgigs_org_read: coltrane_is_org_member(org_id)); a ctk_ agent token takes the security-definer RPCs
+// that resolve the token inside the store (coltrane_mcp_gig_outputs / coltrane_mcp_gig_status), the
+// same split hosted_tools.ts drew. A store refusal is thrown with the store's words — never turned
+// into an empty list, which is the very answer these seams exist to end.
+
+function isAgentBearer(bearer: string): boolean {
+  return bearer.startsWith("ctk_");
+}
+
+async function storeRead(ctx: PostgrestContext, path: string, init?: { method: "POST"; body: unknown }): Promise<unknown> {
+  const headers: Record<string, string> = { apikey: ctx.anonKey, Authorization: `Bearer ${ctx.bearer}`, Accept: "application/json" };
+  const req: RequestInit = init
+    ? { method: "POST", headers: { ...headers, "Content-Type": "application/json" }, body: JSON.stringify(init.body) }
+    : { method: "GET", headers };
+  const res = await fetch(`${ctx.baseUrl}/rest/v1/${path}`, req);
+  const text = await res.text();
+  if (!res.ok) {
+    let message = text || `store error ${res.status}`;
+    try {
+      const parsed = JSON.parse(text) as { message?: string };
+      if (parsed.message) message = parsed.message;
+    } catch { /* keep the raw text */ }
+    throw new Error(`${path.split("?")[0]} ${res.status}: ${message}`);
+  }
+  return text ? (JSON.parse(text) as unknown) : null;
+}
+
+const OUTPUT_COLUMNS =
+  "id,gig_id,agent_slug,phase,primitive,core_type,domain_type,domain_type_version,domain,content_sha,input_refs,input_shas,created_at,cost_usd,data";
+
+/** Hosted output read: the gig's sealed rows, oldest first, each carrying its content_sha. */
+export function postgrestReadOutputs(
+  ctx: PostgrestContext,
+): (sel: { gig_id?: string | undefined; domain_type?: string | undefined; agent_slug?: string | undefined; output_id?: string | undefined; content_sha?: string | undefined }) => Promise<Record<string, unknown>[]> {
+  return async (sel) => {
+    let out: unknown;
+    if (isAgentBearer(ctx.bearer)) {
+      out = await storeRead(ctx, "rpc/coltrane_mcp_gig_outputs", { method: "POST", body: { p_bearer: ctx.bearer, p_gig: sel.gig_id ?? null } });
+    } else {
+      const q: string[] = [`select=${OUTPUT_COLUMNS}`];
+      if (sel.gig_id) q.push(`gig_id=eq.${encodeURIComponent(sel.gig_id)}`);
+      if (sel.domain_type) q.push(`domain_type=eq.${encodeURIComponent(sel.domain_type)}`);
+      if (sel.agent_slug) q.push(`agent_slug=eq.${encodeURIComponent(sel.agent_slug)}`);
+      if (sel.output_id) q.push(`id=eq.${encodeURIComponent(sel.output_id)}`);
+      if (sel.content_sha) q.push(`content_sha=eq.${encodeURIComponent(sel.content_sha)}`);
+      q.push("order=created_at");
+      out = await storeRead(ctx, `coltrane_outputs?${q.join("&")}`);
+    }
+    return Array.isArray(out) ? (out as Record<string, unknown>[]) : [];
+  };
+}
+
+const GIG_COLUMNS =
+  "id,standard_slug,standard_version,status,mode,acting_for,dispatched_by,ran_on,attempts,resumes,work_order_id,genome_hash,run_fingerprint,total_cost_usd,total_tokens,total_duration_ms,created_at,started_at,completed_at,lease_until,manifest";
+
+/** Hosted gig read: the row by id, or null when the store does not hold (or does not show) it. */
+export function postgrestReadGig(ctx: PostgrestContext): (gig_id: string) => Promise<Record<string, unknown> | null> {
+  return async (gig_id) => {
+    const out = isAgentBearer(ctx.bearer)
+      ? await storeRead(ctx, "rpc/coltrane_mcp_gig_status", { method: "POST", body: { p_bearer: ctx.bearer, p_gig: gig_id } })
+      : await storeRead(ctx, `coltrane_gigs?select=${GIG_COLUMNS}&id=eq.${encodeURIComponent(gig_id)}`);
+    const row = Array.isArray(out) ? out[0] : out;
+    return row && typeof row === "object" ? (row as Record<string, unknown>) : null;
+  };
+}
+

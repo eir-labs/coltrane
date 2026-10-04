@@ -3870,6 +3870,17 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
           error: `agent_token_extend is served by the tool surface; the bare dispatcher cannot extend "${key_id}" in org "${org_slug}" (hours ${String(hours ?? "")}, reason ${JSON.stringify(reason ?? "")}). Call it through the surface.`,
         };
       }
+      case "residency_seat": {
+        // NOT the live path (served by the surface, which holds the caller and deps.seatResidency); this
+        // handler reads exactly its seven advertised arguments (advertised_args_are_read.test.ts).
+        const org_slug = String(args["org_slug"] ?? ""); const agent_slug = String(args["agent_slug"] ?? "");
+        const venue_slug = String(args["venue_slug"] ?? ""); const channel_id = String(args["channel_id"] ?? "");
+        const hands = args["hands"]; const repo = args["repo"]; const may_dispatch = args["may_dispatch"];
+        return {
+          ok: false, refusal: "no_backend", requires_approval: approval,
+          error: `residency_seat is served by the tool surface; the bare dispatcher cannot seat "${agent_slug}" in ${org_slug}/${venue_slug} room ${channel_id} (hands ${JSON.stringify(hands ?? [])}, repo ${JSON.stringify(repo ?? null)}, may_dispatch ${JSON.stringify(may_dispatch ?? [])}). Call it through the surface.`,
+        };
+      }
       case "agent_token_rewind": {
         // NOT the live path (served by the surface); reads exactly its three arguments.
         const org_slug = String(args["org_slug"] ?? "");
@@ -4019,6 +4030,10 @@ export interface ToolSurfaceDeps extends ServerDeps {
    *  for an agent token): status, standard, spend, timestamps. gig_monitor and execution_history_read
    *  on the hosted surface answer from it — the STORE's status, never "unknown". null = not held. */
   readGig?: ((gig_id: string) => Promise<Record<string, unknown> | null>) | undefined;
+  /** THE SOVEREIGN SEATS (RS-5): hosted residency_seat → the store's public.coltrane_residency_seat under the
+   *  MEMBER's bearer (e.g. postgrestSeatResidency(ctx)). The surface refuses an agent-token caller first;
+   *  without the seam it is an honest typed error. */
+  seatResidency?: ((args: { org_slug: string; agent_slug: string; venue_slug: string; channel_id: string; hands?: string[]; repo?: string | null; may_dispatch?: string[] }) => Promise<{ residency_id: string }>) | undefined;
   /** Hosted genome persistence: a successful define/compose/register also upserts through
    *  this store (the governed RPC), or the definition evaporates at end-of-request. */
   store?: GenomeStore | undefined;
@@ -4237,6 +4252,31 @@ async function callSurfaceTool(
     if (!shape.ok) return { ok: false, error: shape.error };
     const ceilingAt = issued && typeof issued === "object" && typeof (issued as { tenure_ceiling_at?: unknown }).tenure_ceiling_at === "string" ? (issued as { tenure_ceiling_at: string }).tenure_ceiling_at : null;
     return { ok: true, data: { key_id: shape.key_id, org_slug, agent_slug, expires_at: shape.expires_at, tenure_ceiling_at: ceilingAt, agent_token: shape.agent_token } };
+  }
+  if (slug === "residency_seat") {
+    // THE SOVEREIGN SEATS; THE HOST CLAIMS (RS-5). A member act: an agent-token caller is refused before
+    // any backend — a seat does not seat seats. Four names are required and read as strings; the lists
+    // pass as lists (the store refuses a wildcard itself). The store's refusal rides back in its words.
+    if (deps.caller?.kind !== "member") {
+      return { ok: false, refusal: "not_a_human_member", error: "only a human member may seat a resident presence: a seat does not seat seats. Act from a member session." };
+    }
+    const need = ["org_slug", "agent_slug", "venue_slug", "channel_id"] as const;
+    const got: Record<string, string> = {};
+    for (const k of need) {
+      const v = args[k];
+      if (typeof v !== "string" || !v.trim()) return { ok: false, refusal: "bad_args", error: `residency_seat needs ${k} (a non-empty string)` };
+      got[k] = v.trim();
+    }
+    const list = (k: string): string[] | undefined => (Array.isArray(args[k]) ? (args[k] as unknown[]).map(String) : undefined);
+    const repo = typeof args.repo === "string" && args.repo ? args.repo : null;
+    if (!deps.seatResidency) return { ok: false, refusal: "no_backend", error: "no seating backend is wired on this surface — wire deps.seatResidency (e.g. postgrestSeatResidency(ctx) from ./genome_store) over public.coltrane_residency_seat." };
+    let r: { residency_id: string };
+    try {
+      const hands = list("hands"); const may_dispatch = list("may_dispatch");
+      r = await deps.seatResidency({ org_slug: got.org_slug!, agent_slug: got.agent_slug!, venue_slug: got.venue_slug!, channel_id: got.channel_id!, repo, ...(hands ? { hands } : {}), ...(may_dispatch ? { may_dispatch } : {}) });
+    } catch (e) { return { ok: false, error: e instanceof Error ? e.message : String(e) }; }
+    if (!r || typeof r.residency_id !== "string" || !r.residency_id) return { ok: false, error: "the seating backend answered without a residency id" };
+    return { ok: true, data: { residency_id: r.residency_id, org_slug: got.org_slug!, agent_slug: got.agent_slug!, channel_id: got.channel_id! } };
   }
   if (slug === "agent_token_extend" || slug === "agent_token_rewind") {
     // THE GOVERNOR'S TWO ACTS ON THE WATCH. Human member only — a seat never winds, extends or

@@ -20,7 +20,8 @@
 //   H4  with a reader, gig_monitor returns the STORE's status, never "unknown": completed → complete,
 //       and queued/running/failed/aborted/awaiting_approval as the store says; a gig the store does
 //       not hold is not_found, not unknown
-//   H5  hosted execution_history_read by gig id with NO reader refuses; with one it serves the row
+//   H5  hosted execution_history_read by gig id with NO reader refuses; with one it serves the row; a gig
+//       the store does not show is not_found, never an empty history (the grade's note)
 //   H6  postgrestReadOutputs builds the member GET exactly — coltrane_outputs, gig_id=eq.<id>, the
 //       select names content_sha — under the caller's bearer; a ctk_ bearer takes the agent RPC
 //       (coltrane_mcp_gig_outputs) instead of the table
@@ -119,8 +120,9 @@ describe("a finished gig's seals are readable from the door", () => {
     expect(r.ok).toBe(true);
     expect(r.data.count).toBe(1);
     expect(r.data.executions[0]).toMatchObject({ gig_id: GIG, status: "completed", standard_slug: "software-change-pr-v1", genome_hash: "h", run_fingerprint: "f" });
-    const other = (await call(d, "execution_history_read", { gig_id: "nope" })) as unknown as { data: { count: number } };
-    expect(other.data.count).toBe(0);
+    const other = (await call(d, "execution_history_read", { gig_id: "nope" })) as unknown as Record<string, unknown>;
+    expect(other["ok"]).toBe(false);
+    expect(other["not_found"]).toBe(true);
   });
 
   it("H6 postgrestReadOutputs: the member GET names the table, the gig and the seal; an agent bearer takes the RPC", async () => {

@@ -4420,11 +4420,13 @@ async function callSurfaceTool(
       } catch (e) {
         return { ok: false, error: e instanceof Error ? e.message : String(e) };
       }
+      // A gig the store does not show is not_found for BOTH reads — an ok-but-empty history would be
+      // the vacuous answer again, one row up (the grade of #584).
+      if (!row) return { ok: false, not_found: true, error: `no gig ${gid} in the store, or none this caller may see` };
       if (slug === "execution_history_read") {
-        const executions = row ? [{ gig_id: gid, ...row }] : [];
+        const executions = [{ gig_id: gid, ...row }];
         return { ok: true, data: { executions, count: executions.length } };
       }
-      if (!row) return { ok: false, not_found: true, error: `no gig ${gid} in the store, or none this caller may see` };
       let outs: Record<string, unknown>[] = [];
       if (deps.readOutputs) {
         try { outs = await deps.readOutputs({ gig_id: gid }); } catch (e) { return { ok: false, error: e instanceof Error ? e.message : String(e) }; }

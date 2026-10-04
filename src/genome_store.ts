@@ -1042,7 +1042,12 @@ function isAgentBearer(bearer: string): boolean {
 }
 
 async function storeRead(ctx: PostgrestContext, path: string, init?: { method: "POST"; body: unknown }): Promise<unknown> {
-  const headers: Record<string, string> = { apikey: ctx.anonKey, Authorization: `Bearer ${ctx.bearer}`, Accept: "application/json" };
+  // THE AGENT TOKEN RIDES IN THE BODY, NEVER AS THE BEARER. PostgREST wants a JWT in Authorization; a ctk_
+  // is not one, and it answered "Expected 3 parts in JWT; got 1" (401) to the reconciler's own read, live at
+  // coltrane-ui cfbd57b. On the agent path the header carries the ANON key and the RPC's p_bearer carries
+  // the token — the shape rpcQueueGig, rpcGigStatus and hosted_tools' rpc() have always kept.
+  const authorization = isAgentBearer(ctx.bearer) ? ctx.anonKey : ctx.bearer;
+  const headers: Record<string, string> = { apikey: ctx.anonKey, Authorization: `Bearer ${authorization}`, Accept: "application/json" };
   const req: RequestInit = init
     ? { method: "POST", headers: { ...headers, "Content-Type": "application/json" }, body: JSON.stringify(init.body) }
     : { method: "GET", headers };

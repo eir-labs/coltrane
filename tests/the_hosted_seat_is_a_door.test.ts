@@ -32,11 +32,11 @@ import { readFileSync } from "node:fs";
 import { runReside } from "../src/reside.js";
 
 const ROW = {
-  residency_id: "7c9e6679-7425-40de-944b-e07fc1f90ae7", org_id: "c0000000-0000-4000-8000-00000000e17a", agent_slug: "vor",
-  channel_id: "C0C6DDCK1V1", venue_slug: "residency", repo: null, hands: ["envoy"], status: "seated", cursor: 3, session_id: null,
+  residency_id: "7c9e6679-7425-40de-944b-e07fc1f90ae7", org_id: "c0000000-0000-4000-8000-00000000e17a", agent_slug: "resident",
+  channel_id: "C0000000TEST", venue_slug: "greenroom", repo: null, hands: ["envoy"], status: "seated", cursor: 3, session_id: null,
   soul_output_id: null, may_dispatch: ["software-change-pr-v1"], lease_until: "2026-10-04T09:00:00Z", fence: 7, token: "lease-secret",
 };
-const CTX = { baseUrl: "https://store.test", anonKey: "anon", key: "cdk_box", instance: "coltrane-residency-vor" };
+const CTX = { baseUrl: "https://store.test", anonKey: "anon", key: "cdk_box", instance: "box-under-test" };
 
 function recordFetch(reply: (url: string, body: Record<string, unknown>) => Response) {
   const calls: Array<{ url: string; body: Record<string, unknown>; headers: Record<string, string> }> = [];
@@ -57,9 +57,9 @@ describe("the hosted seat is a door", () => {
     const seat = postgrestSeatBacking(CTX);
     const any = await seat.claim("any");
     expect(calls[0]!.url).toBe(`https://store.test/rest/v1/rpc/${HOSTED_SEAT_DOORS.claim}`);
-    expect(calls[0]!.body).toEqual({ p_key: "cdk_box", p_instance: "coltrane-residency-vor", p_residency_id: null });
+    expect(calls[0]!.body).toEqual({ p_key: "cdk_box", p_instance: "box-under-test", p_residency_id: null });
     expect(calls[0]!.headers["apikey"]).toBe("anon");
-    expect(any).toMatchObject({ residency_id: ROW.residency_id, agent_slug: "vor", org: ROW.org_id, channel_id: "C0C6DDCK1V1", venue_slug: "residency", lease_token: "lease-secret", cursor: 3, hands: ["envoy"], may_dispatch: ["software-change-pr-v1"] });
+    expect(any).toMatchObject({ residency_id: ROW.residency_id, agent_slug: "resident", org: ROW.org_id, channel_id: "C0000000TEST", venue_slug: "greenroom", lease_token: "lease-secret", cursor: 3, hands: ["envoy"], may_dispatch: ["software-change-pr-v1"] });
     expect(any!.fence).toBe("7");
     await seat.claim(ROW.residency_id);
     expect(calls[1]!.body["p_residency_id"]).toBe(ROW.residency_id);
@@ -71,7 +71,7 @@ describe("the hosted seat is a door", () => {
     const seat = postgrestSeatBacking(CTX);
     await seat.heartbeat(ROW.residency_id, "7");
     expect(calls[0]!.url).toMatch(/coltrane_residency_heartbeat$/);
-    expect(calls[0]!.body).toEqual({ p_key: "cdk_box", p_instance: "coltrane-residency-vor", p_residency_id: ROW.residency_id, p_fence: 7 });
+    expect(calls[0]!.body).toEqual({ p_key: "cdk_box", p_instance: "box-under-test", p_residency_id: ROW.residency_id, p_fence: 7 });
     await seat.release(ROW.residency_id, "7", "hibernated");
     expect(calls[1]!.body).toMatchObject({ p_fence: 7, p_status: "hibernated" });
     expect(await seat.cursorAdvance(ROW.residency_id, "7", 4)).toBe(4);
@@ -94,7 +94,7 @@ describe("the hosted seat is a door", () => {
     const none = hostedSeatBackingFromEnv({ COLTRANE_STORE_URL: "https://s", COLTRANE_STORE_ANON: "a" });
     expect(none.ok).toBe(false);
     if (!none.ok) expect(none.missing).toEqual(["COLTRANE_DRAIN_KEY", "COLTRANE_INSTANCE"]);
-    const alias = hostedSeatBackingFromEnv({ COLTRANE_STORE_URL: "https://s", COLTRANE_STORE_ANON: "a", COLTRANE_DRAIN_KEY: "cdk_x", FLY_APP_NAME: "coltrane-residency-vor" });
+    const alias = hostedSeatBackingFromEnv({ COLTRANE_STORE_URL: "https://s", COLTRANE_STORE_ANON: "a", COLTRANE_DRAIN_KEY: "cdk_x", FLY_APP_NAME: "box-under-test" });
     expect(alias.ok).toBe(true);
     const full = hostedSeatBackingFromEnv({ COLTRANE_STORE_URL: "https://s", COLTRANE_STORE_ANON: "a", COLTRANE_DRAIN_KEY: "cdk_x", COLTRANE_INSTANCE: "i" });
     expect(full.ok).toBe(true);
@@ -104,7 +104,7 @@ describe("the hosted seat is a door", () => {
   it("RH5 the deployment injects the provider: runReside with io.hosted passes the seat seam and stops at the listener; the CLI builds it from the drain env", async () => {
     recordFetch(() => json(null));
     const err: string[] = [];
-    const env = { COLTRANE_STORE_URL: "https://store.test", COLTRANE_STORE_ANON: "anon", COLTRANE_DRAIN_KEY: "cdk_box", COLTRANE_INSTANCE: "coltrane-residency-vor" };
+    const env = { COLTRANE_STORE_URL: "https://store.test", COLTRANE_STORE_ANON: "anon", COLTRANE_DRAIN_KEY: "cdk_box", COLTRANE_INSTANCE: "box-under-test" };
     const built = hostedSeatBackingFromEnv(env);
     expect(built.ok).toBe(true);
     const code = await runReside(["reside", "--residency", ROW.residency_id], { env, err: (s: string) => err.push(s), ...(built.ok ? { hosted: built.seat } : {}) });
@@ -128,7 +128,7 @@ describe("the hosted seat is a door", () => {
     const d: ToolSurfaceDeps = { registry, outputs: createOutputStore(registry), ledger: new MemoryLedger(), hosted: true, ...extra };
     return (args) => createToolSurface(d).find((t) => t.name === "residency_seat")!.call(args) as unknown as Promise<Record<string, unknown>>;
   }
-  const SEAT_ARGS = { org_slug: "eir-labs-inc", agent_slug: "vor", venue_slug: "residency", channel_id: "C0C6DDCK1V1", hands: ["envoy"], may_dispatch: ["software-change-pr-v1"] };
+  const SEAT_ARGS = { org_slug: "org-under-test", agent_slug: "resident", venue_slug: "greenroom", channel_id: "C0000000TEST", hands: ["envoy"], may_dispatch: ["software-change-pr-v1"] };
 
   it("RH6 residency_seat is a member act: an agent token is refused first; a member without the seam gets no_backend", async () => {
     const agent = await surface({ caller: { kind: "gig" }, seatResidency: async () => ({ residency_id: "x" }) })(SEAT_ARGS);
@@ -145,8 +145,8 @@ describe("the hosted seat is a door", () => {
     const call = surface({ caller: { kind: "member" }, seatResidency: async (a) => { seen.push(a); return { residency_id: ROW.residency_id }; } });
     const ok = await call(SEAT_ARGS);
     expect(ok["ok"]).toBe(true);
-    expect(ok["data"]).toEqual({ residency_id: ROW.residency_id, org_slug: "eir-labs-inc", agent_slug: "vor", channel_id: "C0C6DDCK1V1" });
-    expect(seen[0]).toMatchObject({ org_slug: "eir-labs-inc", agent_slug: "vor", venue_slug: "residency", channel_id: "C0C6DDCK1V1", hands: ["envoy"], may_dispatch: ["software-change-pr-v1"], repo: null });
+    expect(ok["data"]).toEqual({ residency_id: ROW.residency_id, org_slug: "org-under-test", agent_slug: "resident", channel_id: "C0000000TEST" });
+    expect(seen[0]).toMatchObject({ org_slug: "org-under-test", agent_slug: "resident", venue_slug: "greenroom", channel_id: "C0000000TEST", hands: ["envoy"], may_dispatch: ["software-change-pr-v1"], repo: null });
     const bad = await call({ ...SEAT_ARGS, channel_id: "  " });
     expect(bad["refusal"]).toBe("bad_args");
     expect(seen).toHaveLength(1);
@@ -157,11 +157,11 @@ describe("the hosted seat is a door", () => {
 
   it("RH8 postgrestSeatResidency POSTs the public seat door under the member's bearer with the twin's eight parameters", async () => {
     const calls = recordFetch(() => json(ROW.residency_id));
-    const r = await postgrestSeatResidency({ baseUrl: "https://store.test", anonKey: "anon", bearer: "eyJmember" })({ org_slug: "eir-labs-inc", agent_slug: "vor", venue_slug: "residency", channel_id: "C0C6DDCK1V1", hands: ["envoy"], may_dispatch: ["software-change-pr-v1"] });
+    const r = await postgrestSeatResidency({ baseUrl: "https://store.test", anonKey: "anon", bearer: "eyJmember" })({ org_slug: "org-under-test", agent_slug: "resident", venue_slug: "greenroom", channel_id: "C0000000TEST", hands: ["envoy"], may_dispatch: ["software-change-pr-v1"] });
     expect(r).toEqual({ residency_id: ROW.residency_id });
     expect(calls[0]!.url).toBe("https://store.test/rest/v1/rpc/coltrane_residency_seat");
     expect(calls[0]!.headers["Authorization"]).toBe("Bearer eyJmember");
     expect(Object.keys(calls[0]!.body).sort()).toEqual(["p_agent_slug", "p_channel_id", "p_hands", "p_may_dispatch", "p_org_slug", "p_repo", "p_soul_output_id", "p_venue_slug"]);
-    expect(calls[0]!.body).toMatchObject({ p_org_slug: "eir-labs-inc", p_agent_slug: "vor", p_venue_slug: "residency", p_channel_id: "C0C6DDCK1V1", p_hands: ["envoy"], p_may_dispatch: ["software-change-pr-v1"], p_repo: null, p_soul_output_id: null });
+    expect(calls[0]!.body).toMatchObject({ p_org_slug: "org-under-test", p_agent_slug: "resident", p_venue_slug: "greenroom", p_channel_id: "C0000000TEST", p_hands: ["envoy"], p_may_dispatch: ["software-change-pr-v1"], p_repo: null, p_soul_output_id: null });
   });
 });

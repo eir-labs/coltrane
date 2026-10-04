@@ -63,7 +63,7 @@ describe("a residency's token is minted into its vault", () => {
     expect(seen[0]).toEqual({ org_slug: "org-under-test", agent_slug: "resident", ttl_hours: 24, tenure_ceiling_hours: 720, reason: "a residency sitting, signed off", secret_name: "RESIDENCY_AGENT_TOKEN", may_dispatch: ["a-standard"] });
     expect(r["data"]).toEqual({ key_id: ANSWER.key_id, org_slug: "org-under-test", agent_slug: "resident", secret_name: "RESIDENCY_AGENT_TOKEN", expires_at: ANSWER.expires_at, tenure_ceiling_at: ANSWER.tenure_ceiling_at });
     expect(JSON.stringify(r)).not.toMatch(/ctk_|agent_token/);
-    const named = await call({ ...ARGS, secret_name: "VOR_TOKEN" });
+    const named = await call({ ...ARGS, secret_name: "RESIDENT_TOKEN" });
     expect((named["data"] as Record<string, unknown>)["secret_name"]).toBe("RESIDENCY_AGENT_TOKEN"); // the backend's name wins; a seam that renames is the store's business
   });
 
@@ -89,6 +89,11 @@ describe("a residency's token is minted into its vault", () => {
     }));
     const r = await postgrestResidencyTokenIntoVault({ baseUrl: "https://store.test", anonKey: "anon", bearer: "eyJmember" })(ARGS);
     expect(r).toEqual(ANSWER);
+    // the reader is the FIRST wall: a store row carrying anything beyond the four fields comes back as exactly four
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify([{ ...ANSWER, agent_token: "ctk_0123456789abcdef", extra: "x" }]), { status: 200, headers: { "Content-Type": "application/json" } })));
+    const stripped = await postgrestResidencyTokenIntoVault({ baseUrl: "https://store.test", anonKey: "anon", bearer: "eyJmember" })(ARGS);
+    expect(Object.keys(stripped).sort()).toEqual(["expires_at", "key_id", "secret_name", "tenure_ceiling_at"]);
+    expect(JSON.stringify(stripped)).not.toContain("ctk_");
     expect(calls[0]!.url).toBe("https://store.test/rest/v1/rpc/coltrane_mint_residency_token_into_vault");
     expect((calls[0]!.init.headers as Record<string, string>)["Authorization"]).toBe("Bearer eyJmember");
     expect(JSON.parse(String(calls[0]!.init.body))).toEqual({ p_org_slug: "org-under-test", p_agent_slug: "resident", p_ttl_hours: 24, p_tenure_ceiling_hours: 720, p_reason: "a residency sitting, signed off", p_secret_name: "RESIDENCY_AGENT_TOKEN", p_may_dispatch: [] });

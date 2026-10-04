@@ -34,7 +34,7 @@
  * module evaluation. The alternative was duplicating the transition table, which is the one thing
  * the surface's identity laws exist to forbid.
  */
-import { selectResidencyBacking, resolveSeatBacking } from "./reside_backing.js";
+import { selectResidencyBacking, resolveSeatBacking, type SeatBacking } from "./reside_backing.js";
 import {
   applyResidencyOp,
   bootResidency,
@@ -655,6 +655,9 @@ export async function driveResidency(r: Residency, deps: ResideDeps, opts: Drive
 interface ResideIo {
   err?: (s: string) => void;
   env?: Record<string, string | undefined>;
+  /** The hosted seat backing the DEPLOYMENT injects (the agnosticism law: this module ships no provider of
+   *  its own and names no store). The CLI builds it from the drain environment and passes it here. */
+  hosted?: SeatBacking;
 }
 
 /**
@@ -695,7 +698,10 @@ export async function runReside(argv: readonly string[], io: unknown): Promise<n
     say("reside refused: no_backend (seam: store-env) — the hosted backing needs COLTRANE_STORE_URL and COLTRANE_STORE_ANON.");
     return 2;
   }
-  const seat = await resolveSeatBacking(choice, {});
+  // The hosted backing is what the deployment injected (io.hosted) — never built here (the agnosticism
+  // law). Absent, resolveSeatBacking refuses no_backend at the hosted seam in its own sealed words.
+  const injected: { hosted?: SeatBacking } = choice.backing === "hosted" && asIo?.hosted ? { hosted: asIo.hosted } : {};
+  const seat = await resolveSeatBacking(choice, injected);
   if (!seat.ok) {
     say(`reside refused: ${seat.refusal} (seam: ${seat.seam}) — ${seat.message}`);
     return resideExitCode(seat.refusal);

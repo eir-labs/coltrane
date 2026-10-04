@@ -209,7 +209,15 @@ const TOOL_DEFS: readonly Omit<MCPToolDef, "description">[] = [
   // authenticated human member). The schema is the store's mint and nothing more — no chair, no
   // caps: a verb that could issue AND seat would be a path to mint authority. Hours are INTEGER (the
   // store's granularity); the token is returned ONCE and never read back.
-  { slug: "agent_token_issue",             category: "run", input_schema: obj({ org_slug: "string", agent_slug: "string", may_dispatch: "array", ttl_hours: "number" }), output_schema: obj({ key_id: "string", org_slug: "string", agent_slug: "string", expires_at: nullable("string"), agent_token: "string" }) },
+  { slug: "agent_token_issue",             category: "run", input_schema: obj({ org_slug: "string", agent_slug: "string", may_dispatch: "array", ttl_hours: "number", tenure_ceiling_hours: "number", reason: "string" }), output_schema: obj({ key_id: "string", org_slug: "string", agent_slug: "string", expires_at: nullable("string"), tenure_ceiling_at: nullable("string"), agent_token: "string" }) },
+  // agent_token_extend / agent_token_rewind — the governor's two acts on a standing token's watch
+  // (spec.coltrane-ui.token-tenure-extends-not-reissues): EXTEND moves expires_at toward the
+  // mainspring, never past it, never to null; RE-WIND restarts a watch that stopped for want of
+  // witnessed activity, same secret. Human member only — the seat never winds itself. The store
+  // holds the watch; a deployment wires deps.extendAgentToken / deps.rewindAgentToken. No token is
+  // ever returned: the secret changes hands once, at the mint.
+  { slug: "agent_token_extend",            category: "run", input_schema: obj({ org_slug: "string", key_id: "string", hours: "number", reason: "string" }), output_schema: obj({ key_id: "string", org_slug: "string", expires_at: "string", tenure_ceiling_at: "string" }) },
+  { slug: "agent_token_rewind",            category: "run", input_schema: obj({ org_slug: "string", key_id: "string", reason: "string" }), output_schema: obj({ key_id: "string", org_slug: "string", act_id: "string", wound_at: "string" }) },
   // org_hire — the verb that ADMITS an agent to an org. The org-membership analogue of
   // venue_credential_mint: the engine ships the schema and its refusals, a deployment wires the
   // admission backend (deps.hireMember). `input_schema` is derived from the single Zod source
@@ -399,6 +407,10 @@ export const TOOL_DESCRIPTIONS: Record<string, string> = {
     "Seat an agent as a member of an organization.",
   agent_token_issue:
     "Issue a standing agent token (ctk_) to an agent seated in your organization — the credential a reconciler holds between sittings. `ttl_hours` is a whole number of hours; `may_dispatch` lists standard slugs. Returned ONCE; only its hash is stored. Requires a human member; an agent token may not issue one.",
+  agent_token_extend:
+    "Extend a standing agent token's life toward its mainspring: `hours` (whole) moves expires_at to min(now + hours, tenure_ceiling_at), never past the ceiling, never to null; a reason is required and witnessed. Human member only — a seat never extends itself. Returns the watch's new state, never a token.",
+  agent_token_rewind:
+    "Re-wind a standing agent token whose watch STOPPED for want of witnessed activity: same secret, same ceiling, one witnessed act. Refused for a run-down (past its ceiling) or revoked token — those cost a mint. Human member only, with a reason.",
   output_write:
     "Seal an output. The write path enforces the core type's substance floor — a Verdict without a method on every check, an Interpretation without claims, is REFUSED and the run stops. Not a warning, not a score you can override.",
   skill_execute:

@@ -28,13 +28,20 @@
 // carried back as typed codes (not_a_member, not_named). The token is returned ONCE and is never
 // sealed to the ledger: the store's row is its record.
 
-export const AGENT_TOKEN_REFUSALS = ["bad_may_dispatch", "bad_ttl", "no_backend", "not_a_human_member"] as const;
+// A DELEGATION IS A POCKET WATCH (4 Oct 2026, spec.coltrane-ui.token-tenure-extends-not-reissues;
+// Eugene: "i say build it"). A mint names its MAINSPRING (tenure_ceiling_hours — the furthest the
+// seat may exist) and its REASON, with no default: a mint without either is refused by name. The
+// governor EXTENDS (expires_at moves toward the ceiling, never past it, never to null) and RE-WINDS
+// (a stopped watch restarts with the same secret) by two verbs that only a human member may call;
+// the seat never winds, extends or re-winds itself. The store holds the watch; the engine ships the
+// verbs' schemas and refusals and a deployment wires the doors.
+export const AGENT_TOKEN_REFUSALS = ["bad_ceiling", "bad_hours", "bad_key_id", "bad_may_dispatch", "bad_ttl", "no_backend", "no_reason", "not_a_human_member"] as const;
 export type AgentTokenRefusal = (typeof AGENT_TOKEN_REFUSALS)[number];
 
 /** The deployment's contract: resolve to a typed struct, never a generic throw, so the store's own
  *  refusal codes survive the seam. */
 export type IssueAgentTokenResult =
-  | { ok: true; key_id: string; expires_at: string | null; agent_token: string }
+  | { ok: true; key_id: string; expires_at: string | null; agent_token: string; tenure_ceiling_at?: string | null }
   | { ok: false; code: "not_a_member" | "not_named" };
 
 export interface IssueAgentTokenArgs {
@@ -42,6 +49,57 @@ export interface IssueAgentTokenArgs {
   agent_slug: string;
   may_dispatch: string[];
   ttl_hours: number;
+  /** The mainspring: the furthest the seat may exist, in whole hours from the mint. No default. */
+  tenure_ceiling_hours: number;
+  /** Why this seat, for how long — RC-1's horizon applied to standing. No default. */
+  reason: string;
+}
+
+export interface ExtendAgentTokenArgs { org_slug: string; key_id: string; hours: number; reason: string }
+export type ExtendAgentTokenResult =
+  | { ok: true; key_id: string; expires_at: string; tenure_ceiling_at: string }
+  | { ok: false; code: "not_found" | "revoked" | "lapsed" | "over_ceiling" | "over_max" | "not_a_member" };
+export interface RewindAgentTokenArgs { org_slug: string; key_id: string; reason: string }
+export type RewindAgentTokenResult =
+  | { ok: true; key_id: string; act_id: string; wound_at: string }
+  | { ok: false; code: "not_found" | "revoked" | "lapsed" | "not_stopped" | "not_a_member" };
+
+const MAX_HOURS = 24 * 366;
+
+/** Whole hours ≥ 1, as the store takes them; anything else is refused by name, never rounded. */
+export function hoursOrRefusal(raw: unknown, field: string): { hours: number } | { refusal: "bad_hours"; error: string } {
+  const n = typeof raw === "number" ? raw : typeof raw === "string" && raw.trim() !== "" ? Number(raw) : NaN;
+  if (!Number.isInteger(n) || n < 1 || n > MAX_HOURS) {
+    return { refusal: "bad_hours", error: `${field} must be a whole number of hours from 1 to ${MAX_HOURS} (got ${JSON.stringify(raw)}) — the store moves a watch in integer hours and a value it cannot express is refused, not rounded.` };
+  }
+  return { hours: n };
+}
+
+/** The mainspring, with no default: absent, non-integer, or shorter than the first ttl is refused —
+ *  a ceiling under the ttl would have the first expiry already past the end of the sitting. */
+export function ceilingHoursOrRefusal(raw: unknown, ttl_hours: number): { tenure_ceiling_hours: number } | { refusal: "bad_ceiling"; error: string } {
+  const n = typeof raw === "number" ? raw : typeof raw === "string" && raw.trim() !== "" ? Number(raw) : NaN;
+  if (!Number.isInteger(n) || n < 1 || n > MAX_HOURS) {
+    return { refusal: "bad_ceiling", error: `tenure_ceiling_hours must be a whole number of hours from 1 to ${MAX_HOURS} (got ${JSON.stringify(raw)}) — a delegation has NO default mainspring: the governor sets how long the seat may exist at all, with a reason.` };
+  }
+  if (n < ttl_hours) {
+    return { refusal: "bad_ceiling", error: `tenure_ceiling_hours (${n}) is shorter than ttl_hours (${ttl_hours}) — the first expiry would already be past the mainspring; the ceiling is the furthest the seat may run.` };
+  }
+  return { tenure_ceiling_hours: n };
+}
+
+/** A reason is a non-blank sentence; its absence is refused by name (the horizon, RC-1, applied to standing). */
+export function reasonOrRefusal(raw: unknown): { reason: string } | { refusal: "no_reason"; error: string } {
+  if (typeof raw !== "string" || raw.trim() === "") {
+    return { refusal: "no_reason", error: "reason is required: say what sitting this delegation is for and over what horizon — a watch is set with a reason, never by default." };
+  }
+  return { reason: raw.trim() };
+}
+
+/** A key_id names one token row; a blank one names nothing. */
+export function keyIdOrRefusal(raw: unknown): { key_id: string } | { refusal: "bad_key_id"; error: string } {
+  if (typeof raw !== "string" || raw.trim() === "") return { refusal: "bad_key_id", error: "key_id must name the token row (the key the mint returned); a blank one names nothing." };
+  return { key_id: raw.trim() };
 }
 
 /** The store's mint takes integer hours and the floor is one. Anything else is refused by name —

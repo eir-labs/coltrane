@@ -16,8 +16,8 @@
 //        to a null claim; a claim that answers no row is null
 //   RH4  hostedSeatBackingFromEnv builds the provider from the five drain variables (FLY_APP_NAME as
 //        COLTRANE_INSTANCE's alias) and names every missing one
-//   RH5  runReside in the drain environment injects that provider: the seat seam passes (no "seam: hosted"
-//        refusal) and the boot's next wall is the deployment's listener; a missing drain variable is named
+//   RH5  the DEPLOYMENT injects the provider (the agnosticism law): runReside with io.hosted passes the seat
+//        seam and stops at the listener; without it the sealed refusal stands; the CLI builds it from the env
 //   RH6  residency_seat on the hosted surface is a MEMBER act: an agent-token caller is refused
 //        not_a_human_member before any backend; a member without the seam gets no_backend by name
 //   RH7  with the seam, the four names are read as non-empty strings (bad_args otherwise), the lists pass
@@ -27,8 +27,8 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
 import { createRegistry, createOutputStore, MemoryLedger } from "../src/index.js";
 import { createToolSurface, type ToolSurfaceDeps } from "../src/server.js";
-import { postgrestSeatBacking, hostedSeatBackingFromEnv, claimFromRow, HOSTED_SEAT_DOORS } from "../src/reside_hosted.js";
-import { postgrestSeatResidency } from "../src/genome_store.js";
+import { postgrestSeatBacking, hostedSeatBackingFromEnv, claimFromRow, HOSTED_SEAT_DOORS, postgrestSeatResidency } from "../src/genome_store.js";
+import { readFileSync } from "node:fs";
 import { runReside } from "../src/reside.js";
 
 const ROW = {
@@ -101,21 +101,26 @@ describe("the hosted seat is a door", () => {
     if (full.ok) for (const m of ["claim", "heartbeat", "release", "cursorAdvance"] as const) expect(typeof full.seat[m]).toBe("function");
   });
 
-  it("RH5 runReside in the drain environment injects the provider: the seat seam passes and the boot refuses at a DEPLOYMENT seam, not no_backend on the seat", async () => {
+  it("RH5 the deployment injects the provider: runReside with io.hosted passes the seat seam and stops at the listener; the CLI builds it from the drain env", async () => {
     recordFetch(() => json(null));
     const err: string[] = [];
     const env = { COLTRANE_STORE_URL: "https://store.test", COLTRANE_STORE_ANON: "anon", COLTRANE_DRAIN_KEY: "cdk_box", COLTRANE_INSTANCE: "coltrane-residency-vor" };
-    const code = await runReside(["reside", "--residency", ROW.residency_id], { env, err: (s: string) => err.push(s) });
+    const built = hostedSeatBackingFromEnv(env);
+    expect(built.ok).toBe(true);
+    const code = await runReside(["reside", "--residency", ROW.residency_id], { env, err: (s: string) => err.push(s), ...(built.ok ? { hosted: built.seat } : {}) });
     const said = err.join("\n");
-    // before this module: "no_backend (seam: hosted) — the hosted backing is supplied by the DEPLOYMENT…"
     expect(said).not.toMatch(/seam: hosted|supplied by the DEPLOYMENT|seam: store-env/);
-    // the loop's own next wall — the listener the deployment wires — is what refuses now
     expect(said).toMatch(/no_backend \(seam: channelListener\)/);
     expect(code).toBe(2);
-    const missing: string[] = [];
-    const code2 = await runReside(["reside"], { env: { COLTRANE_STORE_URL: "https://store.test", COLTRANE_STORE_ANON: "anon", COLTRANE_INSTANCE: "i" }, err: (s: string) => missing.push(s) });
-    expect(code2).toBe(2);
-    expect(missing.join("\n")).toMatch(/no_backend \(seam: store-env\).*COLTRANE_DRAIN_KEY/);
+    // without the injection the sealed refusal stands — the engine built nothing out of thin air
+    const bare: string[] = [];
+    await runReside(["reside"], { env, err: (s: string) => bare.push(s) });
+    expect(bare.join("\n")).toMatch(/seam: hosted/);
+    // the CLI is the deployment's edge: it names the builder and hands the result to runReside
+    const cli = readFileSync(new URL("../src/cli.ts", import.meta.url), "utf8");
+    expect(cli).toMatch(/hostedSeatBackingFromEnv\(resideEnv\)/);
+    expect(cli).toMatch(/runReside\(argv, \{ \.\.\.\(io as object\), \.\.\.hosted \}\)/);
+    expect(cli).toMatch(/no_backend \(seam: store-env\)/);
   });
 
   function surface(extra: Partial<ToolSurfaceDeps>): (args: Record<string, unknown>) => Promise<Record<string, unknown>> {

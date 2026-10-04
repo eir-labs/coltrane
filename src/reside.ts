@@ -35,7 +35,6 @@
  * the surface's identity laws exist to forbid.
  */
 import { selectResidencyBacking, resolveSeatBacking, type SeatBacking } from "./reside_backing.js";
-import { hostedSeatBackingFromEnv } from "./reside_hosted.js";
 import {
   applyResidencyOp,
   bootResidency,
@@ -656,6 +655,9 @@ export async function driveResidency(r: Residency, deps: ResideDeps, opts: Drive
 interface ResideIo {
   err?: (s: string) => void;
   env?: Record<string, string | undefined>;
+  /** The hosted seat backing the DEPLOYMENT injects (the agnosticism law: this module ships no provider of
+   *  its own and names no store). The CLI builds it from the drain environment and passes it here. */
+  hosted?: SeatBacking;
 }
 
 /**
@@ -696,18 +698,9 @@ export async function runReside(argv: readonly string[], io: unknown): Promise<n
     say("reside refused: no_backend (seam: store-env) — the hosted backing needs COLTRANE_STORE_URL and COLTRANE_STORE_ANON.");
     return 2;
   }
-  // THE HOSTED SEAT IS A DOOR (RS-5): in the drain environment the deployment's provider is the engine's
-  // own postgrestSeatBacking over the public residency doors, built from the same five variables that
-  // marked the environment hosted. A missing variable is a typed refusal naming it, never a null seat.
-  let injected: { hosted?: SeatBacking } = {};
-  if (choice.backing === "hosted") {
-    const hosted = hostedSeatBackingFromEnv(env);
-    if (!hosted.ok) {
-      say(`reside refused: no_backend (seam: store-env) — the hosted backing needs ${hosted.missing.join(", ")}.`);
-      return 2;
-    }
-    injected = { hosted: hosted.seat };
-  }
+  // The hosted backing is what the deployment injected (io.hosted) — never built here (the agnosticism
+  // law). Absent, resolveSeatBacking refuses no_backend at the hosted seam in its own sealed words.
+  const injected: { hosted?: SeatBacking } = choice.backing === "hosted" && asIo?.hosted ? { hosted: asIo.hosted } : {};
   const seat = await resolveSeatBacking(choice, injected);
   if (!seat.ok) {
     say(`reside refused: ${seat.refusal} (seam: ${seat.seam}) — ${seat.message}`);

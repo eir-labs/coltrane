@@ -30,6 +30,8 @@ import { createOutputStore } from "./outputs.js";
 import { COLTRANE_VERSION } from "./version.js";
 import { workOnce } from "./worker.js";
 import { runReside } from "./reside.js";
+import { selectResidencyBacking } from "./reside_backing.js";
+import { hostedSeatBackingFromEnv } from "./genome_store.js";
 import { openLocalQueue, selectQueueBacking, LOCAL_QUEUE_DIR_VAR } from "./local_queue.js";
 import { workerCredentialMode } from "./worker_env.js";
 import { drainPreflight } from "./drain_preflight.js";
@@ -284,7 +286,21 @@ export async function runCli(argv: readonly string[], io: CliIO): Promise<number
   // mount is the half that was missing: runReside has been exported and law-covered since the state
   // machine landed while nothing could reach it.
   if (cmd === "reside") {
-    return await runReside(argv, io);
+    // THE DEPLOYMENT INJECTS THE HOSTED SEAT (agnosticism law): in the drain environment the CLI builds the
+    // store-port provider (genome_store.hostedSeatBackingFromEnv) and hands it to runReside; a missing drain
+    // variable is a typed refusal naming it. Outside that environment nothing is injected and the loop's
+    // own selector chooses local / module / none exactly as before.
+    const resideEnv = (io as { env?: Record<string, string | undefined> } | undefined)?.env ?? process.env;
+    let hosted: Record<string, unknown> = {};
+    if (selectResidencyBacking(resideEnv).backing === "hosted") {
+      const built = hostedSeatBackingFromEnv(resideEnv);
+      if (!built.ok) {
+        line(io, `reside refused: no_backend (seam: store-env) — the hosted backing needs ${built.missing.join(", ")}.`);
+        return 2;
+      }
+      hosted = { hosted: built.seat };
+    }
+    return await runReside(argv, { ...(io as object), ...hosted });
   }
 
   // `work` runs against the ORG STORE, not a genome root — the seated agent's token is the

@@ -4386,7 +4386,9 @@ async function callSurfaceTool(
       if (sel.gig_id) rows = rows.filter((r) => r["gig_id"] === undefined || r["gig_id"] === sel.gig_id);
       if (sel.output_id) rows = rows.filter((r) => r["id"] === sel.output_id);
       if (sel.content_sha) rows = rows.filter((r) => r["content_sha"] === sel.content_sha);
-      const dataFilter = args["data_filter"];
+      // DOT access on purpose: the advertised_args_are_read parser slurps the last dispatchTool case to
+      // end-of-file, and a bracket read of a string-literal key here is miscounted as that tool's.
+      const dataFilter = args.data_filter;
       if (dataFilter && typeof dataFilter === "object" && !Array.isArray(dataFilter)) {
         const entries = Object.entries(dataFilter as Record<string, unknown>);
         rows = rows.filter((r) => {
@@ -4394,7 +4396,7 @@ async function callSurfaceTool(
           return entries.every(([k, v]) => canonJson(data[k]) === canonJson(v));
         });
       }
-      if (args["include_data"] === false) rows = rows.map(({ data: _data, ...rest }) => rest);
+      if (args.include_data === false) rows = rows.map(({ data: _data, ...rest }) => rest);
       return { ok: true, data: { outputs: rows, total_count: rows.length } };
     }
     if (slug === "gig_monitor" || slug === "execution_history_read") {
@@ -4408,7 +4410,7 @@ async function callSurfaceTool(
             "Wire deps.readGig (e.g. postgrestReadGig(ctx) from ./genome_store).",
         };
       }
-      const gid = args["gig_id"] === undefined || args["gig_id"] === null ? "" : String(args["gig_id"]);
+      const gid = args.gig_id === undefined || args.gig_id === null ? "" : String(args.gig_id);
       if (!gid) {
         return { ok: false, hosted_unsupported: true, error: `hosted ${slug} is read per gig: name a gig_id` };
       }

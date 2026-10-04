@@ -1098,3 +1098,24 @@ export function postgrestReadGig(ctx: PostgrestContext): (gig_id: string) => Pro
   };
 }
 
+// ── THE SOVEREIGN SEATS (RS-5) ───────────────────────────────────────────────────────────────────
+/** Hosted seam for residency_seat: the member's own bearer rides PostgREST to public.coltrane_residency_seat
+ *  (the wrapper over residency.seat), which authorizes on auth.uid() + org membership itself. Returns the
+ *  new residency id. A store refusal is thrown with the store's words. Member JWT only — a ctk_ token is
+ *  refused at the surface before this is reached (a seat does not seat seats). */
+export function postgrestSeatResidency(
+  ctx: PostgrestContext,
+): (args: { org_slug: string; agent_slug: string; venue_slug: string; channel_id: string; hands?: string[]; repo?: string | null; may_dispatch?: string[] }) => Promise<{ residency_id: string }> {
+  return async (args) => {
+    const out = await storeRead(ctx, "rpc/coltrane_residency_seat", {
+      method: "POST",
+      body: {
+        p_org_slug: args.org_slug, p_agent_slug: args.agent_slug, p_venue_slug: args.venue_slug, p_channel_id: args.channel_id,
+        p_hands: args.hands ?? [], p_repo: args.repo ?? null, p_soul_output_id: null, p_may_dispatch: args.may_dispatch ?? [],
+      },
+    });
+    if (typeof out !== "string" || !out) throw new Error("coltrane_residency_seat answered without a residency id");
+    return { residency_id: out };
+  };
+}
+

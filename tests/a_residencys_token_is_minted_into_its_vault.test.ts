@@ -15,7 +15,7 @@
 //        RESIDENCY_AGENT_TOKEN), and the answer carries key_id, the times and the name — no token field
 //   VT4  THE VALUE NEVER LEAVES THE STORE: a backend that answers with a token (a ctk_ value, or a field
 //        named like one) is refused, not relayed; a store refusal rides back in its words
-//   VT5  postgrestResidencyTokenIntoVault POSTs public.coltrane_residency_token_into_vault under the
+//   VT5  postgrestResidencyTokenIntoVault POSTs public.coltrane_mint_residency_token_into_vault under the
 //        MEMBER's bearer with the door's seven parameters and answers the four fields
 //   VT6  the advertised row names exactly the arguments the surface reads (advertised_args_are_read holds)
 import { describe, it, expect, afterEach, vi } from "vitest";
@@ -75,7 +75,7 @@ describe("a residency's token is minted into its vault", () => {
     expect(JSON.stringify(r1)).not.toContain("ctk_0123456789abcdef");
     const leaky2 = surface({ caller: { kind: "member" }, residencyTokenIntoVault: async () => ({ ...ANSWER, secret_name: "ctk_0123456789abcdef" }) });
     expect((await leaky2(ARGS))["ok"]).toBe(false);
-    const refused = surface({ caller: { kind: "member" }, residencyTokenIntoVault: async () => { throw new Error("coltrane_residency_token_into_vault 400: agent resident is proposed — a capability token may only be issued to an agent that has been through the naming ceremony"); } });
+    const refused = surface({ caller: { kind: "member" }, residencyTokenIntoVault: async () => { throw new Error("coltrane_mint_residency_token_into_vault 400: agent resident is proposed — a capability token may only be issued to an agent that has been through the naming ceremony"); } });
     const r2 = await refused(ARGS);
     expect(r2["ok"]).toBe(false);
     expect(String(r2["error"])).toMatch(/naming ceremony/);
@@ -89,7 +89,7 @@ describe("a residency's token is minted into its vault", () => {
     }));
     const r = await postgrestResidencyTokenIntoVault({ baseUrl: "https://store.test", anonKey: "anon", bearer: "eyJmember" })(ARGS);
     expect(r).toEqual(ANSWER);
-    expect(calls[0]!.url).toBe("https://store.test/rest/v1/rpc/coltrane_residency_token_into_vault");
+    expect(calls[0]!.url).toBe("https://store.test/rest/v1/rpc/coltrane_mint_residency_token_into_vault");
     expect((calls[0]!.init.headers as Record<string, string>)["Authorization"]).toBe("Bearer eyJmember");
     expect(JSON.parse(String(calls[0]!.init.body))).toEqual({ p_org_slug: "org-under-test", p_agent_slug: "resident", p_ttl_hours: 24, p_tenure_ceiling_hours: 720, p_reason: "a residency sitting, signed off", p_secret_name: "RESIDENCY_AGENT_TOKEN", p_may_dispatch: [] });
   });

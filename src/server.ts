@@ -4045,7 +4045,7 @@ export interface ToolSurfaceDeps extends ServerDeps {
    *  without the seam it is an honest typed error. */
   seatResidency?: ((args: { org_slug: string; agent_slug: string; venue_slug: string; channel_id: string; hands?: string[]; repo?: string | null; may_dispatch?: string[] }) => Promise<{ residency_id: string }>) | undefined;
   /** A RESIDENCY'S TOKEN IS MINTED INTO ITS VAULT (SF-3 A1): hosted residency_token_into_vault → the store's
-   *  public.coltrane_residency_token_into_vault under the MEMBER's bearer (e.g. postgrestResidencyTokenIntoVault(ctx)).
+   *  public.coltrane_mint_residency_token_into_vault under the MEMBER's bearer (e.g. postgrestResidencyTokenIntoVault(ctx)).
    *  The backend answers the key and the watch's times and NEVER the token; the surface refuses an agent-token
    *  caller first; without the seam it is an honest typed error. */
   residencyTokenIntoVault?: ((args: { org_slug: string; agent_slug: string; ttl_hours: number; tenure_ceiling_hours: number; reason: string; secret_name?: string; may_dispatch?: string[] }) => Promise<{ key_id: string; expires_at: string; tenure_ceiling_at: string; secret_name: string }>) | undefined;
@@ -4289,7 +4289,7 @@ async function callSurfaceTool(
     const secret_name = typeof args.secret_name === "string" && args.secret_name.trim() ? args.secret_name.trim() : "RESIDENCY_AGENT_TOKEN";
     if (!/^[A-Za-z0-9_.-]{1,64}$/.test(secret_name)) return { ok: false, refusal: "bad_args", error: "secret_name must be [A-Za-z0-9_.-]{1,64}" };
     const may_dispatch = Array.isArray(args.may_dispatch) ? (args.may_dispatch as unknown[]).map(String) : undefined;
-    if (!deps.residencyTokenIntoVault) return { ok: false, refusal: "no_backend", error: "no vault-minting backend is wired on this surface — wire deps.residencyTokenIntoVault (e.g. postgrestResidencyTokenIntoVault(ctx) from ./genome_store) over public.coltrane_residency_token_into_vault." };
+    if (!deps.residencyTokenIntoVault) return { ok: false, refusal: "no_backend", error: "no vault-minting backend is wired on this surface — wire deps.residencyTokenIntoVault (e.g. postgrestResidencyTokenIntoVault(ctx) from ./genome_store) over public.coltrane_mint_residency_token_into_vault." };
     let r: Record<string, unknown>;
     try {
       r = (await deps.residencyTokenIntoVault({ org_slug, agent_slug, ttl_hours: ttl.ttl_hours, tenure_ceiling_hours: ceil.tenure_ceiling_hours, reason: why.reason, secret_name, ...(may_dispatch ? { may_dispatch } : {}) })) as unknown as Record<string, unknown>;

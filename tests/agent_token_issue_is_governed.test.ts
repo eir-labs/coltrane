@@ -66,9 +66,9 @@ describe("agent_token_issue — a governed verb that issues a STANDING token to 
     expect(issueTool(surfaceDeps()), "and therefore in createToolSurface").toBeDefined();
   });
 
-  it("INV-2 · its input schema is exactly {org_slug, agent_slug, may_dispatch, ttl_hours} — the store's mint, no more", () => {
+  it("INV-2 · its input schema is exactly {org_slug, agent_slug, may_dispatch, ttl_hours, tenure_ceiling_hours, reason} — the store's mint with its mainspring and reason (4 Oct), no more", () => {
     const def = MCP_TOOLS.find((t) => t.slug === "agent_token_issue")!;
-    expect(Object.keys(props(def.input_schema)).sort()).toEqual(["agent_slug", "may_dispatch", "org_slug", "ttl_hours"]);
+    expect(Object.keys(props(def.input_schema)).sort()).toEqual(["agent_slug", "may_dispatch", "org_slug", "reason", "tenure_ceiling_hours", "ttl_hours"]);
     for (const forbidden of ["caps", "chair", "chair_id", "standards", "grant", "scopes"]) {
       expect(props(def.input_schema), `no capability travels on the mint: ${forbidden}`).not.toHaveProperty(forbidden);
     }
@@ -76,14 +76,14 @@ describe("agent_token_issue — a governed verb that issues a STANDING token to 
 
   it("INV-3 · the refusal vocabulary is closed and named", async () => {
     const m = await agentTokenModule();
-    expect([...m.AGENT_TOKEN_REFUSALS].sort()).toEqual(["bad_may_dispatch", "bad_ttl", "no_backend", "not_a_human_member"]);
+    expect([...m.AGENT_TOKEN_REFUSALS].sort()).toEqual(["bad_ceiling", "bad_hours", "bad_key_id", "bad_may_dispatch", "bad_ttl", "no_backend", "no_reason", "not_a_human_member"]);
   });
 
   it("INV-4 · an agent token may not issue an agent token — gig, player, venue and absent callers are refused before any backend", async () => {
     for (const caller of [{ kind: "gig" as const, gig_id: "g1" }, { kind: "player" as const }, { kind: "venue" as const }, undefined]) {
       const backend = okIssue();
       const tool = issueTool(surfaceDeps({ caller, issueAgentToken: backend }));
-      const res = (await tool!.call({ org_slug: ORG, agent_slug: AGENT, may_dispatch: [], ttl_hours: 72 })) as SurfaceToolResult;
+      const res = (await tool!.call({ org_slug: ORG, agent_slug: AGENT, may_dispatch: [], ttl_hours: 72, tenure_ceiling_hours: 24 * 30, reason: "the sitting" })) as SurfaceToolResult;
       expect(res.ok, String(caller?.kind)).toBe(false);
       expect(res.refusal, String(caller?.kind)).toBe("not_a_human_member");
       expect(backend, "a refused issue never touches the backend").not.toHaveBeenCalled();
@@ -93,7 +93,7 @@ describe("agent_token_issue — a governed verb that issues a STANDING token to 
   it("INV-5 · a member caller with no backend wired is refused no_backend, naming the seam — and on a hosted surface too, ahead of the hosted check", async () => {
     for (const hosted of [false, true]) {
       const tool = issueTool(surfaceDeps({ hosted, caller: { kind: "member" } }));
-      const res = (await tool!.call({ org_slug: ORG, agent_slug: AGENT, may_dispatch: [], ttl_hours: 72 })) as SurfaceToolResult;
+      const res = (await tool!.call({ org_slug: ORG, agent_slug: AGENT, may_dispatch: [], ttl_hours: 72, tenure_ceiling_hours: 24 * 30, reason: "the sitting" })) as SurfaceToolResult;
       expect(res.ok).toBe(false);
       expect(res.refusal).toBe("no_backend");
       expect(res.error).toMatch(/issueAgentToken/);
@@ -111,7 +111,7 @@ describe("agent_token_issue — a governed verb that issues a STANDING token to 
     expect(m.ttlHoursOrRefusal("24")).toEqual({ ttl_hours: 24 });
     const backend = okIssue();
     const tool = issueTool(surfaceDeps({ caller: { kind: "member" }, issueAgentToken: backend }));
-    const res = (await tool!.call({ org_slug: ORG, agent_slug: AGENT, may_dispatch: [], ttl_hours: 1.5 })) as SurfaceToolResult;
+    const res = (await tool!.call({ org_slug: ORG, agent_slug: AGENT, may_dispatch: [], ttl_hours: 1.5, tenure_ceiling_hours: 24 * 30, reason: "the sitting" })) as SurfaceToolResult;
     expect(res.ok).toBe(false);
     expect(res.refusal).toBe("bad_ttl");
     expect(res.error).toMatch(/1\.5/);
@@ -121,7 +121,7 @@ describe("agent_token_issue — a governed verb that issues a STANDING token to 
   it("INV-7 · the backend's typed refusals survive the seam: not_a_member, not_named", async () => {
     for (const code of ["not_a_member", "not_named"] as const) {
       const tool = issueTool(surfaceDeps({ caller: { kind: "member" }, issueAgentToken: codeIssue(code) }));
-      const res = (await tool!.call({ org_slug: ORG, agent_slug: AGENT, may_dispatch: [], ttl_hours: 72 })) as SurfaceToolResult;
+      const res = (await tool!.call({ org_slug: ORG, agent_slug: AGENT, may_dispatch: [], ttl_hours: 72, tenure_ceiling_hours: 24 * 30, reason: "the sitting" })) as SurfaceToolResult;
       expect(res.ok).toBe(false);
       expect(res.refusal).toBe(code);
     }
@@ -131,10 +131,10 @@ describe("agent_token_issue — a governed verb that issues a STANDING token to 
     const backend = okIssue();
     const ledger = new MemoryLedger();
     const tool = issueTool(surfaceDeps({ caller: { kind: "member" }, issueAgentToken: backend, ledger }));
-    const res = (await tool!.call({ org_slug: ORG, agent_slug: AGENT, ttl_hours: 72 })) as SurfaceToolResult & { data?: Record<string, unknown> };
+    const res = (await tool!.call({ org_slug: ORG, agent_slug: AGENT, ttl_hours: 72, tenure_ceiling_hours: 24 * 30, reason: "the sitting" })) as SurfaceToolResult & { data?: Record<string, unknown> };
     expect(res.ok).toBe(true);
-    expect(backend).toHaveBeenCalledWith({ org_slug: ORG, agent_slug: AGENT, may_dispatch: [], ttl_hours: 72 });
-    expect(Object.keys(res.data ?? {}).sort()).toEqual(["agent_slug", "agent_token", "expires_at", "key_id", "org_slug"]);
+    expect(backend).toHaveBeenCalledWith({ org_slug: ORG, agent_slug: AGENT, may_dispatch: [], ttl_hours: 72, tenure_ceiling_hours: 24 * 30, reason: "the sitting" });
+    expect(Object.keys(res.data ?? {}).sort()).toEqual(["agent_slug", "agent_token", "expires_at", "key_id", "org_slug", "tenure_ceiling_at"]);
     expect(res.data?.agent_token).toBe("ctk_" + "0".repeat(48));
     expect(ledger.query({}), "the token is the store's record (hash + issuer), never the ledger's").toHaveLength(0);
   });
@@ -142,12 +142,12 @@ describe("agent_token_issue — a governed verb that issues a STANDING token to 
   it("INV-9 · may_dispatch is a list of standard slugs or absent; a malformed one is refused by name, never narrowed to [] (the grade's D3)", async () => {
     const backend = okIssue();
     const tool = issueTool(surfaceDeps({ caller: { kind: "member" }, issueAgentToken: backend }));
-    await tool!.call({ org_slug: ORG, agent_slug: AGENT, may_dispatch: [" reconcile-work-order-v0 "], ttl_hours: 72 });
-    expect(backend).toHaveBeenCalledWith({ org_slug: ORG, agent_slug: AGENT, may_dispatch: ["reconcile-work-order-v0"], ttl_hours: 72 });
+    await tool!.call({ org_slug: ORG, agent_slug: AGENT, may_dispatch: [" reconcile-work-order-v0 "], ttl_hours: 72, tenure_ceiling_hours: 24 * 30, reason: "the sitting" });
+    expect(backend).toHaveBeenCalledWith({ org_slug: ORG, agent_slug: AGENT, may_dispatch: ["reconcile-work-order-v0"], ttl_hours: 72, tenure_ceiling_hours: 24 * 30, reason: "the sitting" });
     for (const bad of ["reconcile-work-order-v0", { 0: "x" }, 42, ["reconcile-work-order-v0", 7], [""], [null]]) {
       const spy = okIssue();
       const t = issueTool(surfaceDeps({ caller: { kind: "member" }, issueAgentToken: spy }));
-      const res = (await t!.call({ org_slug: ORG, agent_slug: AGENT, may_dispatch: bad, ttl_hours: 72 })) as SurfaceToolResult;
+      const res = (await t!.call({ org_slug: ORG, agent_slug: AGENT, may_dispatch: bad, ttl_hours: 72, tenure_ceiling_hours: 24 * 30, reason: "the sitting" })) as SurfaceToolResult;
       expect(res.ok, JSON.stringify(bad)).toBe(false);
       expect(res.refusal, JSON.stringify(bad)).toBe("bad_may_dispatch");
       expect(spy, "a refused shape never reaches the backend").not.toHaveBeenCalled();
@@ -158,7 +158,7 @@ describe("agent_token_issue — a governed verb that issues a STANDING token to 
     for (const bad of [{ ok: true }, { ok: true, key_id: "k", agent_token: "" }, { ok: true, key_id: "k", agent_token: "   " }, { ok: true, key_id: "", agent_token: "ctk_" + "0".repeat(48) }, { ok: true, key_id: "k", agent_token: 42 }, null, undefined, "yes"]) {
       const backend = vi.fn(async (_a: IssueArgs) => bad as never);
       const tool = issueTool(surfaceDeps({ caller: { kind: "member" }, issueAgentToken: backend }));
-      const res = (await tool!.call({ org_slug: ORG, agent_slug: AGENT, ttl_hours: 72 })) as SurfaceToolResult;
+      const res = (await tool!.call({ org_slug: ORG, agent_slug: AGENT, ttl_hours: 72, tenure_ceiling_hours: 24 * 30, reason: "the sitting" })) as SurfaceToolResult;
       expect(res.ok, JSON.stringify(bad)).toBe(false);
       expect(res.error, JSON.stringify(bad)).toMatch(/nothing issued/);
     }
@@ -166,14 +166,14 @@ describe("agent_token_issue — a governed verb that issues a STANDING token to 
     for (const tok of ["ctk_ABCDEF0123456789", "ctk_x", "tok-of-another-deployment", "ctk_" + "f".repeat(48)]) {
       const backend = vi.fn(async (_a: IssueArgs) => ({ ok: true as const, key_id: "k", expires_at: "2026-10-06T00:00:00.000Z", agent_token: tok }));
       const tool = issueTool(surfaceDeps({ caller: { kind: "member" }, issueAgentToken: backend }));
-      const res = (await tool!.call({ org_slug: ORG, agent_slug: AGENT, ttl_hours: 72 })) as SurfaceToolResult & { data?: Record<string, unknown> };
+      const res = (await tool!.call({ org_slug: ORG, agent_slug: AGENT, ttl_hours: 72, tenure_ceiling_hours: 24 * 30, reason: "the sitting" })) as SurfaceToolResult & { data?: Record<string, unknown> };
       expect(res.ok, tok).toBe(true);
       expect(res.data?.agent_token, tok).toBe(tok);
     }
     // The expiry is the store's number or null — never a blank string wearing a date.
     const noExp = vi.fn(async (_a: IssueArgs) => ({ ok: true as const, key_id: "k", agent_token: "ctk_abc" }) as never);
     const t2 = issueTool(surfaceDeps({ caller: { kind: "member" }, issueAgentToken: noExp }));
-    const r2 = (await t2!.call({ org_slug: ORG, agent_slug: AGENT, ttl_hours: 72 })) as SurfaceToolResult & { data?: Record<string, unknown> };
+    const r2 = (await t2!.call({ org_slug: ORG, agent_slug: AGENT, ttl_hours: 72, tenure_ceiling_hours: 24 * 30, reason: "the sitting" })) as SurfaceToolResult & { data?: Record<string, unknown> };
     expect(r2.ok).toBe(true);
     expect(r2.data?.expires_at).toBeNull();
   });

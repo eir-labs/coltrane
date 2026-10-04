@@ -24,7 +24,8 @@
 //       the store does not show is not_found, never an empty history (the grade's note)
 //   H6  postgrestReadOutputs builds the member GET exactly — coltrane_outputs, gig_id=eq.<id>, the
 //       select names content_sha — under the caller's bearer; a ctk_ bearer takes the agent RPC
-//       (coltrane_mcp_gig_outputs) instead of the table
+//       (coltrane_mcp_gig_outputs) with the token in p_bearer and the ANON key as the Authorization
+//       bearer — a ctk_ is not a JWT and PostgREST refuses it as one (measured live, 4 Oct)
 //   H7  postgrestReadGig builds the member GET on coltrane_gigs by id; a ctk_ bearer takes
 //       coltrane_mcp_gig_status
 //   H8  a bare (non-hosted) surface is untouched: output_query still reads the local store
@@ -147,6 +148,11 @@ describe("a finished gig's seals are readable from the door", () => {
     expect(calls[1]!.url).toBe("https://store.test/rest/v1/rpc/coltrane_mcp_gig_outputs");
     expect(calls[1]!.init.method).toBe("POST");
     expect(JSON.parse(String(calls[1]!.init.body))).toEqual({ p_bearer: "ctk_abc", p_gig: GIG });
+    // THE AGENT TOKEN RIDES IN THE BODY, NEVER AS THE BEARER: PostgREST wants a JWT in Authorization and a
+    // ctk_ is not one ("Expected 3 parts in JWT; got 1", measured live as vor at coltrane-ui cfbd57b). The
+    // header carries the anon key; p_bearer carries the token — the shape rpcQueueGig and hosted_tools keep.
+    expect((calls[1]!.init.headers as Record<string, string>)["Authorization"]).toBe("Bearer anon");
+    expect(JSON.stringify(calls[1]!.init.headers)).not.toContain("ctk_abc");
     // a store refusal is thrown with the store's words, never swallowed into an empty
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ message: "permission denied for table coltrane_outputs" }), { status: 401 })));
     await expect(postgrestReadOutputs({ baseUrl: "https://store.test", anonKey: "anon", bearer: "eyJx" })({ gig_id: GIG })).rejects.toThrow(/permission denied/);
@@ -170,6 +176,7 @@ describe("a finished gig's seals are readable from the door", () => {
     expect(await agent(GIG)).toMatchObject({ status: "completed" });
     expect(calls[2]!.url).toBe("https://store.test/rest/v1/rpc/coltrane_mcp_gig_status");
     expect(JSON.parse(String(calls[2]!.init.body))).toEqual({ p_bearer: "ctk_abc", p_gig: GIG });
+    expect((calls[2]!.init.headers as Record<string, string>)["Authorization"]).toBe("Bearer anon");
   });
 
   it("H8 a bare surface is untouched: output_query reads the local store as before", async () => {

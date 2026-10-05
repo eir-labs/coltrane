@@ -1,20 +1,17 @@
 {
   "$schema": "conformance.repo-self.v1",
   "repo": "eir-labs/coltrane",
-  "filled_by": "john (the ops lane — session coltrane-ops, 5 Oct 2026 night, under Eugene's corpus commission)",
+  "filled_by": "john (the operations lane that consumes this engine — 5 Oct 2026 night, under Eugene's corpus commission)",
   "date": "2026-10-05",
-
   "identity": {
     "is": "THE ENGINE. The OSS runtime that resolves a layered genome (agents, standards, skills, core types), runs a standard's chairs as real model invocations against typed input and output contracts, and seals every run into an append-only ledger carrying its genome hash, run fingerprint and usage. Published to npm as @eir-labs/coltrane; every downstream project in the estate is a genome that EXTENDS this one.",
-    "is_not": "NOT a database-backed service — there is no DB anywhere in its path; the ledger is JSONL on disk. NOT the store (eir-labs/coltrane-ui) and NOT the control plane (eir-labs/coltrane-ops): this repo SERVES verbs, it does not decide who may call them. The wall is the store, and an engine verb with no registry row there refuses by name. NOT an agent framework in the prompt-template sense: a chair is a seat in a standard whose output must SEAL against an effective schema, and a chair that cannot seal is refused rather than retried. And NOT a repo whose package.json tells you its version — see soft, because that one has cost real time."
+    "is_not": "NOT a database-backed service — there is no DB anywhere in its path; the ledger is JSONL on disk. NOT the store (eir-labs/coltrane-ui) and NOT the control plane that provisions downstream projects: this repo SERVES verbs, it does not decide who may call them. The wall is the store, and an engine verb with no registry row there refuses by name. NOT an agent framework in the prompt-template sense: a chair is a seat in a standard whose output must SEAL against an effective schema, and a chair that cannot seal is refused rather than retried. And NOT a repo whose package.json tells you its version — see soft, because that one has cost real time."
   },
-
   "direction": {
     "now": "Hardening the seams a genome crosses — the layered loader, the chair's reach, the gig's lease and room — with the test suite as the gate rather than a reviewer's reading.",
     "next": "standard_simulate grows a PAYLOAD and a RESOLUTION SOURCE, so a simulation reads what a gig would actually load at dispatch time instead of estimating from a standard's structure. Today it cannot answer 'would this run', only 'what would this cost' — and a downstream lane built its own resolving simulator because of it. That belongs here.",
     "north": "A run is reproducible from its receipt alone: the genome hash says what was loaded, the fingerprint says what ran, the usage says what it cost, and the ledger that holds all three cannot be rewritten. Everything else in the estate is built on that being true."
   },
-
   "state": {
     "solid": [
       "Genome layering is ONE function, not a convention: the base genome loads first and the project's own directories land on top, which is why a downstream needs no core_types of its own [E:loader]",
@@ -36,12 +33,11 @@
     "seams": [
       "NPM — the only supported way a downstream consumes this engine. Git-vendoring was retired at 0.8.0, so a project depends on the published package and layers its genome over the installed base [E:publish]",
       "THE STORE (eir-labs/coltrane-ui) — it holds a registry row for every verb this engine serves and the door that checks each one. The engine serving a verb is necessary and NOT sufficient: with no row there, the call refuses by name [E:registry]",
-      "THE CONTROL PLANE (eir-labs/coltrane-ops) — stamps downstream projects that extend this engine, provisions them, and tracks their engine version in a fleet registry re-derived from each project's package.json [E:publish]",
+      "THE CONTROL PLANE — a private operations repo, named here only by its function because this tree's boundary gate governs what may be named in it; stamps downstream projects that extend this engine, provisions them, and tracks their engine version in a fleet registry re-derived from each project's package.json [E:publish]",
       "THE GENOME ROOT — the server reads COLTRANE_GENOME (or falls back to cwd). The fallback is load-bearing in practice: at least one downstream's config sets a DIFFERENT variable name that this engine ignores, and works only because cwd happens to be right [E:loader]",
       "THE MODEL — a chair is a real invocation, so a chair's output is sealed against its effective schema rather than trusted, and usage is recorded per run [E:prompt]"
     ]
   },
-
   "for_the_next_agent": [
     "THE REQUIRED SET IS union(schema.required, required_fields) — AND CORE'S REQUIRED IS NOT FOLDED IN. Properties merge core under domain; required does not. This is the rule most often restated wrongly in prose around this estate (including by this lane, in its own documentation, until a working payload falsified it). The source is the authority, and the comment beside it records the three live chair failures that produced the rule.",
     "READ THE VERSION FROM npm, NOT FROM THE TREE: `npm view @eir-labs/coltrane version`. package.json at main says 0.12.0 while the published package is 0.25.32. Any downstream debugging a version mismatch should start here, because the repo will confidently tell them the wrong number.",
@@ -49,17 +45,46 @@
     "A CHAIR THAT CANNOT SEAL IS REFUSED, not retried or best-efforted. If a chair fails in a live run, suspect the contract before the model: the seal enforces the effective schema, and the usual cause is a producer shown one contract while judged against another. That specific bug has been fixed once already, at the unification point, and the fix's comment asks that any future divergence be argued there rather than worked around.",
     "standard_simulate WILL NOT TELL YOU WHETHER A GIG WOULD RUN. It estimates cost and duration from structure and labels its basis honestly, but it resolves no payload and fetches nothing. If you need pre-dispatch assurance today, you need the resolving simulator the ops lane built — and the better fix, owed here, is to give this function a payload and a resolution source."
   ],
-
   "evidence_index": {
-    "loader":   { "kind": "file", "ref": "src/loader.ts" },
-    "registry": { "kind": "file", "ref": "src/registry.ts" },
-    "prompt":   { "kind": "file", "ref": "src/claude_invoker.ts" },
-    "ledger":   { "kind": "file", "ref": "src/ledger.ts" },
-    "outputs":  { "kind": "file", "ref": "src/outputs.ts" },
-    "core":     { "kind": "file", "ref": "src/canonical_core_types.ts" },
-    "sim":      { "kind": "file", "ref": "src/simulate.ts" },
-    "tests":    { "kind": "file", "ref": "tests/a_chair_never_feeds_an_undeclared_type.test.ts" },
-    "publish":  { "kind": "file", "ref": ".github/workflows/publish.yml" },
-    "pkg":      { "kind": "file", "ref": "package.json" }
+    "loader": {
+      "kind": "file",
+      "ref": "src/loader.ts"
+    },
+    "registry": {
+      "kind": "file",
+      "ref": "src/registry.ts"
+    },
+    "prompt": {
+      "kind": "file",
+      "ref": "src/claude_invoker.ts"
+    },
+    "ledger": {
+      "kind": "file",
+      "ref": "src/ledger.ts"
+    },
+    "outputs": {
+      "kind": "file",
+      "ref": "src/outputs.ts"
+    },
+    "core": {
+      "kind": "file",
+      "ref": "src/canonical_core_types.ts"
+    },
+    "sim": {
+      "kind": "file",
+      "ref": "src/simulate.ts"
+    },
+    "tests": {
+      "kind": "file",
+      "ref": "tests/a_chair_never_feeds_an_undeclared_type.test.ts"
+    },
+    "publish": {
+      "kind": "file",
+      "ref": ".github/workflows/publish.yml"
+    },
+    "pkg": {
+      "kind": "file",
+      "ref": "package.json"
+    }
   }
 }

@@ -30,6 +30,7 @@ import { createOutputStore } from "./outputs.js";
 import { COLTRANE_VERSION } from "./version.js";
 import { workOnce } from "./worker.js";
 import { runReside } from "./reside.js";
+import { runPlay } from "./play.js";
 import { selectResidencyBacking } from "./reside_backing.js";
 import { hostedSeatBackingFromEnv } from "./genome_store.js";
 import { openLocalQueue, selectQueueBacking, LOCAL_QUEUE_DIR_VAR } from "./local_queue.js";
@@ -84,6 +85,23 @@ export const USAGE = `coltrane ${COLTRANE_VERSION}
                                          checkpoints under COLTRANE_WORKER_CHECKPOINTS,
                                          default ~/.coltrane/worker-checkpoints;
                                          exit 0 complete or parked, 1 failed, 3 queue empty)
+  coltrane play                         BOOT A SEAT in this folder: declare which genome answered,
+                                        prove the credential is live with a real verb call, greet the
+                                        door for the standing it injects, install the session's
+                                        refusals as PreToolUse guards, then hand over a Claude Code
+                                        session
+  coltrane play --dry-run                everything except the mint and the exec
+  coltrane play --dry-run --show-context  the standing it would inject, each fact carrying where
+                                        and when it was read
+  coltrane play --dry-run --show-hooks   the guards it installs
+  coltrane play --check-hook '<cmd>'     DRIVE an installed guard against one command; non-zero
+                                        means the guard refuses it (\`-\` reads the hook payload
+                                        on stdin, which is how the installed hook calls back)
+                                        (env: the same contract reside and work take —
+                                         COLTRANE_STORE_URL, COLTRANE_STORE_ANON,
+                                         COLTRANE_SERVICE_URL, COLTRANE_AGENT_TOKEN;
+                                         no new credential class
+                                         exit 0 booted or planned, 2 a refusal by name)
   coltrane reside [--any|--residency <id>]  hold a residency: claim a seat, ack its channel in
                                          reflex, answer every wake, and drain the org's due work
                                          orders through its institution's governed verbs
@@ -230,7 +248,7 @@ export async function runCli(argv: readonly string[], io: CliIO): Promise<number
   if (flags["version"]) { io.out(COLTRANE_VERSION + "\n"); return 0; }
   if (cmd === undefined || flags["help"] || cmd === "help") { io.out(USAGE); return cmd === undefined ? 2 : 0; }
 
-  const KNOWN = ["validate", "seal-genome", "dispatch", "enqueue", "monitor", "logs", "abort", "trace", "simulate", "health", "serve", "work", "reside"];
+  const KNOWN = ["validate", "seal-genome", "dispatch", "enqueue", "monitor", "logs", "abort", "trace", "simulate", "health", "serve", "work", "reside", "play"];
   if (!KNOWN.includes(cmd)) {
     line(io, `unknown command "${cmd}"\n`);
     io.err(USAGE);
@@ -285,6 +303,14 @@ export async function runCli(argv: readonly string[], io: CliIO): Promise<number
   // The verb owns the env check and the exit codes (src/reside.ts); this is only the mount, and the
   // mount is the half that was missing: runReside has been exported and law-covered since the state
   // machine landed while nothing could reach it.
+  // `play` is the SEAT'S BOOT: resolve the genome, prove the credential is live, greet the door for the
+  // standing it injects, install the refusals the session cannot disobey, then hand over the session.
+  // It takes the same bootstrap contract reside and work take — no credential class of its own.
+  if (cmd === "play") {
+    const playEnv = (io as { env?: Record<string, string | undefined> } | undefined)?.env ?? process.env;
+    return await runPlay(argv.slice(1), { out: io.out, err: io.err, env: playEnv });
+  }
+
   if (cmd === "reside") {
     // THE DEPLOYMENT INJECTS THE HOSTED SEAT (agnosticism law): in the drain environment the CLI builds the
     // store-port provider (genome_store.hostedSeatBackingFromEnv) and hands it to runReside; a missing drain

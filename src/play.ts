@@ -66,7 +66,7 @@ export const FORBIDDEN_ACTS: readonly ForbiddenAct[] = [
   {
     id: "credential-through-transcript",
     example: "echo $COLTRANE_AGENT_TOKEN",
-    why: "an credential value rendered into a transcript. The mint returns the value ONCE and stores only its hash, so a value reaching a scrollback, a CI log or a session transcript is published and cannot be unpublished by forgetting it.",
+    why: "a credential value rendered into a transcript. The mint returns the value ONCE and stores only its hash, so a value reaching a scrollback, a CI log or a session transcript is published and cannot be unpublished by forgetting it.",
     test: (c) =>
       /\b(echo|printf|cat|env|printenv|set)\b/.test(c) &&
       /(COLTRANE_AGENT_TOKEN|vor\.env)/.test(c),
@@ -521,7 +521,7 @@ export async function runPlay(argv: readonly string[], io: PlayIO): Promise<numb
   );
   if (needed.length > 0) {
     io.err(
-      `play refused: no_backend (seam: store-env) — a boot mints an credential and greets a door, and this ` +
+      `play refused: no_backend (seam: store-env) — a boot mints a credential and greets a door, and this ` +
         `environment wires neither. Missing ${needed.join(", ")}. ` +
         `This is the same bootstrap contract reside and work take; play adds no credential class of its own.\n`,
     );

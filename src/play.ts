@@ -25,6 +25,7 @@
 // session does the thinking; the boot hands it pointers and the few live facts, never a corpus. It
 // reads no credential variable `reside` and `work` do not already read — a second path to standing is
 // a second path to an unattributable act, which this estate ruled out on 4 Oct.
+import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { GenomeLoadError, resolveExtendsChain } from "./loader.js";
@@ -40,6 +41,15 @@ export interface PlayIO {
 }
 
 const stamp = (): string => new Date().toISOString();
+
+/** `--name value`, or undefined. Never defaulted: a boot does not guess which seat it is for, and a
+ *  mint reason nobody wrote is a reason nobody can be held to. */
+function flagValue(argv: readonly string[], name: string): string | undefined {
+  const i = argv.indexOf(name);
+  if (i === -1) return undefined;
+  const v = argv[i + 1];
+  return v !== undefined && !v.startsWith("--") ? v : undefined;
+}
 
 // ───────────────────────────────────────────────────────────────────────────────────────────────────
 // THE GUARD TABLE. ONE SOURCE, TWO READERS: the hook the boot installs and `--check-hook` both run
@@ -155,6 +165,9 @@ function sourceReport(env: Record<string, string | undefined>, cwd: string): Sou
 // ───────────────────────────────────────────────────────────────────────────────────────────────────
 interface WatchReport {
   lines: readonly string[];
+  /** Proved live by a real verb call THIS RUN. A boot WINDS a live watch and never issues a second
+   *  standing one: a second path to standing is a second path to an unattributable act. */
+  live?: boolean;
   refusal?: { code: number; lines: readonly string[] };
 }
 
@@ -209,6 +222,7 @@ async function watchReport(env: Record<string, string | undefined>): Promise<Wat
     });
     await store.load();
     return {
+      live: true,
       lines: [
         "  bearer: supplied (value never read back here)",
         "  watch: LIVE — proved by a real verb call (genome read) through the store, which carries the delegation",
@@ -237,32 +251,158 @@ async function watchReport(env: Record<string, string | undefined>): Promise<Wat
 // ───────────────────────────────────────────────────────────────────────────────────────────────────
 // INSTRUMENT. The value never crosses a transcript; the destination is named, the mode is owned.
 // ───────────────────────────────────────────────────────────────────────────────────────────────────
-const INSTRUMENT_REL = join(".claude", "vor.env");
+const CREDENTIAL_REL = join(".claude", "vor.env");
 
-/** The boot OWNS this file's mode. Creating it empty at 0600 before any mint means the destination is
- *  never a world-readable file that a later write drops a credential into. */
-function ensureInstrument(cwd: string): { path: string; lines: readonly string[] } {
-  const path = join(cwd, INSTRUMENT_REL);
-  mkdirSync(dirname(path), { recursive: true });
-  if (!existsSync(path)) {
-    writeFileSync(
-      path,
-      "# coltrane play — the seat's credential lands here, owner-only.\n" +
-        "# The value is written by a mint and is never printed, echoed or logged.\n",
-      { mode: 0o600 },
-    );
-  }
-  chmodSync(path, 0o600);
-  const mode = (statSync(path).mode & 0o777).toString(8);
+// A DRY RUN CREATES NOTHING HERE, AND THAT IS A CORRECTION. This step used to pre-create the file empty
+// at 0600 so its mode could be graded. Driven 6 Oct: BOOT-4's leg B then PASSED on two comment lines with
+// no value — the law demanded the artifact EXIST rather than that the run PRODUCE it, and a placeholder
+// was the cheapest way to satisfy it. Both sides changed: the leg now grades the mode only of a file
+// carrying a value, and this step no longer manufactures the thing it is graded on. A dry run REPORTS the
+// destination and whatever is actually there; only a real mint writes.
+function credentialReport(cwd: string): { path: string; lines: readonly string[] } {
+  const path = join(cwd, CREDENTIAL_REL);
+  const state = !existsSync(path)
+    ? "absent — no boot has written one here yet (a dry run does not create it)"
+    : /ctk_[A-Za-z0-9_.-]{8,}/.test(readFileSync(path, "utf8"))
+      ? `present, carrying a value, mode ${(statSync(path).mode & 0o777).toString(8)}`
+      : `present but carrying NO value — a placeholder, which is not a credential`;
   return {
     path,
     lines: [
-      `  destination: ${INSTRUMENT_REL} (mode ${mode}, owner read/write only)`,
+      `  destination: ${CREDENTIAL_REL} (written 0600, owner read/write only, by a real boot)`,
+      `  current state: ${state}`,
       "  the boot says WHERE it wrote and never WHAT it wrote: the mint returns the value once and the store",
       "    holds only its hash, so an echoed value is a credential published for good.",
       `  read at ${stamp()}`,
     ],
   };
+}
+
+// ───────────────────────────────────────────────────────────────────────────────────────────────────
+// THE MINT. A CALL, NOT A SENTENCE. Driven 6 Oct and this is the correction: the first cut of this file
+// named a mint eighteen times and called it zero times — every occurrence sat inside a message saying a
+// mint WOULD happen — and seven green laws said nothing, because all seven drove `--dry-run`, which the
+// banner itself calls "everything except the mint and the exec".
+// agent_token_issue is wired by the DEPLOYMENT (ToolSurfaceDeps.issueAgentToken, gating on an
+// authenticated human member and storing only the token's hash), so the call goes to the door over the
+// same MCP surface every other verb uses. The value comes back ONCE and goes straight to a 0600 file.
+// ───────────────────────────────────────────────────────────────────────────────────────────────────
+interface MintOutcome {
+  ok: boolean;
+  lines: readonly string[];
+  /** The value, held only long enough to write it. Never returned into any rendered output. */
+  token?: string;
+  key_id?: string;
+}
+
+async function callDoor(
+  door: string,
+  bearer: string | undefined,
+  name: string,
+  args: Record<string, unknown>,
+): Promise<{ ok: boolean; detail: string; result?: Record<string, unknown> }> {
+  const res = await fetch(door, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      accept: "application/json, text/event-stream",
+      ...(bearer !== undefined && bearer.length > 0 ? { authorization: `Bearer ${bearer}` } : {}),
+    },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } }),
+  });
+  const raw = await res.text();
+  if (!res.ok) return { ok: false, detail: `HTTP ${res.status}: ${raw.slice(0, 300)}` };
+  // The surface answers either a JSON body or an SSE frame; both carry one JSON-RPC envelope.
+  const json = /^\s*\{/.test(raw) ? raw : (/^data:\s*(\{.*)$/m.exec(raw)?.[1] ?? raw);
+  let env: { result?: { isError?: boolean; structuredContent?: unknown; content?: unknown }; error?: { message?: string } };
+  try {
+    env = JSON.parse(json) as typeof env;
+  } catch {
+    return { ok: false, detail: `the door's answer did not parse: ${raw.slice(0, 200)}` };
+  }
+  if (env.error) return { ok: false, detail: `the door refused: ${env.error.message ?? JSON.stringify(env.error)}` };
+  if (env.result?.isError === true) {
+    const text = JSON.stringify(env.result.content ?? env.result.structuredContent ?? {});
+    return { ok: false, detail: `the verb refused: ${text.slice(0, 300)}` };
+  }
+  const structured = env.result?.structuredContent;
+  return { ok: true, detail: `HTTP ${res.status}`, ...(structured !== undefined && structured !== null ? { result: structured as Record<string, unknown> } : {}) };
+}
+
+/** TTL AT THE CEILING, NEVER BELOW IT. The 4 Oct mint took ttl 24h against a 168h ceiling and died in a
+ *  day with six days of authorised tenure unused; that lapse is the whole reason the watch check exists,
+ *  so the boot does not repeat it. */
+const TENURE_CEILING_HOURS = 168;
+
+async function mint(
+  door: string,
+  bearer: string | undefined,
+  org: string,
+  agent: string,
+  reason: string,
+): Promise<MintOutcome> {
+  const read = stamp();
+  const r = await callDoor(door, bearer, "agent_token_issue", {
+    org_slug: org,
+    agent_slug: agent,
+    ttl_hours: TENURE_CEILING_HOURS,
+    tenure_ceiling_hours: TENURE_CEILING_HOURS,
+    reason,
+  });
+  if (!r.ok) {
+    return {
+      ok: false,
+      lines: [
+        `  mint: REFUSED by the door — ${r.detail}`,
+        "  agent_token_issue requires an authenticated HUMAN MEMBER: a seated agent's own token may not issue a",
+        "    standing one, and the engine fails that closed rather than appearing to half-work. If this boot is",
+        "    running as a seated agent, a member must mint, or a governor must agent_token_extend an existing watch.",
+        `  attempted_at: ${read}`,
+      ],
+    };
+  }
+  const token = typeof r.result?.["agent_token"] === "string" ? (r.result["agent_token"] as string) : undefined;
+  const keyId = typeof r.result?.["key_id"] === "string" ? (r.result["key_id"] as string) : undefined;
+  if (token === undefined || token.length === 0) {
+    return {
+      ok: false,
+      lines: [
+        "  mint: the door answered without a credential value — nothing was written, and the boot does not",
+        "    proceed on a mint it cannot evidence.",
+        `  attempted_at: ${read}`,
+      ],
+    };
+  }
+  return {
+    ok: true,
+    token,
+    ...(keyId !== undefined ? { key_id: keyId } : {}),
+    lines: [
+      `  mint: PERFORMED via agent_token_issue at the door (${r.detail})`,
+      `  key_id: ${keyId ?? "(not returned)"} · ttl ${TENURE_CEILING_HOURS}h at a ${TENURE_CEILING_HOURS}h ceiling`,
+      "  the value is NOT rendered here and appears in no stream: it goes straight to a 0600 file.",
+      `  minted_at: ${read}`,
+    ],
+  };
+}
+
+/** Write the credential, owner-only, created 0600 so it is never briefly world-readable. */
+function writeCredential(path: string, token: string, keyId: string | undefined): readonly string[] {
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(
+    path,
+    `# coltrane play — written ${stamp()}. Owner-only. Never commit, never echo.\n` +
+      // The key_id goes in as a COMMENT, not a second env key. BOOT-7 reads this file's text for
+      // COLTRANE_[A-Z0-9_]+ and holds play to the vars reside and work already take, so inventing one
+      // here — even only as a string written into a file — would be inventing a credential class.
+      (keyId !== undefined ? `# key_id: ${keyId}\n` : "") +
+      `COLTRANE_AGENT_TOKEN=${token}\n`,
+    { mode: 0o600 },
+  );
+  chmodSync(path, 0o600);
+  return [
+    `  wrote: ${CREDENTIAL_REL} (mode ${(statSync(path).mode & 0o777).toString(8)}, value not rendered)`,
+  ];
 }
 
 // ───────────────────────────────────────────────────────────────────────────────────────────────────
@@ -479,7 +619,7 @@ export async function runPlay(argv: readonly string[], io: PlayIO): Promise<numb
   out.push("");
 
   // 3 · INSTRUMENT DESTINATION
-  const credential = ensureInstrument(cwd);
+  const credential = credentialReport(cwd);
   out.push("credential — where the value lands");
   out.push(...credential.lines);
   out.push("");
@@ -528,7 +668,48 @@ export async function runPlay(argv: readonly string[], io: PlayIO): Promise<numb
     return 2;
   }
 
-  // The mint, the writes and the exec. Reached only with a live door; the dry run stops above.
+  // ── THE TWO ACTS. Everything above this line is a report; a boot is these two things or it has not
+  // happened. The previous cut of this function wrote two files and printed "boot complete — handing
+  // over a session" with no mint call and no process primitive anywhere in the file. The sentence was
+  // the whole boot. It is now unreachable without both acts succeeding.
+  const door = `${(env["COLTRANE_SERVICE_URL"] ?? "").replace(/\/$/, "")}/api/mcp`;
+  const bearer = env["COLTRANE_AGENT_TOKEN"];
+  const credentialPath = join(cwd, CREDENTIAL_REL);
+  const acts: string[] = [];
+
+  // ACT ONE · establish a credential THIS RUN. A watch proved live above is wound, not re-minted — a
+  // second standing credential is a second path to an unattributable act. Otherwise: mint.
+  if (watch.live && bearer !== undefined && bearer.length > 0) {
+    acts.push("mint: NOT NEEDED — the watch presented was proved live by a real verb call above, so this");
+    acts.push("  boot wound the existing credential rather than issuing a second standing one.");
+    acts.push(...writeCredential(credentialPath, bearer, undefined));
+  } else {
+    // THE PICKER. Which seat is being booted is the operator's call, never the CLI's guess: a mint names
+    // an org and an agent, and a boot that picked for you would mint standing nobody asked for.
+    const org = flagValue(argv, "--org");
+    const agent = flagValue(argv, "--agent");
+    if (org === undefined || agent === undefined) {
+      io.err(
+        `play refused: no_seat (seam: the picker) — a mint names the seat it is for, and this boot was given ` +
+          `${org === undefined ? "no --org" : `--org ${org}`} and ${agent === undefined ? "no --agent" : `--agent ${agent}`}. ` +
+          `Name both: coltrane play --org <slug> --agent <slug>. The CLI does not choose a seat for you; ` +
+          `standing nobody asked for is standing nobody can account for.\n`,
+      );
+      return 2;
+    }
+    const reason =
+      flagValue(argv, "--reason") ??
+      `coltrane play: booting a seat in ${cwd} at ${stamp()}`;
+    const minted = await mint(door, bearer, org, agent, reason);
+    io.out(["mint — establishing a credential", ...minted.lines, ""].join("\n") + "\n");
+    if (!minted.ok || minted.token === undefined) {
+      io.err("play refused: the mint did not produce a credential — no session is handed over without one.\n");
+      return 2;
+    }
+    acts.push(...writeCredential(credentialPath, minted.token, minted.key_id));
+  }
+
+  // The operating parameters and the standing, written before the handover so the session opens holding them.
   hooksReport(cwd, cliEntry, true);
   writeFileSync(
     join(cwd, CONTEXT_REL),
@@ -542,9 +723,27 @@ export async function runPlay(argv: readonly string[], io: PlayIO): Promise<numb
       ...FORBIDDEN_ACTS.map((a) => `- \`${a.example}\` — ${a.why}`),
     ].join("\n") + "\n",
   );
-  io.out(
-    `boot complete — handing over a session with ${relative(cwd, join(cwd, SETTINGS_REL))} as its operating ` +
-      `parameters and ${relative(cwd, join(cwd, CONTEXT_REL))} as its standing.\n`,
-  );
-  return 0;
+
+  // ACT TWO · the handover is an EXEC. The argv is named BEFORE the launch, so a reader can tell a
+  // handover from a print statement even if the child never starts.
+  const sessionArgv = [
+    "--settings",
+    relative(cwd, join(cwd, SETTINGS_REL)),
+    "--append-system-prompt-file",
+    relative(cwd, join(cwd, CONTEXT_REL)),
+  ];
+  acts.push(`launched: claude ${sessionArgv.join(" ")}`);
+  acts.push(`argv: ${JSON.stringify(["claude", ...sessionArgv])}`);
+  io.out(["handover — the session", ...acts.map((l) => `  ${l}`), ""].join("\n") + "\n");
+
+  const child = spawnSync("claude", sessionArgv, { cwd, stdio: "inherit" });
+  if (child.error !== undefined) {
+    io.err(
+      `play refused: the handover did not happen — could not launch \`claude\`: ${child.error.message}. ` +
+        `The credential was written; the session was not started, so this is not a completed boot.\n`,
+    );
+    return 2;
+  }
+  io.out(`boot complete — the session exited ${child.status ?? "(signalled)"}.\n`);
+  return child.status ?? 0;
 }

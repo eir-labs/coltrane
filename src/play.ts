@@ -701,8 +701,8 @@ export async function runPlay(argv: readonly string[], io: PlayIO): Promise<numb
   const needed = ["COLTRANE_SERVICE_URL"].filter((v) => (env[v] ?? "").length === 0);
   if (needed.length > 0) {
     io.err(
-      `play refused: no_backend (seam: store-env) — a boot mints a credential and greets a door, and this ` +
-        `environment wires neither. Missing ${needed.join(", ")}. ` +
+      `play refused: no_backend (seam: the door) — a boot mints or winds a credential and greets a door, and ` +
+        `this environment names no door to do either through. Missing ${needed.join(", ")}. ` +
         `This is the same bootstrap contract reside and work take; play adds no credential class of its own.\n`,
     );
     return 2;

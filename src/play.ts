@@ -370,13 +370,31 @@ async function mint(
     reason,
   });
   if (!r.ok) {
+    // NAME WHICH WALL WAS HIT, because the two look identical in a transcript and send the reader to
+    // opposite places. Measured 6 Oct: with NO bearer the request carries no Authorization header at all,
+    // so the door answers 401 "No authorization provided" BEFORE the verb is reached — the member-only
+    // refusal never fires, and a reader who saw only "the mint was refused" would go hunting for a
+    // permission problem that was never consulted. A member's standing has to arrive here AS A VALUE: a
+    // session that is itself member-authenticated holds that standing as a TRANSPORT, which is not
+    // something this process can be handed.
+    const unauthenticated = bearer === undefined || bearer.length === 0;
     return {
       ok: false,
       lines: [
         `  mint: REFUSED by the door — ${r.detail}`,
-        "  agent_token_issue requires an authenticated HUMAN MEMBER: a seated agent's own token may not issue a",
-        "    standing one, and the engine fails that closed rather than appearing to half-work. If this boot is",
-        "    running as a seated agent, a member must mint, or a governor must agent_token_extend an existing watch.",
+        ...(unauthenticated
+          ? [
+              "  NOTE: this boot sent NO bearer, so the door refused the REQUEST, not the mint — the member-only",
+              "    check was never reached. agent_token_issue needs a human member's credential as a VALUE in",
+              "    COLTRANE_AGENT_TOKEN. This is not a permission problem to go hunting for; it is an",
+              "    unauthenticated call. Until a member's bearer is wired in, WIND is the reachable path: present",
+              "    a live watch and the boot winds it instead of issuing a second standing credential.",
+            ]
+          : [
+              "  agent_token_issue requires an authenticated HUMAN MEMBER: a seated agent's own token may not issue",
+              "    a standing one, and the engine fails that closed rather than appearing to half-work. A member must",
+              "    mint, or a governor must agent_token_extend an existing watch.",
+            ]),
         `  attempted_at: ${read}`,
       ],
     };

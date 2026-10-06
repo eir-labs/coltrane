@@ -19,3 +19,10 @@ tests/lint_guard/.scratch/
 
 # written by scripts/emit_releases.mjs at publish time; never committed (it would go stale)
 /releases.json
+
+# written by `coltrane play` — the seat's instrument (0600) and the boot-owned session parameters.
+# NEVER committed: vor.env carries a credential, and the others are regenerated every boot so a
+# committed copy could only ever be a stale memory of a standing that has moved.
+.claude/vor.env
+.claude/coltrane-boot.settings.json
+.claude/coltrane-boot.context.md

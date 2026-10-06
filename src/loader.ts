@@ -813,7 +813,11 @@ function readGenomeManifest(root: string, manifestErrors: LoadError[]): readonly
   }
 }
 
-function resolveExtendsChain(root: string): { roots: string[]; pinErrors: LoadError[] } {
+/** Exported so a caller that must REPORT the layer stack reads the same walk resolveGenome loads it
+ *  from. `coltrane play` declares the stack it read (BOOT-2); reporting it from a second traversal
+ *  would let the declared stack and the loaded one drift, which is the confusion the declaration
+ *  exists to end. */
+export function resolveExtendsChain(root: string): { roots: string[]; pinErrors: LoadError[] } {
   const ordered: string[] = [];
   const pinErrors: LoadError[] = [];
   const done = new Set<string>();

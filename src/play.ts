@@ -29,7 +29,6 @@ import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { GenomeLoadError, resolveExtendsChain } from "./loader.js";
-import { postgrestGenomeStore } from "./genome_store.js";
 
 export interface PlayIO {
   out: (s: string) => void;
@@ -172,16 +171,26 @@ interface WatchReport {
 }
 
 const HANDSHAKE_NOTE =
-  "  liveness is proved by a REAL VERB CALL (a genome read through the store), never by an `initialize` handshake: " +
+  "  liveness is proved by a REAL VERB CALL (health_check through the engine's own surface — the only door that " +
+  "can read a ctk_; PostgREST answers PGRST301 to one, which is a probe fault and not a lapse), never by an `initialize` handshake: " +
   "the door answers HTTP 200 to initialize with a LAPSED delegation, because the handshake does not carry it. " +
   "A 200 there is not standing and is never read as standing.";
 
+// WHICH DOOR CAN READ A ctk_ — measured 6 Oct, and this was a real defect that stopped the boot dead.
+// The first cut probed liveness with `postgrestGenomeStore(...).load()`, i.e. a PostgREST read carrying
+// the credential as a Bearer. PostgREST expects a three-part Supabase JWT, so it answered
+// `PGRST301 — Expected 3 parts in JWT; got 1` for a credential that was PERFECTLY LIVE: the same ctk_,
+// put to coltrane.eir.sh/api/mcp `tools/call health_check` seconds later, answered {"ok":true}. An agent
+// capability token is validated by the ENGINE'S OWN SURFACE, not by PostgREST's JWT gate.
+// So the probe rejected every genuine agent credential and the boot refused to hand over on a good watch.
+// Two faults, one line: the wrong door, AND a classifier that read the word `jwt` in the failure as
+// evidence of a lapse. A probe fault must never be rendered as a refusal by the door — that is the same
+// false-signal shape as a dead credential wearing the costume of a non-conformant subject, inverted.
 async function watchReport(env: Record<string, string | undefined>): Promise<WatchReport> {
   const bearer = env["COLTRANE_AGENT_TOKEN"];
-  const storeUrl = env["COLTRANE_STORE_URL"];
-  const anonKey = env["COLTRANE_STORE_ANON"];
-  const hasStore =
-    storeUrl !== undefined && storeUrl.length > 0 && anonKey !== undefined && anonKey.length > 0;
+  const service = env["COLTRANE_SERVICE_URL"];
+  const door =
+    service !== undefined && service.length > 0 ? `${service.replace(/\/$/, "")}/api/mcp` : undefined;
   const read = stamp();
 
   if (bearer === undefined || bearer.length === 0) {
@@ -200,52 +209,56 @@ async function watchReport(env: Record<string, string | undefined>): Promise<Wat
 
   // A BEARER WAS SUPPLIED. It is never trusted on presentation — presence is not liveness, and the
   // whole defect this guards against was a token that existed, parsed, and was dead.
-  if (!hasStore) {
+  if (door === undefined) {
     const lines = [
       "  bearer: supplied (value never read back here)",
       "  REFUSED: watch unverifiable — a bearer was presented but no door is configured to verify it against.",
       "    An unverified watch is indistinguishable from a lapsed one, and this estate has already paid for",
-      "    that confusion once. Configure COLTRANE_STORE_URL + COLTRANE_STORE_ANON so the watch can be proved,",
-      "    or unset the bearer and let the boot MINT a fresh one (member-only).",
+      "    that confusion once. Set COLTRANE_SERVICE_URL so the watch can be proved against the surface that",
+      "    can read it, or unset the bearer and let the boot MINT a fresh one (member-only).",
       `  read at ${read}`,
     ];
     return { lines, refusal: { code: 2, lines } };
   }
 
-  // THE REAL VERB CALL. A genome load through the store carries the delegation; a lapsed watch refuses
-  // here even though the handshake would not.
-  try {
-    const store = postgrestGenomeStore({
-      baseUrl: storeUrl as string,
-      anonKey: anonKey as string,
-      bearer,
-    });
-    await store.load();
+  // THE REAL VERB CALL, through the engine's own surface — the only door that can read a ctk_. A lapsed
+  // delegation refuses here even though `initialize` at the same URL answers 200.
+  const probe = await callDoor(door, bearer, "health_check", {});
+  if (probe.ok) {
     return {
       live: true,
       lines: [
         "  bearer: supplied (value never read back here)",
-        "  watch: LIVE — proved by a real verb call (genome read) through the store, which carries the delegation",
+        `  watch: LIVE — proved by a real verb call (health_check) at ${door} (${probe.detail}), which carries the delegation`,
         HANDSHAKE_NOTE,
         `  read at ${read}`,
       ],
     };
-  } catch (e) {
-    const why = e instanceof Error ? e.message : String(e);
-    const lapsed = /lapsed|expired|jwt|unauthor|forbidden|invalid|revoked|delegation/i.test(why);
+  }
+
+  // UNREACHABLE IS NOT REFUSED. Naming a watch lapsed because the probe could not ask is the inverse of
+  // the defect this law exists for, and it is how a good credential gets thrown away.
+  if (probe.unreachable === true) {
     const lines = [
       "  bearer: supplied (value never read back here)",
-      `  REFUSED: the watch did not answer a real verb call — ${why}`,
-      lapsed
-        ? "    This is the lapsed-delegation class: only a MINT cures it (agent_token_issue), or a governor's"
-        : "    The door refused the delegation. Only a MINT cures it (agent_token_issue), or a governor's",
-      "    agent_token_extend moves expires_at toward the tenure ceiling. Both are member-only: the seat never",
-      "    winds its own watch.",
-      HANDSHAKE_NOTE,
+      `  REFUSED: watch UNVERIFIED — ${probe.detail}`,
+      "    This is NOT a lapse and must not be read as one: the door could not be asked, so the watch's state",
+      "    is unknown. The boot still refuses, because handing over on an unproved credential is the defect,",
+      "    but the cure here is reaching the door — not minting over a watch that may be perfectly good.",
       `  read at ${read}`,
     ];
     return { lines, refusal: { code: 2, lines } };
   }
+
+  const lines = [
+    "  bearer: supplied (value never read back here)",
+    `  REFUSED: the door refused the delegation on a real verb call — ${probe.detail}`,
+    "    Only a MINT cures it (agent_token_issue), or a governor's agent_token_extend moves expires_at toward",
+    "    the tenure ceiling. Both are member-only: the seat never winds its own watch.",
+    HANDSHAKE_NOTE,
+    `  read at ${read}`,
+  ];
+  return { lines, refusal: { code: 2, lines } };
 }
 
 // ───────────────────────────────────────────────────────────────────────────────────────────────────
@@ -300,16 +313,23 @@ async function callDoor(
   bearer: string | undefined,
   name: string,
   args: Record<string, unknown>,
-): Promise<{ ok: boolean; detail: string; result?: Record<string, unknown> }> {
-  const res = await fetch(door, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      accept: "application/json, text/event-stream",
-      ...(bearer !== undefined && bearer.length > 0 ? { authorization: `Bearer ${bearer}` } : {}),
-    },
-    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } }),
-  });
+): Promise<{ ok: boolean; detail: string; unreachable?: boolean; result?: Record<string, unknown> }> {
+  let res: Response;
+  try {
+    res = await fetch(door, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        accept: "application/json, text/event-stream",
+        ...(bearer !== undefined && bearer.length > 0 ? { authorization: `Bearer ${bearer}` } : {}),
+      },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } }),
+    });
+  } catch (e) {
+    // A DOOR THAT COULD NOT BE REACHED IS NOT A DOOR THAT REFUSED. Keeping these apart is the whole
+    // lesson of the probe fault below: "could not ask" must never be rendered as "the answer was no".
+    return { ok: false, unreachable: true, detail: `the door could not be reached: ${e instanceof Error ? e.message : String(e)}` };
+  }
   const raw = await res.text();
   if (!res.ok) return { ok: false, detail: `HTTP ${res.status}: ${raw.slice(0, 300)}` };
   // The surface answers either a JSON body or an SSE frame; both carry one JSON-RPC envelope.
@@ -656,9 +676,11 @@ export async function runPlay(argv: readonly string[], io: PlayIO): Promise<numb
   // A REAL BOOT needs the door: the mint and the greeting both go through it. An unwired seam is a
   // NAMED refusal naming the variable it wants — never a throw, and never a silent local default that
   // hands over a session with no credential at all.
-  const needed = ["COLTRANE_STORE_URL", "COLTRANE_STORE_ANON", "COLTRANE_SERVICE_URL"].filter(
-    (v) => (env[v] ?? "").length === 0,
-  );
+  // THE DOOR IS WHAT A BOOT REQUIRES — the mint and the greeting both go through it. The STORE vars are
+  // the HOSTED GENOME's business, not the boot's: a seat booting against a local genome and a hosted door
+  // is a legitimate arrangement, and demanding store credentials it will never use would refuse a working
+  // configuration by name. The source block above already declares which backing answered.
+  const needed = ["COLTRANE_SERVICE_URL"].filter((v) => (env[v] ?? "").length === 0);
   if (needed.length > 0) {
     io.err(
       `play refused: no_backend (seam: store-env) — a boot mints a credential and greets a door, and this ` +

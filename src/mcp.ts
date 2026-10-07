@@ -255,6 +255,19 @@ const TOOL_DEFS: readonly Omit<MCPToolDef, "description">[] = [
   // disk and updates the live deps in place (no MCP server restart needed).
   // Returns the diff vs the prior state, plus any load_errors from the new genome.
   { slug: "genome_reload",                 category: "improve", input_schema: obj({}), output_schema: obj({ reloaded: "boolean", changes: "object", load_errors: "array" }) },
+  // genome_rows — THE ORG GENOME, READABLE THROUGH THE DOOR. A hosted seat authenticates with an OAuth
+  // bearer for the DOOR; that is not a set of store credentials, so it cannot read the store's REST
+  // tables, and requiring it to would drag a deployment's URL and anon key back into the user's lap —
+  // the thing `coltrane login` exists to delete. So the door serves the rows and the CLIENT feeds them
+  // to the ONE shared reconstruction (reconstructGenome), which is what keeps a JWT-loaded genome, a
+  // ctk-loaded genome and a door-loaded genome from drifting into three different views.
+  // ROWS AND NOT A RECONSTRUCTED GENOME, deliberately: reconstruction FILTERS retired and superseded
+  // definitions and lifts drafts into their own collection, so serialising a loaded genome back to rows
+  // would quietly lose every draft and mark everything standing. The rows are the only faithful shape.
+  // The engine ships the verb, its schema and its refusal; a deployment wires the read itself on
+  // ToolSurfaceDeps.genomeRows. Unwired, it answers no_backend by name and never a vacuous empty — an
+  // empty genome and an unwired seam are the two answers a caller must never have to tell apart.
+  { slug: "genome_rows",                   category: "improve", input_schema: obj({}), output_schema: obj({ rows: "object", org_id: "string" }) },
   // server_restart — Rob #N / PR #141. Picks up new server bytes after
   // npm run build without ending the Claude Code conversation. This entry
   // exists so coltrane's own introspection (tool_inspect, system_audit)
@@ -433,6 +446,8 @@ export const TOOL_DESCRIPTIONS: Record<string, string> = {
     "What the engine believes its own state to be: genome, store and ledger.",
   genome_reload:
     "Re-read the genome from disk without restarting the server, and report what changed.",
+  genome_rows:
+    "The organization's genome as store rows, for a client holding a door bearer rather than store credentials. Read-only.",
   server_restart:
     "Restart the MCP server process, so a change to the engine or its wiring takes effect without the client reconnecting by hand.",
   system_audit:

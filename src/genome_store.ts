@@ -1265,3 +1265,71 @@ export function postgrestResidencyTokenIntoVault(
   };
 }
 
+
+/** THE DOOR BACKING (BOOT-13 leg D). A hosted seat authenticates with an OAuth bearer FOR THE DOOR —
+ *  RFC 9728 discovery, a dynamically registered public client, PKCE — and that bearer is not a set of
+ *  store credentials. It cannot ride the REST tables, and requiring a user to supply a store URL and an
+ *  anon key so that it could is exactly the experience `coltrane login` exists to delete: those are the
+ *  SERVICE's published constants, never the user's to configure.
+ *
+ *  So the door serves the rows and this feeds them to `reconstructGenome` — the SAME reconstruction the
+ *  JWT and ctk_ backings use, which is the whole reason a door-loaded genome cannot drift into a third
+ *  view of the same organization.
+ *
+ *  Read-only: authoring is a member act through the governed upsert RPC, and a door bearer is not a
+ *  licence to write. `upsert` refuses by name rather than appearing to half-work. */
+export function doorGenomeStore(
+  ctx: { door: string; bearer: string; acting_org_id?: string | undefined; base?: LoadedGenome | null | undefined },
+): GenomeStore {
+  return {
+    async load(): Promise<LoadedGenome> {
+      const res = await fetch(`${ctx.door.replace(/\/$/, "")}/api/mcp`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${ctx.bearer}`,
+          "content-type": "application/json",
+          accept: "application/json, text/event-stream",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0", id: 1, method: "tools/call",
+          params: { name: "genome_rows", arguments: {} },
+        }),
+      });
+      const text = await res.text();
+      if (!res.ok) throw new GenomeLoadError(`genome load (door): HTTP ${res.status}: ${text.slice(0, 200)}`);
+      // The surface answers a JSON body or an SSE frame; both carry one JSON-RPC envelope.
+      const json = /^\s*\{/.test(text) ? text : (/^data:\s*(\{.*)$/m.exec(text)?.[1] ?? text);
+      let env: { result?: { isError?: boolean; structuredContent?: unknown; content?: unknown }; error?: { message?: string } };
+      try {
+        env = JSON.parse(json) as typeof env;
+      } catch {
+        throw new GenomeLoadError(`genome load (door): the answer did not parse: ${text.slice(0, 160)}`);
+      }
+      if (env.error) throw new GenomeLoadError(`genome load (door): ${env.error.message ?? "the door refused"}`);
+      if (env.result?.isError === true) {
+        throw new GenomeLoadError(`genome load (door): ${JSON.stringify(env.result.content ?? {}).slice(0, 300)}`);
+      }
+      const payload = env.result?.structuredContent as (Partial<GenomeRows> & { org_id?: unknown }) | undefined;
+      if (payload === undefined) throw new GenomeLoadError("genome load (door): the verb returned no rows");
+      const pinned = typeof payload.org_id === "string" ? payload.org_id : ctx.acting_org_id;
+      return reconstructGenome(
+        {
+          core_types: payload.core_types ?? [],
+          domain_types: payload.domain_types ?? [],
+          agents: payload.agents ?? [],
+          standards: payload.standards ?? [],
+          skills: payload.skills ?? [],
+          ...(payload.charts !== undefined ? { charts: payload.charts } : {}),
+          ...(payload.venues !== undefined ? { venues: payload.venues } : {}),
+        },
+        { ...(pinned !== undefined ? { acting_org_id: pinned } : {}), base: ctx.base ?? null },
+      );
+    },
+    async upsert(): Promise<void> {
+      throw new GenomeLoadError(
+        "a door bearer may read the genome and not author it: authoring is a member act through the governed upsert RPC. " +
+          "This is refused by name rather than attempted and silently dropped.",
+      );
+    },
+  };
+}

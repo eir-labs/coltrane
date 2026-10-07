@@ -2475,6 +2475,21 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
           },
         };
       }
+      case "genome_rows": {
+        // THE LOCAL SURFACE HAS NO ORG STORE, AND SAYS SO. A file-backed server's genome IS the
+        // directory, which `validate` and `genome_reload` already read; there are no organization rows
+        // here to return. Advertised-and-unhandled is a dead name (#234 holds every advertised tool to
+        // having a handler), and a vacuous empty would be worse than either — a caller cannot tell it
+        // from an organization that has defined nothing. So it refuses by name.
+        return {
+          ok: false,
+          requires_approval: approval,
+          error:
+            "no_backend: genome_rows returns an ORGANIZATION's genome as store rows, and this server is " +
+            "file-backed — it has no org store to read. Locally the genome is the directory itself; use " +
+            "validate or genome_reload. A hosted surface answers this verb through a host-wired row read.",
+        };
+      }
       case "genome_reload": {
         // Rob #130 — re-read the genome from disk and update deps in place. No
         // MCP server restart needed; the user's Claude Code session keeps its
@@ -4029,6 +4044,16 @@ export interface ToolSurfaceDeps extends ServerDeps {
    *  through, the store authorizes and refuses a claimed/running row. Without it, hosted
    *  gig_cancel is an honest typed error. */
   cancelGig?: ((args: Record<string, unknown>) => Promise<Record<string, unknown>>) | undefined;
+  /** THE ORG GENOME IS READABLE FROM THE DOOR (BOOT-13 leg D). A hosted seat holds an OAuth bearer for
+   *  the DOOR, which is not a set of store credentials — so it cannot read the store's REST tables, and
+   *  requiring it to would drag a deployment's URL and anon key back into the user's lap, which is what
+   *  `coltrane login` exists to delete. The host wires the row read (it already holds the store context
+   *  that builds `genome`); the engine serves it and the CLIENT feeds the rows to the one shared
+   *  reconstruction. ROWS, not a reconstructed genome: reconstruction filters retired and superseded
+   *  definitions and lifts drafts aside, so a serialised genome would quietly lose every draft and mark
+   *  everything standing. Without this seam the verb answers no_backend BY NAME — never a vacuous empty,
+   *  because an empty genome and an unwired seam are the two answers a caller must never confuse. */
+  genomeRows?: (() => Promise<Record<string, unknown>>) | undefined;
   /** A FINISHED GIG'S SEALS ARE READABLE FROM THE DOOR (conformance V-7; item 38). Hosted read of a
    *  gig's sealed outputs from the ORG STORE (e.g. postgrestReadOutputs(ctx) → GET coltrane_outputs
    *  under the member's bearer, RLS deciding; coltrane_mcp_gig_outputs for an agent token). The hosted
@@ -4445,6 +4470,27 @@ async function callSurfaceTool(
     // from "it sealed nothing" (measured live at 828dfbc on gig 7bf12626, seven seals on the store).
     // So on the hosted surface these three read the ORG STORE through host-wired seams, the same
     // idiom as queueGig/approveGig/cancelGig, and without a seam they are an honest typed error.
+    // genome_rows — the org genome, for a client holding a DOOR bearer rather than store credentials.
+    // READ-ONLY, and an unwired seam REFUSES BY NAME: the one answer it must never give is an empty
+    // genome, which a caller cannot tell from an organization that has defined nothing.
+    if (slug === "genome_rows") {
+      if (!deps.genomeRows) {
+        return {
+          ok: false,
+          hosted_unsupported: true,
+          error:
+            "no_backend: genome_rows needs a host-wired row read (ToolSurfaceDeps.genomeRows, e.g. the " +
+            "store context this surface already builds `genome` from). Returning an empty genome here " +
+            "would be indistinguishable from an organization with no definitions, so it refuses instead.",
+        };
+      }
+      try {
+        return { ok: true, data: await deps.genomeRows() };
+      } catch (e) {
+        return { ok: false, error: `genome_rows: the store did not answer — ${e instanceof Error ? e.message : String(e)}` };
+      }
+    }
+
     if (slug === "output_query") {
       if (!deps.readOutputs) {
         return {

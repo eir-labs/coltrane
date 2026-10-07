@@ -29,7 +29,7 @@ import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { GenomeLoadError, resolveExtendsChain, resolveGenome, type LoadedGenome } from "./loader.js";
-import { postgrestGenomeStore, rpcGenomeStore } from "./genome_store.js";
+import { doorGenomeStore, rpcGenomeStore } from "./genome_store.js";
 import { currentDoor, currentSession, sessionIsExpired, type StoreSession } from "./login.js";
 
 export interface PlayIO {
@@ -122,20 +122,31 @@ async function sourceReport(
 
   // 1 · A MEMBER SESSION. The member's own JWT rides the REST tables directly.
   if (session !== undefined && !sessionIsExpired(session)) {
-    return {
-      ok: false,
-      refusal: "hosted_genome_not_wired",
-      lines: [
-        `  backing: hosted — you are signed in to ${session.store}`,
-        "  NOT DELIVERED: reading the organization's genome through the door is the last inch of this and it",
-        "    is not wired yet. A login yields a bearer for the DOOR; it is not a set of store credentials, so",
-        "    the member path cannot ride the REST tables the way a self-hosted override does.",
-        "  This is named rather than worked around: a boot that reported `backing: hosted` here without",
-        "    loading anything would be declaring an answer it did not deliver, which is the defect that let an",
-        "    authenticated seat adopt an empty folder.",
-        `  read at ${stamp()}`,
-      ],
-    };
+    try {
+      const g = await doorGenomeStore({ door: session.store, bearer: session.access_token }).load();
+      return {
+        ok: true,
+        backing: "hosted",
+        lines: [
+          "  backing: hosted — the organization's genome store answered, not this directory",
+          `  through: ${session.store} (the door you signed in to; its bearer reads the genome, no store credentials)`,
+          `  delivered: ${count(g)}`,
+          `  read at ${stamp()}`,
+        ],
+      };
+    } catch (e) {
+      return {
+        ok: false,
+        refusal: "hosted_genome_unreadable",
+        lines: [
+          `  backing: hosted (claimed) — signed in to ${session.store}, but the genome did not come back`,
+          `  REFUSED: ${e instanceof Error ? e.message : String(e)}`,
+          "  this is named rather than fallen back from: answering with this directory instead would seat an",
+          "    agent against the wrong world while reporting success.",
+          `  read at ${stamp()}`,
+        ],
+      };
+    }
   }
 
   // 2 · A SEAT'S OWN CREDENTIAL. A ctk_ is not a JWT and cannot ride the REST tables: the definer RPC

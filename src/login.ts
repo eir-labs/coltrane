@@ -131,7 +131,7 @@ export async function discover(doorUrl: string, fetchImpl: typeof fetch = fetch)
   let metaUrl: string | undefined;
   let resource = doorUrl.replace(/\/$/, "");
   try {
-    const probe = await fetchImpl(mcp, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize" }) });
+    const probe = await fetchImpl(mcp, { method: "POST", headers: { "content-type": "application/json", accept: "application/json, text/event-stream" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize" }) });
     const wa = probe.headers.get("www-authenticate") ?? "";
     metaUrl = /resource_metadata="([^"]+)"/.exec(wa)?.[1];
   } catch (e) {

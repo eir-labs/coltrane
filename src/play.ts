@@ -569,6 +569,12 @@ async function greetReport(env: Record<string, string | undefined>): Promise<rea
       method: "POST",
       headers: {
         "content-type": "application/json",
+        // THE TRANSPORT REQUIRES BOTH TYPES, AND THE REAL DOOR ENFORCES IT. Driven 7 Oct: without this
+        // the greeting got HTTP 406 and rendered `injected_facts: 0` — a boot that honestly reported
+        // injecting no standing, for a reason that was a missing header rather than an absent door. My
+        // stub door never checked Accept, so the probe passed in test and failed in production: a stub
+        // more permissive than the thing it stands in for is a test that cannot see the defect.
+        accept: "application/json, text/event-stream",
         ...(env["COLTRANE_AGENT_TOKEN"] !== undefined
           ? { authorization: `Bearer ${env["COLTRANE_AGENT_TOKEN"]}` }
           : {}),

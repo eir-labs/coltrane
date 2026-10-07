@@ -30,7 +30,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync
 import { dirname, join, relative } from "node:path";
 import { GenomeLoadError, resolveExtendsChain, resolveGenome, type LoadedGenome } from "./loader.js";
 import { postgrestGenomeStore, rpcGenomeStore } from "./genome_store.js";
-import { readSession, resolveServiceConstants, sessionIsExpired, DEFAULT_DOOR, type MemberSession } from "./login.js";
+import { currentDoor, currentSession, sessionIsExpired, type StoreSession } from "./login.js";
 
 export interface PlayIO {
   out: (s: string) => void;
@@ -106,7 +106,7 @@ type SourceReport =
 async function sourceReport(
   env: Record<string, string | undefined>,
   cwd: string,
-  session: MemberSession | undefined,
+  session: StoreSession | undefined,
   bearer: string | undefined,
 ): Promise<SourceReport> {
   const read = stamp();
@@ -122,47 +122,33 @@ async function sourceReport(
 
   // 1 · A MEMBER SESSION. The member's own JWT rides the REST tables directly.
   if (session !== undefined && !sessionIsExpired(session)) {
-    try {
-      const g = await postgrestGenomeStore({
-        baseUrl: session.store_url,
-        anonKey: session.store_anon,
-        bearer: session.access_token,
-      }).load();
-      return {
-        ok: true,
-        backing: "hosted",
-        lines: [
-          "  backing: hosted — the organization's genome store answered, not this directory",
-          `  store: ${session.store_url}`,
-          `  as: the member logged in${session.email !== undefined ? ` as ${session.email}` : ""} (session in ~/.coltrane, not this folder)`,
-          `  delivered: ${count(g)}`,
-          `  read at ${read}`,
-        ],
-      };
-    } catch (e) {
-      return {
-        ok: false,
-        refusal: "hosted_genome_unreadable",
-        lines: [
-          "  backing: hosted (claimed) — but the store did not answer",
-          `  REFUSED: ${e instanceof Error ? e.message : String(e)}`,
-          "  your login may have expired. Run `coltrane login` again.",
-          `  read at ${read}`,
-        ],
-      };
-    }
+    return {
+      ok: false,
+      refusal: "hosted_genome_not_wired",
+      lines: [
+        `  backing: hosted — you are signed in to ${session.store}`,
+        "  NOT DELIVERED: reading the organization's genome through the door is the last inch of this and it",
+        "    is not wired yet. A login yields a bearer for the DOOR; it is not a set of store credentials, so",
+        "    the member path cannot ride the REST tables the way a self-hosted override does.",
+        "  This is named rather than worked around: a boot that reported `backing: hosted` here without",
+        "    loading anything would be declaring an answer it did not deliver, which is the defect that let an",
+        "    authenticated seat adopt an empty folder.",
+        `  read at ${stamp()}`,
+      ],
+    };
   }
 
   // 2 · A SEAT'S OWN CREDENTIAL. A ctk_ is not a JWT and cannot ride the REST tables: the definer RPC
   // resolves the token's hash inside the store and returns that org's rows. The mechanism already
   // existed and nothing joined it to this caller, which is why an authenticated seat read a folder.
   if (bearer !== undefined && bearer.length > 0) {
-    const resolved = await resolveServiceConstants(env);
-    if (resolved.ok) {
+    const storeUrl = env["COLTRANE_STORE_URL"];
+    const storeAnon = env["COLTRANE_STORE_ANON"];
+    if (storeUrl !== undefined && storeUrl.length > 0 && storeAnon !== undefined && storeAnon.length > 0) {
       try {
         const g = await rpcGenomeStore({
-          baseUrl: resolved.constants.store_url,
-          anonKey: resolved.constants.store_anon,
+          baseUrl: storeUrl,
+          anonKey: storeAnon,
           agentToken: bearer,
         }).load();
         return {
@@ -170,7 +156,7 @@ async function sourceReport(
           backing: "hosted",
           lines: [
             "  backing: hosted — the organization's genome store answered, not this directory",
-            `  store: ${resolved.constants.store_url} (constants from ${resolved.from})`,
+            `  store: ${storeUrl} (from this environment — a self-hosted deployment)`,
             "  as: the seat's own credential, through the definer RPC that can read a ctk_",
             `  delivered: ${count(g)}`,
             `  read at ${read}`,
@@ -283,7 +269,8 @@ const HANDSHAKE_NOTE =
 // false-signal shape as a dead credential wearing the costume of a non-conformant subject, inverted.
 async function watchReport(env: Record<string, string | undefined>): Promise<WatchReport> {
   const bearer = env["COLTRANE_AGENT_TOKEN"];
-  const door = `${(env["COLTRANE_SERVICE_URL"] ?? DEFAULT_DOOR).replace(/\/$/, "")}/api/mcp`;
+  const chosen = currentDoor(env);
+  const door = chosen === undefined ? undefined : `${chosen.url}/api/mcp`;
   const read = stamp();
 
   if (bearer === undefined || bearer.length === 0) {
@@ -302,6 +289,17 @@ async function watchReport(env: Record<string, string | undefined>): Promise<Wat
 
   // A BEARER WAS SUPPLIED. It is never trusted on presentation — presence is not liveness, and the
   // whole defect this guards against was a token that existed, parsed, and was dead.
+  if (door === undefined) {
+    const lines = [
+      "  bearer: supplied (value never read back here)",
+      "  REFUSED: watch unverified — no auth store is selected, so there is no door to prove it against.",
+      "    An unverified watch is indistinguishable from a lapsed one. Run `coltrane login` and choose the",
+      "    house this seat belongs to.",
+      `  read at ${read}`,
+    ];
+    return { lines, refusal: { code: 2, lines } };
+  }
+
   // THE REAL VERB CALL, through the engine's own surface — the only door that can read a ctk_. A lapsed
   // delegation refuses here even though `initialize` at the same URL answers 200.
   const probe = await callDoor(door, bearer, "health_check", {});
@@ -539,7 +537,7 @@ const FACT = (key: string, value: string, door: string, read: string): string =>
   `    ${key} = ${value} · source: ${door} · read: ${read}`;
 
 async function greetReport(env: Record<string, string | undefined>): Promise<readonly string[]> {
-  const service = env["COLTRANE_SERVICE_URL"] ?? DEFAULT_DOOR;
+  const service = currentDoor(env)?.url ?? "";
   const read = stamp();
 
   if (service.length === 0) {
@@ -726,7 +724,7 @@ export async function runPlay(argv: readonly string[], io: PlayIO): Promise<numb
   out.push("");
 
   // 1 · SOURCE
-  const session = readSession(env["HOME"] ?? "");
+  const session = currentSession(env);
   const seatBearer = env["COLTRANE_AGENT_TOKEN"];
   const src = await sourceReport(env, cwd, session, seatBearer);
   out.push("source — which genome answered");
@@ -801,7 +799,8 @@ export async function runPlay(argv: readonly string[], io: PlayIO): Promise<numb
   // happened. The previous cut of this function wrote two files and printed "boot complete — handing
   // over a session" with no mint call and no process primitive anywhere in the file. The sentence was
   // the whole boot. It is now unreachable without both acts succeeding.
-  const door = `${(env["COLTRANE_SERVICE_URL"] ?? DEFAULT_DOOR).replace(/\/$/, "")}/api/mcp`;
+  const chosen = currentDoor(env);
+  const door = chosen === undefined ? undefined : `${chosen.url}/api/mcp`;
   const bearer = env["COLTRANE_AGENT_TOKEN"];
   const credentialPath = join(cwd, CREDENTIAL_REL);
   const acts: string[] = [];
@@ -829,6 +828,10 @@ export async function runPlay(argv: readonly string[], io: PlayIO): Promise<numb
     const reason =
       flagValue(argv, "--reason") ??
       `coltrane play: booting a seat in ${cwd} at ${stamp()}`;
+    if (door === undefined) {
+      io.err("play refused: no auth store is selected, so there is no door to mint through. Run `coltrane login`.\n");
+      return 2;
+    }
     const minted = await mint(door, bearer, org, agent, reason);
     io.out(["mint — establishing a credential", ...minted.lines, ""].join("\n") + "\n");
     if (!minted.ok || minted.token === undefined) {

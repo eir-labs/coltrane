@@ -28,7 +28,9 @@
 import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
-import { GenomeLoadError, resolveExtendsChain } from "./loader.js";
+import { GenomeLoadError, resolveExtendsChain, resolveGenome, type LoadedGenome } from "./loader.js";
+import { postgrestGenomeStore, rpcGenomeStore } from "./genome_store.js";
+import { readSession, resolveServiceConstants, sessionIsExpired, DEFAULT_DOOR, type MemberSession } from "./login.js";
 
 export interface PlayIO {
   out: (s: string) => void;
@@ -101,22 +103,91 @@ type SourceReport =
   | { ok: true; backing: "hosted" | "local"; lines: readonly string[] }
   | { ok: false; lines: readonly string[]; refusal: string };
 
-function sourceReport(env: Record<string, string | undefined>, cwd: string): SourceReport {
-  const storeUrl = env["COLTRANE_STORE_URL"];
-  const anonKey = env["COLTRANE_STORE_ANON"];
+async function sourceReport(
+  env: Record<string, string | undefined>,
+  cwd: string,
+  session: MemberSession | undefined,
+  bearer: string | undefined,
+): Promise<SourceReport> {
   const read = stamp();
 
-  if (storeUrl !== undefined && storeUrl.length > 0 && anonKey !== undefined && anonKey.length > 0) {
-    return {
-      ok: true,
-      backing: "hosted",
-      lines: [
-        "  backing: hosted — the organization's genome store answers, not this directory",
-        `  store: ${storeUrl}`,
-        "  org: resolved by the store from the caller's working org (set once via org_use), never guessed here",
-        `  read at ${read}`,
-      ],
-    };
+  // A HOSTED BACKING IS DELIVERED, NOT DECLARED. Measured 7 Oct: an authenticated hosted seat standing
+  // in ~/eir/eir-drafting — a directory with no agents/, no standards/, no genome files at all —
+  // reported `backing: local, this directory's genome files answer` and BOOT-2 passed it, because
+  // BOOT-2 grades whether the boot DECLARES its backing and names its layer stack. It did, impeccably,
+  // about an empty folder. Declaring a wrong answer precisely is not delivering a right one. So this
+  // step now LOADS the genome it claims and reports what came back; a count is delivery, a name is not.
+  const count = (g: LoadedGenome): string =>
+    `${g.agents.size} agents · ${g.standards.size} standards · ${g.domain_types.size} domain types · ${g.core_types.size} core types`;
+
+  // 1 · A MEMBER SESSION. The member's own JWT rides the REST tables directly.
+  if (session !== undefined && !sessionIsExpired(session)) {
+    try {
+      const g = await postgrestGenomeStore({
+        baseUrl: session.store_url,
+        anonKey: session.store_anon,
+        bearer: session.access_token,
+      }).load();
+      return {
+        ok: true,
+        backing: "hosted",
+        lines: [
+          "  backing: hosted — the organization's genome store answered, not this directory",
+          `  store: ${session.store_url}`,
+          `  as: the member logged in${session.email !== undefined ? ` as ${session.email}` : ""} (session in ~/.coltrane, not this folder)`,
+          `  delivered: ${count(g)}`,
+          `  read at ${read}`,
+        ],
+      };
+    } catch (e) {
+      return {
+        ok: false,
+        refusal: "hosted_genome_unreadable",
+        lines: [
+          "  backing: hosted (claimed) — but the store did not answer",
+          `  REFUSED: ${e instanceof Error ? e.message : String(e)}`,
+          "  your login may have expired. Run `coltrane login` again.",
+          `  read at ${read}`,
+        ],
+      };
+    }
+  }
+
+  // 2 · A SEAT'S OWN CREDENTIAL. A ctk_ is not a JWT and cannot ride the REST tables: the definer RPC
+  // resolves the token's hash inside the store and returns that org's rows. The mechanism already
+  // existed and nothing joined it to this caller, which is why an authenticated seat read a folder.
+  if (bearer !== undefined && bearer.length > 0) {
+    const resolved = await resolveServiceConstants(env);
+    if (resolved.ok) {
+      try {
+        const g = await rpcGenomeStore({
+          baseUrl: resolved.constants.store_url,
+          anonKey: resolved.constants.store_anon,
+          agentToken: bearer,
+        }).load();
+        return {
+          ok: true,
+          backing: "hosted",
+          lines: [
+            "  backing: hosted — the organization's genome store answered, not this directory",
+            `  store: ${resolved.constants.store_url} (constants from ${resolved.from})`,
+            "  as: the seat's own credential, through the definer RPC that can read a ctk_",
+            `  delivered: ${count(g)}`,
+            `  read at ${read}`,
+          ],
+        };
+      } catch (e) {
+        return {
+          ok: false,
+          refusal: "hosted_genome_unreadable",
+          lines: [
+            "  backing: hosted (claimed) — but the store did not answer",
+            `  REFUSED: ${e instanceof Error ? e.message : String(e)}`,
+            `  read at ${read}`,
+          ],
+        };
+      }
+    }
   }
 
   // LOCAL. resolveExtendsChain is the SAME walk resolveGenome performs, so the stack reported here
@@ -145,6 +216,29 @@ function sourceReport(env: Record<string, string | undefined>, cwd: string): Sou
     roots.length === 1
       ? ["    (one layer: no genome.json `extends` manifest at this root, so no base is layered under it)"]
       : [];
+
+  // AN EMPTY FOLDER IS NOT A GENOME, AND ADOPTING ONE SILENTLY IS THE DEFECT. A directory with no
+  // definitions in it answers every question with "nothing", which is indistinguishable from a genome
+  // that loaded and happens to be bare — so the boot would seat an agent against an empty world and
+  // say so in a true, useless sentence. If there is nothing here and nobody has logged in, the thing
+  // the operator needs is a login, and that is the only thing this names (leg C).
+  const local = resolveGenome(root);
+  const empty = local.agents.size === 0 && local.standards.size === 0 && local.domain_types.size === 0;
+  if (empty) {
+    return {
+      ok: false,
+      refusal: "no_genome",
+      lines: [
+        `  backing: local — and ${root} holds no definitions at all (no agents, no standards, no types)`,
+        "  REFUSED: there is nothing here to boot a seat against, and no member is logged in, so there is",
+        "    no hosted genome to fall back to. An empty directory adopted as a genome is a seat working",
+        "    against an empty world while reporting success.",
+        "  Run `coltrane login` and the organization's genome answers instead of this folder.",
+        `  read at ${read}`,
+      ],
+    };
+  }
+
   return {
     ok: true,
     backing: "local",
@@ -154,6 +248,7 @@ function sourceReport(env: Record<string, string | undefined>, cwd: string): Sou
       "  layers (base first), flattened by resolveGenome's extends chain:",
       ...stack,
       ...single,
+      `  delivered: ${count(local)}`,
       `  read at ${read}`,
     ],
   };
@@ -188,9 +283,7 @@ const HANDSHAKE_NOTE =
 // false-signal shape as a dead credential wearing the costume of a non-conformant subject, inverted.
 async function watchReport(env: Record<string, string | undefined>): Promise<WatchReport> {
   const bearer = env["COLTRANE_AGENT_TOKEN"];
-  const service = env["COLTRANE_SERVICE_URL"];
-  const door =
-    service !== undefined && service.length > 0 ? `${service.replace(/\/$/, "")}/api/mcp` : undefined;
+  const door = `${(env["COLTRANE_SERVICE_URL"] ?? DEFAULT_DOOR).replace(/\/$/, "")}/api/mcp`;
   const read = stamp();
 
   if (bearer === undefined || bearer.length === 0) {
@@ -209,18 +302,6 @@ async function watchReport(env: Record<string, string | undefined>): Promise<Wat
 
   // A BEARER WAS SUPPLIED. It is never trusted on presentation — presence is not liveness, and the
   // whole defect this guards against was a token that existed, parsed, and was dead.
-  if (door === undefined) {
-    const lines = [
-      "  bearer: supplied (value never read back here)",
-      "  REFUSED: watch unverifiable — a bearer was presented but no door is configured to verify it against.",
-      "    An unverified watch is indistinguishable from a lapsed one, and this estate has already paid for",
-      "    that confusion once. Set COLTRANE_SERVICE_URL so the watch can be proved against the surface that",
-      "    can read it, or unset the bearer and let the boot MINT a fresh one (member-only).",
-      `  read at ${read}`,
-    ];
-    return { lines, refusal: { code: 2, lines } };
-  }
-
   // THE REAL VERB CALL, through the engine's own surface — the only door that can read a ctk_. A lapsed
   // delegation refuses here even though `initialize` at the same URL answers 200.
   const probe = await callDoor(door, bearer, "health_check", {});
@@ -458,13 +539,13 @@ const FACT = (key: string, value: string, door: string, read: string): string =>
   `    ${key} = ${value} · source: ${door} · read: ${read}`;
 
 async function greetReport(env: Record<string, string | undefined>): Promise<readonly string[]> {
-  const service = env["COLTRANE_SERVICE_URL"];
+  const service = env["COLTRANE_SERVICE_URL"] ?? DEFAULT_DOOR;
   const read = stamp();
 
-  if (service === undefined || service.length === 0) {
+  if (service.length === 0) {
     return [
       "  greeting: NOT PERFORMED",
-      "  door: unconfigured (COLTRANE_SERVICE_URL unset)",
+      "  door: unconfigured",
       `  attempted_at: ${read}`,
       "  injected_facts: 0",
       "  nothing is injected. Standing this boot did not receive THIS RUN is not supplied from memory:",
@@ -645,7 +726,9 @@ export async function runPlay(argv: readonly string[], io: PlayIO): Promise<numb
   out.push("");
 
   // 1 · SOURCE
-  const src = sourceReport(env, cwd);
+  const session = readSession(env["HOME"] ?? "");
+  const seatBearer = env["COLTRANE_AGENT_TOKEN"];
+  const src = await sourceReport(env, cwd, session, seatBearer);
   out.push("source — which genome answered");
   out.push(...src.lines);
   out.push("");
@@ -681,7 +764,15 @@ export async function runPlay(argv: readonly string[], io: PlayIO): Promise<numb
   // A REFUSAL IS A REFUSAL IN A DRY RUN TOO. The dry run reports a plan; a dead credential is not a
   // gap in the plan, it is a boot that must not happen.
   if (!src.ok) {
-    io.err(`play refused: ${src.refusal} (seam: genome) — see the source block above.\n`);
+    // THE REFUSAL ITSELF CARRIES THE CURE. "see the block above" makes a reader scroll to learn what to
+    // do, and what they must do is always the same one thing: say who they are.
+    io.err(
+      src.refusal === "no_genome"
+        ? "play refused: there is no genome here and nobody is logged in. Run `coltrane login` — that is the only thing asked of you.\n"
+        : src.refusal === "hosted_genome_unreadable"
+          ? "play refused: the organization's genome did not answer. Your login may have expired — run `coltrane login` again.\n"
+          : `play refused: ${src.refusal} — see the source block above.\n`,
+    );
     return 2;
   }
   if (watch.refusal) {
@@ -694,16 +785,14 @@ export async function runPlay(argv: readonly string[], io: PlayIO): Promise<numb
   // A REAL BOOT needs the door: the mint and the greeting both go through it. An unwired seam is a
   // NAMED refusal naming the variable it wants — never a throw, and never a silent local default that
   // hands over a session with no credential at all.
-  // THE DOOR IS WHAT A BOOT REQUIRES — the mint and the greeting both go through it. The STORE vars are
-  // the HOSTED GENOME's business, not the boot's: a seat booting against a local genome and a hosted door
-  // is a legitimate arrangement, and demanding store credentials it will never use would refuse a working
-  // configuration by name. The source block above already declares which backing answered.
-  const needed = ["COLTRANE_SERVICE_URL"].filter((v) => (env[v] ?? "").length === 0);
-  if (needed.length > 0) {
+  // NOTHING IS DEMANDED OF A USER BUT WHO THEY ARE. There is no variable left to refuse for: the door
+  // resolves to the service's own address, and the store's constants are the service's to publish. If a
+  // boot cannot proceed, the refusal names a LOGIN or a SEAT and names nothing else — a hosted user sent
+  // to an environment variable is this contract's red, and was the whole of the experience before it.
+  if (session === undefined && (seatBearer === undefined || seatBearer.length === 0)) {
     io.err(
-      `play refused: no_backend (seam: the door) — a boot mints or winds a credential and greets a door, and ` +
-        `this environment names no door to do either through. Missing ${needed.join(", ")}. ` +
-        `This is the same bootstrap contract reside and work take; play adds no credential class of its own.\n`,
+      "play refused: nobody is logged in, and this seat holds no credential of its own. " +
+        "Run `coltrane login` — that is the only thing asked of you.\n",
     );
     return 2;
   }
@@ -712,7 +801,7 @@ export async function runPlay(argv: readonly string[], io: PlayIO): Promise<numb
   // happened. The previous cut of this function wrote two files and printed "boot complete — handing
   // over a session" with no mint call and no process primitive anywhere in the file. The sentence was
   // the whole boot. It is now unreachable without both acts succeeding.
-  const door = `${(env["COLTRANE_SERVICE_URL"] ?? "").replace(/\/$/, "")}/api/mcp`;
+  const door = `${(env["COLTRANE_SERVICE_URL"] ?? DEFAULT_DOOR).replace(/\/$/, "")}/api/mcp`;
   const bearer = env["COLTRANE_AGENT_TOKEN"];
   const credentialPath = join(cwd, CREDENTIAL_REL);
   const acts: string[] = [];

@@ -517,7 +517,19 @@ export const TWO_CORPORA_CALIBRATION_TRAIL = {
 // network grant stopped being a dead name — skill_subprocess passes the flag on the grant's presence
 // and skill_runner enforces the list, the method, the request ceiling and the byte ceiling. The
 // ratchet moving down is the point: three fields that were declared and unread are now enforced.
-export const PINNED_UNREAD_ENGINE_FIELDS = 20;
+// 20 → 19 (2026-10-07): `address` acquired a "reader" THAT IS NOT ONE, and the pin moves only because
+// this sweep's own rule says it must. `coltrane login` runs a loopback listener for the OAuth redirect
+// and calls `server.address()` — Node's API, on a Node object, nothing to do with the genome field
+// named `address`, which remains declared and unwired. The sweep is fail-safe toward READ by design
+// (any whole-word hit counts), so a stdlib method name collides with a field name and the count shrinks.
+// RECORDED RATHER THAN CURED, deliberately: the honest fix is in the DETECTOR — a genome field is data
+// and is never invoked, so `name(` is a call and not a read — but narrowing the sweep could flip other
+// fields in both corpora, and editing a law's detector to make a build pass is the move this estate
+// forbids. Two prose collisions (`instrument`, then `address` in user-facing strings) were cured the
+// right way, by renaming the prose. This third one cannot be: the call is legitimate code.
+// So: `address` is NOT reachable, the number says otherwise, and the next person to touch this sweep
+// should fix the detector and push the pin back to 20.
+export const PINNED_UNREAD_ENGINE_FIELDS = 19;
 
 /** CONTRACT ratchet FLOOR (hand-verified 2026-08-21). 127 = the count of domain_types/*.json +
  *  core_types/*.json schema.properties keys (>= 5 chars, deduped) with no `\bname\b` reader anywhere in the

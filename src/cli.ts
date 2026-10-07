@@ -31,6 +31,7 @@ import { COLTRANE_VERSION } from "./version.js";
 import { workOnce } from "./worker.js";
 import { runReside } from "./reside.js";
 import { runPlay } from "./play.js";
+import { runLogin } from "./login.js";
 import { selectResidencyBacking } from "./reside_backing.js";
 import { hostedSeatBackingFromEnv } from "./genome_store.js";
 import { openLocalQueue, selectQueueBacking, LOCAL_QUEUE_DIR_VAR } from "./local_queue.js";
@@ -85,6 +86,12 @@ export const USAGE = `coltrane ${COLTRANE_VERSION}
                                          checkpoints under COLTRANE_WORKER_CHECKPOINTS,
                                          default ~/.coltrane/worker-checkpoints;
                                          exit 0 complete or parked, 1 failed, 3 queue empty)
+  coltrane login                        AUTHENTICATE ONCE, as a member, by a one-time code emailed to
+                                        you. The session lands in ~/.coltrane/session.json (0600) and
+                                        from then on the door, the store's published constants and the
+                                        genome backing are RESOLVED — never exported. This is the only
+                                        thing ever asked of a hosted user.
+  coltrane login --status                are you logged in, as whom, until when
   coltrane play                         BOOT A SEAT in this folder: declare which genome answered,
                                         prove the credential is live with a real verb call, greet the
                                         door for the standing it injects, install the session's
@@ -248,7 +255,7 @@ export async function runCli(argv: readonly string[], io: CliIO): Promise<number
   if (flags["version"]) { io.out(COLTRANE_VERSION + "\n"); return 0; }
   if (cmd === undefined || flags["help"] || cmd === "help") { io.out(USAGE); return cmd === undefined ? 2 : 0; }
 
-  const KNOWN = ["validate", "seal-genome", "dispatch", "enqueue", "monitor", "logs", "abort", "trace", "simulate", "health", "serve", "work", "reside", "play"];
+  const KNOWN = ["validate", "seal-genome", "dispatch", "enqueue", "monitor", "logs", "abort", "trace", "simulate", "health", "serve", "work", "reside", "play", "login"];
   if (!KNOWN.includes(cmd)) {
     line(io, `unknown command "${cmd}"\n`);
     io.err(USAGE);
@@ -303,6 +310,14 @@ export async function runCli(argv: readonly string[], io: CliIO): Promise<number
   // The verb owns the env check and the exit codes (src/reside.ts); this is only the mount, and the
   // mount is the half that was missing: runReside has been exported and law-covered since the state
   // machine landed while nothing could reach it.
+  // `login` is the ONLY thing ever asked of a hosted user. It authenticates a member once and keeps the
+  // session in the HOME directory, so the door, the store's published constants and the genome backing
+  // are all RESOLVED from then on rather than exported into every shell.
+  if (cmd === "login") {
+    const loginEnv = (io as { env?: Record<string, string | undefined> } | undefined)?.env ?? process.env;
+    return await runLogin(argv.slice(1), { out: io.out, err: io.err, env: loginEnv });
+  }
+
   // `play` is the SEAT'S BOOT: resolve the genome, prove the credential is live, greet the door for the
   // standing it injects, install the refusals the session cannot disobey, then hand over the session.
   // It takes the same bootstrap contract reside and work take — no credential class of its own.

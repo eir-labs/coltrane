@@ -455,10 +455,8 @@ export function reconstructGenome(rows: GenomeRows, pin?: GenomeLoadPin): Loaded
       const identityOf = (r: Row, slug: string) => ({
         ...(typeof r["version"] === "number" ? { version: r["version"] } : {}),
         org_id: typeof r["org_id"] === "string" ? r["org_id"] : null,
-        content_hash: standardContentHash({
-          slug, domain: typeof r["domain"] === "string" ? r["domain"] : null, phases: r["phases"], input_types: r["input_types"], output_types: r["output_types"],
-          max_examine_rounds: r["max_examine_rounds"], reserve_pool: r["reserve_pool"],
-        }),
+        // The row as stored, spread: which fields fold is the helper's one list, never a second one here.
+        content_hash: standardContentHash({ ...r, slug, domain: typeof r["domain"] === "string" ? r["domain"] : null }),
       });
       const draft_standards = new Map<string, Standard>();
       for (const r of standardRows.filter(isDraft)) {

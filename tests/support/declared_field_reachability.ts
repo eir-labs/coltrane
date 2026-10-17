@@ -523,6 +523,7 @@ export const TWO_CORPORA_CALIBRATION_TRAIL = {
 // contract coltrane-drafts names — and this ratchet matches a NAME (`\baddress\b`), not the field. A
 // name colliding with another name and passing for a read is the slug-for-identifier defect again, in
 // the ratchet; when the detector learns to tell fields apart, `address` comes back and this goes to 20.
+// Owned and tracked: eir-labs/coltrane#591.
 export const PINNED_UNREAD_ENGINE_FIELDS = 19;
 
 /** CONTRACT ratchet FLOOR (hand-verified 2026-08-21). 127 = the count of domain_types/*.json +

@@ -4,6 +4,7 @@ import { PRIMITIVE_OUTPUT_TYPE, CORE_TYPES } from "./core_types.js";
 // runtime cycle, and the compose refusal below cannot drift from the set the spawn advertises.
 import { seatEffectiveTools } from "./chart.js";
 import type { ModelTier, Depth } from "./pricing.js";
+import { canonStructuralJson, sha256Hex } from "./canonical_form.js";
 import { AgentSchema, type AgentInput, type AgentOutput, type StandardInput, type StandardOutput } from "./genome_schema.js";
 
 // The per-agent code-tool exposure gate (old AgentPermissions.code_tool_access). Scales
@@ -152,6 +153,27 @@ export type Standard = Omit<StandardOutput, "agents" | "agent_slugs" | "phases">
 };
 
 export class CompositionError extends Error {}
+
+/**
+ * A standard definition's CONTENT HASH — what the record says, as distinct from its name.
+ *
+ * Folds the fields that define the standard (never its status, version or org, which say where the
+ * record stands rather than what it is), over canonStructuralJson so a field that states nothing — an
+ * empty array, an absent optional — cannot move it. The store loader stamps it on every parsed
+ * standard, drafts included, from the row as stored; a definition with no stamp (a file, or one built
+ * in memory) is hashed from the record itself.
+ */
+export function standardContentHash(def: {
+  slug: string; domain?: string | null | undefined; phases?: unknown;
+  input_types?: unknown; output_types?: unknown; eval_slugs?: unknown;
+  max_examine_rounds?: unknown; reserve_pool?: unknown; description?: unknown;
+}): string {
+  return sha256Hex(canonStructuralJson({
+    slug: def.slug, domain: def.domain ?? null, phases: def.phases ?? [],
+    input_types: def.input_types, output_types: def.output_types, eval_slugs: def.eval_slugs,
+    max_examine_rounds: def.max_examine_rounds, reserve_pool: def.reserve_pool, description: def.description,
+  }));
+}
 
 // A definition that is structurally parseable but INCOMPLETE against the current schema —
 // e.g. an agent missing its now-required behavioral representation. Distinct from

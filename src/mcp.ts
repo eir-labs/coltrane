@@ -54,7 +54,7 @@ const TOOL_DEFS: readonly Omit<MCPToolDef, "description">[] = [
   // inspect returns ONE standard's full record — its phases with each chair's seat (role,
   // agent/skill/human, contracts), its type surface, its evals, and its description. Without it
   // there was no MCP read path to a standard's whole shape.
-  { slug: "standard_inspect",              category: "understand", input_schema: obj({ slug: "string" }), output_schema: obj({ slug: "string", domain: "string", status: "string", phases: "array", input_types: "array", output_types: "array", eval_slugs: "array", description: nullable("string") }) },
+  { slug: "standard_inspect",              category: "understand", input_schema: obj({ slug: "string" }), output_schema: obj({ slug: "string", domain: "string", status: "string", address: "object", composition_error: nullable("string"), phases: "array", input_types: "array", output_types: "array", eval_slugs: "array", description: nullable("string") }) },
   { slug: "agent_browse",                  category: "understand", input_schema: obj({ domain: "string", primitive: "string" }), output_schema: obj({ agents: "array", count: "number" }) },
   // The chart and the venue joined the parity table when they became authorable (0.7.0 shipped
   // ChartSchema with no MCP surface at all, which is why there was nothing to list). A chart row
@@ -104,7 +104,7 @@ const TOOL_DEFS: readonly Omit<MCPToolDef, "description">[] = [
   // #239 — `basis`/`sample_size` say WHERE the estimate came from (a measured mean of real runs,
   // the standard's real structure, or a per-slug guess). estimated_duration_ms is the key the
   // handler actually returns; the old `estimated_duration` was never present on a response.
-  { slug: "standard_simulate",             category: "build", input_schema: obj({ standard_slug: "string", mock_input: "object", depth: "string", venue: "string" }), output_schema: obj({ phases: "array", estimated_cost: "number", estimated_duration_ms: "number", basis: "string", sample_size: "number", seat_plan: "object", seal_drill: "object", furnishings: "object" }) },
+  { slug: "standard_simulate",             category: "build", input_schema: obj({ standard_slug: "string", mock_input: "object", depth: "string", venue: "string" }), output_schema: obj({ phases: "array", estimated_cost: "number", estimated_duration_ms: "number", basis: "string", sample_size: "number", address: "object", seat_plan: "object", seal_drill: "object", furnishings: "object" }) },
   // #237 — `depth` is read now (and rejected when unrecognized); the response echoes the depth
   // the run actually took, so "I ran a cheap iteration" is verifiable rather than assumed.
   // #234 — every argument this tool reads is advertised, and every argument advertised is read.
@@ -334,7 +334,7 @@ export const TOOL_DESCRIPTIONS: Record<string, string> = {
   standard_browse:
     "List standards (multi-phase workflows), filtered by domain and status. Shallow rows — use standard_inspect for one standard's full shape.",
   standard_inspect:
-    "One standard's whole record: every phase with each chair's seat (role, the agent or human filling it, input and output contracts), its type surface, its evals and its description.",
+    "One standard's whole record: every phase with each chair's seat (role, the agent or human filling it, input and output contracts), its type surface, its evals and its description. A draft is read too, and an active version of the same name wins over it. The answer says WHICH record the name resolved to, as its address: slug, version, status, org, content_hash, and the genome_hash a gig of it would record (null, with the loader's composition_error, for a draft that does not compose).",
   agent_browse:
     "List agent definitions, filtered by domain or cognitive primitive.",
   chart_browse:
@@ -374,7 +374,7 @@ export const TOOL_DESCRIPTIONS: Record<string, string> = {
   venue_define:
     "Define a venue: the deny-by-default tool CEILING, ingress and egress origins, digest-pinned installs, credential surface and lifecycle. A venue can only ever narrow a seated agent, never widen one.",
   standard_simulate:
-    "Walk a standard's graph without running it: its phases, estimated cost and duration, and the BASIS that estimate came from — a measured mean of real runs, the standard's real structure, or a per-slug guess. With a `mock_input`, the answer also names WHO PLAYS: every chair by role, the seats a fan-out chair expands into (`role#key`, computed by the engine's own split), the BYTES each seat would be handed after narrowing, and the largest field inside each one — so a prompt too long to run is a number you read here, not a failure eight phases in. Cheap to run before a dispatch is not.",
+    "Walk a standard's graph without running it: its phases, estimated cost and duration, and the BASIS that estimate came from — a measured mean of real runs, the standard's real structure, or a per-slug guess. With a `mock_input`, the answer also names WHO PLAYS: every chair by role, the seats a fan-out chair expands into (`role#key`, computed by the engine's own split), the BYTES each seat would be handed after narrowing, and the largest field inside each one — so a prompt too long to run is a number you read here, not a failure eight phases in. Cheap to run before a dispatch is not. A draft can be priced before it is promoted: it is composed first through the loader's own gate, and a draft that does not compose is refused in the loader's words, never estimated. The answer names the record it priced, as its address (slug, version, status, org, content_hash). A draft is never dispatched.",
   agent_promote:
     "Move an agent definition one step along its lifecycle: name the target `status` and the `current` one you believe it holds. The chain is draft, review, approved, active, retired — promotion is not a jump to active.",
   standard_promote:

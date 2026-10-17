@@ -517,7 +517,14 @@ export const TWO_CORPORA_CALIBRATION_TRAIL = {
 // network grant stopped being a dead name — skill_subprocess passes the flag on the grant's presence
 // and skill_runner enforces the list, the method, the request ceiling and the byte ceiling. The
 // ratchet moving down is the point: three fields that were declared and unread are now enforced.
-export const PINNED_UNREAD_ENGINE_FIELDS = 20;
+// 20 → 19 (2026-10-17): NOT a field acquiring a reader, and said so rather than counted as progress.
+// OrganizationSchema.`address` is still read by nothing. It leaves the unread set because the standard
+// resolver (server.ts, resolveStandard) now answers with an `address` — the word the conformance
+// contract coltrane-drafts names — and this ratchet matches a NAME (`\baddress\b`), not the field. A
+// name colliding with another name and passing for a read is the slug-for-identifier defect again, in
+// the ratchet; when the detector learns to tell fields apart, `address` comes back and this goes to 20.
+// Owned and tracked: eir-labs/coltrane#591.
+export const PINNED_UNREAD_ENGINE_FIELDS = 19;
 
 /** CONTRACT ratchet FLOOR (hand-verified 2026-08-21). 127 = the count of domain_types/*.json +
  *  core_types/*.json schema.properties keys (>= 5 chars, deduped) with no `\bname\b` reader anywhere in the

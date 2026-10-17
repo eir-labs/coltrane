@@ -327,6 +327,13 @@ export const StandardSchema = z.object({
    *  budget input) is the primary source and OVERRIDES this default deterministically when both are
    *  present (no max, no sum). Optional + non-negative integer, additive like the chair fields. */
   reserve_pool: z.number().int().nonnegative().optional(),
+  // IDENTITY — which record this is, beside what it says (spec.coltrane.simulate-and-inspect-drafts).
+  // A slug is a name; the store's real key is (org, slug, version, status), and the store loader keeps
+  // the row's version and org and stamps the definition's content hash, so a resolved name can say
+  // WHICH record it reached. All optional: a file has no org, and may carry no version.
+  version: z.number().optional(),
+  org_id: z.string().nullable().optional(),
+  content_hash: z.string().optional(),
 });
 export type StandardInput = z.input<typeof StandardSchema>;
 export type StandardOutput = z.output<typeof StandardSchema>;

@@ -23,7 +23,7 @@ import {
   type EvalRecord,
 } from "./loader.js";
 import { writeGenomeFileVersioned, stageSkillPackage } from "./genome_writer.js";
-import { defineAgent, composeStandard, type Agent, type Standard, type PhaseDef } from "./composition.js";
+import { defineAgent, composeStandard, standardContentHash, type Agent, type Standard, type PhaseDef } from "./composition.js";
 import { composeChart, chartEntrySeedTypes, type Chart, type Venue } from "./chart.js";
 import { DomainTypeSchema, SkillSchema, ChartSchema, VenueSchema, venueDefect } from "./genome_schema.js";
 import { domainTypeDefect } from "./registry.js";
@@ -116,7 +116,8 @@ export function fileGenomeStore(root: string): GenomeStore {
 // ── PostgREST backing ─────────────────────────────────────────────────────────────
 
 // The five genome tables and the columns the engine reads back. Row shapes are the
-// round-tripped Supabase schema (org_id is RLS's concern, not the engine's).
+// round-tripped Supabase schema. org_id is RLS's concern — except on standards, where the loader keeps
+// it as part of a record's identity (the address a resolved name answers with).
 export const Q = {
   core_types: "coltrane_core_types?select=slug,primitive,base_schema,description",
   domain_types: "coltrane_domain_types?select=slug,version,extends,domain,status,schema,required_fields",
@@ -127,7 +128,7 @@ export const Q = {
   // store genome are two different standards (the drain would never amend and its pool would vanish).
   // NOTE (out of scope, hosted): the hosted coltrane_standards table needs these two columns before
   // this select reaches the hosted drain; that migration lives outside this repo.
-  standards: "coltrane_standards?select=slug,version,status,domain,phases,input_types,output_types,max_examine_rounds,reserve_pool",
+  standards: "coltrane_standards?select=slug,version,status,org_id,domain,phases,input_types,output_types,max_examine_rounds,reserve_pool",
   // Same gap venues had, one class over: no `version`, no `org_id`. coltrane_skills is
   // versioned, so skill_evolve minting v2 leaves v1 on the table — and the loader, seeing
   // two rows for one slug, threw "duplicate skill slug" and named the SLUG. A live skill
@@ -448,6 +449,17 @@ export function reconstructGenome(rows: GenomeRows, pin?: GenomeLoadPin): Loaded
       // the loaded genome, so a draft absent from everything would be `notFound` and could
       // never be promoted. They are parsed leniently — a draft that cannot even be read is
       // simply not offered for promotion, and promote's own check is what refuses it there.
+      // WHICH RECORD each parsed standard is, not only what it says: the row's version and org, and the
+      // definition's content hash — stamped on live and draft rows alike, so the one resolver
+      // (resolveStandard, server.ts) can answer a name with an address rather than a bare slug.
+      const identityOf = (r: Row, slug: string) => ({
+        ...(typeof r["version"] === "number" ? { version: r["version"] } : {}),
+        org_id: typeof r["org_id"] === "string" ? r["org_id"] : null,
+        content_hash: standardContentHash({
+          slug, domain: typeof r["domain"] === "string" ? r["domain"] : null, phases: r["phases"], input_types: r["input_types"], output_types: r["output_types"],
+          max_examine_rounds: r["max_examine_rounds"], reserve_pool: r["reserve_pool"],
+        }),
+      });
       const draft_standards = new Map<string, Standard>();
       for (const r of standardRows.filter(isDraft)) {
         const slug = typeof r["slug"] === "string" ? r["slug"] : null;
@@ -459,6 +471,7 @@ export function reconstructGenome(rows: GenomeRows, pin?: GenomeLoadPin): Loaded
           input_types: r["input_types"] ?? [],
           output_types: r["output_types"] ?? [],
           status: "draft",
+          ...identityOf(r, slug),
         } as unknown as Standard);
       }
 
@@ -486,7 +499,7 @@ export function reconstructGenome(rows: GenomeRows, pin?: GenomeLoadPin): Loaded
           });
           standards.set(
             slug,
-            composeStandard({
+            { ...composeStandard({
               slug,
               domain: String(r["domain"] ?? ""),
               agents: resolved,
@@ -500,7 +513,7 @@ export function reconstructGenome(rows: GenomeRows, pin?: GenomeLoadPin): Loaded
               // spread) so the reconstructed standard keeps both. Absent leaves them unset.
               ...(typeof mer === "number" ? { max_examine_rounds: mer } : {}),
               ...(typeof rp === "number" ? { reserve_pool: rp } : {}),
-            }),
+            }), ...identityOf(r, slug) },
           );
           orgStandards.add(slug);
           provenance.set(`standard:${slug}`, "store");

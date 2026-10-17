@@ -45,7 +45,7 @@ import { sealDrill } from "./seal_drill.js";
 import { standardSimulate } from "./simulate.js";
 import { planSeats } from "./seat_plan.js";
 import { resolveSealedInputs } from "./sealed_inputs.js";
-import { runGig, outputSatisfiesType, BudgetExhausted, GigAborted, ResumeRefused, partialGigUsage, partialBudgetState, partitionGigInputKeys, unknownGigInputMessage, type AgentInvoker } from "./runtime.js";
+import { runGig, genomeHash, outputSatisfiesType, BudgetExhausted, GigAborted, ResumeRefused, partialGigUsage, partialBudgetState, partitionGigInputKeys, unknownGigInputMessage, type AgentInvoker } from "./runtime.js";
 import { assembleRunDeps, resolveWorkingRepo, resolveChangeSetBase } from "./run_deps.js";
 import { createCheckpointStore, createReuseStore, type CheckpointStore, type ReuseStore } from "./reuse.js";
 import { killLiveChairChildren, type SeatAsker } from "./claude_invoker.js";
@@ -66,7 +66,7 @@ import {
 } from "./venue_credential.js";
 import { ttlHoursOrRefusal, mayDispatchOrRefusal, issuedOrError, ceilingHoursOrRefusal, reasonOrRefusal, hoursOrRefusal, keyIdOrRefusal, type IssueAgentTokenResult, type IssueAgentTokenArgs, type ExtendAgentTokenArgs, type ExtendAgentTokenResult, type RewindAgentTokenArgs, type RewindAgentTokenResult } from "./agent_token.js";
 import type { HireMemberResult } from "./org_hire.js";
-import { composeStandard, defineAgent, CompositionError, type Standard, type Agent, type AgentDef, type PhaseDef } from "./composition.js";
+import { composeStandard, standardContentHash, defineAgent, CompositionError, type Standard, type Agent, type AgentDef, type PhaseDef } from "./composition.js";
 import { PRIMITIVE_OUTPUT_TYPE, type Primitive } from "./core_types.js";
 import { proposeTypeChange, type DomainTypeDef } from "./type_versioning.js";
 import { proposeAgentChange, evolveProfile, type AgentProfile } from "./agent_profile.js";
@@ -638,6 +638,113 @@ async function openNamedBus(busArg: unknown, asArg: unknown, slug: string): Prom
   }
 }
 
+// ── ONE RESOLUTION OF A STANDARD'S NAME, and the record it resolved TO ─────────────────────────────
+//
+// A slug is a NAME. The genome holds a standard in one of two partitions — `standards`, what the drain
+// runs, and `draft_standards`, what is still being written (genome_store.ts; drafts do not load) — and
+// every handler that took a standard's slug used to decide by hand which record the name meant:
+// `standards.get(slug)` in four places, `?? draft_standards.get(slug)` in one. Teaching inspect and
+// simulate about drafts the same way would have made six hand-kept answers to one question, which is
+// how they come to disagree (spec.coltrane.simulate-and-inspect-drafts).
+//
+// So it is answered HERE, once — this is the only function that reads `draft_standards` (the
+// conformance contract coltrane-drafts SDC-6 parses this file to hold that) — and the answer carries
+// the record's ADDRESS: slug, version, status, org and content hash, plus the genome_hash a gig of it
+// would record. A caller is told WHICH record it got, not only that the name matched something.
+//
+// The precedence is the loader's: a live standard wins over a draft of the same name. A draft is
+// composed through the loader's own gate on resolution, because drafts are parsed leniently and never
+// checked at load; one that does not compose resolves with a null genome_hash and the loader's
+// refusal, so a reader can still see it and nothing can price or run it.
+
+/** Where a resolved name landed. Null where the backing has nothing to say (a file has no org). */
+interface StandardAddress {
+  readonly slug: string;
+  readonly version: number | null;
+  readonly status: string;
+  readonly org: string | null;
+  /** What the definition says — stamped by the store loader, else hashed from the record. */
+  readonly content_hash: string;
+  /** genomeHash of the composed record, the identity a gig records; null when it does not compose. */
+  readonly genome_hash: string | null;
+}
+
+interface ResolvedStandard {
+  /** The record as the genome holds it — for a draft, the lenient parse. */
+  readonly held: Standard;
+  /** Composed as the loader composes one: a live standard is its own composition. Null for a draft
+   *  that does not compose. */
+  readonly composed: Standard | null;
+  /** True when it came from `draft_standards` — the store's status column, not a definition's own
+   *  `status` field (the file backing has no such column, and its standards are as they always were). */
+  readonly draft: boolean;
+  readonly address: StandardAddress;
+  /** The loader's refusal, for a draft that does not compose. Null otherwise. */
+  readonly composition_error: string | null;
+}
+
+/** Compose a held standard against the agents it seats — the loader's call, agents resolved by slug as
+ *  the store loader resolves them. Throws CompositionError naming the fault. */
+function composeHeld(std: Standard, agents: ReadonlyMap<string, Agent>): Standard {
+  const phases = (std.phases ?? []) as readonly PhaseDef[];
+  const chairAgentSlugs = [
+    ...new Set(phases.flatMap((p) => (p.chairs ?? []).map((c) => c.agent_slug).filter((x): x is string => !!x))),
+  ];
+  const resolved: Agent[] = chairAgentSlugs.map((aslug) => {
+    const a = agents.get(aslug);
+    if (!a) throw new CompositionError(`references unknown agent "${aslug}"`);
+    return a;
+  });
+  // Same shape the loader passes, agents included — one gate, one call site idiom.
+  return composeStandard({
+    slug: std.slug,
+    domain: std.domain ?? "",
+    agents: resolved,
+    phases,
+    status: "active",
+    ...(Array.isArray(std.input_types) ? { input_types: std.input_types as string[] } : {}),
+    ...(Array.isArray(std.output_types) ? { output_types: std.output_types as string[] } : {}),
+  } as never);
+}
+
+function resolveStandard(name: string, deps: Pick<ServerDeps, "standards" | "draft_standards" | "agents">): ResolvedStandard | undefined {
+  const addressOf = (held: Standard, status: string, genome_hash: string | null): StandardAddress => ({
+    slug: held.slug,
+    version: typeof held.version === "number" ? held.version : null,
+    status,
+    org: held.org_id ?? null,
+    content_hash: held.content_hash ?? standardContentHash(held),
+    genome_hash,
+  });
+  const live = deps.standards?.get(name);
+  if (live) {
+    // A hand-built standard with no resolved agents has no structural projection to fold.
+    const gh = Array.isArray(live.agents) ? genomeHash(live) : null;
+    return { held: live, composed: live, draft: false, address: addressOf(live, live.status ?? "active", gh), composition_error: null };
+  }
+  const held = deps.draft_standards?.get(name);
+  if (!held) return undefined;
+  if (!deps.agents) {
+    return { held, composed: null, draft: true, address: addressOf(held, "draft", null),
+             composition_error: "no agents are wired into this server, so the draft's composition cannot be checked" };
+  }
+  try {
+    const composed = { ...composeHeld(held, deps.agents), status: "draft" } as unknown as Standard;
+    return { held, composed, draft: true, address: addressOf(held, "draft", genomeHash(composed)), composition_error: null };
+  } catch (e) {
+    return { held, composed: null, draft: true, address: addressOf(held, "draft", null),
+             composition_error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+/** The one refusal both dispatch doors give a draft: it names the record, and where to go instead. */
+function draftIsNotRun(r: ResolvedStandard): string {
+  const a = r.address;
+  return `gig_dispatch: standard "${a.slug}" is a draft (${a.slug}@${a.version ?? "?"}, org ${a.org ?? "?"}, ` +
+    `content_hash ${a.content_hash}) — a draft is read with standard_inspect and priced with standard_simulate, ` +
+    `and is never run; promote it to active with standard_promote first`;
+}
+
 export async function dispatchTool(slug: string, args: Record<string, unknown>, deps: ServerDeps): Promise<ToolResult> {
   if (!KNOWN_SLUGS.has(slug)) {
     return { ok: false, error: `unknown tool "${slug}"` };
@@ -803,7 +910,13 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         // SLUG, so a 6-phase pipeline came back as three invented phases and a cost with no
         // connection to it. And hand it the REAL settled spend of prior runs (#195): a measured
         // mean of this pipeline beats any formula for the "validate before you spend" check.
-        const std = deps.standards?.get(simSlug);
+        //
+        // A DRAFT RESOLVES TOO (spec.coltrane.simulate-and-inspect-drafts): pricing a draft before
+        // asking for its promotion is the point of a pre-dispatch gate. The resolver composes it
+        // through the loader's own gate, and one that does not compose is refused below, in the
+        // loader's words — drafts load leniently and are never checked, so this is where they are.
+        const resolved = resolveStandard(simSlug, deps);
+        const std = resolved?.composed ?? undefined;
         // #267 — refuse a standard we cannot find, rather than estimating one we invented.
         // This tool is documented as the cheap pre-dispatch gate ("validate before you
         // spend"), and a gate that cannot fail is worse than no gate: callers stop looking.
@@ -833,7 +946,16 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         if (!simSlug) {
           return { ok: false, requires_approval: approval, error: "standard_simulate requires a standard_slug" };
         }
-        if (!std) {
+        if (resolved && !std) {
+          return {
+            ok: false,
+            requires_approval: approval,
+            error:
+              `standard "${simSlug}" is a draft that does not compose, so there is no run to price — ` +
+              `${resolved.composition_error}`,
+          };
+        }
+        if (!resolved || !std) {
           return {
             ok: false,
             requires_approval: approval,
@@ -924,7 +1046,8 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
             equipment: room.equipment.tools,
           };
         }
-        return { ok: true, requires_approval: approval, data: { ...res, seal_drill: drill, seat_plan: plan, ...(furnishings ? { furnishings } : {}) } };
+        // WHICH RECORD was priced — the name resolved once, reported by its address.
+        return { ok: true, requires_approval: approval, data: { ...res, address: resolved.address, seal_drill: drill, seat_plan: plan, ...(furnishings ? { furnishings } : {}) } };
       }
       case "output_query": {
         const mirror = deps.output_mirror;
@@ -1161,9 +1284,11 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
             if (s) targetStandards.push(s);
           }
         } else {
-          const standard = deps.standards.get(slug2);
-          if (!standard) return { ok: false, requires_approval: approval, error: `unknown standard "${slug2}"` };
-          targetStandards.push(standard);
+          // Refused on the RECORD: a name that resolves to a draft is a draft, not an unknown name.
+          const resolved = resolveStandard(slug2, deps);
+          if (!resolved) return { ok: false, requires_approval: approval, error: `unknown standard "${slug2}"` };
+          if (resolved.draft) return { ok: false, requires_approval: approval, error: draftIsNotRun(resolved) };
+          targetStandards.push(resolved.held);
         }
         // #203, the READ side. Preserving `status` through the loader was only half of it: the
         // symptom recorded on the issue — "a retired standard stays dispatchable and nothing
@@ -3190,15 +3315,21 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
         if (!deps.standards) return { ok: false, not_implemented: true, requires_approval: approval, error: "standard_inspect needs a standards map (bootstrap from a genome)" };
         const target = String(args["slug"] ?? "");
         if (!target) return { ok: false, requires_approval: approval, error: "standard_inspect requires slug" };
-        const std = deps.standards.get(target);
-        if (!std) return { ok: false, requires_approval: approval, error: `unknown standard "${target}"` };
+        // A draft resolves too, and is READ whether or not it composes — reading it back is how its
+        // author finds the fault; `composition_error` names it. The record is shown as held.
+        const resolved = resolveStandard(target, deps);
+        if (!resolved) return { ok: false, requires_approval: approval, error: `unknown standard "${target}"` };
+        const std = resolved.held;
         return {
           ok: true, requires_approval: approval,
           data: {
-            slug: std.slug, domain: std.domain, status: std.status ?? "active",
-            phases: std.phases.map((p) => ({
+            slug: std.slug, domain: std.domain, status: resolved.address.status,
+            // Which record the name resolved to: its content address, and why it has none if not.
+            address: resolved.address, composition_error: resolved.composition_error,
+            phases: (std.phases ?? []).map((p) => ({
               name: p.name,
-              chairs: p.chairs.map((c) => ({
+              // `?? []`: a draft is the lenient parse, and a chair list it never had is not a crash.
+              chairs: (p.chairs ?? []).map((c) => ({
                 role: c.role,
                 agent_slug: c.agent_slug ?? null,
                 skill_slug: c.skill_slug ?? null,
@@ -3498,8 +3629,10 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
           // one path that is supposed to CHECK a draft would be the one path that cannot see
           // it. That is the failure the verifier named before this was built, so it is guarded
           // here rather than discovered later.
-          const std = deps.standards.get(targetSlug) ?? deps.draft_standards?.get(targetSlug);
-          if (!std) return notFound("standard");
+          // (The lookup is the shared resolver now — resolveStandard, above in this file — so promote,
+          // inspect, simulate and dispatch cannot disagree about which record a name means.)
+          const resolved = resolveStandard(targetSlug, deps);
+          if (!resolved) return notFound("standard");
 
           // THE COMPOSITION GATE, and it did not exist before drafts stopped loading.
           //
@@ -3514,34 +3647,17 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
           // that validates differently from the load is the drift this file already names as
           // the cause of #254, and it is the two-doors-disagreeing shape this whole arc has
           // been closing.
-          if (deps.agents) {
-            const phases = (std.phases ?? []) as readonly PhaseDef[];
-            const chairAgentSlugs = [
-              ...new Set(phases.flatMap((p) => (p.chairs ?? []).map((c) => c.agent_slug).filter((x): x is string => !!x))),
-            ];
-            try {
-              const resolved: Agent[] = chairAgentSlugs.map((aslug) => {
-                const a = deps.agents?.get(aslug);
-                if (!a) throw new CompositionError(`references unknown agent "${aslug}"`);
-                return a;
-              });
-              // Same shape the loader passes, agents included — one gate, one call site idiom.
-              composeStandard({
-                slug: std.slug,
-                domain: std.domain ?? "",
-                agents: resolved,
-                phases,
-                status: "active",
-                ...(Array.isArray(std.input_types) ? { input_types: std.input_types as string[] } : {}),
-                ...(Array.isArray(std.output_types) ? { output_types: std.output_types as string[] } : {}),
-              } as never);
-            } catch (e) {
-              return {
-                ok: false, requires_approval: approval,
-                error: `${slug}: standard "${targetSlug}" does not compose and must not become `
-                     + `"${target}" — ${(e as Error).message}`,
-              };
-            }
+          //
+          // The resolver has already run that gate on a draft (composeHeld, the one simulate composes
+          // through) and kept the refusal, so promote reads it rather than composing a second time. A
+          // live standard composed at load. With no agents wired the gate cannot run, and promote
+          // declines to invent a refusal, as it always has.
+          if (deps.agents && resolved.composition_error !== null) {
+            return {
+              ok: false, requires_approval: approval,
+              error: `${slug}: standard "${targetSlug}" does not compose and must not become `
+                   + `"${target}" — ${resolved.composition_error}`,
+            };
           }
         } else if (slug === "skill_promote" && deps.skills) {
           const sk = deps.skills.get(targetSlug);
@@ -4551,6 +4667,12 @@ async function callSurfaceTool(
         const shaped = await hostedDispatchArgs(args, deps.gigStatus);
         if (!shaped.ok) return { ok: false, error: shaped.error };
         const queued = shaped.forward;
+        // A DRAFT IS NEVER RUN, and the door is where that is said. This surface used to queue one —
+        // no `standards` hit, so it queued unvalidated, and the store's own check admits draft rows —
+        // leaving the drain to refuse it at claim, after the caller had walked away. Refused on the
+        // RECORD the name resolves to (dot access: see the note below).
+        const named = resolveStandard(String(args.standard_slug ?? ""), deps);
+        if (named?.draft) return { ok: false, error: draftIsNotRun(named) };
         // contract-post-time-gig-input-v1 — validate the payload BEFORE it is queued, in the SAME
         // words as runGig's preflight, so the caller who can still fix the key is the one who is told
         // (not the worker, later). Everything below the guard queues exactly as today; a throw on this
@@ -4570,7 +4692,7 @@ async function callSurfaceTool(
           // (O4) declared inputs from deps.standards FIRST; only on a miss, exactly one narrow read of
           // the host-wired reader. The reader may throw or answer undefined — either means "unresolved".
           let declared: readonly string[] | undefined;
-          const held = deps.standards?.get(standard_slug);
+          const held = named?.held; // resolved once, above; a draft never reaches here
           if (held) {
             declared = held.input_types ?? [];
           } else if (deps.declaredGigInputs) {

@@ -161,7 +161,8 @@ export class CompositionError extends Error {}
  * record stands rather than what it is), over canonStructuralJson so a field that states nothing — an
  * empty array, an absent optional — cannot move it. The store loader stamps it on every parsed
  * standard, drafts included, from the row as stored; a definition with no stamp (a file, or one built
- * in memory) is hashed from the record itself.
+ * in memory) is hashed from the record itself. THIS is the one list of folded fields: both callers
+ * hand it the whole record and it picks, so the stamp and the fallback cannot fold different fields.
  */
 export function standardContentHash(def: {
   slug: string; domain?: string | null | undefined; phases?: unknown;

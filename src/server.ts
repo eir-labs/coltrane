@@ -3629,10 +3629,10 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
           // one path that is supposed to CHECK a draft would be the one path that cannot see
           // it. That is the failure the verifier named before this was built, so it is guarded
           // here rather than discovered later.
-          // (The lookup is the shared resolver now — src/standard_resolve.ts — so promote, inspect,
-          // simulate and dispatch cannot disagree about which record a name means.)
-          const std = resolveStandard(targetSlug, deps)?.held;
-          if (!std) return notFound("standard");
+          // (The lookup is the shared resolver now — resolveStandard, above in this file — so promote,
+          // inspect, simulate and dispatch cannot disagree about which record a name means.)
+          const resolved = resolveStandard(targetSlug, deps);
+          if (!resolved) return notFound("standard");
 
           // THE COMPOSITION GATE, and it did not exist before drafts stopped loading.
           //
@@ -3647,16 +3647,17 @@ async function runImpl(slug: string, args: Record<string, unknown>, deps: Server
           // that validates differently from the load is the drift this file already names as
           // the cause of #254, and it is the two-doors-disagreeing shape this whole arc has
           // been closing.
-          if (deps.agents) {
-            try {
-              composeHeld(std, deps.agents); // the same gate simulate composes a draft through
-            } catch (e) {
-              return {
-                ok: false, requires_approval: approval,
-                error: `${slug}: standard "${targetSlug}" does not compose and must not become `
-                     + `"${target}" — ${(e as Error).message}`,
-              };
-            }
+          //
+          // The resolver has already run that gate on a draft (composeHeld, the one simulate composes
+          // through) and kept the refusal, so promote reads it rather than composing a second time. A
+          // live standard composed at load. With no agents wired the gate cannot run, and promote
+          // declines to invent a refusal, as it always has.
+          if (deps.agents && resolved.composition_error !== null) {
+            return {
+              ok: false, requires_approval: approval,
+              error: `${slug}: standard "${targetSlug}" does not compose and must not become `
+                   + `"${target}" — ${resolved.composition_error}`,
+            };
           }
         } else if (slug === "skill_promote" && deps.skills) {
           const sk = deps.skills.get(targetSlug);

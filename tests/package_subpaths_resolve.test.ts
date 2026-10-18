@@ -51,7 +51,7 @@ describe("every subpath this package advertises can be imported", () => {
   it("the exports map is non-empty and still carries the known subpaths", () => {
     // Guards the derivation: an emptied map would otherwise satisfy every law below.
     expect(subpaths().length).toBeGreaterThanOrEqual(4);
-    for (const known of ["./tool_surface", "./genome_store", "./worker_env", "./genome_schema"]) {
+    for (const known of ["./tool_surface", "./genome_store", "./worker_env", "./genome_schema", "./venue_realizer"]) {
       expect(subpaths(), `${known} is advertised to downstreams`).toContain(known);
     }
   });
@@ -152,6 +152,18 @@ describe("every subpath this package advertises can be imported", () => {
     const schema = (await import(pathToFileURL(resolved.schema).href)) as Record<string, unknown>;
     for (const sym of ["VenueSchema", "AgentSchema", "StandardSchema"]) {
       expect(schema[sym], `${sym} is the single Zod source every restatement derives from`).toBeDefined();
+    }
+  });
+
+  it("law 3c — the venue realizer exports, THROUGH its subpath, what a downstream realizes rooms with", async () => {
+    // chancery-os realizes its rooms through this seam and no other (conformance die-package DP-0, Vör, 18 Oct 2026): a booked
+    // room is selectRealizer(venue) + realize(...), brought down by the compose project the realization owns, swept by gig. A
+    // downstream that cannot import these writes a second realizer, which is the failure DP-0 refuses; so the subpath carries
+    // each of them, resolved from where a consumer stands, through `exports`.
+    const resolved = asConsumer((req) => req.resolve(`${pkg.name}/venue_realizer`));
+    const realizer = (await import(pathToFileURL(resolved).href)) as Record<string, unknown>;
+    for (const sym of ["selectRealizer", "dockerComposeRealizer", "localProcessRealizer", "VenueSubstrateUnavailable", "composeProjectName", "roomContainerName"]) {
+      expect(realizer[sym], `${sym} is the venue realizer's, for a downstream to realize rooms with`).toBeDefined();
     }
   });
 });

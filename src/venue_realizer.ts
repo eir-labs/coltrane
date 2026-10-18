@@ -33,8 +33,9 @@ export { DEVICE_CLASSES };
  *  a subset of the venue's `credential_surface`. Injected the way the engine already injects one. */
 export type CredentialResolver = (names: readonly string[]) => Promise<Record<string, string>>;
 
-/** How the containerized realizer reaches `docker`. Real by default; see dockerComposeRealizer. */
-export type ComposeRunner = (args: readonly string[], timeoutMs: number) => void;
+/** How the containerized realizer reaches `docker`. Real by default; see dockerComposeRealizer. It answers docker's stdout, which
+ *  the host-wide reads (release, sweep) need: what stands is read from the host, never remembered by a process. */
+export type ComposeRunner = (args: readonly string[], timeoutMs: number) => string | void;
 
 /** The properties a realizer may CLAIM — and may only claim if it can actually keep them. */
 export type VenueGuarantee =
@@ -122,7 +123,14 @@ export interface VenueRealizer {
   readonly retention: RetentionPolicy;
   realize(venue: unknown, credentialResolver: CredentialResolver, opts: RealizeOpts): Promise<RealizationHandle>;
   sweep(opts: { liveGigs: readonly string[] }): Promise<readonly RealizedArtifact[]>;
+  /** Bring down the realization of a gig, found as it stands on the host, NOT through a handle: the process that realized it may be
+   *  gone (a booking is closed by a later process than the one that brought its room up). A gig with nothing standing is a named
+   *  no-op. Never brings down anything this realizer did not label as its own. */
+  release(gigId: string): Promise<ReleaseResult>;
 }
+
+/** What release did: `released` false is the named no-op, never a failure. */
+export interface ReleaseResult { released: boolean; said: string }
 
 // ── The refusals. Each NAMES the thing it refused, so a caller is not left to guess. ──────────────
 
@@ -825,6 +833,13 @@ export function localProcessRealizer(): VenueRealizer {
       return makeHandle("PLAYING", configs, `${opts.gigId}.local`, artifacts);
     },
     sweep,
+    async release(gigId) {
+      const mine = [...HOST_ARTIFACTS.entries()].filter(([, a]) => a.labels.gig_id === gigId);
+      for (const [k] of mine) HOST_ARTIFACTS.delete(k);
+      return mine.length
+        ? { released: true, said: `released ${mine.length} local-process artifact(s) of gig ${gigId}` }
+        : { released: false, said: `no realization of gig ${gigId} stands on this host (local-process)` };
+    },
   };
 }
 
@@ -841,9 +856,22 @@ export function dockerComposeRealizer(opts?: { run?: ComposeRunner; prepareWorks
   // transport verbatim, so a fake here cannot buy a false claim of liveness there.
   const run: ComposeRunner =
     opts?.run ??
-    ((args, timeout) => {
-      execFileSync("docker", [...args], { stdio: "pipe", timeout });
-    });
+    ((args, timeout) => execFileSync("docker", [...args], { stdio: ["ignore", "pipe", "pipe"], timeout, encoding: "utf8" }));
+  // WHAT STANDS, read from the host: every container labelled coltrane.managed=true, by compose project. The label is asked of
+  // docker AND checked here, so a runner (or a daemon) answering with a foreign container cannot make one of ours. A standing
+  // project names its gig as realize() named it, by the gig's first eight (coltrane-gig-<gig8>): the rendered room carries no
+  // longer id, because a render carries no token of a secret's shape (spec_venue_realization_substrate GAP 6).
+  const PROJECT = /^coltrane-gig-([0-9a-f]{8})$/;
+  const standing = (): { project: string; gig8: string }[] => {
+    const out = run(["ps", "-a", "--filter", "label=coltrane.managed=true", "--format", '{{.Label "coltrane.managed"}}\t{{.Label "coltrane.project"}}'], 30_000);
+    const seen = new Map<string, { project: string; gig8: string }>();
+    for (const line of String(out ?? "").split("\n").filter(Boolean)) {
+      const [managed, project] = line.split("\t");
+      const m = PROJECT.exec(project ?? "");
+      if (managed === "true" && m && project && m[1]) seen.set(project, { project, gig8: m[1] });
+    }
+    return [...seen.values()];
+  };
   // THE ROOM POPULATES ITS TREE THROUGH THE DRAIN'S OWN FUNCTION. Defaults to the imported
   // `prepareWorkspace` — literally the function worker.ts calls at its own clone site — so there is
   // one clone/credential/cleanup mechanism, never a second the room could drift from. Injectable only
@@ -1070,6 +1098,24 @@ export function dockerComposeRealizer(opts?: { run?: ComposeRunner; prepareWorks
         rmSync(realizationDir, { recursive: true, force: true });
       }, seat);
     },
-    sweep,
+    // host-wide: the compose projects that stand, not the ones this process remembers (a fresh process sweeps what a killed one left)
+    async sweep({ liveGigs }) {
+      // what this process realized, and what stands on the host that it did not (a killed instance's, a peer's that is over)
+      const remembered = await sweep({ liveGigs });
+      const live8 = new Set(liveGigs.map((g) => g.slice(0, 8)));
+      const known8 = new Set(remembered.map((a) => a.labels.gig_id.slice(0, 8)));
+      const stood = standing()
+        .filter((p) => !live8.has(p.gig8) && !known8.has(p.gig8))
+        .map((p) => ({ kind: "compose-project", id: p.project, labels: { gig_id: p.gig8, instance: "host" } }));
+      return [...remembered, ...stood];
+    },
+    async release(gigId) {
+      const project = composeProjectName(join(tmpdir(), "coltrane-realizations", `gig-${gigId.slice(0, 8)}`));
+      const mine = standing().filter((p) => p.project === project);
+      if (!mine.length) return { released: false, said: `no realization of gig ${gigId} stands on this host (container)` };
+      run(["compose", "-p", project, "down", "-v", "--remove-orphans"], 120_000);
+      rmSync(join(tmpdir(), "coltrane-realizations", `gig-${gigId.slice(0, 8)}`), { recursive: true, force: true });
+      return { released: true, said: `released compose project ${project} of gig ${gigId}` };
+    },
   };
 }

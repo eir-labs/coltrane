@@ -57,6 +57,11 @@
       "import": "./dist/src/worker_env.js",
       "default": "./dist/src/worker_env.js"
     },
+    "./venue_realizer": {
+      "types": "./dist/src/venue_realizer.d.ts",
+      "import": "./dist/src/venue_realizer.js",
+      "default": "./dist/src/venue_realizer.js"
+    },
     "./genome_schema": {
       "types": "./dist/src/genome_schema.d.ts",
       "import": "./dist/src/genome_schema.js",

@@ -12,8 +12,8 @@
 // fields CONTAIN. Rendering a runtime configuration from contract data is code generation from data,
 // and if any part of the input is reachable by a gig, a permissive renderer is remote code execution
 // with extra steps.
-import { existsSync, writeFileSync, rmSync, mkdirSync, mkdtempSync } from "node:fs";
-import { execFileSync } from "node:child_process";
+import { existsSync, writeFileSync, rmSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync } from "node:fs";
+import { execFileSync, spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { VenueSchema, DEVICE_CLASSES, type VenueOutput } from "./genome_schema.js";
@@ -102,6 +102,9 @@ export interface RealizeOpts {
    *  credential is minted. Inferring an ambient source is the exact failure this explicit field
    *  forecloses. */
   repoUrl?: string;
+  /** The room's seat, for a realizer that runs it on the host (local-process): the command the caller hands it, started detached in its
+   *  own process group, recorded on the host so that release and sweep bring it down from any process. Absent → no seat is started. */
+  seat?: { command: string; args?: readonly string[]; env?: Readonly<Record<string, string>>; log?: string };
   /** The per-gig git-credential plumbing `prepareWorkspace` requires, supplied by the realization
    *  caller alongside `repoUrl` — never derived from ambient process state. The minted token only ever
    *  rides `cloneInto`'s GIT_CONFIG_* env, never a host file, so token-never-on-disk is preserved. */
@@ -811,8 +814,28 @@ async function sweep(opts: { liveGigs: readonly string[] }): Promise<readonly Re
  *  not a security control and must not be described as one, so claiming those guarantees would be a
  *  false contract a caller would rely on. Must work on a host with no container runtime and no
  *  daemon installed. */
-export function localProcessRealizer(): VenueRealizer {
+// THE LOCAL REALIZER KEEPS ITS REALIZATIONS ON THE HOST (conformance the-die-e2e E2E-7). What it realizes is written to a host
+// registry (<root>/<gig>.json: the gig, its artifacts, its seat's process group), so release and sweep find it from ANY process, as
+// VenueRealizer.release says ("found as it stands on the host, NOT through a handle: the process that realized it may be gone"). The
+// seat a caller hands it is started detached, in its own process group, and brought down with the realization.
+export function localProcessRealizer(options: { root?: string } = {}): VenueRealizer {
   const substrate = "local-process";
+  const root = options.root ?? join(tmpdir(), "coltrane-local-realizations");
+  mkdirSync(root, { recursive: true });
+  type Entry = { gig_id: string; substrate: string; artifacts: RealizedArtifact[]; seats: { pid: number; pgid: number }[] };
+  const entryPath = (gig: string) => join(root, `${gig.replace(/[^A-Za-z0-9._-]/g, "_")}.json`);
+  const read = (gig: string): Entry | null => { try { return JSON.parse(readFileSync(entryPath(gig), "utf8")) as Entry; } catch { return null; } };
+  const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+  const signal = (e: Entry, sig: NodeJS.Signals) => { for (const st of e.seats) { try { process.kill(-st.pgid, sig); } catch { /* already gone */ } } };
+  async function bringDown(gig: string): Promise<Entry | null> {
+    const e = read(gig); if (!e) return null;
+    signal(e, "SIGTERM");
+    for (let i = 0; i < 40 && e.seats.some((st) => alive(st.pid)); i++) await new Promise((r) => setTimeout(r, 100));
+    if (e.seats.some((st) => alive(st.pid))) signal(e, "SIGKILL");
+    rmSync(entryPath(gig), { force: true });
+    for (const a of e.artifacts) HOST_ARTIFACTS.delete(a.id);
+    return e;
+  }
   return {
     substrate,
     // Claims ONLY what a subprocess of the host can actually keep: the tool surface is reproducible
@@ -827,17 +850,34 @@ export function localProcessRealizer(): VenueRealizer {
         throw new VenueSubstrateUnavailable(v.substrate, [substrate]);
       }
       const configs = await buildMcpConfigs(v, opts);
+      const instance = opts.instance ?? INSTANCE;
       const artifacts: RealizedArtifact[] = [
-        { kind: "local-process-group", id: `lpg-${opts.gigId}-${ARTIFACT_SEQ++}`, labels: { gig_id: opts.gigId, instance: INSTANCE } },
+        { kind: "local-process-group", id: `lpg-${opts.gigId}-${ARTIFACT_SEQ++}`, labels: { gig_id: opts.gigId, instance } },
       ];
-      return makeHandle("PLAYING", configs, `${opts.gigId}.local`, artifacts);
+      const seats: Entry["seats"] = [];
+      if (opts.seat) {
+        const out = opts.seat.log ? openSync(opts.seat.log, "a") : "ignore";
+        const child = spawn(opts.seat.command, [...(opts.seat.args ?? [])], { env: { ...(opts.seat.env ?? {}) }, detached: true, stdio: ["ignore", out, out] });
+        child.unref();
+        if (child.pid) { seats.push({ pid: child.pid, pgid: child.pid }); artifacts.push({ kind: "local-process", id: `pid-${child.pid}`, labels: { gig_id: opts.gigId, instance } }); }
+      }
+      writeFileSync(entryPath(opts.gigId), JSON.stringify({ gig_id: opts.gigId, substrate, artifacts, seats } satisfies Entry, null, 1));
+      // the handle's teardown brings the seat down now and leaves nothing on the host (release, from any process, does the same)
+      return makeHandle("PLAYING", configs, `${opts.gigId}.local`, artifacts, () => { const e = read(opts.gigId); if (e) { signal(e, "SIGTERM"); rmSync(entryPath(opts.gigId), { force: true }); } });
     },
-    sweep,
+    async sweep({ liveGigs }) {
+      const live = new Set(liveGigs), out: RealizedArtifact[] = [];
+      for (const f of readdirSync(root).filter((n) => n.endsWith(".json"))) {
+        let e: Entry; try { e = JSON.parse(readFileSync(join(root, f), "utf8")) as Entry; } catch { continue; }
+        if (live.has(e.gig_id)) continue;
+        await bringDown(e.gig_id); out.push(...e.artifacts);
+      }
+      return out;
+    },
     async release(gigId) {
-      const mine = [...HOST_ARTIFACTS.entries()].filter(([, a]) => a.labels.gig_id === gigId);
-      for (const [k] of mine) HOST_ARTIFACTS.delete(k);
-      return mine.length
-        ? { released: true, said: `released ${mine.length} local-process artifact(s) of gig ${gigId}` }
+      const e = await bringDown(gigId);
+      return e
+        ? { released: true, said: `released gig ${gigId} from the host: ${e.artifacts.length} artifact(s), ${e.seats.length} seat process group(s) brought down` }
         : { released: false, said: `no realization of gig ${gigId} stands on this host (local-process)` };
     },
   };

@@ -56,7 +56,7 @@ describe("gig_song: renders to a valid JSONG tick-log", () => {
     const { header, ticks } = readAll(songToJsong(song));
     expect(header.version).toBe(0);
     expect(ticks.length).toBe(2);
-    expect(ticks[0]!.slug).toBe("scout");
+    expect(new TextDecoder().decode(ticks[0]!.slug as Uint8Array)).toBe("scout"); // a slug reads back as its bytes
     expect(ticks[0]!.score).toBeCloseTo(song.steps[0]!.consonance, 6);
     expect(ticks[0]!.state_59[4]).toBeCloseTo(song.steps[0]!.consonance, 6); // C/coherence slot
   });

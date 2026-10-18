@@ -77,15 +77,18 @@ describe("JSONG: byte-for-byte conformance with the Python reference (O16)", () 
     expect(t.state_59[10]).toBe(3.125);
     expect(t.state_59[58]).toBe(-1.0);
     expect(t.score).toBe(0.5);
-    expect(t.slug).toBe("verse-1");
+    expect(new TextDecoder().decode(t.slug as Uint8Array)).toBe("verse-1"); // read back as its bytes
   });
 });
 
 describe("JSONG: round-trip + multi-tick file", () => {
   it("pack→unpack is identity for header and tick", () => {
     expect(unpackHeader(packHeader(goldenHeader())).start_us).toBe(1779791700000000n);
-    const t = unpackTick(packTick(goldenTick()));
-    expect(t).toEqual(goldenTick());
+    const { slug, wire, ...t } = unpackTick(packTick(goldenTick()));
+    const { slug: goldenSlug, ...golden } = goldenTick();
+    expect(t).toEqual(golden);
+    expect(new TextDecoder().decode(slug as Uint8Array)).toBe(goldenSlug); // the slug reads back as its bytes
+    expect(wire!.score.length + wire!.state.length).toBe(8 + 59 * 4);     // and the floats carry their wire bits
   });
 
   it("writeAll → readAll preserves header + every tick in order", () => {
@@ -94,7 +97,7 @@ describe("JSONG: round-trip + multi-tick file", () => {
     expect(header.start_us).toBe(1779791700000000n);
     expect(out.length).toBe(2);
     expect(out[1]!.tick_idx).toBe(8);
-    expect(out[1]!.slug).toBe("chorus");
+    expect(new TextDecoder().decode(out[1]!.slug as Uint8Array)).toBe("chorus");
   });
 });
 

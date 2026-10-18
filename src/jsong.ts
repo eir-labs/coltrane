@@ -3,11 +3,16 @@
 // is referenced by the ledger via its sha256, never imported into the canonical_form
 // contract. Fixed little-endian layout: 48-byte file header + N × 280-byte records.
 //
+// Every byte Python writes comes back: the slug is BYTES (Python's bytes20), state_59 and score keep their WIRE BITS (a JS number
+// cannot hold a signalling NaN's payload, so a read keeps the bytes and a write emits them while the value is unchanged), and any
+// version but 0 is refused, as Python refuses it (conformance room-stream-jsong JS-1).
+//
 // Python struct formats (the source of truth this port reproduces byte-for-byte):
 //   header: "<4sHH16s16sQ"   magic, version, reserved, gig_id, agent_id, start_us
 //   tick:   "<II HH I 59f d 20s"  tick_idx, delta_us, role, reserved, flags, state_59, score, slug
 
 export const MAGIC = new Uint8Array([0x6a, 0x53, 0x4e, 0x47]); // b"jSNG"
+export const VERSION = 0; // the only version Python reads or writes
 export const FILE_HEADER_SIZE = 48;
 export const TICK_RECORD_SIZE = 280;
 export const STATE_DIM = 59;
@@ -43,7 +48,9 @@ export interface TickRecord {
   flags: number;
   state_59: number[]; // exactly 59 float32 values, canonical order
   score: number; // float64 coherence C = R − E²
-  slug: string; // ≤ 20 bytes UTF-8, null-padded on the wire
+  slug: string | Uint8Array; // ≤ 20 bytes, null-padded on the wire; read back as its bytes (a string is UTF-8 encoded on write)
+  /** the wire bytes of state_59 and score as read; written back while the values still decode to them */
+  wire?: { state: Uint8Array; score: Uint8Array };
 }
 
 function fitBytes(src: Uint8Array, n: number): Uint8Array {
@@ -54,7 +61,8 @@ function fitBytes(src: Uint8Array, n: number): Uint8Array {
 }
 
 const enc = new TextEncoder();
-const dec = new TextDecoder();
+// the same value, NaN for NaN (a NaN's payload is the wire's to keep, not the number's)
+const same = (a: number, b: number) => Object.is(a, b) || (Number.isNaN(a) && Number.isNaN(b));
 
 export function packHeader(h: FileHeader): Uint8Array {
   const buf = new Uint8Array(FILE_HEADER_SIZE);
@@ -74,8 +82,10 @@ export function unpackHeader(buf: Uint8Array): FileHeader {
     if (buf[i] !== MAGIC[i]) throw new JsongError("bad magic (expected jSNG)");
   }
   const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+  const version = dv.getUint16(4, true);
+  if (version !== VERSION) throw new JsongError(`unsupported version ${version} (reader supports ${VERSION})`);
   return {
-    version: dv.getUint16(4, true),
+    version,
     gig_id: buf.slice(8, 24),
     agent_id: buf.slice(24, 40),
     start_us: dv.getBigUint64(40, true),
@@ -87,6 +97,8 @@ export function packTick(rec: TickRecord): Uint8Array {
   if (rec.role !== ROLE_OBSERVATION && rec.role !== ROLE_SPEC && rec.role !== ROLE_VERDICT) {
     throw new JsongError(`invalid role ${rec.role}`);
   }
+  const slug = typeof rec.slug === "string" ? enc.encode(rec.slug) : rec.slug;
+  if (slug.length > SLUG_SIZE) throw new JsongError(`slug too long (${slug.length} > ${SLUG_SIZE} bytes)`); // Python refuses; never truncate
   const buf = new Uint8Array(TICK_RECORD_SIZE);
   const dv = new DataView(buf.buffer);
   dv.setUint32(0, rec.tick_idx, true);
@@ -94,9 +106,15 @@ export function packTick(rec: TickRecord): Uint8Array {
   dv.setUint16(8, rec.role, true);
   dv.setUint16(10, 0, true); // reserved
   dv.setUint32(12, rec.flags, true);
-  for (let i = 0; i < STATE_DIM; i++) dv.setFloat32(16 + i * 4, rec.state_59[i]!, true);
-  dv.setFloat64(252, rec.score, true);
-  buf.set(fitBytes(enc.encode(rec.slug), SLUG_SIZE), 260);
+  const w = rec.wire, wv = w ? new DataView(w.state.buffer, w.state.byteOffset, w.state.byteLength) : null;
+  for (let i = 0; i < STATE_DIM; i++) {
+    const v = rec.state_59[i]!;
+    if (wv && same(wv.getFloat32(i * 4, true), Math.fround(v))) buf.set(w!.state.subarray(i * 4, i * 4 + 4), 16 + i * 4);
+    else dv.setFloat32(16 + i * 4, v, true);
+  }
+  if (w && same(new DataView(w.score.buffer, w.score.byteOffset, 8).getFloat64(0, true), rec.score)) buf.set(w.score, 252);
+  else dv.setFloat64(252, rec.score, true);
+  buf.set(fitBytes(slug, SLUG_SIZE), 260);
   return buf;
 }
 
@@ -107,9 +125,8 @@ export function unpackTick(buf: Uint8Array): TickRecord {
   if (role !== ROLE_OBSERVATION && role !== ROLE_SPEC && role !== ROLE_VERDICT) throw new JsongError(`invalid role ${role}`);
   const state_59: number[] = new Array(STATE_DIM);
   for (let i = 0; i < STATE_DIM; i++) state_59[i] = dv.getFloat32(16 + i * 4, true);
-  const slugBytes = buf.slice(260, 280);
-  let end = slugBytes.length;
-  while (end > 0 && slugBytes[end - 1] === 0) end--; // strip null padding
+  let end = SLUG_SIZE;
+  while (end > 0 && buf[260 + end - 1] === 0) end--; // strip null padding, as Python's rstrip(b"\\0")
   return {
     tick_idx: dv.getUint32(0, true),
     delta_us: dv.getUint32(4, true),
@@ -117,7 +134,8 @@ export function unpackTick(buf: Uint8Array): TickRecord {
     flags: dv.getUint32(12, true),
     state_59,
     score: dv.getFloat64(252, true),
-    slug: dec.decode(slugBytes.subarray(0, end)),
+    slug: buf.slice(260, 260 + end),
+    wire: { state: buf.slice(16, 252), score: buf.slice(252, 260) },
   };
 }
 

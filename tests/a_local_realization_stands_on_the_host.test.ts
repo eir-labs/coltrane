@@ -75,6 +75,16 @@ describe("a local realization stands on the host", () => {
     expect(out.released, out.said).toBe(true);
   });
 
+  it("L6 — the handle names the seat it started (pid and process group), so its caller can watch it", async () => {
+    const r = root(), gig = "a7a7a7a7-0000-4000-8000-0000000000l6";
+    const h = await localProcessRealizer({ root: r }).realize(EMPTY_ROOM, noCredentials, { gigId: gig, seat: seat(r) });
+    expect(h.seats?.length, "the handle names one seat").toBe(1);
+    expect(h.seats[0].pid, "the seat it names is the one running").toBe(pidOf(h));
+    expect(alive(h.seats[0].pid)).toBe(true);
+    await localProcessRealizer({ root: r }).release(gig);
+    expect(alive(h.seats[0].pid), "and release brings that seat down").toBe(false);
+  });
+
   it("L5 — a realizer on another root neither sees nor releases it", async () => {
     const r = root(), other = root(), gig = "f6f6f6f6-0000-4000-8000-0000000000l5";
     const h = await localProcessRealizer({ root: r }).realize(EMPTY_ROOM, noCredentials, { gigId: gig, seat: seat(r) });

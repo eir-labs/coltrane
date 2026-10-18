@@ -85,6 +85,9 @@ export interface RealizationHandle {
    *  can run the chair as `docker exec -i -w <workspace> <container> claude …` INSIDE the room. Absent
    *  on the production room image and on the local-process realizer: the seat runs on the host. */
   seat?: { container: string; workspace: string } | undefined;
+  /** The seat processes a realizer started on the host for this realization (local-process), by pid and process group, so the caller can
+   *  watch the room's seat; release and sweep bring them down. Absent = the realizer started none. */
+  seats?: readonly { pid: number; pgid: number }[];
 }
 
 export interface RealizeOpts {
@@ -863,7 +866,8 @@ export function localProcessRealizer(options: { root?: string } = {}): VenueReal
       }
       writeFileSync(entryPath(opts.gigId), JSON.stringify({ gig_id: opts.gigId, substrate, artifacts, seats } satisfies Entry, null, 1));
       // the handle's teardown brings the seat down now and leaves nothing on the host (release, from any process, does the same)
-      return makeHandle("PLAYING", configs, `${opts.gigId}.local`, artifacts, () => { const e = read(opts.gigId); if (e) { signal(e, "SIGTERM"); rmSync(entryPath(opts.gigId), { force: true }); } });
+      const handle = makeHandle("PLAYING", configs, `${opts.gigId}.local`, artifacts, () => { const e = read(opts.gigId); if (e) { signal(e, "SIGTERM"); rmSync(entryPath(opts.gigId), { force: true }); } });
+      return seats.length ? { ...handle, seats } : handle;
     },
     async sweep({ liveGigs }) {
       const live = new Set(liveGigs), out: RealizedArtifact[] = [];

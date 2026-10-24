@@ -1,0 +1,21 @@
+{
+  "slug": "forebear-review-v0",
+  "domain": "review",
+  "agent_slugs": ["forebear-census", "helmholtz-reviewer", "hauer-reviewer", "klein-reviewer", "forebear-adjudicator"],
+  "phases": [
+    { "name": "census", "chairs": [ { "role": "census", "agent_slug": "forebear-census", "depends_on": [],
+        "input_contract": ["review-request"], "output_contract": ["review-surface"], "required_skills": [] } ] },
+    { "name": "helmholtz", "chairs": [ { "role": "review-helmholtz", "agent_slug": "helmholtz-reviewer", "depends_on": ["census"],
+        "input_contract": ["review-surface", "review-request"], "output_contract": ["review-finding"], "required_skills": [] } ] },
+    { "name": "hauer", "chairs": [ { "role": "review-hauer", "agent_slug": "hauer-reviewer", "depends_on": ["census"],
+        "input_contract": ["review-surface", "review-request"], "output_contract": ["review-finding"], "required_skills": [] } ] },
+    { "name": "klein", "chairs": [ { "role": "review-klein", "agent_slug": "klein-reviewer", "depends_on": ["census"],
+        "input_contract": ["review-surface", "review-request"], "output_contract": ["review-finding"], "required_skills": [] } ] },
+    { "name": "adjudicate", "chairs": [ { "role": "adjudicate", "agent_slug": "forebear-adjudicator", "depends_on": ["review-helmholtz", "review-hauer", "review-klein", "census"],
+        "input_contract": ["review-finding", "review-surface", "review-request"], "output_contract": ["change-verdict"], "required_skills": [] } ] }
+  ],
+  "status": "draft",
+  "input_types": ["review-request"],
+  "output_types": ["review-surface", "review-finding", "change-verdict"],
+  "description": "The three-lane forebear review, generalised from lineage-review-v0 to ANY artifact of the research container — a question, a needs list, a set of competency questions, a layer partition, a type schema, a search protocol, a prereg, a study result, a lineage record. The lanes are epistemic, not topical, which is why they generalise: HELMHOLTZ — conservation; every claim names its source and every judgment is stated as the quantity it stands for (Erhaltung der Kraft 1847; sensation apart from inference). HAUER — the recording outranks the model; every empirical claim names the recording it rests on and says whether it is held, reachable or neither; a method with no trial is proposed, not adopted (the 1996 WSCC forensics). KLEIN — state the group; every classification states the criterion that places a member, every partition is one, and a rename is refused (Erlangen 1872). One seat counts the artifact by code; three seats grade one lane each, sequentially; one seat attacks every finding, runs what can be run, refutes what does not hold, and seals a change-verdict against the artifact's own claims, with a lane-by-lane pointer for the author. No human seat: the verdict is what the container's seal gate consumes, so that work does not close without a grade (chancery-os: never self-graded). lineage-review-v0 remains the lineage-record specialisation with its edge-level checks; this is the general form. Forebears sit as chairs carrying a standard, never as named envoys."
+}

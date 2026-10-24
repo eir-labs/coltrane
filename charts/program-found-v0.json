@@ -1,0 +1,49 @@
+{
+  "slug": "program-found-v0",
+  "movements": [
+    {
+      "movement_id": "m1-lineage",
+      "standard_slug": "lineage-pass-v1",
+      "seatings": []
+    },
+    {
+      "movement_id": "m2-adopt",
+      "standard_slug": "lineage-adopt-v0",
+      "seatings": [],
+      "runtime_fills": {
+        "lineage-adoption-target": {
+          "institution": "power-grid-research",
+          "note": "filled at dispatch from the sealed lineage-record's forebears"
+        }
+      }
+    },
+    {
+      "movement_id": "m3-name",
+      "standard_slug": "naming-ritual-v1",
+      "seatings": []
+    }
+  ],
+  "edges": [
+    {
+      "from_movement": "m1-lineage",
+      "to_movement": "m2-adopt",
+      "output_type": "lineage-record"
+    }
+  ],
+  "approval_gates": [
+    {
+      "gate_id": "approve-lineage",
+      "after_movement": "m1-lineage",
+      "before_movement": "m2-adopt",
+      "chair": "governor",
+      "prompt": "Approve the reviewed lineage record. Nothing is adopted on an absent yes."
+    },
+    {
+      "gate_id": "seal-name",
+      "after_movement": "m2-adopt",
+      "before_movement": "m3-name",
+      "chair": "governor",
+      "prompt": "The seal alone mints. Strike the name and substitute before sealing if you will."
+    }
+  ]
+}

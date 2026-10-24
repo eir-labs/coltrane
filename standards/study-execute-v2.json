@@ -1,0 +1,79 @@
+{
+  "slug": "study-execute-v2",
+  "domain": "research-program",
+  "agent_slugs": [
+    "lab-tester",
+    "lab-tech"
+  ],
+  "phases": [
+    {
+      "name": "attest",
+      "chairs": [
+        {
+          "role": "attest-lock",
+          "agent_slug": "lab-tester",
+          "depends_on": [],
+          "input_contract": [
+            "prereg"
+          ],
+          "output_contract": [
+            "lock-manifest"
+          ],
+          "required_skills": []
+        }
+      ]
+    },
+    {
+      "name": "execute",
+      "chairs": [
+        {
+          "role": "execute-study",
+          "agent_slug": "lab-tech",
+          "depends_on": [
+            "attest-lock"
+          ],
+          "input_contract": [
+            "prereg",
+            "lock-manifest",
+            "change-set"
+          ],
+          "output_contract": [
+            "study-result"
+          ],
+          "required_skills": []
+        }
+      ]
+    },
+    {
+      "name": "adjudicate",
+      "chairs": [
+        {
+          "role": "adjudicate",
+          "agent_slug": "lab-tester",
+          "depends_on": [
+            "execute-study"
+          ],
+          "input_contract": [
+            "study-result",
+            "prereg"
+          ],
+          "output_contract": [
+            "research-verdict"
+          ],
+          "required_skills": []
+        }
+      ]
+    }
+  ],
+  "status": "draft",
+  "input_types": [
+    "prereg",
+    "change-set"
+  ],
+  "output_types": [
+    "lock-manifest",
+    "study-result",
+    "research-verdict"
+  ],
+  "description": "study-execute-v1 evolved: an ATTEST seat first — the lab tester reads the frozen prereg from git (never the working tree) and seals the lock-manifest, which nothing emitted before — then the lab tech executes, then the lab tester adjudicates per prediction citing the gate text verbatim. Three chairs, two agents, disjoint by law: the executor never adjudicates its own run."
+}

@@ -1,0 +1,89 @@
+{
+  "slug": "recording-census",
+  "version": 1,
+  "extends": "Signal",
+  "domain": "power-grid",
+  "status": "active",
+  "description": "What is THERE in a recording, before anyone decides what is in it. Sealed by a SENSE seat with no fitted model in the loop: duration, rate, channels, dropouts, noise floor, stationarity, the raw spectrum. A model sealed over a recording cites a census of it sealed earlier \u2014 the style 'listen before you model', graded by chain order.",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "recording_ref": {
+        "type": "string",
+        "description": "event-recording or known-tone-set sha"
+      },
+      "duration_s": {
+        "type": "number",
+        "description": ""
+      },
+      "rate_hz": {
+        "type": "number",
+        "description": ""
+      },
+      "channels": {
+        "type": "number",
+        "description": ""
+      },
+      "dropouts": {
+        "type": "array",
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          }
+        },
+        "description": "gaps as [start_s, end_s]"
+      },
+      "noise_floor": {
+        "type": "string",
+        "description": "per channel, in the recording's units; how estimated (e.g. median of quiet windows)"
+      },
+      "stationary_windows": {
+        "type": "array",
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          }
+        },
+        "description": "[start_s, end_s] where the census judged the signal stationary by a stated test"
+      },
+      "raw_spectrum_ref": {
+        "type": "string",
+        "description": "sha of the periodogram or spectrogram, unfitted"
+      },
+      "what_was_not_opened": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "description": ""
+        },
+        "description": ""
+      },
+      "census_code_sha256": {
+        "type": "string",
+        "description": "the script that counted"
+      }
+    },
+    "required": [
+      "recording_ref",
+      "duration_s",
+      "rate_hz",
+      "channels",
+      "dropouts",
+      "noise_floor",
+      "raw_spectrum_ref",
+      "census_code_sha256"
+    ]
+  },
+  "required_fields": [
+    "recording_ref",
+    "duration_s",
+    "rate_hz",
+    "channels",
+    "dropouts",
+    "noise_floor",
+    "raw_spectrum_ref",
+    "census_code_sha256"
+  ]
+}

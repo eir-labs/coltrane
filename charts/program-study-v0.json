@@ -1,0 +1,46 @@
+{
+  "slug": "program-study-v0",
+  "movements": [
+    {
+      "movement_id": "m1-prereg",
+      "standard_slug": "prereg-draft-v0",
+      "seatings": []
+    },
+    {
+      "movement_id": "m2-review",
+      "standard_slug": "forebear-review-v0",
+      "seatings": []
+    },
+    {
+      "movement_id": "m3-study",
+      "standard_slug": "study-execute-v2",
+      "seatings": [],
+      "runtime_fills": {
+        "change-set": {
+          "note": "the instrument's sealed change-set, by sha, from the last instrument-v0 performance"
+        }
+      }
+    },
+    {
+      "movement_id": "m4-reconcile",
+      "standard_slug": "reconcile-work-order-v0",
+      "seatings": []
+    }
+  ],
+  "edges": [
+    {
+      "from_movement": "m1-prereg",
+      "to_movement": "m3-study",
+      "output_type": "prereg"
+    }
+  ],
+  "approval_gates": [
+    {
+      "gate_id": "freeze",
+      "after_movement": "m2-review",
+      "before_movement": "m3-study",
+      "chair": "research-lead",
+      "prompt": "The prereg is reviewed. Freeze it — commit, tag, timestamp, register — before any instrument runs or any data is reached."
+    }
+  ]
+}

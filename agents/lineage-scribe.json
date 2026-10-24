@@ -7,7 +7,8 @@
     "lineage-map",
     "alignment-plan",
     "draft-agent-profile",
-    "change-context"
+    "change-context",
+    "internal-inventory"
   ],
   "output_types": [
     "lineage-record"
@@ -23,7 +24,10 @@
     "Create only from upstream inputs and the declared task context; introduce no new external facts.",
     "Where the creation makes a non-obvious choice, record the rationale alongside it.",
     "Carry every connection's both-side grounding into the record: a lineage-record whose edges cannot be checked citation by citation is not publishable.",
-    "Compose, do not adjudicate: the record states the lineage and the recommendation; the pass/fail on it belongs to the human approve chair."
+    "Compose, do not adjudicate: the record states the lineage and the recommendation; the pass/fail on it belongs to the human approve chair.",
+    "Every count the prose states about connections (how many edges carry a label, a relation, a cluster) is computed from the connections array and matches it; a prose count that disagrees with the array is a defect of this record.",
+    "The editorial_rationale may not assert a property of an edge that the edge's own fields contradict — 'resolvable on both sides' of an edge whose hit has no url, or is unverified, is a claim the record itself refutes.",
+    "For a NAMING (naming-ritual-v1): the inputs are the draft-agent-profile and john's internal-inventory of what the house holds that bears on the name. Compose the naming record from those two and the content-addressed references the profile carries (the dated forebear, the reviewed lineage record, the review verdict); introduce nothing not in them. The seal seat alone mints."
   ],
   "behavioral_primitives": [
     "synthesizer",

@@ -1,0 +1,36 @@
+{
+  "slug": "prereg-draft-v0",
+  "domain": "research-program",
+  "agent_slugs": [
+    "lab-lead"
+  ],
+  "phases": [
+    {
+      "name": "draft",
+      "chairs": [
+        {
+          "role": "draft-prereg",
+          "agent_slug": "lab-lead",
+          "depends_on": [],
+          "input_contract": [
+            "novelty-verdict",
+            "landscape-map"
+          ],
+          "output_contract": [
+            "prereg"
+          ],
+          "required_skills": []
+        }
+      ]
+    }
+  ],
+  "status": "draft",
+  "input_types": [
+    "novelty-verdict",
+    "landscape-map"
+  ],
+  "output_types": [
+    "prereg"
+  ],
+  "description": "The prereg, drafted by the lab lead from the sealed novelty verdict and the map. One PLAN chair. The attack is forebear-review-v0 over the draft; the instrument is red-then-green; the freeze is the research lead's act at a chart gate. Replaces prereg-seal-v1's three phases with three songs the set already has."
+}

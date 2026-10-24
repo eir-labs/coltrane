@@ -4,7 +4,7 @@
   "extends": "Signal",
   "domain": "lineage",
   "status": "active",
-  "description": "One EXTERNAL source identified by the lineage pass: a piece of prior art, precedent, or canonical text, with the claim read from it and its attribution. A source with no claim cites nothing in particular; url and citation carry the locator the claim was verified against.",
+  "description": "One EXTERNAL source identified by the lineage pass: a piece of prior art, precedent, or canonical text, with the claim read from it and its attribution. A source with no claim cites nothing in particular; url and citation carry the locator the claim was verified against. locator_status says whether the locator was fetched in this run; locator_kind says what kind of surface it reaches; a secondary surface is apparatus, never the locator of a work.",
   "schema": {
     "type": "object",
     "properties": {
@@ -22,6 +22,33 @@
       },
       "citation": {
         "type": "string"
+      },
+      "locator_status": {
+        "type": "string",
+        "enum": [
+          "fetched",
+          "unverified"
+        ],
+        "description": "fetched = the page at url was retrieved by a tool in this run and the quote was read from it; unverified = it was not, and the hit says what was tried."
+      },
+      "locator_kind": {
+        "type": "string",
+        "enum": [
+          "edition",
+          "paper",
+          "archive-scan",
+          "secondary",
+          "none"
+        ],
+        "description": "What the url reaches: a named edition's own text, a paper (DOI or publisher article page), a library/archive scan — or a secondary surface (encyclopedia, catalogue, slide deck, bookseller, biography), or no locator at all."
+      },
+      "quote": {
+        "type": "string",
+        "description": "The exact passage the claim is read from, verbatim from the fetched page. Empty when locator_status is unverified."
+      },
+      "tried": {
+        "type": "string",
+        "description": "When unverified: what was searched or fetched and what came back."
       }
     }
   },

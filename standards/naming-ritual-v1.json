@@ -18,7 +18,7 @@
             "draft-agent-profile"
           ],
           "output_contract": [
-            "change-context"
+            "internal-inventory"
           ],
           "optional_outputs": [],
           "required_skills": [],
@@ -38,7 +38,7 @@
           ],
           "input_contract": [
             "draft-agent-profile",
-            "change-context"
+            "internal-inventory"
           ],
           "output_contract": [
             "lineage-record"
@@ -76,7 +76,8 @@
     "draft-agent-profile"
   ],
   "output_types": [
-    "lineage-verdict"
+    "lineage-verdict",
+    "internal-inventory"
   ],
-  "description": "The naming ritual as this institution's law, tip-conforming (adopted by the founding after the founder's v0 failed this engine's composition rules; deliberated through deliberation-before-amendment-v1). Warrant + dated forebear + human seal = a named agent. The reader frames, the scribe composes with the forebear by content address, and the seal alone mints: no model seat in this graph can produce the verdict, mechanically. The reading seat now seats john, the shared exhaustive-read seat, carrying its own turn_budget; context-reader was capability-identical to john and is retired."
+  "description": "The naming ritual as this institution's law, tip-conforming (adopted by the founding after the founder's v0 failed this engine's composition rules; deliberated through deliberation-before-amendment-v1). Warrant + dated forebear + human seal = a named agent. The reader frames, the scribe composes with the forebear by content address, and the seal alone mints: no model seat in this graph can produce the verdict, mechanically. The reading seat now seats john, the shared exhaustive-read seat, carrying its own turn_budget; context-reader was capability-identical to john and is retired. EVOLVED locally 24 Oct 2026, from a finding: read-candidate sealed change-context, a code-change reading whose required set (relevant_files, existing_tests, unknowns) cannot be satisfied by a draft-agent-profile — john failed at the write boundary on the HEIMDALL naming (no output_write passed). Reading a candidate IS an inventory of what the house already holds that bears on the name, so the reader now seals internal-inventory — the shape john already knows — and the scribe composes from the profile and that inventory. The seal seat is unchanged: human, alone, mints."
 }

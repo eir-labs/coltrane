@@ -1,0 +1,118 @@
+{
+  "slug": "lock-manifest",
+  "version": 1,
+  "extends": "Artifact",
+  "domain": "research-program",
+  "status": "active",
+  "description": "LOCAL COPY of the hosted registered type (traced 2026-10-23); schema and required_fields transcribed, nothing authored.",
+  "schema": {
+    "type": "object",
+    "required": [
+      "schema_version",
+      "prereg_sha256",
+      "runner_sha256",
+      "stamps",
+      "post_lock_constraints"
+    ],
+    "properties": {
+      "line": {
+        "type": "string",
+        "description": "Study line identifier, e.g. P1-IDENTITY."
+      },
+      "stamps": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": [
+            "target",
+            "ots_path",
+            "stamped_at"
+          ],
+          "properties": {
+            "target": {
+              "type": "string"
+            },
+            "ots_path": {
+              "type": "string"
+            },
+            "calendars": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "stamped_at": {
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        },
+        "minItems": 2,
+        "description": "One entry per stamped artefact, in stamping order. The manifest's own stamp is last and is added after this array is written."
+      },
+      "version": {
+        "type": "string",
+        "description": "e.g. v0."
+      },
+      "approval": {
+        "type": "string",
+        "description": "The governor's approval, quoted. A seal with no named approver has no governor."
+      },
+      "prereg_path": {
+        "type": "string"
+      },
+      "runner_path": {
+        "type": "string"
+      },
+      "prereg_sha256": {
+        "type": "string",
+        "pattern": "^[0-9a-f]{64}$"
+      },
+      "runner_sha256": {
+        "type": "string",
+        "pattern": "^[0-9a-f]{64}$"
+      },
+      "schema_version": {
+        "type": "string",
+        "const": "lock_manifest_v2"
+      },
+      "foundation_hashes": {
+        "type": "object",
+        "description": "The standards this study inherits, by hash. A study whose foundation moved is a different study.",
+        "additionalProperties": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      },
+      "post_lock_constraints": {
+        "type": "object",
+        "required": [
+          "append_only",
+          "frozen"
+        ],
+        "properties": {
+          "frozen": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "append_only": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "description": "What may and may not change after this seal. Sections 0 and 1 are append-only; 3 and 5 are frozen. Any other change requires a new prereg with its own lock."
+      }
+    }
+  },
+  "required_fields": [
+    "schema_version",
+    "prereg_sha256",
+    "runner_sha256",
+    "stamps",
+    "post_lock_constraints"
+  ]
+}

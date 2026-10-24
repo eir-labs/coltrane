@@ -1,0 +1,94 @@
+{
+  "slug": "research-verdict",
+  "version": 1,
+  "extends": "Verdict",
+  "domain": "research-program",
+  "status": "active",
+  "description": "LOCAL COPY of the hosted registered type (traced 2026-10-23); schema and required_fields transcribed, nothing authored.",
+  "schema": {
+    "type": "object",
+    "required": [
+      "prereg_sha256",
+      "outcome",
+      "per_prediction",
+      "layer1_result"
+    ],
+    "properties": {
+      "outcome": {
+        "enum": [
+          "RIPENED",
+          "PARTLY-RIPENED",
+          "RIPENED-DIFFERENTLY",
+          "FAIL",
+          "VOID",
+          "HALTED"
+        ],
+        "type": "string",
+        "description": "RIPENED: the locked gates passed. PARTLY-RIPENED: some passed. RIPENED-DIFFERENTLY: gates fired but not the predicted ones — the study found something it did not predict, which is a result and not a rescue. FAIL: the gates failed cleanly, which is data. VOID: a precondition failed and the measurement is invalid, which is NOT an answer. HALTED: a Layer-1 violation, which overrides everything above."
+      },
+      "void_reason": {
+        "type": "string",
+        "description": "Required iff outcome is VOID. Names the failed precondition."
+      },
+      "layer1_result": {
+        "enum": [
+          "passed",
+          "violated"
+        ],
+        "type": "string",
+        "description": "If violated, outcome MUST be HALTED regardless of any band."
+      },
+      "prereg_sha256": {
+        "type": "string",
+        "pattern": "^[0-9a-f]{64}$",
+        "description": "The sealed prereg whose gates this verdict evaluates. Non-negotiable: without it the thresholds are unfalsifiable."
+      },
+      "per_prediction": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": [
+            "prediction_id",
+            "band",
+            "observed",
+            "threshold_cited"
+          ],
+          "properties": {
+            "band": {
+              "enum": [
+                "pass",
+                "fail",
+                "ambiguous"
+              ],
+              "type": "string"
+            },
+            "observed": {
+              "type": [
+                "number",
+                "string"
+              ]
+            },
+            "prediction_id": {
+              "type": "string"
+            },
+            "threshold_cited": {
+              "type": "string",
+              "description": "The gate text copied verbatim from the sealed prereg, so a reader can check the band without opening another file."
+            }
+          }
+        },
+        "minItems": 1
+      },
+      "retraction_ref": {
+        "type": "string",
+        "description": "If this verdict retracts an earlier claim, the reference to that claim. Retraction events are authored at the moment of falsification, never reconstructed afterwards."
+      }
+    }
+  },
+  "required_fields": [
+    "prereg_sha256",
+    "outcome",
+    "per_prediction",
+    "layer1_result"
+  ]
+}

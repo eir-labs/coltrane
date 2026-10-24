@@ -1,0 +1,22 @@
+{
+  "slug": "lineage-review-request",
+  "version": 1,
+  "extends": "Signal",
+  "domain": "lineage",
+  "status": "active",
+  "description": "The request that opens a graded review of a sealed lineage-record. Points at the record and at the RAW outputs it was composed from — the hits and the inventory — so every grader reads the recording, never the scribe's summary of it. Carries the record's own validation_criteria verbatim as `claims`: a review checks these; it does not restate them.",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "record_path": { "type": "string", "description": "Path to the lineage-record under review, as sealed (the engine artifact, data and envelope)." },
+      "record_sha": { "type": "string", "description": "The record's content_sha. A grader that reads a different sha is grading the wrong thing." },
+      "gig_id": { "type": "string", "description": "The lineage-pass gig that composed the record." },
+      "hits_dir": { "type": "string", "description": "Directory holding every lineage-hit the record consumed, one file each, byte-for-byte from the store." },
+      "inventory_path": { "type": "string", "description": "The internal-inventory the record consumed." },
+      "map_path": { "type": "string", "description": "The lineage-map the record consumed (where the edge labels were assigned)." },
+      "claims": { "type": "array", "items": { "type": "string" }, "description": "The record's own validation_criteria, verbatim. The review tests these." },
+      "out_of_scope": { "type": "array", "items": { "type": "string" }, "description": "What this review is explicitly NOT about." }
+    }
+  },
+  "required_fields": ["source", "record_path", "record_sha", "hits_dir", "claims"]
+}

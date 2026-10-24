@@ -1,0 +1,17 @@
+{
+  "slug": "program-survey-v0",
+  "movements": [
+    {
+      "movement_id": "m1-discover",
+      "standard_slug": "domain-landscape-discovery-v0",
+      "seatings": []
+    },
+    {
+      "movement_id": "m2-review",
+      "standard_slug": "forebear-review-v0",
+      "seatings": []
+    }
+  ],
+  "edges": [],
+  "approval_gates": []
+}

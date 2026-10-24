@@ -1,0 +1,46 @@
+{
+  "slug": "instrument-v0",
+  "movements": [
+    {
+      "movement_id": "m1-listen",
+      "standard_slug": "listen-v0",
+      "seatings": []
+    },
+    {
+      "movement_id": "m2-laws",
+      "standard_slug": "draft-red-laws-v0",
+      "seatings": [],
+      "runtime_fills": {
+        "change-request": {
+          "note": "the instrument to build: one tool from quadrants/power-grid/tools.json, by name"
+        },
+        "subsystem-contract": {
+          "note": "the tool's contract from its grade-spec"
+        }
+      }
+    },
+    {
+      "movement_id": "m3-build",
+      "standard_slug": "build-from-red-spec-v0",
+      "seatings": [
+        {
+          "chair": "build-change",
+          "agent_slug": "lab-tech"
+        }
+      ],
+      "runtime_fills": {
+        "change-plan": {
+          "note": "the build plan from the red-spec's laws, filled at dispatch"
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "from_movement": "m2-laws",
+      "to_movement": "m3-build",
+      "output_type": "red-spec"
+    }
+  ],
+  "approval_gates": []
+}

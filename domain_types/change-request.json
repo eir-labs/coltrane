@@ -21,7 +21,7 @@
         "items": {
           "type": "string"
         },
-        "description": "Paths the requester believes are in scope. A belief, not a finding \u2014 the reading phase may contradict it."
+        "description": "Paths the requester believes are in scope. A belief, not a finding — the reading phase may contradict it."
       },
       "acceptance_criteria": {
         "type": "array",

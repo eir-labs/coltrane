@@ -1,0 +1,34 @@
+{
+  "slug": "listen-v0",
+  "domain": "research-program",
+  "agent_slugs": [
+    "listener"
+  ],
+  "phases": [
+    {
+      "name": "census",
+      "chairs": [
+        {
+          "role": "listen",
+          "agent_slug": "listener",
+          "depends_on": [],
+          "input_contract": [
+            "Signal"
+          ],
+          "output_contract": [
+            "recording-census"
+          ],
+          "required_skills": []
+        }
+      ]
+    }
+  ],
+  "status": "draft",
+  "input_types": [
+    "Signal"
+  ],
+  "output_types": [
+    "recording-census"
+  ],
+  "description": "LISTEN BEFORE YOU MODEL as a tune: one SENSE chair seals a recording-census over a recording, with no fitted model in the loop. Run on each recording before any representation-spec or mode-claim is built on it; the style's grade is chain order (census created_at before model created_at, census in input_refs)."
+}

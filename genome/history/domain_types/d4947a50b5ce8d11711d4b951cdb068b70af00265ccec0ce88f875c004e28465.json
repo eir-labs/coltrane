@@ -1,0 +1,36 @@
+{
+  "slug": "review-surface",
+  "version": 1,
+  "extends": "Interpretation",
+  "domain": "review",
+  "status": "active",
+  "description": "The map a forebear review runs from: a census of the artifact's structure counted by code — its sections, the claims it makes, the sources it cites and which carry a locator, the categories it uses and whether each states a criterion — and for each lane the one question it answers and the paths it opens. A pointer, never a payload.",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "census": {
+        "type": "object",
+        "properties": {
+          "artifact_type": { "type": "string" },
+          "sections": { "type": "array", "items": { "type": "string" }, "description": "The artifact's top-level parts, as found." },
+          "claims_found": { "type": "number", "description": "Assertions the artifact makes, counted." },
+          "judgment_words": { "type": "array", "items": { "type": "string" }, "description": "Adjectives and verdict-words standing where a quantity could stand (loud, destructive, good, significant, robust)." },
+          "sources_cited": { "type": "number" },
+          "sources_without_locator": { "type": "array", "items": { "type": "string" } },
+          "empirical_claims_without_recording": { "type": "array", "items": { "type": "string" }, "description": "Claims about the world that name no recording, dataset, or measurement they rest on." },
+          "categories": { "type": "array", "items": { "type": "object", "properties": { "name": { "type": "string" }, "members": { "type": "number" }, "criterion_stated": { "type": "boolean" }, "where": { "type": "string" } } }, "description": "Every classification the artifact imposes — layers, labels, tiers, types, clusters — with whether a placement criterion is stated and where." },
+          "possible_renames": { "type": "array", "items": { "type": "string" }, "description": "Two names that may be one thing." }
+        }
+      },
+      "dimensions": {
+        "type": "array",
+        "items": { "type": "object", "properties": {
+          "dimension": { "type": "string", "description": "helmholtz | hauer | klein" },
+          "question": { "type": "string" },
+          "look_at": { "type": "array", "items": { "type": "string" } } } }
+      },
+      "unread": { "type": "array", "items": { "type": "string" } }
+    }
+  },
+  "required_fields": ["claims", "census", "dimensions", "unread"]
+}

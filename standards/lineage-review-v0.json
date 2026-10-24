@@ -1,0 +1,124 @@
+{
+  "slug": "lineage-review-v0",
+  "domain": "lineage",
+  "agent_slugs": [
+    "lineage-census",
+    "helmholtz-grader",
+    "hauer-grader",
+    "klein-grader",
+    "lineage-review-adjudicator"
+  ],
+  "phases": [
+    {
+      "name": "census",
+      "chairs": [
+        {
+          "role": "census",
+          "agent_slug": "lineage-census",
+          "depends_on": [],
+          "input_contract": [
+            "lineage-review-request"
+          ],
+          "output_contract": [
+            "lineage-review-surface"
+          ],
+          "required_skills": []
+        }
+      ]
+    },
+    {
+      "name": "helmholtz",
+      "chairs": [
+        {
+          "role": "grade-helmholtz",
+          "agent_slug": "helmholtz-grader",
+          "depends_on": [
+            "census"
+          ],
+          "input_contract": [
+            "lineage-review-surface",
+            "lineage-review-request"
+          ],
+          "output_contract": [
+            "review-finding"
+          ],
+          "required_skills": []
+        }
+      ]
+    },
+    {
+      "name": "hauer",
+      "chairs": [
+        {
+          "role": "grade-hauer",
+          "agent_slug": "hauer-grader",
+          "depends_on": [
+            "census"
+          ],
+          "input_contract": [
+            "lineage-review-surface",
+            "lineage-review-request"
+          ],
+          "output_contract": [
+            "review-finding"
+          ],
+          "required_skills": []
+        }
+      ]
+    },
+    {
+      "name": "klein",
+      "chairs": [
+        {
+          "role": "grade-klein",
+          "agent_slug": "klein-grader",
+          "depends_on": [
+            "census"
+          ],
+          "input_contract": [
+            "lineage-review-surface",
+            "lineage-review-request"
+          ],
+          "output_contract": [
+            "review-finding"
+          ],
+          "required_skills": []
+        }
+      ]
+    },
+    {
+      "name": "adjudicate",
+      "chairs": [
+        {
+          "role": "adjudicate",
+          "agent_slug": "lineage-review-adjudicator",
+          "depends_on": [
+            "grade-helmholtz",
+            "grade-hauer",
+            "grade-klein",
+            "census"
+          ],
+          "input_contract": [
+            "review-finding",
+            "lineage-review-surface",
+            "lineage-review-request"
+          ],
+          "output_contract": [
+            "change-verdict"
+          ],
+          "required_skills": []
+        }
+      ]
+    }
+  ],
+  "status": "draft",
+  "input_types": [
+    "lineage-review-request"
+  ],
+  "output_types": [
+    "lineage-review-surface",
+    "review-finding",
+    "change-verdict"
+  ],
+  "description": "A graded review of a sealed lineage-record, sitting between lineage-pass-v1's compose seat and its human approve seat, because the record's own validation_criteria are written by the scribe about itself and the house's law says the author never grades. One seat counts the record against the raw hits it consumed (by code, never by memory). Three seats each grade ONE lane, and each lane is a forebear's falsifier: HELMHOLTZ — conservation; a claim must be IN the source it cites and the source named must be the source reached (Erhaltung der Kraft 1847; sensation apart from inference). HAUER — the recording outranks the model; 'reached' must be borne out by the hit, and the record's UNVERIFIED set must match the census (the 1996 WSCC forensics). KLEIN — state the group; a label without a stated criterion is a mood, and a forebear under two names is one forebear (Erlangen 1872). One seat attacks every finding, runs what can be run, refutes what does not hold, and seals a change-verdict against the record's own claims, with a lane-by-lane pointer for lineage-deepen-v0. The three graders sit in SEQUENTIAL phases deliberately, after pr-review-v1: this runs on the operator's own machine. The graders hold no web grant: they judge what the hits SHOW about retrieval and name fetching as not_checked — a deepen pass with a scout is where a locator is actually resolved. No human seat: the verdict is input to the pass's approve seat, where the human seals with the grade in hand. Forebears are seated as chairs carrying a standard, not as named envoys (envoy-map.md: a config stamped from the genome is never an Envoy)."
+}

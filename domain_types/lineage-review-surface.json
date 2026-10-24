@@ -1,0 +1,102 @@
+{
+  "slug": "lineage-review-surface",
+  "version": 1,
+  "extends": "Interpretation",
+  "domain": "lineage",
+  "status": "active",
+  "description": "The map a lineage review is run from: a deterministic census of the record against its raw hits (counted by code, not remembered), and for each grading lane the one question it answers and the paths it opens. A pointer, never a payload — each grader opens its own files and signs its own reading.",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "census": {
+        "type": "object",
+        "properties": {
+          "hits": {
+            "type": "number"
+          },
+          "hits_with_url": {
+            "type": "number"
+          },
+          "hits_without_url": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Hit sources with no locator at all."
+          },
+          "hits_secondary_locator": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Hit sources whose locator reaches an encyclopedia, catalogue, slide deck, publisher page or other secondary surface rather than an edition or paper."
+          },
+          "record_unverified": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Every edge or source the RECORD marks UNVERIFIED, as it marks them."
+          },
+          "edges": {
+            "type": "number"
+          },
+          "strength_labels": {
+            "type": "object",
+            "description": "Count of edges per strength label, as the record assigns them."
+          },
+          "edges_internal_side_is_seat_note": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Edges whose internal_ref is a seat's memory note or transcription rather than a sealed house artifact."
+          },
+          "forebears_cited_twice": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "A forebear that appears under two edges or two clusters."
+          }
+        }
+      },
+      "dimensions": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "dimension": {
+              "type": "string",
+              "description": "The lane: helmholtz | hauer | klein."
+            },
+            "question": {
+              "type": "string",
+              "description": "The one question this lane answers, stated so that a NO is possible."
+            },
+            "look_at": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Paths this lane should open."
+            }
+          }
+        }
+      },
+      "unread": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "What this census did NOT open. An honest gap, stated."
+      }
+    }
+  },
+  "required_fields": [
+    "claims",
+    "census",
+    "dimensions",
+    "unread"
+  ]
+}

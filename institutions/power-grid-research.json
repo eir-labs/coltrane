@@ -1,0 +1,273 @@
+{
+  "institution": {
+    "slug": "power-grid-research",
+    "name": "The Power-Grid Research Program (WP-A: Disturbance Attribution)",
+    "kind": "institution",
+    "laws": [],
+    "sovereign": false,
+    "lineage": []
+  },
+  "organizations": [
+    {
+      "slug": "eir-labs-research",
+      "name": "Eir Labs — Research",
+      "charter": "The operating organization of the power-grid research program. Its charter is the sealed container: survey, charter, study, review, reconcile — every step consuming the sealed output before it; a prereg frozen by the governor before any data is touched; three pairwise-disjoint seats; no seal without a grade from someone who is not the author; nothing partner-sourced sealed before the process begins. Declared locally 24 Oct 2026 from Eugene Stuckless's sheets (lineage-input/heimdall/board.md); every row is a draft until he rules on it.",
+      "parent_org": null
+    }
+  ],
+  "agent_records": [],
+  "org_members": [],
+  "chairs": [
+    {
+      "id": "power-grid-research.chair.domain-envoy",
+      "institution_slug": "power-grid-research",
+      "role": "domain-envoy",
+      "function": "JUDGE",
+      "mission": "Listen to the whole ensemble: read every scan against the five lines of the domain's lineage and the three invariant clusters, and say of each item whether it is in the lineage, a rename, or in the void — and which line it descends from. Sound when the order breaks: a scan that contradicts the charter, a forebear cited by recollection, a claim of novelty resting on a kernel the field already chose. This chair filters; it never composes the map, never seals a verdict, never advances the phase. Its incumbent is named by the naming ritual and seated only after the governor's seal.",
+      "required_skills": [],
+      "caps": [
+        {
+          "edge_type": "produced-by",
+          "scope": {
+            "institution": "power-grid-research"
+          },
+          "expires": null
+        }
+      ],
+      "obligations": [
+        {
+          "attributes": "the domain-envoy",
+          "aim": "name the lineage line every fit descends from, or mark the item IN THE VOID with the invariant that makes the void impossible or the word UNEXPLORED",
+          "deontic": "obliged",
+          "tier": "declared"
+        },
+        {
+          "attributes": "the domain-envoy",
+          "aim": "cite a forebear by locator, or mark it UNVERIFIED on its face",
+          "deontic": "obliged",
+          "tier": "declared"
+        },
+        {
+          "attributes": "the domain-envoy",
+          "aim": "emit any landscape-map, novelty-verdict, or Verdict; the chair's product is a landscape-fit another chair can be held to",
+          "deontic": "forbidden",
+          "tier": "declared"
+        },
+        {
+          "attributes": "the domain-envoy",
+          "aim": "hold any write grant to the container or the genome",
+          "deontic": "forbidden",
+          "tier": "declared"
+        }
+      ]
+    },
+    {
+      "id": "power-grid-research.chair.prereg-author",
+      "institution_slug": "power-grid-research",
+      "role": "prereg-author",
+      "function": "PLAN",
+      "mission": "Write the predictions with pass / fail / ambiguous gates stated as quantities, the seeds, the contamination rows, the scope exclusion, and the literal STOP — before any data is reached. The hand that writes the prediction holds no reach to the held-out set.",
+      "required_skills": [],
+      "caps": [
+        {
+          "edge_type": "produced-by",
+          "scope": {
+            "institution": "power-grid-research"
+          },
+          "expires": null
+        }
+      ],
+      "obligations": [
+        {
+          "attributes": "the prereg-author",
+          "aim": "declare the grant open/** and nothing wider",
+          "deontic": "obliged",
+          "tier": "declared"
+        },
+        {
+          "attributes": "the prereg-author",
+          "aim": "state every gate as a quantity with a threshold, never an adjective",
+          "deontic": "obliged",
+          "tier": "declared"
+        },
+        {
+          "attributes": "the prereg-author",
+          "aim": "hold or declare reach to sealed/**",
+          "deontic": "forbidden",
+          "tier": "declared"
+        },
+        {
+          "attributes": "the prereg-author",
+          "aim": "seal after the held-out set has been reached by anyone",
+          "deontic": "forbidden",
+          "tier": "declared"
+        }
+      ]
+    },
+    {
+      "id": "power-grid-research.chair.study-executor",
+      "institution_slug": "power-grid-research",
+      "role": "study-executor",
+      "function": "CREATE",
+      "mission": "Run every analysis the sealed prereg names, each marked confirmatory or exploratory, from sealed inputs on a clean tree, and record the residual beside each. This seat may reach the held-out set through the door, and is never the seat that sealed the prereg.",
+      "required_skills": [],
+      "caps": [
+        {
+          "edge_type": "produced-by",
+          "scope": {
+            "institution": "power-grid-research"
+          },
+          "expires": null
+        }
+      ],
+      "obligations": [
+        {
+          "attributes": "the study-executor",
+          "aim": "mark every analysis confirmatory only when the sealed prereg names it; everything else exploratory",
+          "deontic": "obliged",
+          "tier": "declared"
+        },
+        {
+          "attributes": "the study-executor",
+          "aim": "record the residual and the recording reference for every analysis",
+          "deontic": "obliged",
+          "tier": "declared"
+        },
+        {
+          "attributes": "the study-executor",
+          "aim": "be the incumbent of the prereg-author chair for the same program",
+          "deontic": "forbidden",
+          "tier": "declared"
+        },
+        {
+          "attributes": "the study-executor",
+          "aim": "cite a result from a dirty tree as confirmatory",
+          "deontic": "forbidden",
+          "tier": "declared"
+        }
+      ]
+    },
+    {
+      "id": "power-grid-research.chair.hot-auditor",
+      "institution_slug": "power-grid-research",
+      "role": "hot-auditor",
+      "function": "VERIFY",
+      "mission": "Re-open the work after it completes and before any completion seals: re-run every confirmatory analysis from sealed inputs, name every check that could not run, and spend declared heat on refutation. The operator's completion claims are input, never completion. This seat is disjoint from both the prereg-author and the study-executor.",
+      "required_skills": [],
+      "caps": [
+        {
+          "edge_type": "produced-by",
+          "scope": {
+            "institution": "power-grid-research"
+          },
+          "expires": null
+        }
+      ],
+      "obligations": [
+        {
+          "attributes": "the hot-auditor",
+          "aim": "re-run every confirmatory analysis from sealed inputs and report matches and mismatches verbatim",
+          "deontic": "obliged",
+          "tier": "declared"
+        },
+        {
+          "attributes": "the hot-auditor",
+          "aim": "name every check that could not run; an empty inferred_not_run is a claim that everything ran",
+          "deontic": "obliged",
+          "tier": "declared"
+        },
+        {
+          "attributes": "the hot-auditor",
+          "aim": "be the incumbent of the prereg-author or study-executor chair for the same program",
+          "deontic": "forbidden",
+          "tier": "declared"
+        },
+        {
+          "attributes": "the hot-auditor",
+          "aim": "soften a failing result to pass",
+          "deontic": "forbidden",
+          "tier": "declared"
+        }
+      ]
+    },
+    {
+      "id": "power-grid-research.chair.governor",
+      "institution_slug": "power-grid-research",
+      "role": "governor",
+      "function": "JUDGE",
+      "mission": "Hold the three acts that are a person's alone: approve a lineage, seal a name, freeze a preregistration. Review the sealed record each approval presents and accept or refuse it under their own name. A run that reaches this office unapproved waits; nothing ships on an absent yes.",
+      "required_skills": [],
+      "caps": [
+        {
+          "edge_type": "produced-by",
+          "scope": {
+            "institution": "power-grid-research"
+          },
+          "expires": null
+        },
+        {
+          "grant": "dispatch",
+          "standards": [
+            "lineage-pass-v1",
+            "lineage-adopt-v0",
+            "lineage-deepen-v0",
+            "lineage-reweave-v0",
+            "naming-ritual-v1",
+            "lineage-review-v0",
+            "forebear-review-v0"
+          ],
+          "expires": null
+        }
+      ],
+      "obligations": [
+        {
+          "attributes": "the governor",
+          "aim": "review the sealed outputs an approval presents before accepting them; an approval that does not cite what it reviewed is void",
+          "deontic": "obliged",
+          "tier": "declared"
+        },
+        {
+          "attributes": "the governor",
+          "aim": "delegate the refusal, or let the office be held or its verdict produced by a model agent",
+          "deontic": "forbidden",
+          "tier": "declared"
+        },
+        {
+          "attributes": "the governor",
+          "aim": "seal a preregistration after the held-out set has been reached",
+          "deontic": "forbidden",
+          "tier": "declared"
+        }
+      ],
+      "human": true
+    }
+  ],
+  "assignments": [],
+  "forebears": [
+    {
+      "slug": "helmholtz-hermann",
+      "institution_slug": "power-grid-research",
+      "name": "Hermann von Helmholtz",
+      "domain": "physiology of hearing; physics of energy",
+      "kind": "scientist",
+      "what_taken": "Born 31 August 1821 in Potsdam; died 8 September 1894 in Charlottenburg. What the review's conservation lane takes is the documented working stance: a perception is not left as a perception — an instrument is built that isolates exactly the claimed structure so another person can perceive it (the resonators of Die Lehre von den Tonempfindungen, 1863), sensation is kept apart from the inference drawn from it (Handbuch der physiologischen Optik), and no effect is admitted without an accounted source (Über die Erhaltung der Kraft, 1847). Nothing of the man's biography beyond this working disposition is claimed or carried."
+    },
+    {
+      "slug": "hauer-john",
+      "institution_slug": "power-grid-research",
+      "name": "John F. Hauer",
+      "domain": "power-system dynamics; wide-area measurement",
+      "kind": "engineer",
+      "what_taken": "Engineer at the Bonneville Power Administration. What the review's recording lane takes is the documented working practice: record the system continuously before anyone needs the recording (the wide-area measurement system), estimate modes from recorded response with the excitation, the model order and the residual stated (Hauer, Demeure & Scharf, IEEE Trans. Power Systems 5(1), 1990), and when the model and the recording disagree, correct the model to the recording (the 10 August 1996 WSCC breakup; Kosterev, Taylor & Mittelstadt, IEEE Trans. Power Systems 14(3), 1999). Nothing of the man's biography beyond this working disposition is claimed or carried; dates of birth and death are not asserted here and are OWED."
+    },
+    {
+      "slug": "klein-felix",
+      "institution_slug": "power-grid-research",
+      "name": "Felix Klein",
+      "domain": "geometry; the organisation of mathematics",
+      "kind": "mathematician",
+      "what_taken": "Born 25 April 1849 in Düsseldorf; died 22 June 1925 in Göttingen. What the review's invariance lane takes is the documented method of the Erlangen Programme (Vergleichende Betrachtungen über neuere geometrische Forschungen, 1872): a geometry is the study of what its transformation group leaves invariant, so a representation is defined by what it refuses to distinguish, and two objects agreeing on every invariant are one object; and the organising practice of the Encyklopädie der mathematischen Wissenschaften — a sourced survey of everything that exists. Nothing of the man's biography beyond this working disposition is claimed or carried."
+    }
+  ],
+  "lineage_edges": []
+}

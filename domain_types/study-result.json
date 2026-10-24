@@ -1,0 +1,109 @@
+{
+  "slug": "study-result",
+  "version": 1,
+  "extends": "Artifact",
+  "domain": "research-program",
+  "status": "active",
+  "description": "LOCAL COPY of the hosted registered type (traced 2026-10-23); schema and required_fields transcribed, nothing authored.",
+  "schema": {
+    "type": "object",
+    "required": [
+      "prereg_sha256",
+      "runner_sha256",
+      "seeds",
+      "pipeline_git_sha",
+      "pipeline_git_dirty",
+      "ts_iso",
+      "analyses"
+    ],
+    "properties": {
+      "cost": {
+        "type": "object",
+        "properties": {
+          "usd": {
+            "type": "number"
+          },
+          "tokens": {
+            "type": "number"
+          },
+          "wall_clock_s": {
+            "type": "number"
+          }
+        },
+        "description": "Declared ceilings versus actual. A study that silently exceeded its budget spent someone else's attention."
+      },
+      "seeds": {
+        "type": "array",
+        "items": {
+          "type": "integer"
+        },
+        "minItems": 1
+      },
+      "ts_iso": {
+        "type": "string",
+        "format": "date-time"
+      },
+      "analyses": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": [
+            "name",
+            "status",
+            "result"
+          ],
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "result": {},
+            "status": {
+              "enum": [
+                "confirmatory",
+                "exploratory"
+              ],
+              "type": "string",
+              "description": "Exactly the analyses named in the sealed prereg are confirmatory. Everything else is exploratory, however compelling."
+            }
+          }
+        },
+        "minItems": 1,
+        "description": "EVERY analysis run, not only the locked one."
+      },
+      "verdict_ref": {
+        "type": "string"
+      },
+      "prereg_sha256": {
+        "type": "string",
+        "pattern": "^[0-9a-f]{64}$"
+      },
+      "runner_sha256": {
+        "type": "string",
+        "pattern": "^[0-9a-f]{64}$"
+      },
+      "substrate_class": {
+        "type": "string",
+        "description": "What kind of thing was measured. Lets a later reader ask whether a claim transferred across substrate classes or only within one."
+      },
+      "pipeline_git_sha": {
+        "type": "string"
+      },
+      "lock_manifest_ref": {
+        "type": "string"
+      },
+      "pipeline_git_dirty": {
+        "type": "boolean",
+        "description": "MANDATORY. True means this result cannot be reproduced by anyone, including its author. Recording it as clean when it is not is the cheapest way to make a corpus permanently unauditable."
+      }
+    }
+  },
+  "required_fields": [
+    "prereg_sha256",
+    "runner_sha256",
+    "seeds",
+    "pipeline_git_sha",
+    "pipeline_git_dirty",
+    "ts_iso",
+    "analyses"
+  ]
+}

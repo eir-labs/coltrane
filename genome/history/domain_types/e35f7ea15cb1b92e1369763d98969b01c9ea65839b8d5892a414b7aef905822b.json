@@ -1,0 +1,20 @@
+{
+  "slug": "review-request",
+  "version": 1,
+  "extends": "Signal",
+  "domain": "review",
+  "status": "active",
+  "description": "Opens a three-lane forebear review of ANY artifact — a question, a needs list, a type schema, a search protocol, a prereg, a study result, a lineage record. Names the artifact, its type, and the claims it makes about itself; the review tests those claims and the three epistemic lanes, never the artifact the reviewers would have written.",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "artifact_path": { "type": "string", "description": "Path to the artifact under review, as it stands." },
+      "artifact_type": { "type": "string", "description": "What it is: a registered domain type slug, or a plain name (question | needs | competency-questions | layers | type-schema | search-protocol | prereg | board)." },
+      "artifact_sha": { "type": "string", "description": "A content address for the bytes reviewed, when one exists; else a file-bytes sha256 stated as such." },
+      "supporting_paths": { "type": "array", "items": { "type": "string" }, "description": "What the artifact rests on and the reviewers may open: sources it cites, the types it must satisfy, the house rules, prior verdicts." },
+      "claims": { "type": "array", "items": { "type": "string" }, "description": "What the artifact says about itself, verbatim. The review tests these; it does not restate them." },
+      "out_of_scope": { "type": "array", "items": { "type": "string" } }
+    }
+  },
+  "required_fields": ["source", "artifact_path", "artifact_type", "claims"]
+}

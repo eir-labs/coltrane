@@ -1,0 +1,163 @@
+{
+  "slug": "prereg",
+  "version": 1,
+  "extends": "Plan",
+  "domain": "research-program",
+  "status": "active",
+  "description": "LOCAL COPY of the hosted registered type (traced 2026-10-23); schema and required_fields transcribed, nothing authored.",
+  "schema": {
+    "type": "object",
+    "required": [
+      "prereg_id",
+      "doc_path",
+      "doc_sha256",
+      "sections",
+      "contamination",
+      "predictions",
+      "seeds",
+      "layer1_stop",
+      "scope_exclusion"
+    ],
+    "properties": {
+      "seeds": {
+        "type": "array",
+        "items": {
+          "type": "integer"
+        },
+        "minItems": 1
+      },
+      "doc_path": {
+        "type": "string"
+      },
+      "sections": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "minItems": 12,
+        "description": "Section headings in document order. The validator compares against canonical order and fails on ANY transposition."
+      },
+      "prereg_id": {
+        "type": "string",
+        "description": "Short line identifier, e.g. P1-IDENTITY-v0."
+      },
+      "doc_sha256": {
+        "type": "string",
+        "pattern": "^[0-9a-f]{64}$"
+      },
+      "layer1_stop": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Pre-flight gates that ABORT before the study runs. Must contain a literal STOP. A precondition failure yields VOID, never FAIL."
+      },
+      "predictions": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": [
+            "prediction_id",
+            "statistic",
+            "gates",
+            "confidence"
+          ],
+          "properties": {
+            "gates": {
+              "type": "object",
+              "required": [
+                "pass",
+                "fail",
+                "ambiguous"
+              ],
+              "properties": {
+                "fail": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "pass": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "ambiguous": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "statistic": {
+              "type": "string",
+              "minLength": 1
+            },
+            "confidence": {
+              "type": "string",
+              "minLength": 1
+            },
+            "prediction_id": {
+              "type": "string",
+              "pattern": "^P-[A-Z0-9_-]+$"
+            },
+            "meaning_of_fail": {
+              "type": "string"
+            },
+            "meaning_of_pass": {
+              "type": "string"
+            }
+          }
+        },
+        "minItems": 1,
+        "description": "Frozen at lock."
+      },
+      "contamination": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": [
+            "prediction_id",
+            "label",
+            "why"
+          ],
+          "properties": {
+            "why": {
+              "type": "string",
+              "minLength": 1
+            },
+            "label": {
+              "enum": [
+                "CLEAN",
+                "INFORMED",
+                "STRONGLY INFORMED"
+              ],
+              "type": "string"
+            },
+            "prediction_id": {
+              "type": "string"
+            }
+          }
+        },
+        "minItems": 1,
+        "description": "One row per prediction. Disclosed contamination is a fact the reader prices in; undisclosed contamination is the failure."
+      },
+      "provenance_keys": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "scope_exclusion": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "minItems": 1,
+        "description": "What this study does NOT do. Name the LARGEST gap, not the most defensible one."
+      }
+    }
+  },
+  "required_fields": [
+    "prereg_id",
+    "doc_sha256",
+    "predictions",
+    "seeds",
+    "layer1_stop",
+    "scope_exclusion"
+  ]
+}

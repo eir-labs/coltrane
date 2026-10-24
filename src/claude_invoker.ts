@@ -23,20 +23,34 @@ const EMPTY_TOOL_REGISTRY: ToolProviderRegistry = new Map();
 const OUTPUT_WRITE_TOOL = `mcp__${ENGINE_MCP_SERVER}__output_write`;
 
 // Per-tier model resolution (the old MODEL_TIER_MAP: economy/standard/premium →
-// haiku/sonnet/opus). An agent's model_tier picks the concrete spawn model; falls back to
-// the invoker's static default only when the agent declares no tier.
+// haiku/sonnet/opus). An agent's model_tier picks the concrete spawn model; an agent that
+// declares no tier takes the invoker's static default (COLTRANE_MODEL), else DEFAULT_CHAIR_MODEL.
+// Moved to the 5.5 family on Eugene's word, 25 Oct 2026 ("omg go for it"): list price per
+// 1M in/out — Sonnet 4.6 $3/$15 → Sonnet 5.5 $2/$10; Haiku 4.5 $1/$5 → Haiku 5.5 $0.10/$0.50.
+// PREMIUM IS SONNET 5.5, by Eugene's word, 27 Oct 2026: "SONNET FOR PREMIUM TOO." So standard and
+// premium name the same model; the tier stays on the record (model_tier) so the two remain
+// separable in spend and can be re-split here, at the one place a tier resolves.
+// Pinned by tests/the_tier_map_is_sonnet_5_5.test.ts.
 export const MODEL_TIER_MAP: Record<ModelTier, string> = {
-  economy: "claude-haiku-4-5",
-  standard: "claude-sonnet-4-6",
-  premium: "claude-opus-4-8",
+  economy: "claude-haiku-5-5",
+  standard: "claude-sonnet-5-5",
+  premium: "claude-sonnet-5-5",
 };
+/**
+ * The model an UNTIERED seat runs when the operator pins none (no COLTRANE_MODEL). Before this, such a
+ * seat ran the operator's personal `claude` default — a model nobody in the record chose. Sonnet 5.5,
+ * by Eugene's word, 27 Oct 2026.
+ */
+export const DEFAULT_CHAIR_MODEL = "claude-sonnet-5-5";
 /**
  * Tier → the model that actually runs. EXPORTED because the runtime must stamp the same answer
  * onto the sealed output that the invoker used to spawn. Two functions computing this
  * separately is the two-gates-one-concern shape that produced the silent wrong-resume.
+ * Precedence: the tier's entry, then the fallback (the operator's COLTRANE_MODEL), then
+ * DEFAULT_CHAIR_MODEL.
  */
-export function resolveModel(tier: ModelTier | undefined, fallback: string | undefined): string | undefined {
-  return tier ? MODEL_TIER_MAP[tier] : fallback;
+export function resolveModel(tier: ModelTier | undefined, fallback: string | undefined): string {
+  return tier ? MODEL_TIER_MAP[tier] : (fallback ?? DEFAULT_CHAIR_MODEL);
 }
 
 // code_tool_access → the built-in code tools the cage denies. none denies all; read keeps

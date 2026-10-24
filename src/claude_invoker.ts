@@ -25,10 +25,14 @@ const OUTPUT_WRITE_TOOL = `mcp__${ENGINE_MCP_SERVER}__output_write`;
 // Per-tier model resolution (the old MODEL_TIER_MAP: economy/standard/premium →
 // haiku/sonnet/opus). An agent's model_tier picks the concrete spawn model; falls back to
 // the invoker's static default only when the agent declares no tier.
+// Moved to the 5.5 family on Eugene's word, 25 Oct 2026 ("omg go for it"): list price per
+// 1M in/out — Opus 4.8 $5/$25 → Opus 5.5 $4/$20; Sonnet 4.6 $3/$15 → Sonnet 5.5 $2/$10;
+// Haiku 4.5 $1/$5 → Haiku 5.5 $0.10/$0.50. Opus 5.5's own effort default is `medium`, one
+// below 4.8's — harmless here because the spawn ALWAYS carries an explicit --effort (#seat-effort).
 export const MODEL_TIER_MAP: Record<ModelTier, string> = {
-  economy: "claude-haiku-4-5",
-  standard: "claude-sonnet-4-6",
-  premium: "claude-opus-4-8",
+  economy: "claude-haiku-5-5",
+  standard: "claude-sonnet-5-5",
+  premium: "claude-opus-5-5",
 };
 /**
  * Tier → the model that actually runs. EXPORTED because the runtime must stamp the same answer

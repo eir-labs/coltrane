@@ -15,11 +15,27 @@ under a design the repo already states in its own vocabulary — `lineage-pass-v
 structural.
 
 **Laws.** `tests/spec_coltrane_1_0.test.ts`. Run `npx vitest run tests/spec_coltrane_1_0.test.ts`.
-Six assertions are executable against the engine as it stands and RED today on ABSENCE of the
-mechanism; the rest are `it.todo` because the seam they pin has no API yet to assert against. A todo
+Nine assertions are executable against the engine as it stands and RED today on ABSENCE of the
+mechanism (six since revision 1, three added at revision 6); the rest are `it.todo` because the seam
+they pin has no API yet to assert against. A todo
 is a law without a seam, not a law deferred. **This PR is RED by design.** The gate is the
 spec-review verdict, not the test run. `scripts/laws.sh` counts are bumped so the only red is the
 laws themselves.
+
+**Revision 6** folds in what was found after revision 5 (written 1–2 Oct), verified against the engine's
+`main` on 2026-10-25: step 0 is BUILT and steps 1–4 are not started (a status section, step 0's laws
+re-pointed at what exists); an institution's governing record may live in an EXTERNAL governing store and
+the genome holds a pinned COPY of it, never the authority (K); every law carries a RULE LEVEL, and a
+constitutional change is sealed by the sponsoring organization's governor or, for a sovereign
+institution, by its own (V); a sealed plan mints a trace INTENT and a sealed output a trace STEP (G8–G11);
+the store port may be implemented by an external store, its contract is enumerated once, and where two
+sides disagree on a column's type the contract names one (S2–S4); seats and traces carry enough to price
+an act (G12); and step 4's survivors are chosen by a reduction judge, not by hand (D1). Items K, V and the
+trace are OPERATOR DECISIONS dated 2026-10-25, each with the alternative it rejected. The store port,
+the type seams, pricing and the reduction judge are the SPEC AUTHOR's proposals, marked as such; every
+real choice they raise is a question in "Open at revision 6", not decided here. Every operator decision
+revision 5 recorded is unchanged. Revision 5's text carried G1–G7 only in the laws file; they are restated
+below from it, unchanged, so the trace has a section to sit in.
 
 **Revision 5** folds in a THIRD non-author review of revision 4, which found four contradictions between a
 decision and a law already in the document — the spec had stopped looking — plus seven more operator decisions
@@ -36,6 +52,33 @@ contradicting laws) and two objects named by the operator: residency and model a
 review's pivotal finding and the operator's are the same gap seen from two sides: the first draft had
 no object for *a position with a player in it*. It now has two, because that is one thing at plan
 time and another thing across time.
+
+## Status at revision 6 — verified against `main`, 2026-10-25
+
+This PR's branch is based on an older `main`; the status below is read from `main` at the time of
+writing, not from the branch.
+
+- **Step 0 — Residency: BUILT.** The reside contract (`docs/specs/residency_contract.md`) is
+  implemented: `src/residency.ts` is the state machine (closed states, closed ops, a party-constrained
+  legal-transition table, the reflex, the reaper, the boot preflight — 43 laws per its own header,
+  `tests/spec_reside_*.test.ts`), `src/reside.ts` is the standing loop mounted as `coltrane reside`, and
+  `src/reside_backing.ts` selects the seat backing. The hosted seat is a DOOR: `postgrestSeatBacking`
+  (`src/genome_store.ts`) drives the residency over public residency doors, the store backing injected by
+  the deployment, not named by the loop (`tests/the_hosted_seat_is_a_door.test.ts`). A residency's token is
+  minted INTO ITS VAULT by a member act whose answer never carries the token
+  (`tests/a_residencys_token_is_minted_into_its_vault.test.ts`).
+- **What step 0 as built does NOT yet carry**, said so it is not assumed: the built residency row
+  (`RESIDENCY_ROW_FIELDS`: `agent_slug, org, venue_slug, channel_id, soul_output_id, status, session_id,
+  cursor, host, lease_until, heartbeat_at, fence`) names no INSTITUTION and no OFFICE, so R1 ("through a
+  current residency in the gig's institution") has no column to resolve through; the transition table
+  reserves `unseat` to the holder and `reap` to the reaper, so there is no REMOVAL by the sealing office
+  (R1 "can be removed", R3); the row keys on `agent_slug`, not a player uuid (P2, step 4); there is no
+  `kind` (R5); and a booking does not park on an unheld office (T1). How R1/R3 meet the built row is
+  question O2 below.
+- **Steps 1–4: NOT STARTED.** A grep of `src/` on `main` finds no reflection phase, no session note, no
+  gig-plan (`src/seat_plan.ts` is a PRE-FLIGHT that counts seats and bytes, not a sealed plan), no player
+  lineage seal and no player store. All six revision-1 executable laws are red on `main` for the same
+  absence, and so are the three added at revision 6.
 
 ## Three words for three things
 
@@ -152,6 +195,44 @@ The first draft used "chair" for three different objects. Fixed:
   inference as scarce". Rejected: all evals as positions (that cost); all evals engine-run (gives up the
   idea that some judgements on a chart deserve a player).
 
+### Gig plan — a SEAT per position (G)
+
+Restated from the laws file, unchanged (revision 5 carried these only there):
+
+- **G1** — before performance a planner seals a gig-plan: the FIRST phase played is the plan, not the
+  chart's first phase.
+- **G2** — a seat whose position's needed mode the player's lineage does not support is refused AT PLAN
+  (decidable there because the position carries `needs`; compose has no registry, `src/composition.ts:464`).
+- **G3** — a seat that VERIFIES another seat's output cannot hold the same player.
+- **G4** — the plan is the ONLY source of per-seat capability: a seat no plan granted anything reaches
+  nothing, whatever the player file says.
+- **G5** — reflection is appended by the engine, never declared on a chart (executable under M2/G5).
+- **G6** — re-seating after the seal is a SEALED AMENDMENT by the ENGINE (expansion, ladder rungs, and
+  reflection) or an OFFICE (approval) — and no one else; the planner's frame is final once sealed.
+- **G7** — the plan is part of run identity: its `content_sha` enters `RunIdentity`, the checkpoint key
+  becomes `(plan_sha, seat)`, and `ClaimedGig` carries the plan; a QUEUED gig is planned AT ENQUEUE by a
+  resident planner of the queueing institution — the drain executes and never plans.
+
+**The trace — OPERATOR DECISION, 2026-10-25.** Every sealed act is traced, and the trace is written by
+the STORE, not by the engine's callers. Rejected: *trace as caller code* (a trace a writer must remember
+to emit is a trace some writer skips, and the absence returns a legitimate-looking ledger).
+
+- **G8** — every sealed gig plan mints a trace INTENT. The intent names the AUTHORIZING ACT in the
+  governing store by an act id that is OPAQUE to the engine — the engine carries it and never interprets it.
+  What a standalone engine's intent names is O7.
+- **G9** — every sealed output mints a trace STEP pointing at its intent.
+- **G10** — steps are APPEND-ONLY and CHAINED: each carries `prev_hash` and `hash`, so a removed or
+  reordered step breaks the chain where it happened.
+- **G11** — DEVIATION and NOVELTY are DERIVED — views over intents and steps — and never stored. The
+  mechanism on a store that has one is an INSERT TRIGGER on gigs and on outputs that writes the trace, so no
+  writer can skip it; what the file backing does, having no trigger, is O8.
+- **G12** — PRICED ACTS (spec author's proposal). A seat is sealed with `(office, position mode, inputs,
+  tier/model)` and its outputs by `content_sha` — enough to price each act as a code length under its
+  office's lineage (two-part minimum description length: Rissanen 1978; Grünwald, *The Minimum Description
+  Length Principle*, 2007). 1.0 does NOT build pricing. The law is only that the seat and trace shapes
+  MUST carry office, position, inputs and outputs-by-hash, so pricing is possible later without a
+  migration.
+
 ### Tours — a booking names an office
 
 - **T1** — a Booking (`tours/*.json`, today `responsible_chair`) names the OFFICE responsible
@@ -191,11 +272,64 @@ The first draft used "chair" for three different objects. Fixed:
   record in the system** — the fixed point, written down rather than left implicit (second review).
   Every other residency is sealed by it. This CLOSES the first draft's open question 1.
 - **R5** — a human holding an office is a residency too (`kind: human`). Removal works identically.
+- **Re-pointed at revision 6.** R1, R3, R5 and T1 now name the BUILT residency as their subject —
+  `src/residency.ts` (`RESIDENCY_ROW_FIELDS`, `LEGAL_TRANSITIONS`, `applyResidencyOp`) and its seat
+  backings — not `institutions/*.json` assignments alone. Each law is owed as the gap between the built
+  row and the clause: an office and institution on the row (R1), removal as a sealed act of the sealing
+  office (R3), a `kind` (R5), parking on an unheld office (T1). See O2.
 - **R6** — hydration slots bound "at seat time" (CLAUDE.md, `p.chair.supplies`, `src/runtime.ts:
   3669`) bind at PLAN time from the office's supplies through the seat. The institution still
   supplies the data; the seat is where it arrives. Slots with `binding: "gig"` (`src/genome_schema.ts:
   66, :75`; skipped at compose, `src/composition.ts:411`) are filled by the PLANNER onto the seat from
   the work set — the same act that resolves the seat's inputs (G1). The dispatcher fills nothing.
+
+### Governance source — the engine holds a copy, never the authority (K)
+
+Revision 5 treated `institutions/*.json` as the authority over an institution, its offices, its charter
+and its laws. That was true when nothing else held them. **OPERATOR DECISION, 2026-10-25:** an
+institution's offices, charter and laws may be held by an EXTERNAL GOVERNING STORE — the institution's
+governing store — and COPIED DOWN into the genome, pinned by content hash. The engine holds a copy, never
+the authority. Rejected: *the genome is the authority* (the engine would then be where governance is
+amended, and a repo commit would be a constitutional act no governing office sealed).
+
+- **K1** — the genome's institution file is one of two things: AUTHORED LOCALLY (a standalone engine with
+  no governing store — today's shape, unchanged) or a PINNED COPY of the governing store's record, carrying
+  a pin block `pinned_from: { record, content_hash }` beside the `institution` section (the block's name
+  and shape are the spec author's proposal). **A pinned copy whose content hash disagrees with the hash its
+  pin declares is a `load_error` naming BOTH hashes** — the one the source declared and the one the copy
+  actually has — and the document drops out like any other inadmissible institution. Seam:
+  `loadInstitutions` (`src/institution_loader.ts`), which today ignores any section it does not know.
+  What exactly is hashed is O3.
+- **K2** — a pinned copy is not edited in the genome. A local edit to a pinned copy is not an amendment;
+  it is a hash mismatch, and K1 refuses it. The record changes only where it is governed, and comes down
+  again as a new pin.
+- **K3** — the engine's own VARIANTS (an evolved charter, a proposed law, a new office) climb back to the
+  governing store only through a governed path: NOVELTY → VERDICT → A HUMAN SEAL. The engine proposes; it
+  never writes the authority. (The engine's existing `charter_suggest_update` / proposal surfaces are the
+  novelty end of that path; the verdict and the seal are the governing store's.)
+
+### Rule levels — every law says which level it is at (V)
+
+**OPERATOR DECISION, 2026-10-25:** every law the engine carries — an institution's laws
+(`InstitutionalLawSchema`), a chair's obligations (`NormPairSchema`), a `bearing_laws` record's ADICO law —
+carries a LEVEL ∈ `operational | collective-choice | constitutional`, after Ostrom's levels of action and
+Crawford & Ostrom (1995), "A Grammar of Institutions" — the same paper the ADICO grammar in
+`src/genome_schema.ts` already cites. Rejected: *level-less laws* (a law that does not say what level it
+is at cannot say who may change it, so every amendment is argued from scratch).
+
+- **V1** — a law with no level is REFUSED, and a level outside the three is REFUSED. Today both
+  `InstitutionalLawSchema` and `NormPairSchema` are STRICT, so a `level` field fails to parse — the field
+  must be declared to exist at all. Asserted over the schemas AND over every law and obligation the shipped
+  institutions carry (the universe pinned: every institution loads, the count is non-zero). Whether `level`
+  is required with no default is O4.
+- **V2** — a change at the CONSTITUTIONAL level — a charter, or a constitutional law — of a NON-SOVEREIGN
+  institution requires the seal of its SPONSORING ORGANIZATION's governor office. A SOVEREIGN institution
+  (`InstitutionSchema.sovereign`) seals its own. This GENERALISES R4's fixed point: the self-sealed
+  governor residency is the sovereign case; every non-sovereign institution's constitution is sealed one
+  level up. How the sponsor is named is O5.
+- **V3** — the constitutional amendment of a charter is ITSELF a sealed act, with its own record — never a
+  silent overwrite of the charter text. Under K, that record is the governing store's; the engine receives
+  it as a new pin.
 
 ### Model agnosticism — cross-cutting
 
@@ -227,6 +361,28 @@ The first draft used "chair" for three different objects. Fixed:
   `identity,method,constraints,…` at :113-115 and reconstruction runs `defineAgent` at :292, which
   throws on a missing disposition). A law per object that the file, PostgREST and RPC views cannot
   drift — the existing parity invariant (`tests/genome_browse_parity.test.ts`) extended.
+- **S2** — THE PORT, NOT THE STORE (spec author's proposal; entailed by K). A backing may target an
+  EXTERNAL store that emits the engine's tables — gig, output, trace, drain lease, residency, player store —
+  from its OWN declaration. The engine depends on the port's contract, never on which store implements it;
+  the engine names no store. (The hosted seat already works this way: the loop names no store symbol and
+  the deployment injects the backing.)
+- **S3** — the port contract's TABLE and RPC set is ENUMERATED ONCE, as data, in the engine; each
+  backing's parity test runs against that enumeration, so a table a backing forgets is a red parity law,
+  not a runtime surprise. Today the selects live in a query map (`Q`, `src/genome_store.ts`) and nothing
+  enumerates the RPCs.
+- **S4** — KNOWN TYPE SEAMS (spec author's proposal). Where the engine and an external store disagree on a
+  column's type, the port contract names ONE type and both sides conform. Seams found at revision 6:
+
+  | Column | Types seen across the two sides | The contract's one type |
+  | --- | --- | --- |
+  | an act's verb | `uuid` vs `text` | O6 |
+  | a trace payload | `text` vs `jsonb` | O6 |
+  | a work order / work program id | `text` vs `uuid` | O6 |
+  | a sequence | `integer` vs `bigint` | O6 |
+  | a standard's `input_types` | `jsonb` vs array | O6 |
+
+  The law is that each named column has exactly one type in the contract and every backing's row shape
+  conforms; which type each gets is O6.
 
 ### Turn — a request is a gig
 
@@ -282,7 +438,11 @@ surprise.
 
 ## Build order — each gates the next
 
-0. **Residency** (R1, R3, R5, T1). Mostly already in `institutions/`; make it sealed and load-bearing.
+0. **Residency** (R1, R3, R5, T1). **BUILT on `main`** (see Status): the reside contract, the hosted seat
+   as a door, the token minted into the vault. Owed against it: the gaps the Status names (office and
+   institution on the row, removal by the sealing office, `kind`, parking) — O2. K1–K3 and V1–V3 attach
+   to the institution file this step rests on; where they land in this order is O1.
+   Revision 5 said: mostly already in `institutions/`; make it sealed and load-bearing.
    INDEPENDENT of step 1 — the third review showed memory belongs to the player and survives a residency
    ending (M1/R3), so nothing in memory is owned "against" a residency. Steps 0 and 1 ship in parallel.
 1. **Memory + reflection** (M1–M5, G5, A3–A4). New store with its own ledger, new final phase. Additive.
@@ -291,10 +451,18 @@ surprise.
 2. **Plan + seat** (G1–G7, A2, R2, R4, R6). New first movement, new sealed types, plan in run identity, the
    planner's office and its grant, gig-bound slots onto the seat. HARD dependency on 0 (R1: no residency,
    no seat); bypasses 1. R2/R4/R6 moved here from step 0 — they have no subject until there is a plan.
+   THE TRACE (G8–G11) and the priced-act shape (G12) land here: a trace intent has no subject until there
+   is a sealed plan. S2–S4 attach to whichever step first adds a table to the port contract — step 1's
+   player store — not to step 4 (spec author's proposal).
 3. **Lineage mandatory** (P3, P5, L1–L4, A1). Depends on 2 (checked at plan) AND on 0 (a seal needs the
    governor's residency to be sealed by).
-4. **Strip and shrink** (C1–C4, P1, P2, P4, S1, H1–H2). The one-time break. 71 players become however many
-   have earned a name.
+4. **Strip and shrink** (C1–C4, P1, P2, P4, S1, H1–H2, D1). The one-time break. 71 players become however many
+   have earned a name. The estimate in "What it supersedes" stands. **D1** (spec author's proposal): WHICH
+   players, charts and institutions survive is decided by a REDUCTION JUDGE, not by hand — a candidate
+   reduction is accepted only if replay holds ∧ the planted defects are still caught ∧ held-out work still
+   passes ∧ the two-part description length of the genome STRICTLY DROPS. A player "has earned a name" when
+   declaring it SHORTENS the description: a name that costs more to state than it saves is not kept. Which
+   corpus the judge reads is O9.
 5. There is no step 5.
 
 ## Open at the time of writing
@@ -304,6 +472,41 @@ Nothing. Formerly open, now decided: bootstrap (R4), notes-content (R3), consoli
 the third review: the reflection seat's capability (M2/G6), the planner's own grant (R2), a rung's note (A3),
 the governor's seal (P3), checks vs judgements (C4), tension with the user (L1), an unheld office (T1).
 
-Every question raised across four revisions is now decided above, each with the alternative it
-rejected. A decision is not a law: each is owed one at its build step, and this document stops being a
-spec the day the last of them is green.
+Every question raised across revisions 1–5 is decided above, each with the alternative it rejected.
+Revision 6's three operator decisions (K, V, the trace) are recorded where they apply, with theirs.
+
+## Open at revision 6
+
+Each is the operator's to decide; the alternatives are listed, none is chosen here.
+
+- **O1 — where K and V land in the build order.** (a) In step 0, re-opening a built step; (b) a new step
+  between 0 and 2, so step 0 stays closed and the plan's office checks (R2, R4) read levels from the start;
+  (c) in step 4, because V1 makes `level` required on every shipped law and that is a one-time break.
+- **O2 — how R1/R3 meet the built residency.** (a) Extend the built row with `institution`, `office`,
+  `from`, `until | removed`, and add a `remove` op reserved to the sealing office; (b) keep the reside row as
+  PRESENCE (where a player sits and listens) and add a separate sealed OFFICE-HOLDING record that R1
+  resolves through; (c) resolve office through the existing chair assignment (`ChairAssignmentSchema`) and
+  leave the reside row as it is.
+- **O3 — what a pin's content hash covers.** (a) sha256 over the engine's canonical JSON of the document
+  minus its pin block; (b) the governing store's own hash of its record, carried verbatim, re-derived by a
+  canonicalization the port contract publishes; (c) both, and K1 names all three on a mismatch.
+- **O4 — a law with no level in a standalone engine.** (a) Required, no default — every shipped law and
+  obligation is migrated when V1 lands; (b) defaulted to `operational` (against "absent must mean decline",
+  stated so it is chosen knowingly); (c) required only on a pinned copy, optional on a locally authored file.
+- **O5 — how a non-sovereign institution names its sponsoring organization (V2).** (a) The existing
+  `OrganizationSchema.parent_org` chain; (b) a new `sponsor` field on the institution section; (c) only the
+  governing store's record names it, and the engine reads it from the pinned copy.
+- **O6 — the one type per seam (S4).** (a) The wider type wins (`text` over `uuid`, `jsonb` over `text`,
+  `bigint` over `integer`, `jsonb` over array); (b) the stricter type wins (`uuid`, `jsonb`, `uuid`,
+  `bigint`, array); (c) the external store's declaration wins and the engine conforms.
+- **O7 — a trace intent in a standalone engine (G8).** (a) Required — a standalone engine mints a local act
+  and names it; (b) nullable — a standalone intent names no act and says so; (c) the operator's approval of
+  the gig is the act.
+- **O8 — the trace on the file backing (G11).** (a) The file backing's write path appends the trace in the
+  same write as the gig or output row — still the store's write, never a caller's; (b) the file backing
+  refuses step-2 gigs; (c) the trace exists only on stores that have triggers, and the file backing says so.
+- **O9 — the reduction judge's corpus (D1).** (a) The ledger's replay corpus; (b) a held-out set sealed
+  before step 4 begins; (c) both, with the held-out set never read while candidates are drawn.
+
+A decision is not a law: each is owed one at its build step, and this document stops being a spec the day
+the last of them is green.

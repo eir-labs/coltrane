@@ -1,10 +1,11 @@
 // RED — coltrane 1.0: a player is a name, a lineage, a memory and an instrument.
 //
-// Spec: docs/specs/coltrane-1.0.red-spec.md (revision 6). Nine laws are EXECUTABLE against the engine as
-// it stands and red today on ABSENCE of the mechanism, never on a collection, import or fixture error —
-// six since revision 1, and three added at revision 6 where the engine has a seam to assert against: K1
-// (the institution loader, which ignores a pin), V1 (the law schemas, which are STRICT and refuse a level)
-// and S3 (the store port module, which enumerates no contract).
+// Spec: docs/specs/coltrane-1.0.red-spec.md (revision 6). Ten laws are EXECUTABLE against the engine as
+// it stands and red today, never on a collection, import or fixture error — six since revision 1, and four
+// added at revision 6 where the engine has a seam to assert against: K1 (the institution loader, which
+// ignores a pin), V1 (the law schemas are STRICT and refuse a level, and admission does not ask for one),
+// V4 (InstitutionSchema still carries `sovereign`, which an operator ruling removed — red on PRESENCE) and
+// S3 (the store port module, which enumerates no contract its writers are checked against).
 // The rest are `it.todo` because the seam they pin — a seat, a gig-plan, a planner office, a residency,
 // a player store with its own ledger, a lineage-keyed floor — has no API yet. A todo is a law without a
 // seam, not a law deferred; each carries its full text so the count in scripts/laws.sh is honest about
@@ -33,7 +34,8 @@ import {
 import { runGig } from "../src/runtime.js";
 import { loadGenome } from "../src/loader.js";
 import { loadInstitutions } from "../src/institution_loader.js";
-import { InstitutionalLawSchema, NormPairSchema } from "../src/genome_schema.js";
+import { InstitutionalLawSchema, NormPairSchema, InstitutionSchema } from "../src/genome_schema.js";
+import { checkInstitutionAdmissibility } from "../src/institution_enforcement.js";
 import { testAgent } from "./_support/agents.js";
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -124,7 +126,7 @@ describe("P — a player is a name, a lineage, a memory and an instrument", () =
 // ── LINEAGE ──────────────────────────────────────────────────────────────────────────────────────
 describe("L — behaviour is founded on a sealed PLAYER lineage (not the lineage of a question)", () => {
   it.todo("L0 — `lineage-record` is the lineage OF A QUESTION (lineage-pass-v1, attached to an institution) and is not used as a player's lineage");
-  it.todo("L1 — a PLAYER LINEAGE SEAL {player_id, forebear, alignment, angle} — and NOTHING else; tensions[] is dropped, tension is emergent from seating — is sealed by the governor's office (= naming-ritual-v1's human seat); per player, never per institution");
+  it.todo("L1 — a PLAYER LINEAGE SEAL {player_id, forebear, alignment, angle} — and NOTHING else; tensions[] is dropped, tension is emergent from seating — is sealed by the governor's office (= naming-ritual-v1's human seat) — under K4 (revision 6) an ACT IN THE GOVERNING STORE that the engine verifies by content hash, never seals; per player, never per institution");
   it.todo("L2 — a player's prompt foundation is built FROM the seal's text; no identity field to drift from it (buildPrompt reads a.identity at claude_invoker.ts:204; completions calls it at completions_invoker.ts:342/349/362)");
   it.todo("L3 — the behavioural floor keys on the seal's forebear discipline, not a primitives enum (behavioral_families.ts:5-13, floor :78)");
   it.todo("L4 — the current named players pass through the ritual like any other; a nick that alludes is permitted, the formal name is earned");
@@ -225,50 +227,63 @@ describe("G — a gig is planned (a SEAT per position), played, and reflected on
   it.todo("G7 — the plan is part of run identity: its content_sha enters RunIdentity (reuse.ts:116-136), the checkpoint key becomes (plan_sha, seat) (:215), and ClaimedGig carries the plan (worker.ts:102); a QUEUED gig is planned AT ENQUEUE by a resident planner of the queueing institution — the drain executes and never plans");
   // THE TRACE — operator decision 2026-10-25 (rejected: trace as caller code). Todos: there is no sealed
   // plan to mint an intent from until step 2, and the store-side trigger has no engine API to assert on.
-  it.todo("G8 — every sealed gig plan mints a trace INTENT naming the authorizing act in the governing store by an act id OPAQUE to the engine");
-  it.todo("G9 — every sealed output mints a trace STEP pointing at its intent");
-  it.todo("G10 — trace steps are APPEND-ONLY and CHAINED (prev_hash, hash): a removed or reordered step breaks the chain where it happened");
-  it.todo("G11 — deviation and novelty are DERIVED views over intents and steps, never stored; the trace is written by the STORE (an insert trigger on gigs and on outputs, so no writer can skip it), never by caller code");
-  it.todo("G12 — (spec author's proposal) a seat is sealed with (office, position mode, inputs, tier/model) and its outputs by content_sha, so each act can later be priced as a two-part code length under its office's lineage; 1.0 builds no pricing, only the shape that makes it possible");
+  it.todo("G8 — every sealed gig plan mints a TRACE INTENT on the PLAN row's insert (not the gig's), naming the authorizing act in the governing store by an act id OPAQUE to the engine; a trace intent is not the PR intent (intent_sha, runtime.ts:1558)");
+  it.todo("G9 — every sealed output mints a TRACE STEP pointing at its intent — an edge in the provenance graph output_trace / `coltrane trace` already walks (cli.ts:71, mcp.ts:75)");
+  it.todo("G10 — (spec author's proposal) trace steps are APPEND-ONLY and CHAINED (prev_hash, hash): a removed or reordered step breaks the chain where it happened");
+  it.todo("G11 — (operator decision) the trace is minted by the STORE, never caller code, and deviation and novelty are DERIVED views, never stored; (spec author's proposal) the mechanism is an insert trigger on plan rows and on outputs");
+  it.todo("G12 — (spec author's proposal) a seat is sealed with (office, position mode, inputs, tier/model) and its outputs by content_sha, so each act can later be priced as a two-part code length under the seated player's lineage seal and the office's statements; 1.0 builds no pricing (and pricing is not computeCredits)");
 });
 
 // ── GOVERNANCE SOURCE ────────────────────────────────────────────────────────────────────────────
 describe("K — the engine holds a COPY of governance, never the authority (operator decision 2026-10-25)", () => {
-  it("K1 — a PINNED COPY whose content hash disagrees with the hash its pin declares is a load_error naming BOTH hashes, and drops out", () => {
+  it("K1 — a PINNED COPY whose content hash disagrees with its pin is a load_error naming BOTH hashes and drops out; a copy whose hash MATCHES its pin is admitted", () => {
     // The subject is the real institution loader over a real shipped institution, copied verbatim. The
     // precondition proves the copy is admissible WITHOUT a pin, so the only thing this can be red on is the
     // loader's ABSENT pin check — today loadInstitutions reads the sections it knows and ignores the rest.
+    // NO HASH FORMAT IS FIXED HERE (spec O3 leaves it open): the declared value is an opaque string no
+    // canonicalization produces, and the positive control re-pins with whatever hash the refusal says the
+    // copy HAS — so the law holds for any O3 answer, and cannot green on a refusal that names a made-up hash.
     const raw = JSON.parse(readFileSync(join(REPO, "institutions", "quartet.json"), "utf8")) as Record<string, unknown>;
-    const plain = mkdtempSync(join(tmpdir(), "one-point-oh-k1a-"));
-    const pinned = mkdtempSync(join(tmpdir(), "one-point-oh-k1b-"));
+    const dirs: string[] = [];
+    const loadWith = (doc: unknown) => {
+      const d = mkdtempSync(join(tmpdir(), "one-point-oh-k1-")); dirs.push(d);
+      mkdirSync(join(d, "institutions"));
+      writeFileSync(join(d, "institutions", "copy.json"), JSON.stringify(doc, null, 2));
+      return loadInstitutions(d);
+    };
     try {
-      mkdirSync(join(plain, "institutions"));
-      writeFileSync(join(plain, "institutions", "copy.json"), JSON.stringify(raw, null, 2));
-      const base = loadInstitutions(plain);
+      const base = loadWith(raw);
       expect(base.load_errors, "fixture precondition: the unpinned copy is admissible").toEqual([]);
       expect(base.institutions.size, "fixture precondition: the unpinned copy is admitted").toBe(1);
 
-      const declared = "sha256:" + "0".repeat(64); // what the source declared; no real document hashes to it
-      mkdirSync(join(pinned, "institutions"));
-      writeFileSync(join(pinned, "institutions", "copy.json"), JSON.stringify({ ...raw, pinned_from: { record: "governing-record-opaque-1", content_hash: declared } }, null, 2));
-      const got = loadInstitutions(pinned);
+      const declared = "declared-by-the-source-and-matching-nothing";
+      const got = loadWith({ ...raw, pinned_from: { record: "governing-record-opaque-1", content_hash: declared } });
       const err = got.load_errors.find((e) => JSON.stringify(e).includes("copy.json"));
       expect(err, "a pinned copy whose hash disagrees with its pin must be a load_error — the engine holds a copy, not the authority").toBeDefined();
-      const text = JSON.stringify(err);
+      const text = String((err as { error?: unknown }).error ?? JSON.stringify(err));
       expect(text, "the refusal names the hash the SOURCE declared").toContain(declared);
-      const computed = (text.match(/sha256:[0-9a-f]{64}/g) ?? []).filter((h) => h !== declared);
-      expect(computed.length, "the refusal names the hash the COPY actually has — both hashes, not one").toBeGreaterThan(0);
       expect(got.institutions.size, "a mismatched copy drops out like any inadmissible institution").toBe(0);
-    } finally { rmSync(plain, { recursive: true, force: true }); rmSync(pinned, { recursive: true, force: true }); }
+      // The COPY's hash, as the refusal states it: any hash-shaped token (optionally algorithm-prefixed) that
+      // is not the declared string.
+      const actual = (text.match(/(?:[a-z0-9-]+:)?[0-9a-f]{32,}/gi) ?? []).filter((h) => h !== declared);
+      expect(actual.length, "the refusal names the hash the COPY actually has — both hashes, not one").toBeGreaterThan(0);
+
+      // POSITIVE CONTROL: pinned with the copy's own hash, the same document is admitted. A loader that
+      // refused every pin would pass the half above; it cannot pass this.
+      const honest = loadWith({ ...raw, pinned_from: { record: "governing-record-opaque-1", content_hash: actual[0] } });
+      expect(honest.load_errors, `a copy whose hash matches its pin (${actual[0]}) is admitted`).toEqual([]);
+      expect(honest.institutions.size, "the honest pinned copy is in the map").toBe(1);
+    } finally { for (const d of dirs) rmSync(d, { recursive: true, force: true }); }
   });
-  it.todo("K2 — a pinned copy is not edited in the genome: a local edit is a hash mismatch (K1), not an amendment; the record changes only where it is governed and comes down as a new pin");
-  it.todo("K3 — the engine's own variants (an evolved charter, a proposed law, a new office) climb back to the governing store only through NOVELTY -> VERDICT -> A HUMAN SEAL; the engine proposes and never writes the authority");
+  it.todo("K2 — a pinned copy is not edited in the genome: a local edit is a hash mismatch (K1), not an amendment; persistLineageAdoption (lineage_persist.ts:78) writing into a PINNED copy must become a proposal to the governing store, never a local write (a locally authored file keeps today's write)");
+  it.todo("K3 — the engine's own variants (an evolved charter, a proposed law, a new office, an adopted lineage) climb back to the governing store only through NOVELTY -> VERDICT -> A HUMAN SEAL; the engine proposes and never writes the authority");
+  it.todo("K4 — (operator decision 2026-10-25) residencies and namings are sealed by an ACT IN THE GOVERNING STORE; the engine holds the sealed record by content hash and REFUSES an unsealed one — it verifies, it no longer seals; K covers the file loader AND the hosted institution read (genome_store.ts Q.institutions) with one shared check");
 });
 
 // ── RULE LEVELS ──────────────────────────────────────────────────────────────────────────────────
 describe("V — every law says which level it is at (operator decision 2026-10-25; Ostrom; Crawford & Ostrom 1995)", () => {
   const LEVELS = ["operational", "collective-choice", "constitutional"] as const;
-  it("V1 — every law the engine carries (institution laws, chair obligations, bearing_laws) carries a level in operational | collective-choice | constitutional; none, or any other, is REFUSED", () => {
+  it("V1 — every law (institution laws, chair obligations, bearing_laws) carries a level in operational | collective-choice | constitutional; a law with NO level still parses and is REFUSED AT ADMISSION, naming the law (operator decision 2026-10-25)", () => {
     const g = loadGenome(REPO);
     // Pin the universe: every shipped institution loaded, so a law cannot leave the universe by breakage.
     const onDisk = readdirSync(join(REPO, "institutions")).filter((f) => f.endsWith(".json")).length;
@@ -284,20 +299,46 @@ describe("V — every law says which level it is at (operator decision 2026-10-2
     const anObligation = laws.find((l) => l.schema === "obligation");
     expect(aLaw && anObligation, "fixture precondition: the shipped genome carries at least one law and one obligation").toBeTruthy();
 
-    // THE SEAM FIRST. Both schemas are STRICT today, so a `level` is an unknown key and fails to parse —
-    // the field must be DECLARED to exist. Red here on absence; a data-only migration cannot green it.
+    // 1. THE SCHEMAS DECLARE THE FIELD. Both are STRICT today, so a `level` is an unknown key and fails to
+    //    parse — red here on absence. A level outside the three fails the enum. A law with NO level still
+    //    PARSES: the refusal belongs to admission (the `tier` precedent), not to the parse.
     const strip = (o: Record<string, unknown>) => { const { level: _drop, ...rest } = o; return rest; };
     for (const [name, schema, sample] of [["InstitutionalLawSchema", InstitutionalLawSchema, aLaw!.law], ["NormPairSchema", NormPairSchema, anObligation!.law]] as const) {
       for (const lv of LEVELS) expect(schema.safeParse({ ...strip(sample), level: lv }).success, `${name} must ACCEPT level "${lv}"`).toBe(true);
       expect(schema.safeParse({ ...strip(sample), level: "sovereign" }).success, `${name} must REFUSE a level outside the three`).toBe(false);
-      expect(schema.safeParse(strip(sample)).success, `${name} must REFUSE a law with NO level — absent is not operational`).toBe(false);
+      expect(schema.safeParse(strip(sample)).success, `${name}: a law with no level still PARSES — the refusal is admission's, not the schema's`).toBe(true);
     }
-    // THE UNIVERSE: every law and obligation the shipped institutions carry states its level.
+
+    // 2. ADMISSION REFUSES A LEVEL-LESS LAW, NAMING IT. Over a real shipped institution: with every law and
+    //    obligation levelled it is admitted; with ONE law's level removed it is refused and the offender
+    //    names that law — the way an unmarked obligation `tier` is refused today.
+    const [, inst] = [...(g.institutions ?? new Map())][0]!;
+    const lv = (o: object) => ({ ...o, level: "operational" });
+    const levelled = {
+      institution: { ...inst.document.institution, laws: (inst.document.institution.laws ?? []).map(lv) },
+      chairs: (inst.document.chairs ?? []).map((c: { obligations?: object[] }) => ({ ...c, obligations: (c.obligations ?? []).map(lv) })),
+    };
+    expect(checkInstitutionAdmissibility(levelled as never).admitted, "a fully levelled shipped institution is admitted").toBe(true);
+    const oneMissing = { ...levelled, institution: { ...levelled.institution, laws: levelled.institution.laws.map((l: Record<string, unknown>, i: number) => (i === 0 ? strip(l) : l)) } };
+    const verdict = checkInstitutionAdmissibility(oneMissing as never);
+    expect(verdict.admitted, "an institution carrying a law with no level is REFUSED at admission").toBe(false);
+    expect(JSON.stringify(verdict.offenders), "the offender names the law and says it has no level").toMatch(/level/i);
+
+    // 3. THE UNIVERSE: every law and obligation the shipped institutions carry states its level.
     const offenders = laws.filter((l) => !LEVELS.includes(l.law["level"] as never)).map((l) => l.ref);
     expect(offenders, `${offenders.length} of ${laws.length} shipped laws state no level`).toEqual([]);
   });
-  it.todo("V2 — a CONSTITUTIONAL change (a charter, or a constitutional law) of a NON-SOVEREIGN institution requires the seal of its SPONSORING organization's governor office; a SOVEREIGN institution (InstitutionSchema.sovereign) seals its own — R4's fixed point generalised");
-  it.todo("V3 — the constitutional amendment of a charter is ITSELF a sealed act with its own record, never a silent overwrite of the charter text; under K the record is the governing store's and arrives as a new pin");
+  it.todo("V2 — (operator decision 2026-10-25: there is no sovereign institution) every institution's constitution — its charter and constitutional laws — changes only under the seal of its SPONSORING ORGANIZATION's governor office; sovereignty, where it exists, is an organization's; the charter lives today only on OrganizationSchema.charter");
+  it.todo("V3 — the constitutional amendment of a charter is ITSELF a sealed act with its own record, never a silent overwrite of the charter text; under K/K4 the record is the governing store's and arrives as a new pin");
+  it("V4 — no institution is sovereign: InstitutionSchema carries no `sovereign` field and no shipped institution declares one (operator ruling 2026-10-25; owed at step 4)", () => {
+    // Red today on PRESENCE: genome_schema.ts declares `sovereign` on InstitutionSchema. Both halves are read:
+    // the schema's own shape, and every shipped institution file's raw `institution` section.
+    const shipped = readdirSync(join(REPO, "institutions")).filter((f) => f.endsWith(".json"));
+    expect(shipped.length, "fixture precondition: institutions are shipped").toBeGreaterThan(0);
+    const declaring = shipped.filter((f) => "sovereign" in ((JSON.parse(readFileSync(join(REPO, "institutions", f), "utf8")) as { institution?: object }).institution ?? {}));
+    expect(declaring, "no shipped institution declares itself sovereign").toEqual([]);
+    expect(Object.keys(InstitutionSchema.shape), "InstitutionSchema carries no `sovereign` — sovereignty is an organization's").not.toContain("sovereign");
+  });
 });
 
 // ── TOURS ────────────────────────────────────────────────────────────────────────────────────────
@@ -310,7 +351,7 @@ describe("R — a player holds an OFFICE by residency, and can be removed", () =
   it.todo("R1 — a player is seated only through a CURRENT residency in the gig's institution; the plan resolves position -> player THROUGH residency. Subject re-pointed at revision 6: the BUILT residency (src/residency.ts RESIDENCY_ROW_FIELDS / LEGAL_TRANSITIONS, its seat backings), whose row names no institution or office yet (spec O2); institutions/quartet.json chairs and assignments are the office side");
   it.todo("R2 — a residency grants OFFICES, not capabilities — with ONE named exception: the PLANNER's office carries a fixed grant sealed by the governor, because it creates seats and is the one seat in no plan; the dispatch grant (DispatchCapGrantSchema, genome_schema.ts:843) moves onto it");
   it.todo("R3 — ending a residency is a sealed act — including REMOVAL by the sealing office, which the built transition table (unseat: holder, reap: reaper) does not yet have; memory stays the player's, outputs stay the institution's; a departed player cannot carry the institution's text out (closes first-draft open question 3)");
-  it.todo("R4 — the first planner is seated by residency granted directly by the governor's office, not by a plan (closes first-draft open question 1)");
+  it.todo("R4 — the first planner is seated by residency granted directly by the governor's office, not by a plan (closes first-draft open question 1); revision 6: that residency is sealed by an act in the governing store and the engine VERIFIES it (K4), and the self-sealed governor is the ORGANIZATION's (follows from K4 + V2; spec O10 asks the operator to confirm)");
   it.todo("R5 — a human holding an office is a residency too (kind: human — the built residency row carries no kind yet); removal works identically");
   it.todo("R6 — hydration slots bound 'at seat time' (p.chair.supplies, runtime.ts:3669) bind at PLAN time from the office's supplies through the seat");
 });
@@ -326,25 +367,43 @@ describe("A — nothing a player carries is shaped to a model", () => {
 // ── STORES ───────────────────────────────────────────────────────────────────────────────────────
 describe("S — every object on every backing", () => {
   it.todo("S1 — player, lineage seal, gig-plan, plan-amendment, seat, residency, session note, consolidated memory each have a row shape on file, PostgREST and RPC (genome_store.ts:41 GenomeClass; :113-115 Q.agents; :292 defineAgent) — genome_browse_parity extended");
-  it.todo("S2 — (spec author's proposal; entailed by K) a backing may target an EXTERNAL store that emits the engine's tables — gig, output, trace, drain lease, residency, player store — from its own declaration; the engine depends on the port's contract and names no store");
-  it("S3 — the port contract's table and RPC set is ENUMERATED ONCE, as data, in the store port, and the backings' parity test runs against that enumeration", async () => {
-    // Name-agnostic on purpose: the law does not dictate the export's name, only that EXACTLY ONE export
-    // of the port module is an enumeration ({ tables[], rpcs[] }) and that it covers the tables the spec
-    // names. Today src/genome_store.ts has a query map (Q) and enumerates no RPCs — red on absence.
+  it.todo("S2 — (spec author's proposal) a backing may target an EXTERNAL store that emits the engine's tables — gig, output, trace, drain lease, residency, player store — from its own declaration; the engine depends on the port's contract and names no store");
+  it("S3 — the port contract's tables and RPCs are ENUMERATED ONCE, as data, in the store port; every table the engine's writers and hosted readers address and every residency door is IN it; a parity test runs all three backings against it", async () => {
+    // GREEN ONLY ON A REAL ENUMERATION. The tables are not a list typed into this law: they are READ OUT OF
+    // THE WRITERS (the output and gig mirrors, output_mirror.ts; the hosted gig read, hosted_tools.ts) and
+    // the RPCs out of HOSTED_SEAT_DOORS, the existing partial enumeration — and each must be a member of the
+    // contract. Name-agnostic about the export: exactly one export of the port module is { tables[], rpcs[] }.
+    // Tables owed by later steps (player store: S3.1, trace: S3.2) join with their steps, not here.
     const port = (await import("../src/genome_store.js")) as Record<string, unknown>;
+    const src = (f: string) => readFileSync(join(REPO, "src", f), "utf8");
+    const written = new Set<string>([
+      ...[...src("output_mirror.ts").matchAll(/\/rest\/v1\/([a-z_]+)/g)].map((m) => m[1]!),
+      ...[...src("hosted_tools.ts").matchAll(/restGet\(\s*ctx,\s*[`"']([a-z_]+)\?/g)].map((m) => m[1]!),
+    ]);
+    expect(written.size, "fixture precondition: the writers address at least one table").toBeGreaterThan(0);
+    const doors = Object.values((port["HOSTED_SEAT_DOORS"] ?? {}) as Record<string, string>);
+    expect(doors.length, "fixture precondition: HOSTED_SEAT_DOORS names the residency doors").toBeGreaterThan(0);
+
     const contracts = Object.entries(port).filter(([, v]) => !!v && typeof v === "object"
       && Array.isArray((v as { tables?: unknown }).tables) && Array.isArray((v as { rpcs?: unknown }).rpcs));
     expect(contracts.map(([k]) => k), "exactly one enumeration of the port contract — not zero, not two that can drift").toHaveLength(1);
     const [name, contract] = contracts[0]!;
-    const tables = JSON.stringify((contract as { tables: unknown[] }).tables);
-    for (const t of [/gig/i, /output/i, /trace/i, /lease/i, /residenc/i, /player/i]) expect(tables, `the contract's tables cover ${t}`).toMatch(t);
-    expect((contract as { rpcs: unknown[] }).rpcs.length, "the contract enumerates its RPCs").toBeGreaterThan(0);
-    // ...and a parity test runs EVERY backing against it — the enumeration is read, not merely declared.
+    const nameOf = (t: unknown) => (typeof t === "string" ? t : String((t as { name?: unknown }).name ?? ""));
+    const tables = new Set((contract as { tables: unknown[] }).tables.map(nameOf));
+    const rpcs = new Set((contract as { rpcs: unknown[] }).rpcs.map(nameOf));
+    const unlisted = [...written].filter((t) => !tables.has(t));
+    expect(unlisted, "every table a writer or hosted reader addresses is in the contract").toEqual([]);
+    const doorsMissing = doors.filter((d) => !rpcs.has(d));
+    expect(doorsMissing, "every residency door is among the contract's RPCs").toEqual([]);
+    // ...and a parity test IMPORTS the enumeration and runs every backing against it.
+    const importsIt = new RegExp(`import\\s*\\{[^}]*\\b${name}\\b[^}]*\\}\\s*from\\s*["']\\.\\./src/genome_store(\\.js)?["']`);
     const readers = readdirSync(join(REPO, "tests")).filter((f) => f.endsWith(".test.ts") && f !== "spec_coltrane_1_0.test.ts")
       .map((f) => readFileSync(join(REPO, "tests", f), "utf8"))
-      .filter((src) => src.includes(name) && ["fileGenomeStore", "postgrestGenomeStore", "rpcGenomeStore"].every((b) => src.includes(b)));
-    expect(readers.length, `a parity test reads ${name} and runs all three backings against it`).toBeGreaterThan(0);
+      .filter((t) => importsIt.test(t) && ["fileGenomeStore(", "postgrestGenomeStore(", "rpcGenomeStore("].every((b) => t.includes(b)));
+    expect(readers.length, `a parity test imports ${name} and runs all three backings against it`).toBeGreaterThan(0);
   });
+  it.todo("S3.1 — step 1: the player store's tables join the port contract's enumeration, and the parity test covers them on all three backings");
+  it.todo("S3.2 — step 2: the trace's tables (intents, steps) and the plan's table join the port contract's enumeration, and the parity test covers them on all three backings");
   it.todo("S4 — (spec author's proposal) where the engine and an external store disagree on a column's type the port contract names ONE type and every backing conforms; seams known at revision 6: an act's verb (uuid|text), a trace payload (text|jsonb), a work order / work program id (text|uuid), a sequence (integer|bigint), a standard's input_types (jsonb|array) — which type each gets is spec O6");
 });
 
@@ -363,5 +422,5 @@ describe("H — the hash changes meaning once, and identity survives the break",
 
 // ── STEP 4: WHAT SURVIVES ────────────────────────────────────────────────────────────────────────
 describe("D — what survives the strip is decided by a reduction judge, not by hand", () => {
-  it.todo("D1 — (spec author's proposal) a reduction of players, charts or institutions is accepted only if replay holds AND planted defects are still caught AND held-out work still passes AND the two-part description length STRICTLY DROPS; a player has earned a name when declaring it shortens the description");
+  it.todo("D1 — (spec author's proposal) over PLAYERS and CHARTS in LOCALLY AUTHORED files only, the reduction judge PROPOSES a reduction only if replay holds AND planted defects are still caught AND held-out work still passes AND the two-part description length STRICTLY DROPS; the proposal travels K3 (novelty -> verdict -> human seal) and the HUMAN SEAL decides; a name is still earned through the naming ritual (L1/L4) — a shorter description is evidence for the seal, not a replacement");
 });

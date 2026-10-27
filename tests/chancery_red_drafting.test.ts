@@ -341,7 +341,12 @@ describe("DS-3 — drafting:the-drafter-cannot-review: `review` is a different s
     const rev = agentOf(std, review.agent_slug);
     const effective = seatEffectiveTools(rev, review);
     expect(effective.filter(isWriteGrant), `the review seat's effective grant [${effective.join(", ")}] holds a write tool`).toEqual([]);
-    expect(rev.code_tool_access ?? "none", "the review seat's code-tool exposure must not be write/full").not.toMatch(/^(write|full)$/);
+    // code_tool_access is a LADDER of what the cage keeps (src/claude_invoker.ts codeToolsKept), and a reviewer that
+    // runs a scoped Bash must be `full` (tests/genome_behavioral_floor.test.ts) — so "no EFFECTIVE write" is: every
+    // write tool the ladder would keep (write/full: Write, Edit…) is named in the agent's disallowed_tools.
+    const keepsWrite = /^(write|full)$/.test(rev.code_tool_access ?? "none");
+    const unDenied = keepsWrite ? [...WRITE_TOOLS].filter((t) => !(rev.disallowed_tools ?? []).includes(t)) : [];
+    expect(unDenied, `the review seat's code_tool_access "${rev.code_tool_access}" keeps write tools its disallowed_tools [${(rev.disallowed_tools ?? []).join(", ")}] do not deny`).toEqual([]);
     expect(() => recompose(std), "the standard as held must compose").not.toThrow();
   });
 

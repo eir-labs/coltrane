@@ -19,8 +19,61 @@ VERIFY, seals a `change-verdict`). `max_examine_rounds` is 3. It publishes nothi
 - **Scope out:** building `spec_grade` / `make:spec_grade` (Forseti, chancery-os; DS-6 is not this repo's);
   dispatching the testable charter's red pass; anything in `eir-dev/chancery-os`.
 - **Laws:** `tests/chancery_red_drafting.test.ts` (33 laws: 30 red today, 3 DS-4 controls green today — see
-  "Observed RED"). No existing law is modified or removed;
+  "Observed RED"; **superseded, see "Status — engine enforcement landed" below**). No existing law is
+  modified or removed;
   `scripts/laws.sh` is untouched (the operator adjusts pinned counts at commit).
+
+## Status — engine enforcement landed (27 Oct 2026)
+
+The engine half of this contract is built in `src/**`. The sections below it are the argued half as it was
+drafted; where a count or a claim there no longer matches the tree it is marked superseded rather than
+rewritten. No law text was edited.
+
+**Observed, this run** (`npx vitest run tests/chancery_red_drafting.test.ts`):
+
+- Before the build: **33 tests, 19 failed** (DS-1 7 green; the DS-2 and DS-3 controls green; DS-2 P1/P2,
+  DS-3 P1–P2d, DS-4 P1–P7 and DS-5 ×5 red). This replaces "30 failed, 3 passed" under "Observed RED", which
+  predates the genome landing (commit `effebfc`).
+- After the build: **33 passed (33)**, `npx tsc --noEmit` clean, the law file byte-identical to `d7eb789`.
+
+**What was built, and where**
+
+| law | enforcement | callsite |
+|-----|-------------|----------|
+| chair fields | `requires_spec_grade`, `seat`, `independent_of`, `read_only` declared on `ChairSchema` (optional, no default) and mirrored on the runtime `Chair` | `src/genome_schema.ts`, `src/composition.ts` |
+| DS-2 | a chair declaring `seat: "skill"` that seats an agent (alone or beside a `skill_slug`) is refused, naming the chair — checked before the skill/agent split, so the stated reason is the gate | `composeStandard` |
+| DS-3 | `independent_of` is checked first (the drafter at `review` breaks both rules and the self-review is the reason that matters); then `read_only`: a write-tool grant (scoped or not) or an unscoped `Bash` in the **effective** grant (`seatEffectiveTools`), `code_tool_access: write`, or `full` without all four write tools in `disallowed_tools` | `composeStandard` |
+| DS-4 | `specGradeRefusal`, called in `runGig` after the declared-input door and before the cancellation checkpoint, the agent lookup and the dispatch preflight — so before any model seat. `RunDeps.spec_grades` is typed and carried by `assembleRunDeps` | `src/runtime.ts`, `src/run_deps.ts` |
+| DS-5 | `compareBaselineLoop({ baseline, branch, scope })` returning `{ pass, violations, excepted }`; exported from `src/index.ts` | `src/baseline_holds.ts` |
+
+**Choices made where the contract was silent** (each is a place a reviewer may disagree):
+
+- **Absence declines.** A standard with a `requires_spec_grade` chair refuses when no `spec_grades` were
+  supplied at all; only the verdict `PASS` admits (a verdict other than `PASS`/`HOLD` is refused too).
+- **Latest wins, and is checked first.** Once the named grade is found, a later grade for the *same spec*
+  refuses before the named record's own verdict, principal, hash or scope are read (Vör's addition).
+- **A grade's `scope` is `string[] | null`**, as the law file builds it. `null` covers every law; a list must
+  name every law in the change-request's `scope.laws`. (The change-plan inferred an object `{laws}`; the law
+  file shows otherwise and wins.)
+- **A mismatch between the grade's `spec` and the change-request's `spec` is not a refusal** — the hash
+  check is what ties them, and the contract lists its refusal causes exhaustively. Left open for the operator.
+- **`scope.terms` is accepted by `compareBaselineLoop` and not read**: the contract defines no rule for it.
+  A law present only on the branch is allowed.
+- **Other `code_tool_access` values** (`none`, `read`) are not refused for a `read_only` chair; the contract
+  names only `write` and `full`.
+- **No production source of `RunDeps.spec_grades` is wired** (out of scope). Until one is, a gig for a
+  standard with a `requires_spec_grade` chair declines at every door. No existing standard declares the
+  field, so no live dispatch changes.
+
+**A declared field with no reader, and how it was closed.** `baseline_commit` — declared by change-request
+v2 in the genome landing (`effebfc`) — had no reader anywhere in `src/`, `agents/`, `standards/` or
+`evals/`, which put `tests/declared_fields_are_read.test.ts` over its pins (246 against 245, 122 against
+121); the landing had not moved them. It is now READ: the DS-4 admission refuses a change-request whose
+`baseline_commit` is not a revision the engine will hand to git (`isSafeGitRev`, the same wall the workspace
+and the change-set seal use), because the scope gate passes that commit to `git`. This is a new, narrow
+refusal, and only for a standard with a `requires_spec_grade` chair and a `baseline_commit` that is present
+and unsafe; an absent field is allowed. It is a real read of the value, not a mention added to satisfy the
+ratchet.
 
 ## What is red today, and how the laws reach it
 
@@ -86,7 +139,9 @@ standard. DS-2/DS-3, whose subject is the standard, never use the stand-in.
 5. **Declarations the enforcement reads (DS-2/DS-3).** The laws mutate the *loaded* standard minimally and
    so work with whatever declaration the genome door lands (a chair field that already passes the schema —
    e.g. `supplies` — or a schema change in `src/**`). Genome records are limited to what
-   `src/genome_schema.ts` accepts; unknown keys on a standard or chair are stripped.
+   `src/genome_schema.ts` accepts; unknown keys on a standard or chair are stripped. *(Superseded: the four
+   chair fields the held standard declares — `requires_spec_grade`, `seat`, `independent_of`, `read_only` —
+   are now declared on `ChairSchema`, so the loader keeps them. See "Status — engine enforcement landed".)*
 
 ## Invariants → laws
 
@@ -117,6 +172,9 @@ The enforcement does not exist yet, so each plant is the **removal** of the thin
 | DS-5 | `src/…`: make `compareBaselineLoop` ignore plant outcomes (P1), ignore verdict changes (P2), or skip absent laws (P3) |
 
 ## Observed RED (this run)
+
+*(Superseded as a statement of today's tree — see "Status — engine enforcement landed". Kept as the record of
+the first run, taken before the genome landed.)*
 
 `npx vitest run tests/chancery_red_drafting.test.ts` — **33 tests, 30 failed, 3 passed** (the three DS-4
 controls, green today because the stand-in seats `draft` — which also shows the harness is live: a run that

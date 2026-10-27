@@ -275,6 +275,22 @@ export const ChairSchema = z.object({
   // runs COLD (no fork) rather than warm-starting a primer too large to be worth forking. OPTIONAL, so
   // an absent ceiling forks the primer whatever its size (the standing behaviour).
   fork_from: z.object({ primer: z.string(), max_context_tokens: z.number().optional() }).optional(),
+  /** chancery-red-drafting-v0 (DS-4) — the gig is admitted only when this chair would be seated against
+   *  an admitting, LATEST spec_grade (RunDeps.spec_grades); read by runGig before any seat is invoked.
+   *  OPTIONAL with NO default, like `turn_budget`: a Zod object DROPS an undeclared key, so the field
+   *  must be declared here to be RETAINED, and an absent field leaves every existing chair record (and
+   *  its genome_hash) untouched. */
+  requires_spec_grade: z.boolean().optional(),
+  /** chancery-red-drafting-v0 (DS-2) — `"skill"` declares this chair a deterministic GATE: it must be
+   *  seated by a skill and no agent, and composeStandard refuses a model seat there. A one-value enum,
+   *  so a typo is a load error rather than a gate that is silently not declared. OPTIONAL, no default. */
+  seat: z.enum(["skill"]).optional(),
+  /** chancery-red-drafting-v0 (DS-3) — roles whose work this chair must not review: the seated agent
+   *  may not be the agent of any named role. Checked at compose. OPTIONAL, no default. */
+  independent_of: z.array(z.string()).optional(),
+  /** chancery-red-drafting-v0 (DS-3) — this chair only READS: the seated agent's EFFECTIVE grant may
+   *  hold no write tool and no unscoped Bash. Checked at compose. OPTIONAL, no default. */
+  read_only: z.boolean().optional(),
   /** FAN-OUT — one chair template, seated once per item of an input set, each instance seeing only
    *  its item (and, per `join`, only the items of other sets that match it). The instance count comes
    *  from the sealed data, never from the model; the split is the engine's, and each instance's seal

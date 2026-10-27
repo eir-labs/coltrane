@@ -226,6 +226,7 @@ export type AssembleRunDepsArgs = Pick<
   | "mounts"
   | "publisher"
   | "attribution"
+  | "spec_grades"
 > & {
   /**
    * The enforcement environment, supplied per door: {} on the drain, the bootstrap map on the server
@@ -276,6 +277,9 @@ export function assembleRunDeps(args: AssembleRunDepsArgs): RunDeps {
     // server run is byte-identical, and a pull-request seal there refuses `publisher_unavailable`.
     ...(args.publisher ? { publisher: args.publisher } : {}),
     ...(args.attribution ? { attribution: args.attribution } : {}),
+    // chancery-red-drafting-v0 (DS-4) — the grades a `requires_spec_grade` chair is admitted against,
+    // threaded only when supplied, so every dispatch that supplies none is byte-identical to before.
+    ...(args.spec_grades ? { spec_grades: args.spec_grades } : {}),
     // THE AMEND LADDER, from the deployment's environment — here, in the one assembler, so the dispatch
     // door and the drain cannot disagree about it. Absent → no key → the loop is what it was.
     ...(() => { const l = amendLadderFromEnv(process.env); return l ? { tier_ladder: l } : {}; })(),

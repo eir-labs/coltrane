@@ -1,0 +1,52 @@
+{
+  "slug": "scope-verdict",
+  "version": 1,
+  "extends": "Verdict",
+  "domain": "spec-drafting",
+  "status": "active",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "refused": {
+        "type": "array",
+        "description": "Each refusal: {kind: file|law|term, id, change: written|added|removed|amended, reason}.",
+        "items": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            },
+            "change": {
+              "type": "string"
+            },
+            "reason": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "id"
+          ]
+        }
+      },
+      "files": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "The staged paths that differ from the baseline."
+      },
+      "ids": {
+        "type": "object",
+        "description": "Per .sx file: the added, removed and amended ids."
+      }
+    }
+  },
+  "required_fields": [
+    "refused",
+    "files"
+  ]
+}

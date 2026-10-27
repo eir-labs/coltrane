@@ -1,0 +1,18 @@
+{
+  "id": "no-scope",
+  "description": "a change-request with no scope is refused before git is read",
+  "input": {
+    "baseline_commit": "0000000000000000000000000000000000000000"
+  },
+  "assertions": [
+    {
+      "path": "pass",
+      "op": "equals",
+      "value": false
+    },
+    {
+      "path": "target_ref",
+      "op": "is_string"
+    }
+  ]
+}

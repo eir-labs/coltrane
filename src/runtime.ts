@@ -446,7 +446,36 @@ async function drainTerminalHeader(deps: RunDeps, rec: GigHeaderRecord): Promise
   }
 }
 
+/**
+ * chancery-red-drafting-v0 (DS-4) — one `spec_grade` record, in its SPECIFIED shape; this engine reads
+ * it and never writes one. `scope` is the list of law ids the grade covers, or null for "covers
+ * everything". `by` is the principal that made the grade.
+ */
+export interface SpecGradeRecord {
+  spec: string;
+  content_hash: string;
+  verdict: string;
+  scope: readonly string[] | null;
+  by: string;
+}
+
+/**
+ * The spec grades a gig is admitted against: who holds the conformance seat, and the grades Chancery
+ * supplies for the spec, each under the id a change-request names it by, in record order, OLDEST FIRST.
+ */
+export interface SpecGrades {
+  conformance_seat: string;
+  grades: ReadonlyArray<{ id: string; record: SpecGradeRecord }>;
+}
+
 export interface RunDeps {
+  /**
+   * chancery-red-drafting-v0 (DS-4) — the grades `requires_spec_grade` chairs are admitted against.
+   * ABSENT means NO GRADE WAS SUPPLIED, not "no grade is needed": a standard with a chair declaring
+   * `requires_spec_grade` then REFUSES the gig (absence must decline). A standard with no such chair
+   * never reads this, so every other dispatch is untouched.
+   */
+  spec_grades?: SpecGrades | undefined;
   /**
    * THE AMEND LADDER — COLTRANE_TIER_LADDER's rungs (cheapest first, already narrowed to rungs this
    * deployment can seat). When set, the examine⇄amend loop reads each failed re-verify against the one
@@ -1762,6 +1791,71 @@ export function partitionGigInputKeys(
   return { extras: extras.sort() };
 }
 
+// chancery-red-drafting-v0 (DS-4) — the spec-grade admission. A standard whose chair declares
+// `requires_spec_grade` runs only against an admitting, LATEST grade of the spec the change-request
+// names; this answers WHY NOT, or undefined when the gig is admitted. Pure: it reads the standard, the
+// dispatch payload and the supplied grades, and invokes nothing — so runGig can ask it before any seat.
+//
+// FAIL CLOSED throughout. No `spec_grades` supplied is a refusal, not a pass (absence must decline), and
+// only the verdict PASS admits. The causes are checked in the order below, and the supersession check
+// comes right after the named grade is found: Vör's rule is to read the LATEST grade, so a superseded
+// record's own verdict/hash/scope are moot and the reason given is that a later grade exists.
+function specGradeRefusal(
+  standard: Standard,
+  gigInput: Readonly<Record<string, unknown>>,
+  supplied: SpecGrades | undefined,
+): string | undefined {
+  if (!standard.phases.some((ph) => ph.chairs.some((ch) => ch.requires_spec_grade === true))) return undefined;
+  const head = `standard "${standard.slug}" requires an admitting spec_grade`;
+  if (supplied === undefined) {
+    return `${head}, but no spec_grades were supplied to this run — a gig that needs a grade is refused when none arrives`;
+  }
+  // The change-request is the typed gig input this gate reads (domain_types/change-request.json).
+  const rawRequest = gigInput["change-request"];
+  const request = rawRequest !== null && typeof rawRequest === "object" && !Array.isArray(rawRequest)
+    ? (rawRequest as Record<string, unknown>)
+    : {};
+  const gradeId = request["spec_grade"];
+  if (typeof gradeId !== "string" || gradeId === "") {
+    return `${head}, but the change-request names no spec_grade record`;
+  }
+  const at = supplied.grades.findIndex((g) => g.id === gradeId);
+  if (at < 0) {
+    return `${head}, but spec_grade "${gradeId}" is not among the grades supplied to this run`;
+  }
+  const named = supplied.grades[at]!.record;
+  const later = supplied.grades.slice(at + 1).find((g) => g.record.spec === named.spec);
+  if (later !== undefined) {
+    return `${head}, but spec_grade "${gradeId}" is superseded: a later grade "${later.id}" exists for spec "${named.spec}" — only the latest grade admits`;
+  }
+  if (named.verdict !== "PASS") {
+    return `${head}, but spec_grade "${gradeId}" has verdict ${named.verdict} — only a PASS admits`;
+  }
+  if (named.by !== supplied.conformance_seat) {
+    return `${head}, but spec_grade "${gradeId}" was made by "${named.by}", not the conformance seat "${supplied.conformance_seat}"`;
+  }
+  if (named.content_hash !== request["content_hash"]) {
+    return `${head}, but spec_grade "${gradeId}" grades content_hash ${named.content_hash} and the change-request names content_hash ${String(request["content_hash"])}`;
+  }
+  const scope = request["scope"];
+  const namedLaws = scope !== null && typeof scope === "object" && Array.isArray((scope as { laws?: unknown }).laws)
+    ? ((scope as { laws: unknown[] }).laws.filter((l): l is string => typeof l === "string"))
+    : [];
+  // A null grade scope covers everything; a listed one must name every law the change-request does.
+  const omitted = named.scope === null ? undefined : namedLaws.find((l) => !named.scope!.includes(l));
+  if (omitted !== undefined) {
+    return `${head}, but spec_grade "${gradeId}" does not cover law "${omitted}" that the change-request names in its scope`;
+  }
+  // The baseline the red pass is measured from is handed to git by the scope gate, so it is held to the
+  // same wall as every other revision that reaches git (isSafeGitRev: nothing a git option parser could
+  // read, no whitespace, no range). Absent is allowed — the field is optional on the change-request.
+  const baseline = request["baseline_commit"];
+  if (typeof baseline === "string" && !isSafeGitRev(baseline)) {
+    return `${head}, but the change-request's baseline_commit ${JSON.stringify(baseline)} is not a revision the engine will hand to git — nothing beginning with a dash, no whitespace, no '..'`;
+  }
+  return undefined;
+}
+
 export async function runGig(
   standard: Standard,
   gigInput: Record<string, unknown>,
@@ -2242,6 +2336,13 @@ export async function runGig(
       emit(ev as unknown as GigProgressEvent);
     }
   }
+
+  // chancery-red-drafting-v0 (DS-4) — admit the gig only against an admitting, LATEST spec_grade. After
+  // the payload is resolved and type-checked (the gate reads the change-request) and before any chair is
+  // prepared, so a refused gig has invoked no model seat. A standard with no `requires_spec_grade` chair
+  // returns undefined here and is untouched.
+  const gradeRefusal = specGradeRefusal(standard, gigInput, deps.spec_grades);
+  if (gradeRefusal !== undefined) throw new RuntimeError(gradeRefusal);
 
   // #249/#250 — the cancellation checkpoint. Level 1 of the abort chain: cheap, deterministic,
   // and where MOST of the post-abort spend was going. A standard with P sequential phases could

@@ -3,6 +3,7 @@ import { PRIMITIVE_OUTPUT_TYPE, CORE_TYPES } from "./core_types.js";
 // The ONE oracle for what a seat may reach. chart.ts imports this module TYPE-only, so there is no
 // runtime cycle, and the compose refusal below cannot drift from the set the spawn advertises.
 import { seatEffectiveTools } from "./chart.js";
+import { toolBaseName } from "./tool_providers.js";
 import type { ModelTier, Depth } from "./pricing.js";
 import { canonStructuralJson, sha256Hex } from "./canonical_form.js";
 import { AgentSchema, type AgentInput, type AgentOutput, type StandardInput, type StandardOutput } from "./genome_schema.js";
@@ -10,6 +11,10 @@ import { AgentSchema, type AgentInput, type AgentOutput, type StandardInput, typ
 // The per-agent code-tool exposure gate (old AgentPermissions.code_tool_access). Scales
 // the agent's access to Claude Code's built-in file/exec tools, independent of MCP grant.
 export type CodeToolAccess = "none" | "read" | "write" | "full";
+
+/** The built-in tools that can change the working tree. A `read_only` chair's seat may hold none of them
+ *  (chancery-red-drafting-v0, DS-3), however the grant is scoped. */
+const READ_ONLY_WRITE_TOOLS: readonly string[] = ["Write", "Edit", "MultiEdit", "NotebookEdit"];
 
 // The Belbin cognitive-role pairing (exactly 2, held "in tension") — the agent's
 // DISPOSITION. This is a DIFFERENT axis from `primitives` (the process step that resolves
@@ -116,6 +121,17 @@ export interface Chair {
    *  contract-rolling-seat-primer-v1 (O4) — `max_context_tokens` is a context ceiling: a primer whose
    *  recorded `context_tokens` exceeds it is REPLACED (cold run), never forked. Absent → fork any size. */
   fork_from?: { primer: string; max_context_tokens?: number };
+  /** chancery-red-drafting-v0 (DS-4) — admit the gig only against an admitting, LATEST spec_grade
+   *  (mirrors `ChairSchema.requires_spec_grade`; read by runGig before any seat is invoked). */
+  requires_spec_grade?: boolean;
+  /** chancery-red-drafting-v0 (DS-2) — `"skill"` makes this chair a deterministic gate: composeStandard
+   *  refuses an agent seated here (mirrors `ChairSchema.seat`). */
+  seat?: "skill";
+  /** chancery-red-drafting-v0 (DS-3) — roles whose work this chair may not review: its agent may not be
+   *  theirs (mirrors `ChairSchema.independent_of`). */
+  independent_of?: readonly string[];
+  /** chancery-red-drafting-v0 (DS-3) — this chair holds no write grant (mirrors `ChairSchema.read_only`). */
+  read_only?: boolean;
   /** FAN-OUT — seat this chair once per item of `over` (mirrors `ChairSchema.fan_out`). */
   fan_out?: FanOut;
 }
@@ -359,6 +375,17 @@ export function composeStandard(def: {
       }
       seenRoles.set(ch.role, ph.name);
 
+      // chancery-red-drafting-v0 (DS-2) — a chair declaring `seat: "skill"` is a deterministic GATE, and
+      // a model must not hold one. Checked before the skill/agent split below, so the stated reason is the
+      // gate and not an incidental agent-branch rule, and it covers an agent seated ALONE and one seated
+      // BESIDE a skill_slug alike: either way a model sits at a seat declared deterministic.
+      if (ch.seat === "skill" && (ch.agent_slug ?? "") !== "") {
+        throw new CompositionError(
+          `standard ${def.slug}: chair "${ch.role}" declares seat "skill" but seats agent "${ch.agent_slug}"; ` +
+            `a model/agent may not hold a deterministic gate. Seat the skill with skill_slug and no agent_slug.`,
+        );
+      }
+
       // contract-rolling-seat-primer-v1 (O1) — a chair MAY declare both prime and fork_from when they
       // name the SAME area: a build primes the area and forks the prior primer OF THAT area (the rolling
       // primer itself). Refuse ONLY a chair whose primed area DIFFERS from the area it forks — a
@@ -410,6 +437,48 @@ export function composeStandard(def: {
           throw new CompositionError(
             `standard ${def.slug}: chair "${ch.role}" references unknown agent "${ch.agent_slug}" (not in standard's agents list)`,
           );
+        }
+        // chancery-red-drafting-v0 (DS-3a) — INDEPENDENCE. A chair declaring `independent_of: [roles]`
+        // reviews work it did not do: its agent may not be the agent of any named role. Checked before
+        // the read-only rule below because a drafter seated at review usually breaks both, and the
+        // reason the author needs is the self-review. A named role no chair holds is not refused here.
+        for (const role of ch.independent_of ?? []) {
+          const reviewed = phases.flatMap((p) => p.chairs).find((c) => c.role === role);
+          if (reviewed !== undefined && reviewed.agent_slug === ch.agent_slug) {
+            throw new CompositionError(
+              `standard ${def.slug}: chair "${ch.role}" declares independent_of "${role}" but seats agent ` +
+                `"${ag.slug}", which also holds "${role}" — an agent may not review its own work. Seat a ` +
+                `different agent at "${ch.role}".`,
+            );
+          }
+        }
+        // chancery-red-drafting-v0 (DS-3b) — READ-ONLY. A chair declaring `read_only: true` seats an agent
+        // that can write nothing. Two readings of "can write", both refused, because the effective-grant
+        // oracle alone reads only `allowed_tools`: (1) a grant whose base name is a write tool, scoped or
+        // not, or an UNSCOPED Bash (a scoped `Bash(cmd:*)` is a narrowed shell, not a write grant); (2) the
+        // code-tool ladder (`code_tool_access`): `write` keeps the write tools outright, and `full` keeps
+        // them unless every one is named in `disallowed_tools`.
+        if (ch.read_only === true) {
+          const writeGrant = seatEffectiveTools(ag, ch).find(
+            (g) => READ_ONLY_WRITE_TOOLS.includes(toolBaseName(g)) || g.trim() === "Bash",
+          );
+          if (writeGrant !== undefined) {
+            throw new CompositionError(
+              `standard ${def.slug}: chair "${ch.role}" is read-only but agent "${ag.slug}" holds the write-capable ` +
+                `grant "${writeGrant}" — a read-only seat may hold no write tool and no unscoped Bash. Drop the ` +
+                `grant, or narrow the chair's allowed_tools below it.`,
+            );
+          }
+          const ladder = ag.code_tool_access;
+          const undenied = READ_ONLY_WRITE_TOOLS.filter((t) => !(ag.disallowed_tools ?? []).includes(t));
+          if (ladder === "write" || (ladder === "full" && undenied.length > 0)) {
+            throw new CompositionError(
+              `standard ${def.slug}: chair "${ch.role}" is read-only but agent "${ag.slug}" has code_tool_access ` +
+                `"${ladder}"` +
+                (ladder === "full" ? `, which keeps write tools its disallowed_tools do not deny [${undenied.join(", ")}]` : ", which keeps the write tools") +
+                ` — a read-only seat holds no write grant. Lower code_tool_access, or deny every write tool.`,
+            );
+          }
         }
         // The floor is satisfied by either kind of holding: a slug bound into the shared
         // repertoire, or a full definition the agent CARRIES on its own record. A carried skill is

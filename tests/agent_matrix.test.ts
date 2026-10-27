@@ -136,8 +136,11 @@ describe("agent matrix: prompt + cage derive correctly across all pairwise permu
 });
 
 describe("agent matrix: the derivation rules themselves are sound", () => {
-  it("model tiers map to distinct concrete models", () => {
-    expect(new Set(Object.values(MODEL_TIER_MAP)).size).toBe(Object.keys(MODEL_TIER_MAP).length);
+  // Was "model tiers map to distinct concrete models". Retired by Eugene's word, 27 Oct 2026: "SONNET
+  // FOR PREMIUM TOO" — standard and premium now deliberately name one model (pinned exactly in
+  // the_tier_map_is_sonnet_5_5). What survives is the floor: the cheap tier is its own model.
+  it("the economy tier maps to a model of its own", () => {
+    expect([MODEL_TIER_MAP.standard, MODEL_TIER_MAP.premium]).not.toContain(MODEL_TIER_MAP.economy);
   });
   it("the code-access denial ladder is monotone (none denies all, full denies none)", () => {
     expect(CODE_DENIALS["none"]!.length).toBe(4);

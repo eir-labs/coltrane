@@ -62,3 +62,7 @@ export * from "./residency.js";
 // flags, worker env, domain-type versions, law counts) and reports what each release changed. A public
 // entrypoint, exported here so the public-entrypoint rule can name it.
 export * from "./releases.js";
+
+// The drafting standard's baseline-vs-branch comparison (chancery-red-drafting-v0, DS-5): a public
+// entrypoint, because the red pass's caller — not this engine — takes the two loop results.
+export * from "./baseline_holds.js";

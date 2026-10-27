@@ -1,10 +1,9 @@
 {
   "slug": "change-request",
-  "version": 1,
+  "version": 2,
   "extends": "Signal",
   "domain": "software-change",
   "status": "active",
-  "description": "The seed of a software-change run: the change as it arrives, before anyone has read the codebase it lands in. A request that names no observable acceptance cannot be verified at the end of the run, so acceptance_criteria is required at the boundary rather than discovered at the verdict.",
   "schema": {
     "type": "object",
     "properties": {
@@ -21,7 +20,7 @@
         "items": {
           "type": "string"
         },
-        "description": "Paths the requester believes are in scope. A belief, not a finding \u2014 the reading phase may contradict it."
+        "description": "Paths the requester believes are in scope. A belief, not a finding — the reading phase may contradict it."
       },
       "acceptance_criteria": {
         "type": "array",
@@ -48,6 +47,50 @@
       "change_set_base": {
         "type": "string",
         "description": "The commit the change-set is measured from (git diff <base> -- <path> at seal), as a FULL sha. CARRIED here, never inferred from the working tree: the drain clones one commit deep, and prepareWorkspace fetches this commit into the tree while the gig's credential is in hand, so a change-set of DELIVERED work can name the parent of the landing commit. A full sha is required in practice: an abbreviated sha cannot be fetched, and a tag or branch name fetched into a shallow clone lands only in FETCH_HEAD, so the seal refuses it base_not_in_tree. Optional and additive; absent, the seat's own base must already be in the tree or the seal refuses base_not_in_tree."
+      },
+      "spec": {
+        "type": "string",
+        "description": "The graded spec's slug (chancery-red-drafting-v0)."
+      },
+      "content_hash": {
+        "type": "string",
+        "description": "The graded spec's content hash the red pass drafts against."
+      },
+      "spec_grade": {
+        "type": "string",
+        "description": "The id of the Chancery spec_grade record that passed the spec."
+      },
+      "scope": {
+        "type": "object",
+        "description": "What a red pass may write: {files: [path], laws: [law id], terms: [term id]}.",
+        "properties": {
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "laws": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "terms": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "baseline_commit": {
+        "type": "string",
+        "description": "The commit the red pass is measured from (the baseline the loop is run on)."
+      },
+      "branch": {
+        "type": "string",
+        "description": "The branch the red pass writes."
       }
     }
   },

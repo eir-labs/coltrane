@@ -106,7 +106,8 @@ describe("E1 · the store genome has a base: the engine's packaged genome sits u
     const g = reconstructGenome({ core_types: [], domain_types: [], agents: [], standards: [], skills: [] } as never, { base: engineBaseGenome() });
     expect(g.load_errors).toEqual([]);
     expect(g.standards.has("software-change-pr-v1"), "no promotion needed — R30's trap closes").toBe(true);
-    expect(g.domain_types.has("change-request@1"), "the base's types ride too").toBe(true);
+    // change-request is at v2 since 2026-10-27 (type_extend for chancery-red-drafting-v0: spec, content_hash, spec_grade, scope, baseline_commit, branch).
+    expect(g.domain_types.has("change-request@2"), "the base's types ride too").toBe(true);
     expect(g.provenance?.get("standard:software-change-pr-v1")).toBe("engine-base");
   });
 

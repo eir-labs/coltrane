@@ -66,3 +66,7 @@ export * from "./releases.js";
 // The drafting standard's baseline-vs-branch comparison (chancery-red-drafting-v0, DS-5): a public
 // entrypoint, because the red pass's caller — not this engine — takes the two loop results.
 export * from "./baseline_holds.js";
+
+// RR-1: whether a seat-bearing room's floor is pinned by digest — a public entrypoint, because the standard that names a room
+// (the drafting room's dispatch check, in-house) is the caller that refuses a tag-only floor, not this engine.
+export { floorIsPinned } from "./venue_realizer.js";

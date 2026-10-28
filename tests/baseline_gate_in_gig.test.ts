@@ -60,11 +60,17 @@ const GIT_ENV = { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_SYS
 const git = (cwd: string, ...args: string[]) => execFileSync("git", ["-c", "user.email=l@x", "-c", "user.name=l", "-c", "commit.gpgsign=false", ...args], { cwd, encoding: "utf8", env: GIT_ENV });
 const w = (dir: string, rel: string, text: string) => { mkdirSync(dirname(join(dir, rel)), { recursive: true }); writeFileSync(join(dir, rel), text); };
 
-function repo() {
+// RR-4 (wiki spec.coltrane.the-red-pass-runs-in-its-room): a loop result whose law names vary by run. The first charter red pass
+// burned three rounds because a non-deterministic instrument read as a baseline violation; the gate must say so, first.
+const NONDETERMINISTIC_LOOP_RESULT = `#!/usr/bin/env node
+process.stdout.write(JSON.stringify({ laws: [{ id: "law-at-" + process.hrtime.bigint(), verdict: "pass", plants: [] }] }));
+`;
+
+function repo(loopResult: string = LOOP_RESULT) {
   const dir = mkdtempSync(join(tmpdir(), "baseline-gate-")); tmps.push(dir);
   git(dir, "init", "-q");
   w(dir, "crossing/laws.sx", LAWS); w(dir, "crossing/terms.sx", TERMS("please")); w(dir, "src/greeting.txt", "Hello, please come in.\n");
-  w(dir, "loop/loop-result", LOOP_RESULT); chmodSync(join(dir, "loop/loop-result"), 0o755);
+  w(dir, "loop/loop-result", loopResult); chmodSync(join(dir, "loop/loop-result"), 0o755);
   git(dir, "add", "-A"); git(dir, "commit", "-q", "-m", "baseline");
   return { dir, baseline: git(dir, "rev-parse", "HEAD").trim() };
 }
@@ -73,9 +79,9 @@ const SPEC = "eir:spec.chancery.the-testable-charter";
 const pageHash = (title: string, body: string): string => createHash("sha256").update(`${title}\n${body}`, "utf8").digest("hex"); // RR-3: the page's own content expression
 const SPEC_TITLE = "A graded spec", SPEC_BODY = "the graded text";
 const H = pageHash(SPEC_TITLE, SPEC_BODY), VOR = "principal:vor";
-async function drive(stageAmend: (dir: string) => void) {
+async function drive(stageAmend: (dir: string) => void, loopResult?: string) {
   const std = (genome.standards.get("chancery-red-drafting-v0") ?? genome.draft_standards.get("chancery-red-drafting-v0")) as Standard;
-  const r = repo();
+  const r = repo(loopResult);
   const seated: string[] = [];
   const invoke: AgentInvoker = (ctx) => {
     seated.push(ctx.role ?? ctx.agent.slug);
@@ -130,5 +136,15 @@ describe("DS-5 driven — the baseline-gate chair holds every unscoped law to th
     const bv = d.outputs.all().filter((o) => o.domain_type === "baseline-verdict").at(-1);
     expect(bv?.data["pass"], `baseline-gate refused an honest red pass: ${JSON.stringify(bv?.data ?? {}).slice(0, 400)}`).toBe(true);
     expect(d.seated.filter((s) => s === "review").length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("RR-4 determinism first — a loop result whose laws change their names between two runs of the baseline is refused AS NON-DETERMINISTIC, naming the law, before the branch is compared", { timeout: 60_000 }, async () => {
+    const d = await drive(() => { /* stage nothing: the branch IS the baseline */ }, NONDETERMINISTIC_LOOP_RESULT);
+    const bv = d.outputs.all().filter((o) => o.domain_type === "baseline-verdict").at(-1);
+    expect(bv?.data["pass"], "a non-deterministic instrument passed the baseline").toBe(false);
+    const said = JSON.stringify(bv?.data ?? {});
+    expect(said, "the refusal must name non-determinism, not a baseline violation").toMatch(/not deterministic/);
+    expect(said).toMatch(/law-at-/);
+    expect(d.seated.filter((s) => s === "review").length).toBe(0);
   });
 });

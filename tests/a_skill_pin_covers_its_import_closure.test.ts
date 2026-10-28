@@ -15,7 +15,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from "nod
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import * as skills from "../src/skills.js";
 import { drainSkillDirs } from "../src/run_deps.js";
 
@@ -76,6 +76,66 @@ describe("DR-3b — the pin covers the skill's local import closure", () => {
     expect(s.dirs.has("closer")).toBe(false);
     expect(s.refused.find((r) => r.slug === "closer")?.reason ?? "").toMatch(/not a literal/);
     expect(() => skills.hashSkillCode(join(root, "skills/closer/skill.mjs"))).toThrow(/unresolvable/);
+  });
+
+  // DR-3b by RESOLUTION, not spelling (Vör at 24ecba2): the walker followed only "./" and "../" and silently skipped the rest, so the
+  // package's own name (self-reference through its `exports` map), an absolute path or a file:// URL reached the same code unpinned.
+  const PKG = JSON.stringify({ name: "closer-pkg", type: "module", exports: { ".": "./dist/src/helper.js" } });
+  const tamperedSeated = (skillCode: string) => {
+    const root = engine(skillCode, { "package.json": PKG, "dist/src/helper.js": HELPER, "dist/src/strict.js": STRICT });
+    const before = drainSkillDirs(root).dirs.has("closer");
+    w(root, "dist/src/helper.js", HELPER.replace("strict(x)", "true"));
+    return { before, after: drainSkillDirs(root).dirs.has("closer") };
+  };
+
+  it("plant (Vör's, 24ecba2) — the package's OWN NAME (self-reference via exports): the tampered import is refused", () => {
+    const r = tamperedSeated(`import { holds } from "closer-pkg";\nexport default (input) => ({ pass: holds(input) });\n`);
+    expect(r.before, "precondition: the honest closure is seated").toBe(true);
+    expect(r.after, "a tampered file reached by the package's own name walked through the pin").toBe(false);
+  });
+
+  it("plant — an ABSOLUTE path import: the tampered import is refused", () => {
+    const root = engine(IMPORTS_HELPER, { "dist/src/helper.js": HELPER, "dist/src/strict.js": STRICT });
+    const abs = join(root, "dist/src/helper.js");
+    const code = `import { holds } from ${JSON.stringify(abs)};\nexport default (input) => ({ pass: holds(input) });\n`;
+    w(root, "skills/closer/skill.mjs", code);
+    const meta = JSON.parse(readFileSync(join(root, "skills/closer/meta.json"), "utf8"));
+    meta.code_hash = skills.hashSkillCode(join(root, "skills/closer/skill.mjs"));
+    w(root, "skills/closer/meta.json", JSON.stringify(meta));
+    expect(drainSkillDirs(root).dirs.has("closer"), "precondition").toBe(true);
+    w(root, "dist/src/helper.js", HELPER.replace("strict(x)", "true"));
+    expect(drainSkillDirs(root).dirs.has("closer")).toBe(false);
+  });
+
+  it("plant — a file:// URL import: the tampered import is refused", () => {
+    const root = engine(IMPORTS_HELPER, { "dist/src/helper.js": HELPER, "dist/src/strict.js": STRICT });
+    const url = pathToFileURL(join(root, "dist/src/helper.js")).href;
+    const code = `import { holds } from ${JSON.stringify(url)};\nexport default (input) => ({ pass: holds(input) });\n`;
+    w(root, "skills/closer/skill.mjs", code);
+    const meta = JSON.parse(readFileSync(join(root, "skills/closer/meta.json"), "utf8"));
+    meta.code_hash = skills.hashSkillCode(join(root, "skills/closer/skill.mjs"));
+    w(root, "skills/closer/meta.json", JSON.stringify(meta));
+    expect(drainSkillDirs(root).dirs.has("closer"), "precondition").toBe(true);
+    w(root, "dist/src/helper.js", HELPER.replace("strict(x)", "true"));
+    expect(drainSkillDirs(root).dirs.has("closer")).toBe(false);
+  });
+
+  it("plant — a bare specifier that resolves to nothing: refused, never skipped", () => {
+    const root = engine(`export default () => ({ pass: true });\n`, {});
+    const code = `import { x } from "no-such-package-anywhere";\nexport default () => ({ pass: x });\n`;
+    w(root, "skills/closer/skill.mjs", code);
+    const meta = JSON.parse(readFileSync(join(root, "skills/closer/meta.json"), "utf8"));
+    meta.code_hash = `sha256:${createHash("sha256").update(code).digest("hex")}`;
+    w(root, "skills/closer/meta.json", JSON.stringify(meta));
+    expect(drainSkillDirs(root).dirs.has("closer")).toBe(false);
+  });
+
+  it("twin, must be ALLOWED — a node: builtin and a dependency under node_modules are outside the closure (the stated trust surface)", () => {
+    const root = engine(`import { createHash } from "node:crypto";\nimport dep from "some-dep";\nexport default () => ({ pass: !!createHash && !!dep });\n`,
+      { "package.json": PKG, "node_modules/some-dep/package.json": JSON.stringify({ name: "some-dep", main: "index.js" }), "node_modules/some-dep/index.js": "module.exports = 1;\n" });
+    expect(drainSkillDirs(root).dirs.has("closer")).toBe(true);
+    const files = (skills as unknown as { skillCodeClosure: (p: string) => { files: string[] } }).skillCodeClosure(join(root, "skills/closer/skill.mjs")).files;
+    expect(files.length, "the builtin and the node_modules dependency joined the closure").toBe(1);
   });
 
   it("control — a skill that imports nothing local hashes exactly as before: scope-gate's pin is its file's sha256", () => {

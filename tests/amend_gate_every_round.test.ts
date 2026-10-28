@@ -48,7 +48,7 @@ const std = (rounds: number) => composeStandard({
 const FAIL = (method: string) => ({ pass: false, checks: [{ method, target_ref: "law/x", result: "fails" }] });
 
 /** gate(n) is the gate's answer on the n-th draft (1-based); reviews[i] the reviewer's i-th answer (pass once they run out). */
-function band(gate: (draft: number) => boolean, reviews: boolean[]) {
+function band(gate: (draft: number) => boolean | "silent" | "throw", reviews: boolean[]) {
   const order: string[] = [];
   let drafts = 0, looks = 0;
   const invoke: AgentInvoker = (ctx) => {
@@ -56,7 +56,10 @@ function band(gate: (draft: number) => boolean, reviews: boolean[]) {
     order.push(ctx.agent.slug);
     if (ctx.agent.slug === "maker") { drafts++; return { ...coreInvariantFields("Artifact"), a: `draft ${drafts}` }; }
     if (ctx.agent.slug === "gatekeeper") {
-      return gate(drafts)
+      const g = gate(drafts);
+      if (g === "throw") throw new Error(`the gate crashed on draft ${drafts}`);
+      if (g === "silent") return { ...coreInvariantFields("Verdict"), scope_files: [], refused_ids: [] }; // a Verdict with no pass
+      return g
         ? { ...coreInvariantFields("Verdict"), pass: true, scope_files: ["crossing/laws.sx"], refused_ids: [] }
         : { ...coreInvariantFields("Verdict"), ...FAIL(`draft ${drafts} writes an unscoped law`), refused_ids: ["law/x"] };
     }
@@ -66,16 +69,17 @@ function band(gate: (draft: number) => boolean, reviews: boolean[]) {
   return { invoke, order, looks: () => looks };
 }
 
-async function run(gate: (draft: number) => boolean, reviews: boolean[], rounds = 3) {
+async function run(gate: (draft: number) => boolean | "silent" | "throw", reviews: boolean[], rounds = 3) {
   const w = world();
   const b = band(gate, reviews);
   const events: GigProgressEvent[] = [];
+  let err: unknown;
   const res = await runGig(std(rounds), {}, {
     outputs: w.outputs, ledger: w.ledger, invoke: b.invoke,
     onProgress: (e: GigProgressEvent) => events.push(e),
-  } as never);
+  } as never).catch((e: unknown) => { err = e; return undefined as never; });
   const ev = (t: string) => events.filter((e) => e.type === t) as Array<GigProgressEvent & Record<string, unknown>>;
-  return { res, b, ev };
+  return { res, b, ev, err };
 }
 
 describe("the gate runs on every amend round, before the reviewer", () => {
@@ -90,7 +94,7 @@ describe("the gate runs on every amend round, before the reviewer", () => {
     expect(b.looks()).toBe(1);
     const gated = ev("amend_gated");
     expect(gated.length).toBe(1);
-    expect(gated[0]).toMatchObject({ phase: "review", role: "review", gate: "gate", round: 1 });
+    expect(gated[0], "the round named is the round the gate ran in: the first amend is round 2").toMatchObject({ phase: "review", role: "review", gate: "gate", round: 2 });
     expect(JSON.stringify(gated[0]!["checks"])).toContain("draft 2 writes an unscoped law");
     const last = res.outputs.filter((o) => o.domain_type === "verdict").at(-1)!;
     expect(last.data["pass"], "the reviewer's failing verdict stands: the gig does not pass").toBe(false);
@@ -102,5 +106,18 @@ describe("the gate runs on every amend round, before the reviewer", () => {
     const { res, b } = await run(() => true, [false, false]);
     expect(b.looks()).toBe(3);
     expect(res.outputs.filter((o) => o.domain_type === "verdict").at(-1)!.data["pass"]).toBe(true);
+  });
+
+  it("G5 (Vör's plant, fce898d) — a gate that seals a Verdict with NO pass on the amended artifact stops the loop: silence is not a yes", async () => {
+    const { res, b, ev } = await run((d) => (d === 1 ? true : "silent"), [false], 3);
+    expect(b.order, "the reviewer is not seated after a silent gate").toEqual(["maker", "gatekeeper", "reviewer", "maker", "gatekeeper"]);
+    expect(ev("amend_gated").length).toBe(1);
+    expect(res!.outputs.filter((o) => o.domain_type === "verdict").at(-1)!.data["pass"], "the gig does not pass").toBe(false);
+  });
+
+  it("G6 — a gate whose chair throws on the amended artifact fails the gig closed: the reviewer is not seated, no pass", async () => {
+    const { b, err } = await run((d) => (d === 1 ? true : "throw"), [false], 3);
+    expect(b.order.filter((x) => x === "reviewer").length, "no second reviewer seat").toBe(1);
+    expect(err, "the crash surfaces as a failed gig, never a pass").toBeDefined();
   });
 });

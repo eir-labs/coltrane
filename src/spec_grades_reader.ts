@@ -58,9 +58,15 @@ export async function readSpecGrades(
   if (!rows || !seats) return undefined;
   if (seats.length !== 1 || typeof seats[0] !== "string" || !UUID.test(seats[0])) return undefined;
   const grades: SpecGradesRead["grades"] = [];
+  // DS-4 refuses a superseded grade by POSITION, so the order is verified, not trusted: every row carries the `at` of its
+  // make act, and the rows are non-decreasing in it. An out-of-order or undated row voids the read (Vör, at fb32460).
+  let last = -Infinity;
   for (const row of rows) {
     const g = asGrade(row, spec);
     if (!g) return undefined; // never partial
+    const at = Date.parse(String((row as { at?: unknown }).at ?? ""));
+    if (!Number.isFinite(at) || at < last) return undefined;
+    last = at;
     grades.push(g);
   }
   return { conformance_seat: seats[0], grades };

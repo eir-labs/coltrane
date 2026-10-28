@@ -36,10 +36,12 @@ import { testAgent } from "./_support/agents.js";
 // The content hash a definition SHOULD carry, computed here from its defining fields — never by the
 // engine's own helper, so the law is not the implementation agreeing with itself.
 type Def = { slug: string; domain?: unknown; phases?: unknown; input_types?: unknown; output_types?: unknown;
-  eval_slugs?: unknown; max_examine_rounds?: unknown; reserve_pool?: unknown; description?: unknown };
+  eval_slugs?: unknown; max_examine_rounds?: unknown; reserve_pool?: unknown; description?: unknown; refuse_when_unresolved?: unknown };
 const contentHash = (d: Def) => sha256Hex(canonStructuralJson({
   slug: d.slug, domain: d.domain ?? null, phases: d.phases ?? [], input_types: d.input_types, output_types: d.output_types,
   eval_slugs: d.eval_slugs, max_examine_rounds: d.max_examine_rounds, reserve_pool: d.reserve_pool, description: d.description,
+  // DS-7: the refusal policy decides how a gig ends, so it is a defining field (absent folds as before)
+  refuse_when_unresolved: d.refuse_when_unresolved,
 }));
 
 const REPO_ROOT = fileURLToPath(new URL("..", import.meta.url));

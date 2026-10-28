@@ -43,7 +43,9 @@ describe("DS-4 reads the conformance seat at the grade's own moment", () => {
   it("plant — a grade whose maker did not hold the seat at its moment is refused (held_seat: false), even if that maker holds it now", async () => {
     const d = await drive({ conformance_seat: VOR, grades: [grade({ held_seat: false })] });
     expect(d.seated).toBe(false);
-    expect(d.message).toMatch(/did not hold the conformance seat when it was made/);
+    // Vör: the door already refuses a grade whose maker was not seated at its moment (DS-6, enforced), so on a landed grade
+    // held_seat false means the seat's record was amended after the grade: a back-dated or rewritten seat. Say that.
+    expect(d.message).toMatch(/the seat's record was amended after the grade/);
   });
 
   it("control — a grade with no attestation is judged as before, against the current holder", async () => {

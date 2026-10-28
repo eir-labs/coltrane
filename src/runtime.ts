@@ -15,7 +15,7 @@ import { join as joinPath, relative as relPath, isAbsolute as isAbsPath, sep as 
 import type { Standard, Agent, Chair } from "./composition.js";
 import { PRIMITIVE_OUTPUT_TYPE, CORE_TYPES } from "./core_types.js";
 import { executeSkillAsync } from "./skill_subprocess.js";
-import { loadSkillPackage } from "./skills.js";
+import { loadSkillPackage, skillIdentityHashes } from "./skills.js";
 import { resolveModel, sessionUuidFor } from "./claude_invoker.js";
 import { resolveAgentGrants, type ToolProviderRegistry } from "./tool_providers.js";
 import { resolveAndRealize, type Realization, type RealizationOk } from "./venue_realize.js";
@@ -2501,20 +2501,9 @@ export async function runGig(
    * skill chair, and `meta.version` can stay put across a rewrite — `loadSkillPackage`
    * computes the hash from the bytes, which is what makes this honest.
    */
-  const resolvedSkillHashes = (): Array<{ slug: string; code_hash: string }> => {
-    const out: Array<{ slug: string; code_hash: string }> = [];
-    for (const [slug, dir] of deps.skill_dirs ?? []) {
-      try {
-        const pkg = loadSkillPackage(dir);
-        out.push({ slug, code_hash: pkg.codeHash ?? "" });
-      } catch {
-        // Unreadable here means unusable at dispatch too; record the absence rather than
-        // silently folding nothing, so a skill that vanished moves the identity.
-        out.push({ slug, code_hash: "<unreadable>" });
-      }
-    }
-    return out;
-  };
+  // Unreadable here means unusable at dispatch too; skillIdentityHashes records the absence rather than
+  // silently folding nothing, so a skill that vanished moves the identity. One expression, shared with the drain.
+  const resolvedSkillHashes = (): Array<{ slug: string; code_hash: string }> => skillIdentityHashes(deps.skill_dirs ?? []);
 
   const identity = (): RunIdentity => ({
     standard_slug: standard.slug,

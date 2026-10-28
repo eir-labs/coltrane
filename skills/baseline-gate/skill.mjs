@@ -38,6 +38,15 @@ function loopResult(dir) {
   return ok ? { result: { laws: j.laws } } : { error: "loop/loop-result's JSON is not {laws: [{id, verdict, plants: [{id, outcome}]}]}" };
 }
 
+/** The first law that differs between two loop results of one commit, by id, or undefined when they are the same. */
+function firstMoved(a, b) {
+  const key = (r) => new Map(r.laws.map((l) => [l.id, JSON.stringify(l)]));
+  const A = key(a), B = key(b);
+  for (const [id, v] of A) if (B.get(id) !== v) return id;
+  for (const id of B.keys()) if (!A.has(id)) return id;
+  return undefined;
+}
+
 export default function run(input, context) {
   const req = pickRequest(input, context);
   const scope = req.scope && typeof req.scope === "object" ? req.scope : null;
@@ -60,6 +69,13 @@ export default function run(input, context) {
     if (b.status !== 0) return refuse("branch-export", `exporting the staged branch failed: ${(b.stderr || "").trim().slice(0, 300)}`);
     const atBase = loopResult(base);
     if (atBase.error) return refuse("loop-result-at-baseline", atBase.error);
+    // RR-4, DETERMINISM FIRST (wiki spec.coltrane.the-red-pass-runs-in-its-room): the instrument is checked before it is
+    // trusted. A second run on the same baseline must give the same laws, verdicts and plant outcomes; if it does not, every
+    // comparison below would read the instrument's noise as the branch's fault (gig 3243a92c spent three rounds that way).
+    const again = loopResult(base);
+    if (again.error) return refuse("loop-result-at-baseline", again.error);
+    const moved = firstMoved(atBase.result, again.result);
+    if (moved) return refuse("loop-result-is-deterministic", `the loop result is not deterministic: two runs on the baseline differ at law ${JSON.stringify(moved)}, so no comparison with the branch can be trusted`);
     const atBranch = loopResult(branch);
     if (atBranch.error) return refuse("loop-result-on-branch", atBranch.error);
     const cmp = compareBaselineLoop({ baseline: atBase.result, branch: atBranch.result, scope });

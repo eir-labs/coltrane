@@ -147,6 +147,7 @@ export const claimFor = (standard_slug: string, extra: Record<string, unknown> =
     mode: "rehearsal",
     input: { subject: "the wire" },
     acting_for: "steve-1",
+    credential_expires_at: "2099-01-01T00:00:00Z", // DR-6: the player credential outlives the deadline (the venue path does not read it)
     ...extra,
   };
   if (!("token" in extra)) c["token"] = `ctk_${String(c["gig_id"])}`;

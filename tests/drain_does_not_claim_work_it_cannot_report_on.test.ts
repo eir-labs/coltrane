@@ -57,7 +57,7 @@ describe("DR-6 — the drain does not begin a gig whose credential expires befor
   });
 
   it("plant — a claim carrying no credential_expires_at: not begun (absent declines, never assumes enough)", async () => {
-    notBegun(await drive({}), "no credential_expires_at");
+    notBegun(await drive({ credential_expires_at: undefined }), "no credential_expires_at");
   });
 
   it("plant — an unparseable credential_expires_at: not begun", async () => {

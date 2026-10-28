@@ -10,7 +10,7 @@ const BLAKEY = "cc9eed18-21b7-4eda-834e-280451f00e15";
 const SPEC = "spec.chancery.the-testable-charter";
 const H = "e".repeat(64);
 const grade = (over: Record<string, unknown> = {}, rec: Record<string, unknown> = {}) =>
-  ({ id: "g1", at: "2026-10-28T06:00:00Z", record: { spec: SPEC, content_hash: H, verdict: "PASS", scope: null, by: VOR, ...rec }, ...over });
+  ({ id: "g1", at: "2026-10-28T06:00:00Z", record: { spec: SPEC, content_hash: H, verdict: "PASS", scope: null, by: VOR, held_seat: true, ...rec }, ...over });
 
 type Calls = Array<{ url: string; body: unknown }>;
 function store(routes: Record<string, () => { status: number; body: unknown }>): { fetchFn: typeof fetch; calls: Calls } {
@@ -33,7 +33,7 @@ describe("DR-1 — the drain's grades come from the store it claimed from, throu
     expect(typeof readSpecGrades, "src/spec_grades_reader.ts exports no readSpecGrades").toBe("function");
     const s = store({ ask_spec_grades: () => ({ status: 200, body: [grade()] }), ask_conformance_seat: () => ({ status: 200, body: [VOR] }) });
     const got = await readSpecGrades!(ctx, SPEC, "2026-10-28T07:00:00Z", s.fetchFn);
-    expect(got).toEqual({ conformance_seat: VOR, grades: [{ id: "g1", record: { spec: SPEC, content_hash: H, verdict: "PASS", scope: null, by: VOR } }] });
+    expect(got).toEqual({ conformance_seat: VOR, grades: [{ id: "g1", record: { spec: SPEC, content_hash: H, verdict: "PASS", scope: null, by: VOR, held_seat: true } }] });
     expect(s.calls.find((c) => c.url.endsWith("/ask_spec_grades"))?.body).toEqual({ p_spec: SPEC });
     expect(s.calls.find((c) => c.url.endsWith("/ask_conformance_seat"))?.body).toEqual({ p_at: "2026-10-28T07:00:00Z" });
     expect(s.calls.every((c) => c.url.startsWith("http://store.test/rest/v1/rpc/")), "only the store's asks are read: no table select").toBe(true);
@@ -80,6 +80,7 @@ describe("DR-2 — the read fails closed: absent, never empty-and-admitting, nev
     ["a grade whose grader is not a principal id", { ask_spec_grades: () => ({ status: 200, body: [grade({}, { by: "vor" })] }), ask_conformance_seat: () => ({ status: 200, body: [VOR] }) }],
     ["a grade whose hash is not a sha256", { ask_spec_grades: () => ({ status: 200, body: [grade({}, { content_hash: "abc" })] }), ask_conformance_seat: () => ({ status: 200, body: [VOR] }) }],
     ["one good grade beside one malformed (never partial)", { ask_spec_grades: () => ({ status: 200, body: [grade(), grade({ id: "bad" }, { verdict: "MAYBE" })] }), ask_conformance_seat: () => ({ status: 200, body: [VOR] }) }],
+    ["a grade carrying no held_seat attestation (the ask's seat-at-its-moment)", { ask_spec_grades: () => ({ status: 200, body: [grade({}, { held_seat: undefined })] }), ask_conformance_seat: () => ({ status: 200, body: [VOR] }) }],
     ["no one seated in the conformance seat", { ask_spec_grades: () => ({ status: 200, body: [grade()] }), ask_conformance_seat: () => ({ status: 200, body: [] }) }],
     ["two principals seated in the conformance seat", { ask_spec_grades: () => ({ status: 200, body: [grade()] }), ask_conformance_seat: () => ({ status: 200, body: [VOR, BLAKEY] }) }],
     ["the ask does not exist on this store (404)", { ask_conformance_seat: () => ({ status: 200, body: [VOR] }) }],

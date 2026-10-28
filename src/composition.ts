@@ -183,12 +183,13 @@ export class CompositionError extends Error {}
 export function standardContentHash(def: {
   slug: string; domain?: string | null | undefined; phases?: unknown;
   input_types?: unknown; output_types?: unknown; eval_slugs?: unknown;
-  max_examine_rounds?: unknown; reserve_pool?: unknown; description?: unknown;
+  max_examine_rounds?: unknown; reserve_pool?: unknown; description?: unknown; refuse_when_unresolved?: unknown;
 }): string {
   return sha256Hex(canonStructuralJson({
     slug: def.slug, domain: def.domain ?? null, phases: def.phases ?? [],
     input_types: def.input_types, output_types: def.output_types, eval_slugs: def.eval_slugs,
     max_examine_rounds: def.max_examine_rounds, reserve_pool: def.reserve_pool, description: def.description,
+    refuse_when_unresolved: def.refuse_when_unresolved,
   }));
 }
 
@@ -307,6 +308,8 @@ export function composeStandard(def: {
   input_types?: readonly string[]; // the gig contract (#177) — types entering from outside the standard
   output_types?: readonly string[];
   max_examine_rounds?: number;
+  /** DS-7: an exhausted amend ladder ends refused (see genome_schema.ts). */
+  refuse_when_unresolved?: boolean;
   description?: string;
   /** The standard's DEFAULT reserve pool (#turn-budget). Rides through the loss-free `...def`
    *  spread into the runtime Standard; the dispatch payload's `pool` overrides it at runGig. */

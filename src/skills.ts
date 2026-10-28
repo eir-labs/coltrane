@@ -364,3 +364,18 @@ export function composeSkills(dirs: readonly string[]): CompositionResult {
 void (readSkillMeta as unknown);
 void (executeSkill as unknown);
 export type { ExecuteResult as _ExecuteResult };
+
+/**
+ * THE ONE EXPRESSION a run's identity folds its skills through: each registered skill dir's code hash, in the
+ * map's order, an unreadable package recorded as such so a vanished skill moves the identity. runGig
+ * (resolvedSkillHashes) and the drain's reconstruction (worker.ts coldRunIdentity) both call this, so the two
+ * cannot drift (DR-5, Vör: "fold identity through the same expression runGig uses").
+ */
+export function skillIdentityHashes(skillDirs: Iterable<[string, string]>): Array<{ slug: string; code_hash: string }> {
+  const out: Array<{ slug: string; code_hash: string }> = [];
+  for (const [slug, dir] of skillDirs) {
+    try { out.push({ slug, code_hash: loadSkillPackage(dir).codeHash ?? "" }); }
+    catch { out.push({ slug, code_hash: "<unreadable>" }); }
+  }
+  return out;
+}

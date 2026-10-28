@@ -36,7 +36,7 @@ import { homedir, tmpdir } from "node:os";
 import * as path from "node:path";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { loadSkillPackage } from "./skills.js";
+import { skillIdentityHashes } from "./skills.js";
 import { runGig, ResumeRefused, genomeHash, CORE_TO_PRIMITIVE, type AgentInvoker, type TerminalHeaderOutcome } from "./runtime.js";
 import { HOSTED_LEASE_MS, LeaseLost, LeaseUnverifiable, renewLease, releaseLease, type LeaseCredential } from "./lease.js";
 import { makeGigLogTee, gigLogBaseFromEnv } from "./gig_log_tee.js";
@@ -885,9 +885,7 @@ export function coldRunIdentity(standard: Standard, gigInput: Record<string, unk
     genome_hash: genomeHash(standard),
     // DR-5 — exactly what runGig's resolvedSkillHashes folds for the dirs the drain registers (DR-3), in the
     // same order, so a re-claim reconstructs the identity its own run computed.
-    producers_sha: producersSha({ agents: standard.agents, skills: [...skillDirs].map(([slug, dir]) => {
-      try { return { slug, code_hash: loadSkillPackage(dir).codeHash ?? "" }; } catch { return { slug, code_hash: "<unreadable>" }; }
-    }) }),
+    producers_sha: producersSha({ agents: standard.agents, skills: skillIdentityHashes(skillDirs) }),
     gig_input_sha: sha256Hex(canonJson(gigInput)),
     model_version: "unknown",
     depth: "",

@@ -1054,6 +1054,19 @@ export function partialBudgetState(e: unknown): BudgetState | undefined {
 export class RuntimeError extends Error {}
 
 /**
+ * DS-7 — a gig that ENDS REFUSED by its own standard's policy (refuse_when_unresolved): the amend rounds ran out with a
+ * verdict still failing, or a gate stopped them. Typed and structured, so a caller tells "the work failed its review"
+ * from "the engine broke" by class and fields, never by matching the message (Vör at 05df7a3). The gig still ends in
+ * the store's `failed` state; this is the reason it carries.
+ */
+export class GigRefusedError extends RuntimeError {
+  constructor(message: string, readonly refusal: { kind: "unresolved"; chair: string; gate?: string; rounds: number }) {
+    super(message);
+    this.name = "GigRefusedError";
+  }
+}
+
+/**
  * One dead reference the dispatch preflight caught. Four kinds, ALL knowable at t=0 from the
  * standard alone — no chair need run to see any of them:
  *
@@ -1841,7 +1854,10 @@ function specGradeRefusal(
   // unattested grade is judged as before, against the current holder: never looser.
   const heldSeat = named.held_seat;
   if (heldSeat === false) {
-    return `${head}, but spec_grade "${gradeId}" was made by "${named.by}", who did not hold the conformance seat when it was made`;
+    // The door refuses a grade whose maker was not seated at its moment (DS-6, enforced), so on a landed grade a false
+    // attestation can only mean the seat's record was amended after the grade: a back-dated or rewritten seat. That is
+    // the one thing it can be, and this is the only place in the system that detects it.
+    return `${head}, but spec_grade "${gradeId}" attests held_seat false for "${named.by}": the seat's record was amended after the grade (the door admits a grade only from the seat's holder at its moment), so the seat history no longer supports it`;
   }
   if (heldSeat !== true && named.by !== supplied.conformance_seat) {
     return `${head}, but spec_grade "${gradeId}" was made by "${named.by}", not the conformance seat "${supplied.conformance_seat}"`;
@@ -3269,7 +3285,7 @@ export async function runGig(
           const why = stoppedByGate !== undefined
             ? `the gate "${stoppedByGate}" refused the amended artifact, and "${vch.role}"'s last verdict still fails`
             : `"${vch.role}"'s verdict still fails after ${examineRounds} amend round(s)`;
-          throw new RuntimeError(`gig refused (refuse_when_unresolved): ${why}`);
+          throw new GigRefusedError(`gig refused (refuse_when_unresolved): ${why}`, { kind: "unresolved", chair: vch.role, ...(stoppedByGate !== undefined ? { gate: stoppedByGate } : {}), rounds: examineRounds });
         }
       }
     }

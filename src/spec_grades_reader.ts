@@ -10,7 +10,7 @@
 
 export interface SpecGradesRead {
   conformance_seat: string;
-  grades: Array<{ id: string; record: { spec: string; content_hash: string; verdict: "PASS" | "HOLD"; scope: string[] | null; by: string } }>;
+  grades: Array<{ id: string; record: { spec: string; content_hash: string; verdict: "PASS" | "HOLD"; scope: string[] | null; by: string; held_seat: boolean } }>;
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -42,7 +42,9 @@ function asGrade(row: unknown, spec: string): SpecGradesRead["grades"][number] |
   const scope = g["scope"];
   if (!(scope === null || scope === undefined || (Array.isArray(scope) && scope.every((x) => typeof x === "string")))) return undefined;
   if (typeof g["by"] !== "string" || !UUID.test(g["by"])) return undefined;
-  return { id: r.id, record: { spec, content_hash: g["content_hash"], verdict: g["verdict"], scope: (scope ?? null) as string[] | null, by: g["by"] } };
+  // whether the grader held the conformance seat at the grade's own moment (the ask's attestation); required
+  if (typeof g["held_seat"] !== "boolean") return undefined;
+  return { id: r.id, record: { spec, content_hash: g["content_hash"], verdict: g["verdict"], scope: (scope ?? null) as string[] | null, by: g["by"], held_seat: g["held_seat"] } };
 }
 
 export async function readSpecGrades(

@@ -459,6 +459,9 @@ export interface SpecGradeRecord {
   verdict: string;
   scope: readonly string[] | null;
   by: string;
+  /** Whether `by` held the conformance seat at the grade's own moment, as the store attests it (chancery-os
+   *  ask_spec_grades). Absent: unattested, judged against the current holder. */
+  held_seat?: boolean;
 }
 
 /**
@@ -1833,7 +1836,14 @@ function specGradeRefusal(
   if (named.verdict !== "PASS") {
     return `${head}, but spec_grade "${gradeId}" has verdict ${named.verdict} — only a PASS admits`;
   }
-  if (named.by !== supplied.conformance_seat) {
+  // The seat is read at the GRADE'S OWN MOMENT when the store attests it (held_seat, from ask_spec_grades): a seat
+  // rotation must not void every grade ever recorded (Vör). An attested false refuses whoever holds the seat now; an
+  // unattested grade is judged as before, against the current holder: never looser.
+  const heldSeat = named.held_seat;
+  if (heldSeat === false) {
+    return `${head}, but spec_grade "${gradeId}" was made by "${named.by}", who did not hold the conformance seat when it was made`;
+  }
+  if (heldSeat !== true && named.by !== supplied.conformance_seat) {
     return `${head}, but spec_grade "${gradeId}" was made by "${named.by}", not the conformance seat "${supplied.conformance_seat}"`;
   }
   if (named.content_hash !== request["content_hash"]) {

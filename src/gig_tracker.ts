@@ -206,6 +206,7 @@ export function gigEventLogLine(gig_id: string, ev: GigProgressEvent): string | 
     case "phase_start": return JSON.stringify({ ...base, ev: "phase_start", phase: ev.phase, chairs: ev.roles });
     case "amend_escalated": return JSON.stringify({ ...base, ev: "amend_escalated", phase: ev.phase, role: ev.role, round: ev.round, from_tier: ev.from_tier, to_tier: ev.to_tier });
     case "amend_stalled": return JSON.stringify({ ...base, ev: "amend_stalled", phase: ev.phase, role: ev.role, round: ev.round, repeated: ev.repeated });
+    case "amend_gated": return JSON.stringify({ ...base, ev: "amend_gated", phase: ev.phase, role: ev.role, gate: ev.gate, round: ev.round, checks: ev.checks });
     case "fan_out_unmatched": return JSON.stringify({ ...base, ev: "fan_out_unmatched", phase: ev.phase, role: ev.role, set_type: ev.set_type, path: ev.path, on: ev.on, values: ev.values });
     case "chair_start": return JSON.stringify({ ...base, ev: "chair_start", phase: ev.phase, role: ev.role, producer: ev.producer });
     case "chair_complete": return JSON.stringify({ ...base, ev: "chair_complete", role: ev.role, sealed: ev.output_types, ms: ev.duration_ms });

@@ -269,6 +269,8 @@ export type GigProgressEvent =
   | { type: "amend_escalated"; phase: string; role: string; round: number; from_tier: string; to_tier: string }
   /** The amend ladder stopped the loop: the re-verify failed on the same findings as the verdict before. */
   | { type: "amend_stalled"; phase: string; role: string; round: number; repeated: Array<{ method: string; target_ref: string }> }
+  /** A gate the verifier depends on refused the amended artifact; the loop stopped before the verifier saw it. */
+  | { type: "amend_gated"; phase: string; role: string; gate: string; round: number; checks: Array<{ method: string; target_ref: string }> }
   | { type: "chair_start"; phase: string; role: string; producer: string }
   | {
       type: "chair_complete"; phase: string; role: string; producer: string;
@@ -3184,6 +3186,33 @@ export async function runGig(
             producedByRole.set(mk.role, recs);
             produced.push(...recs);
             noteCheckpointRole(mk.role, phaseNameOf(mk.role), recs);
+          }
+          // THE GATE ON EVERY ROUND (Vör's HOLD on #596): a chair the verifier depends on that is not a maker
+          // and judges what was just amended (it depends, directly or transitively, on an amended maker) is a
+          // GATE. It re-runs on the amended artifact after the makers and before the verifier, so an amended
+          // diff is gated exactly as round one's was. A gate that fails stops the loop: the verifier never sees
+          // the gated artifact, and its last failing verdict stands.
+          const amendedRoles = new Set(makers.map((m) => m.role));
+          const gates = vch.depends_on
+            .map((role) => allChairs.find((c) => c.role === role))
+            .filter((c): c is Chair => !!c && !amendedRoles.has(c.role)
+              && [...transitiveDepsOf(c.role)].some((r) => amendedRoles.has(r)));
+          let gatedBy: { gate: string; record: OutputRecord } | undefined;
+          for (const g of gates) {
+            const gprep = prepareChair(g, phaseNameOf(g.role), [], { round: round + 1 });
+            const grecs = await invokeAndWriteChair(gprep);
+            dropFromProduced(producedByRole.get(g.role) ?? []);
+            producedByRole.set(g.role, grecs);
+            produced.push(...grecs);
+            noteCheckpointRole(g.role, phaseNameOf(g.role), grecs);
+            const refused = failingVerdict(g.role);
+            if (refused) { gatedBy = { gate: g.role, record: refused }; break; }
+          }
+          if (gatedBy) {
+            emit({ type: "amend_gated", phase: phase.name, role: vch.role, gate: gatedBy.gate, round, checks: findingsOf(gatedBy.record) });
+            if (budget && hasCeiling) budget.spent_usd = usage.total_cost_usd;
+            saveCheckpoint();
+            break;
           }
           // RE-VERIFY the amended artifact. contract-resumed-gig-session-v1 (O1/I1) — the re-verify
           // RESUMES the verifier's own round-one session (`resume: true`), never re-opens `--session-id`

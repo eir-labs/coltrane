@@ -29,7 +29,7 @@ async function drive(spec_grades: unknown): Promise<{ seated: boolean; message: 
   let seated = false;
   const invoke: AgentInvoker = () => { seated = true; throw new Error("stub invoker: a model seat was invoked"); };
   let message = "";
-  try { await runGig(std, { "change-request": request }, { outputs: createOutputStore(registry), ledger: new MemoryLedger(), invoke, skill_dirs: new Map([["scope-gate", `${ROOT}skills/scope-gate`]]), spec_grades } as never); }
+  try { await runGig(std, { "change-request": request }, { outputs: createOutputStore(registry), ledger: new MemoryLedger(), invoke, skill_dirs: new Map([["scope-gate", `${ROOT}skills/scope-gate`], ["baseline-gate", `${ROOT}skills/baseline-gate`]]), spec_grades } as never); }
   catch (e) { message = e instanceof Error ? e.message : String(e); }
   return { seated, message };
 }

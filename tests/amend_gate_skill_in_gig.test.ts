@@ -7,7 +7,7 @@
 // scope gate must refuse that amended diff, naming the law, before the reviewer is seated again.
 import { describe, it, expect, afterAll } from "vitest";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -22,6 +22,7 @@ import { coreInvariantFields } from "./_support/specs.js";
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const SLUG = "chancery-red-drafting-v0";
 const GATE_DIR = join(ROOT, "skills", "scope-gate");
+const BASELINE_DIR = join(ROOT, "skills", "baseline-gate");
 const genome = loadGenome(ROOT);
 const registry = createRegistry([...genome.domain_types.values()] as never);
 
@@ -44,7 +45,11 @@ function repo(): { dir: string; baseline: string } {
   const dir = mkdtempSync(join(tmpdir(), "amend-gate-")); tmps.push(dir);
   git(dir, "init", "-q");
   writeRel(dir, "crossing/laws.sx", BASE_LAWS);
-  git(dir, "add", "--", "crossing/laws.sx");
+  // the repository's declared loop result (DS-5's baseline-gate reads it): every law passes, its plant "p" red. The
+  // statement edits this plant makes move no verdict, so the baseline holds and only the scope gate can refuse.
+  writeRel(dir, "loop/loop-result", `#!/usr/bin/env node\nconst t = require("fs").readFileSync("crossing/laws.sx", "utf8");\nprocess.stdout.write(JSON.stringify({ laws: [...t.matchAll(/\\(law "([^"]+)"/g)].map((m) => ({ id: m[1], verdict: "pass", plants: [{ id: "p", outcome: "red" }] })) }));\n`);
+  chmodSync(join(dir, "loop/loop-result"), 0o755);
+  git(dir, "add", "--", "crossing/laws.sx", "loop/loop-result");
   git(dir, "commit", "-q", "-m", "baseline");
   return { dir, baseline: git(dir, "rev-parse", "HEAD").trim() };
 }
@@ -95,7 +100,7 @@ describe("the scope gate runs on every amend round of chancery-red-drafting-v0, 
     try {
       await runGig(std!, { "change-request": request }, {
         outputs, ledger: new MemoryLedger(), invoke,
-        skill_dirs: new Map([["scope-gate", GATE_DIR]]),
+        skill_dirs: new Map([["scope-gate", GATE_DIR], ["baseline-gate", BASELINE_DIR]]),
         tree_root: r.dir,
         spec_grades: { conformance_seat: VOR, grades: [{ id: "g1", record: { spec: SPEC, content_hash: HASH, verdict: "PASS", scope: SCOPE.laws, by: VOR } }] },
         onProgress: (e: GigProgressEvent) => events.push(e),

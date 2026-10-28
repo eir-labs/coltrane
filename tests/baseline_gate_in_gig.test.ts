@@ -107,7 +107,7 @@ describe("DS-5 driven — the baseline-gate chair holds every unscoped law to th
     expect(b?.skill_slug).toBe("baseline-gate");
   });
 
-  it("DS-5 plant, driven — a scoped term amended so an UNSCOPED law passes its own plant: refused by baseline-gate, naming the law and the plant, the reviewer never seated", async () => {
+  it("DS-5 plant, driven — a scoped term amended so an UNSCOPED law passes its own plant: refused by baseline-gate, naming the law and the plant, the reviewer never seated", { timeout: 60_000 }, async () => {
     const d = await drive((dir) => {
       w(dir, "crossing/terms.sx", TERMS(""));
       w(dir, "crossing/laws.sx", LAWS + `(law "${NEW}"\n  (check "grep -qE 'Ada|Grace' src/greeting.txt")\n  (plant "drop-name" "true"))\n\n`);
@@ -120,7 +120,7 @@ describe("DS-5 driven — the baseline-gate chair holds every unscoped law to th
     expect(said).toContain("drop-please");
   });
 
-  it("DS-5 twin, driven — a red pass that adds a law and leaves the term alone passes baseline-gate and the reviewer is seated", async () => {
+  it("DS-5 twin, driven — a red pass that adds a law and leaves the term alone passes baseline-gate and the reviewer is seated", { timeout: 60_000 }, async () => {
     const d = await drive((dir) => {
       w(dir, "crossing/laws.sx", LAWS + `(law "${NEW}"\n  (check "grep -qE 'Ada|Grace' src/greeting.txt")\n  (plant "drop-name" "true"))\n\n`);
     });

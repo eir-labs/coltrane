@@ -1,0 +1,13 @@
+{
+  "slug": "baseline-gate",
+  "version": 1,
+  "skill_type": "verification",
+  "input_type": "change-request",
+  "output_type": "baseline-verdict",
+  "determinism_ratio": 1,
+  "permission": {
+    "tier": 2
+  },
+  "description": "The drafting standard's baseline chair (DS-5): every law that exists at the baseline and is not named in the scope keeps, on the drafter's staged branch, its verdict and each plant's outcome. Runs the repository's loop/loop-result on the baseline and on the branch, each in a throwaway directory, and compares them with the engine's compareBaselineLoop. A missing or malformed loop result is refused. Deterministic, no model.",
+  "code_hash": "sha256:435e9d92bb503aa8a567621d80320f93925abb8a23443a77e25627ed61bff284"
+}

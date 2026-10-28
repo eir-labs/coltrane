@@ -267,9 +267,9 @@ const modelSeatFitting = (chair: Chair, slug: string): Agent =>
   } as never);
 
 describe("DS-2 — drafting:the-gate-is-not-a-model: `scope` is skill-backed and a model seat there fails to compose", () => {
-  it("DS-2 control — the standard as held composes: draft(agent) → scope(skill scope-gate, no agent) → review(agent), 3 examine rounds", () => {
+  it("DS-2 control — the standard as held composes: draft(agent) → scope(skill scope-gate, no agent) → baseline(skill baseline-gate, DS-5) → review(agent), 3 examine rounds", () => {
     const std = held();
-    expect(std.phases.map((p) => p.name), "phases, in order").toEqual(["draft", "scope", "review"]);
+    expect(std.phases.map((p) => p.name), "phases, in order").toEqual(["draft", "scope", "baseline", "review"]);
     const draft = chairByRole(std, "draft"), scope = chairByRole(std, "scope"), review = chairByRole(std, "review");
     expect(draft.agent_slug).toBe(DRAFTER);
     expect(draft.output_contract).toEqual(["red-spec"]);
@@ -277,6 +277,11 @@ describe("DS-2 — drafting:the-gate-is-not-a-model: `scope` is skill-backed and
     expect(scope.skill_slug, "`scope` must be SKILL-BACKED by scope-gate").toBe(GATE);
     expect(scope.agent_slug ?? "", "`scope` must hold no agent (no model seat)").toBe("");
     expect(scope.output_contract).toEqual(["scope-verdict"]);
+    const baseline = chairByRole(std, "baseline");
+    expect(baseline.skill_slug, "`baseline` must be SKILL-BACKED by baseline-gate (DS-5)").toBe("baseline-gate");
+    expect(baseline.agent_slug ?? "", "`baseline` must hold no agent (no model seat)").toBe("");
+    expect(baseline.output_contract).toEqual(["baseline-verdict"]);
+    expect((genome.skills.get("baseline-gate") as unknown as { determinism_ratio?: number } | undefined)?.determinism_ratio, "the baseline gate's skill declares determinism_ratio 1.0").toBe(1);
     expect(review.agent_slug).toBe(REVIEWER);
     expect(review.output_contract).toEqual(["change-verdict"]);
     expect(agentOf(std, REVIEWER).primitives, "the reviewer's primitive is VERIFY").toContain("VERIFY");
@@ -455,7 +460,7 @@ async function drive(grades: { id: string; record: SpecGrade }[], input: Record<
   };
   const deps = {
     outputs: createOutputStore(registry), ledger: new MemoryLedger(), invoke,
-    skill_dirs: new Map([[GATE, GATE_DIR]]),
+    skill_dirs: new Map([[GATE, GATE_DIR], ["baseline-gate", join(ROOT, "skills", "baseline-gate")]]),
     spec_grades: { conformance_seat: seat, grades },
   };
   let err: unknown;

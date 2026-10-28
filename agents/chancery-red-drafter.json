@@ -6,6 +6,7 @@
   "input_types": [
     "change-request",
     "scope-verdict",
+    "baseline-verdict",
     "change-verdict"
   ],
   "output_types": [

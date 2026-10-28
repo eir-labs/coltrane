@@ -310,7 +310,8 @@ describe("#227 — the genome's declared required fields are dropped, not absent
     // 85 → 88 (2026-10-01): the pr-review trio (pr-review-v1) — pr-review-request,
     // pr-review-surface, review-finding.
     // 88 → 89 (2026-10-27): scope-verdict (chancery-red-drafting-v0's scope gate), required refused + files.
-    expect(checked.length).toBe(89);
+    // 89 → 90 (2026-10-28): baseline-verdict (chancery-red-drafting-v0's baseline gate, DS-5), required pass + violations + excepted.
+    expect(checked.length).toBe(90);
   });
 });
 

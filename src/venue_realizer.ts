@@ -250,6 +250,13 @@ export function environmentIdentity(venue: unknown): string {
   return `env-${sha256Hex(canonStructuralJson(v))}`;
 }
 
+/** R38's exemption, as ONE predicate (it was written twice: the claim gate and the run path; and the realize decision in runtime.ts read neither it nor floor — Vör, round 8). A room NEEDS NOTHING STOOD UP only when it
+ *  declares no servers, no substrate and NO FLOOR: a floored room is one a box must build (RR-1(c2), Vör round 7 — the floor was not
+ *  read, so a floored, server-less room was admitted to every box as needing nothing and its chairs would have run on the host). */
+export function aRoomNeedsNothing(room: { mcp_servers?: readonly unknown[]; substrate?: unknown; floor?: unknown } | undefined | null): boolean {
+  return Boolean(room) && Array.isArray(room!.mcp_servers) && room!.mcp_servers.length === 0 && !room!.substrate && !room!.floor;
+}
+
 /** RR-1: a floor written as a DIGEST — `sha256:<64 hex>`, or `<repository>@sha256:<64 hex>` — names exactly one image and is
  *  used verbatim. Anything else is a TAG, which moves (Vör: two runs resolving one tag to different images make a gate's
  *  determinism only as stable as that day's tag). */

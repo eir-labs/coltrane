@@ -20,6 +20,7 @@ import { resolveModel, sessionUuidFor } from "./claude_invoker.js";
 import { resolveAgentGrants, type ToolProviderRegistry } from "./tool_providers.js";
 import { resolveAndRealize, type Realization, type RealizationOk } from "./venue_realize.js";
 import type { VenueRealizer, RealizationHandle, CredentialResolver } from "./venue_realizer.js";
+import { aRoomNeedsNothing } from "./venue_realizer.js";
 import type { Venue } from "./chart.js";
 
 // core type → the process primitive that produces it (reverse of PRIMITIVE_OUTPUT_TYPE).
@@ -1977,7 +1978,9 @@ export async function runGig(
     // same discipline src/workspace.ts documents: the SUBJECT of work must be explicit, but the
     // credential that clones it is ambient plumbing, never a per-repository fact. Absent env → the
     // populate declines on its own terms (prepareWorkspace names what it could not obtain).
-    if (deps.venueRealizer && gigVenue && (gigVenue.mcp_servers.length > 0 || deps.repoUrl)) {
+    // RR-1(c2), Vör round 8: a floor is a reason to realize. A room that does not need nothing (servers, a substrate, or a FLOOR) is
+    // stood up; a furnishings-only room is not, unless the run names a repository to populate.
+    if (deps.venueRealizer && gigVenue && (!aRoomNeedsNothing(gigVenue) || deps.repoUrl)) {
       gigSubstrate = await deps.venueRealizer.realize(
         gigVenue,
         deps.credentialResolver ?? (async () => ({})),

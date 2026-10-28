@@ -31,6 +31,7 @@
 // header carries the run's genome_hash. So a worker with no local record reconstructs one from
 // the sink (`resumeStateFromDrain` below) and resumes from that. Resume state's home is the
 // store; the local checkpoint demotes to a fast path.
+import { aRoomNeedsNothing } from "./venue_realizer.js";
 import * as fs from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import * as path from "node:path";
@@ -600,13 +601,6 @@ export function standardForRun<S>(
 
 /** Does this room need nothing stood up — no mcp_servers, no substrate — so any box may run in it? */
 export type RoomNeedsNothing = (ctx: WorkerContext, venue: string) => Promise<boolean>;
-
-/** R38's exemption, as ONE predicate (it was written twice: the claim gate and the run path). A room NEEDS NOTHING STOOD UP only when it
- *  declares no servers, no substrate and NO FLOOR: a floored room is one a box must build (RR-1(c2), Vör round 7 — the floor was not
- *  read, so a floored, server-less room was admitted to every box as needing nothing and its chairs would have run on the host). */
-export function aRoomNeedsNothing(room: { mcp_servers?: readonly unknown[]; substrate?: unknown; floor?: unknown } | undefined | null): boolean {
-  return Boolean(room) && Array.isArray(room!.mcp_servers) && room!.mcp_servers.length === 0 && !room!.substrate && !room!.floor;
-}
 
 export const defaultRoomNeedsNothing: RoomNeedsNothing = async (ctx, venue) => {
   // Read once: the gate's load is kept on the context so the run below does not pay for it twice
@@ -2110,3 +2104,6 @@ export function commitAttribution(claim: { gig_id: string; acting_for: string },
     },
   };
 }
+
+// RR-1(c2): the predicate lives in venue_realizer.ts (one home for the claim gate, the run path and the realize decision).
+export { aRoomNeedsNothing } from "./venue_realizer.js";

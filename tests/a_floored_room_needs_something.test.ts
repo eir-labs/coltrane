@@ -32,8 +32,7 @@ describe("RR-1(c2) — a floored room needs something", () => {
   it("twin: furnishings only — no servers, no substrate, no floor — needs nothing (R38 unchanged)", () => {
     expect(needsNothing!(room())).toBe(true);
   });
-  it("both sites use it: the claim gate and the run path spell the predicate nowhere else", () => {
-    const src = readFileSync(`${ROOT}src/worker.ts`, "utf8");
-    expect(src.match(/mcp_servers\.length === 0/g)?.length ?? 0, "the predicate is written out more than once").toBe(1);
-  });
+  // The once-only law was a law on spelling (Vör, round 8: re-inlined as !room.mcp_servers.length it stayed green). Replaced by
+  // behaviour at each decision site: the claim gate (venue_dispatch/drain_claim_run_coherence) and the realize decision
+  // (venue_dispatch/a_floored_room_is_realized) are driven, so a divergent duplicate reds where it diverges, in any file.
 });

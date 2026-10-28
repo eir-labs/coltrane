@@ -8,7 +8,7 @@
 // The pin now hashes the skill's transitive LOCAL import closure (every relative specifier, static or literal
 // dynamic, followed through the files it names). A skill that imports nothing local hashes exactly as before, so
 // every existing pin stands. A closure that cannot be resolved — a relative file that is not there, a dynamic import
-// whose specifier is not a literal — yields a hash no pin can equal: refused at seating, never seated on a guess.
+// whose specifier is not a literal — is refused (SkillLoadError) whatever the meta pins: never seated on a guess.
 // Bare specifiers (node:*, packages) are outside the closure; that is the stated trust surface.
 import { describe, it, expect, afterAll } from "vitest";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from "node:fs";
@@ -57,15 +57,25 @@ describe("DR-3b — the pin covers the skill's local import closure", () => {
     expect(drainSkillDirs(root).dirs.has("closer")).toBe(false);
   });
 
-  it("plant — a relative import that is not there: refused, never seated on a guess", () => {
-    const root = engine(IMPORTS_HELPER, {});
+  it("plant — a relative import that is no longer there (pinned while it was): refused, never seated on a guess", () => {
+    const root = engine(IMPORTS_HELPER, { "dist/src/helper.js": HELPER, "dist/src/strict.js": STRICT });
+    rmSync(join(root, "dist/src/strict.js"));
     const s = drainSkillDirs(root);
     expect(s.dirs.has("closer")).toBe(false);
+    expect(s.refused.find((r) => r.slug === "closer")?.reason ?? "").toMatch(/unresolvable/);
   });
 
-  it("plant — a dynamic import whose specifier is not a literal: refused (its closure cannot be known)", () => {
-    const root = engine(`const p = "../../dist/src/" + "helper.js";\nexport default async (i) => (await import(p)).holds(i);\n`, { "dist/src/helper.js": HELPER, "dist/src/strict.js": STRICT });
-    expect(drainSkillDirs(root).dirs.has("closer")).toBe(false);
+  it("plant — a dynamic import whose specifier is not a literal, pinned under the one-file rule: refused (its closure cannot be known)", () => {
+    const code = `const p = "../../dist/src/" + "helper.js";\nexport default async (i) => (await import(p)).holds(i);\n`;
+    const root = engine(IMPORTS_HELPER, { "dist/src/helper.js": HELPER, "dist/src/strict.js": STRICT });
+    w(root, "skills/closer/skill.mjs", code);
+    const meta = JSON.parse(readFileSync(join(root, "skills/closer/meta.json"), "utf8"));
+    meta.code_hash = `sha256:${createHash("sha256").update(code).digest("hex")}`;
+    w(root, "skills/closer/meta.json", JSON.stringify(meta));
+    const s = drainSkillDirs(root);
+    expect(s.dirs.has("closer")).toBe(false);
+    expect(s.refused.find((r) => r.slug === "closer")?.reason ?? "").toMatch(/not a literal/);
+    expect(() => skills.hashSkillCode(join(root, "skills/closer/skill.mjs"))).toThrow(/unresolvable/);
   });
 
   it("control — a skill that imports nothing local hashes exactly as before: scope-gate's pin is its file's sha256", () => {

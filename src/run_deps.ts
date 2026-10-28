@@ -309,6 +309,7 @@ export function drainSkillDirs(root: string): { dirs: Map<string, string>; refus
     try { pkg = loadSkillPackage(dir); } catch (e) { refused.push({ slug: name.name, reason: `unreadable package: ${e instanceof Error ? e.message : String(e)}` }); continue; }
     const slug = pkg.meta.slug;
     if (pkg.codeHash === null) continue; // no code half: nothing to run, nothing to seat
+    if (pkg.codeUnresolved !== undefined) { refused.push({ slug, reason: `its import closure is unresolvable: ${pkg.codeUnresolved}` }); continue; }
     const pin = (pkg.meta as { code_hash?: unknown }).code_hash;
     if (typeof pin !== "string" || pin.length === 0) { refused.push({ slug, reason: "no code_hash pin in meta.json: an unpinned skill is not seated on the drain" }); continue; }
     if (pin !== pkg.codeHash) { refused.push({ slug, reason: `code_hash mismatch: pinned ${pin}, on disk ${pkg.codeHash}` }); continue; }

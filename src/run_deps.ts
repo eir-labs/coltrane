@@ -30,6 +30,9 @@ import { MCP_TOOLS } from "./mcp.js";
 import { ENGINE_MCP_SERVER, type ToolProvider, type ToolProviderRegistry } from "./tool_providers.js";
 import type { BudgetInput, RunDeps } from "./runtime.js";
 import { PLAYER_LEASE_MS } from "./lease.js";
+import { existsSync, readdirSync } from "node:fs";
+import { join } from "node:path";
+import { loadSkillPackage } from "./skills.js";
 
 /**
  * Every engine tool as an in-house provider, tagged with the engine's own MCP server.
@@ -284,4 +287,32 @@ export function assembleRunDeps(args: AssembleRunDepsArgs): RunDeps {
     // door and the drain cannot disagree about it. Absent → no key → the loop is what it was.
     ...(() => { const l = amendLadderFromEnv(process.env); return l ? { tier_ladder: l } : {}; })(),
   };
+}
+
+/**
+ * DR-3 (wiki spec.coltrane.the-drain-runs-a-graded-red-pass) — the skill dirs the DRAIN may register: each
+ * skill whose code half ships in the engine package (`<root>/skills/<slug>/`), and only when its meta pins a
+ * `code_hash` that the code on disk hashes to. A packaged skill with no pin, or whose code moved under its pin,
+ * is not seated and is named. A store-loaded skill has no package here, so it is never registered and still
+ * fails closed at prep, as before. `root` is the installed engine package's root.
+ */
+export function drainSkillDirs(root: string): { dirs: Map<string, string>; refused: Array<{ slug: string; reason: string }> } {
+  const dirs = new Map<string, string>();
+  const refused: Array<{ slug: string; reason: string }> = [];
+  const base = join(root, "skills");
+  if (!existsSync(base)) return { dirs, refused };
+  for (const name of readdirSync(base, { withFileTypes: true })) {
+    if (!name.isDirectory()) continue;
+    const dir = join(base, name.name);
+    if (!existsSync(join(dir, "meta.json"))) continue;
+    let pkg;
+    try { pkg = loadSkillPackage(dir); } catch (e) { refused.push({ slug: name.name, reason: `unreadable package: ${e instanceof Error ? e.message : String(e)}` }); continue; }
+    const slug = pkg.meta.slug;
+    if (pkg.codeHash === null) continue; // no code half: nothing to run, nothing to seat
+    const pin = (pkg.meta as { code_hash?: unknown }).code_hash;
+    if (typeof pin !== "string" || pin.length === 0) { refused.push({ slug, reason: "no code_hash pin in meta.json: an unpinned skill is not seated on the drain" }); continue; }
+    if (pin !== pkg.codeHash) { refused.push({ slug, reason: `code_hash mismatch: pinned ${pin}, on disk ${pkg.codeHash}` }); continue; }
+    dirs.set(slug, dir);
+  }
+  return { dirs, refused };
 }

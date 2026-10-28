@@ -48,6 +48,19 @@ describe("DR-1 — the drain's grades come from the store it claimed from, throu
     expect(got?.grades.map((g) => g.id)).toEqual(["old", "new"]);
   });
 
+  it("DR-2 plant (Vör) — rows out of order in `at`: DS-4's supersession is positional, so an unverified order is refused", async () => {
+    const s = store({
+      ask_spec_grades: () => ({ status: 200, body: [grade({ id: "new", at: "2026-10-28T06:00:00Z" }), grade({ id: "old", at: "2026-10-27T06:00:00Z" }, { verdict: "HOLD" })] }),
+      ask_conformance_seat: () => ({ status: 200, body: [VOR] }),
+    });
+    expect(await readSpecGrades!(ctx, SPEC, "2026-10-28T07:00:00Z", s.fetchFn)).toBeUndefined();
+  });
+
+  it("DR-2 plant — a grade with no `at`: absent", async () => {
+    const s = store({ ask_spec_grades: () => ({ status: 200, body: [grade({ at: undefined })] }), ask_conformance_seat: () => ({ status: 200, body: [VOR] }) });
+    expect(await readSpecGrades!(ctx, SPEC, "2026-10-28T07:00:00Z", s.fetchFn)).toBeUndefined();
+  });
+
   it("DR-1 plant — no grade for the spec: an empty list, so DS-4 refuses (absence of a PASS, not absence of the read)", async () => {
     const s = store({ ask_spec_grades: () => ({ status: 200, body: [] }), ask_conformance_seat: () => ({ status: 200, body: [VOR] }) });
     expect(await readSpecGrades!(ctx, SPEC, "2026-10-28T07:00:00Z", s.fetchFn)).toEqual({ conformance_seat: VOR, grades: [] });

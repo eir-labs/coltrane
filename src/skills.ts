@@ -6,8 +6,10 @@
 // those records, the evolution gate, and composition — is declared here as typed
 // stubs so the RED contract suite typechecks and fails honestly on assertions (not on
 // missing imports). Each stub throws NotImplemented; the build fills them in green.
-import { readFileSync, existsSync, mkdtempSync, mkdirSync, copyFileSync, readdirSync, rmSync, appendFileSync } from "node:fs";
-import { dirname, join, resolve as resolvePath, relative as relativePath } from "node:path";
+import { readFileSync, existsSync, realpathSync, mkdtempSync, mkdirSync, copyFileSync, readdirSync, rmSync, appendFileSync } from "node:fs";
+import { dirname, join, resolve as resolvePath, relative as relativePath, sep as pathSep } from "node:path";
+import { createRequire, isBuiltin } from "node:module";
+import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import { containedPath } from "./contained_path.js";
 import { createHash } from "node:crypto";
@@ -49,31 +51,51 @@ export class SkillCompositionCycleError extends Error {}
 // Declare the hash format so implementations match.
 export const CODE_HASH_ALGO = "sha256";
 /**
- * A skill's LOCAL import closure (DR-3b, Vör at a189507): skill.mjs and every file it reaches through a relative
- * specifier — static `import … from`, `export … from`, a side-effect `import "…"`, or a literal dynamic
- * `import("…")` — followed transitively. Bare specifiers (node:*, packages) are outside it, by statement. A relative
- * file that is not there, or a dynamic import whose specifier is not a literal, makes the closure UNRESOLVABLE:
- * `unresolved` names why, and hashSkillCode refuses it (SkillLoadError), so the package is refused whatever it pins.
+ * A skill's LOCAL import closure (DR-3b; Vör at a189507 and 24ecba2): skill.mjs and every file it reaches, followed
+ * transitively, CLASSIFIED BY WHERE A SPECIFIER RESOLVES — never by how it is spelled. Every specifier of a static
+ * `import … from`, an `export … from`, a side-effect `import "…"`, a literal dynamic `import("…")` or a literal `require("…")`
+ * is resolved (a relative or absolute path, a file:// URL, or a bare name through Node's resolution, the package's own
+ * name and its `exports` map included):
+ *   · a builtin (`node:*`, `fs`, …) is outside the closure;
+ *   · a file under a `node_modules` directory is an installed dependency, outside the closure (the stated trust surface);
+ *   · any other resolved file is LOCAL and joins the closure;
+ *   · a specifier that resolves to nothing, or a dynamic import / require whose specifier is not a literal, makes the
+ *     closure UNRESOLVABLE: `unresolved` names why, hashSkillCode refuses it, and the package is refused whatever it pins.
  */
 export function skillCodeClosure(codePath: string): { files: string[]; unresolved?: string } {
   const files: string[] = [];
   const seen = new Set<string>();
-  const queue = [resolvePath(codePath)];
+  const queue = [existsSync(codePath) ? realpathSync(codePath) : resolvePath(codePath)];
   while (queue.length > 0) {
     const file = queue.shift()!;
     if (seen.has(file)) continue;
     seen.add(file);
-    if (!existsSync(file)) return { files, unresolved: `a relative import names ${file}, which is not there` };
+    if (!existsSync(file)) return { files, unresolved: `an import resolves to ${file}, which is not there` };
     files.push(file);
     // Comments are not code: a block comment or a // line that mentions an import names no file.
     const text = readFileSync(file, "utf-8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
     if (/\bimport\s*\(\s*(?!["'][^"']*["']\s*\))/.test(text)) return { files, unresolved: `${file} imports dynamically from a specifier that is not a literal` };
+    if (/\brequire\s*\(\s*(?!["'][^"']*["']\s*\))/.test(text)) return { files, unresolved: `${file} requires a specifier that is not a literal` };
     const specs = [
       ...text.matchAll(/\b(?:import|export)\b[^;"'`]*?\bfrom\s*["']([^"']+)["']/g),
       ...text.matchAll(/\bimport\s*["']([^"']+)["']/g),
       ...text.matchAll(/\bimport\s*\(\s*["']([^"']+)["']\s*\)/g),
+      ...text.matchAll(/\brequire\s*\(\s*["']([^"']+)["']\s*\)/g),
     ].map((m) => m[1] as string);
-    for (const spec of specs) if (spec.startsWith("./") || spec.startsWith("../")) queue.push(resolvePath(dirname(file), spec));
+    const req = createRequire(file);
+    for (const spec of specs) {
+      if (isBuiltin(spec)) continue;
+      let resolved: string;
+      try {
+        resolved = spec.startsWith("file:") ? fileURLToPath(spec) : req.resolve(spec);
+      } catch (e) {
+        return { files, unresolved: `${file} imports "${spec}", which resolves to nothing (${e instanceof Error ? e.message.split("\n")[0] : String(e)})` };
+      }
+      if (!existsSync(resolved)) return { files, unresolved: `${file} imports "${spec}", which resolves to ${resolved}, which is not there` };
+      const real = realpathSync(resolved);
+      if (real.split(pathSep).includes("node_modules")) continue; // an installed dependency: outside, by statement
+      queue.push(real);
+    }
   }
   return { files };
 }
@@ -86,7 +108,7 @@ export function hashSkillCode(codePath: string): string {
   if (closure.unresolved !== undefined) throw new SkillLoadError(`skill code ${codePath}: its import closure is unresolvable — ${closure.unresolved}`);
   const fileHash = (f: string) => createHash(CODE_HASH_ALGO).update(readFileSync(f)).digest("hex");
   if (closure.files.length === 1) return `${CODE_HASH_ALGO}:${fileHash(closure.files[0]!)}`;
-  const base = dirname(resolvePath(codePath));
+  const base = dirname(realpathSync(codePath));
   const h = createHash(CODE_HASH_ALGO);
   for (const f of closure.files) h.update(`${relativePath(base, f)}\0${fileHash(f)}\n`);
   return `${CODE_HASH_ALGO}:${h.digest("hex")}`;

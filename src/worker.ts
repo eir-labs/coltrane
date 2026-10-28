@@ -2017,6 +2017,14 @@ export async function workOnce(ctx: WorkerContext, deps: WorkOnceDeps): Promise<
     const headerOwed = terminal !== undefined && terminal.owed;
     let recorded = headerOwed ? terminal!.acknowledged : false;
     const headerless = !headerOwed;
+    // RR-6(b): ONCE THE FAILED HEADER IS ACKNOWLEDGED, NOTHING FURTHER IS OWED. A second terminal write (gig_fail, a terminal
+    // release) reaches a gig that is already finished; the store refuses it (a finished gig's lease is not held), and the old
+    // log then claimed the failure was unrecorded and the row "held until its lease lapses" — false on gig 3243a92c, whose
+    // ledger shows running → failed through the header. gig_fail stays the fallback for a failure the header did not land.
+    if (headerOwed && recorded) {
+      log(`gig ${claim.gig_id}: the failed header landed; nothing further is owed (no gig_fail, no release)`);
+      return { claimed: true, gig_id: claim.gig_id, status: "failed", error: message, acknowledged: true };
+    }
     try {
       if ((await failGig(ctx, claim.gig_id, message)) && headerless) recorded = true;
     } catch (fe) {

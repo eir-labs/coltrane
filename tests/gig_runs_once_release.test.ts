@@ -67,6 +67,9 @@ describe("E5 — release, never hold", () => {
     env = hostedEnv();
     const store = hostedStore({
       claim: claimFor("one-chair-v0"),
+      // RR-6(b): the fallback (gig_fail, then a terminal release) exists for a failure the store did NOT record. Once the failed
+      // header is acknowledged nothing further is owed, so this law's precondition is a failed header that does not land.
+      header: (b: Record<string, unknown>) => (b["status"] === "failed" ? new Response(JSON.stringify({ message: "service unavailable" }), { status: 503 }) : undefined),
       gigFail: () => new Response(JSON.stringify({ message: "store unavailable" }), { status: 500 }),
     });
     const invoke = vi.fn(async () => { throw new Error("the model never came back"); });

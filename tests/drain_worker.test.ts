@@ -121,6 +121,7 @@ const CLAIM = {
   mode: "rehearsal",
   input: { subject: "the wire" },
   acting_for: "steve-1",
+  credential_expires_at: "2099-01-01T00:00:00Z", // DR-6: the player credential outlives the deadline
 };
 
 type FetchCall = { url: string; body: Record<string, unknown> };

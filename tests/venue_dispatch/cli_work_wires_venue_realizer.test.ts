@@ -58,7 +58,7 @@ const GENOME_ROWS = {
 
 const CLAIM = {
   gig_id: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", standard_slug: "wire-run-v0",
-  standard_version: null, mode: "rehearsal", input: { subject: "the wire" }, acting_for: "steve-1",
+  standard_version: null, mode: "rehearsal", input: { subject: "the wire" }, acting_for: "steve-1", credential_expires_at: "2099-01-01T00:00:00Z", // DR-6: the player credential outlives the deadline
   venue: "engine-room-v1",
 };
 

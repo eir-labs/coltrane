@@ -337,6 +337,10 @@ export const StandardSchema = z.object({
   // laundering a red verdict green when the rounds are spent. See the EXAMINE⇄AMEND block in
   // runtime.ts; the contract is tests/examine_amend_loop.test.ts.
   max_examine_rounds: z.number().optional(),
+  /** DS-7 (wiki spec.chancery.the-testable-charter.drafting-standard): when the amend rounds run out with a verdict still
+   *  failing, or a gate stops the loop, the gig ends REFUSED, naming the verdict's chair, instead of completing with the
+   *  failing verdict sealed inside. Absent: today's behaviour. */
+  refuse_when_unresolved: z.boolean().optional(),
   description: z.string().optional(),
   /** The DEFAULT gig-level reserve pool: a per-gig quantity of turns a budget-exhausted chair may
    *  draw from, capped per chair by its own `turn_reserve`. The DISPATCH payload's `pool` (on the

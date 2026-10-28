@@ -3139,6 +3139,7 @@ export async function runGig(
         const ladder = deps.tier_ladder;
         const makerTier = new Map<string, string>(); // maker role → the rung it is seated on now
 
+        let stoppedByGate: string | undefined; // DS-7: the gate that stopped this verifier's loop, if one did
         for (let round = 1; round <= examineRounds && verdict; round++) {
           checkpoint();
           emit({ type: "phase_start", phase: `${phase.name}:amend#${round}`, roles: [...makers.map((m) => m.role), vch.role] });
@@ -3214,6 +3215,7 @@ export async function runGig(
             if (!yes) { gatedBy = { gate: g.role, record: verdicts.find((r) => (r.data as { pass?: unknown }).pass !== true) }; break; }
           }
           if (gatedBy) {
+            stoppedByGate = gatedBy.gate;
             emit({ type: "amend_gated", phase: phase.name, role: vch.role, gate: gatedBy.gate, round: round + 1, checks: gatedBy.record ? findingsOf(gatedBy.record) : [] });
             if (budget && hasCeiling) budget.spent_usd = usage.total_cost_usd;
             saveCheckpoint();
@@ -3259,6 +3261,15 @@ export async function runGig(
               emit({ type: "amend_escalated", phase: phaseNameOf(mk.role), role: mk.role, round, from_tier: from, to_tier: to });
             }
           }
+        }
+        // DS-7 — AN EXHAUSTED LADDER IS REFUSED. A standard that declares refuse_when_unresolved does not complete with a
+        // failing verdict sealed inside: the rounds ran out (or a stall, or a gate, stopped them) and the verdict still
+        // fails, so the gig ends refused, naming the verdict's chair. The failing records stay sealed.
+        if (standard.refuse_when_unresolved === true && (stoppedByGate !== undefined || failingVerdict(vch.role))) {
+          const why = stoppedByGate !== undefined
+            ? `the gate "${stoppedByGate}" refused the amended artifact, and "${vch.role}"'s last verdict still fails`
+            : `"${vch.role}"'s verdict still fails after ${examineRounds} amend round(s)`;
+          throw new RuntimeError(`gig refused (refuse_when_unresolved): ${why}`);
         }
       }
     }

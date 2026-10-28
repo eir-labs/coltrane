@@ -3192,12 +3192,14 @@ export async function runGig(
           // GATE. It re-runs on the amended artifact after the makers and before the verifier, so an amended
           // diff is gated exactly as round one's was. A gate that fails stops the loop: the verifier never sees
           // the gated artifact, and its last failing verdict stands.
+          // A gate is any chair the verifier reaches through depends_on, directly or transitively, that is not
+          // an amended maker and itself depends on one. They re-run in the standard's own order (phase order,
+          // which is dependency order), so a gate that reads another gate's verdict reads this round's.
           const amendedRoles = new Set(makers.map((m) => m.role));
-          const gates = vch.depends_on
-            .map((role) => allChairs.find((c) => c.role === role))
-            .filter((c): c is Chair => !!c && !amendedRoles.has(c.role)
-              && [...transitiveDepsOf(c.role)].some((r) => amendedRoles.has(r)));
-          let gatedBy: { gate: string; record: OutputRecord } | undefined;
+          const reach = transitiveDepsOf(vch.role);
+          const gates = allChairs.filter((c) => reach.has(c.role) && !amendedRoles.has(c.role) && producesVerdict(c)
+            && [...transitiveDepsOf(c.role)].some((r) => amendedRoles.has(r)));
+          let gatedBy: { gate: string; record: OutputRecord | undefined } | undefined;
           for (const g of gates) {
             const gprep = prepareChair(g, phaseNameOf(g.role), [], { round: round + 1 });
             const grecs = await invokeAndWriteChair(gprep);
@@ -3205,11 +3207,15 @@ export async function runGig(
             producedByRole.set(g.role, grecs);
             produced.push(...grecs);
             noteCheckpointRole(g.role, phaseNameOf(g.role), grecs);
-            const refused = failingVerdict(g.role);
-            if (refused) { gatedBy = { gate: g.role, record: refused }; break; }
+            // FAIL CLOSED (Vör, driven at fce898d): a gate that seals a Verdict proceeds only on an explicit
+            // `pass === true`. A verdict with no `pass`, or no verdict at all, stops the loop like a refusal:
+            // silence is not a yes.
+            const verdicts = grecs.filter((r) => (deps.outputs.coreTypeOf(r.domain_type) ?? "") === "Verdict");
+            const yes = verdicts.length > 0 && verdicts.every((r) => (r.data as { pass?: unknown }).pass === true);
+            if (!yes) { gatedBy = { gate: g.role, record: verdicts.find((r) => (r.data as { pass?: unknown }).pass !== true) }; break; }
           }
           if (gatedBy) {
-            emit({ type: "amend_gated", phase: phase.name, role: vch.role, gate: gatedBy.gate, round, checks: findingsOf(gatedBy.record) });
+            emit({ type: "amend_gated", phase: phase.name, role: vch.role, gate: gatedBy.gate, round: round + 1, checks: gatedBy.record ? findingsOf(gatedBy.record) : [] });
             if (budget && hasCeiling) budget.spent_usd = usage.total_cost_usd;
             saveCheckpoint();
             break;

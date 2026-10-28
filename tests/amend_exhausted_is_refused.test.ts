@@ -13,6 +13,9 @@ import {
   type AgentInvoker, type DomainType, type PhaseDef, type Chair,
 } from "../src/index.js";
 import { loadGenome } from "../src/loader.js";
+import * as engine from "../src/index.js";
+type Refused = Error & { refusal: unknown };
+const GigRefusedError = (engine as unknown as { GigRefusedError?: new (...a: never[]) => Refused }).GigRefusedError;
 import { testAgent } from "./_support/agents.js";
 import { coreInvariantFields } from "./_support/specs.js";
 
@@ -65,6 +68,11 @@ describe("DS-7 — an exhausted amend ladder ends refused, naming the last verdi
     const { err, res } = await run(true, [false, false, false]);
     expect(res, "the gig ended completed with its last verdict failing: a green over nothing").toBeUndefined();
     expect(String((err as Error)?.message ?? err)).toMatch(/refused.*"review".*fail/s);
+    // Vör: "refused" must be a state a caller can read, not a word in a message. The error is TYPED and carries the
+    // refusal as a structure, so "the red pass failed review three times" is told from "the engine broke" by type.
+    expect(typeof GigRefusedError, "the engine exports no GigRefusedError: only substring matching can tell a refusal from a crash").toBe("function");
+    expect(err).toBeInstanceOf(GigRefusedError!);
+    expect((err as Refused).refusal).toEqual({ kind: "unresolved", chair: "review", rounds: 2 });
   });
 
   it("twin, must be ALLOWED — a pass that amends to green on round two ends completed", async () => {

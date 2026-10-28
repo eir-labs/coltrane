@@ -250,6 +250,22 @@ export function environmentIdentity(venue: unknown): string {
   return `env-${sha256Hex(canonStructuralJson(v))}`;
 }
 
+/** RR-1: a floor written as a DIGEST — `sha256:<64 hex>`, or `<repository>@sha256:<64 hex>` — names exactly one image and is
+ *  used verbatim. Anything else is a TAG, which moves (Vör: two runs resolving one tag to different images make a gate's
+ *  determinism only as stable as that day's tag). */
+const FLOOR_DIGEST = /^(?:[a-z0-9][a-z0-9._\/-]*(?::[0-9]+)?(?:\/[a-z0-9._-]+)*@)?sha256:[0-9a-f]{64}$/;
+/** Whether a room's floor is pinned by digest. A standard that names a seat-bearing room may require it (the drafting room
+ *  does); an unfloored room, or a floor named by tag, is not pinned. */
+export function floorIsPinned(venue: unknown): boolean {
+  const f = (venue as { floor?: unknown } | null)?.floor;
+  return typeof f === "string" && FLOOR_DIGEST.test(f);
+}
+/** The room's image: a digest floor verbatim, a tag floor as coltrane/floor:<tag> (unchanged), no floor the room image. */
+function floorImage(v: { floor?: string | undefined }): string {
+  if (!v.floor) return "coltrane/room:ephemeral";
+  return FLOOR_DIGEST.test(v.floor) ? v.floor : `coltrane/floor:${v.floor}`;
+}
+
 /** The identity of the shared floor a venue composes over. Two venues declaring the same floor
  *  resolve to the SAME floor identity — the precondition for sharing at all. */
 export function floorIdentity(venue: unknown): string {
@@ -400,7 +416,7 @@ export function renderComposeConfig(
   // material straight into the container's own filesystem at realization (`docker cp` into the
   // created-but-not-started room), and nothing readable from the host holds it while the room runs.
   const room: Record<string, unknown> = {
-    image: v.floor ? `coltrane/floor:${v.floor}` : "coltrane/room:ephemeral",
+    image: floorImage(v),
     working_dir: workspace,
     // The room HOLDS. Under this realizer's topology the chair reaches the SERVERS inside by
     // `docker exec` (see buildMcpConfigs), and there is nothing to exec into unless the container
@@ -505,7 +521,7 @@ export function renderComposeConfig(
   const serverServices: Record<string, unknown> = {};
   for (const s of v.mcp_servers) {
     serverServices[s.slug] = {
-      image: v.floor ? `coltrane/floor:${v.floor}` : "coltrane/room:ephemeral",
+      image: floorImage(v),
       ...(s.command.length > 0 ? { command: s.command } : {}),
       networks: ["room-net"],
       // The classes this server may read are declared in `x-coltrane-room.mcp_servers[].credential_names`;

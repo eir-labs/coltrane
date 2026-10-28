@@ -15,7 +15,7 @@ import { join as joinPath, relative as relPath, isAbsolute as isAbsPath, sep as 
 import type { Standard, Agent, Chair } from "./composition.js";
 import { PRIMITIVE_OUTPUT_TYPE, CORE_TYPES } from "./core_types.js";
 import { executeSkillAsync } from "./skill_subprocess.js";
-import { loadSkillPackage } from "./skills.js";
+import { loadSkillPackage, skillIdentityHashes } from "./skills.js";
 import { resolveModel, sessionUuidFor } from "./claude_invoker.js";
 import { resolveAgentGrants, type ToolProviderRegistry } from "./tool_providers.js";
 import { resolveAndRealize, type Realization, type RealizationOk } from "./venue_realize.js";
@@ -459,6 +459,9 @@ export interface SpecGradeRecord {
   verdict: string;
   scope: readonly string[] | null;
   by: string;
+  /** Whether `by` held the conformance seat at the grade's own moment, as the store attests it (chancery-os
+   *  ask_spec_grades). Absent: unattested, judged against the current holder. */
+  held_seat?: boolean;
 }
 
 /**
@@ -1049,6 +1052,19 @@ export function partialBudgetState(e: unknown): BudgetState | undefined {
 }
 
 export class RuntimeError extends Error {}
+
+/**
+ * DS-7 — a gig that ENDS REFUSED by its own standard's policy (refuse_when_unresolved): the amend rounds ran out with a
+ * verdict still failing, or a gate stopped them. Typed and structured, so a caller tells "the work failed its review"
+ * from "the engine broke" by class and fields, never by matching the message (Vör at 05df7a3). The gig still ends in
+ * the store's `failed` state; this is the reason it carries.
+ */
+export class GigRefusedError extends RuntimeError {
+  constructor(message: string, readonly refusal: { kind: "unresolved"; chair: string; gate?: string; rounds: number }) {
+    super(message);
+    this.name = "GigRefusedError";
+  }
+}
 
 /**
  * One dead reference the dispatch preflight caught. Four kinds, ALL knowable at t=0 from the
@@ -1833,7 +1849,17 @@ function specGradeRefusal(
   if (named.verdict !== "PASS") {
     return `${head}, but spec_grade "${gradeId}" has verdict ${named.verdict} — only a PASS admits`;
   }
-  if (named.by !== supplied.conformance_seat) {
+  // The seat is read at the GRADE'S OWN MOMENT when the store attests it (held_seat, from ask_spec_grades): a seat
+  // rotation must not void every grade ever recorded (Vör). An attested false refuses whoever holds the seat now; an
+  // unattested grade is judged as before, against the current holder: never looser.
+  const heldSeat = named.held_seat;
+  if (heldSeat === false) {
+    // The door refuses a grade whose maker was not seated at its moment (DS-6, enforced), so on a landed grade a false
+    // attestation can only mean the seat's record was amended after the grade: a back-dated or rewritten seat. That is
+    // the one thing it can be, and this is the only place in the system that detects it.
+    return `${head}, but spec_grade "${gradeId}" attests held_seat false for "${named.by}": the seat's record was amended after the grade (the door admits a grade only from the seat's holder at its moment), so the seat history no longer supports it`;
+  }
+  if (heldSeat !== true && named.by !== supplied.conformance_seat) {
     return `${head}, but spec_grade "${gradeId}" was made by "${named.by}", not the conformance seat "${supplied.conformance_seat}"`;
   }
   if (named.content_hash !== request["content_hash"]) {
@@ -2501,20 +2527,9 @@ export async function runGig(
    * skill chair, and `meta.version` can stay put across a rewrite — `loadSkillPackage`
    * computes the hash from the bytes, which is what makes this honest.
    */
-  const resolvedSkillHashes = (): Array<{ slug: string; code_hash: string }> => {
-    const out: Array<{ slug: string; code_hash: string }> = [];
-    for (const [slug, dir] of deps.skill_dirs ?? []) {
-      try {
-        const pkg = loadSkillPackage(dir);
-        out.push({ slug, code_hash: pkg.codeHash ?? "" });
-      } catch {
-        // Unreadable here means unusable at dispatch too; record the absence rather than
-        // silently folding nothing, so a skill that vanished moves the identity.
-        out.push({ slug, code_hash: "<unreadable>" });
-      }
-    }
-    return out;
-  };
+  // Unreadable here means unusable at dispatch too; skillIdentityHashes records the absence rather than
+  // silently folding nothing, so a skill that vanished moves the identity. One expression, shared with the drain.
+  const resolvedSkillHashes = (): Array<{ slug: string; code_hash: string }> => skillIdentityHashes(deps.skill_dirs ?? []);
 
   const identity = (): RunIdentity => ({
     standard_slug: standard.slug,
@@ -3140,6 +3155,7 @@ export async function runGig(
         const ladder = deps.tier_ladder;
         const makerTier = new Map<string, string>(); // maker role → the rung it is seated on now
 
+        let stoppedByGate: string | undefined; // DS-7: the gate that stopped this verifier's loop, if one did
         for (let round = 1; round <= examineRounds && verdict; round++) {
           checkpoint();
           emit({ type: "phase_start", phase: `${phase.name}:amend#${round}`, roles: [...makers.map((m) => m.role), vch.role] });
@@ -3215,6 +3231,7 @@ export async function runGig(
             if (!yes) { gatedBy = { gate: g.role, record: verdicts.find((r) => (r.data as { pass?: unknown }).pass !== true) }; break; }
           }
           if (gatedBy) {
+            stoppedByGate = gatedBy.gate;
             emit({ type: "amend_gated", phase: phase.name, role: vch.role, gate: gatedBy.gate, round: round + 1, checks: gatedBy.record ? findingsOf(gatedBy.record) : [] });
             if (budget && hasCeiling) budget.spent_usd = usage.total_cost_usd;
             saveCheckpoint();
@@ -3260,6 +3277,15 @@ export async function runGig(
               emit({ type: "amend_escalated", phase: phaseNameOf(mk.role), role: mk.role, round, from_tier: from, to_tier: to });
             }
           }
+        }
+        // DS-7 — AN EXHAUSTED LADDER IS REFUSED. A standard that declares refuse_when_unresolved does not complete with a
+        // failing verdict sealed inside: the rounds ran out (or a stall, or a gate, stopped them) and the verdict still
+        // fails, so the gig ends refused, naming the verdict's chair. The failing records stay sealed.
+        if (standard.refuse_when_unresolved === true && (stoppedByGate !== undefined || failingVerdict(vch.role))) {
+          const why = stoppedByGate !== undefined
+            ? `the gate "${stoppedByGate}" refused the amended artifact, and "${vch.role}"'s last verdict still fails`
+            : `"${vch.role}"'s verdict still fails after ${examineRounds} amend round(s)`;
+          throw new GigRefusedError(`gig refused (refuse_when_unresolved): ${why}`, { kind: "unresolved", chair: vch.role, ...(stoppedByGate !== undefined ? { gate: stoppedByGate } : {}), rounds: examineRounds });
         }
       }
     }

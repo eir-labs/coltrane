@@ -66,6 +66,7 @@ export interface StandardFileDef {
   input_types?: readonly string[]; // the gig contract (#177) — types entering from outside the standard
   output_types?: readonly string[];
   max_examine_rounds?: number;
+  refuse_when_unresolved?: boolean;
   description?: string;
   /** #203 — lifecycle. Read from the file so a deprecation survives the round trip. */
   status?: "active" | "deprecated" | "retired";
@@ -441,6 +442,7 @@ export function loadGenome(
         // one — which is what makes "is this standard retired?" a question with an answer.
         status: def.status ?? "active",
         ...(def.max_examine_rounds !== undefined ? { max_examine_rounds: def.max_examine_rounds } : {}),
+        ...(def.refuse_when_unresolved !== undefined ? { refuse_when_unresolved: def.refuse_when_unresolved } : {}),
         ...(def.description ? { description: def.description } : {}),
       }));
       standard_paths.set(def.slug, path);

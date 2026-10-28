@@ -688,7 +688,7 @@ describe("R · the live payload seals", () => {
 // with a store stub; the run registry carries one type the loader DROPS on reload (the reserved
 // {ok, refusal, message} triple) and one whose CONTENT changes on reload.
 describe("G11 · the refusal names the offending type(s) and the reason, in the chair's error and the gig's terminal record", () => {
-  const CLAIM = { gig_id: "99999999-2222-3333-4444-555555555555", standard_slug: "wire-run-v0", standard_version: null, mode: "rehearsal", input: {}, acting_for: "steve-1" };
+  const CLAIM = { gig_id: "99999999-2222-3333-4444-555555555555", standard_slug: "wire-run-v0", standard_version: null, mode: "rehearsal", input: {}, acting_for: "steve-1", credential_expires_at: "2099-01-01T00:00:00Z" };
   const ROWS = {
     core_types: [], domain_types: [orgVerdictRow], skills: [],
     agents: [{

@@ -33,7 +33,10 @@
 // store; the local checkpoint demotes to a fast path.
 import * as fs from "node:fs";
 import { homedir, tmpdir } from "node:os";
+import * as path from "node:path";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { skillIdentityHashes } from "./skills.js";
 import { runGig, ResumeRefused, genomeHash, CORE_TO_PRIMITIVE, type AgentInvoker, type TerminalHeaderOutcome } from "./runtime.js";
 import { HOSTED_LEASE_MS, LeaseLost, LeaseUnverifiable, renewLease, releaseLease, type LeaseCredential } from "./lease.js";
 import { makeGigLogTee, gigLogBaseFromEnv } from "./gig_log_tee.js";
@@ -46,7 +49,8 @@ import { workerCredentialMode } from "./worker_env.js";
 import { prepareWorkspace, prepareWorkspaces, type PreparedWorkspaces } from "./workspace.js";
 import type { CommitAttribution } from "./publisher.js";
 import { COLTRANE_VERSION } from "./version.js";
-import { engineToolProviders, drainBudget, drainTimeoutMs, resolveWorkingRepo, resolveChangeSetBase, assembleRunDeps } from "./run_deps.js";
+import { engineToolProviders, drainBudget, drainTimeoutMs, resolveWorkingRepo, resolveChangeSetBase, assembleRunDeps, drainSkillDirs, typedInputField } from "./run_deps.js";
+import { readSpecGrades } from "./spec_grades_reader.js";
 import { githubGrant, normalizeRepoUrl } from "./genome_schema.js";
 // The repository resolver's ONE home is run_deps.ts (shared by both doors). Re-exported here so
 // worker.ts's own consumers — and tests/the_repo_is_typed_input — keep importing it from this path.
@@ -105,6 +109,13 @@ export interface WorkerContext {
 /** The claim RPC's payload: everything the worker needs to run the row it now leases. */
 export interface ClaimedGig {
   gig_id: string;
+  /**
+   * DR-6: the instant the credential this claim runs under stops being honoured — on the player path the
+   * player's STANDING token's `expires_at`, which coltrane_mcp_claim reports. The worker refuses to begin a
+   * gig whose credential ends before its deadline; absent or unparseable declines. (A venue claim's minted
+   * credential moves with the lease at every renewal, so the venue path reads the lease instead.)
+   */
+  credential_expires_at?: string | null;
   standard_slug: string;
   standard_version: number | null;
   mode: string;
@@ -294,7 +305,7 @@ export type WorkOnceResult =
        *  `abandoned` is the store saying this gig is NOT this worker's to run — its lease was lost,
        *  or the store refused the 'running' header (the row is finished, or someone else holds it).
        *  The worker stopped and wrote nothing terminal; `error` says which. */
-      status: "complete" | "failed" | "awaiting_approval" | "abandoned" | "aborted";
+      status: "complete" | "failed" | "awaiting_approval" | "abandoned" | "aborted" | "declined";
       /** Present iff `aborted`: why the run was stopped. `timeout` = the drain's run deadline
        *  (drainTimeoutMs) fired. A deadline is how long the work was allowed to take, not a defect in
        *  it, so the gig ends aborted (header `aborted`), never failed through gig_fail. */
@@ -311,7 +322,26 @@ export type WorkOnceResult =
       error?: string;
       /** Present iff awaiting_approval: the human chair the run parked at. */
       awaiting?: { phase: string; role: string };
+      /** Present iff `declined` (DR-6): the gig was NOT BEGUN — no header, no chair, nothing spent —
+       *  because the credential it would report through ends before the run's deadline, or its end is
+       *  not known. Not the gig's fault: the row is left to its lease. */
+      declined?: { reason: "credential_short"; credential_expires_at: string | null; deadline_at: string };
     };
+
+/** The installed engine package's root: the nearest directory above this module whose package.json is the engine's. */
+function engineRoot(): string {
+  let dir = path.dirname(fileURLToPath(import.meta.url));
+  for (let i = 0; i < 6; i++) {
+    try {
+      const pj = JSON.parse(fs.readFileSync(join(dir, "package.json"), "utf-8")) as { name?: string };
+      if (pj.name === "@eir-labs/coltrane") return dir;
+    } catch { /* keep walking */ }
+    dir = path.dirname(dir);
+  }
+  return path.dirname(fileURLToPath(import.meta.url));
+}
+/** DR-3 — the skills the drain seats: the engine package's own, each only at the code_hash its meta pins. */
+const DRAIN_SKILLS = drainSkillDirs(engineRoot());
 
 export interface WorkOnceDeps {
   /** Build the chair invoker against the STORE registry (types the org's outputs seal to). */
@@ -861,11 +891,13 @@ function chairSeats(standard: Standard, outputs: OutputStore): ChairSeat[] {
  * construction. Change what `workOnce` passes and this has to move with it, or every
  * reconstruction is refused for identity drift against its own run.
  */
-function coldRunIdentity(standard: Standard, gigInput: Record<string, unknown>): RunIdentity {
+export function coldRunIdentity(standard: Standard, gigInput: Record<string, unknown>, skillDirs: Map<string, string> = DRAIN_SKILLS.dirs): RunIdentity {
   return {
     standard_slug: standard.slug,
     genome_hash: genomeHash(standard),
-    producers_sha: producersSha({ agents: standard.agents, skills: [] }),
+    // DR-5 — exactly what runGig's resolvedSkillHashes folds for the dirs the drain registers (DR-3), in the
+    // same order, so a re-claim reconstructs the identity its own run computed.
+    producers_sha: producersSha({ agents: standard.agents, skills: skillIdentityHashes(skillDirs) }),
     gig_input_sha: sha256Hex(canonJson(gigInput)),
     model_version: "unknown",
     depth: "",
@@ -1335,6 +1367,30 @@ export async function workOnce(ctx: WorkerContext, deps: WorkOnceDeps): Promise<
   if (!claim) return { claimed: false };
   log(`claimed ${claim.gig_id} (${claim.standard_slug}, ${claim.mode}) as ${claim.acting_for}`);
 
+  // ── DR-6: A DRAIN DOES NOT BEGIN WORK IT CANNOT REPORT ON. ───────────────────────────────────────────
+  // The lease is checked before and after the run; this checks the OTHER thing every write depends on —
+  // what remains of the credential. On the player path the claim runs under the player's standing token
+  // to a fixed deadline, so a token that ends first would claim, spend, and then be unable to say how the
+  // gig ended. Decided before any header, clone or chair; an end that is absent or unparseable declines.
+  // The venue path has no run deadline and its credential moves with every renewal, so it is not asked.
+  const now = deps.now ?? Date.now;
+  const venueRun = Boolean(ctx.drainKey && ctx.instance);
+  const credentialExpiry = typeof claim.credential_expires_at === "string" ? Date.parse(claim.credential_expires_at) : NaN;
+  if (!venueRun) {
+    const deadlineMs = drainTimeoutMs("player")!;
+    const deadlineAt = new Date(now() + deadlineMs).toISOString();
+    if (!Number.isFinite(credentialExpiry) || credentialExpiry < now() + deadlineMs) {
+      const stated = claim.credential_expires_at ?? null;
+      const error = !Number.isFinite(credentialExpiry)
+        ? `not begun: the claim states no readable credential_expires_at (${JSON.stringify(stated)}), so this worker cannot show it will be able to report the gig's end by its deadline ${deadlineAt}`
+        : `not begun: this worker's credential expires at ${new Date(credentialExpiry).toISOString()}, before the run's deadline ${deadlineAt}; the gig is left to its lease, untouched`;
+      log(`gig ${claim.gig_id} ${error}`);
+      console.error(`[drain] gig ${claim.gig_id} ${error}`);
+      return { claimed: true, gig_id: claim.gig_id, status: "declined", error, acknowledged: false,
+        declined: { reason: "credential_short", credential_expires_at: typeof stated === "string" ? stated : null, deadline_at: deadlineAt } };
+    }
+  }
+
   // ── THE LEASE IS HELD BY RENEWING IT, and the run stops the moment it is lost. ─────────────────
   // The store re-claims a row whose lease lapsed, so a gig that runs past one lease without renewing
   // is handed to a second worker WHILE IT IS STILL RUNNING: two runs, two payments. The heartbeat is
@@ -1345,7 +1401,6 @@ export async function workOnce(ctx: WorkerContext, deps: WorkOnceDeps): Promise<
   // logged and tried again next beat; the lease still has two beats of slack.
   const aborter = new AbortController();
   const leaseCred = leaseCredential(ctx);
-  const now = deps.now ?? Date.now;
   // THE LEASE IS THE ONLY CLOCK A VENUE RUN HAS. The store granted a lease at the claim and grants
   // another at every renewal that lands; `leaseConfirmedAt` is the instant of the latest grant. A
   // renewal that merely failed to arrive is tried again next beat — but once a WHOLE lease window has
@@ -1380,6 +1435,15 @@ export async function workOnce(ctx: WorkerContext, deps: WorkOnceDeps): Promise<
         log(`lease renewal for ${claim.gig_id} did not land (the next beat tries again; ${HOSTED_LEASE_MS - sinceConfirmed} ms of the confirmed lease remain): ${r.detail}`);
       })
     : undefined;
+  // DR-6, the other half: an unacknowledged terminal write while the credential had LAPSED is this worker's
+  // own expiry, not the store's failure, and is said so. The venue credential ends with the latest
+  // confirmed lease (the renew moves it); the player's is the instant the claim stated.
+  const credentialLapse = (): string | undefined => {
+    const end = venueRun ? leaseConfirmedAt + HOSTED_LEASE_MS : credentialExpiry;
+    return Number.isFinite(end) && now() >= end
+      ? `this worker's credential lapsed at ${new Date(end).toISOString()}, before the terminal write`
+      : undefined;
+  };
   const leaseLost = (): LeaseLost | undefined =>
     aborter.signal.aborted && aborter.signal.reason instanceof LeaseLost ? aborter.signal.reason : undefined;
   // What the store was told about this run's end — reported by runGig for every terminal header.
@@ -1808,6 +1872,11 @@ export async function workOnce(ctx: WorkerContext, deps: WorkOnceDeps): Promise<
       }
     }
 
+    // DR-1 / DR-2 — a change-request that names a spec is run only on a grade the store holds: read here, from the
+    // store this gig was claimed from, through its asks (ask_spec_grades, ask_conformance_seat). Never from the input.
+    // A failed read is undefined, so DS-4 refuses before any seat.
+    const requestedSpec = typedInputField(claim.input, "spec");
+    const specGrades = requestedSpec ? await readSpecGrades({ baseUrl: ctx.baseUrl, anonKey: ctx.anonKey }, requestedSpec, new Date().toISOString()) : undefined;
     const run = (resume: boolean, cold_run_reason?: string): ReturnType<typeof runGig> => runGig(standard, claim.input, {
       onProgress: tee,
       ...assembleRunDeps({
@@ -1818,11 +1887,12 @@ export async function workOnce(ctx: WorkerContext, deps: WorkOnceDeps): Promise<
         // Passed unconditionally, as the server does: undefined is a truthful "not configured".
         model_version: process.env["COLTRANE_MODEL"],
         skills: genome.skills,
-        // EMPTY, and explicitly so rather than by omission. Store-loaded skills carry no local package
-        // dir by construction — there is no code half to point at — so a skill-BACKED chair fails at
-        // prep with the runtime's own "no skill_dir is registered" error. Declaring it says the drain
-        // HAS no local dirs, instead of leaving a reader to infer whether the wire was considered.
-        skill_dirs: new Map<string, string>(),
+        // DR-3: the engine package's OWN skills, each only at the code_hash its meta pins (drainSkillDirs).
+        // A store-loaded skill still carries no local package dir by construction, so a chair backed by
+        // one fails at prep with the runtime's own "no skill_dir is registered" error, as before.
+        skill_dirs: DRAIN_SKILLS.dirs,
+        // DR-1 — the grades read above, or absent (DS-4 then refuses).
+        spec_grades: specGrades,
         evals: genome.evals,
         budget: drainBudget(claim.input, claim.budget_micro_usd),
         toolProviders: engineToolProviders(),
@@ -1888,7 +1958,9 @@ export async function workOnce(ctx: WorkerContext, deps: WorkOnceDeps): Promise<
     }
     const acknowledged = terminalAcknowledged();
     if (!acknowledged) {
-      log(
+      const lapse = credentialLapse();
+      if (lapse) log(`gig ${claim.gig_id}: its ${res.status} state was not recorded — ${lapse}` + (terminal?.error ? ` (${terminal.error})` : "") + ` — the row may still read running and will be re-claimed`);
+      else log(
         `gig ${claim.gig_id}: the store did NOT acknowledge its ${res.status} state` +
         (terminal?.error ? ` — ${terminal.error}` : "") +
         ` — the row may still read running and will be re-claimed`,
@@ -1934,7 +2006,7 @@ export async function workOnce(ctx: WorkerContext, deps: WorkOnceDeps): Promise<
     if (aborter.signal.aborted && aborter.signal.reason instanceof DrainDeadline) {
       const error = aborter.signal.reason.message;
       const acknowledged = terminalAcknowledged();
-      log(`gig ${claim.gig_id} aborted: ${error}${acknowledged ? "" : " — and the store did NOT acknowledge the aborted header"}`);
+      log(`gig ${claim.gig_id} aborted: ${error}${acknowledged ? "" : ` — ${credentialLapse() ?? "and the store did NOT acknowledge the aborted header"}`}`);
       return { claimed: true, gig_id: claim.gig_id, status: "aborted", aborted: { reason: "timeout" }, error, acknowledged };
     }
     const message = e instanceof Error ? e.message : String(e);
@@ -1964,7 +2036,11 @@ export async function workOnce(ctx: WorkerContext, deps: WorkOnceDeps): Promise<
         log(`could not record failure (${why}) and this box holds no venue credential to release it with — the row is held until its lease lapses`);
       }
     }
-    if (!recorded) console.error(`[drain] gig ${claim.gig_id} failed and the store did NOT acknowledge the failure: ${message}`);
+    if (!recorded) {
+      const lapse = credentialLapse();
+      console.error(`[drain] gig ${claim.gig_id} failed and ${lapse ? `the failure was not recorded — ${lapse}` : "the store did NOT acknowledge the failure"}: ${message}`);
+      if (lapse) log(`gig ${claim.gig_id} failed — ${lapse}`);
+    }
     return { claimed: true, gig_id: claim.gig_id, status: "failed", error: message, acknowledged: recorded };
   } finally {
     stopHeartbeat?.();

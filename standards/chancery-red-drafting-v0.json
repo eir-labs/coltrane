@@ -47,6 +47,27 @@
       ]
     },
     {
+      "name": "baseline",
+      "chairs": [
+        {
+          "role": "baseline",
+          "skill_slug": "baseline-gate",
+          "seat": "skill",
+          "depends_on": [
+            "draft"
+          ],
+          "input_contract": [
+            "change-request",
+            "red-spec"
+          ],
+          "output_contract": [
+            "baseline-verdict"
+          ],
+          "required_skills": []
+        }
+      ]
+    },
+    {
       "name": "review",
       "chairs": [
         {
@@ -58,12 +79,14 @@
           "read_only": true,
           "depends_on": [
             "draft",
-            "scope"
+            "scope",
+            "baseline"
           ],
           "input_contract": [
             "change-request",
             "red-spec",
-            "scope-verdict"
+            "scope-verdict",
+            "baseline-verdict"
           ],
           "output_contract": [
             "change-verdict"
@@ -81,8 +104,10 @@
   "output_types": [
     "red-spec",
     "scope-verdict",
+    "baseline-verdict",
     "change-verdict"
   ],
   "max_examine_rounds": 3,
-  "description": "Draft RED laws in eir-dev/chancery-os for a spec already graded PASS, only the laws its spec names, and have them run by a seat that did not write them (spec.chancery.the-testable-charter.drafting-standard rev 2, graded PASS by Vör). The gig runs only on an admitting, latest spec_grade (DS-4). Draft: chancery-red-drafter writes the scoped laws and seals a red-spec from the staged diff. Scope: the skill-backed scope-gate (determinism 1.0, no model) refuses any staged path outside the scope's files and any law or term id added, removed or amended that the scope does not name; a rename is a removal plus an addition (DS-1, DS-2). Review: chancery-red-reviewer, a different seat with no write grant (DS-3), runs the whole loop on the baseline and on the branch; every pre-existing law not named in the scope keeps its verdict and plant outcome (DS-5). A failing verdict returns to the drafter up to max_examine_rounds = 3. It publishes nothing: it leaves a branch."
+  "refuse_when_unresolved": true,
+  "description": "Draft RED laws in eir-dev/chancery-os for a spec already graded PASS, only the laws its spec names, and have them run by a seat that did not write them (spec.chancery.the-testable-charter.drafting-standard rev 2, graded PASS by Vör). The gig runs only on an admitting, latest spec_grade (DS-4). Draft: chancery-red-drafter writes the scoped laws and seals a red-spec from the staged diff. Scope: the skill-backed scope-gate (determinism 1.0, no model) refuses any staged path outside the scope's files and any law or term id added, removed or amended that the scope does not name; a rename is a removal plus an addition (DS-1, DS-2). Baseline: the skill-backed baseline-gate (determinism 1.0, no model) runs the repository's loop/loop-result on the baseline and on the staged branch, each in a throwaway directory, and refuses any law not named in the scope whose verdict or plant outcome moved (DS-5). Review: chancery-red-reviewer, a different seat with no write grant (DS-3), runs the scoped laws on the branch and reads the baseline-verdict. A failing verdict returns to the drafter up to max_examine_rounds = 3. It publishes nothing: it leaves a branch."
 }

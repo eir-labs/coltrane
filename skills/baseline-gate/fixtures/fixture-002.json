@@ -1,0 +1,6 @@
+{
+  "id": "no-baseline",
+  "description": "a change-request with no baseline_commit is refused before git is read",
+  "input": { "scope": { "files": ["crossing/laws.sx"], "laws": [], "terms": [] } },
+  "assertions": [ { "path": "pass", "op": "equals", "value": false }, { "path": "target_ref", "op": "is_string" } ]
+}

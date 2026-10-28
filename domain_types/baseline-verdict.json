@@ -1,0 +1,43 @@
+{
+  "slug": "baseline-verdict",
+  "version": 1,
+  "extends": "Verdict",
+  "domain": "spec-drafting",
+  "status": "active",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "pass": {
+        "type": "boolean",
+        "description": "true only when every law at the baseline not named in the scope keeps, on the staged branch, its verdict and each plant's outcome."
+      },
+      "violations": {
+        "type": "array",
+        "description": "Each moved law or plant: {law, plant?, baseline, branch, reason} as compareBaselineLoop returns it.",
+        "items": {
+          "type": "object"
+        }
+      },
+      "excepted": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "The law ids the scope names, excepted because their verdict is meant to change."
+      },
+      "baseline": {
+        "type": "object",
+        "description": "loop/loop-result at the baseline commit: {laws: [{id, verdict, plants: [{id, outcome}]}]}."
+      },
+      "branch": {
+        "type": "object",
+        "description": "loop/loop-result on the staged branch, same shape."
+      }
+    }
+  },
+  "required_fields": [
+    "pass",
+    "violations",
+    "excepted"
+  ]
+}

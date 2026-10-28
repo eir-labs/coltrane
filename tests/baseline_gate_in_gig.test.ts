@@ -9,6 +9,7 @@
 // Plant: the drafter amends a SCOPED term so that an UNSCOPED law passes its own plant. The scope gate admits it (the
 // term is named); only the baseline holds can see it, and must refuse it, naming the law and the plant, before review.
 // Twin: the drafter adds a law and leaves the term alone; the baseline passes and the reviewer is seated.
+import { createHash } from "node:crypto";
 import { describe, it, expect, afterAll } from "vitest";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, chmodSync } from "node:fs";
@@ -69,7 +70,9 @@ function repo() {
 }
 
 const SPEC = "eir:spec.chancery.the-testable-charter";
-const H = "c".repeat(64), VOR = "principal:vor";
+const pageHash = (title: string, body: string): string => createHash("sha256").update(`${title}\n${body}`, "utf8").digest("hex"); // RR-3: the page's own content expression
+const SPEC_TITLE = "A graded spec", SPEC_BODY = "the graded text";
+const H = pageHash(SPEC_TITLE, SPEC_BODY), VOR = "principal:vor";
 async function drive(stageAmend: (dir: string) => void) {
   const std = (genome.standards.get("chancery-red-drafting-v0") ?? genome.draft_standards.get("chancery-red-drafting-v0")) as Standard;
   const r = repo();
@@ -88,7 +91,7 @@ async function drive(stageAmend: (dir: string) => void) {
   const outputs = createOutputStore(registry);
   let err: unknown;
   try {
-    await runGig(std, { "change-request": { source: "eugene", request_text: "Add the guest law.", acceptance_criteria: ["observed red"], spec: SPEC, content_hash: H, spec_grade: "g1",
+    await runGig(std, { "change-request": { source: "eugene", request_text: "Add the guest law.", acceptance_criteria: ["observed red"], spec: SPEC, content_hash: H, spec_title: SPEC_TITLE, spec_body: SPEC_BODY, spec_grade: "g1",
       scope: { files: ["crossing/laws.sx", "crossing/terms.sx"], laws: [NEW], terms: [TERM] }, baseline_commit: r.baseline, branch: "red/x" } }, {
       outputs, ledger: new MemoryLedger(), invoke, tree_root: r.dir,
       skill_dirs: new Map([["scope-gate", join(ROOT, "skills", "scope-gate")], ["baseline-gate", join(ROOT, "skills", "baseline-gate")]]),

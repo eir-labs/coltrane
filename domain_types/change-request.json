@@ -1,6 +1,6 @@
 {
   "slug": "change-request",
-  "version": 2,
+  "version": 3,
   "extends": "Signal",
   "domain": "software-change",
   "status": "active",
@@ -91,6 +91,14 @@
       "branch": {
         "type": "string",
         "description": "The branch the red pass writes."
+      },
+      "spec_title": {
+        "type": "string",
+        "description": "The graded spec page's title, exactly as the wiki holds it. With spec_body it is the text the grade attests: sha256(spec_title + \"\\n\" + spec_body), UTF-8, equals content_hash (RR-3)."
+      },
+      "spec_body": {
+        "type": "string",
+        "description": "The graded spec page's body, exactly as the wiki holds it (its bytes, no added newline). The drafter reads the spec from here; DS-4 refuses the gig before any seat unless sha256(spec_title + \"\\n\" + spec_body) equals content_hash (RR-3)."
       }
     }
   },

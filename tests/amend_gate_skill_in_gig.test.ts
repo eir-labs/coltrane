@@ -5,6 +5,7 @@
 // run through runGig, with the REAL scope-gate skill reading a REAL git tree. Round one's staged diff is in
 // scope; the reviewer fails it; the drafter's amend stages an edit to a law the scope does not name. The
 // scope gate must refuse that amended diff, naming the law, before the reviewer is seated again.
+import { createHash } from "node:crypto";
 import { describe, it, expect, afterAll } from "vitest";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, chmodSync } from "node:fs";
@@ -55,7 +56,9 @@ function repo(): { dir: string; baseline: string } {
 }
 
 const SPEC = "eir:spec.chancery.the-testable-charter";
-const HASH = "c".repeat(64);
+const pageHash = (title: string, body: string): string => createHash("sha256").update(`${title}\n${body}`, "utf8").digest("hex"); // RR-3: the page's own content expression
+const SPEC_TITLE = "A graded spec", SPEC_BODY = "the graded text";
+const HASH = pageHash(SPEC_TITLE, SPEC_BODY);
 const VOR = "principal:vor";
 const SCOPE = { files: ["crossing/laws.sx"], laws: [LAW_NAMED], terms: [] as string[] };
 
@@ -93,7 +96,7 @@ describe("the scope gate runs on every amend round of chancery-red-drafting-v0, 
     const events: GigProgressEvent[] = [];
     const request = {
       source: "eugene", request_text: "Draft the red laws.", acceptance_criteria: ["each law is observed red"],
-      spec: SPEC, content_hash: HASH, spec_grade: "g1", scope: SCOPE, baseline_commit: r.baseline, branch: "red/x",
+      spec: SPEC, content_hash: HASH, spec_title: SPEC_TITLE, spec_body: SPEC_BODY, spec_grade: "g1", scope: SCOPE, baseline_commit: r.baseline, branch: "red/x",
     };
     let err: unknown;
     const outputs = createOutputStore(registry);

@@ -4,6 +4,7 @@
 // whether its maker held the seat at the grade's act time (`held_seat`, chancery-os ask_spec_grades); DS-4 admits on
 // that attestation and refuses on `false`. A grade carrying no attestation is judged as before, against the current
 // holder: never looser.
+import { createHash } from "node:crypto";
 import { describe, it, expect } from "vitest";
 import { fileURLToPath } from "node:url";
 import { loadGenome } from "../src/loader.js";
@@ -18,10 +19,12 @@ const genome = loadGenome(ROOT);
 const registry = createRegistry([...genome.domain_types.values()] as never);
 const SLUG = "chancery-red-drafting-v0";
 const SPEC = "eir:spec.chancery.the-testable-charter";
-const H = "b".repeat(64);
+const pageHash = (title: string, body: string): string => createHash("sha256").update(`${title}\n${body}`, "utf8").digest("hex"); // RR-3: the page's own content expression
+const SPEC_TITLE = "A graded spec", SPEC_BODY = "the graded text";
+const H = pageHash(SPEC_TITLE, SPEC_BODY);
 const VOR = "principal:vor", NEW_HOLDER = "principal:the-next-conformance-seat";
 const L = "drafting:scope-is-the-specs";
-const request = { source: "eugene", request_text: "Draft the RED laws.", acceptance_criteria: ["each law is observed red"], spec: SPEC, content_hash: H, spec_grade: "g1", scope: { files: ["crossing/laws.sx"], laws: [L], terms: [] }, baseline_commit: "0".repeat(40), branch: "red/x" };
+const request = { source: "eugene", request_text: "Draft the RED laws.", acceptance_criteria: ["each law is observed red"], spec: SPEC, content_hash: H, spec_title: SPEC_TITLE, spec_body: SPEC_BODY, spec_grade: "g1", scope: { files: ["crossing/laws.sx"], laws: [L], terms: [] }, baseline_commit: "0".repeat(40), branch: "red/x" };
 const grade = (over: Record<string, unknown> = {}) => ({ id: "g1", record: { spec: SPEC, content_hash: H, verdict: "PASS", scope: [L], by: VOR, ...over } });
 
 async function drive(spec_grades: unknown): Promise<{ seated: boolean; message: string }> {

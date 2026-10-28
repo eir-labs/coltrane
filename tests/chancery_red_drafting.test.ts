@@ -32,6 +32,7 @@
 //                      RunDeps.spec_grades (the seam this red-spec fixes)           (or admit on verdict alone)
 //   DS-5  behavioural  compareBaselineLoop — src/index.ts (the seam this red-spec    make the comparison ignore plant outcomes, or ignore
 //                      fixes), over loop results taken from a real git repo         the scope's exemption direction
+import { createHash } from "node:crypto";
 import { describe, it, expect, afterAll } from "vitest";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -408,8 +409,12 @@ describe("DS-3 — drafting:the-drafter-cannot-review: `review` is a different s
 //   { conformance_seat: <principal>, grades: [{ id, record: {spec, content_hash, verdict, scope, by} }] }
 interface SpecGrade { spec: string; content_hash: string; verdict: "PASS" | "HOLD"; scope: string[] | null; by: string }
 const SPEC = "eir:spec.chancery.the-testable-charter.drafting-standard";
-const H_OLD = "a".repeat(64);
-const H_NEW = "b".repeat(64);
+const pageHash = (title: string, body: string): string => createHash("sha256").update(`${title}\n${body}`, "utf8").digest("hex"); // RR-3: the page's own content expression
+const SPEC_TITLE = "The chancery-os drafting standard";
+const BODY_OLD = "revision 1 of the drafting standard";
+const BODY_NEW = "revision 2 of the drafting standard";
+const H_OLD = pageHash(SPEC_TITLE, BODY_OLD);
+const H_NEW = pageHash(SPEC_TITLE, BODY_NEW);
 const VOR = "principal:vor";
 const INTRUDER = "principal:someone-else";
 const L1 = "drafting:scope-is-the-specs";
@@ -418,7 +423,7 @@ const grade = (over: Partial<SpecGrade> = {}): SpecGrade =>
   ({ spec: SPEC, content_hash: H_NEW, verdict: "PASS", scope: [L1, L2], by: VOR, ...over });
 const changeRequest = (gradeId: string | undefined, over: Record<string, unknown> = {}): Record<string, unknown> => ({
   source: "eugene", request_text: "Draft the RED laws DS-1 to DS-5.", acceptance_criteria: ["each law is observed red"],
-  spec: SPEC, content_hash: H_NEW, ...(gradeId !== undefined ? { spec_grade: gradeId } : {}),
+  spec: SPEC, content_hash: H_NEW, spec_title: SPEC_TITLE, spec_body: BODY_NEW, ...(gradeId !== undefined ? { spec_grade: gradeId } : {}),
   scope: { files: ["tests/chancery_red_drafting.test.ts"], laws: [L1, L2], terms: [] },
   baseline_commit: "0".repeat(40), branch: "standard/chancery-red-drafting", ...over,
 });

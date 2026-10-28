@@ -107,7 +107,8 @@ describe("E1 · the store genome has a base: the engine's packaged genome sits u
     expect(g.load_errors).toEqual([]);
     expect(g.standards.has("software-change-pr-v1"), "no promotion needed — R30's trap closes").toBe(true);
     // change-request is at v2 since 2026-10-27 (type_extend for chancery-red-drafting-v0: spec, content_hash, spec_grade, scope, baseline_commit, branch).
-    expect(g.domain_types.has("change-request@2"), "the base's types ride too").toBe(true);
+    // change-request@3 since 2026-10-28 (type_extend: spec_title, spec_body — RR-3, the graded spec travels with the request).
+    expect(g.domain_types.has("change-request@3"), "the base's types ride too").toBe(true);
     expect(g.provenance?.get("standard:software-change-pr-v1")).toBe("engine-base");
   });
 

@@ -1865,6 +1865,17 @@ function specGradeRefusal(
   if (named.content_hash !== request["content_hash"]) {
     return `${head}, but spec_grade "${gradeId}" grades content_hash ${named.content_hash} and the change-request names content_hash ${String(request["content_hash"])}`;
   }
+  // RR-3: the graded text travels with the request, and the grade's hash binds it. A hash names text; without the text the
+  // drafter has nothing to draft from (gig 3243a92c sealed unsatisfiable-inputs every round). The binding is the graded page's
+  // OWN content expression, sha256(title + "\n" + body) in UTF-8, so the grade's hash stays the page's identifier and anyone
+  // can check one against the other without a private convention. The payload is shaped to fit the hash, never the reverse.
+  const specTitle = request["spec_title"], specBody = request["spec_body"];
+  if (typeof specTitle !== "string") return `${head}, but the change-request carries no spec_title: the text the grade attests must travel with the request (sha256(spec_title + "\n" + spec_body) = content_hash)`;
+  if (typeof specBody !== "string") return `${head}, but the change-request carries no spec_body: the text the grade attests must travel with the request (sha256(spec_title + "\n" + spec_body) = content_hash)`;
+  const carried = createHash("sha256").update(`${specTitle}\n${specBody}`, "utf8").digest("hex");
+  if (carried !== named.content_hash) {
+    return `${head}, but the carried spec text hashes to ${carried} (sha256(spec_title + "\n" + spec_body)) and spec_grade "${gradeId}" grades ${named.content_hash}: the text is not the text the grade attests`;
+  }
   const scope = request["scope"];
   const namedLaws = scope !== null && typeof scope === "object" && Array.isArray((scope as { laws?: unknown }).laws)
     ? ((scope as { laws: unknown[] }).laws.filter((l): l is string => typeof l === "string"))

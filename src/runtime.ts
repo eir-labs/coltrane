@@ -269,6 +269,8 @@ export type GigProgressEvent =
   | { type: "amend_escalated"; phase: string; role: string; round: number; from_tier: string; to_tier: string }
   /** The amend ladder stopped the loop: the re-verify failed on the same findings as the verdict before. */
   | { type: "amend_stalled"; phase: string; role: string; round: number; repeated: Array<{ method: string; target_ref: string }> }
+  /** A gate the verifier depends on refused the amended artifact; the loop stopped before the verifier saw it. */
+  | { type: "amend_gated"; phase: string; role: string; gate: string; round: number; checks: Array<{ method: string; target_ref: string }> }
   | { type: "chair_start"; phase: string; role: string; producer: string }
   | {
       type: "chair_complete"; phase: string; role: string; producer: string;
@@ -3185,6 +3187,39 @@ export async function runGig(
             produced.push(...recs);
             noteCheckpointRole(mk.role, phaseNameOf(mk.role), recs);
           }
+          // THE GATE ON EVERY ROUND (Vör's HOLD on #596): a chair the verifier depends on that is not a maker
+          // and judges what was just amended (it depends, directly or transitively, on an amended maker) is a
+          // GATE. It re-runs on the amended artifact after the makers and before the verifier, so an amended
+          // diff is gated exactly as round one's was. A gate that fails stops the loop: the verifier never sees
+          // the gated artifact, and its last failing verdict stands.
+          // A gate is any chair the verifier reaches through depends_on, directly or transitively, that is not
+          // an amended maker and itself depends on one. They re-run in the standard's own order (phase order,
+          // which is dependency order), so a gate that reads another gate's verdict reads this round's.
+          const amendedRoles = new Set(makers.map((m) => m.role));
+          const reach = transitiveDepsOf(vch.role);
+          const gates = allChairs.filter((c) => reach.has(c.role) && !amendedRoles.has(c.role) && producesVerdict(c)
+            && [...transitiveDepsOf(c.role)].some((r) => amendedRoles.has(r)));
+          let gatedBy: { gate: string; record: OutputRecord | undefined } | undefined;
+          for (const g of gates) {
+            const gprep = prepareChair(g, phaseNameOf(g.role), [], { round: round + 1 });
+            const grecs = await invokeAndWriteChair(gprep);
+            dropFromProduced(producedByRole.get(g.role) ?? []);
+            producedByRole.set(g.role, grecs);
+            produced.push(...grecs);
+            noteCheckpointRole(g.role, phaseNameOf(g.role), grecs);
+            // FAIL CLOSED (Vör, driven at fce898d): a gate that seals a Verdict proceeds only on an explicit
+            // `pass === true`. A verdict with no `pass`, or no verdict at all, stops the loop like a refusal:
+            // silence is not a yes.
+            const verdicts = grecs.filter((r) => (deps.outputs.coreTypeOf(r.domain_type) ?? "") === "Verdict");
+            const yes = verdicts.length > 0 && verdicts.every((r) => (r.data as { pass?: unknown }).pass === true);
+            if (!yes) { gatedBy = { gate: g.role, record: verdicts.find((r) => (r.data as { pass?: unknown }).pass !== true) }; break; }
+          }
+          if (gatedBy) {
+            emit({ type: "amend_gated", phase: phase.name, role: vch.role, gate: gatedBy.gate, round: round + 1, checks: gatedBy.record ? findingsOf(gatedBy.record) : [] });
+            if (budget && hasCeiling) budget.spent_usd = usage.total_cost_usd;
+            saveCheckpoint();
+            break;
+          }
           // RE-VERIFY the amended artifact. contract-resumed-gig-session-v1 (O1/I1) — the re-verify
           // RESUMES the verifier's own round-one session (`resume: true`), never re-opens `--session-id`
           // for a live id: the id is deterministic in (gig_id, role), so a second `--session-id` open
@@ -3956,7 +3991,14 @@ export async function runGig(
       // missing kill.
       // Beside the merge, the upstream outputs INDIVIDUALLY, by role — the merge alone collapses two
       // same-type outputs into one (measured: two adjudicators read as one; tests/skill_chair_upstream_by_role).
-      const skillContext = { upstream: inputs.map((i) => ({ role: i.from_role, domain_type: i.domain_type, data: i.data })) };
+      // A declared gig input the chair's contract names is part of what the chair reads (composition.ts:
+      // "gig inputs are available to any chair"). prepareChair counts it as supplied without making it a
+      // record, so the skill must be handed it here too, or a non-root skill chair never sees it: the
+      // drafting standard's scope gate read no change-request in a driven gig and refused every red pass.
+      const gigUpstream = chair.input_contract
+        .filter((need) => standardInputs.has(need) && gigInput[need] !== undefined && !inputs.some((i) => i.domain_type === need))
+        .map((need) => ({ role: "gig", domain_type: need, data: gigInput[need] as Record<string, unknown> }));
+      const skillContext = { upstream: [...gigUpstream, ...inputs.map((i) => ({ role: i.from_role, domain_type: i.domain_type, data: i.data }))] };
       // contract-skill-chair-runs-in-tree-v1 (O1/I1) — a skill chair's code half runs in the GIG'S
       // tree: forward RunDeps.tree_root as the child's working directory when the run has one. A run
       // with no tree_root passes no cwd, so the child inherits the engine process's directory (I2).

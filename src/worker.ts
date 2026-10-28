@@ -33,7 +33,10 @@
 // store; the local checkpoint demotes to a fast path.
 import * as fs from "node:fs";
 import { homedir, tmpdir } from "node:os";
+import * as path from "node:path";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { loadSkillPackage } from "./skills.js";
 import { runGig, ResumeRefused, genomeHash, CORE_TO_PRIMITIVE, type AgentInvoker, type TerminalHeaderOutcome } from "./runtime.js";
 import { HOSTED_LEASE_MS, LeaseLost, LeaseUnverifiable, renewLease, releaseLease, type LeaseCredential } from "./lease.js";
 import { makeGigLogTee, gigLogBaseFromEnv } from "./gig_log_tee.js";
@@ -46,7 +49,7 @@ import { workerCredentialMode } from "./worker_env.js";
 import { prepareWorkspace, prepareWorkspaces, type PreparedWorkspaces } from "./workspace.js";
 import type { CommitAttribution } from "./publisher.js";
 import { COLTRANE_VERSION } from "./version.js";
-import { engineToolProviders, drainBudget, drainTimeoutMs, resolveWorkingRepo, resolveChangeSetBase, assembleRunDeps } from "./run_deps.js";
+import { engineToolProviders, drainBudget, drainTimeoutMs, resolveWorkingRepo, resolveChangeSetBase, assembleRunDeps, drainSkillDirs } from "./run_deps.js";
 import { githubGrant, normalizeRepoUrl } from "./genome_schema.js";
 // The repository resolver's ONE home is run_deps.ts (shared by both doors). Re-exported here so
 // worker.ts's own consumers — and tests/the_repo_is_typed_input — keep importing it from this path.
@@ -312,6 +315,21 @@ export type WorkOnceResult =
       /** Present iff awaiting_approval: the human chair the run parked at. */
       awaiting?: { phase: string; role: string };
     };
+
+/** The installed engine package's root: the nearest directory above this module whose package.json is the engine's. */
+function engineRoot(): string {
+  let dir = path.dirname(fileURLToPath(import.meta.url));
+  for (let i = 0; i < 6; i++) {
+    try {
+      const pj = JSON.parse(fs.readFileSync(join(dir, "package.json"), "utf-8")) as { name?: string };
+      if (pj.name === "@eir-labs/coltrane") return dir;
+    } catch { /* keep walking */ }
+    dir = path.dirname(dir);
+  }
+  return path.dirname(fileURLToPath(import.meta.url));
+}
+/** DR-3 — the skills the drain seats: the engine package's own, each only at the code_hash its meta pins. */
+const DRAIN_SKILLS = drainSkillDirs(engineRoot());
 
 export interface WorkOnceDeps {
   /** Build the chair invoker against the STORE registry (types the org's outputs seal to). */
@@ -861,11 +879,15 @@ function chairSeats(standard: Standard, outputs: OutputStore): ChairSeat[] {
  * construction. Change what `workOnce` passes and this has to move with it, or every
  * reconstruction is refused for identity drift against its own run.
  */
-function coldRunIdentity(standard: Standard, gigInput: Record<string, unknown>): RunIdentity {
+export function coldRunIdentity(standard: Standard, gigInput: Record<string, unknown>, skillDirs: Map<string, string> = DRAIN_SKILLS.dirs): RunIdentity {
   return {
     standard_slug: standard.slug,
     genome_hash: genomeHash(standard),
-    producers_sha: producersSha({ agents: standard.agents, skills: [] }),
+    // DR-5 — exactly what runGig's resolvedSkillHashes folds for the dirs the drain registers (DR-3), in the
+    // same order, so a re-claim reconstructs the identity its own run computed.
+    producers_sha: producersSha({ agents: standard.agents, skills: [...skillDirs].map(([slug, dir]) => {
+      try { return { slug, code_hash: loadSkillPackage(dir).codeHash ?? "" }; } catch { return { slug, code_hash: "<unreadable>" }; }
+    }) }),
     gig_input_sha: sha256Hex(canonJson(gigInput)),
     model_version: "unknown",
     depth: "",
@@ -1818,11 +1840,10 @@ export async function workOnce(ctx: WorkerContext, deps: WorkOnceDeps): Promise<
         // Passed unconditionally, as the server does: undefined is a truthful "not configured".
         model_version: process.env["COLTRANE_MODEL"],
         skills: genome.skills,
-        // EMPTY, and explicitly so rather than by omission. Store-loaded skills carry no local package
-        // dir by construction — there is no code half to point at — so a skill-BACKED chair fails at
-        // prep with the runtime's own "no skill_dir is registered" error. Declaring it says the drain
-        // HAS no local dirs, instead of leaving a reader to infer whether the wire was considered.
-        skill_dirs: new Map<string, string>(),
+        // DR-3: the engine package's OWN skills, each only at the code_hash its meta pins (drainSkillDirs).
+        // A store-loaded skill still carries no local package dir by construction, so a chair backed by
+        // one fails at prep with the runtime's own "no skill_dir is registered" error, as before.
+        skill_dirs: DRAIN_SKILLS.dirs,
         evals: genome.evals,
         budget: drainBudget(claim.input, claim.budget_micro_usd),
         toolProviders: engineToolProviders(),

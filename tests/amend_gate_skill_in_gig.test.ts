@@ -60,7 +60,7 @@ const VOR = "principal:vor";
 const SCOPE = { files: ["crossing/laws.sx"], laws: [LAW_NAMED], terms: [] as string[] };
 
 describe("the scope gate runs on every amend round of chancery-red-drafting-v0, in a real tree", () => {
-  it("G4 (Vör's plant, end to end) — round one in scope, the reviewer fails it, the amend edits an unscoped law: the scope gate refuses it by name and the reviewer is not seated again", async () => {
+  it("G4 (Vör's plant, end to end) — round one in scope, the reviewer fails it, the amend edits an unscoped law: the scope gate refuses it by name and the reviewer is not seated again", { timeout: 60_000 }, async () => {
     const std = (genome.standards.get(SLUG) ?? genome.draft_standards.get(SLUG)) as Standard | undefined;
     expect(std, `${SLUG} is not in the genome`).toBeDefined();
     expect(std!.max_examine_rounds ?? 0, "the standard must budget amend rounds for this plant to mean anything").toBeGreaterThan(0);

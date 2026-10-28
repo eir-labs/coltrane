@@ -7,7 +7,7 @@
 // stubs so the RED contract suite typechecks and fails honestly on assertions (not on
 // missing imports). Each stub throws NotImplemented; the build fills them in green.
 import { readFileSync, existsSync, mkdtempSync, mkdirSync, copyFileSync, readdirSync, rmSync, appendFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve as resolvePath, relative as relativePath } from "node:path";
 import { tmpdir } from "node:os";
 import { containedPath } from "./contained_path.js";
 import { createHash } from "node:crypto";
@@ -48,8 +48,48 @@ export class SkillCompositionCycleError extends Error {}
 
 // Declare the hash format so implementations match.
 export const CODE_HASH_ALGO = "sha256";
+/**
+ * A skill's LOCAL import closure (DR-3b, Vör at a189507): skill.mjs and every file it reaches through a relative
+ * specifier — static `import … from`, `export … from`, a side-effect `import "…"`, or a literal dynamic
+ * `import("…")` — followed transitively. Bare specifiers (node:*, packages) are outside it, by statement. A relative
+ * file that is not there, or a dynamic import whose specifier is not a literal, makes the closure UNRESOLVABLE:
+ * `unresolved` names why, and hashSkillCode refuses it (SkillLoadError), so the package is refused whatever it pins.
+ */
+export function skillCodeClosure(codePath: string): { files: string[]; unresolved?: string } {
+  const files: string[] = [];
+  const seen = new Set<string>();
+  const queue = [resolvePath(codePath)];
+  while (queue.length > 0) {
+    const file = queue.shift()!;
+    if (seen.has(file)) continue;
+    seen.add(file);
+    if (!existsSync(file)) return { files, unresolved: `a relative import names ${file}, which is not there` };
+    files.push(file);
+    // Comments are not code: a block comment or a // line that mentions an import names no file.
+    const text = readFileSync(file, "utf-8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+    if (/\bimport\s*\(\s*(?!["'][^"']*["']\s*\))/.test(text)) return { files, unresolved: `${file} imports dynamically from a specifier that is not a literal` };
+    const specs = [
+      ...text.matchAll(/\b(?:import|export)\b[^;"'`]*?\bfrom\s*["']([^"']+)["']/g),
+      ...text.matchAll(/\bimport\s*["']([^"']+)["']/g),
+      ...text.matchAll(/\bimport\s*\(\s*["']([^"']+)["']\s*\)/g),
+    ].map((m) => m[1] as string);
+    for (const spec of specs) if (spec.startsWith("./") || spec.startsWith("../")) queue.push(resolvePath(dirname(file), spec));
+  }
+  return { files };
+}
+
+/** The pin's hash. A skill whose closure is itself hashes exactly as it always did (sha256 of skill.mjs), so every
+ *  existing pin stands; a wider closure hashes each file's path (relative to the skill) and bytes, in closure order. */
 export function hashSkillCode(codePath: string): string {
-  return `${CODE_HASH_ALGO}:${createHash(CODE_HASH_ALGO).update(readFileSync(codePath)).digest("hex")}`;
+  const closure = skillCodeClosure(codePath);
+  // Refused, not hashed: a hash of "unresolvable" would be a value a pin could be set to.
+  if (closure.unresolved !== undefined) throw new SkillLoadError(`skill code ${codePath}: its import closure is unresolvable — ${closure.unresolved}`);
+  const fileHash = (f: string) => createHash(CODE_HASH_ALGO).update(readFileSync(f)).digest("hex");
+  if (closure.files.length === 1) return `${CODE_HASH_ALGO}:${fileHash(closure.files[0]!)}`;
+  const base = dirname(resolvePath(codePath));
+  const h = createHash(CODE_HASH_ALGO);
+  for (const f of closure.files) h.update(`${relativePath(base, f)}\0${fileHash(f)}\n`);
+  return `${CODE_HASH_ALGO}:${h.digest("hex")}`;
 }
 
 // ── Package loading + identity ────────────────────────────────────────────────
@@ -61,7 +101,11 @@ export interface SkillPackage {
     input_schema?: Record<string, unknown>;
     output_schema?: Record<string, unknown>;
   };
-  codeHash: string | null; // computed sha256 of skill.mjs; null when there's no code half
+  codeHash: string | null; // computed sha256 of skill.mjs and its local import closure; null when there's no code half
+  /** DR-3b: why the code half's import closure cannot be resolved (a relative file not there, a non-literal dynamic
+   *  import). Loading a genome runs no code, so the package still loads; SEATING it is refused (drainSkillDirs), and
+   *  its codeHash is then a non-sha256 sentinel that equals no pin. */
+  codeUnresolved?: string;
   fixtures: SkillFixture[];
   mdPath: string | null;   // dual-artifact reasoning half (skill.md), if present
 }
@@ -79,7 +123,13 @@ export function loadSkillPackage(dir: string): SkillPackage {
     throw new SkillLoadError(`skill package ${dir}: meta.json is missing a slug`);
   }
   const codePath = join(dir, "skill.mjs");
-  const codeHash = existsSync(codePath) ? hashSkillCode(codePath) : null;
+  let codeHash: string | null = null;
+  let codeUnresolved: string | undefined;
+  if (existsSync(codePath)) {
+    const closure = skillCodeClosure(codePath);
+    if (closure.unresolved !== undefined) { codeUnresolved = closure.unresolved; codeHash = `unresolvable:${closure.unresolved}`; }
+    else codeHash = hashSkillCode(codePath);
+  }
   const mdPath = existsSync(join(dir, "skill.md")) ? join(dir, "skill.md") : null;
   const fixtures = loadFixtures(dir);
   for (const fx of fixtures) {
@@ -87,7 +137,7 @@ export function loadSkillPackage(dir: string): SkillPackage {
       throw new SkillLoadError(`skill package ${meta.slug}: a fixture has an invalid shape (each needs a non-empty id and an input)`);
     }
   }
-  return { dir, meta, codeHash, fixtures, mdPath };
+  return { dir, meta, codeHash, ...(codeUnresolved !== undefined ? { codeUnresolved } : {}), fixtures, mdPath };
 }
 
 // ── Code-first / model-residual resolution (Phase 2) ──────────────────────────

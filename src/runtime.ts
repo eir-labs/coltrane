@@ -3985,7 +3985,14 @@ export async function runGig(
       // missing kill.
       // Beside the merge, the upstream outputs INDIVIDUALLY, by role — the merge alone collapses two
       // same-type outputs into one (measured: two adjudicators read as one; tests/skill_chair_upstream_by_role).
-      const skillContext = { upstream: inputs.map((i) => ({ role: i.from_role, domain_type: i.domain_type, data: i.data })) };
+      // A declared gig input the chair's contract names is part of what the chair reads (composition.ts:
+      // "gig inputs are available to any chair"). prepareChair counts it as supplied without making it a
+      // record, so the skill must be handed it here too, or a non-root skill chair never sees it: the
+      // drafting standard's scope gate read no change-request in a driven gig and refused every red pass.
+      const gigUpstream = chair.input_contract
+        .filter((need) => standardInputs.has(need) && gigInput[need] !== undefined && !inputs.some((i) => i.domain_type === need))
+        .map((need) => ({ role: "gig", domain_type: need, data: gigInput[need] as Record<string, unknown> }));
+      const skillContext = { upstream: [...gigUpstream, ...inputs.map((i) => ({ role: i.from_role, domain_type: i.domain_type, data: i.data }))] };
       // contract-skill-chair-runs-in-tree-v1 (O1/I1) — a skill chair's code half runs in the GIG'S
       // tree: forward RunDeps.tree_root as the child's working directory when the run has one. A run
       // with no tree_root passes no cwd, so the child inherits the engine process's directory (I2).

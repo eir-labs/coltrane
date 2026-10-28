@@ -49,7 +49,8 @@ import { workerCredentialMode } from "./worker_env.js";
 import { prepareWorkspace, prepareWorkspaces, type PreparedWorkspaces } from "./workspace.js";
 import type { CommitAttribution } from "./publisher.js";
 import { COLTRANE_VERSION } from "./version.js";
-import { engineToolProviders, drainBudget, drainTimeoutMs, resolveWorkingRepo, resolveChangeSetBase, assembleRunDeps, drainSkillDirs } from "./run_deps.js";
+import { engineToolProviders, drainBudget, drainTimeoutMs, resolveWorkingRepo, resolveChangeSetBase, assembleRunDeps, drainSkillDirs, typedInputField } from "./run_deps.js";
+import { readSpecGrades } from "./spec_grades_reader.js";
 import { githubGrant, normalizeRepoUrl } from "./genome_schema.js";
 // The repository resolver's ONE home is run_deps.ts (shared by both doors). Re-exported here so
 // worker.ts's own consumers — and tests/the_repo_is_typed_input — keep importing it from this path.
@@ -1828,6 +1829,11 @@ export async function workOnce(ctx: WorkerContext, deps: WorkOnceDeps): Promise<
       }
     }
 
+    // DR-1 / DR-2 — a change-request that names a spec is run only on a grade the store holds: read here, from the
+    // store this gig was claimed from, through its asks (ask_spec_grades, ask_conformance_seat). Never from the input.
+    // A failed read is undefined, so DS-4 refuses before any seat.
+    const requestedSpec = typedInputField(claim.input, "spec");
+    const specGrades = requestedSpec ? await readSpecGrades({ baseUrl: ctx.baseUrl, anonKey: ctx.anonKey }, requestedSpec, new Date().toISOString()) : undefined;
     const run = (resume: boolean, cold_run_reason?: string): ReturnType<typeof runGig> => runGig(standard, claim.input, {
       onProgress: tee,
       ...assembleRunDeps({
@@ -1842,6 +1848,8 @@ export async function workOnce(ctx: WorkerContext, deps: WorkOnceDeps): Promise<
         // A store-loaded skill still carries no local package dir by construction, so a chair backed by
         // one fails at prep with the runtime's own "no skill_dir is registered" error, as before.
         skill_dirs: DRAIN_SKILLS.dirs,
+        // DR-1 — the grades read above, or absent (DS-4 then refuses).
+        spec_grades: specGrades,
         evals: genome.evals,
         budget: drainBudget(claim.input, claim.budget_micro_usd),
         toolProviders: engineToolProviders(),

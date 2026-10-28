@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# The gate inside the thing that commits (Vör, round 4 on 651c5e6; Eugene approved 29 Oct 2026): a commit is refused unless the
+# whole guard prints "exact". Opt-in per worktree: git config extensions.worktreeConfig true && git config --worktree core.hooksPath
+# "$PWD/scripts/hooks". Versioned here (Vör, round 6: a gate whose body lives outside any repository is unreviewable and reapable, and git
+# is silent when it goes; tests/a_configured_gate_is_present.test.ts fails in that state).
+set -uo pipefail
+# A hook runs with git's own environment exported (GIT_DIR, GIT_INDEX_FILE, GIT_WORK_TREE, …). The guard's tests run git in temp
+# repos; inheriting these sends them at THIS repo instead. Measured 29 Oct: the first probe set core.bare=true and a fixture
+# user.name/email in the shared .git/config. Every GIT_* variable is cleared before the guard runs.
+for v in $(env | sed -n 's/^\(GIT_[A-Za-z0-9_]*\)=.*/\1/p'); do unset "$v"; done
+out="$(bash scripts/laws.sh 2>&1)"; last="$(printf '%s\n' "$out" | tail -1)"
+case "$last" in
+  *exact*) exit 0 ;;
+  *) printf '%s\n' "$out" | grep -E "FAIL|×|REFUSED|expected" | head -12; echo "pre-commit REFUSED: the guard did not print exact (last line: $last)"; exit 1 ;;
+esac

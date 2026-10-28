@@ -601,12 +601,19 @@ export function standardForRun<S>(
 /** Does this room need nothing stood up — no mcp_servers, no substrate — so any box may run in it? */
 export type RoomNeedsNothing = (ctx: WorkerContext, venue: string) => Promise<boolean>;
 
+/** R38's exemption, as ONE predicate (it was written twice: the claim gate and the run path). A room NEEDS NOTHING STOOD UP only when it
+ *  declares no servers, no substrate and NO FLOOR: a floored room is one a box must build (RR-1(c2), Vör round 7 — the floor was not
+ *  read, so a floored, server-less room was admitted to every box as needing nothing and its chairs would have run on the host). */
+export function aRoomNeedsNothing(room: { mcp_servers?: readonly unknown[]; substrate?: unknown; floor?: unknown } | undefined | null): boolean {
+  return Boolean(room) && Array.isArray(room!.mcp_servers) && room!.mcp_servers.length === 0 && !room!.substrate && !room!.floor;
+}
+
 export const defaultRoomNeedsNothing: RoomNeedsNothing = async (ctx, venue) => {
   // Read once: the gate's load is kept on the context so the run below does not pay for it twice
   // (one process claims one gig; the cache lives exactly as long as that claim).
   const genome = await rpcGenomeStore(ctx).load();
   const room = genome.venues.get(venue);
-  const admitted = Boolean(room) && room!.mcp_servers.length === 0 && !room!.substrate;
+  const admitted = aRoomNeedsNothing(room);
   // Kept for the run ONLY on admission: a refused claim's read must not be consumed by a later
   // claim on the same context (the grade's note 2).
   if (admitted) genomeReadAtGate.set(ctx, genome); else genomeReadAtGate.delete(ctx);
@@ -1501,7 +1508,7 @@ export async function workOnce(ctx: WorkerContext, deps: WorkOnceDeps): Promise<
       genomeReadAtGate.delete(ctx);
       room = genomeForRun.venues.get(claim.venue);
     }
-    const roomNeedsNothing = Boolean(room) && room!.mcp_servers.length === 0 && !room!.substrate;
+    const roomNeedsNothing = aRoomNeedsNothing(room);
     const roomWillPopulate = Boolean(claim.venue && workingRepo && deps.venueRealizer && !roomNeedsNothing);
     // A ROOM FURNISHES ITS TREES. When the room's github connector grants repositories, every granted
     // tree is cloned under one root, each with its own credential, and the change-request's tree

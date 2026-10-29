@@ -124,6 +124,11 @@ describe("SA-3 — the CLI's own file, at a target DERIVED FROM THE IMAGE, 0600,
     expect(hdr(0)).toEqual({ name: ".claude/", mode: 0o700, uid: 1001, gid: 1002, type: "5" });
     expect(hdr(512)).toEqual({ name: ".claude/.credentials.json", mode: 0o600, uid: 1001, gid: 1002, type: "0" });
     expect(tar.subarray(1024, 1024 + FAKE.length).toString("utf8")).toBe(FAKE);
+    // the CLI's state file beside it (measured as the seat's uid, HOME=/: with none the CLI silently skips its state; with one owned by
+    // the seat it edits IN PLACE, same inode, 2 → 852 bytes), so it is pre-created, owned by the seat, 0600, holding no credential
+    const off = 1024 + Math.ceil(FAKE.length / 512) * 512;
+    expect(hdr(off)).toEqual({ name: ".claude.json", mode: 0o600, uid: 1001, gid: 1002, type: "0" });
+    expect(tar.subarray(off + 512, off + 514).toString("utf8")).toBe("{}");
   });
 });
 

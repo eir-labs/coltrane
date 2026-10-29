@@ -66,14 +66,23 @@ function header(name: string, mode: number, uid: number, gid: number, size: numb
   put(sum.toString(8).padStart(6, "0") + "\0 ", 148, 8);
   return b;
 }
-/** The tar extracted at the target's HOME: .claude/ (0700) and .claude/.credentials.json (0600), both owned by the probed uid:gid. */
+/** The CLI's state file, beside its login: measured as the seat's uid with HOME=/ (not writable), the CLI SILENTLY SKIPS its state when
+ *  the file is absent, and with one owned by the seat it edits it IN PLACE (same inode, 2 → 852 bytes). So it is pre-created, owned by
+ *  the seat, 0600, holding no credential (Vör: $HOME/.claude.json is written on state change, which a startup check cannot see). */
+export const SEAT_STATE_REL = ".claude.json";
+const pad512 = (n: number) => Buffer.alloc((512 - (n % 512)) % 512, 0);
+/** The tar extracted at the target's HOME: .claude/ (0700), .claude/.credentials.json (0600) and .claude.json (0600, "{}"), all owned
+ *  by the probed uid:gid. */
 export function seatCredentialTar(material: string, t: SeatTarget): Buffer {
   const data = Buffer.from(material, "utf8");
-  const pad = Buffer.alloc((512 - (data.length % 512)) % 512, 0);
+  const state = Buffer.from("{}", "utf8");
   return Buffer.concat([
     header(".claude/", 0o700, t.uid, t.gid, 0, "5"),
     header(SEAT_CREDENTIAL_REL, 0o600, t.uid, t.gid, data.length, "0"),
-    data, pad, Buffer.alloc(1024, 0),
+    data, pad512(data.length),
+    header(SEAT_STATE_REL, 0o600, t.uid, t.gid, state.length, "0"),
+    state, pad512(state.length),
+    Buffer.alloc(1024, 0),
   ]);
 }
 

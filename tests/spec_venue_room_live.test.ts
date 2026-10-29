@@ -643,9 +643,16 @@ describe.skipIf(!HAVE_FLOOR)("the seat authenticates in its room — the install
     try {
       const ls = dk(["exec", c, "stat", "-c", "%a %u %g", target.path]).stdout.trim();
       expect(ls).toBe(`600 ${target.uid} ${target.gid}`);
+      // the CLI's state file: pre-created, owned by the seat, and edited IN PLACE by the CLI (same inode, grown)
+      const state = target.home === "/" ? "/.claude.json" : `${target.home}/.claude.json`;
+      const before = dk(["exec", c, "stat", "-c", "%i %s %a %u", state]).stdout.trim().split(" ");
+      expect(before.slice(2)).toEqual(["600", String(target.uid)]);
       const r = dk(["exec", "-w", "/tmp", c, "timeout", "12", "claude", "-p", "hi"]);
       expect(`${r.stdout}${r.stderr}`).not.toMatch(/Not logged in/);
       expect(r.status, "exit 1 is the CLI's not-logged-in exit").not.toBe(1);
+      const after = dk(["exec", c, "stat", "-c", "%i %s", state]).stdout.trim().split(" ");
+      expect(after[0], "the state file was replaced, not edited in place: pre-creating it would not hold").toBe(before[0]);
+      expect(Number(after[1]), "the CLI wrote no state").toBeGreaterThan(Number(before[1]));
     } finally { drop(c); }
   });
   it("SA-3 twin: without the delivered file the same image prints \"Not logged in\" (the probe above could have failed)", async () => {

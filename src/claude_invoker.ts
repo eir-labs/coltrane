@@ -3,7 +3,7 @@
 // nothing but Claude Code"). buildPrompt is pure + testable; runClaude is the one
 // non-deterministic seam (spawns the CLI, parses structured output).
 import { spawn, type ChildProcess } from "node:child_process";
-import { writeFileSync, unlinkSync } from "node:fs";
+import { readFileSync, writeFileSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID, createHash } from "node:crypto";
@@ -1983,8 +1983,13 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
       // Absent → identity, and the leaf spawns on the host exactly as before.
       const seatExec = ctx.seatExec;
       const execBin = seatExec ? "docker" : bin;
+      // The MCP config is written to the HOST's tmpdir (cfgPath) and the invoker's args name that path; a seat spawned by docker exec
+      // reads the CONTAINER's filesystem, where the path is not ("MCP config file not found", gig 3ba295b5, 29 Oct). The claude CLI
+      // takes --mcp-config as a file or a JSON string, so the in-room arm passes the file's JSON instead of its host path.
+      const inRoomArgs = (args: readonly string[]): string[] =>
+        args.map((a, k) => (k > 0 && args[k - 1] === "--mcp-config" && a === cfgPath ? readFileSync(cfgPath, "utf-8") : a));
       const inRoom = (args: readonly string[]): string[] =>
-        seatExec ? ["exec", "-i", "-w", seatExec.workspace, seatExec.container, bin, ...args] : [...args];
+        seatExec ? ["exec", "-i", "-w", seatExec.workspace, seatExec.container, bin, ...inRoomArgs(args)] : [...args];
       // ONE invocation only — on the output_write path the agent self-corrects a rejected write
       // WITHIN this single run (each output_write rejection returns in-band and it calls again),
       // and on the text path there is a single answer. Either way, the invoker never re-prompts.

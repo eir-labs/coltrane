@@ -84,6 +84,27 @@ describe("the seat runs inside the room — the invoker relocation", () => {
     expect(args.includes("exec"), "no docker-exec wrapper without a seat-bearing room").toBe(false);
   });
 
+  it("IN ROOM, --mcp-config carries the config's JSON, never a host path the container cannot see (29 Oct, gig 3ba295b5)", async () => {
+    // The red pass's draft chair ran inside the drafting room and exited 1: "MCP config file not found: /var/folders/…/coltrane-mcp-….json".
+    // The invoker writes the config to the HOST's tmpdir and passes its path; a seat spawned by docker exec reads the container's
+    // filesystem, where that path is not. The claude CLI takes --mcp-config as a file OR a JSON string, so the in-room arm passes the JSON.
+    const agent = testAgent({ slug: "p", primitives: ["SENSE"], allowed_tools: ["Read"] });
+    const { args } = await driveSpawn(agent, room(["Read"]), { container: CONTAINER, workspace: WORKSPACE });
+    const i = args.indexOf("--mcp-config");
+    expect(i, "the in-room spawn passes an MCP config").toBeGreaterThan(-1);
+    const v = args[i + 1]!;
+    expect(v.startsWith("/") || v.includes("coltrane-mcp-"), `a host path rode into the room: ${v}`).toBe(false);
+    expect(() => JSON.parse(v), "the in-room --mcp-config is the config's JSON").not.toThrow();
+    expect(JSON.parse(v)).toHaveProperty("mcpServers");
+  });
+
+  it("ON THE HOST, --mcp-config still names the written file (unchanged)", async () => {
+    const agent = testAgent({ slug: "p", primitives: ["SENSE"], allowed_tools: ["Read"] });
+    const { args } = await driveSpawn(agent, room(["Read"]));
+    const v = args[args.indexOf("--mcp-config") + 1]!;
+    expect(v.includes("coltrane-mcp-") && v.endsWith(".json"), `the host spawn lost its config file: ${v}`).toBe(true);
+  });
+
   it("moving the seat does NOT widen it — a granted-but-unequipped tool is absent in BOTH arms", async () => {
     // THE LAW THAT MATTERS for relocation safety. Agent grants Read+Bash; the room equips only Read.
     // The ceiling is agent.allowed_tools ∩ venue.equipment.tools, computed BEFORE the spawn is

@@ -145,6 +145,43 @@ describe("DR-3b — the pin covers the skill's local import closure", () => {
     expect(JSON.parse(readFileSync(join(ROOT, "skills/scope-gate/meta.json"), "utf8")).code_hash).toBe(plain);
   });
 
+  // INSTALLED (29 Oct, the red pass on stack rp1): the engine runs from npm, at <prefix>/node_modules/@eir-labs/coltrane, so EVERY
+  // file of the package has a node_modules segment in its real path. Classifying by "any node_modules segment" dropped the skill's own
+  // local import from its closure, the hash covered skill.mjs alone, and the drain refused baseline-gate as a code_hash mismatch.
+  // node_modules is judged relative to the skill's own package root: only a node_modules below (or outside) that root is a dependency.
+  function installed(): string {
+    const prefix = mkdtempSync(join(tmpdir(), "skill-installed-")); tmps.push(prefix);
+    const root = join(prefix, "node_modules", "@scope", "eng");
+    w(root, "package.json", PKG);
+    w(root, "dist/src/helper.js", HELPER); w(root, "dist/src/strict.js", STRICT);
+    w(root, "skills/closer/skill.mjs", IMPORTS_HELPER);
+    w(root, "node_modules/some-dep/package.json", JSON.stringify({ name: "some-dep", main: "index.js" }));
+    w(root, "node_modules/some-dep/index.js", "module.exports = 1;\n");
+    return root;
+  }
+  it("INSTALLED twin, must be ALLOWED — an engine under node_modules keeps its skill's local closure: the pin equals the source layout's, and it is seated", () => {
+    const src = engine(IMPORTS_HELPER, { "package.json": PKG, "dist/src/helper.js": HELPER, "dist/src/strict.js": STRICT });
+    const pin = JSON.parse(readFileSync(join(src, "skills/closer/meta.json"), "utf-8")).code_hash;
+    const root = installed();
+    expect(skills.hashSkillCode(join(root, "skills/closer/skill.mjs")), "the installed closure hashes differently from the source layout").toBe(pin);
+    w(root, "skills/closer/meta.json", JSON.stringify({ slug: "closer", version: 1, skill_type: "verification", determinism_ratio: 1, permission: { tier: 1 }, code_hash: pin }));
+    expect(drainSkillDirs(root).dirs.has("closer"), `refused: ${JSON.stringify(drainSkillDirs(root).refused)}`).toBe(true);
+  });
+  it("INSTALLED plant — under node_modules, the imported file tampered: still refused (the closure did not shrink to skill.mjs)", () => {
+    const src = engine(IMPORTS_HELPER, { "package.json": PKG, "dist/src/helper.js": HELPER, "dist/src/strict.js": STRICT });
+    const pin = JSON.parse(readFileSync(join(src, "skills/closer/meta.json"), "utf-8")).code_hash;
+    const root = installed();
+    w(root, "skills/closer/meta.json", JSON.stringify({ slug: "closer", version: 1, skill_type: "verification", determinism_ratio: 1, permission: { tier: 1 }, code_hash: pin }));
+    w(root, "dist/src/strict.js", "export const strict = (x) => true;\n");
+    expect(drainSkillDirs(root).dirs.has("closer")).toBe(false);
+  });
+  it("INSTALLED twin — a dependency under the installed package's OWN node_modules is still outside the closure", () => {
+    const root = installed();
+    w(root, "skills/closer/skill.mjs", `import dep from "some-dep";\nexport default () => ({ pass: !!dep });\n`);
+    const files = (skills as unknown as { skillCodeClosure: (p: string) => { files: string[] } }).skillCodeClosure(join(root, "skills/closer/skill.mjs")).files;
+    expect(files.length, "the package's own dependency joined the closure").toBe(1);
+  });
+
   it("the real baseline-gate — its closure names dist/src/baseline_holds.js, and its pin is the closure's", () => {
     const closure = (skills as unknown as { skillCodeClosure?: (p: string) => { files: string[] } }).skillCodeClosure;
     expect(typeof closure, "src/skills.ts exports no skillCodeClosure").toBe("function");

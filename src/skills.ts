@@ -66,6 +66,18 @@ export function skillCodeClosure(codePath: string): { files: string[]; unresolve
   const files: string[] = [];
   const seen = new Set<string>();
   const queue = [existsSync(codePath) ? realpathSync(codePath) : resolvePath(codePath)];
+  // node_modules is judged RELATIVE TO THE SKILL'S OWN PACKAGE ROOT (the nearest ancestor holding package.json). An engine installed
+  // from npm lives at <prefix>/node_modules/@eir-labs/coltrane, so every file of it has a node_modules segment; classifying by any
+  // segment dropped the skill's own local imports and the drain refused baseline-gate as a code_hash mismatch (29 Oct, stack rp1).
+  // A file inside the package root but outside its own node_modules is LOCAL; one under the root's node_modules, or outside the
+  // root under a node_modules, is an installed dependency.
+  let pkgRoot = dirname(queue[0]!);
+  while (!existsSync(join(pkgRoot, "package.json")) && dirname(pkgRoot) !== pkgRoot) pkgRoot = dirname(pkgRoot);
+  if (!existsSync(join(pkgRoot, "package.json"))) pkgRoot = "";
+  const isDependency = (real: string): boolean => {
+    const rel = pkgRoot !== "" && real.startsWith(pkgRoot + pathSep) ? real.slice(pkgRoot.length + 1) : real;
+    return rel.split(pathSep).includes("node_modules");
+  };
   while (queue.length > 0) {
     const file = queue.shift()!;
     if (seen.has(file)) continue;
@@ -93,7 +105,7 @@ export function skillCodeClosure(codePath: string): { files: string[]; unresolve
       }
       if (!existsSync(resolved)) return { files, unresolved: `${file} imports "${spec}", which resolves to ${resolved}, which is not there` };
       const real = realpathSync(resolved);
-      if (real.split(pathSep).includes("node_modules")) continue; // an installed dependency: outside, by statement
+      if (isDependency(real)) continue; // an installed dependency: outside, by statement
       queue.push(real);
     }
   }

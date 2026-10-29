@@ -14,6 +14,7 @@
 // with extra steps.
 import { existsSync, writeFileSync, rmSync, mkdirSync, mkdtempSync } from "node:fs";
 import { execFileSync } from "node:child_process";
+import { EGRESS_PROXY_PORT, egressProxySource } from "./egress_proxy.js";
 import { seatClassesFor, seatClassUnpinned, seatProbeArgs, parseSeatProbe, seatCredentialTar } from "./seat_credentials.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -557,11 +558,30 @@ export function renderComposeConfig(
     };
   }
 
+  // THE ROOM REACHES ONLY ITS DOORS (spec.coltrane.the-room-reaches-only-its-doors). A room that declares egress doors gets one `egress`
+  // service: the engine's CONNECT proxy (egress_proxy.ts), run from the room's OWN image with the doors as its arguments. It alone joins
+  // a non-internal network; the room stays on room-net, internal (EP-1, load-bearing: every bypass fails closed). The room's compose
+  // service carries NO environment: the seat's proxy rides in its own settings file, delivered with its login (seat_credentials.ts), and
+  // `environment` is not a contract-substitutable field (EP-0). The egress service is handed no credential, secret or volume (EP-7).
+  const egressDoors = v.doors?.egress ?? [];
+  const egressServices: Record<string, Record<string, unknown>> = {};
+  const egressNetworks: Record<string, Record<string, unknown>> = {};
+  if (egressDoors.length > 0) {
+    egressServices["egress"] = {
+      image: room["image"],
+      command: ["node", "-e", egressProxySource(), "--", ...egressDoors],
+      networks: ["room-net", "egress-net"],
+      logging: { driver: "json-file", options: { "max-size": "10m", "max-file": "3" } },
+      labels: { "coltrane.managed": "true", "coltrane.slug": v.slug, "coltrane.project": projectName, "coltrane.egress": "true" },
+    };
+    egressNetworks["egress-net"] = {};
+  }
+
   return {
     version: "3.8",
     name: projectName,
-    services: { room, ...serverServices },
-    networks: { "room-net": { internal: true } },
+    services: { room, ...serverServices, ...egressServices },
+    networks: { "room-net": { internal: true }, ...egressNetworks },
     // No top-level `secrets:` block. A compose file-secret needs a host-file source, and that source
     // is a bind mount that keeps the material readable on the host for the room's whole life — the
     // exact exposure this realizer now closes by copying the material into the container instead. The
@@ -1095,7 +1115,8 @@ export function dockerComposeRealizer(opts?: { run?: ComposeRunner; prepareWorks
           // probed AS THE ROOM RUNS: the rendered room service's own user (the drain's uid:gid), never the image's default user
           const roomUser = (doc as { services?: { room?: { user?: unknown } } }).services?.room?.user;
           const target = parseSeatProbe(String(run(seatProbeArgs(floorImage(v), typeof roomUser === "string" ? roomUser : undefined), 60_000) ?? ""));
-          run(["cp", "-", `${roomContainer}:${target.home}`], 60_000, seatCredentialTar(material[cls]!, target));
+          const proxyUrl = (v.doors?.egress ?? []).length > 0 ? `http://egress:${EGRESS_PROXY_PORT}` : undefined;
+          run(["cp", "-", `${roomContainer}:${target.home}`], 60_000, seatCredentialTar(material[cls]!, target, proxyUrl ? { proxyUrl } : {}));
         }
         for (const s of v.mcp_servers) {
           deliverCredentialFiles(run, serverContainerName(realizationDir, s.slug), s.credential_names, material);

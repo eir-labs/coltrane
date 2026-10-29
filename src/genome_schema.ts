@@ -1144,7 +1144,7 @@ export const VenueEquipmentSchema = z
  *  nothing. `*` is refused — a wildcard door is not a door, it is the absence of one. */
 const HostSchema = z
   .string()
-  .refine((h) => h.trim() !== "*", { message: `a door names hosts, never "*" — a wildcard door is not a door` });
+  .refine((h) => !h.includes("*"), { message: `a door names a host, never "*" or a pattern — a wildcard door is not a door` });
 export const VenueDoorsSchema = z
   .object({
     ingress: z.array(HostSchema).default([]),

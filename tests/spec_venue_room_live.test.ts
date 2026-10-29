@@ -678,3 +678,49 @@ describe.skipIf(!HAVE_FLOOR)("the seat authenticates in its room — the install
     } finally { drop(c); }
   });
 });
+
+// ── THE ROOM REACHES ONLY ITS DOORS, LIVE (spec.coltrane.the-room-reaches-only-its-doors EP-4) ──────────────────────────────────────
+// Real networks and the real proxy source, in the floor image: a client on the INTERNAL network only reaches the declared host through the
+// proxy, is refused an undeclared one (403), and cannot connect directly at all (EP-1's internal-ness is what makes that fail closed).
+describe.skipIf(!HAVE_FLOOR)("the room reaches only its doors — the egress proxy, live", () => {
+  const img = "coltrane/floor:seat";
+  const dk = (args: string[]) => spawnSync("docker", args, { encoding: "utf8", timeout: 120_000 });
+  const tag = `ep4-${process.pid}`;
+  const clientJs = (target: string) =>
+    `const net=require("node:net");const s=net.connect(3128,"egress",()=>s.write("CONNECT ${target} HTTP/1.1\\r\\nHost: ${target}\\r\\n\\r\\n"));` +
+    `s.once("data",(d)=>{console.log(d.toString().split("\\r\\n")[0]);process.exit(0);});s.on("error",(e)=>{console.log("ERR "+e.code);process.exit(0);});setTimeout(()=>{console.log("TIMEOUT");process.exit(0)},15000);`;
+  it("EP-4: the declared door is reached through the proxy; an undeclared host is refused; a direct connection fails", async () => {
+    const { egressProxySource } = await import("../src/egress_proxy.js");
+    dk(["network", "create", "--internal", `${tag}-room`]);
+    dk(["network", "create", `${tag}-out`]);
+    try {
+      dk(["run", "-d", "--name", `${tag}-egress`, "--network", `${tag}-room`, "--network-alias", "egress", "--entrypoint", "node", img, "-e", egressProxySource(), "--", "api.anthropic.com"]);
+      dk(["network", "connect", `${tag}-out`, `${tag}-egress`]);
+      spawnSync("sleep", ["2"]);
+      const run = (js: string) => dk(["run", "--rm", "--network", `${tag}-room`, "--entrypoint", "node", img, "-e", js]).stdout.trim();
+      expect(run(clientJs("api.anthropic.com:443"))).toBe("HTTP/1.1 200 Connection Established");
+      expect(run(clientJs("API.ANTHROPIC.COM.:443"))).toBe("HTTP/1.1 200 Connection Established");
+      expect(run(clientJs("example.com:443"))).toBe("HTTP/1.1 403 Forbidden");
+      expect(run(clientJs("api.anthropic.com.evil.test:443"))).toBe("HTTP/1.1 403 Forbidden");
+      // the SEAT's way out: its settings file (seatCredentialTar with the proxy URL) is what the CLI reads; a fake token reaching the API
+      // through the proxy is answered 401 by the API itself, never a DNS failure (the room has no route of its own)
+      const { seatCredentialTar, parseSeatProbe } = await import("../src/seat_credentials.js");
+      const user = `${process.getuid?.()}:${process.getgid?.()}`;
+      const fake = JSON.stringify({ claudeAiOauth: { accessToken: "sk-ant-oat01-fake-not-real", refreshToken: "", expiresAt: 4102444800000, scopes: ["user:inference"], subscriptionType: "max" } });
+      const seat = dk(["create", "--network", `${tag}-room`, "--user", user, "--entrypoint", "sleep", img, "120"]).stdout.trim();
+      try {
+        const target = parseSeatProbe(dk(["run", "--rm", "--network", "none", "--user", user, "--entrypoint", "sh", img, "-c", 'id -u; id -g; printf "%s\\n" "$HOME"']).stdout);
+        spawnSync("docker", ["cp", "-", `${seat}:${target.home}`], { input: seatCredentialTar(fake, target, { proxyUrl: "http://egress:3128" }), timeout: 60_000 });
+        dk(["start", seat]);
+        const r = dk(["exec", "-w", "/tmp", seat, "timeout", "40", "claude", "-p", "hi", "--setting-sources", "user"]);
+        expect(`${r.stdout}${r.stderr}`).toMatch(/401/);
+        expect(`${r.stdout}${r.stderr}`).not.toMatch(/EAI_AGAIN|Can't reach the API/);
+      } finally { dk(["rm", "-f", seat]); }
+      const direct = run(`const s=require("node:net").connect(443,"api.anthropic.com",()=>{console.log("CONNECTED");process.exit(0)});s.on("error",(e)=>{console.log("ERR "+e.code);process.exit(0)});setTimeout(()=>{console.log("TIMEOUT");process.exit(0)},10000);`);
+      expect(direct, "a client on the internal network connected directly: the room has a route out").not.toBe("CONNECTED");
+    } finally {
+      dk(["rm", "-f", `${tag}-egress`]);
+      dk(["network", "rm", `${tag}-room`, `${tag}-out`]);
+    }
+  });
+});

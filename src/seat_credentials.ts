@@ -73,13 +73,23 @@ export const SEAT_STATE_REL = ".claude.json";
 const pad512 = (n: number) => Buffer.alloc((512 - (n % 512)) % 512, 0);
 /** The tar extracted at the target's HOME: .claude/ (0700), .claude/.credentials.json (0600) and .claude.json (0600, "{}"), all owned
  *  by the probed uid:gid. */
-export function seatCredentialTar(material: string, t: SeatTarget): Buffer {
+/** The seat's own settings, for a room with egress doors (spec.coltrane.the-room-reaches-only-its-doors): the CLI is started with
+ *  `--setting-sources user`, so ~/.claude/settings.json's `env` reaches it. Measured (floor image, as the room's user, fake token): with
+ *  HTTPS_PROXY only here, the CLI went out through the egress proxy and the API answered 401. So the room's compose document carries no
+ *  environment at all (EP-0 holds literally), and the keys are exactly the engine's. */
+export const SEAT_SETTINGS_REL = ".claude/settings.json";
+export function seatSettings(proxyUrl: string): string {
+  return JSON.stringify({ env: { HTTPS_PROXY: proxyUrl, https_proxy: proxyUrl, CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1" } });
+}
+export function seatCredentialTar(material: string, t: SeatTarget, opts: { proxyUrl?: string } = {}): Buffer {
   const data = Buffer.from(material, "utf8");
   const state = Buffer.from("{}", "utf8");
+  const settings = opts.proxyUrl ? Buffer.from(seatSettings(opts.proxyUrl), "utf8") : null;
   return Buffer.concat([
     header(".claude/", 0o700, t.uid, t.gid, 0, "5"),
     header(SEAT_CREDENTIAL_REL, 0o600, t.uid, t.gid, data.length, "0"),
     data, pad512(data.length),
+    ...(settings ? [header(SEAT_SETTINGS_REL, 0o600, t.uid, t.gid, settings.length, "0"), settings, pad512(settings.length)] : []),
     header(SEAT_STATE_REL, 0o600, t.uid, t.gid, state.length, "0"),
     state, pad512(state.length),
     Buffer.alloc(1024, 0),

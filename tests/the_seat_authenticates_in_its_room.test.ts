@@ -38,8 +38,16 @@ describe("SA-2 — the drain's resolver reads a provisioned 0600 file per class;
     await expect(fileCredentialResolver(provisioned("  \n"))([SEAT_CREDENTIAL_CLASS])).rejects.toThrow(/empty/);
   });
   it("plant: a file readable by group or others is refused", async () => {
-    await expect(fileCredentialResolver(provisioned(FAKE, 0o644))([SEAT_CREDENTIAL_CLASS])).rejects.toThrow(/readable by others|mode/);
-    await expect(fileCredentialResolver(provisioned(FAKE, 0o640))([SEAT_CREDENTIAL_CLASS])).rejects.toThrow(/readable by others|mode/);
+    await expect(fileCredentialResolver(provisioned(FAKE, 0o644))([SEAT_CREDENTIAL_CLASS])).rejects.toThrow(/group or others/);
+    await expect(fileCredentialResolver(provisioned(FAKE, 0o640))([SEAT_CREDENTIAL_CLASS])).rejects.toThrow(/group or others/);
+  });
+  it("the mode refusal names what is checked (group and others), never an exact mode the check does not enforce (Vör, e1849f6b)", async () => {
+    const err = await fileCredentialResolver(provisioned(FAKE, 0o644))([SEAT_CREDENTIAL_CLASS]).catch((e) => String(e));
+    expect(err).toMatch(/group or others/);
+    expect(err).not.toMatch(/must be 0600/);
+    // the owner's own bits are not what is checked: 0400 and 0700 are admitted, as the message now says
+    await expect(fileCredentialResolver(provisioned(FAKE, 0o400))([SEAT_CREDENTIAL_CLASS])).resolves.toEqual({ [SEAT_CREDENTIAL_CLASS]: FAKE });
+    await expect(fileCredentialResolver(provisioned(FAKE, 0o700))([SEAT_CREDENTIAL_CLASS])).resolves.toEqual({ [SEAT_CREDENTIAL_CLASS]: FAKE });
   });
   it("plant: a 0600 file owned by another identity is refused (Vör, 1ef94eea)", async () => {
     const someoneElse = (process.getuid?.() ?? 0) + 4242;

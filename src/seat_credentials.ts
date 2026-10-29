@@ -79,7 +79,7 @@ export function fileCredentialResolver(dir: string, owner: number | undefined = 
       if (!existsSync(p)) throw new Error(`credential class ${cls}: no file provisioned (absent) in the seat credentials directory`);
       const st = statSync(p);
       if (!st.isFile()) throw new Error(`credential class ${cls}: the provisioned path is not a file`);
-      if ((st.mode & 0o077) !== 0) throw new Error(`credential class ${cls}: the provisioned file is readable by others (mode ${(st.mode & 0o777).toString(8)}); it must be 0600`);
+      if ((st.mode & 0o077) !== 0) throw new Error(`credential class ${cls}: the provisioned file grants access to group or others (mode ${(st.mode & 0o777).toString(8)}); it must grant none to group or others`);
       if (owner !== undefined && st.uid !== owner) throw new Error(`credential class ${cls}: the provisioned file's owner is uid ${st.uid}, not the provisioning identity`);
       const v = readFileSync(p, "utf8");
       if (v.trim() === "") throw new Error(`credential class ${cls}: the provisioned file is empty`);

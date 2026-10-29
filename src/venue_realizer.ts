@@ -1092,7 +1092,9 @@ export function dockerComposeRealizer(opts?: { run?: ComposeRunner; prepareWorks
         // SA-3: the CLI's OWN credentials file, at a target derived from the floor image (uid, gid, HOME), written 0600 by a tar stream
         // into the created-not-started container: the value rides stdin only, never an argument, an environment or a host file.
         for (const cls of seatClasses) {
-          const target = parseSeatProbe(String(run(seatProbeArgs(floorImage(v)), 60_000) ?? ""));
+          // probed AS THE ROOM RUNS: the rendered room service's own user (the drain's uid:gid), never the image's default user
+          const roomUser = (doc as { services?: { room?: { user?: unknown } } }).services?.room?.user;
+          const target = parseSeatProbe(String(run(seatProbeArgs(floorImage(v), typeof roomUser === "string" ? roomUser : undefined), 60_000) ?? ""));
           run(["cp", "-", `${roomContainer}:${target.home}`], 60_000, seatCredentialTar(material[cls]!, target));
         }
         for (const s of v.mcp_servers) {

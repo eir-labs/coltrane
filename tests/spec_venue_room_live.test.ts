@@ -626,8 +626,10 @@ describe.skipIf(!HAVE_FLOOR)("the seat authenticates in its room — the install
   const dk = (args: string[], input?: Buffer) => spawnSync("docker", args, { encoding: "utf8", timeout: 90_000, ...(input ? { input } : {}) });
   async function standWith(file: boolean): Promise<string> {
     const { seatProbeArgs, parseSeatProbe, seatCredentialTar } = await import("../src/seat_credentials.js");
-    const target = parseSeatProbe(dk(seatProbeArgs(img)).stdout);
-    const c = dk(["create", "--network", "none", "--entrypoint", "sleep", img, "300"]).stdout.trim();
+    // as the ROOM runs: the realizer pins the room's user to the drain's uid:gid, so the probe and the container both run as that user
+    const user = `${process.getuid?.()}:${process.getgid?.()}`;
+    const target = parseSeatProbe(dk(seatProbeArgs(img, user)).stdout);
+    const c = dk(["create", "--network", "none", "--user", user, "--entrypoint", "sleep", img, "300"]).stdout.trim();
     if (file) dk(["cp", "-", `${c}:${target.home}`], seatCredentialTar(SEAT_FILE, target));
     dk(["start", c]);
     return c;
@@ -636,7 +638,7 @@ describe.skipIf(!HAVE_FLOOR)("the seat authenticates in its room — the install
 
   it("SA-3: derived from the image, 0600, owned by the image's user; the installed claude gets past auth with it", async () => {
     const { seatProbeArgs, parseSeatProbe } = await import("../src/seat_credentials.js");
-    const target = parseSeatProbe(dk(seatProbeArgs(img)).stdout);
+    const target = parseSeatProbe(dk(seatProbeArgs(img, `${process.getuid?.()}:${process.getgid?.()}`)).stdout);
     const c = await standWith(true);
     try {
       const ls = dk(["exec", c, "stat", "-c", "%a %u %g", target.path]).stdout.trim();

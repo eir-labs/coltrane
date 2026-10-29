@@ -29,9 +29,11 @@ export function seatClassUnpinned(v: { floor?: string | undefined; credential_su
   return v.credential_surface.includes(SEAT_CREDENTIAL_CLASS) && !floorIsPinned(v) ? SEAT_CREDENTIAL_CLASS : undefined;
 }
 
-/** The probe that reads the floor image's own uid, gid and HOME: a throwaway container with no network, running nothing but `id`. */
-export function seatProbeArgs(image: string): string[] {
-  return ["run", "--rm", "--network", "none", "--entrypoint", "sh", image, "-c", 'id -u; id -g; printf "%s\\n" "$HOME"'];
+/** The probe that reads the uid, gid and HOME the SEAT WILL RUN AS: the floor image under the room's own rendered user (the realizer
+ *  pins the room to the drain's uid:gid), a throwaway container with no network, running nothing but `id`. Probing the bare image's
+ *  default user put the file under /home/node while the seat ran as the drain's uid with HOME=/ (gig da64edf7). */
+export function seatProbeArgs(image: string, user?: string): string[] {
+  return ["run", "--rm", "--network", "none", ...(user ? ["--user", user] : []), "--entrypoint", "sh", image, "-c", 'id -u; id -g; printf "%s\\n" "$HOME"'];
 }
 
 /** The probe's answer as a target. A non-numeric id or a HOME that is not absolute is refused: the target is never guessed. */
@@ -40,7 +42,7 @@ export function parseSeatProbe(out: string): SeatTarget {
   if (!/^\d+$/.test(u ?? "") || !/^\d+$/.test(g ?? "")) throw new Error(`the floor image's user did not probe as numeric uid and gid (got ${JSON.stringify([u, g])})`);
   if (!h || !h.startsWith("/") || h.includes("\0")) throw new Error(`the floor image's HOME did not probe as an absolute path (got ${JSON.stringify(h)})`);
   const home = h.replace(/\/+$/, "") || "/";
-  const dir = `${home}/.claude`;
+  const dir = home === "/" ? "/.claude" : `${home}/.claude`;
   return { uid: Number(u), gid: Number(g), home, dir, path: `${dir}/.credentials.json` };
 }
 

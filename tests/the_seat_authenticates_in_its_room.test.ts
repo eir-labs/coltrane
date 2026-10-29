@@ -143,6 +143,23 @@ async function realizeWith(material: Record<string, string>) {
   return { calls, error, handle };
 }
 
+describe("SA-3b — the probe asks the ROOM AS IT RUNS, not the bare image (gig da64edf7, 29 Oct)", () => {
+  // The realizer pins the room's user to the drain's uid:gid (so the workspace bind mount is writable). The probe ran the bare image as
+  // its default user (node, 1000, /home/node), the file went to /home/node/.claude owned 1000, and the seat, running as the drain's uid
+  // with HOME=/, read nothing: "Not logged in" with the credential delivered. The probe now runs as the room's rendered user.
+  it("the probe carries the room's rendered --user", async () => {
+    const { calls } = await realizeWith({ [SEAT_CREDENTIAL_CLASS]: FAKE });
+    const probe = calls.find((c) => c.args[0] === "run" && c.args.includes("--entrypoint"));
+    expect(probe, "no probe").toBeDefined();
+    const i = probe!.args.indexOf("--user");
+    expect(i, "the probe ran as the image's default user, not the room's").toBeGreaterThan(-1);
+    expect(probe!.args[i + 1]).toBe(`${process.getuid?.()}:${process.getgid?.()}`);
+  });
+  it("a HOME of / gives /.claude/.credentials.json, not //.claude", () => {
+    expect(parseSeatProbe("501\n20\n/\n")).toEqual({ uid: 501, gid: 20, home: "/", dir: "/.claude", path: "/.claude/.credentials.json" });
+  });
+});
+
 describe("SA-5 — \"Not logged in\" is never the first sign: no material refuses at realization, before the room starts", () => {
   it("plant: an empty seat material refuses, naming the class, and the room is never started", async () => {
     const { calls, error } = await realizeWith({ [SEAT_CREDENTIAL_CLASS]: "" });

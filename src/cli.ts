@@ -33,7 +33,7 @@ import { runReside } from "./reside.js";
 import { selectResidencyBacking } from "./reside_backing.js";
 import { hostedSeatBackingFromEnv } from "./genome_store.js";
 import { openLocalQueue, selectQueueBacking, LOCAL_QUEUE_DIR_VAR } from "./local_queue.js";
-import { workerCredentialMode } from "./worker_env.js";
+import { realizableVenuesFromEnv, workerCredentialMode } from "./worker_env.js";
 import { drainPreflight } from "./drain_preflight.js";
 import { selectChairInvoker } from "./invoker_selection.js";
 import { engineServerForRegistry } from "./run_genome_engine.js";
@@ -355,6 +355,8 @@ export async function runCli(argv: readonly string[], io: CliIO): Promise<number
           agentToken: mode.mode === "player" ? mode.agentToken : "",
           ...(mode.mode === "venue" ? { drainKey: mode.drainKey, instance: mode.instance } : {}),
           ...(typeof flags["worker"] === "string" ? { worker: flags["worker"] } : {}),
+          // the rooms this box can stand up (the claim gate, venueMayClaim): read once, deny-by-default
+          realizableVenues: realizableVenuesFromEnv(process.env),
         },
         {
           // WHICH PORT RUNS THE CHAIRS is selected from environment PRESENCE, the same policy shape

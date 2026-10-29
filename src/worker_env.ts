@@ -124,6 +124,14 @@ export const WORKER_ENV_CONTRACT: readonly WorkerEnvVar[] = [
       "Bearer credential for the chat-completions endpoint; required only when COLTRANE_COMPLETIONS_URL is set.",
   },
   {
+    name: "COLTRANE_REALIZABLE_VENUES",
+    host: "none",
+    role: "tuning",
+    required: "never",
+    meaning:
+      "The rooms this box can stand up, comma-separated venue slugs (WorkerContext.realizableVenues): a claim naming a room outside this set is refused and released. Absent or empty declares none; there is no wildcard.",
+  },
+  {
     name: "COLTRANE_TIER_ECONOMY",
     host: "none",
     role: "tuning",
@@ -321,6 +329,15 @@ export function normalizeWorkerEnv(env: Record<string, string | undefined>): Rec
   }
 
   return out;
+}
+
+/**
+ * THE ROOMS THIS BOX CAN BUILD, read once (the drain's WorkerContext.realizableVenues; nothing set it before 29 Oct, so a floored room
+ * was never claimable from the CLI). Comma-separated slugs, trimmed, empties dropped. Deny-by-default: absent or empty is no room, and
+ * "*" is a slug, never a wildcard.
+ */
+export function realizableVenuesFromEnv(env: Record<string, string | undefined>): string[] {
+  return String(env["COLTRANE_REALIZABLE_VENUES"] ?? "").split(",").map((s) => s.trim()).filter((s) => s.length > 0);
 }
 
 /**

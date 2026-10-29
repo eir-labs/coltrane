@@ -14,6 +14,11 @@ import {
   SEAT_CREDENTIAL_CLASS, seatClassesFor, parseSeatProbe, seatProbeArgs, seatCredentialTar, fileCredentialResolver,
 } from "../src/seat_credentials.js";
 import { dockerComposeRealizer } from "../src/venue_realizer.js";
+import { loadGenome } from "../src/loader.js";
+import { createRegistry } from "../src/registry.js";
+import { createOutputStore } from "../src/outputs.js";
+import { MemoryLedger } from "../src/ledger.js";
+import { runGig } from "../src/runtime.js";
 
 const FAKE = "FAKE-SEAT-TOKEN-not-a-credential-7f3a";
 const DIGEST = "sha256:" + "cd".repeat(32);
@@ -201,5 +206,33 @@ describe("REACHED — the drain and the CLI hand a resolver to the run", () => {
   });
   it("the CLI's work path builds fileCredentialResolver from COLTRANE_SEAT_CREDENTIALS_DIR", () => {
     expect(SRC("cli.ts")).toMatch(/fileCredentialResolver\(process\.env\["COLTRANE_SEAT_CREDENTIALS_DIR"\]/);
+  });
+});
+
+describe("NO ROOM FOR A REFUSED GIG — a pre-dispatch refusal happens before the room exists (Vör, after 9fe966e)", () => {
+  // runGig realized the room (with its seat credential delivered) and only THEN ran the pre-dispatch refusals (missing input, the DS-4
+  // grade check, the dispatch preflight, resume refusals), all of which sat before the try whose finally tears the room down. Gig
+  // 4a383eb9 refused at the preflight and left its room up for four hours; under seat auth that room holds a credential. A refused gig
+  // must refuse before any room is stood up.
+  it("plant: a gig refused before any chair (here its payload fails the type check, ahead of DS-4), in a floored venue, never reaches the realizer", async () => {
+    const ROOT = fileURLToPath(new URL("..", import.meta.url));
+    const genome = loadGenome(ROOT);
+    const registry = createRegistry([...genome.domain_types.values()] as never);
+    const std = (genome.standards.get("chancery-red-drafting-v0") ?? genome.draft_standards.get("chancery-red-drafting-v0")) as never;
+    let realized = 0;
+    const venueRealizer = { substrate: "test", guarantees: [], available: () => true, retention: { max_cached_build_artifacts: 0, max_unreferenced_environments: 0, cadence: "gig" },
+      realize: async () => { realized++; return { state: "PLAYING", mcpServerConfigs: {}, configPath: "", artifacts: [], teardown: () => {}, tornDown: () => true } as never; } };
+    const venue = { slug: "drafting", institution_slug: "demo", mcp_servers: [], floor: DIGEST, credential_surface: [SEAT_CREDENTIAL_CLASS],
+      equipment: { tools: ["Read"] }, doors: { ingress: [], egress: [] }, installs: [], lifecycle: { policy: "ephemeral" } };
+    let message = "";
+    try {
+      await runGig(std, { "change-request": { spec: "s", content_hash: "0".repeat(64), spec_grade: "g1" } }, {
+        outputs: createOutputStore(registry), ledger: new MemoryLedger(), invoke: () => { throw new Error("no seat may run"); },
+        venue: "drafting", venues: new Map([["drafting", venue]]), venueRealizer,
+        skill_dirs: new Map([["scope-gate", `${ROOT}skills/scope-gate`], ["baseline-gate", `${ROOT}skills/baseline-gate`]]),
+      } as never);
+    } catch (e) { message = e instanceof Error ? e.message : String(e); }
+    expect(message, "the gig was not refused before any chair").toMatch(/change-request|spec_grade/);
+    expect(realized, "a room was stood up for a gig refused before any chair").toBe(0);
   });
 });

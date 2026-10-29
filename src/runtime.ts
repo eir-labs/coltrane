@@ -1962,40 +1962,6 @@ export async function runGig(
     // realize() only returns ok once the slug resolved, so the venue is present in the map.
     gigVenue = deps.venues?.get(deps.venue);
 
-    // Realize the SUBSTRATE when the venue declares servers to stand up OR the RUN names a repository
-    // to populate the room's tree with — either is a reason to build a real room. A venue with NEITHER
-    // has nothing to stand up (the empty room stays free), and an absent realizer is the opt-out that
-    // keeps every pre-wire caller byte-identical. realize() tolerates an empty mcp_servers list (its
-    // credential/compose steps iterate the servers as no-ops — the existing repo_url-declines law
-    // exercises exactly this, mcp_servers: [], and gets a handle back), so a repository-only run
-    // reaches it without an empty services list becoming fatal. credentialResolver defaults to an
-    // empty async resolver — realize() takes it as a required positional, so undefined would throw at
-    // credential-resolution time; the empty default satisfies the interface without a new mandatory
-    // field. A bring-up failure propagates like a policy refusal: no chair spawns.
-    //
-    // The repository is `deps.repoUrl` — named by the RUN, explicit at dispatch. The per-gig git
-    // credential plumbing (drainKey/instance/endpoint) is READ FROM THE AMBIENT ENVIRONMENT here, the
-    // same discipline src/workspace.ts documents: the SUBJECT of work must be explicit, but the
-    // credential that clones it is ambient plumbing, never a per-repository fact. Absent env → the
-    // populate declines on its own terms (prepareWorkspace names what it could not obtain).
-    // RR-1(c2), Vör round 8: a floor is a reason to realize. A room that does not need nothing (servers, a substrate, or a FLOOR) is
-    // stood up; a furnishings-only room is not, unless the run names a repository to populate.
-    if (deps.venueRealizer && gigVenue && (!aRoomNeedsNothing(gigVenue) || deps.repoUrl)) {
-      gigSubstrate = await deps.venueRealizer.realize(
-        gigVenue,
-        deps.credentialResolver ?? (async () => ({})),
-        {
-          gigId: gig_id,
-          ...(deps.repoUrl ? { repoUrl: deps.repoUrl } : {}),
-          ...(deps.changeSetBase ? { changeSetBase: deps.changeSetBase } : {}),
-          ...(process.env["COLTRANE_DRAIN_KEY"] ? { drainKey: process.env["COLTRANE_DRAIN_KEY"] } : {}),
-          ...(process.env["COLTRANE_INSTANCE"] ? { instance: process.env["COLTRANE_INSTANCE"] } : {}),
-          ...(process.env["COLTRANE_GIT_CREDENTIALS_URL"]
-            ? { gitCredentialsEndpoint: process.env["COLTRANE_GIT_CREDENTIALS_URL"] }
-            : {}),
-        },
-      );
-    }
   }
 
   // Hash the gig input LAZILY. Three callers want it now (#196's provenance backfill, the
@@ -2782,6 +2748,45 @@ export async function runGig(
   }
 
   try {
+    // NO ROOM FOR A REFUSED GIG (Vör, after coltrane 9fe966e): the substrate is realized as the FIRST STATEMENT OF THE TRY whose finally tears it down (structural, not positional:
+    // Vör), after every pre-dispatch refusal
+    // (missing input, the DS-4 grade check, the dispatch preflight, an abort, the resume refusals) and immediately before the try whose
+    // finally tears it down. It used to be realized ~800 lines earlier, outside that try: gig 4a383eb9 refused at the preflight and left
+    // its room up for four hours, and under seat auth such a room holds a delivered credential. A refused gig now never gets a room.
+    // Realize the SUBSTRATE when the venue declares servers to stand up OR the RUN names a repository
+    // to populate the room's tree with — either is a reason to build a real room. A venue with NEITHER
+    // has nothing to stand up (the empty room stays free), and an absent realizer is the opt-out that
+    // keeps every pre-wire caller byte-identical. realize() tolerates an empty mcp_servers list (its
+    // credential/compose steps iterate the servers as no-ops — the existing repo_url-declines law
+    // exercises exactly this, mcp_servers: [], and gets a handle back), so a repository-only run
+    // reaches it without an empty services list becoming fatal. credentialResolver defaults to an
+    // empty async resolver — realize() takes it as a required positional, so undefined would throw at
+    // credential-resolution time; the empty default satisfies the interface without a new mandatory
+    // field. A bring-up failure propagates like a policy refusal: no chair spawns.
+    //
+    // The repository is `deps.repoUrl` — named by the RUN, explicit at dispatch. The per-gig git
+    // credential plumbing (drainKey/instance/endpoint) is READ FROM THE AMBIENT ENVIRONMENT here, the
+    // same discipline src/workspace.ts documents: the SUBJECT of work must be explicit, but the
+    // credential that clones it is ambient plumbing, never a per-repository fact. Absent env → the
+    // populate declines on its own terms (prepareWorkspace names what it could not obtain).
+    // RR-1(c2), Vör round 8: a floor is a reason to realize. A room that does not need nothing (servers, a substrate, or a FLOOR) is
+    // stood up; a furnishings-only room is not, unless the run names a repository to populate.
+    if (deps.venueRealizer && gigVenue && (!aRoomNeedsNothing(gigVenue) || deps.repoUrl)) {
+      gigSubstrate = await deps.venueRealizer.realize(
+        gigVenue,
+        deps.credentialResolver ?? (async () => ({})),
+        {
+          gigId: gig_id,
+          ...(deps.repoUrl ? { repoUrl: deps.repoUrl } : {}),
+          ...(deps.changeSetBase ? { changeSetBase: deps.changeSetBase } : {}),
+          ...(process.env["COLTRANE_DRAIN_KEY"] ? { drainKey: process.env["COLTRANE_DRAIN_KEY"] } : {}),
+          ...(process.env["COLTRANE_INSTANCE"] ? { instance: process.env["COLTRANE_INSTANCE"] } : {}),
+          ...(process.env["COLTRANE_GIT_CREDENTIALS_URL"]
+            ? { gitCredentialsEndpoint: process.env["COLTRANE_GIT_CREDENTIALS_URL"] }
+            : {}),
+        },
+      );
+    }
 
   for (const phase of standard.phases) {
     checkpoint(); // between phases — the cheapest place to stop, and the biggest saving

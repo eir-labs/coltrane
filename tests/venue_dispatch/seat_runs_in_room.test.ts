@@ -13,6 +13,7 @@
 //
 // The child-env seam captures the constructed (bin, args) without spawning a real process — the same
 // injected-run seam the sibling property test uses.
+import { readFileSync } from "node:fs";
 import { describe, it, expect } from "vitest";
 import { venueEffectiveTools, type Venue } from "../../src/chart.js";
 import { realize, type Realization } from "../../src/venue_realize.js";
@@ -104,6 +105,47 @@ describe("the seat runs inside the room — the invoker relocation", () => {
     const v = args[args.indexOf("--mcp-config") + 1]!;
     expect(v.includes("coltrane-mcp-") && v.endsWith(".json"), `the host spawn lost its config file: ${v}`).toBe(true);
   });
+
+  it("IN ROOM, the seat's ENGINE server is the room's own engine, at a run genome copied into the room; no host env rides (gig 9fbcfa3c, 29 Oct)", async () => {
+    // The drafter ran inside the drafting room and reached its model, then "sealed no output through its write boundary": the engine MCP
+    // server entry named the HOST's node and dist path and a host tmp run genome, none of which exist in the container, so output_write
+    // never reached the seat. In the room, the entry is the floor's own engine at /app, with COLTRANE_GENOME at the run genome copied in.
+    const agent = testAgent({ slug: "p", primitives: ["SENSE"], allowed_tools: ["Read"] });
+    const copies: string[][] = [];
+    let sawArgs: string[] = [];
+    const invoke = makeClaudeInvoker({
+      run: (_bin: string, args: string[]) => { sawArgs = args; return '{"text":"ok"}'; },
+      sealVia: "output_write",
+      engineServer: { command: "/usr/local/bin/node", args: ["/host/coltrane/dist/src/server_entry.js"], env: { COLTRANE_GENOME: "/var/folders/xx/T/coltrane-run-genome-abc123", COLTRANE_SERVER_DIRECT: "1", HOST_ONLY_VALUE: "must-not-ride" } },
+      roomCopy: (src: string, container: string, dest: string) => { copies.push([src, container, dest]); },
+    } as never);
+    const realization = realize(room(["Read"]), { seats: [{ agent }], ambientEnv: {}, gigId: "g1" });
+    await (invoke as unknown as (c: unknown) => Promise<unknown>)({ agent, gig_input: {}, inputs: [], realization, venue: room(["Read"]), seatExec: { container: CONTAINER, workspace: WORKSPACE } }).catch(() => undefined);
+    const cfg = JSON.parse(sawArgs[sawArgs.indexOf("--mcp-config") + 1]!);
+    const eng = cfg.mcpServers.coltrane;
+    expect(eng.command).toBe("node");
+    expect(eng.args).toEqual(["/app/dist/src/server_entry.js"]);
+    expect(eng.env.COLTRANE_GENOME).toBe("/tmp/coltrane-run-genome-abc123");
+    expect(eng.env.COLTRANE_SERVER_DIRECT).toBe("1");
+    expect(JSON.stringify(eng)).not.toContain("must-not-ride");
+    expect(JSON.stringify(eng)).not.toContain("/host/");
+    expect(copies).toEqual([["/var/folders/xx/T/coltrane-run-genome-abc123", CONTAINER, "/tmp"]]);
+  });
+
+  it("ON THE HOST, the engine server entry is unchanged and nothing is copied", async () => {
+    const agent = testAgent({ slug: "p", primitives: ["SENSE"], allowed_tools: ["Read"] });
+    const copies: string[][] = [];
+    let sawArgs: string[] = [];
+    const host = { command: "/usr/local/bin/node", args: ["/host/coltrane/dist/src/server_entry.js"], env: { COLTRANE_GENOME: "/var/folders/xx/T/coltrane-run-genome-abc123" } };
+    let cfgText = "";
+    const invoke = makeClaudeInvoker({ run: (_b: string, args: string[]) => { sawArgs = args; cfgText = readFileSync(args[args.indexOf("--mcp-config") + 1]!, "utf-8"); return '{"text":"ok"}'; }, sealVia: "output_write", engineServer: host, roomCopy: (s: string, c: string, d: string) => { copies.push([s, c, d]); } } as never);
+    const realization = realize(room(["Read"]), { seats: [{ agent }], ambientEnv: {}, gigId: "g1" });
+    await (invoke as unknown as (c: unknown) => Promise<unknown>)({ agent, gig_input: {}, inputs: [], realization, venue: room(["Read"]) }).catch(() => undefined);
+    expect(sawArgs.includes("--mcp-config")).toBe(true);
+    const cfg = JSON.parse(cfgText);
+    expect(cfg.mcpServers.coltrane.args).toEqual(host.args);
+    expect(copies).toEqual([]);
+  }, 30_000);
 
   it("moving the seat does NOT widen it — a granted-but-unequipped tool is absent in BOTH arms", async () => {
     // THE LAW THAT MATTERS for relocation safety. Agent grants Read+Bash; the room equips only Read.

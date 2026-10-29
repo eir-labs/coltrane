@@ -2,10 +2,12 @@
 // `claude` CLI (Claude Code IS the cognition — the prime directive's "depend on
 // nothing but Claude Code"). buildPrompt is pure + testable; runClaude is the one
 // non-deterministic seam (spawns the CLI, parses structured output).
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, execFileSync, type ChildProcess } from "node:child_process";
 import { readFileSync, writeFileSync, unlinkSync } from "node:fs";
+/** docker cp a host directory into a running room container. The source is engine-owned (the run genome), never contract-named. */
+const copyIntoRoom = (src: string, container: string, dest: string): void => { execFileSync("docker", ["cp", src, `${container}:${dest}`], { stdio: ["ignore", "pipe", "pipe"], timeout: 60_000 }); };
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, basename } from "node:path";
 import { randomUUID, createHash } from "node:crypto";
 import { abortReasonText, type AgentInvocationContext, type AgentInvoker, type AgentStreamEvent } from "./runtime.js";
 import type { Registry } from "./registry.js";
@@ -1353,6 +1355,8 @@ export interface ClaudeInvokerOptions {
    * gates disagree (src/run_genome_engine.ts). Wins over `mcpServerConfigs[coltrane]` for the seal.
    */
   engineServer?: Record<string, unknown> | undefined;
+  /** Copy a host directory into a seat-bearing room's container (`docker cp <src> <container>:<dest>`); a seam for the laws. */
+  roomCopy?: ((src: string, container: string, dest: string) => void) | undefined;
 }
 
 // The blast-radius cage, PURE. Given the agent's tool grant + a per-gig mcp-config path,
@@ -1861,6 +1865,20 @@ export function makeClaudeInvoker(opts: ClaudeInvokerOptions = {}): AgentInvoker
         return [name, { ...d, env: { ...env, ...additions } }];
       }),
     );
+    // THE SEAT IN ITS ROOM SEALS THROUGH THE ROOM'S OWN ENGINE (gig 9fbcfa3c). The engine server entry names the HOST's node, dist path
+    // and a host tmp run genome, none of which exist in the container, so output_write never reached an in-room seat. In the room the
+    // entry is the floor's own engine at /app, and the run genome (the store registry's types, proven to reload identically on the host)
+    // is copied into the container's /tmp, so the seat validates against exactly the types the drain seals with. Only the engine's own
+    // markers ride: COLTRANE_GENOME, COLTRANE_SERVER_DIRECT and the validate-mode/lineage additions; no other host env value.
+    const engineEntry = enriched[ENGINE_MCP_SERVER] as Record<string, unknown> | undefined;
+    if (ctx.seatExec && engineEntry) {
+      const env = (engineEntry["env"] && typeof engineEntry["env"] === "object" ? engineEntry["env"] : {}) as Record<string, unknown>;
+      const hostGenome = typeof env["COLTRANE_GENOME"] === "string" ? (env["COLTRANE_GENOME"] as string) : undefined;
+      const inRoomGenome = hostGenome ? `/tmp/${basename(hostGenome)}` : "/app";
+      if (hostGenome) (opts.roomCopy ?? copyIntoRoom)(hostGenome, ctx.seatExec.container, "/tmp");
+      const kept = Object.fromEntries(Object.entries(envFor(ENGINE_MCP_SERVER)));
+      enriched[ENGINE_MCP_SERVER] = { command: "node", args: ["/app/dist/src/server_entry.js"], env: { ...kept, COLTRANE_GENOME: inRoomGenome, COLTRANE_SERVER_DIRECT: "1" } };
+    }
     writeFileSync(cfgPath, JSON.stringify({ mcpServers: enriched }));
     try {
       const a = ctx.agent;

@@ -70,6 +70,35 @@ describe("SA-1 — the seat's class is resolved beside the servers'", () => {
   });
 });
 
+describe("SA-1b — a seat credential is resolved only for a floor PINNED BY DIGEST; a seat class without one is refused by name (Vör, ledger after 67c5b192)", () => {
+  // seatClassesFor tested floor TRUTHINESS: an absent floor gave [] (no seat) but a TAG floor was truthy, so the seat class was resolved
+  // and the mutable tag resolved twice (compose create, then the probe). One gate per case, no overlap: the store's CHECK closed the tag,
+  // the engine closed the absence. Now pinnedness is the predicate, and a surface naming the seat class without a pinned floor is a
+  // refusal, never a silent degradation to no seat.
+  async function realizeVenue(floor: string | undefined) {
+    const calls: string[][] = [];
+    const run = (args: readonly string[]) => { calls.push([...args]); return args[0] === "run" ? "1000\n1000\n/home/node\n" : ""; };
+    const realizer = dockerComposeRealizer({ run: run as never });
+    const venue = { slug: "drafting", institution_slug: "demo", mcp_servers: [], ...(floor !== undefined ? { floor } : {}), credential_surface: [SEAT_CREDENTIAL_CLASS] };
+    let error: unknown;
+    try { await realizer.realize(venue, async () => ({ [SEAT_CREDENTIAL_CLASS]: FAKE }), { gigId: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee" } as never); } catch (e) { error = e; }
+    return { calls, error };
+  }
+  it("plant: a TAG floor with the seat class is refused by name, before the room is created", async () => {
+    const { calls, error } = await realizeVenue("chancery-drafting");
+    expect(String(error)).toMatch(/claude-code-credentials.*not pinned by digest/);
+    expect(calls.some((c) => c[0] === "compose")).toBe(false);
+  });
+  it("plant: an ABSENT floor with the seat class is refused by name, not degraded to no seat", async () => {
+    const { calls, error } = await realizeVenue(undefined);
+    expect(String(error)).toMatch(/claude-code-credentials.*not pinned by digest/);
+    expect(calls.some((c) => c[0] === "compose")).toBe(false);
+  });
+  it("twin: a digest floor with the seat class is resolved", () => {
+    expect(seatClassesFor({ floor: DIGEST, credential_surface: [SEAT_CREDENTIAL_CLASS] })).toEqual([SEAT_CREDENTIAL_CLASS]);
+  });
+});
+
 describe("SA-3 — the CLI's own file, at a target DERIVED FROM THE IMAGE, 0600, owned by the image's user", () => {
   it("the probe reads uid, gid and HOME from the floor image itself, with no network", () => {
     const a = seatProbeArgs(DIGEST);

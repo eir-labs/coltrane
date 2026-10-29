@@ -14,7 +14,7 @@
 // with extra steps.
 import { existsSync, writeFileSync, rmSync, mkdirSync, mkdtempSync } from "node:fs";
 import { execFileSync } from "node:child_process";
-import { seatClassesFor, seatProbeArgs, parseSeatProbe, seatCredentialTar } from "./seat_credentials.js";
+import { seatClassesFor, seatClassUnpinned, seatProbeArgs, parseSeatProbe, seatCredentialTar } from "./seat_credentials.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { VenueSchema, DEVICE_CLASSES, type VenueOutput } from "./genome_schema.js";
@@ -191,8 +191,8 @@ export class VenueRenderRefusal extends Error {
  *  the class and never the material, so "Not logged in" from inside the room is never the first sign of a missing login. */
 export class VenueSeatUnauthenticated extends Error {
   readonly credentialClass: string;
-  constructor(venueSlug: string, credentialClass: string) {
-    super(`venue "${venueSlug}": its seat's credential class ${credentialClass} has no material, so the seat could not log in; refused before the room is created`);
+  constructor(venueSlug: string, credentialClass: string, why = "has no material, so the seat could not log in") {
+    super(`venue "${venueSlug}": its seat's credential class ${credentialClass} ${why}; refused before the room is created`);
     this.name = "VenueSeatUnauthenticated";
     this.credentialClass = credentialClass;
   }
@@ -990,6 +990,8 @@ export function dockerComposeRealizer(opts?: { run?: ComposeRunner; prepareWorks
       }
       // Bind credentials only through the resolver, from names ⊆ surface. Never inherit host env.
       // SA-1: the SEAT's class joins the request beside the servers' (a floored room whose surface carries it; the surface is the ceiling).
+      const unpinned = seatClassUnpinned(v);
+      if (unpinned !== undefined) throw new VenueSeatUnauthenticated(v.slug, unpinned, "its floor is not pinned by digest, so the image the seat runs could differ from the one its login target is read from");
       const seatClasses = seatClassesFor(v);
       const requested = [...new Set([...v.mcp_servers.flatMap((s) => s.credential_names).filter((n) => v.credential_surface.includes(n)), ...seatClasses])];
       const material = await credentialResolver(requested);

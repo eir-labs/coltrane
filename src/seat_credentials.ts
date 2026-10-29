@@ -8,7 +8,7 @@
 // no file and an empty file both print "Not logged in"; a well-formed 0600 file owned by the user gets past auth.
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
-import type { CredentialResolver } from "./venue_realizer.js";
+import { floorIsPinned, type CredentialResolver } from "./venue_realizer.js";
 
 /** The class a venue declares on its credential_surface for its seat's own login. */
 export const SEAT_CREDENTIAL_CLASS = "claude-code-credentials";
@@ -17,9 +17,16 @@ export const SEAT_CREDENTIAL_REL = ".claude/.credentials.json";
 
 export interface SeatTarget { uid: number; gid: number; home: string; dir: string; path: string }
 
-/** The seat classes a venue's realization must resolve: only a floored (seat-bearing) room has a seat, and the surface is the ceiling. */
+/** The seat classes a venue's realization must resolve: only a room whose floor is PINNED BY DIGEST (the engine's one predicate,
+ *  floorIsPinned) has a seat whose target can be derived from the image it runs, and the surface is the ceiling. A tag floor is a
+ *  mutable reference resolved twice (compose create, then the probe); an absent floor has no seat. Either with the seat class on the
+ *  surface is refused by name at realization (seatClassUnpinned), never degraded to no seat (Vör, after 67c5b192). */
 export function seatClassesFor(v: { floor?: string | undefined; credential_surface: readonly string[] }): string[] {
-  return v.floor && v.credential_surface.includes(SEAT_CREDENTIAL_CLASS) ? [SEAT_CREDENTIAL_CLASS] : [];
+  return floorIsPinned(v) && v.credential_surface.includes(SEAT_CREDENTIAL_CLASS) ? [SEAT_CREDENTIAL_CLASS] : [];
+}
+/** The seat class a venue names on its surface without a floor pinned by digest: the realization refuses it by name. */
+export function seatClassUnpinned(v: { floor?: string | undefined; credential_surface: readonly string[] }): string | undefined {
+  return v.credential_surface.includes(SEAT_CREDENTIAL_CLASS) && !floorIsPinned(v) ? SEAT_CREDENTIAL_CLASS : undefined;
 }
 
 /** The probe that reads the floor image's own uid, gid and HOME: a throwaway container with no network, running nothing but `id`. */

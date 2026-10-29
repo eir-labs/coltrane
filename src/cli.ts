@@ -40,6 +40,7 @@ import { engineServerForRegistry } from "./run_genome_engine.js";
 import type { Registry } from "./registry.js";
 import type { AgentInvoker } from "./runtime.js";
 import { dockerComposeRealizer } from "./venue_realizer.js";
+import { fileCredentialResolver } from "./seat_credentials.js";
 import { readFileSync } from "node:fs";
 
 export interface CliIO {
@@ -378,6 +379,8 @@ export async function runCli(argv: readonly string[], io: CliIO): Promise<number
           // throw on construction (venue_realizer.ts:808); runGig only realizes when the venue declares
           // mcp_servers, so a server-less venue's behaviour is unchanged.
           venueRealizer: dockerComposeRealizer(),
+          // the seat's login for a seat-bearing room: one 0600 file per class, provisioned by Forseti (SA-2); unset → no material
+          ...(process.env["COLTRANE_SEAT_CREDENTIALS_DIR"] ? { credentialResolver: fileCredentialResolver(process.env["COLTRANE_SEAT_CREDENTIALS_DIR"]) } : {}),
           log: (l) => line(io, l),
         },
       );

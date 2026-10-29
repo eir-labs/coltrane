@@ -124,6 +124,14 @@ export const WORKER_ENV_CONTRACT: readonly WorkerEnvVar[] = [
       "Bearer credential for the chat-completions endpoint; required only when COLTRANE_COMPLETIONS_URL is set.",
   },
   {
+    name: "COLTRANE_SEAT_CREDENTIALS_DIR",
+    host: "none",
+    role: "credential",
+    required: "never",
+    meaning:
+      "The directory of seat credential files, one per class (claude-code-credentials), each 0600 and owned by this box's user, provisioned by Forseti; read only when a seat-bearing room is realized and copied into the room as the CLI's own login file. Unset means no material: a room whose seat needs a login refuses at realization.",
+  },
+  {
     name: "COLTRANE_REALIZABLE_VENUES",
     host: "none",
     role: "tuning",

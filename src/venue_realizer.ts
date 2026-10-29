@@ -14,6 +14,7 @@
 // with extra steps.
 import { existsSync, writeFileSync, rmSync, mkdirSync, mkdtempSync } from "node:fs";
 import { execFileSync } from "node:child_process";
+import { seatClassesFor, seatProbeArgs, parseSeatProbe, seatCredentialTar } from "./seat_credentials.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { VenueSchema, DEVICE_CLASSES, type VenueOutput } from "./genome_schema.js";
@@ -35,7 +36,8 @@ export type CredentialResolver = (names: readonly string[]) => Promise<Record<st
 
 /** How the containerized realizer reaches `docker`. Real by default; see dockerComposeRealizer. It answers docker's stdout, which
  *  the host-wide reads (release, sweep) need: what stands is read from the host, never remembered by a process. */
-export type ComposeRunner = (args: readonly string[], timeoutMs: number) => string | void;
+/** `input`, when given, is the command's stdin (the seat credential's tar stream into `docker cp -`); never an argument. */
+export type ComposeRunner = (args: readonly string[], timeoutMs: number, input?: Buffer) => string | void;
 
 /** The properties a realizer may CLAIM — and may only claim if it can actually keep them. */
 export type VenueGuarantee =
@@ -182,6 +184,17 @@ export class VenueRenderRefusal extends Error {
     this.name = "VenueRenderRefusal";
     this.forbidden = args.forbidden;
     this.field = args.field;
+  }
+}
+
+/** SA-5: a seat-bearing room whose seat credential class has no material. Refused at realization, before the room is created, naming
+ *  the class and never the material, so "Not logged in" from inside the room is never the first sign of a missing login. */
+export class VenueSeatUnauthenticated extends Error {
+  readonly credentialClass: string;
+  constructor(venueSlug: string, credentialClass: string) {
+    super(`venue "${venueSlug}": its seat's credential class ${credentialClass} has no material, so the seat could not log in; refused before the room is created`);
+    this.name = "VenueSeatUnauthenticated";
+    this.credentialClass = credentialClass;
   }
 }
 
@@ -879,7 +892,7 @@ export function dockerComposeRealizer(opts?: { run?: ComposeRunner; prepareWorks
   // transport verbatim, so a fake here cannot buy a false claim of liveness there.
   const run: ComposeRunner =
     opts?.run ??
-    ((args, timeout) => execFileSync("docker", [...args], { stdio: ["ignore", "pipe", "pipe"], timeout, encoding: "utf8" }));
+    ((args, timeout, input) => execFileSync("docker", [...args], input ? { input, stdio: ["pipe", "pipe", "pipe"], timeout, encoding: "utf8" } : { stdio: ["ignore", "pipe", "pipe"], timeout, encoding: "utf8" }));
   // WHAT STANDS, read from the host: every container labelled coltrane.managed=true, by compose project. The label is asked of
   // docker AND checked here, so a runner (or a daemon) answering with a foreign container cannot make one of ours. A standing
   // project names its gig as realize() named it, by the gig's first eight (coltrane-gig-<gig8>): the rendered room carries no
@@ -976,8 +989,16 @@ export function dockerComposeRealizer(opts?: { run?: ComposeRunner; prepareWorks
         await host.credential({ gigId: opts.gigId });
       }
       // Bind credentials only through the resolver, from names ⊆ surface. Never inherit host env.
-      const requested = v.mcp_servers.flatMap((s) => s.credential_names).filter((n) => v.credential_surface.includes(n));
+      // SA-1: the SEAT's class joins the request beside the servers' (a floored room whose surface carries it; the surface is the ceiling).
+      const seatClasses = seatClassesFor(v);
+      const requested = [...new Set([...v.mcp_servers.flatMap((s) => s.credential_names).filter((n) => v.credential_surface.includes(n)), ...seatClasses])];
       const material = await credentialResolver(requested);
+      // SA-5: "Not logged in" is never the first sign. A seat class with no material refuses HERE, before the room exists, naming the class.
+      for (const cls of seatClasses) {
+        if (typeof material[cls] !== "string" || material[cls]!.trim() === "") {
+          throw new VenueSeatUnauthenticated(v.slug, cls);
+        }
+      }
 
       // ── THE ROOM IS ACTUALLY STOOD UP ────────────────────────────────────────────────────────
       //
@@ -1064,7 +1085,14 @@ export function dockerComposeRealizer(opts?: { run?: ComposeRunner; prepareWorks
         run(["compose", "-f", composePath, "create"], 180_000);
         // The room reads the whole surface it was granted; each server reads only the classes it
         // declared. Both are copied straight into the container filesystem at /run/secrets/<class>.
-        deliverCredentialFiles(run, roomContainer, v.credential_surface, material);
+        // The seat's class is NOT a /run/secrets file (those are 0444 by design): it goes to the CLI's own file below.
+        deliverCredentialFiles(run, roomContainer, v.credential_surface.filter((c) => !seatClasses.includes(c)), material);
+        // SA-3: the CLI's OWN credentials file, at a target derived from the floor image (uid, gid, HOME), written 0600 by a tar stream
+        // into the created-not-started container: the value rides stdin only, never an argument, an environment or a host file.
+        for (const cls of seatClasses) {
+          const target = parseSeatProbe(String(run(seatProbeArgs(floorImage(v)), 60_000) ?? ""));
+          run(["cp", "-", `${roomContainer}:${target.home}`], 60_000, seatCredentialTar(material[cls]!, target));
+        }
         for (const s of v.mcp_servers) {
           deliverCredentialFiles(run, serverContainerName(realizationDir, s.slug), s.credential_names, material);
         }

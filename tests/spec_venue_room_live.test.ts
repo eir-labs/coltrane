@@ -613,3 +613,59 @@ describe.skipIf(!HAVE_FLOOR)("a realized room's workspace contains a working tre
     }
   }, 300_000);
 });
+
+// ── THE SEAT AUTHENTICATES IN ITS ROOM, LIVE (spec.coltrane.the-seat-authenticates-in-its-room SA-3, SA-4; Vör, 1ef94eea) ─────────────
+// In the floor image itself (coltrane/floor:seat), with no network and a FAKE value: the target is derived from the image by the
+// realizer's own probe, delivered by its own tar, and the INSTALLED claude reads it (past auth, never "Not logged in"); without it,
+// "Not logged in". And the value is in no process environment: absent from the claude process's own environ, which no child can
+// inherit around (asserted on the parent, timing-independent; Vör F2). A twin proves the environ probe can see a value that IS there.
+const SEAT_FAKE = "FAKE-SEAT-TOKEN-live-not-a-credential-91c4";
+const SEAT_FILE = JSON.stringify({ claudeAiOauth: { accessToken: SEAT_FAKE, refreshToken: SEAT_FAKE, expiresAt: 4102444800000, scopes: ["user:inference"], subscriptionType: "max" } });
+describe.skipIf(!HAVE_FLOOR)("the seat authenticates in its room — the installed CLI reads the delivered file, and no environment holds it", () => {
+  const img = "coltrane/floor:seat";
+  const dk = (args: string[], input?: Buffer) => spawnSync("docker", args, { encoding: "utf8", timeout: 90_000, ...(input ? { input } : {}) });
+  async function standWith(file: boolean): Promise<string> {
+    const { seatProbeArgs, parseSeatProbe, seatCredentialTar } = await import("../src/seat_credentials.js");
+    const target = parseSeatProbe(dk(seatProbeArgs(img)).stdout);
+    const c = dk(["create", "--network", "none", "--entrypoint", "sleep", img, "300"]).stdout.trim();
+    if (file) dk(["cp", "-", `${c}:${target.home}`], seatCredentialTar(SEAT_FILE, target));
+    dk(["start", c]);
+    return c;
+  }
+  const drop = (c: string) => { dk(["kill", c]); dk(["container", "rm", c]); };
+
+  it("SA-3: derived from the image, 0600, owned by the image's user; the installed claude gets past auth with it", async () => {
+    const { seatProbeArgs, parseSeatProbe } = await import("../src/seat_credentials.js");
+    const target = parseSeatProbe(dk(seatProbeArgs(img)).stdout);
+    const c = await standWith(true);
+    try {
+      const ls = dk(["exec", c, "stat", "-c", "%a %u %g", target.path]).stdout.trim();
+      expect(ls).toBe(`600 ${target.uid} ${target.gid}`);
+      const r = dk(["exec", "-w", "/tmp", c, "timeout", "12", "claude", "-p", "hi"]);
+      expect(`${r.stdout}${r.stderr}`).not.toMatch(/Not logged in/);
+      expect(r.status, "exit 1 is the CLI's not-logged-in exit").not.toBe(1);
+    } finally { drop(c); }
+  });
+  it("SA-3 twin: without the delivered file the same image prints \"Not logged in\" (the probe above could have failed)", async () => {
+    const c = await standWith(false);
+    try {
+      const r = dk(["exec", "-w", "/tmp", c, "timeout", "12", "claude", "-p", "hi"]);
+      expect(`${r.stdout}${r.stderr}`).toMatch(/Not logged in/);
+    } finally { drop(c); }
+  });
+  it("SA-4: the value is absent from the claude process's own environment (no child can inherit it)", async () => {
+    const c = await standWith(true);
+    try {
+      dk(["exec", "-d", "-w", "/tmp", c, "timeout", "30", "claude", "-p", "hi"]);
+      spawnSync("sleep", ["3"]);
+      const pids = dk(["exec", c, "pgrep", "-f", "claude -p hi"]).stdout.split("\n").filter(Boolean);
+      expect(pids.length, "no claude process to inspect").toBeGreaterThan(0);
+      for (const p of pids) expect(dk(["exec", c, "cat", `/proc/${p}/environ`]).stdout).not.toContain(SEAT_FAKE);
+      // twin: a claude started WITH the value in its environment is seen by the same probe
+      dk(["exec", "-d", "-e", `PROBE_TWIN=${SEAT_FAKE}`, "-w", "/tmp", c, "timeout", "30", "claude", "-p", "twin"]);
+      spawnSync("sleep", ["3"]);
+      const twin = dk(["exec", c, "pgrep", "-f", "claude -p twin"]).stdout.split("\n").filter(Boolean);
+      expect(twin.some((p) => dk(["exec", c, "cat", `/proc/${p}/environ`]).stdout.includes(SEAT_FAKE)), "the environ probe cannot see a value that is there").toBe(true);
+    } finally { drop(c); }
+  });
+});

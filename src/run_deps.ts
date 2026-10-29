@@ -224,6 +224,7 @@ export type AssembleRunDepsArgs = Pick<
   | "venue"
   | "venues"
   | "venueRealizer"
+  | "credentialResolver"
   | "placementResolver"
   | "tree_root"
   | "mounts"
@@ -263,6 +264,8 @@ export function assembleRunDeps(args: AssembleRunDepsArgs): RunDeps {
     ...(args.venue ? { venue: args.venue } : {}),
     ...(args.venues ? { venues: args.venues } : {}),
     ...(args.venueRealizer ? { venueRealizer: args.venueRealizer } : {}),
+    // the seat's (and servers') credential material, read only at realization (spec.coltrane.the-seat-authenticates-in-its-room SA-2)
+    ...(args.credentialResolver ? { credentialResolver: args.credentialResolver } : {}),
     ...(args.placementResolver ? { placementResolver: args.placementResolver } : {}),
     ...(args.repoUrl ? { repoUrl: args.repoUrl } : {}),
     ...(args.changeSetBase ? { changeSetBase: args.changeSetBase } : {}),

@@ -65,7 +65,7 @@ import {
 } from "./reuse.js";
 import type { Standard, Chair } from "./composition.js";
 import type { LoadedGenome, LoadError } from "./loader.js";
-import type { VenueRealizer } from "./venue_realizer.js";
+import type { VenueRealizer, CredentialResolver } from "./venue_realizer.js";
 
 /** Where the org store is, and who is working. */
 export interface WorkerContext {
@@ -359,6 +359,9 @@ export interface WorkOnceDeps {
    * factory inside `workOnce` would pull substrate the drain does not own into the claim path.
    */
   venueRealizer?: VenueRealizer;
+  /** The credential resolver a realization asks for its classes (the seat's login among them): the CLI builds it from
+   *  COLTRANE_SEAT_CREDENTIALS_DIR. Absent = no material, and a seat-bearing room whose surface names a seat class refuses. */
+  credentialResolver?: CredentialResolver;
   /**
    * THE HEARTBEAT'S CLOCK, injected. Arms `beat` every `intervalMs` and returns the function that
    * stops it. `workOnce` arms it once per claimed gig (venue mode), at HOSTED_LEASE_MS / 3, before the
@@ -1907,6 +1910,9 @@ export async function workOnce(ctx: WorkerContext, deps: WorkOnceDeps): Promise<
         venue: claim.venue ?? undefined,
         venues: genome.venues,
         venueRealizer: deps.venueRealizer,
+        // the seat's credential material for a seat-bearing room (spec.coltrane.the-seat-authenticates-in-its-room SA-2): the drain's
+        // resolver, read only at realization; absent → the runtime's empty default, and a seat class then refuses (SA-5)
+        credentialResolver: deps.credentialResolver,
         repoUrl: claim.venue && !roomNeedsNothing ? workingRepo : undefined,
         changeSetBase: claim.venue && !roomNeedsNothing ? resolveChangeSetBase(claim) ?? undefined : undefined,
         // The address-stamping tree (records-by-address): the drain's OWN working clone, the tree its

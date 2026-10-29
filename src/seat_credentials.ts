@@ -1,0 +1,90 @@
+// THE SEAT AUTHENTICATES IN ITS ROOM (wiki spec.coltrane.the-seat-authenticates-in-its-room; Vör graded PASS, ledger 1ef94eea).
+//
+// A seat-bearing room runs `claude` inside its container, and the engine never forwards a host credential into a room. The seat's
+// credential is a class on the venue's credential_surface (SEAT_CREDENTIAL_CLASS), resolved like any other, and delivered to the CLI's
+// OWN credentials file inside the container: never an environment variable (inherited by every MCP server the CLI spawns, and what
+// crash handlers log) and no shell wrapper. The target is DERIVED FROM THE FLOOR IMAGE at realization (its uid, gid and HOME), so a floor
+// rebuilt with another user cannot leave a stale literal behind. Measured in the drafting room's floor (Claude Code 2.1.312, user node):
+// no file and an empty file both print "Not logged in"; a well-formed 0600 file owned by the user gets past auth.
+import { existsSync, readFileSync, statSync } from "node:fs";
+import { join } from "node:path";
+import type { CredentialResolver } from "./venue_realizer.js";
+
+/** The class a venue declares on its credential_surface for its seat's own login. */
+export const SEAT_CREDENTIAL_CLASS = "claude-code-credentials";
+/** Where the installed CLI reads its login, relative to its HOME. */
+export const SEAT_CREDENTIAL_REL = ".claude/.credentials.json";
+
+export interface SeatTarget { uid: number; gid: number; home: string; dir: string; path: string }
+
+/** The seat classes a venue's realization must resolve: only a floored (seat-bearing) room has a seat, and the surface is the ceiling. */
+export function seatClassesFor(v: { floor?: string | undefined; credential_surface: readonly string[] }): string[] {
+  return v.floor && v.credential_surface.includes(SEAT_CREDENTIAL_CLASS) ? [SEAT_CREDENTIAL_CLASS] : [];
+}
+
+/** The probe that reads the floor image's own uid, gid and HOME: a throwaway container with no network, running nothing but `id`. */
+export function seatProbeArgs(image: string): string[] {
+  return ["run", "--rm", "--network", "none", "--entrypoint", "sh", image, "-c", 'id -u; id -g; printf "%s\\n" "$HOME"'];
+}
+
+/** The probe's answer as a target. A non-numeric id or a HOME that is not absolute is refused: the target is never guessed. */
+export function parseSeatProbe(out: string): SeatTarget {
+  const [u, g, h] = String(out).split("\n").map((s) => s.trim());
+  if (!/^\d+$/.test(u ?? "") || !/^\d+$/.test(g ?? "")) throw new Error(`the floor image's user did not probe as numeric uid and gid (got ${JSON.stringify([u, g])})`);
+  if (!h || !h.startsWith("/") || h.includes("\0")) throw new Error(`the floor image's HOME did not probe as an absolute path (got ${JSON.stringify(h)})`);
+  const home = h.replace(/\/+$/, "") || "/";
+  const dir = `${home}/.claude`;
+  return { uid: Number(u), gid: Number(g), home, dir, path: `${dir}/.credentials.json` };
+}
+
+// ── a minimal ustar writer: two entries, numeric owners, exact modes ──────────────────────────────────────────────────────────────
+function header(name: string, mode: number, uid: number, gid: number, size: number, type: "0" | "5"): Buffer {
+  const b = Buffer.alloc(512, 0);
+  const put = (s: string, off: number, len: number) => b.write(s.slice(0, len), off, len, "utf8");
+  const oct = (n: number, len: number) => n.toString(8).padStart(len - 1, "0") + "\0";
+  put(name, 0, 100);
+  put(oct(mode, 8), 100, 8);
+  put(oct(uid, 8), 108, 8);
+  put(oct(gid, 8), 116, 8);
+  put(oct(size, 12), 124, 12);
+  put(oct(0, 12), 136, 12);
+  b.fill(0x20, 148, 156); // the checksum field counts as spaces while it is summed
+  put(type, 156, 1);
+  put("ustar\0", 257, 6);
+  put("00", 263, 2);
+  let sum = 0;
+  for (const byte of b) sum += byte;
+  put(sum.toString(8).padStart(6, "0") + "\0 ", 148, 8);
+  return b;
+}
+/** The tar extracted at the target's HOME: .claude/ (0700) and .claude/.credentials.json (0600), both owned by the probed uid:gid. */
+export function seatCredentialTar(material: string, t: SeatTarget): Buffer {
+  const data = Buffer.from(material, "utf8");
+  const pad = Buffer.alloc((512 - (data.length % 512)) % 512, 0);
+  return Buffer.concat([
+    header(".claude/", 0o700, t.uid, t.gid, 0, "5"),
+    header(SEAT_CREDENTIAL_REL, 0o600, t.uid, t.gid, data.length, "0"),
+    data, pad, Buffer.alloc(1024, 0),
+  ]);
+}
+
+/** THE DRAIN'S RESOLVER: one file per class under `dir`, provisioned by Forseti. Read only when a realization asks for the class.
+ *  Four separate refusals, none carrying the material: absent, empty (blank), readable by group or others, owned by another identity. */
+export function fileCredentialResolver(dir: string, owner: number | undefined = process.getuid?.()): CredentialResolver {
+  return async (names) => {
+    const out: Record<string, string> = {};
+    for (const cls of names) {
+      if (!/^[a-z0-9][a-z0-9._-]*$/.test(cls)) throw new Error(`credential class ${JSON.stringify(cls)} is not a class name`);
+      const p = join(dir, cls);
+      if (!existsSync(p)) throw new Error(`credential class ${cls}: no file provisioned (absent) in the seat credentials directory`);
+      const st = statSync(p);
+      if (!st.isFile()) throw new Error(`credential class ${cls}: the provisioned path is not a file`);
+      if ((st.mode & 0o077) !== 0) throw new Error(`credential class ${cls}: the provisioned file is readable by others (mode ${(st.mode & 0o777).toString(8)}); it must be 0600`);
+      if (owner !== undefined && st.uid !== owner) throw new Error(`credential class ${cls}: the provisioned file's owner is uid ${st.uid}, not the provisioning identity`);
+      const v = readFileSync(p, "utf8");
+      if (v.trim() === "") throw new Error(`credential class ${cls}: the provisioned file is empty`);
+      out[cls] = v;
+    }
+    return out;
+  };
+}

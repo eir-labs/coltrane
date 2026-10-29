@@ -1896,6 +1896,12 @@ function specGradeRefusal(
   return undefined;
 }
 
+/** The tree a run's git reads use: the one the run named, else a seat-bearing room's workspace (bind-mounted at the same host path),
+ *  else none (a laws/changes seal then refuses tree_root_unknown rather than stamping the wrong tree). */
+export function effectiveTreeRoot(named: string | undefined, seat: { container: string; workspace: string } | undefined): string | undefined {
+  return named ?? seat?.workspace;
+}
+
 export async function runGig(
   standard: Standard,
   gigInput: Record<string, unknown>,
@@ -2786,6 +2792,10 @@ export async function runGig(
             : {}),
         },
       );
+      // THE SEAT'S TREE IS THE ROOM'S WORKSPACE (gig 726754eb): with the working tree deferred to room realization the drain names no
+      // tree_root, and a sealed red-spec's `laws` could not be stamped from git (tree_root_unknown). The workspace is a git checkout
+      // bind-mounted at the same path on the host, so it is the tree every later read in this run uses.
+      deps = { ...deps, tree_root: effectiveTreeRoot(deps.tree_root, gigSubstrate.seat) };
     }
 
   for (const phase of standard.phases) {

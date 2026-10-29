@@ -184,7 +184,10 @@ describe("a seat-bearing floor keeps the room's posture — moving the seat wide
     mcp_servers: [
       { slug: "notes", transport: "stdio" as const, command: ["node", "/app/dist/src/server_entry.js"], credential_names: ["notes-token"] },
     ],
-    doors: { ingress: [], egress: ["notes.example"] },
+    // No egress door: these laws are about the floor's image and posture. The door this fixture once declared was never enforced (the
+    // pre-egress room was blanket-internal); now egress doors are enforced by a proxy whose consumer is a seat on a floor pinned by
+    // digest, and a tag floor with doors is refused by name (EP-9, the_room_reaches_only_its_doors).
+    doors: { ingress: [], egress: [] },
     lifecycle: { policy: "ephemeral" as const },
   };
   const REALIZATION_DIR = "/realizations/gig-88888888";
@@ -215,5 +218,23 @@ describe("a seat-bearing floor keeps the room's posture — moving the seat wide
     const doc = render();
     expect(doc, "credential class names are declared").toContain("notes-token");
     expect(doc, "no host-bound compose secret block").not.toMatch(/"secrets"\s*:\s*\{/);
+  });
+});
+
+describe("the seat's tree is the room's workspace (gig 726754eb, 29 Oct)", () => {
+  // The in-room drafter SEALED its red-spec, and the seal refused tree_root_unknown: with the working tree deferred to room realization,
+  // the drain named no tree_root, so `laws` could not be stamped from git. The room's workspace is a git checkout bind-mounted at the
+  // SAME path on the host, so when no tree root was named and the room has a seat, the tree is that workspace.
+  it("effectiveTreeRoot: a named tree wins; else the seat's workspace; else none", async () => {
+    const { effectiveTreeRoot } = await import("../../src/runtime.js");
+    expect(effectiveTreeRoot("/named", { container: "c", workspace: "/ws" })).toBe("/named");
+    expect(effectiveTreeRoot(undefined, { container: "c", workspace: "/ws" })).toBe("/ws");
+    expect(effectiveTreeRoot(undefined, undefined)).toBeUndefined();
+  });
+  it("REACHED: runGig applies it right after the substrate is realized", () => {
+    const src = readFileSync(new URL("../../src/runtime.ts", import.meta.url), "utf-8");
+    const at = src.indexOf("gigSubstrate = await deps.venueRealizer.realize(");
+    expect(at).toBeGreaterThan(-1);
+    expect(src.slice(at, at + 2500)).toMatch(/effectiveTreeRoot\(deps\.tree_root, gigSubstrate\.seat\)/);
   });
 });

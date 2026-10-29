@@ -567,6 +567,16 @@ export function renderComposeConfig(
   const egressServices: Record<string, Record<string, unknown>> = {};
   const egressNetworks: Record<string, Record<string, unknown>> = {};
   if (egressDoors.length > 0) {
+    // EP-9 (Vör, after b7a5c76): the proxy's only consumer is a SEAT, whose settings carry the proxy. A room with egress doors and no
+    // seat (no floor pinned by digest) would get an egress container on a non-internal network that nothing uses: reachability with no
+    // user, the declared-but-unenforced state this spec ends. Refused by name, never silently granted; it lifts when servers get a path.
+    if (!floorIsPinned(v)) {
+      throw new VenueRenderRefusal({
+        forbidden: egressDoors.join(","),
+        field: "doors",
+        message: `venue "${v.slug}" declares egress doors [${egressDoors.join(", ")}] but has no seat to use them (no floor pinned by digest): an egress proxy with no consumer is reachability with no user, so it is refused`,
+      });
+    }
     egressServices["egress"] = {
       image: room["image"],
       command: ["node", "-e", egressProxySource(), "--", ...egressDoors],

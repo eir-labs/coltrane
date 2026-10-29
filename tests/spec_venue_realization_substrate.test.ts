@@ -184,7 +184,10 @@ const CONTAINED_ROOM = {
   mcp_servers: [
     { slug: "notes", transport: "stdio" as const, command: ["notes-mcp", "--stdio"], credential_names: ["notes-token"] },
   ],
-  doors: { ingress: [], egress: ["notes.example"] },
+  // No egress door. No law in this file reads `doors`; the door this fixture once declared was never enforced (the pre-egress room was
+  // blanket-internal). Egress doors are now enforced by a proxy whose only consumer is a seat on a floor pinned by digest, and a room
+  // with doors and no such seat is refused by name (EP-9, the_room_reaches_only_its_doors) until servers get a proxy path.
+  doors: { ingress: [], egress: [] },
   lifecycle: { policy: "ephemeral" as const },
 };
 

@@ -108,3 +108,22 @@ describe("EP-7 — the egress service holds no credential", () => {
     expect(e["environment"]).toBeUndefined();
   });
 });
+
+describe("EP-9 — egress doors with no seat to use them are refused by name (Vör, after b7a5c76)", () => {
+  // The egress service was rendered whenever a room declared egress doors. A room with doors and no seat got an egress container on a
+  // non-internal network that nothing in the room consumes: reachability with no user, the doors-declared-but-unenforced state this spec
+  // exists to end. Same shape as a seat class on an unpinned floor: refused by name, never silently granted. It lifts when servers get a
+  // proxy path, and the law then records why it existed.
+  it("plant: a room with egress doors and no floor (no seat) is refused, naming the doors and the reason", () => {
+    expect(() => render({ ...venue(DOORS), floor: undefined })).toThrow(/egress.*no seat/i);
+  });
+  it("plant: a room with egress doors on a floor that is not pinned by digest is refused (no seat whose image is known)", () => {
+    expect(() => render({ ...venue(DOORS), floor: "chancery-drafting" })).toThrow(/egress.*no seat/i);
+  });
+  it("twin: a seat-bearing room (floor pinned by digest) with egress doors renders its egress service", () => {
+    expect(render(venue(DOORS)).services["egress"]).toBeDefined();
+  });
+  it("twin: a room with no egress doors and no seat renders as before", () => {
+    expect(() => render({ ...venue([]), floor: undefined })).not.toThrow();
+  });
+});

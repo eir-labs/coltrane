@@ -8,7 +8,7 @@ Technical Specification v2.0
 
 March 2026
 
-the founder  |  Eir Is Real, Inc.
+
 
 # **Contents**
 

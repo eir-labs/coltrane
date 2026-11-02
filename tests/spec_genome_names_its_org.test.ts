@@ -4,10 +4,10 @@
 // not degraded, gone — so the room where governance acts are equipped, and the verifier's own
 // room, can equip nobody. Measured in the store, four ACTIVE rows across two orgs:
 //
-//   governance-desk  @eir-labs-inc   v1 active   seed
-//   governance-desk  @eugene-studio  v1 active   by eugene, later
+//   governance-desk  @example-org   v1 active   seed
+//   governance-desk  @eugene-studio  v1 active   later
 //   verifier-desk    @eugene-studio  v1 active   migration
-//   verifier-desk    @eir-labs-inc   v1 active   by eugene, later
+//   verifier-desk    @example-org   v1 active   later
 //
 // In each pair the hand-stamped row is the LATER one: a second org was given the same desk
 // deliberately. So retiring a row deletes a room someone opened on purpose, and a uniqueness
@@ -32,7 +32,7 @@
 import { describe, it, expect } from "vitest";
 import { reconstructGenome, rpcGenomeStore } from "../src/genome_store.js";
 
-const ORG_A = "11111111-1111-4111-8111-111111111111"; // eir-labs-inc, in the fixture
+const ORG_A = "11111111-1111-4111-8111-111111111111"; // example-org, in the fixture
 const ORG_B = "22222222-2222-4222-8222-222222222222"; // eugene-studio
 
 function venueRow(slug: string, org_id: string, tools: string[]) {
@@ -129,7 +129,7 @@ describe("WI-11 — a venue is (org_id, slug), never a slug alone", () => {
       "the guard on this law: an uncontested room must load for the right org",
     ).toBe(true);
     expect(
-      reconstructGenome(rows as never, { acting_org_id: "eir-labs-inc" } as never).venues.has("solo-desk"),
+      reconstructGenome(rows as never, { acting_org_id: "example-org" } as never).venues.has("solo-desk"),
       "a slug was accepted as an org identity — slugs are exactly what collides across orgs",
     ).toBe(false);
   });

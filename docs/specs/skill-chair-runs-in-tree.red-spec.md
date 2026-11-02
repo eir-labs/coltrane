@@ -62,7 +62,7 @@ sandbox-confinement control staying green.
 ## Observed RED (this run)
 
 `npx vitest run tests/spec_skill_chair_runs_in_tree.test.ts` — **3 tests, 3 failed**. Every failure is
-the child reporting the engine process's directory (`/home/user/eir/coltrane`) where the
+the child reporting the engine process's directory (`<checkout>`) where the
 contract requires the run's `tree_root` temp directory:
 
 - **O1** fails at the `cwd = tree_root` assertion (received the engine cwd).

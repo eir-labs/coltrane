@@ -29,9 +29,9 @@ import { canonJson, sha256Hex } from "../src/canonical_form.js";
 
 const FIXTURES = join(__dirname, "fixtures", "bearing_laws");
 const BEARING_LAW_SLUGS = [
-  "lighthouse-sow-delivery-v0",
-  "price-note-payment-v0",
-  "safe-portfolio-honor-v0",
+  "example-delivery-v0",
+  "example-payment-v0",
+  "example-portfolio-v0",
 ] as const;
 
 function writeJson(dir: string, sub: string, name: string, obj: unknown): void {
@@ -96,9 +96,9 @@ describe("the loader learns the bearing-law kind", () => {
       for (const slug of BEARING_LAW_SLUGS) {
         expect(g.bearing_laws?.has(slug)).toBe(true);
       }
-      const safe = g.bearing_laws?.get("safe-portfolio-honor-v0");
+      const safe = g.bearing_laws?.get("example-portfolio-v0");
       expect(safe?.kind).toBe("bearing-law");
-      expect(safe?.subject_ref).toBe("org:eir-labs-inc");
+      expect(safe?.subject_ref).toBe("org:example-co");
       expect(safe?.law.deontic).toBe("obliged");
       expect(safe?.law.check.predicate.length).toBeGreaterThan(0);
     } finally {
@@ -157,14 +157,14 @@ describe("the loader learns the bearing-law kind", () => {
     }
   });
 
-  it("seal-genome content identity is UNMOVED: the pinned sha256(canonJson) of each real bearing-law file", () => {
+  it("seal-genome content identity is UNMOVED: the pinned sha256(canonJson) of each bearing-law fixture", () => {
     // seal-genome hashes `sha256Hex(canonJson(def))` (src/seal_genome.ts:81). These values
     // were computed from the byte-copied real files BEFORE the loader learned the kind;
     // the loader change must not move them. If this pins red, sealing behavior drifted.
     const pinned: Record<string, string> = {
-      "lighthouse-sow-delivery-v0.json": "18c6aec18e3459401cedc6626d3b76b824dfbf19235b54f68e90eebb6e42a1e9",
-      "price-note-payment-v0.json": "58dc72eff4841d3b2e041a1c50df4089587ce5626cd835cf2c8a0dcfe81126ae",
-      "safe-portfolio-honor-v0.json": "e41b26da0a670d6bef51f5cd6f473650d99c4e4ba3e8d786df281f4a2740ca55",
+      "example-delivery-v0.json": "8548c6c46b65eca970e0b87b356e4123da93e65ec38dd976e37edbe1ac1b9379",
+      "example-payment-v0.json": "8679c96329033d36ad3e1cc053e3ead34d6688e2524601373c9075156343f9d3",
+      "example-portfolio-v0.json": "d858a82d82c4c5f1a8d8d55d9f9b048cd4e45541091d015552ec1c056ede78e9",
     };
     const files = readdirSync(FIXTURES).filter((f) => f.endsWith(".json")).sort();
     expect(files).toEqual(Object.keys(pinned).sort());

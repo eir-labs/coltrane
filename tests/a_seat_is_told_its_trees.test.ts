@@ -1,7 +1,7 @@
 // A SEAT IS TOLD ITS TREES — the trees the room furnished reach every seat, named in its prompt.
 // (spec: wiki spec.one-write-path.a-room-furnishes-its-reach; founder's ruling R38, 3 Oct 2026)
 //
-// Measured on 3 Oct: Vör's lineage pass ran with coltrane-ui not mounted and john's internal read
+// Measured on 3 Oct: a lineage pass ran with coltrane-ui not mounted and a seat's internal read
 // "dereferenced zero files: completeness 0.05". When a room furnishes four trees, a seat that is not
 // told where they sit will read none of them either. So the drain's mounts (RunDeps.mounts, from
 // prepareWorkspaces) reach every seat's invocation context, and buildPrompt names each one with its

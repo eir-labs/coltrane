@@ -27,7 +27,7 @@ for (const path of [...forkedFiles.map((f) => f.path), ...readRel]) {   // ← c
 is not. So a carried absolute path is resealed absolute forever, a carried path outside `tree_root` is never
 dropped, and a carried absolute spelling plus a relative read of the same file de-dupe as two distinct
 strings. Measured (change-request): three seat-primers sealed 2026-09-17 before fdb36ff (gigs 54f62153,
-955f7cc6, 6ea6d047) carry 4, 6 and 8 absolute paths under `/home/user/eir/coltrane`. The
+955f7cc6, 6ea6d047) carry 4, 6 and 8 absolute paths under `<checkout>`. The
 standing path laws (`tests/spec_seat_primer_paths_relative.test.ts`) exercise Read events only, so none of
 them saw this.
 

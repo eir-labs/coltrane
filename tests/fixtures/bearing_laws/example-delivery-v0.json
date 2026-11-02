@@ -1,0 +1,41 @@
+{
+  "slug": "example-delivery-v0",
+  "domain": "org-bearing",
+  "status": "active",
+  "kind": "bearing-law",
+  "source": "charter",
+  "subject_ref": "org:example-co",
+  "bearer": "Example Co., a fictional company",
+  "description": "Fictional obligation of an org: deliver the scope of an example statement of work.",
+  "law": {
+    "attributes": "Example Co., as Provider under an example statement of work with Example Client.",
+    "deontic": "obliged",
+    "aim": "Deliver the example scope for the example fixed fee, through the example term end.",
+    "conditions": "From the example effective date through the example term end, for the listed deliverables.",
+    "or_else": "Non-delivery is a breach of the example statement of work.",
+    "check": {
+      "predicate": "the provider has delivered every listed deliverable by the term end",
+      "inputs": {
+        "provider": "principal",
+        "sow": "instrument-ref"
+      }
+    }
+  },
+  "instrument": {
+    "name": "Example Statement of Work",
+    "parties": [
+      "Example Co. (Provider)",
+      "Example Client (Client)"
+    ],
+    "effective_date": "2000-01-01",
+    "term_end": "2000-12-31"
+  },
+  "provenance": {
+    "extracted_from": "fictional fixture for the loader tests",
+    "recast_under": "none",
+    "content_hash_note": "fictional example; no real instrument"
+  },
+  "flags": [
+    "fictional fixture"
+  ]
+}

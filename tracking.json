@@ -175,7 +175,7 @@
     { "from": "tests/honest-scope.test.ts", "to": "tests/gig_nondeterminism.test.ts", "owner": "eng", "status": "done" }
   ],
   "protocol": {
-    "load_assignment": "open /home/user/eir/coltrane-oss/tracking.json; read assignments.<your_ant_id>; that is your work list.",
+    "load_assignment": "open tracking.json at the repository root; read assignments.<your_ant_id>; that is your work list.",
     "claim": "for each spec section in your list, set spec_sections.<section>.status = 'claimed' + updated_at",
     "ship": "set spec_sections.<section>.status = 'covered' + append file to .files[]",
     "delete": "remove file from .files[]; append to deletions_log[] with reason",

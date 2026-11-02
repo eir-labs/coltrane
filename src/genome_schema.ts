@@ -609,7 +609,7 @@ export const BearingLawSchema = z.object({
   status: z.enum(["active", "deprecated", "retired"]).optional(),
   /** Where the obligation derives from (e.g. "charter"). */
   source: z.string(),
-  /** The legal person that bears it, e.g. "org:eir-labs-inc". */
+  /** The legal person that bears it, e.g. "org:example-org". */
   subject_ref: z.string(),
   /** Prose identification of the bearer of record (and any intended assignee). */
   bearer: z.string(),

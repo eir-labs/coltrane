@@ -1,7 +1,7 @@
 // A VENUE RUN STOPS ON FACTS, NOT ON THE CLOCK.
 // (docs/specs/gig-runs-once.red-spec.json — F1, F2, F3; founder's ruling of 3 Oct 2026)
 //
-// Measured 3 Oct 2026 on the eir-labs-inc box: gig 02e41dd7 (software-change-pr-v1, seven chairs) had
+// Measured 3 Oct 2026 on a test box: gig 02e41dd7 (software-change-pr-v1, seven chairs) had
 // sealed six chairs in 23 minutes when the drain's 25-minute run deadline fired and aborted the last,
 // the pull-request chair, with the message "This operation was aborted" and no cause named. $5.96 of
 // sealed work, no receipt. The deadline was a stand-in for a thirty-minute lease the store had moved to

@@ -1,7 +1,6 @@
 # Founder's Testimony — the Coltrane Institution
 
-*Spoken by the sovereign in the founding channel, 2026-08-23 (message address CHANNEL ·
-ts 1787480895-range, following the naming of the jazz lineage into the founding's
+*Spoken by the sovereign, 2026-08-23, following the naming of the jazz lineage into the founding's
 grounding). Recorded verbatim at his instruction: "most certainly you can seal those.
 they're the gods truth." To be sealed under his own hand as an exhibit of Coltrane's
 founding certificate, and to enter the founding's lineage as input — the truest forebear

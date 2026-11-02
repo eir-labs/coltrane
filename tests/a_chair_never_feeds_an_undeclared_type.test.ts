@@ -2,7 +2,7 @@
 // seated agent's declared input_types — every type the chair feeds the agent must be one the agent
 // DECLARES it consumes (input_contract ⊆ agent.input_types, subtype-aware)."
 //
-// THE DEFECT (Vör, WO-R01). The engine enforces a chair's input_contract against the PIPELINE (what
+// THE DEFECT (WO-R01). The engine enforces a chair's input_contract against the PIPELINE (what
 // upstream produced — composition.ts:505-511 and runtime.ts:2299-2314) but NEVER against the seated
 // agent's declared input_types. composition.ts:557-559 makes input_contract and ag.input_types
 // BRANCHES of one ternary — they are never compared. runtime.ts:2315's input_types floor sits in the
@@ -15,7 +15,7 @@
 // Every case targets the REAL callsite (composeStandard / runGig), so it can only pass once the
 // comparison is built — never for a tautological reason.
 //
-// Vör's four controls are baked in:
+// The grader's four controls are baked in:
 //   A (the defect)   — input_contract feeds a type the agent does NOT declare → REFUSE (was ACCEPT).
 //   B (negative)     — a genuinely mis-wired pipeline (input_contract needs an unproduced type) →
 //                      still REFUSE (don't break existing pipeline enforcement).

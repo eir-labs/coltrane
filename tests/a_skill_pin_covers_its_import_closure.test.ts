@@ -138,11 +138,16 @@ describe("DR-3b — the pin covers the skill's local import closure", () => {
     expect(files.length, "the builtin and the node_modules dependency joined the closure").toBe(1);
   });
 
-  it("control — a skill that imports nothing local hashes exactly as before: scope-gate's pin is its file's sha256", () => {
-    const p = join(ROOT, "skills/scope-gate/skill.mjs");
+  // scope-gate was this control's subject until it imported the engine's git pins (dist/src/git_pins.js, RM-4: review of #598,
+  // finding 2), so it no longer imports nothing local. The control keeps its claim on a skill that still imports nothing local
+  // (verdict-gate), and scope-gate's pin is held to its closure like baseline-gate's.
+  it("control — a skill that imports nothing local hashes exactly as before: its hash is its file's sha256; scope-gate's pin is its closure's", () => {
+    const p = join(ROOT, "skills/verdict-gate/skill.mjs");
+    expect(readFileSync(p, "utf8"), "verdict-gate now imports something local: pick another plain skill").not.toMatch(/from\s+["']\.|import\(\s*["']\./);
     const plain = `sha256:${createHash("sha256").update(readFileSync(p)).digest("hex")}`;
     expect(skills.hashSkillCode(p)).toBe(plain);
-    expect(JSON.parse(readFileSync(join(ROOT, "skills/scope-gate/meta.json"), "utf8")).code_hash).toBe(plain);
+    const scope = join(ROOT, "skills/scope-gate/skill.mjs");
+    expect(JSON.parse(readFileSync(join(ROOT, "skills/scope-gate/meta.json"), "utf8")).code_hash).toBe(skills.hashSkillCode(scope));
   });
 
   // INSTALLED (29 Oct, the red pass on stack rp1): the engine runs from npm, at <prefix>/node_modules/@eir-labs/coltrane, so EVERY

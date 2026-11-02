@@ -23,6 +23,7 @@ import { MemoryLedger } from "../src/ledger.js";
 import { runGig, type AgentInvoker } from "../src/runtime.js";
 import type { Standard } from "../src/composition.js";
 import { coreInvariantFields } from "./_support/specs.js";
+import { fakeRoom, markedLoopResult, roomDeps, withRoomOnPath, ROOM_CONTAINER } from "./_support/fake_room.js";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const genome = loadGenome(ROOT);
@@ -66,6 +67,7 @@ const NONDETERMINISTIC_LOOP_RESULT = `#!/usr/bin/env node
 process.stdout.write(JSON.stringify({ laws: [{ id: "law-at-" + process.hrtime.bigint(), verdict: "pass", plants: [] }] }));
 `;
 
+// THE ROOM, DAEMON-FREE: tests/_support/fake_room.ts (a fake docker on PATH, and a realized floored room for runGig).
 function repo(loopResult: string = LOOP_RESULT) {
   const dir = mkdtempSync(join(tmpdir(), "baseline-gate-")); tmps.push(dir);
   git(dir, "init", "-q");
@@ -79,15 +81,18 @@ const SPEC = "eir:spec.chancery.the-testable-charter";
 const pageHash = (title: string, body: string): string => createHash("sha256").update(`${title}\n${body}`, "utf8").digest("hex"); // RR-3: the page's own content expression
 const SPEC_TITLE = "A graded spec", SPEC_BODY = "the graded text";
 const H = pageHash(SPEC_TITLE, SPEC_BODY), VOR = "principal:vor";
-async function drive(stageAmend: (dir: string) => void, loopResult?: string) {
+async function drive(stageAmend: (dir: string) => void, loopResult?: string, opts: { room?: boolean; fsmonitor?: boolean } = {}) {
   const std = (genome.standards.get("chancery-red-drafting-v0") ?? genome.draft_standards.get("chancery-red-drafting-v0")) as Standard;
-  const r = repo(loopResult);
+  const room = fakeRoom(tmps);
+  const r = repo(markedLoopResult(room.ranLog, loopResult ?? LOOP_RESULT));
   const seated: string[] = [];
   const invoke: AgentInvoker = (ctx) => {
     seated.push(ctx.role ?? ctx.agent.slug);
     if ((ctx.role ?? "") === "draft") {
       stageAmend(r.dir);
       git(r.dir, "add", "-A", "crossing");
+      // what a drafter with Write(crossing/**) plus loop-result's shell can do: name a command git runs on every index read
+      if (opts.fsmonitor) git(r.dir, "config", "core.fsmonitor", room.hook);
       return { ...coreInvariantFields("Artifact"), validation_criteria: ["observed red"], input_refs: [], testing_method: "loop/loop-result",
         laws: [{ path: "crossing/laws.sx", commit: r.baseline }], spec_doc: "draft",
         coverage_map: [{ invariant_id: NEW, test_name: "the guest is named", test_file: "crossing/laws.sx", kind: "behavioural", drives: "loop/loop-result — crossing/laws.sx", plant: "remove the guest's name from src/greeting.txt" }] };
@@ -97,14 +102,15 @@ async function drive(stageAmend: (dir: string) => void, loopResult?: string) {
   const outputs = createOutputStore(registry);
   let err: unknown;
   try {
-    await runGig(std, { "change-request": { source: "eugene", request_text: "Add the guest law.", acceptance_criteria: ["observed red"], spec: SPEC, content_hash: H, spec_title: SPEC_TITLE, spec_body: SPEC_BODY, spec_grade: "g1",
+    await withRoomOnPath(room, () => runGig(std, { "change-request": { source: "eugene", request_text: "Add the guest law.", acceptance_criteria: ["observed red"], spec: SPEC, content_hash: H, spec_title: SPEC_TITLE, spec_body: SPEC_BODY, spec_grade: "g1",
       scope: { files: ["crossing/laws.sx", "crossing/terms.sx"], laws: [NEW], terms: [TERM] }, baseline_commit: r.baseline, branch: "red/x" } }, {
       outputs, ledger: new MemoryLedger(), invoke, tree_root: r.dir,
       skill_dirs: new Map([["scope-gate", join(ROOT, "skills", "scope-gate")], ["baseline-gate", join(ROOT, "skills", "baseline-gate")]]),
       spec_grades: { conformance_seat: VOR, grades: [{ id: "g1", record: { spec: SPEC, content_hash: H, verdict: "PASS", scope: [NEW], by: VOR, held_seat: true } }] },
-    } as never);
+      ...(opts.room === false ? {} : roomDeps(std, r.dir)),
+    } as never));
   } catch (e) { err = e; }
-  return { err, seated, outputs };
+  return { err, seated, outputs, room };
 }
 
 describe("DS-5 driven — the baseline-gate chair holds every unscoped law to the baseline, in every round, before review", () => {
@@ -146,5 +152,50 @@ describe("DS-5 driven — the baseline-gate chair holds every unscoped law to th
     expect(said, "the refusal must name non-determinism, not a baseline violation").toMatch(/not deterministic/);
     expect(said).toMatch(/law-at-/);
     expect(d.seated.filter((s) => s === "review").length).toBe(0);
+  });
+});
+
+// RM — THE BASELINE GATE RUNS IN THE ROOM (independent review of #598, finding 1; Eugene, 2 Nov 2026). The gate runs the drafter's
+// loop/loop-result, whose plant SQL (chancery-os: crossing/laws.sx, a free \`:sql\`) the drafter writes. Run by the engine process,
+// that is drafter code on the host, outside the room and its egress proxy. Each law below is driven through runGig, the real
+// scope-gate and baseline-gate skills, and the runtime's own wire from the realized room to the skill.
+//
+//   law  kind        drives                                                plant (the sabotage that turns it red)
+//   RM-1 behavioural runGig → baseline-gate → loop-result, a room standing  run loop-result with spawnSync on the host again
+//   RM-2 behavioural runGig → baseline-gate, NO room                        fall back to the host when context.room is absent
+//   RM-3 behavioural runGig → scope-gate + baseline-gate, core.fsmonitor     drop the pins from scope-gate's git, or run the
+//                    set by the drafter in .git/config                       baseline gate's git on the host
+describe("RM — the baseline gate runs the drafter's loop result in the room, never on the host", () => {
+  it("RM-1 — with a room standing, every loop/loop-result run is in the room (docker exec -i -w … <room>), none on the host, and the verdict still holds", { timeout: 60_000 }, async () => {
+    const d = await drive((dir) => {
+      w(dir, "crossing/laws.sx", LAWS + `(law "${NEW}"\n  (check "grep -qE 'Ada|Grace' src/greeting.txt")\n  (plant "drop-name" "true"))\n\n`);
+    });
+    const ran = d.room.ran();
+    expect(ran.length, "loop/loop-result never ran: the law could not have seen where").toBeGreaterThanOrEqual(3);
+    expect(ran.filter((x) => x !== ROOM_CONTAINER), `loop/loop-result ran outside the room: ${JSON.stringify(ran)}`).toEqual([]);
+    expect(d.room.execs().some((l) => l.startsWith(`${ROOM_CONTAINER}\t`) && l.includes("loop/loop-result")), "no docker exec into the room named loop/loop-result").toBe(true);
+    const bv = d.outputs.all().filter((o) => o.domain_type === "baseline-verdict").at(-1);
+    expect(bv?.data["pass"], `the in-room gate refused an honest red pass: ${JSON.stringify(bv?.data ?? {}).slice(0, 400)}`).toBe(true);
+  });
+
+  it("RM-2 — with no room, the baseline gate refuses by name (fail closed) and loop/loop-result never runs, on the host or anywhere", { timeout: 60_000 }, async () => {
+    const d = await drive((dir) => {
+      w(dir, "crossing/laws.sx", LAWS + `(law "${NEW}"\n  (check "grep -qE 'Ada|Grace' src/greeting.txt")\n  (plant "drop-name" "true"))\n\n`);
+    }, undefined, { room: false });
+    expect(d.room.ran(), "loop/loop-result ran with no room to run it in").toEqual([]);
+    const bv = d.outputs.all().filter((o) => o.domain_type === "baseline-verdict").at(-1);
+    expect(bv?.data["pass"], "the baseline gate passed with no room").toBe(false);
+    expect(JSON.stringify(bv?.data ?? {})).toMatch(/room-present/);
+    expect(d.seated.filter((s) => s === "review").length, "the reviewer was seated over a baseline no room measured").toBe(0);
+  });
+
+  it("RM-3 — a drafter-set core.fsmonitor in .git/config never executes on the host while the scope and baseline gates read the tree", { timeout: 60_000 }, async () => {
+    const d = await drive((dir) => {
+      w(dir, "crossing/laws.sx", LAWS + `(law "${NEW}"\n  (check "grep -qE 'Ada|Grace' src/greeting.txt")\n  (plant "drop-name" "true"))\n\n`);
+    }, undefined, { fsmonitor: true });
+    const sv = d.outputs.all().filter((o) => o.domain_type === "scope-verdict").at(-1);
+    expect(sv?.data["pass"], "the scope gate did not reach its verdict: the law could not have seen git run").toBe(true);
+    expect(d.room.ran().length, "the baseline gate did not run: the law could not have seen git run").toBeGreaterThanOrEqual(3);
+    expect(d.room.fsmonitor().filter((x) => x === "HOST"), "the drafter's core.fsmonitor ran on the host").toEqual([]);
   });
 });

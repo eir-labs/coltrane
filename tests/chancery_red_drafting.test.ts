@@ -35,7 +35,7 @@
 import { createHash } from "node:crypto";
 import { describe, it, expect, afterAll } from "vitest";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -266,6 +266,28 @@ const modelSeatFitting = (chair: Chair, slug: string): Agent =>
     identity: "a planted model seat", method: "read the inputs and answer", constraints: [],
     behavioral_primitives: ["analyst", "critic"],
   } as never);
+
+// RM-4 — the scope gate's host git honours no executable key the drafter can write (independent review of #598, finding 2).
+// The gate runs git on the HOST in the drafter's workspace; a drafter who can run a shell (loop-result's plant SQL) can write
+// .git/config. `git diff --cached` and `git show :<path>` read the index, and an index read runs core.fsmonitor (measured on
+// git 2.50). Plant: drop the engine's pinned settings from the gate's git, and the hook runs.
+describe("RM-4 — the scope gate's host git does not run a drafter-set core.fsmonitor", () => {
+  it("RM-4 — core.fsmonitor set in .git/config names a hook: the gate reaches its verdict and the hook never runs", async () => {
+    const repo = baselineRepo();
+    const sentinel = join(mktmp("fsmonitor-"), "ran");
+    const hook = join(dirname(sentinel), "hook");
+    writeFileSync(hook, `#!/bin/sh\ntouch ${JSON.stringify(sentinel)}\n`); chmodSync(hook, 0o755);
+    stage(repo, { "crossing/laws.sx": BASE_LAWS + lawForm(LAW_NEW, "A red pass leaves a branch and publishes nothing.", [TERM_NAMED], "publish-from-the-pass") });
+    git(repo.dir, "config", "core.fsmonitor", hook);
+    // the twin that keeps this law able to fail: plain git on this host DOES run the hook on the same index read
+    execFileSync("git", ["diff", "--cached", "--name-only", repo.baseline], { cwd: repo.dir, env: GIT_ENV, stdio: "ignore" });
+    expect(existsSync(sentinel), "plain git did not run core.fsmonitor here: this law could not go red").toBe(true);
+    rmSync(sentinel);
+    const out = await runGate(repo);
+    expect(out["pass"], `the gate did not reach its verdict: ${JSON.stringify(out).slice(0, 300)}`).toBe(true);
+    expect(existsSync(sentinel), "the drafter's core.fsmonitor ran on the host during the scope gate").toBe(false);
+  });
+});
 
 describe("DS-2 — drafting:the-gate-is-not-a-model: `scope` is skill-backed and a model seat there fails to compose", () => {
   it("DS-2 control — the standard as held composes: draft(agent) → scope(skill scope-gate, no agent) → baseline(skill baseline-gate, DS-5) → review(agent), 3 examine rounds", () => {

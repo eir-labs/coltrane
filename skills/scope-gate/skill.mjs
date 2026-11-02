@@ -9,6 +9,7 @@
 //       of the old id plus an addition of the new one, so both must be named.
 // Anything else is a refusal that names the file or id. Seals one scope-verdict.
 import { spawnSync } from "node:child_process";
+import { GIT_PINNED_SETTINGS } from "../../dist/src/git_pins.js";
 
 const arr = (v) => (Array.isArray(v) ? v.map(String) : []);
 
@@ -18,8 +19,11 @@ function pickRequest(input, context) {
   return (hit && hit.data) || input || {};
 }
 
+// Every git read here runs on the HOST, in the drafter's workspace, whose .git/config the drafter can write. The engine's own
+// pinned settings (src/git_pins.ts: core.fsmonitor, core.hooksPath, core.attributesFile) ride ahead of every subcommand, so no
+// command that config names is run here (independent review of #598, finding 2: an index read runs core.fsmonitor).
 function git(args) {
-  const r = spawnSync("git", args, { encoding: "utf-8", maxBuffer: 256 * 1024 * 1024 });
+  const r = spawnSync("git", [...GIT_PINNED_SETTINGS, ...args], { encoding: "utf-8", maxBuffer: 256 * 1024 * 1024 });
   return { ok: r.status === 0, out: r.stdout || "", err: (r.stderr || "").trim() };
 }
 

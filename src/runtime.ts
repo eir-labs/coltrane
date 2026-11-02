@@ -5,6 +5,7 @@
 // that carries model_version + (empty, v0) eval_scores — honestly un-tempered.
 import { lineageAdoption } from "./lineage_adoption.js";
 import { isSafeGitRev } from "./run_deps.js";
+import { GIT_PINNED_ENV, GIT_PINNED_SETTINGS } from "./git_pins.js";
 import type { TreePublisher, CommitAttribution } from "./publisher.js";
 export type { TreePublisher, CommitAttribution } from "./publisher.js";
 import { randomUUID, createHash } from "node:crypto";
@@ -1289,29 +1290,8 @@ type ChangeAddress = { path: string; base: string; blob_sha?: string; patch_sha2
 // returns is what plain `git` returns, which is what keeps `blob_sha` naming the content git stores
 // (spec.coltrane.blob-sha-contract) rather than something this seam invented.
 
-/** Pinned environment: the host and the account contribute nothing to a read's answer. */
-const GIT_PINNED_ENV: Readonly<Record<string, string>> = {
-  GIT_CONFIG_GLOBAL: "/dev/null",
-  GIT_CONFIG_SYSTEM: "/dev/null",
-  GIT_CONFIG_NOSYSTEM: "1",
-  GIT_ATTR_NOSYSTEM: "1",
-  // A snapshot is a commit object, and a commit object needs an identity. With the account's own
-  // settings pinned away, git would otherwise guess one from the host's user database — which
-  // differs per machine and is absent entirely in a bare container. Stated, so the snapshot is
-  // written the same way everywhere and never fails for want of a name.
-  GIT_AUTHOR_NAME: "coltrane",
-  GIT_AUTHOR_EMAIL: "coltrane@invalid",
-  GIT_COMMITTER_NAME: "coltrane",
-  GIT_COMMITTER_EMAIL: "coltrane@invalid",
-};
-
-/** Pinned on EVERY invocation, ahead of the subcommand. */
-const GIT_PINNED_SETTINGS: readonly string[] = [
-  "-c", "core.fsmonitor=",
-  "-c", "core.hooksPath=/dev/null",
-  "-c", "core.attributesFile=/dev/null",
-];
-
+// The pins themselves live in src/git_pins.ts, so a skill chair that reads git on the host (scope-gate) imports the SAME
+// settings rather than restating them (independent review of #598, finding 2).
 /**
  * Pinned on ONE subcommand, where the general pins above have no equivalent: `diff` is asked for
  * git's own rendering of the objects, not for some other rendering of them, because the bytes it
@@ -4053,7 +4033,14 @@ export async function runGig(
       const gigUpstream = chair.input_contract
         .filter((need) => standardInputs.has(need) && gigInput[need] !== undefined && !inputs.some((i) => i.domain_type === need))
         .map((need) => ({ role: "gig", domain_type: need, data: gigInput[need] as Record<string, unknown> }));
-      const skillContext = { upstream: [...gigUpstream, ...inputs.map((i) => ({ role: i.from_role, domain_type: i.domain_type, data: i.data }))] };
+      // THE ROOM REACHES THE SKILL (Eugene, 2 Nov 2026: the baseline gate runs INSIDE the room, not on the host). A skill chair's
+      // code half is spawned here on the HOST; a skill that must run something the drafter wrote (baseline-gate runs the drafter's
+      // loop/loop-result, whose plant SQL is free text) is handed the realized seat-bearing room, and runs it there by the same
+      // `docker exec -i -w <workspace> <container>` the seats use. Absent when no seat-bearing room stands: such a skill refuses.
+      const skillContext = {
+        upstream: [...gigUpstream, ...inputs.map((i) => ({ role: i.from_role, domain_type: i.domain_type, data: i.data }))],
+        ...(gigSubstrate?.seat ? { room: { container: gigSubstrate.seat.container, workspace: gigSubstrate.seat.workspace } } : {}),
+      };
       // contract-skill-chair-runs-in-tree-v1 (O1/I1) — a skill chair's code half runs in the GIG'S
       // tree: forward RunDeps.tree_root as the child's working directory when the run has one. A run
       // with no tree_root passes no cwd, so the child inherits the engine process's directory (I2).

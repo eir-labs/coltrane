@@ -19,6 +19,7 @@ import { MemoryLedger } from "../src/ledger.js";
 import { runGig, type AgentInvoker, type GigProgressEvent } from "../src/runtime.js";
 import type { Standard } from "../src/composition.js";
 import { coreInvariantFields } from "./_support/specs.js";
+import { fakeRoom, roomDeps, withRoomOnPath } from "./_support/fake_room.js";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const SLUG = "chancery-red-drafting-v0";
@@ -101,13 +102,15 @@ describe("the scope gate runs on every amend round of chancery-red-drafting-v0, 
     let err: unknown;
     const outputs = createOutputStore(registry);
     try {
-      await runGig(std!, { "change-request": request }, {
+      // the baseline gate runs only in the gig's room (RM-2 refuses without one), so the drafting room stands here too
+      await withRoomOnPath(fakeRoom(tmps), () => runGig(std!, { "change-request": request }, {
         outputs, ledger: new MemoryLedger(), invoke,
         skill_dirs: new Map([["scope-gate", GATE_DIR], ["baseline-gate", BASELINE_DIR]]),
         tree_root: r.dir,
         spec_grades: { conformance_seat: VOR, grades: [{ id: "g1", record: { spec: SPEC, content_hash: HASH, verdict: "PASS", scope: SCOPE.laws, by: VOR } }] },
         onProgress: (e: GigProgressEvent) => events.push(e),
-      } as never);
+        ...roomDeps(std!, r.dir),
+      } as never));
     } catch (e) { err = e; }
     // DS-7: the standard declares refuse_when_unresolved, so a gate that stops the loop ends the gig refused, naming it.
     expect(String((err as Error)?.message ?? err), "the gig must end refused, naming the gate").toMatch(/gig refused \(refuse_when_unresolved\): the gate "scope"/);

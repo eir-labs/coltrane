@@ -391,6 +391,8 @@ export async function executeSkillAsync(
  */
 export interface SkillContext {
   upstream: readonly { role: string | undefined; domain_type: string; data: Record<string, unknown> }[];
+  /** The realized seat-bearing room, when one stands: a skill that must run drafter-written code runs it here, never on the host. */
+  room?: { container: string; workspace: string } | undefined;
 }
 
 /** The human-readable cause behind an abort, whatever shape the aborter used. */

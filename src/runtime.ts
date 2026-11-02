@@ -5,7 +5,7 @@
 // that carries model_version + (empty, v0) eval_scores — honestly un-tempered.
 import { lineageAdoption } from "./lineage_adoption.js";
 import { isSafeGitRev } from "./run_deps.js";
-import { GIT_PINNED_ENV, GIT_PINNED_SETTINGS } from "./git_pins.js";
+import { pinnedGitArgs, pinnedGitEnv } from "./git_pins.js";
 import type { TreePublisher, CommitAttribution } from "./publisher.js";
 export type { TreePublisher, CommitAttribution } from "./publisher.js";
 import { randomUUID, createHash } from "node:crypto";
@@ -1292,31 +1292,16 @@ type ChangeAddress = { path: string; base: string; blob_sha?: string; patch_sha2
 
 // The pins themselves live in src/git_pins.ts, so a skill chair that reads git on the host (scope-gate) imports the SAME
 // settings rather than restating them (independent review of #598, finding 2).
-/**
- * Pinned on ONE subcommand, where the general pins above have no equivalent: `diff` is asked for
- * git's own rendering of the objects, not for some other rendering of them, because the bytes it
- * emits are folded straight into a sealed `patch_sha256`.
- */
-const GIT_SUBCOMMAND_PINS: ReadonlyMap<string, readonly string[]> = new Map([
-  ["diff", ["--no-textconv", "--no-ext-diff"] as readonly string[]],
-]);
+// GIT_SUBCOMMAND_PINS (src/git_pins.ts): `diff` and `show` are asked for git's own rendering of the objects, because the bytes
+// `diff` emits are folded straight into a sealed `patch_sha256`.
 
 /** The exact spawn a git read in `tree_root` is made of — argv and environment together. */
 export type GitInvocation = { readonly file: "git"; readonly argv: readonly string[]; readonly env: NodeJS.ProcessEnv };
 
 /** Build the pinned invocation for `git <args>` in `tree_root`. The caller's `args` survive in order. */
 export function gitInvocation(tree_root: string, args: readonly string[]): GitInvocation {
-  const [subcommand, ...rest] = args;
-  return {
-    file: "git",
-    argv: [
-      "-C", tree_root,
-      ...GIT_PINNED_SETTINGS,
-      ...(subcommand === undefined ? [] : [subcommand, ...(GIT_SUBCOMMAND_PINS.get(subcommand) ?? [])]),
-      ...rest,
-    ],
-    env: { ...process.env, ...GIT_PINNED_ENV },
-  };
+  // the same builders a host skill uses (src/git_pins.ts): settings ahead of the subcommand, its own pins after it, the caller's arguments last
+  return { file: "git", argv: ["-C", tree_root, ...pinnedGitArgs(args)], env: pinnedGitEnv(process.env) };
 }
 
 function gitInTree(tree_root: string, args: readonly string[], extra: NodeJS.ProcessEnv = {}): string {

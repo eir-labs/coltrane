@@ -31,3 +31,29 @@ export const GIT_PINNED_SETTINGS: readonly string[] = [
   "-c", "core.hooksPath=/dev/null",
   "-c", "core.attributesFile=/dev/null",
 ];
+
+/**
+ * Pinned on ONE subcommand, where the general pins above have no equivalent: `diff` and `show` are asked for git's own rendering of
+ * the objects, never one a repository's config or .gitattributes selects (diff.external, a diff driver, a textconv). Moved here from
+ * src/runtime.ts so a host caller builds from the same table (Vör at 224d1fd, F-2: `show` was closed by its argument, not by a pin).
+ */
+export const GIT_SUBCOMMAND_PINS: ReadonlyMap<string, readonly string[]> = new Map([
+  ["diff", ["--no-textconv", "--no-ext-diff"] as readonly string[]],
+  ["show", ["--no-textconv", "--no-ext-diff"] as readonly string[]],
+]);
+
+/** The pinned argv for `git <args>`: the settings ahead of the subcommand, the subcommand's own pins right after it, the caller's
+ *  arguments after those, in order. */
+export function pinnedGitArgs(args: readonly string[]): string[] {
+  const [subcommand, ...rest] = args;
+  return [...GIT_PINNED_SETTINGS, ...(subcommand === undefined ? [] : [subcommand, ...(GIT_SUBCOMMAND_PINS.get(subcommand) ?? [])]), ...rest];
+}
+
+/** The pinned environment for a host git: the parent's environment with EVERY GIT_* removed (GIT_CONFIG_COUNT/KEY/VALUE and
+ *  GIT_CONFIG_PARAMETERS would otherwise add config no pin names; GIT_DIR and friends would aim the read elsewhere), then
+ *  GIT_PINNED_ENV laid over it (Vör at 224d1fd, F-1 and his pre-committed plant). */
+export function pinnedGitEnv(base: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const out: NodeJS.ProcessEnv = {};
+  for (const [k, v] of Object.entries(base)) if (!k.startsWith("GIT_")) out[k] = v;
+  return { ...out, ...GIT_PINNED_ENV };
+}

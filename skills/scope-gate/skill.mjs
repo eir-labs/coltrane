@@ -9,7 +9,7 @@
 //       of the old id plus an addition of the new one, so both must be named.
 // Anything else is a refusal that names the file or id. Seals one scope-verdict.
 import { spawnSync } from "node:child_process";
-import { GIT_PINNED_SETTINGS } from "../../dist/src/git_pins.js";
+import { pinnedGitArgs, pinnedGitEnv } from "../../dist/src/git_pins.js";
 
 const arr = (v) => (Array.isArray(v) ? v.map(String) : []);
 
@@ -19,11 +19,14 @@ function pickRequest(input, context) {
   return (hit && hit.data) || input || {};
 }
 
-// Every git read here runs on the HOST, in the drafter's workspace, whose .git/config the drafter can write. The engine's own
-// pinned settings (src/git_pins.ts: core.fsmonitor, core.hooksPath, core.attributesFile) ride ahead of every subcommand, so no
-// command that config names is run here (independent review of #598, finding 2: an index read runs core.fsmonitor).
+// Every git read here runs on the HOST, in the drafter's workspace, whose .git/config the drafter can write. It is built from the
+// engine's own pins (src/git_pins.ts): the settings ahead of every subcommand (core.fsmonitor, core.hooksPath, core.attributesFile),
+// diff's and show's own flags (--no-textconv --no-ext-diff), and an environment with every inherited GIT_* dropped and the pinned one
+// laid over it, so no command the repository, the account or the host names is run here (independent review of #598, finding 2;
+// Vör at dc7b531 and 224d1fd).
+const DIFF_ARGS = ["diff", "--cached", "--name-only", "--no-renames"];
 function git(args) {
-  const r = spawnSync("git", [...GIT_PINNED_SETTINGS, ...args], { encoding: "utf-8", maxBuffer: 256 * 1024 * 1024 });
+  const r = spawnSync("git", pinnedGitArgs(args), { env: pinnedGitEnv(process.env), encoding: "utf-8", maxBuffer: 256 * 1024 * 1024 });
   return { ok: r.status === 0, out: r.stdout || "", err: (r.stderr || "").trim() };
 }
 
@@ -84,13 +87,13 @@ export default function run(input, context) {
   const checks = [];
   const refused = [];
 
-  const diff = git(["diff", "--cached", "--no-ext-diff", "--no-textconv", "--name-only", "--no-renames", "-z", baseline]);
+  const diff = git([...DIFF_ARGS, "-z", baseline]);
   if (!diff.ok) return refuse("staged-diff", `git diff --cached against ${baseline} failed: ${diff.err}`);
   const changed = diff.out.split("\0").filter(Boolean).sort();
   const outside = changed.filter((p) => !files.has(p));
   for (const p of outside) refused.push({ kind: "file", id: p, change: "written", reason: `${p} is not in the scope's file list` });
   checks.push({
-    method: "file-set-within-scope", target_ref: "git diff --cached --name-only --no-renames",
+    method: "file-set-within-scope", target_ref: `git ${pinnedGitArgs(DIFF_ARGS).filter((a, i, all) => a !== "-c" && all[i - 1] !== "-c").join(" ")}`,
     result: outside.length === 0 ? `all ${changed.length} staged path(s) are in the scope` : `outside the scope: ${outside.join(", ")}`,
   });
 

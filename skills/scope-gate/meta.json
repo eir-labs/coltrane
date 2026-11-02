@@ -9,5 +9,5 @@
     "tier": 2
   },
   "description": "The drafting standard's scope chair (DS-1): the drafter's staged diff against the change-request's scope. Every staged path must be in scope.files; every id added, removed or amended in crossing/laws.sx and crossing/terms.sx must be named (a rename is a removal plus an addition). Anything else is refused, naming the file or id. Deterministic, no model.",
-  "code_hash": "sha256:780cd6a85f66644025da0270b14dd300e926a85f0ce21ad20d5ebb88cfb4bbf7"
+  "code_hash": "sha256:040491809a83065402c5c9d37a482d1b16136fbee6fd86e2317f69c57b5e2c4a"
 }

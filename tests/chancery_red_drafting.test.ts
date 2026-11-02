@@ -50,6 +50,7 @@ import { createRegistry } from "../src/registry.js";
 import { createOutputStore } from "../src/outputs.js";
 import { MemoryLedger } from "../src/ledger.js";
 import { runGig, type AgentInvoker } from "../src/runtime.js";
+import * as pins from "../src/git_pins.js";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const SLUG = "chancery-red-drafting-v0";
@@ -296,10 +297,12 @@ describe("RM-4 — the scope gate's host git does not run a drafter-set core.fsm
 describe("RM-5 — the scope gate's host git runs no external diff and no diff driver the drafter can name", () => {
   it("RM-5 — the gate's diff carries --no-ext-diff and --no-textconv, and with diff.external and a .gitattributes driver planted the gate reaches its verdict and neither runs", async () => {
     const src = readFileSync(join(GATE_DIR, "skill.mjs"), "utf8");
-    const diffCall = src.match(/git\(\[\s*"diff"[^\]]*\]/)?.[0] ?? "";
-    expect(diffCall, "the scope gate makes no git diff call this law can read").not.toBe("");
-    expect(diffCall.includes('"--no-ext-diff"'), `the gate's diff does not pass --no-ext-diff: ${diffCall}`).toBe(true);
-    expect(diffCall.includes('"--no-textconv"'), `the gate's diff does not pass --no-textconv: ${diffCall}`).toBe(true);
+    expect(/git\(\s*\[\s*"diff"|git\(\s*\[\s*\.\.\.DIFF_ARGS/.test(src), "the scope gate makes no git diff call this law can read").toBe(true);
+    const build = (pins as Record<string, unknown>)["pinnedGitArgs"] as ((a: string[]) => string[]) | undefined;
+    expect(typeof build, "src/git_pins.ts exports no pinnedGitArgs for a host caller to build its argv from").toBe("function");
+    expect(/pinnedGitArgs\(/.test(src), "the scope gate does not build its git argv with pinnedGitArgs").toBe(true);
+    const argv = build!(["diff", "--cached", "--name-only"]);
+    expect(argv.includes("--no-ext-diff") && argv.includes("--no-textconv"), `a diff built by pinnedGitArgs lacks --no-ext-diff/--no-textconv: ${argv.join(" ")}`).toBe(true);
     const repo = baselineRepo();
     const sentinel = join(mktmp("extdiff-"), "ran");
     const cmd = join(dirname(sentinel), "ext");
@@ -314,6 +317,69 @@ describe("RM-5 — the scope gate's host git runs no external diff and no diff d
     const out = await runGate(repo);
     expect(out["pass"], `the gate did not reach its verdict: ${JSON.stringify(out).slice(0, 300)}`).toBe(true);
     expect(existsSync(sentinel), "an external diff or diff driver the drafter named ran on the host during the scope gate").toBe(false);
+  });
+});
+
+// RM-6 — the gate's host git runs with the pinned ENVIRONMENT too, and inherits no GIT_* from its parent (Vör at 224d1fd, F-1: the gate
+// imported GIT_PINNED_SETTINGS but not GIT_PINNED_ENV, so the account's global and the system config were live for it alone; and his
+// pre-committed plant: a GIT_CONFIG_COUNT/KEY/VALUE pair in the parent, which neither constant unsets). Driven on a FULL diff with only
+// the settings pins, so the environment is the only thing between the planted command and the host.
+describe("RM-6 — the scope gate's host git takes nothing from the host's or the account's git config, nor from its parent's GIT_*", () => {
+  it("RM-6 — pinnedGitEnv drops every inherited GIT_* and lays GIT_PINNED_ENV over it; a global diff.external and a parent GIT_CONFIG_COUNT pair do not run; the gate spawns with it", () => {
+    const envOf = (pins as Record<string, unknown>)["pinnedGitEnv"] as ((b: NodeJS.ProcessEnv) => NodeJS.ProcessEnv) | undefined;
+    expect(typeof envOf, "src/git_pins.ts exports no pinnedGitEnv").toBe("function");
+    const src = readFileSync(join(GATE_DIR, "skill.mjs"), "utf8");
+    expect(/spawnSync\(\s*"git",\s*pinnedGitArgs\(args\),\s*\{\s*env:\s*pinnedGitEnv\(process\.env\)/.test(src), "the scope gate's git spawn does not carry pinnedGitEnv").toBe(true);
+    const repo = baselineRepo();
+    stage(repo, { "crossing/laws.sx": BASE_LAWS + lawForm(LAW_NEW, "A red pass leaves a branch and publishes nothing.", [TERM_NAMED], "publish-from-the-pass") });
+    const dir = mktmp("pinenv-"), sentinel = join(dir, "ran"), cmd = join(dir, "ext"), globalCfg = join(dir, "gitconfig");
+    writeFileSync(cmd, `#!/bin/sh\ntouch ${JSON.stringify(sentinel)}\n`); chmodSync(cmd, 0o755);
+    writeFileSync(globalCfg, `[diff]\n\texternal = ${cmd}\n`);
+    const parent: NodeJS.ProcessEnv = { ...process.env, GIT_CONFIG_GLOBAL: globalCfg, GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: "diff.external", GIT_CONFIG_VALUE_0: cmd };
+    const full = [...pins.GIT_PINNED_SETTINGS, "diff", "--cached", repo.baseline];
+    execFileSync("git", full, { cwd: repo.dir, env: parent, stdio: "ignore" });
+    expect(existsSync(sentinel), "control: with the parent's environment a full diff runs the planted command, so this law can fail").toBe(true);
+    rmSync(sentinel);
+    const env = envOf!(parent);
+    expect(Object.keys(env).filter((k) => k.startsWith("GIT_") && !(k in pins.GIT_PINNED_ENV)), "an inherited GIT_* survived pinnedGitEnv").toEqual([]);
+    expect(env["PATH"], "pinnedGitEnv dropped PATH, so git cannot be found").toBe(process.env["PATH"]);
+    execFileSync("git", full, { cwd: repo.dir, env, stdio: "ignore" });
+    expect(existsSync(sentinel), "a global diff.external or a parent GIT_CONFIG_COUNT pair ran under pinnedGitEnv").toBe(false);
+  });
+});
+
+// RM-7 — `show` carries its own pins, as `diff` does (Vör at 224d1fd, F-2): the blob forms the engine uses run no textconv today, but
+// `git show <commit>` does; one argument, not a pin, was keeping it closed.
+describe("RM-7 — show is pinned to --no-textconv --no-ext-diff in the one table every host caller builds from", () => {
+  it("RM-7 — GIT_SUBCOMMAND_PINS pins show; a textconv driver planted with a tracked .gitattributes does not run on a pinned git show <commit>", () => {
+    const table = (pins as Record<string, unknown>)["GIT_SUBCOMMAND_PINS"] as ReadonlyMap<string, readonly string[]> | undefined;
+    expect(table?.get("show"), "src/git_pins.ts pins no flags on show").toEqual(["--no-textconv", "--no-ext-diff"]);
+    expect(table?.get("diff"), "diff lost its pins").toEqual(["--no-textconv", "--no-ext-diff"]);
+    const repo = baselineRepo();
+    const dir = mktmp("textconv-"), sentinel = join(dir, "ran"), cmd = join(dir, "tc");
+    writeFileSync(cmd, `#!/bin/sh\ntouch ${JSON.stringify(sentinel)}\ncat "$1"\n`); chmodSync(cmd, 0o755);
+    writeFileSync(join(repo.dir, ".gitattributes"), "*.sx diff=x\n");
+    stage(repo, { "crossing/laws.sx": BASE_LAWS + lawForm(LAW_NEW, "A red pass leaves a branch and publishes nothing.", [TERM_NAMED], "publish-from-the-pass") });
+    git(repo.dir, "add", ".gitattributes"); git(repo.dir, "commit", "-qm", "c");
+    git(repo.dir, "config", "diff.x.textconv", cmd);
+    execFileSync("git", ["show", "HEAD"], { cwd: repo.dir, env: GIT_ENV, stdio: "ignore" });
+    expect(existsSync(sentinel), "control: plain git show <commit> runs the textconv here, so this law can fail").toBe(true);
+    rmSync(sentinel);
+    const build = (pins as Record<string, unknown>)["pinnedGitArgs"] as ((a: string[]) => string[]) | undefined;
+    execFileSync("git", build!(["show", "HEAD"]), { cwd: repo.dir, env: GIT_ENV, stdio: "ignore" });
+    expect(existsSync(sentinel), "a textconv the repository names ran on a pinned git show").toBe(false);
+  });
+});
+
+// RM-8 — the verdict records the call that was made (Vör at 224d1fd, F-3)
+describe("RM-8 — the scope verdict's file-set check names the git call the gate actually made", () => {
+  it("RM-8 — the file-set-within-scope check's target_ref is the pinned diff, flags and all", async () => {
+    const repo = baselineRepo();
+    stage(repo, { "crossing/laws.sx": BASE_LAWS + lawForm(LAW_NEW, "A red pass leaves a branch and publishes nothing.", [TERM_NAMED], "publish-from-the-pass") });
+    const out = await runGate(repo);
+    const check = (out["checks"] as Array<Record<string, unknown>>).find((c) => c["method"] === "file-set-within-scope");
+    const ref = String(check?.["target_ref"] ?? "");
+    for (const flag of ["--cached", "--no-textconv", "--no-ext-diff", "--name-only", "--no-renames"]) expect(ref, `target_ref does not name ${flag}: ${ref}`).toContain(flag);
   });
 });
 

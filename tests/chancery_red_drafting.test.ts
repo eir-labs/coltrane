@@ -705,3 +705,22 @@ describe("LR — the drafter observes its laws through loop/loop-result, which t
     expect(method).not.toMatch(/loop\/loop\.sh/);
   });
 });
+
+describe("LR-R — the reviewer observes redness through loop/loop-result too (Eugene, 2 Nov 2026: \"Same swap for the reviewer\")", () => {
+  // The reviewer, seated in the same room, held only loop/loop.sh, which the room cannot run either (no running Postgres, no su).
+  const reviewer = () => {
+    const a = loadGenome(ROOT).agents.get("chancery-red-reviewer") as Agent | undefined;
+    if (!a) throw new Error("chancery-red-reviewer not in the genome");
+    return a;
+  };
+  it("the reviewer's grants include loop/loop-result and no loop/loop.sh", () => {
+    const tools = reviewer().allowed_tools ?? [];
+    expect(tools).toContain("Bash(loop/loop-result:*)");
+    expect(tools.filter((t) => /loop\/loop\.sh/.test(t))).toEqual([]);
+  });
+  it("the reviewer's method runs loop/loop-result on the branch, and never loop/loop.sh", () => {
+    const method = String(reviewer().method ?? "");
+    expect(method).toMatch(/Run `loop\/loop-result` on the branch/);
+    expect(method).not.toMatch(/loop\/loop\.sh/);
+  });
+});

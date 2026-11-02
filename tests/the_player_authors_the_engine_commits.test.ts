@@ -52,7 +52,7 @@ import { createHash } from "node:crypto";
 import { stampPullRequest, RuntimeError, type TreePublisher, type CommitAttribution } from "../src/runtime.js";
 import { makePublisher } from "../src/workspace.js";
 import { pushInvocation, remoteInvocation } from "../src/publisher.js";
-import { GIT_PINNED_SETTINGS } from "../src/git_pins.js";
+import { GIT_PINNED_SETTINGS, GIT_PINNED_ENV } from "../src/git_pins.js";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -266,6 +266,33 @@ describe("W9e — the push runs nothing the clone's own .git names (independent 
     g("commit", "-q", "--allow-empty", "-m", "d");
     try { execFileSync("git", ["-C", clone, "push", "-q", "origin", "main"], { stdio: "pipe" }); } catch { /* the hook's own exit is not the point */ }
     expect(existsSync(sentinel), "control: plain git on this host runs the clone's pre-push hook, so this law can fail").toBe(true);
+  });
+});
+
+// W9f — the publisher's environment is the ONE declared exception to pinnedGitEnv, and only by the credential (Vör at 36ea9f4): every
+// other git the engine runs takes pinnedGitEnv, which drops every inherited GIT_*; the push, the ls-remote and the clone must carry the
+// helper, which rides GIT_CONFIG_COUNT/KEY_0/VALUE_0, a general config-injection channel. So their environment is pinnedGitEnv's plus
+// EXACTLY those three keys and the token: nothing inherited survives, and nothing else is injected.
+describe("W9f — the publisher's git environment is the pinned one plus exactly the credential helper", () => {
+  it("W9f push, ls-remote and the clone's credentialEnv carry GIT_PINNED_ENV and exactly the three helper keys; an inherited GIT_CONFIG_* or GIT_CONFIG_PARAMETERS does not survive", () => {
+    const planted = { GIT_CONFIG_PARAMETERS: "'core.fsmonitor=touch /tmp/w9f'", GIT_CONFIG_KEY_1: "diff.external", GIT_CONFIG_VALUE_1: "touch /tmp/w9f", GIT_DIR: "/tmp/elsewhere" };
+    const before: Record<string, string | undefined> = {};
+    for (const [k, v] of Object.entries(planted)) { before[k] = process.env[k]; process.env[k] = v; }
+    try {
+      const helper = ["GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0"];
+      const expected = [...Object.keys(GIT_PINNED_ENV), ...helper].sort();
+      for (const [name, env] of [["push", pushInvocation("/tmp/x", "b", "tok").env], ["ls-remote", remoteInvocation("/tmp/x", "main", "tok").env]] as const) {
+        expect(Object.keys(env).filter((k) => k.startsWith("GIT_")).sort(), `${name}: its GIT_* keys are not exactly the pinned ones plus the helper`).toEqual(expected);
+        for (const [k, v] of Object.entries(GIT_PINNED_ENV)) expect(env[k], `${name}: ${k} is not pinned`).toBe(v);
+        expect(env["GIT_CONFIG_COUNT"], `${name}: the helper is not the only injected config`).toBe("1");
+        expect(env["GIT_CONFIG_KEY_0"]).toBe("credential.https://github.com.helper");
+        expect(env["COLTRANE_GIT_TOKEN"]).toBe("tok");
+      }
+      const src = readFileSync(new URL("../src/publisher.ts", import.meta.url), "utf8");
+      expect(/\.\.\.pinnedGitEnv\(process\.env\)/.test(src), "credentialEnv does not build on pinnedGitEnv(process.env)").toBe(true);
+    } finally {
+      for (const [k, v] of Object.entries(before)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
+    }
   });
 });
 

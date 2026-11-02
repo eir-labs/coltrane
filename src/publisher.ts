@@ -6,7 +6,7 @@
 // two acts that need it. The seat never holds a credential, so there is nothing for its grant wall
 // to guard: 22 denied hunts for GH_TOKEN on gig acbdb1d0 (3 Oct 2026) were the measured alternative.
 import { execFileSync } from "node:child_process";
-import { GIT_PINNED_SETTINGS } from "./git_pins.js";
+import { GIT_PINNED_SETTINGS, pinnedGitEnv } from "./git_pins.js";
 
 /** How the engine signs a commit it performs on a player's behalf. */
 export interface CommitAttribution {
@@ -37,9 +37,12 @@ export interface TreePublisher {
  * moment. Supplied through GIT_CONFIG_* rather than `-c` because `git clone -c k=v` writes k into
  * the new clone's .git/config. Scoped to https://github.com so no other host is offered the token.
  */
+// THE ONE DECLARED EXCEPTION to pinnedGitEnv (Vör at 36ea9f4): every other git the engine runs takes pinnedGitEnv, which drops every
+// inherited GIT_*; this one must carry the helper, so it builds on pinnedGitEnv and adds back exactly the three GIT_CONFIG_* keys
+// (W9f holds it to exactly those).
 export function credentialEnv(token: string): NodeJS.ProcessEnv {
   return {
-    ...process.env,
+    ...pinnedGitEnv(process.env),
     COLTRANE_GIT_TOKEN: token,
     GIT_CONFIG_COUNT: "1",
     GIT_CONFIG_KEY_0: "credential.https://github.com.helper",

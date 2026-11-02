@@ -1,0 +1,37 @@
+{
+  "slug": "example-payment-v0",
+  "domain": "org-bearing",
+  "status": "active",
+  "kind": "bearing-law",
+  "source": "charter",
+  "subject_ref": "org:example-co",
+  "bearer": "Example Co., a fictional company",
+  "description": "Fictional obligation of an org: pay the sum acknowledged in an example note.",
+  "law": {
+    "attributes": "Example Co., as debtor under an example note to Example Payee.",
+    "deontic": "obliged",
+    "aim": "Pay the example sum acknowledged in the example note.",
+    "conditions": "On or before the example due date.",
+    "or_else": "Non-payment is a default under the example note.",
+    "check": {
+      "predicate": "the debtor has paid the acknowledged sum by the due date",
+      "inputs": {
+        "debtor": "principal",
+        "note": "instrument-ref"
+      }
+    }
+  },
+  "instrument": {
+    "name": "Example Note",
+    "parties": [
+      "Example Co. (debtor)",
+      "Example Payee (payee)"
+    ],
+    "dated": "2000-01-01"
+  },
+  "provenance": {
+    "extracted_from": "fictional fixture for the loader tests",
+    "recast_under": "none",
+    "content_hash_note": "fictional example; no real instrument"
+  }
+}

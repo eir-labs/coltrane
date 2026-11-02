@@ -156,7 +156,7 @@ describe("every subpath this package advertises can be imported", () => {
   });
 
   it("law 3c — the venue realizer exports, THROUGH its subpath, what a downstream realizes rooms with", async () => {
-    // chancery-os realizes its rooms through this seam and no other (conformance die-package DP-0, Vör, 18 Oct 2026): a booked
+    // a consumer realizes its rooms through this seam and no other (18 Oct 2026): a booked
     // room is selectRealizer(venue) + realize(...), brought down by the compose project the realization owns, swept by gig. A
     // downstream that cannot import these writes a second realizer, which is the failure DP-0 refuses; so the subpath carries
     // each of them, resolved from where a consumer stands, through `exports`.

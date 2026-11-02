@@ -1,7 +1,7 @@
 // A FURNISHED ROOM IS CLAIMED AND MOUNTED — the drain half of "a room furnishes its reach".
 // (spec: wiki spec.one-write-path.a-room-furnishes-its-reach; founder's ruling R38, 3 Oct 2026)
 //
-// MEASURED, 3 Oct: the eir-labs-inc box declares no realizable rooms (nothing sets
+// MEASURED, 3 Oct: a test box declares no realizable rooms (nothing sets
 // WorkerContext.realizableVenues on the drain path), so venueMayClaim would refuse EVERY gig that
 // named a room — and a room that declares no servers and no substrate needs nothing stood up. A
 // furnishings-only room (equipment, doors, connectors) is realizable by every box.

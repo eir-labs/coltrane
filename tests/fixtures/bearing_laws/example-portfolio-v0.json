@@ -1,0 +1,36 @@
+{
+  "slug": "example-portfolio-v0",
+  "domain": "org-bearing",
+  "status": "active",
+  "kind": "bearing-law",
+  "source": "charter",
+  "subject_ref": "org:example-co",
+  "bearer": "Example Co., a fictional company",
+  "description": "Fictional obligation of an org: honour an example portfolio of instruments it issued.",
+  "law": {
+    "attributes": "Example Co., as issuer of an example portfolio of instruments.",
+    "deontic": "obliged",
+    "aim": "Honour every instrument in the example portfolio on its terms.",
+    "conditions": "For as long as any instrument in the example portfolio is outstanding.",
+    "or_else": "Failing to honour an instrument is a breach of that instrument.",
+    "check": {
+      "predicate": "every outstanding instrument in the portfolio is honoured on its terms",
+      "inputs": {
+        "issuer": "principal",
+        "instrument": "instrument-ref"
+      }
+    }
+  },
+  "instrument": {
+    "name": "Example Portfolio",
+    "issuer_of_record": "Example Co."
+  },
+  "provenance": {
+    "extracted_from": "fictional fixture for the loader tests",
+    "recast_under": "none",
+    "content_hash_note": "fictional example; no real instrument"
+  },
+  "flags": [
+    "fictional fixture"
+  ]
+}

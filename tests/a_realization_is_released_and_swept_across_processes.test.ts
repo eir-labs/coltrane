@@ -3,8 +3,8 @@
 // THE GAP. realize() returns a handle whose teardown() is a closure over the compose file it wrote; nothing exported brings a room
 // down once that process is gone. And sweep() said "HOST-WIDE observed state, so a sweep reconciles against what EXISTS … the only
 // model that survives a killed worker", while it read a per-process Map: a fresh process swept nothing. A downstream that books a
-// room in one process and closes it in another (chancery-os's facility, conformance die-package DP-0) could only reach for docker
-// itself, the second realizer DP-0 refuses. Found 18 Oct 2026, building that facility; Vör ruled the cure into its own PR.
+// room in one process and closes it in another (a consumer's facility) could only reach for docker
+// itself, the second realizer DP-0 refuses. Found 18 Oct 2026, building that facility; the grader ruled the cure into its own PR.
 //
 // R1  release(gig) from a FRESH realizer brings down a realization another instance made: by its compose project, exactly
 // R2  sweep from a fresh realizer returns a standing project it never made, and leaves out the live gigs

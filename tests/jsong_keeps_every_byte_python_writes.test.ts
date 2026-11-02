@@ -8,7 +8,7 @@
 //   - state_59 and score are wire bits; a JS number cannot hold a signalling NaN's payload (V8 quiets it through getFloat32 and
 //     getFloat64), so a NaN came back quieted;
 //   - Python refuses any version but 0; the port read anything.
-// The spec is conformance's plant/jsong.ts. Eugene, 19 Oct 2026 (relayed by Vör): "stack fixes and ship local tarball so it doesn't
+// The spec is the consumer's JSONG plant. 19 Oct 2026: "stack fixes and ship local tarball so it doesn't
 // block IMPL of this."
 //
 // J1  a slug that is not UTF-8 comes back as its bytes, and the file re-emits byte for byte

@@ -3,7 +3,7 @@
 // (spec.coltrane-ui.token-tenure-extends-not-reissues; Eugene, 4 Oct 2026: "i say build it")
 //
 // WHY. A standing ctk_ could only be issued or revoked; keeping a seated agent alive past TTL meant
-// a new secret, carried into its environment, and a relaunch — Vör was re-minted twice by hand in
+// a new secret, carried into its environment, and a relaunch — a seat was re-minted twice by hand in
 // one night. Eugene's shape: "the governor's act becomes set timer, and either extend it through a
 // sovereign act within specific parameters, or it expires automatically after a timer"; "it has no
 // default — it's like a pocket watch and must be wound to keep going". The engine ships the three

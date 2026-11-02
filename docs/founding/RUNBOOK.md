@@ -3,7 +3,7 @@
 *Prepared by the Chancery's M4 founding kit (`src/found.py`). The mechanical steps are done;
 the three human seals are the PARK-POINT markers — signature instruments issued at execution, never by the kit.*
 
-- **Governor to seat (Step 4 human seal):** the founder <governor@example.com> — a park annotation only, never a resolved field.
+- **Governor to seat (Step 4 human seal):** the seated governor — a park annotation only, never a resolved field.
 
 ### Step 0 — warrant + charter  [DONE-BY-KIT]
 

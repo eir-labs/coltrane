@@ -84,7 +84,7 @@ export default function run(input, context) {
   const checks = [];
   const refused = [];
 
-  const diff = git(["diff", "--cached", "--name-only", "--no-renames", "-z", baseline]);
+  const diff = git(["diff", "--cached", "--no-ext-diff", "--no-textconv", "--name-only", "--no-renames", "-z", baseline]);
   if (!diff.ok) return refuse("staged-diff", `git diff --cached against ${baseline} failed: ${diff.err}`);
   const changed = diff.out.split("\0").filter(Boolean).sort();
   const outside = changed.filter((p) => !files.has(p));

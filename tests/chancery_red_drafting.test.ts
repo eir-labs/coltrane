@@ -35,7 +35,7 @@
 import { createHash } from "node:crypto";
 import { describe, it, expect, afterAll } from "vitest";
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -286,6 +286,34 @@ describe("RM-4 — the scope gate's host git does not run a drafter-set core.fsm
     const out = await runGate(repo);
     expect(out["pass"], `the gate did not reach its verdict: ${JSON.stringify(out).slice(0, 300)}`).toBe(true);
     expect(existsSync(sentinel), "the drafter's core.fsmonitor ran on the host during the scope gate").toBe(false);
+  });
+});
+
+// RM-5 — nor a drafter-set diff.external, nor a diff driver an in-repo .gitattributes selects (Vör's grade of dc7b531). Both run under
+// the engine's pins on a FULL `git diff --cached` (core.attributesFile pins only the global file; no -c disables the in-repo one). The
+// gate asks only --name-only today, where neither runs (measured), so the law holds the gate's diff to --no-ext-diff --no-textconv as
+// well: an edit that drops --name-only must not open the door. The control proves a full diff here does run the planted command.
+describe("RM-5 — the scope gate's host git runs no external diff and no diff driver the drafter can name", () => {
+  it("RM-5 — the gate's diff carries --no-ext-diff and --no-textconv, and with diff.external and a .gitattributes driver planted the gate reaches its verdict and neither runs", async () => {
+    const src = readFileSync(join(GATE_DIR, "skill.mjs"), "utf8");
+    const diffCall = src.match(/git\(\[\s*"diff"[^\]]*\]/)?.[0] ?? "";
+    expect(diffCall, "the scope gate makes no git diff call this law can read").not.toBe("");
+    expect(diffCall.includes('"--no-ext-diff"'), `the gate's diff does not pass --no-ext-diff: ${diffCall}`).toBe(true);
+    expect(diffCall.includes('"--no-textconv"'), `the gate's diff does not pass --no-textconv: ${diffCall}`).toBe(true);
+    const repo = baselineRepo();
+    const sentinel = join(mktmp("extdiff-"), "ran");
+    const cmd = join(dirname(sentinel), "ext");
+    writeFileSync(cmd, `#!/bin/sh\ntouch ${JSON.stringify(sentinel)}\n`); chmodSync(cmd, 0o755);
+    stage(repo, { "crossing/laws.sx": BASE_LAWS + lawForm(LAW_NEW, "A red pass leaves a branch and publishes nothing.", [TERM_NAMED], "publish-from-the-pass") });
+    git(repo.dir, "config", "diff.external", cmd);
+    git(repo.dir, "config", "diff.x.command", cmd);
+    writeFileSync(join(repo.dir, ".git", "info", "attributes"), "*.sx diff=x\n");
+    execFileSync("git", ["diff", "--cached", repo.baseline], { cwd: repo.dir, env: GIT_ENV, stdio: "ignore" });
+    expect(existsSync(sentinel), "a full git diff did not run the planted command here: this law could not see the door").toBe(true);
+    rmSync(sentinel);
+    const out = await runGate(repo);
+    expect(out["pass"], `the gate did not reach its verdict: ${JSON.stringify(out).slice(0, 300)}`).toBe(true);
+    expect(existsSync(sentinel), "an external diff or diff driver the drafter named ran on the host during the scope gate").toBe(false);
   });
 });
 

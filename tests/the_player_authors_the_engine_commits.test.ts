@@ -52,6 +52,7 @@ import { createHash } from "node:crypto";
 import { stampPullRequest, RuntimeError, type TreePublisher, type CommitAttribution } from "../src/runtime.js";
 import { makePublisher } from "../src/workspace.js";
 import { pushInvocation, remoteInvocation } from "../src/publisher.js";
+import { GIT_PINNED_SETTINGS } from "../src/git_pins.js";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -232,7 +233,7 @@ describe("W9c — the push is built with the credential helper, and spawned as b
   it("W9c pushInvocation carries the token and the github-scoped helper in its env, and the one spawn in publisher.ts uses what it built", () => {
     const built = pushInvocation("/tmp/x", "changeset/g1", "tok-w9c");
     expect(built.file).toBe("git");
-    expect(built.argv).toEqual(["-C", "/tmp/x", "push", "--quiet", "--", "origin", "refs/heads/changeset/g1:refs/heads/changeset/g1"]);
+    expect(built.argv).toEqual([...GIT_PINNED_SETTINGS, "-C", "/tmp/x", "push", "--quiet", "--", "origin", "refs/heads/changeset/g1:refs/heads/changeset/g1"]);
     expect(built.env["COLTRANE_GIT_TOKEN"], "the token rides the push process's env for the helper to read at challenge time").toBe("tok-w9c");
     expect(built.env["GIT_CONFIG_KEY_0"]).toBe("credential.https://github.com.helper");
     expect(built.env["GIT_CONFIG_VALUE_0"]).toContain("password=$COLTRANE_GIT_TOKEN");
@@ -241,6 +242,30 @@ describe("W9c — the push is built with the credential helper, and spawned as b
     const spawns = (src.match(/\b(?:execFileSync|execSync|spawnSync|execFile|spawn|fork)\s*\(/g) ?? []).length;
     expect(spawns, "publisher.ts starts a process somewhere other than the push seam").toBe(1);
     expect(/execFileSync\(\s*built\.file\s*,\s*\[\s*\.\.\.built\.argv\s*\]\s*,\s*\{\s*env:\s*built\.env\b/.test(src), "the push does not spawn what pushInvocation built (argv AND env)").toBe(true);
+  });
+});
+
+describe("W9e — the push runs nothing the clone's own .git names (independent review of #598: the publisher's host-side git)", () => {
+  it("W9e a pre-push hook and a core.fsmonitor set in the clone do not run when the built push runs; plain git on this host does run the hook", () => {
+    const base = mkdtempSync(join(tmpdir(), "w9e-"));
+    const origin = join(base, "origin.git"), clone = join(base, "clone"), sentinel = join(base, "ran");
+    execFileSync("git", ["init", "-q", "--bare", origin]);
+    execFileSync("git", ["init", "-q", "-b", "main", clone]);
+    const g = (...a: string[]) => execFileSync("git", ["-C", clone, ...a], { env: { ...process.env, GIT_AUTHOR_NAME: "w", GIT_AUTHOR_EMAIL: "w@x", GIT_COMMITTER_NAME: "w", GIT_COMMITTER_EMAIL: "w@x" } });
+    writeFileSync(join(clone, "f"), "x\n"); g("add", "f"); g("commit", "-qm", "c"); g("remote", "add", "origin", origin);
+    const hook = join(clone, ".git", "hooks", "pre-push");
+    writeFileSync(hook, `#!/bin/sh\necho hook >> "${sentinel}"\n`, { mode: 0o755 });
+    g("config", "core.fsmonitor", `echo fsmonitor >> "${sentinel}"; false`);
+    const built = pushInvocation(clone, "main", "tok-w9e");
+    execFileSync(built.file, [...built.argv], { env: built.env, stdio: "pipe" });
+    expect(existsSync(sentinel), "the built push ran a hook or an fsmonitor the clone's .git names").toBe(false);
+    expect(execFileSync("git", ["-C", origin, "rev-parse", "refs/heads/main"]).toString().trim(), "the push still landed").toBe(execFileSync("git", ["-C", clone, "rev-parse", "HEAD"]).toString().trim());
+    const r = remoteInvocation(clone, "main", "tok-w9e");
+    execFileSync(r.file, [...r.argv], { env: r.env, stdio: "pipe" });
+    expect(existsSync(sentinel), "the built ls-remote ran something the clone's .git names").toBe(false);
+    g("commit", "-q", "--allow-empty", "-m", "d");
+    try { execFileSync("git", ["-C", clone, "push", "-q", "origin", "main"], { stdio: "pipe" }); } catch { /* the hook's own exit is not the point */ }
+    expect(existsSync(sentinel), "control: plain git on this host runs the clone's pre-push hook, so this law can fail").toBe(true);
   });
 });
 
@@ -267,7 +292,7 @@ describe("P10 / W9d — every remote act is the publisher's", () => {
   });
   it("W9d remoteInvocation carries the helper, and publisher.ts has exactly one spawn that runs what a builder built", () => {
     const built = remoteInvocation("/tmp/x", "main", "tok-w9d");
-    expect(built.argv, "the full ref, never a tail pattern").toEqual(["-C", "/tmp/x", "ls-remote", "--heads", "--", "origin", "refs/heads/main"]);
+    expect(built.argv, "the full ref, never a tail pattern").toEqual([...GIT_PINNED_SETTINGS, "-C", "/tmp/x", "ls-remote", "--heads", "--", "origin", "refs/heads/main"]);
     expect(built.env["COLTRANE_GIT_TOKEN"]).toBe("tok-w9d");
     expect(built.env["GIT_CONFIG_KEY_0"]).toBe("credential.https://github.com.helper");
     const src = readFileSync(new URL("../src/publisher.ts", import.meta.url), "utf8");

@@ -6,6 +6,7 @@
 // two acts that need it. The seat never holds a credential, so there is nothing for its grant wall
 // to guard: 22 denied hunts for GH_TOKEN on gig acbdb1d0 (3 Oct 2026) were the measured alternative.
 import { execFileSync } from "node:child_process";
+import { GIT_PINNED_SETTINGS } from "./git_pins.js";
 
 /** How the engine signs a commit it performs on a player's behalf. */
 export interface CommitAttribution {
@@ -57,7 +58,9 @@ const GITHUB_REPO = /^https:\/\/github\.com\/([A-Za-z0-9_-][A-Za-z0-9_.-]*)\/([A
 export function pushInvocation(dir: string, branch: string, token: string): { file: string; argv: readonly string[]; env: NodeJS.ProcessEnv } {
   return {
     file: "git",
-    argv: ["-C", dir, "push", "--quiet", "--", "origin", `refs/heads/${branch}:refs/heads/${branch}`],
+    // the engine's git pins first: the clone's .git is the drafter's to write, so a pre-push hook or an fsmonitor it names never runs
+    // on the host (W9e; independent review of #598)
+    argv: [...GIT_PINNED_SETTINGS, "-C", dir, "push", "--quiet", "--", "origin", `refs/heads/${branch}:refs/heads/${branch}`],
     env: credentialEnv(token),
   };
 }
@@ -67,7 +70,7 @@ export function pushInvocation(dir: string, branch: string, token: string): { fi
 export function remoteInvocation(dir: string, ref: string, token: string): { file: string; argv: readonly string[]; env: NodeJS.ProcessEnv } {
   // The full ref, not the short name: ls-remote matches a pattern on the TAIL of a ref, so a bare
   // `main` would also answer for refs/heads/x/main (the grade at 598d790, note 5).
-  return { file: "git", argv: ["-C", dir, "ls-remote", "--heads", "--", "origin", `refs/heads/${ref}`], env: credentialEnv(token) };
+  return { file: "git", argv: [...GIT_PINNED_SETTINGS, "-C", dir, "ls-remote", "--heads", "--", "origin", `refs/heads/${ref}`], env: credentialEnv(token) };
 }
 
 /** THE ONE SPAWN in this module: it runs exactly what a builder built — argv and env. */

@@ -81,15 +81,28 @@ export const SEAT_SETTINGS_REL = ".claude/settings.json";
 export function seatSettings(proxyUrl: string): string {
   return JSON.stringify({ env: { HTTPS_PROXY: proxyUrl, https_proxy: proxyUrl, CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1" } });
 }
-export function seatCredentialTar(material: string, t: SeatTarget, opts: { proxyUrl?: string } = {}): Buffer {
+/** SA-8 (gig e774fa20): the seat's ~/.gitconfig names the room's OWN workspace as git's safe.directory. Docker Desktop shows the bind
+ *  mount's directory as uid 0 while everything under it is the seat's uid, so git ("dubious ownership") distrusted the room's tree.
+ *  Exactly one absolute path, the workspace; never "*", never a relative path, and nothing that could close the value and open another
+ *  key (newline, quote, backslash, control characters), since the file is git config text. */
+export const SEAT_GITCONFIG_REL = ".gitconfig";
+export function seatGitconfig(safeDirectory: string): string {
+  if (!safeDirectory.startsWith("/") || safeDirectory.includes("*") || /[\u0000-\u001f"\\]/.test(safeDirectory)) {
+    throw new Error(`safe.directory ${JSON.stringify(safeDirectory)} is not one absolute path free of wildcards, quotes, backslashes and control characters: the seat trusts only its room's own workspace`);
+  }
+  return `[safe]\n\tdirectory = ${safeDirectory}\n`;
+}
+export function seatCredentialTar(material: string, t: SeatTarget, opts: { proxyUrl?: string; safeDirectory?: string } = {}): Buffer {
   const data = Buffer.from(material, "utf8");
   const state = Buffer.from("{}", "utf8");
   const settings = opts.proxyUrl ? Buffer.from(seatSettings(opts.proxyUrl), "utf8") : null;
+  const gitconfig = opts.safeDirectory !== undefined ? Buffer.from(seatGitconfig(opts.safeDirectory), "utf8") : null;
   return Buffer.concat([
     header(".claude/", 0o700, t.uid, t.gid, 0, "5"),
     header(SEAT_CREDENTIAL_REL, 0o600, t.uid, t.gid, data.length, "0"),
     data, pad512(data.length),
     ...(settings ? [header(SEAT_SETTINGS_REL, 0o600, t.uid, t.gid, settings.length, "0"), settings, pad512(settings.length)] : []),
+    ...(gitconfig ? [header(SEAT_GITCONFIG_REL, 0o600, t.uid, t.gid, gitconfig.length, "0"), gitconfig, pad512(gitconfig.length)] : []),
     header(SEAT_STATE_REL, 0o600, t.uid, t.gid, state.length, "0"),
     state, pad512(state.length),
     Buffer.alloc(1024, 0),

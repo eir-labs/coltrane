@@ -1126,7 +1126,8 @@ export function dockerComposeRealizer(opts?: { run?: ComposeRunner; prepareWorks
           const roomUser = (doc as { services?: { room?: { user?: unknown } } }).services?.room?.user;
           const target = parseSeatProbe(String(run(seatProbeArgs(floorImage(v), typeof roomUser === "string" ? roomUser : undefined), 60_000) ?? ""));
           const proxyUrl = (v.doors?.egress ?? []).length > 0 ? `http://egress:${EGRESS_PROXY_PORT}` : undefined;
-          run(["cp", "-", `${roomContainer}:${target.home}`], 60_000, seatCredentialTar(material[cls]!, target, proxyUrl ? { proxyUrl } : {}));
+          // SA-8: the seat trusts exactly its room's own workspace (the room service's working_dir), never another tree
+          run(["cp", "-", `${roomContainer}:${target.home}`], 60_000, seatCredentialTar(material[cls]!, target, { ...(proxyUrl ? { proxyUrl } : {}), safeDirectory: join(realizationDir, "workspace") }));
         }
         for (const s of v.mcp_servers) {
           deliverCredentialFiles(run, serverContainerName(realizationDir, s.slug), s.credential_names, material);

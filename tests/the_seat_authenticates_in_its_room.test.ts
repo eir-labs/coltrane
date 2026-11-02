@@ -236,3 +236,46 @@ describe("NO ROOM FOR A REFUSED GIG — a pre-dispatch refusal happens before th
     expect(realized, "a room was stood up for a gig refused before any chair").toBe(0);
   });
 });
+
+describe("SA-8 — git trusts the room's own workspace, and nothing else (gig e774fa20; Eugene, 31 Oct: \"Grant loop-result\")", () => {
+  // The drafter's git refused the room's tree: "fatal: detected dubious ownership". Docker Desktop shows the bind mount's own directory
+  // as uid 0 while everything under it (.git included) is the seat's uid 501, so git, run as 501, distrusts the repository. The seat's
+  // ~/.gitconfig, delivered in the same tar as its settings, names exactly the room's workspace as safe.directory: never "*", never an
+  // environment variable (EP-0), never a host file.
+  const tarFiles = (tar: Buffer) => {
+    const out: Record<string, { mode: number; uid: number; body: string }> = {};
+    for (let off = 0; off + 512 <= tar.length; ) {
+      const name = tar.subarray(off, off + 100).toString("utf8").replace(/\0.*$/s, "");
+      if (!name) break;
+      const size = parseInt(tar.subarray(off + 124, off + 136).toString("utf8"), 8) || 0;
+      out[name] = { mode: parseInt(tar.subarray(off + 100, off + 108).toString("utf8"), 8), uid: parseInt(tar.subarray(off + 108, off + 116).toString("utf8"), 8), body: tar.subarray(off + 512, off + 512 + size).toString("utf8") };
+      off += 512 + Math.ceil(size / 512) * 512;
+    }
+    return out;
+  };
+  it("the tar carries .gitconfig naming exactly the workspace as safe.directory, owned by the seat, 0600", () => {
+    const f = tarFiles(seatCredentialTar("FAKE", parseSeatProbe("501\n20\n/\n"), { safeDirectory: "/tmp/coltrane-realizations/gig-aaaaaaaa/workspace" }));
+    expect(f[".gitconfig"], "no .gitconfig in the tar").toBeDefined();
+    expect(f[".gitconfig"]!.body).toBe("[safe]\n\tdirectory = /tmp/coltrane-realizations/gig-aaaaaaaa/workspace\n");
+    expect(f[".gitconfig"]!.mode).toBe(0o600);
+    expect(f[".gitconfig"]!.uid).toBe(501);
+  });
+  it("twin: no workspace named, no .gitconfig", () => {
+    expect(tarFiles(seatCredentialTar("FAKE", parseSeatProbe("501\n20\n/\n")))[".gitconfig"]).toBeUndefined();
+  });
+  it("plants: a wildcard, a relative path, and a path carrying a newline or a quote are refused", () => {
+    const t = parseSeatProbe("501\n20\n/\n");
+    expect(() => seatCredentialTar("FAKE", t, { safeDirectory: "*" })).toThrow(/safe.directory/);
+    expect(() => seatCredentialTar("FAKE", t, { safeDirectory: "workspace" })).toThrow(/safe.directory/);
+    expect(() => seatCredentialTar("FAKE", t, { safeDirectory: "/ws\n[safe]\n\tdirectory = *" })).toThrow(/safe.directory/);
+    expect(() => seatCredentialTar("FAKE", t, { safeDirectory: "/ws\"x" })).toThrow(/safe.directory/);
+  });
+  it("REACHED: the realizer hands the room's own workspace to the seat's tar", async () => {
+    const { calls } = await realizeWith({ [SEAT_CREDENTIAL_CLASS]: FAKE });
+    const cp = calls.find((c) => c.args[0] === "cp" && c.input);
+    expect(cp, "no tar delivered").toBeDefined();
+    const g = tarFiles(cp!.input!)[".gitconfig"];
+    expect(g, "the realizer delivered no .gitconfig").toBeDefined();
+    expect(g!.body).toBe(`[safe]\n\tdirectory = ${join(tmpdir(), "coltrane-realizations", "gig-aaaaaaaa", "workspace")}\n`);
+  });
+});

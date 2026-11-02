@@ -683,3 +683,25 @@ describe("DS-5 — drafting:the-baseline-holds: an unscoped pre-existing law kee
     expectRefusal(await compare(base, br), LAW_A, `the UNSCOPED law ${LAW_A} no longer has a verdict on the branch`);
   });
 });
+
+describe("LR — the drafter observes its laws through loop/loop-result, which the room can run (gig e774fa20; Eugene, 31 Oct: \"Grant loop-result\")", () => {
+  // In the drafting room the drafter could not observe a single law: loop/loop.sh needs a running Postgres and `su postgres`, which the
+  // room has neither of (B2, B3 of its own red-spec). loop/loop-result builds a throwaway cluster from the floor's own initdb/pg_ctl
+  // (present in the floor image, measured) and prints one JSON. The drafter's grant and its method name loop-result, and no longer loop.sh.
+  const drafter = () => {
+    const g = loadGenome(ROOT);
+    const a = g.agents.get("chancery-red-drafter") as Agent | undefined;
+    if (!a) throw new Error("chancery-red-drafter not in the genome");
+    return a;
+  };
+  it("the drafter's grants include loop/loop-result and no loop/loop.sh", () => {
+    const tools = drafter().allowed_tools ?? [];
+    expect(tools).toContain("Bash(loop/loop-result:*)");
+    expect(tools.filter((t) => /loop\/loop\.sh/.test(t))).toEqual([]);
+  });
+  it("the drafter's method tells it to run loop/loop-result, and never loop/loop.sh", () => {
+    const method = String(drafter().method ?? "");
+    expect(method).toMatch(/loop\/loop-result/);
+    expect(method).not.toMatch(/loop\/loop\.sh/);
+  });
+});
